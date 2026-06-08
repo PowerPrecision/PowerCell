@@ -3,6 +3,99 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-12] — Afinação Crítica Multi-Tenant: Reatividade de Contexto, Perfis e Assinaturas
+
+### Corrigido
+- **Ecrãs de Área Pessoal e E-mail não atualizam ao trocar de empresa** (`fix` — **CRÍTICO**): Quando o utilizador alterava a empresa no ContextSwitcher, os ecrãs de Área Pessoal (assinatura, cargo, telefone) e E-mail (config IMAP/SMTP) permaneciam com dados da empresa anterior. Causa raiz: o `useEffect` no `ProfilePage.js` dependia apenas de `[user]`, sem `effectiveCompanyId`. O `EmailConfigForm.jsx` dependia apenas de `[companyId]` (prop), sem `effectiveCompanyId` direto do `useAuth()`. E o `switchActiveCompany()` no `AuthContext.js` não recarregava os dados do utilizador após a troca.
+- **Assinatura de email era global, não por empresa** (`fix`): O campo `email_signature` estava guardado no documento global do utilizador, fazendo com que a mesma assinatura fosse usada independentemente da empresa ativa. Agora a assinatura é guardada por empresa na coleção `user_company_roles`.
+
+### Alterado
+- **Modelo UserCompanyRole expandido com campos por empresa** (`refactor` — `backend/models/user_company_role.py`): Adicionados 3 campos opcionais ao `UserCompanyRoleCreate`, `UserCompanyRoleUpdate` e `UserCompanyRoleResponse`:
+  - `signature: Optional[str]` — Assinatura de email HTML/Texto específica para esta empresa
+  - `professional_phone: Optional[str]` — Telefone profissional específico para esta empresa
+  - `job_title: Optional[str]` — Cargo específico nesta empresa
+- **GET /api/auth/me retorna campos específicos da empresa ativa** (`refactor` — `backend/routes/auth.py`): O endpoint agora inclui `active_company_signature`, `active_company_professional_phone` e `active_company_job_title` na resposta, extraídos da associação `user_company_roles` da empresa ativa.
+- **PUT /api/auth/profile suporta campos específicos por empresa** (`refactor` — `backend/routes/auth.py`): Os campos `signature`, `professional_phone` e `job_title` são agora guardados na coleção `user_company_roles` para a empresa ativa (determinada pelo header `X-Company-Id`), mantendo o campo global `email_signature` para retro-compatibilidade.
+- **`get_user_companies()` retorna campos por empresa** (`refactor` — `backend/services/auth.py`): A projeção MongoDB foi expandida para incluir `signature`, `professional_phone` e `job_title`.
+- **Rota de user_company_roles suporta novos campos** (`refactor` — `backend/routes/user_company_roles.py`): Os endpoints `POST` e `PUT` agora aceitam e persistem `signature`, `professional_phone` e `job_title`.
+
+### Adicionado
+- **Reatividade do AuthContext à mudança de empresa** (`feat` — `frontend/src/contexts/AuthContext.js`): A função `switchActiveCompany()` agora chama `GET /auth/me` após a troca de empresa, garantindo que os dados do utilizador (incluindo campos específicos da nova empresa) são atualizados no estado global.
+- **useEffect com `[user, effectiveCompanyId]` no ProfilePage** (`feat` — `frontend/src/pages/ProfilePage.js`): Os campos da Área Pessoal (assinatura, cargo, telefone profissional) são agora atualizados automaticamente quando a empresa ativa muda. O `effectiveCompanyId` está no array de dependências do useEffect.
+- **useEffect com `[companyId, effectiveCompanyId]` no EmailConfigForm** (`feat` — `frontend/src/components/EmailConfigForm.jsx`): A configuração de email é recarregada automaticamente quando o ContextSwitcher muda a empresa ativa.
+- **Card "Dados Profissionais" no ProfilePage** (`feat` — `frontend/src/pages/ProfilePage.js`): Nova secção com campos "Cargo / Função" e "Telefone Profissional" específicos para a empresa ativa, com badge a indicar a empresa ativa.
+- **Assinatura de email por empresa** (`feat` — `frontend/src/pages/ProfilePage.js`): A secção de assinatura agora mostra a empresa ativa e guarda a assinatura no contexto da empresa, não globalmente.
+- **Filtro de templates de email por empresa** (`feat` — `backend/routes/emails.py`): O endpoint `GET /emails/templates` agora filtra templates por `company_id` da empresa ativa, mostrando apenas templates da empresa + templates globais (sem `company_id`). O endpoint `POST /emails/templates` agora associa automaticamente o `company_id` ao template criado.
+- **Campo `company_id` no EmailTemplateResponse** (`feat` — `backend/models/email.py`): Adicionado `company_id: Optional[str] = None` ao modelo de resposta.
+
+### Revisão de Fugas de Contexto
+- ✅ **Templates de Email**: Filtrados por `company_id` ativo (templates globais sem `company_id` são partilhados)
+- ✅ **Notificações Push**: Apenas filtradas por `user_id` (contexto de empresa não aplicável — notificações são pessoais)
+- ✅ **Configuração de Email**: Já filtrada por `company_id` via `X-Company-Id` header
+
+### Notas
+- MongoDB é schemaless — os novos campos são automaticamente disponíveis sem migração
+- Templates existentes sem `company_id` são tratados como globais (visíveis para todas as empresas)
+- O campo global `email_signature` no utilizador é mantido para retro-compatibilidade
+- A duplicação de `email_signature` (global + por empresa) é temporária — numa futura versão, o campo global pode ser removido
+
+## [2026-06-11] — Atribuição de Registos à Tania Fernandes (Dev)
+
+### Alterado
+- **9 processos sem mediador atribuídos à Tania Fernandes** (`ops` — **DEV**): Todos os processos no ambiente de desenvolvimento que não tinham intermediário atribuído foram atribuídos à utilizadora **Tania Fernandes** (ID: `bc2a5a7f-0645-4e38-bdc3-91fd4c2f1c47`, role: `intermediario`, empresa: Precision Crédito). Os 9 processos estavam no estado `clientes_espera` e sem mediador. Atribuição realizada via API `POST /api/processes/{id}/assign?mediador_ids={user_id}` com autenticação admin.
+
+### Processos Atribuídos
+| # | Cliente | Estado |
+|---|---------|--------|
+| 94 | Camila Baptista Lima | clientes_espera |
+| 150 | Cristina Reis Silva Carneiro | clientes_espera |
+| 102 | Duarte Barbosa Silva | clientes_espera |
+| 118 | Fernanda Correia Ribeiro Machado | clientes_espera |
+| 130 | Fernanda Silva Correia Antunes | clientes_espera |
+| 82 | Isabel Carvalho Costa Soares | clientes_espera |
+| 174 | Isabel Vieira Martins Barbosa | clientes_espera |
+| 56 | Joana Baptista Soares Cruz | clientes_espera |
+| 202 | João Dias Tavares | clientes_espera |
+
+### Notas
+- Total de processos no dev: 20
+- Processos da Tania após atribuição: 9 (45%)
+- Processos de outros intermediários: 11
+- Processos sem mediador: 0
+- Operação realizada diretamente na BD de dev via API
+
+## [2026-06-10] — Correção CORS Definitiva: Header X-Company-Id em Falta + Fallback Middleware
+
+### Corrigido
+- **CORS: Header `X-Company-Id` não estava nos `CORS_ALLOW_HEADERS` do Render** (`fix` — **CAUSA RAIZ REAL**): O erro "Response to preflight request doesn't pass access control check: It does not have HTTP ok status" era causado pelo facto de o Render Dashboard ter um valor personalizado para `CORS_ALLOW_HEADERS` que NÃO incluía `X-Company-Id`. Quando o frontend enviava um pedido preflight com `Access-Control-Request-Headers: ...,X-Company-Id`, o CORSMiddleware retornava HTTP 400 "Disallowed CORS headers" em vez de HTTP 200. O browser interpretava este 400 como falha do preflight. Diagnosticado com:
+  ```
+  curl -X OPTIONS -H "Access-Control-Request-Headers: Authorization,Content-Type,X-Company-Id" ...
+  → HTTP 400 "Disallowed CORS headers"
+  ```
+- **CORS: Vercel preview URLs podiam falhar sem mecanismo de fallback** (`fix` — **DEFESA EM PROFUNDIDADE**): O `ALLOW_VERCEL_PREVIEWS` podia estar desativado no Render Dashboard (override manual), invalidando o regex do `CORSMiddleware`
+- **Handler 422 com headers CORS inválidos** (`fix`): O `validation_exception_handler` usava `Access-Control-Allow-Origin: *` com `credentials=true`, o que é rejeitado pelos browsers
+
+### Adicionado
+- **Vercel CORS Fallback Middleware** (`feat` — `server.py`): Middleware outermost que intercepta pedidos preflight OPTIONS de `*.vercel.app` e retorna HTTP 200 com headers CORS correctos, mesmo que o `CORSMiddleware` falhe
+- **Endpoint de diagnóstico CORS** (`feat` — `server.py`): `GET /api/cors-debug?origin=URL` para verificar se uma origin seria permitida
+- **Proteção de headers obrigatórios em config.py** (`feat`): Os headers `X-Active-Role` e `X-Company-Id` são agora SEMPRE adicionados a `CORS_ALLOW_HEADERS`, mesmo que a variável de ambiente os omita. Isto evita que overrides no Render Dashboard quebrem o CORS
+- **CORS_ALLOW_HEADERS e CORS_ALLOW_METHODS explícitos no render.yaml** (`feat`): Variáveis adicionadas ao blueprint do Render para garantir que o Dashboard não usa valores desatualizados
+
+## [2026-06-06] — Correção CORS: Vercel Preview URLs e Headers em Falta
+
+### Corrigido
+- **CORS bloqueia Vercel preview URLs** (`fix` — **CRÍTICO**): O frontend deployado em Vercel (branch `dev`) era bloqueado pelo backend no Render com erro CORS "It does not have HTTP ok status". Causas identificadas:
+  - `CORS_ORIGINS` no `render.yaml` não incluía `powercell-1.onrender.com` nem qualquer domínio Vercel
+  - `ALLOW_VERCEL_PREVIEWS` não estava explicitamente definido no `render.yaml`, podendo ser sobrescrito no dashboard do Render
+  - O regex CORS `r"https://[a-z0-9-]+\.vercel\.app"` era demasiado restritivo para subdomínios longos
+  - O header `X-Company-Id` (enviado pelo frontend) não estava nos `CORS_ALLOW_HEADERS`
+
+### Alterado
+- **render.yaml: CORS_ORIGINS expandido** (`refactor`): Adicionado `powercell-1.onrender.com` à lista de origens explícitas. Adicionada variável `ALLOW_VERCEL_PREVIEWS=true` explicitamente para garantir que o regex CORS cubra qualquer `*.vercel.app`
+- **config.py: Regex CORS mais robusto** (`refactor`): Regex atualizado de `r"https://[a-z0-9-]+\.vercel\.app"` para `r"https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app(?::\d+)?$"` — suporta subdomínios longos como `power-cell-git-dev-power-precisions-projects.vercel.app` e opcionalmente porta. Adicionado log quando `ALLOW_VERCEL_PREVIEWS` está desativado
+- **config.py: CORS_ALLOW_HEADERS atualizado** (`refactor`): Adicionado `X-Company-Id` aos headers permitidos (usado pelo ContextSwitcher multi-empresa no frontend)
+- **server.py: Middleware de debug CORS** (`refactor`): Novo middleware que regista no log origins rejeitadas durante preflight OPTIONS, facilitando diagnóstico de problemas CORS em produção. Adicionado log da configuração CORS completa no arranque
+
 ## [2026-05-24] — Correções: Timeout IRS e Anexos no Email de Sucesso
 
 ### Corrigido

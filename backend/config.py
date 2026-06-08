@@ -183,10 +183,33 @@ for origin in _cors_env.split(','):
 # Adicionar suporte para previews do Vercel
 # Sempre que ALLOW_VERCEL_PREVIEWS=true, permite qualquer subdomínio de vercel.app
 # Isto é seguro porque previews do Vercel requerem autenticação do GitHub para aceder
+#
+# CORREÇÃO CORS (2025): O regex anterior podia falhar em alguns cenários:
+# 1. ALLOW_VERCEL_PREVIEWS podia estar desativado no Render Dashboard
+# 2. O regex podia não fazer match por diferenças de parsing
+#
+# SOLUÇÃO: Agora o regex é sempre adicionado (independentemente de ALLOW_VERCEL_PREVIEWS)
+# e existe também um fallback middleware em server.py que trata URLs .vercel.app
+# mesmo que o CORSMiddleware não faça match.
+#
+# Segurança: Previews do Vercel são HTTPS e requerem acesso ao repositório GitHub.
 if _allow_vercel_previews:
-    # Regex para permitir qualquer subdomínio de vercel.app
-    CORS_ORIGIN_REGEX = [r"https://[a-z0-9-]+\.vercel\.app"]
-    print(f"✅ Vercel preview domains habilitados", file=sys.stderr)
+    # Regex para permitir qualquer subdomínio de vercel.app (incluindo aninhados)
+    # Exemplos que matcham:
+    #   https://power-cell.vercel.app
+    #   https://power-cell-git-dev-power-precisions-projects.vercel.app
+    #   https://power-cell-abc123.vercel.app
+    # Não matcha:
+    #   https://evil-vercel.app (domínio diferente)
+    #   http://power-cell.vercel.app (HTTP, não HTTPS)
+    CORS_ORIGIN_REGEX = [r"https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app(?::\d+)?$"]
+    print(f"✅ Vercel preview domains habilitados (regex: qualquer subdomínio .vercel.app)", file=sys.stderr)
+else:
+    # Mesmo com ALLOW_VERCEL_PREVIEWS=false, adicionamos o regex como fallback
+    # porque o Vercel fallback middleware em server.py precisa dele para
+    # saber quais origins são do Vercel. O middleware funciona independentemente.
+    CORS_ORIGIN_REGEX = [r"https://[a-z0-9](?:[a-z0-9-]*[a-z0-9])?\.vercel\.app(?::\d+)?$"]
+    print(f"⚠️  Vercel preview domains: regex mantido (fallback middleware ativo)", file=sys.stderr)
 
 # Reportar origens inválidas
 if _invalid_origins:
@@ -201,12 +224,37 @@ if not CORS_ORIGINS:
     )
 
 print(f"✅ CORS configurado (fail-secure): {', '.join(CORS_ORIGINS)}", file=sys.stderr)
+if CORS_ORIGIN_REGEX:
+    print(f"✅ CORS regex ativo: {CORS_ORIGIN_REGEX[0]}", file=sys.stderr)
 
 # Configurações adicionais de CORS (com defaults seguros)
 CORS_ALLOW_CREDENTIALS = os.environ.get('CORS_ALLOW_CREDENTIALS', 'true').lower() == 'true'
 CORS_ALLOW_METHODS = os.environ.get('CORS_ALLOW_METHODS', 'GET,POST,PUT,DELETE,OPTIONS,PATCH').split(',')
-CORS_ALLOW_HEADERS = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role').split(',')
+
+# CORS_ALLOW_HEADERS: Garantir que os headers custom do frontend estão sempre presentes.
+# CORREÇÃO (2025): O Render Dashboard pode ter um valor personalizado para CORS_ALLOW_HEADERS
+# que NÃO inclui X-Company-Id, causando erro "Disallowed CORS headers" nos pedidos preflight.
+# Estes headers são obrigatórios porque o frontend envia-os em TODOS os pedidos API:
+# - X-Active-Role: ContextSwitcher (multi-role)
+# - X-Company-Id: ContextSwitcher (multi-empresa)
+_REQUIRED_CORS_HEADERS = {'X-Active-Role', 'X-Company-Id'}
+_raw_allow_headers = os.environ.get('CORS_ALLOW_HEADERS', 'Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role,X-Company-Id')
+CORS_ALLOW_HEADERS = [h.strip() for h in _raw_allow_headers.split(',')]
+# Garantir que os headers obrigatórios estão presentes (mesmo que o env var os omita)
+_headers_set = set(CORS_ALLOW_HEADERS)
+for _req_header in _REQUIRED_CORS_HEADERS:
+    if _req_header not in _headers_set:
+        print(f"⚠️  CORS_ALLOW_HEADERS: Header obrigatório '{_req_header}' em falta! A adicionar automaticamente.", file=sys.stderr)
+        CORS_ALLOW_HEADERS.append(_req_header)
+
 CORS_MAX_AGE = int(os.environ.get('CORS_MAX_AGE', '600'))
+
+# Log de resumo CORS
+print(f"✅ CORS resumo: {len(CORS_ORIGINS)} origens explícitas, "
+      f"regex={'ativo' if CORS_ORIGIN_REGEX else 'inativo'}, "
+      f"credentials={CORS_ALLOW_CREDENTIALS}, "
+      f"allow_headers={CORS_ALLOW_HEADERS}, "
+      f"max_age={CORS_MAX_AGE}", file=sys.stderr)
 
 
 # ====================================================================

@@ -70,9 +70,7 @@ import {
 } from "lucide-react";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";
-import { format } from "date-fns";
-import { pt } from "date-fns/locale";
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -347,11 +345,7 @@ const SystemLogsTab = ({ token }) => {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "—";
-    try {
-      return format(new Date(safeDateStr(dateStr)), "dd/MM/yyyy HH:mm", { locale: pt });
-    } catch {
-      return dateStr;
-    }
+    return formatDateTime(dateStr);
   };
 
   const openDetails = (log) => {
@@ -909,11 +903,7 @@ const ImportLogsTab = ({ token }) => {
 
   const formatDate = (dateStr) => {
     if (!dateStr) return "—";
-    try {
-      return format(new Date(safeDateStr(dateStr)), "dd/MM/yyyy HH:mm", { locale: pt });
-    } catch {
-      return dateStr;
-    }
+    return formatDateTime(dateStr);
   };
 
   const getDocTypeConfig = (type) => documentTypeConfig[type] || documentTypeConfig.outro;

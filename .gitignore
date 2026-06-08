@@ -58,3 +58,4 @@ server.log
 credentials.json
 *.key
 .credentials
+.repo-config

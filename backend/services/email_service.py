@@ -339,6 +339,8 @@ def _send_via_resend(
     body_html: Optional[str],
     attachments: Optional[List[Dict[str, Any]]],
     email_signature: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    from_email_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Enviar email via Resend HTTP API.
@@ -357,11 +359,12 @@ def _send_via_resend(
     try:
         resend.api_key = api_key
 
-        # Construir header From
+        # Construir header From — usar override se fornecido (ex: email do utilizador)
+        effective_from = from_email_override or from_email
         if from_name:
-            from_header = f"{from_name} <{from_email}>"
+            from_header = f"{from_name} <{effective_from}>"
         else:
-            from_header = from_email
+            from_header = effective_from
 
         params: Dict[str, Any] = {
             "from": from_header,
@@ -391,6 +394,10 @@ def _send_via_resend(
             params["cc"] = cc_emails
         if bcc_emails:
             params["bcc"] = bcc_emails
+        
+        # Reply-To
+        if reply_to:
+            params["reply_to"] = reply_to
 
         # Anexos
         if attachments:
@@ -441,6 +448,9 @@ async def send_email(
     attachments: Optional[List[Dict[str, Any]]] = None,
     force_system: bool = False,
     system_purpose: Optional[str] = None,
+    reply_to: Optional[str] = None,
+    skip_proc_tag: bool = False,
+    from_email: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -634,7 +644,8 @@ async def send_email(
     try:
         # === TAG MÁGICA: Injetar [Proc-{id}] no assunto ===
         # Se o email está associado a um processo e o assunto ainda não tem a tag
-        if process_id:
+        # Skip se skip_proc_tag=True (ex: envio de documentação para bancos)
+        if process_id and not skip_proc_tag:
             tag = f"[Proc-{process_id}]"
             if tag not in subject:
                 subject = f"{subject} {tag}"
@@ -685,8 +696,9 @@ async def send_email(
         # === NO-REPLY ENFORCEMENT ===
         # When force_system is True, this is a one-way system email.
         # Append no-reply footer to HTML body and text body.
-        # CRITICAL: Never inject a Reply-To header for system emails.
-        if force_system:
+        # EXCEPTION: When reply_to is provided (e.g. send-documentation),
+        # the email IS replyable, so skip the no-reply footer.
+        if force_system and not reply_to:
             _NO_REPLY_FOOTER_HTML = """
 <div style="margin-top: 32px; padding-top: 16px; border-top: 1px solid #e5e5e5;">
   <p style="font-size: 10px; color: #666; margin: 0; line-height: 1.5;">
@@ -702,19 +714,28 @@ async def send_email(
             body = body + _NO_REPLY_FOOTER_TEXT
 
         msg["Subject"] = subject
+        # Use from_email override when provided (e.g. user's email for documentation)
+        # Otherwise use account email (system default)
+        effective_from_email = from_email or account.email
         # Use formatted From header for system_smtp when from_name is available
         if account.name == "system_smtp" and from_name:
-            msg["From"] = f"{from_name} <{account.email}>"
+            msg["From"] = f"{from_name} <{effective_from_email}>"
         else:
-            msg["From"] = account.email
+            msg["From"] = effective_from_email
         msg["To"] = ", ".join(to_emails)
         
         if cc_emails:
             msg["Cc"] = ", ".join(cc_emails)
         
-        # === CRITICAL: Reply-To is NEVER set for any email ===
-        # Policy: all emails (system and personal) do not include Reply-To.
-        # This line intentionally does NOT exist: msg["Reply-To"] = ...
+        # === Reply-To: quando fornecido, as respostas vão para o utilizador ===
+        if reply_to:
+            msg["Reply-To"] = reply_to
+        
+        # === CRITICAL: Reply-To default policy ===
+        # When force_system is True and no explicit reply_to is provided,
+        # we do NOT set Reply-To (no-reply policy for system emails).
+        # When reply_to is provided (e.g. send-documentation), it overrides
+        # the no-reply policy so replies go to the authenticated user.
 
         # === ENVIAR: Resend API vs SMTP ===
         if account.smtp_server == "resend" and account.password:
@@ -746,6 +767,8 @@ async def send_email(
                 body_html=body_html,
                 attachments=attachments,
                 email_signature=email_sig,
+                reply_to=reply_to,
+                from_email_override=from_email,
             )
         else:
             # --- SMTP directo (legado) ---
@@ -773,7 +796,7 @@ async def send_email(
                 "id": str(uuid.uuid4()),
                 "process_id": process_id,
                 "direction": "sent",
-                "from_email": account.email,
+                "from_email": effective_from_email,
                 "to_emails": to_emails,
                 "cc_emails": cc_emails or [],
                 "bcc_emails": bcc_emails or [],
@@ -1059,11 +1082,6 @@ async def sync_webmail_emails(
     days: int = 30,
     max_emails: int = 100
 ) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        logger.info("[sync_webmail_emails] BLOCKED — ENVIRONMENT != production — nenhuma ligação IMAP")
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar TODOS os emails recentes do IMAP para o webmail.
     Sem filtro de processo — guarda todos os emails recebidos e enviados.
@@ -1076,7 +1094,14 @@ async def sync_webmail_emails(
     Returns:
         Dict com resultado da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    # Permite testar sync em dev/staging definindo EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        logger.info("[sync_webmail_emails] BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true")
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     accounts = await get_email_accounts_async()
     if not accounts:
@@ -1419,10 +1444,6 @@ async def sync_webmail_emails(
 
 
 async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
     
@@ -1434,7 +1455,12 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
     Returns:
         Dict com resultado da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     from services.encryption import encryption_service
     
@@ -1693,10 +1719,6 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
 
 
 async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 200) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar emails para um role partilhado (indexacao, suporte, etc.)
     usando a conta de email partilhada do departamento.
@@ -1712,7 +1734,12 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
     Returns:
         Dict com resultado da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     from services.encryption import encryption_service
     
@@ -1951,10 +1978,6 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
 
 
 async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
-    # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
-    import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return {"success": True, "message": "Ignorado (ENVIRONMENT != production)", "accounts": {}}
     """
     Sincronizar emails para TODOS os utilizadores com configuração ativa.
     Usa asyncio.gather para execução concorrente.
@@ -1962,7 +1985,12 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     Returns:
         Dict com resumo global da sincronização
     """
-    # (Kill switch moved to first line of function — see above)
+    # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
+    import os
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
     # Query: utilizadores com email_config.is_configured == True
     # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails

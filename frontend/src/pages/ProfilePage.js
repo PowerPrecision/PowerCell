@@ -49,7 +49,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { hasRole } from "../utils/roleUtils";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime } from "../lib/utils";
 import DashboardLayout from "../layouts/DashboardLayout";
 import EmailConfigForm from "../components/EmailConfigForm";
 import RichTextEditor from "../components/ui/RichTextEditor";
@@ -80,8 +80,11 @@ import {
 // ====================================================================
 
 const ProfilePage = () => {
-  const { user, logout, refreshUser } = useAuth();
+  const { user, logout, refreshUser, effectiveCompanyId, effectiveRole } = useAuth();
   const navigate = useNavigate();
+
+  // Lista de empresas do utilizador (do GET /auth/me, sempre presente)
+  const userCompanies = user?.companies || [];
 
   // Estados para dados do perfil
   const [profileData, setProfileData] = useState({
@@ -89,8 +92,12 @@ const ProfilePage = () => {
     phone: "",
     email: "",
   });
+  // ── Campos específicos por empresa (multi-tenant) ──
   const [emailSignature, setEmailSignature] = useState("");
+  const [professionalPhone, setProfessionalPhone] = useState("");
+  const [jobTitle, setJobTitle] = useState("");
   const [savingSignature, setSavingSignature] = useState(false);
+  const [savingCompanyFields, setSavingCompanyFields] = useState(false);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
 
@@ -118,21 +125,70 @@ const ProfilePage = () => {
   const [loadingEmailConfig, setLoadingEmailConfig] = useState(false);
 
   // MULTI-EMPRESA: seletor de empresa para config de email pessoal
-  const [emailCompanyId, setEmailCompanyId] = useState("default");
+  // Sincronizado com o ContextSwitcher — quando o utilizador troca de
+  // empresa no navbar, o ecrã de webmail reflete a nova empresa.
+  //
+  // NOTA: Inicializamos com effectiveCompanyId (não "default") porque o
+  // backend espera o ID real da empresa no header X-Company-Id. Se
+  // inicializássemos com "default", o GET /users/me/email-config não
+  // encontraria a config correcta na colecção user_email_configs.
+  const [emailCompanyId, setEmailCompanyId] = useState(effectiveCompanyId || "default");
   const [emailCompanies, setEmailCompanies] = useState([]);
 
-  // Carregar dados do utilizador
+  // Sincronizar emailCompanyId com effectiveCompanyId do AuthContext
+  // Isto garante que quando o ContextSwitcher troca de empresa, o
+  // formulário de webmail recarrega com a config da nova empresa.
+  useEffect(() => {
+    const newId = effectiveCompanyId || "default";
+    if (newId !== emailCompanyId) {
+      console.log("[ProfilePage] Sincronizando emailCompanyId:", emailCompanyId, "→", newId);
+      setEmailCompanyId(newId);
+    }
+  }, [effectiveCompanyId]);
+
+  // ── REATIVIDADE: Recarregar dados do perfil quando a empresa ativa muda ──
+  // Quando o utilizador troca de empresa no ContextSwitcher, os campos
+  // específicos da empresa (assinatura, telefone profissional, cargo)
+  // devem atualizar automaticamente.
+  //
+  // NOTA: O backend GET /auth/me faz MERGE dos dados da empresa ativa
+  // sobre os campos globais (user.phone ← professional_phone da empresa,
+  // user.email_signature ← signature da empresa). Por isso, ao ler
+  // user.phone e user.email_signature já obtemos os valores correctos
+  // para o contexto actual, sem necessidade de fallback manual.
   useEffect(() => {
     if (user) {
+      // Campos mergeados pelo backend (phone/email_signature podem vir
+      // da empresa ativa ou dos campos globais, conforme o contexto)
       setProfileData({
         name: user.name || "",
         phone: user.phone || "",
         email: user.email || "",
       });
-      setEmailSignature(user.email_signature || "");
+      // ── Campos específicos da empresa ativa ──
+      // Prioridade: active_company_* (campos separados do UCR) > campos
+      // mergeados no user (phone/email_signature). Isto permite mostrar
+      // valores diferentes quando o utilizador troca de empresa.
+      setEmailSignature(user.active_company_signature ?? user.email_signature ?? "");
+      setProfessionalPhone(user.active_company_professional_phone ?? "");
+      setJobTitle(user.active_company_job_title ?? "");
       setLoading(false);
+
+      // ── Debug: confirmar que os dados da empresa estão a chegar ──
+      console.log(
+        "[ProfilePage] Dados reidratados — empresa:", effectiveCompanyId,
+        "phone:", user.phone, "signature:", user.email_signature,
+        "active_company_name:", user.active_company_name,
+        "active_company_signature:", user.active_company_signature,
+        "active_company_professional_phone:", user.active_company_professional_phone,
+        "active_company_job_title:", user.active_company_job_title
+      );
     }
-  }, [user]);
+  }, [user, effectiveCompanyId, effectiveRole]);
+
+  // Carregar dados do utilizador (inicial — complementado pelo useEffect acima)
+  // NOTA: A lógica de carregamento foi movida para o useEffect com [user, effectiveCompanyId]
+  // para garantir reatividade à mudança de empresa.
 
   // Carregar sessões
   const loadSessions = async () => {
@@ -152,6 +208,9 @@ const ProfilePage = () => {
   }, []);
 
   // Carregar info de config de email (para mostrar herança)
+  // O header X-Company-Id é injetado automaticamente pelo interceptor api.js
+  // a partir do sessionStorage. O emailCompanyId serve para forçar o reload
+  // quando o utilizador muda a empresa no dropdown LOCAL (sem ContextSwitcher).
   const loadEmailConfigInfo = async () => {
     setLoadingEmailConfig(true);
     try {
@@ -169,28 +228,38 @@ const ProfilePage = () => {
   };
 
   // Carregar empresas do sistema para o dropdown (além das do user)
+  // NOTA: As empresas do user já vêm em userCompanies (via GET /auth/me).
+  // Este useEffect complementa com as empresas do sistema (para admin).
   useEffect(() => {
     const fetchSystemCompanies = async () => {
       try {
+        // Primeiro: incluir empresas do utilizador (do AuthContext)
+        const userCompanyIds = userCompanies.map(c => c.company_id);
+
         const res = await api.get("/system-config/companies");
         const systemCompanies = (res.data?.companies || []).map(c => c.company_id);
-        // Merge com as do user, sem duplicados
+
+        // Merge sem duplicados
         setEmailCompanies(prev => {
-          const merged = new Set([...prev, ...systemCompanies]);
+          const merged = new Set([...prev, ...userCompanyIds, ...systemCompanies]);
           return [...merged];
         });
       } catch (err) {
-        // Silently fail — não é crítico
+        // Fallback: usar apenas as empresas do utilizador
+        setEmailCompanies(prev => {
+          const merged = new Set([...prev, ...userCompanies.map(c => c.company_id)]);
+          return [...merged];
+        });
       }
     };
     if (user && !hasRole(user, "indexacao")) {
       fetchSystemCompanies();
     }
-  }, [user]);
+  }, [user, userCompanies]);
 
   useEffect(() => {
     loadEmailConfigInfo();
-  }, []);
+  }, [emailCompanyId, effectiveCompanyId, effectiveRole]); // Recarregar quando troca de empresa ou perfil
 
   // Guardar alterações do perfil
   const handleSaveProfile = async () => {
@@ -200,18 +269,27 @@ const ProfilePage = () => {
         name: profileData.name,
         phone: profileData.phone,
       });
-      toast({
-        title: "Perfil atualizado",
-        description: "Os seus dados foram atualizados com sucesso.",
-      });
-      // Actualizar o estado local
-      if (response.data.user) {
-        setProfileData({
-          ...profileData,
-          name: response.data.user.name || profileData.name,
-          phone: response.data.user.phone || profileData.phone,
+
+      // Verificar avisos do backend
+      if (response.data.warnings?.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Aviso",
+          description: response.data.warnings.join("; "),
+        });
+      } else {
+        toast({
+          title: "Perfil atualizado",
+          description: "Os seus dados foram atualizados com sucesso.",
         });
       }
+
+      // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
+      // O PUT /auth/profile retorna o user da coleção users, mas os campos
+      // active_company_* só vêm em GET /auth/me. refreshUser() atualiza
+      // o AuthContext, que por sua vez dispara o useEffect [user, effectiveCompanyId]
+      // que atualiza os campos locais (signature, jobTitle, etc.).
+      if (refreshUser) await refreshUser();
     } catch (error) {
       toast({
         variant: "destructive",
@@ -223,17 +301,34 @@ const ProfilePage = () => {
     }
   };
 
-  // Guardar assinatura de email (separadamente para não sobrecarregar o perfil)
+  // Guardar assinatura de email (específica da empresa ativa)
   const handleSaveSignature = async () => {
     setSavingSignature(true);
     try {
       const response = await api.put("/auth/profile", {
-        email_signature: emailSignature,
+        signature: emailSignature,  // Campo específico da empresa → user_company_roles
+        email_signature: emailSignature,  // Backward compat global
       });
-      toast({
-        title: "Assinatura guardada",
-        description: "A sua assinatura de email foi atualizada.",
-      });
+
+      // Verificar avisos do backend
+      if (response.data.warnings?.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Aviso",
+          description: response.data.warnings.join("; "),
+        });
+      } else {
+        toast({
+          title: "Assinatura guardada",
+          description: "A sua assinatura de email foi atualizada para esta empresa.",
+        });
+      }
+
+      // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
+      // O await garante que o user no AuthContext é atualizado ANTES de
+      // o componente tentar usar os dados. Sem await, o useEffect pode
+      // ler dados antigos do user antes do refreshUser completar.
+      if (refreshUser) await refreshUser();
     } catch (error) {
       toast({
         variant: "destructive",
@@ -242,6 +337,45 @@ const ProfilePage = () => {
       });
     } finally {
       setSavingSignature(false);
+    }
+  };
+
+  // Guardar campos específicos da empresa (cargo, telefone profissional)
+  const handleSaveCompanyFields = async () => {
+    setSavingCompanyFields(true);
+    try {
+      const response = await api.put("/auth/profile", {
+        job_title: jobTitle,
+        professional_phone: professionalPhone,
+      });
+
+      // Verificar avisos do backend
+      if (response.data.warnings?.length > 0) {
+        toast({
+          variant: "destructive",
+          title: "Aviso",
+          description: response.data.warnings.join("; "),
+        });
+      } else {
+        toast({
+          title: "Dados profissionais guardados",
+          description: "O seu cargo e telefone profissional foram atualizados para esta empresa.",
+        });
+      }
+
+      // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
+      // O await garante que o user no AuthContext é atualizado ANTES de
+      // o componente tentar usar os dados. Sem await, o useEffect pode
+      // ler dados antigos do user antes do refreshUser completar.
+      if (refreshUser) await refreshUser();
+    } catch (error) {
+      toast({
+        variant: "destructive",
+        title: "Erro ao guardar",
+        description: error.response?.data?.detail || "Não foi possível guardar os dados profissionais.",
+      });
+    } finally {
+      setSavingCompanyFields(false);
     }
   };
 
@@ -343,17 +477,7 @@ const ProfilePage = () => {
     }
   };
 
-  // Formatar data
-  const formatDate = (dateString) => {
-    if (!dateString) return "-";
-    return new Date(safeDateStr(dateString)).toLocaleString("pt-PT", {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    });
-  };
+  // (formatDateTime imported from lib/utils)
 
   // Traduzir força da password
   const getStrengthLabel = (strength) => {
@@ -453,7 +577,15 @@ const ProfilePage = () => {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="phone">Telefone</Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="phone">Telefone</Label>
+                  {user?.active_company_name && user?.active_company_professional_phone && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
+                      <Building2 className="h-3 w-3 mr-0.5" />
+                      {user.active_company_name}
+                    </Badge>
+                  )}
+                </div>
                 <Input
                   id="phone"
                   value={profileData.phone}
@@ -462,6 +594,11 @@ const ProfilePage = () => {
                   }
                   placeholder="O seu telefone"
                 />
+                {user?.active_company_name && user?.active_company_professional_phone && (
+                  <p className="text-xs text-muted-foreground">
+                    Telefone específico de <strong>{user.active_company_name}</strong>. Alterar aqui atualiza também o contacto profissional desta empresa.
+                  </p>
+                )}
               </div>
             </div>
             <div className="space-y-2">
@@ -477,9 +614,15 @@ const ProfilePage = () => {
               </p>
             </div>
             <div className="flex items-center gap-2">
-              <Badge variant="secondary">{getRoleLabel(user?.role)}</Badge>
+              <Badge variant="secondary">{getRoleLabel(effectiveRole || user?.role)}</Badge>
+              {user?.active_company_name && (
+                <Badge variant="outline" className="text-xs font-normal">
+                  <Building2 className="h-3 w-3 mr-1" />
+                  {user.active_company_name}
+                </Badge>
+              )}
               <span className="text-sm text-muted-foreground">
-                Membro desde {formatDate(user?.created_at)}
+                Membro desde {formatDateTime(user?.created_at)}
               </span>
             </div>
             <Button onClick={handleSaveProfile} disabled={saving} className="gap-2">
@@ -515,15 +658,87 @@ const ProfilePage = () => {
           </CardContent>
         </Card>
 
-        {/* Assinatura de Email */}
+        {/* Dados Profissionais por Empresa */}
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <Building2 className="h-5 w-5" />
+              Dados Profissionais
+              {user?.active_company_name && (
+                <Badge variant="outline" className="ml-2 text-xs font-normal">
+                  {user.active_company_name}
+                </Badge>
+              )}
+            </CardTitle>
+            <CardDescription>
+              Cargo e telefone profissional específicos para a empresa ativa.
+              Estes dados são utilizados na assinatura de email e nos templates.
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="job_title">Cargo / Função</Label>
+                <Input
+                  id="job_title"
+                  value={jobTitle}
+                  onChange={(e) => setJobTitle(e.target.value)}
+                  placeholder="Ex: Consultor Imobiliário, Intermediário de Crédito..."
+                />
+                <p className="text-xs text-muted-foreground">
+                  Cargo específico para esta empresa (pode diferir entre empresas).
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="professional_phone">Telefone Profissional</Label>
+                <Input
+                  id="professional_phone"
+                  value={professionalPhone}
+                  onChange={(e) => setProfessionalPhone(e.target.value)}
+                  placeholder="Ex: +351 912 345 678"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Contacto profissional específico para esta empresa.
+                </p>
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <Button
+                onClick={handleSaveCompanyFields}
+                disabled={savingCompanyFields}
+                size="sm"
+                className="gap-2"
+              >
+                {savingCompanyFields ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A guardar...
+                  </>
+                ) : (
+                  <>
+                    <Save className="h-4 w-4" />
+                    Guardar Dados Profissionais
+                  </>
+                )}
+              </Button>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Assinatura de Email — Específica da Empresa Ativa */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <PenLine className="h-5 w-5" />
               Assinatura de Email
+              {user?.active_company_name && (
+                <Badge variant="outline" className="ml-2 text-xs font-normal">
+                  {user.active_company_name}
+                </Badge>
+              )}
             </CardTitle>
             <CardDescription>
-              Configure a sua assinatura pessoal. Será adicionada automaticamente no final de todos os emails que enviar.
+              Assinatura de email específica para a empresa ativa. Será adicionada automaticamente no final de todos os emails que enviar.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -536,7 +751,7 @@ const ProfilePage = () => {
             />
             <div className="flex items-center justify-between">
               <p className="text-xs text-muted-foreground">
-                Suporta formatação de texto, cores, links e imagens.
+                Suporta formatação de texto, cores, links e imagens. Esta assinatura é específica para a empresa ativa.
               </p>
               <Button
                 onClick={handleSaveSignature}
@@ -621,7 +836,7 @@ const ProfilePage = () => {
                           </span>
                           <span className="flex items-center gap-1">
                             <Clock className="h-3 w-3" />
-                            {formatDate(session.created_at)}
+                            {formatDateTime(session.created_at)}
                           </span>
                         </div>
                       </div>
@@ -878,17 +1093,31 @@ const ProfilePage = () => {
                   </div>
                   <Select
                     value={emailCompanyId}
-                    onValueChange={setEmailCompanyId}
+                    onValueChange={(newId) => {
+                      console.log("[ProfilePage] Dropdown email empresa:", emailCompanyId, "→", newId);
+                      setEmailCompanyId(newId);
+                      // Sincronizar com o sessionStorage para que o interceptor
+                      // api.js envie o header X-Company-Id correcto nos pedidos
+                      // GET/POST /users/me/email-config subsequentes.
+                      sessionStorage.setItem("activeCompanyId", newId);
+                    }}
                   >
                     <SelectTrigger id="email-company-select" className="w-48">
                       <SelectValue placeholder="Empresa..." />
                     </SelectTrigger>
                     <SelectContent>
-                      {emailCompanies.map((cid) => (
-                        <SelectItem key={cid} value={cid}>
-                          {cid === "default" ? "Principal (Padrão)" : cid}
-                        </SelectItem>
-                      ))}
+                      {emailCompanies.map((cid) => {
+                        // Tentar obter nome legível do AuthContext
+                        const companyInfo = userCompanies?.find(c => c.company_id === cid);
+                        const displayName = cid === "default"
+                          ? "Principal (Padrão)"
+                          : companyInfo?.company_name || cid;
+                        return (
+                          <SelectItem key={cid} value={cid}>
+                            {displayName}
+                          </SelectItem>
+                        );
+                      })}
                     </SelectContent>
                   </Select>
                 </div>

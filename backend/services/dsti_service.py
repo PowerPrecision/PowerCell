@@ -28,6 +28,8 @@ def calculate_dsti(process: Dict[str, Any]) -> Dict[str, Any]:
     
     Args:
         process: Documento do processo da BD (com personal_data, financial_data, etc.)
+            Se existir second_client_data (populado por populate_client_data),
+            os rendimentos e despesas do 2º titular são somados automaticamente.
     
     Returns:
         Dict com:
@@ -43,8 +45,10 @@ def calculate_dsti(process: Dict[str, Any]) -> Dict[str, Any]:
     """
     financial = process.get("financial_data") or {}
     personal = process.get("personal_data") or {}
+    second_client_data = process.get("second_client_data") or {}
+    second_financial = second_client_data.get("financial_data") if second_client_data else {}
     
-    # === RENDIMENTOS ===
+    # === RENDIMENTOS DO TITULAR PRINCIPAL ===
     # Prioridade: rendimento_liquido_total (agregado de todos os recibos)
     # Fallback: rendimento_mensal (recibo único) ou monthly_income
     rendimento_bruto = _safe_float(financial.get("rendimento_bruto_mensal"))
@@ -59,8 +63,32 @@ def calculate_dsti(process: Dict[str, Any]) -> Dict[str, Any]:
     elif rendimento_bruto > 0 and rendimento_liquido <= 0:
         rendimento_liquido = rendimento_bruto * 0.75
     
-    # Rendimento do co-titular
-    rendimento_co_titular = _safe_float(financial.get("rendimento_co_titular"))
+    # === RENDIMENTOS DO 2º TITULAR (via second_client_id) ===
+    # Se o processo tem second_client_id, os rendimentos vêm do financial_data
+    # desse cliente (populado por populate_client_data → second_client_data).
+    # Prioridade: second_client_data.financial_data (dados do cliente ligado)
+    # Fallback: financial_data.rendimento_co_titular (campo legacy no processo)
+    rendimento_co_titular = 0.0
+    despesas_co_titular = 0.0
+    
+    if second_financial:
+        # 2º titular ligado via second_client_id — somar rendimentos da ficha dele
+        rendimento_co_titular = (
+            _safe_float(second_financial.get("rendimento_liquido_total")) or
+            _safe_float(second_financial.get("rendimento_mensal")) or
+            _safe_float(second_financial.get("monthly_income")) or
+            _safe_float(second_financial.get("rendimento_mensal_irs"))
+        )
+        despesas_co_titular = (
+            _safe_float(second_financial.get("despesas_mensais")) +
+            _safe_float(second_financial.get("prestacao_creditos_mensal")) +
+            _safe_float(second_financial.get("renda_habitacao_atual"))
+        )
+    
+    # Fallback: campo legacy rendimento_co_titular no financial_data do processo
+    if rendimento_co_titular <= 0:
+        rendimento_co_titular = _safe_float(financial.get("rendimento_co_titular"))
+    
     rendimento_bruto_co = rendimento_co_titular * 1.333 if rendimento_co_titular > 0 else 0
     rendimento_liquido_co = rendimento_co_titular if rendimento_co_titular > 0 else 0
     
@@ -86,6 +114,9 @@ def calculate_dsti(process: Dict[str, Any]) -> Dict[str, Any]:
     # Renda de habitação
     renda_habitacao = _safe_float(financial.get("renda_habitacao_atual"))
     
+    # Somar despesas do 2º titular (se existirem)
+    despesas_totais = prestacao_creditos + renda_habitacao + despesas_co_titular
+    
     # === CÁLCULOS ===
     dsti = 0.0
     effort_rate = 0.0
@@ -98,15 +129,14 @@ def calculate_dsti(process: Dict[str, Any]) -> Dict[str, Any]:
         # DSTI = Prestações de crédito / Rendimento bruto total × 100
         dsti = (prestacao_creditos / rendimento_bruto_total) * 100
         
-        # Taxa de esforço global = (créditos + renda) / Rendimento bruto × 100
-        despesas_totais = prestacao_creditos + renda_habitacao
+        # Taxa de esforço global = (créditos + renda + despesas_co) / Rendimento bruto × 100
         effort_rate = (despesas_totais / rendimento_bruto_total) * 100
         
         # Disponibilidade mensal (rendimento líquido - despesas totais)
         disponibilidade = rendimento_liquido_total - despesas_totais
         
         # Prestação máxima respeitando o limite de 50% do BdP
-        max_installment = (rendimento_bruto_total * 0.50) - prestacao_creditos - renda_habitacao
+        max_installment = (rendimento_bruto_total * 0.50) - prestacao_creditos - renda_habitacao - despesas_co_titular
     
     # === CLASSIFICAÇÃO DE RISCO ===
     risk_level, risk_color = _classify_risk(dsti)
@@ -128,6 +158,7 @@ def calculate_dsti(process: Dict[str, Any]) -> Dict[str, Any]:
             "rendimento_liquido_total": round(rendimento_liquido_total, 2),
             "prestacao_creditos_mensal": round(prestacao_creditos, 2),
             "renda_habitacao": round(renda_habitacao, 2),
+            "despesas_co_titular": round(despesas_co_titular, 2),
             "divida_total_crc": round(divida_total_crc, 2),
             "numero_creditos": int(numero_creditos),
         },

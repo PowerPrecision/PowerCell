@@ -12,15 +12,16 @@ from models.enums import ProcessStatus, ProcessType
 class TestProcessStatus:
     """Testes para ProcessStatus enum."""
     
-    def test_all_14_phases_exist(self):
-        """Verifica que todas as 14 fases do workflow existem."""
+    def test_all_15_phases_exist(self):
+        """Verifica que todas as 15 fases do workflow existem."""
         all_statuses = ProcessStatus.all_values()
         
-        # Deve ter 14 fases
-        assert len(all_statuses) == 14
+        # Deve ter 15 fases (14 originais + fila_espera)
+        assert len(all_statuses) == 15
         
         # Fases iniciais
         assert "clientes_espera" in all_statuses
+        assert "fila_espera" in all_statuses
         assert "documentacao" in all_statuses
         assert "analise" in all_statuses
         
@@ -42,9 +43,9 @@ class TestProcessStatus:
         assert "desistencias" in all_statuses
     
     def test_active_statuses_count(self):
-        """Verifica que há 10 status activos."""
+        """Verifica que há 11 status activos."""
         active = ProcessStatus.active_statuses()
-        assert len(active) == 10
+        assert len(active) == 11
     
     def test_completed_statuses_count(self):
         """Verifica que há 2 status de conclusão."""
@@ -125,6 +126,7 @@ class TestProcessWorkflow:
         # A ordem deve fazer sentido para o fluxo de crédito
         workflow_order = [
             "clientes_espera",
+            "fila_espera",
             "documentacao",
             "analise",
             "pre_aprovacao",

@@ -139,6 +139,15 @@ api.interceptors.request.use(
       config.headers["X-Active-Role"] = activeRole;
     }
     
+    // Injetar X-Company-Id para Contexto Multi-Empresa
+    // Utilizadores associados a múltiplas empresas podem alternar
+    // o contexto ativo via ContextSwitcher, e o backend resolve
+    // a configuração de email/dados em função da empresa selecionada
+    const activeCompanyId = sessionStorage.getItem("activeCompanyId");
+    if (activeCompanyId) {
+      config.headers["X-Company-Id"] = activeCompanyId;
+    }
+    
     // Log de debug (apenas em desenvolvimento)
     if (process.env.NODE_ENV === "development") {
       console.debug(`[API] ${config.method?.toUpperCase()} ${config.url}`, config.headers["X-Active-Role"] ? `[${config.headers["X-Active-Role"]}]` : "");

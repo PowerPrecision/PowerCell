@@ -54,7 +54,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { safeCopyToClipboard } from "../utils/clipboard";
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -366,12 +366,7 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
                   <TableCell>
                     <div className="flex items-center gap-1 text-sm text-gray-600">
                       <Clock className="h-3 w-3" />
-                      {new Date(safeDateStr(link.expires_at)).toLocaleDateString("pt-PT", {
-                        day: "2-digit",
-                        month: "2-digit",
-                        hour: "2-digit",
-                        minute: "2-digit",
-                      })}
+                      {formatDateTime(link.expires_at)}
                     </div>
                   </TableCell>
                   <TableCell className="text-right">

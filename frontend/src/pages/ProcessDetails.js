@@ -106,6 +106,7 @@ import AutoDSTIBadge from "../components/AutoDSTIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
 import PortalDocumentRequests from "../components/PortalDocumentRequests";
+import SecondTitularCard from "../components/SecondTitularCard";
 import {
   ArrowLeft,
   User,
@@ -152,7 +153,7 @@ import {
   Shield,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isAfter } from "date-fns";
+import { format, parseISO, isAfter, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
@@ -1710,7 +1711,7 @@ const ProcessDetails = () => {
         process_id: id,
         title: deadlineForm.title,
         description: deadlineForm.description,
-        due_date: format(selectedDate, "yyyy-MM-dd"),
+        due_date: selectedDate && isValid(selectedDate) ? format(selectedDate, "yyyy-MM-dd") : null,
         priority: deadlineForm.priority,
       });
       toast.success("Prazo criado com sucesso!");
@@ -3177,159 +3178,8 @@ const ProcessDetails = () => {
                         </CardContent>
                       </Card>
                       
-                      {/* 2º Titular */}
-                      {(process?.titular2_data || Object.keys(titular2Data).length > 0) && (
-                        <Card className="border-l-4 border-l-cyan-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <Users className="h-4 w-4 text-cyan-500" />
-                              2º Titular
-                              <Badge variant="secondary" className="ml-2">
-                                Cônjuge/Co-Titular
-                              </Badge>
-                            </h4>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              {/* Nome */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Nome</Label>
-                                <Input
-                                  value={titular2Data.name || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, name: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="Nome completo"
-                                />
-                              </div>
-                              
-                              {/* NIF */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">NIF</Label>
-                                <Input
-                                  value={titular2Data.nif || ""}
-                                  onChange={(e) => {
-                                    const value = e.target.value.replace(/\D/g, '').slice(0, 9);
-                                    setTitular2Data({ ...titular2Data, nif: value });
-                                  }}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="999999999"
-                                  maxLength={9}
-                                />
-                              </div>
-                              
-                              {/* Email */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Email</Label>
-                                <Input
-                                  type="email"
-                                  value={titular2Data.email || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, email: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="email@exemplo.com"
-                                />
-                              </div>
-                              
-                              {/* Telefone */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Telefone</Label>
-                                <Input
-                                  value={titular2Data.phone || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, phone: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="912345678"
-                                />
-                              </div>
-                              
-                              {/* Data de Nascimento */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
-                                <Input
-                                  type="date"
-                                  value={titular2Data.birth_date || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, birth_date: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                />
-                              </div>
-                              
-                              {/* Estado Civil */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Estado Civil</Label>
-                                <Select
-                                  value={titular2Data.estado_civil || ""}
-                                  onValueChange={(value) => setTitular2Data({ ...titular2Data, estado_civil: value })}
-                                  disabled={!canEditPersonal}
-                                >
-                                  <SelectTrigger className="h-9">
-                                    <SelectValue placeholder="Selecionar" />
-                                  </SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="solteiro">Solteiro(a)</SelectItem>
-                                    <SelectItem value="casado">Casado(a)</SelectItem>
-                                    <SelectItem value="casado_adquiridos">Casado(a) - Comunhão de Adquiridos</SelectItem>
-                                    <SelectItem value="casado_geral">Casado(a) - Comunhão Geral</SelectItem>
-                                    <SelectItem value="casado_separacao">Casado(a) - Separação de Bens</SelectItem>
-                                    <SelectItem value="divorciado">Divorciado(a)</SelectItem>
-                                    <SelectItem value="viuvo">Viúvo(a)</SelectItem>
-                                    <SelectItem value="uniao_facto">União de Facto</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              
-                              {/* Naturalidade */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Naturalidade</Label>
-                                <Input
-                                  value={titular2Data.naturalidade || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, naturalidade: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="Cidade/País"
-                                />
-                              </div>
-                              
-                              {/* Nacionalidade */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Nacionalidade</Label>
-                                <Input
-                                  value={titular2Data.nacionalidade || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, nacionalidade: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="Portuguesa"
-                                />
-                              </div>
-                              
-                              {/* Nº Documento */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Nº Documento</Label>
-                                <Input
-                                  value={titular2Data.documento_id || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, documento_id: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="Nº do Cartão de Cidadão"
-                                />
-                              </div>
-                              
-                              {/* Morada Fiscal */}
-                              <div className="space-y-1 col-span-2">
-                                <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
-                                <Input
-                                  value={titular2Data.morada_fiscal || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, morada_fiscal: e.target.value })}
-                                  disabled={!canEditPersonal}
-                                  className="h-9"
-                                  placeholder="Rua, número, código postal"
-                                />
-                              </div>
-                              
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )}
+                      {/* 2º Titular — Componente com pesquisa e ficha */}
+                      <SecondTitularCard process={process} onUpdate={fetchData} />
                       
                       {/* Co-Compradores / Co-Proponentes */}
                       {(process?.co_buyers?.length > 0 || process?.co_applicants?.length > 0) && (
@@ -5431,7 +5281,7 @@ const ProcessDetails = () => {
                                   <PopoverTrigger asChild>
                                     <Button variant="outline" className="w-full justify-start text-left font-normal">
                                       <CalendarIcon className="mr-2 h-4 w-4" />
-                                      {selectedDate ? format(selectedDate, "PPP", { locale: pt }) : "Selecione"}
+                                      {selectedDate && isValid(selectedDate) ? format(selectedDate, "PPP", { locale: pt }) : "Selecione"}
                                     </Button>
                                   </PopoverTrigger>
                                   <PopoverContent className="w-auto p-0">

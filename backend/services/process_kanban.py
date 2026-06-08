@@ -42,6 +42,7 @@ KANBAN_COLUMNS = [
     {"id": "ch_aprovado", "name": "CH Aprovado", "color": "#22C55E"},
     {"id": "fase_escritura", "name": "Fase de Escritura", "color": "#84CC16"},
     {"id": "escritura_agendada", "name": "Escritura Agendada", "color": "#10B981"},
+    {"id": "fila_espera", "name": "Fila de Espera", "color": "#F97316"},
     {"id": "concluidos", "name": "Concluídos", "color": "#059669"},
     {"id": "desistencias", "name": "Desistências", "color": "#EF4444"},
 ]

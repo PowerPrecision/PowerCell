@@ -9,8 +9,9 @@ import {
   User, Phone, Mail, MapPin, Euro, Building2, 
   Calendar, Clock, Users, Percent
 } from "lucide-react";
-import { format, parseISO, differenceInDays } from "date-fns";
+import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
+import { safeParseISO, safeFormat } from "../lib/utils";
 import { safeString, safeStringArray } from "../utils/safeString";
 
 const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, consultorNames, mediadorNames }) => {
@@ -24,8 +25,8 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, 
     mediadorNames?.length > 0 ? mediadorNames : (mediadorName ? [mediadorName] : [])
   );
 
-  // Calcular dias no sistema
-  const createdDate = process.created_at ? parseISO(process.created_at) : null;
+  // Calcular dias no sistema (protecção defensiva contra datas inválidas / Safari)
+  const createdDate = safeParseISO(process.created_at);
   const daysInSystem = createdDate ? differenceInDays(new Date(), createdDate) : 0;
 
   // Formatar valor
@@ -141,7 +142,7 @@ const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, 
             </p>
             {createdDate && (
               <p className="text-xs text-muted-foreground">
-                desde {format(createdDate, "dd/MM/yy", { locale: pt })}
+                desde {safeFormat(process.created_at, "dd/MM/yy", { locale: pt })}
               </p>
             )}
           </div>

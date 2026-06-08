@@ -15,16 +15,7 @@ import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-  DialogFooter,
-} from "../components/ui/dialog";
 import {
   Table,
   TableBody,
@@ -51,7 +42,6 @@ import {
   Phone,
   Mail,
   Hash,
-  UserPlus,
   Eye,
   Trash2,
   Link2,
@@ -77,6 +67,7 @@ import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
 import SmartClientSearch from "../components/SmartClientSearch";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import CreateProcessModal from "../components/CreateProcessModal";
+import CreateClientModal from "../components/kanban/CreateClientModal";
 import { getExportPermission } from "../services/api";
 
 const API_URL = (process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com") + "/api";
@@ -156,15 +147,9 @@ export default function ClientsPage() {
   const setSortOrder = (v) => updateParam("order", v);
   
   const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
+  const [showCreateModal, setShowCreateModal] = useState(false);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
   const [processModalClient, setProcessModalClient] = useState(null);
-  const [newClient, setNewClient] = useState({
-    nome: "",
-    email: "",
-    telefone: "",
-    nif: "",
-  });
 
   
   // Verificar se pode eliminar clientes (apenas admin, ceo, diretor, administrativo)
@@ -324,52 +309,10 @@ export default function ClientsPage() {
       : <ArrowDown className="h-3 w-3 ml-1" />;
   };
 
-  const handleCreateClient = async () => {
-    // Validação do nome (obrigatório)
-    if (!newClient.nome.trim()) {
-      toast.error("Nome é obrigatório");
-      return;
-    }
-
-    // Validação do NIF (opcional, mas se preenchido deve ter 9 dígitos)
-    const nifClean = newClient.nif ? newClient.nif.replace(/[^\d]/g, '') : '';
-    if (newClient.nif && nifClean.length !== 9) {
-      toast.error("NIF deve ter exatamente 9 dígitos");
-      return;
-    }
-
-    try {
-      const token = localStorage.getItem("token");
-      
-      // Construir payload apenas com campos preenchidos
-      const payload = { nome: newClient.nome.trim() };
-      if (newClient.email?.trim()) payload.email = newClient.email.trim();
-      if (newClient.telefone?.trim()) payload.telefone = newClient.telefone.trim();
-      if (nifClean) payload.nif = nifClean;
-      
-      const response = await fetch(`${API_URL}/clients`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(payload),
-      });
-
-      if (response.ok) {
-        toast.success("Cliente criado com sucesso");
-        setShowCreateDialog(false);
-        setNewClient({ nome: "", email: "", telefone: "", nif: "" });
-        fetchClients();
-      } else {
-        const error = await response.json();
-        toast.error(error.detail || "Erro ao criar cliente");
-      }
-    } catch (error) {
-      console.error("Erro ao criar cliente:", error);
-      toast.error("Erro ao criar cliente");
-    }
-  };
+  const handleCreateModalSuccess = useCallback(() => {
+    setShowCreateModal(false);
+    fetchClients();
+  }, [fetchClients]);
 
   const handleDeleteClient = async (clientId) => {
     if (!window.confirm("Tem a certeza que deseja eliminar este cliente?")) {
@@ -461,10 +404,7 @@ export default function ClientsPage() {
     }
   };
 
-  // Abrir dialog para criar novo cliente/processo
-  const handleCreateNewProcess = () => {
-    setShowCreateDialog(true);
-  };
+
 
   return (
     <DashboardLayout title="Todos os Clientes">
@@ -495,7 +435,7 @@ export default function ClientsPage() {
             )}
             {canCreateClients && (
               <Button
-                onClick={() => setShowCreateDialog(true)}
+                onClick={() => setShowCreateModal(true)}
                 className="gap-2"
                 data-testid="btn-novo-cliente"
               >
@@ -685,7 +625,7 @@ export default function ClientsPage() {
                   <Button
                     variant="outline"
                     className="mt-4"
-                    onClick={() => setShowCreateDialog(true)}
+                    onClick={() => setShowCreateModal(true)}
                   >
                     <Plus className="h-4 w-4 mr-2" />
                     Criar primeiro cliente
@@ -972,107 +912,12 @@ export default function ClientsPage() {
           </CardContent>
         </Card>
 
-        {/* Create Client Dialog - só visível para quem pode criar clientes */}
-        {canCreateClients && (
-        <Dialog open={showCreateDialog} onOpenChange={setShowCreateDialog}>
-          <DialogContent className="sm:max-w-md">
-            <DialogHeader>
-              <DialogTitle className="flex items-center gap-2">
-                <UserPlus className="h-5 w-5" />
-                Novo Cliente
-              </DialogTitle>
-              <DialogDescription>
-                Preencha os dados para criar um novo cliente.
-              </DialogDescription>
-            </DialogHeader>
-            <form onSubmit={(e) => { e.preventDefault(); handleCreateClient(); }} className="space-y-4 py-4">
-              {/* Campo Nome - Obrigatório */}
-              <div className="space-y-2">
-                <Label htmlFor="nome">
-                  Nome <span className="text-red-500">*</span>
-                </Label>
-                <Input
-                  id="nome"
-                  value={newClient.nome}
-                  onChange={(e) =>
-                    setNewClient({ ...newClient, nome: e.target.value })
-                  }
-                  placeholder="Nome completo do cliente"
-                  required
-                  autoFocus
-                  data-testid="new-client-name"
-                />
-              </div>
-              
-              {/* Email e Telefone - Opcionais */}
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div className="space-y-2">
-                  <Label htmlFor="email" className="text-muted-foreground">
-                    Email <span className="text-xs font-normal">(Opcional)</span>
-                  </Label>
-                  <Input
-                    id="email"
-                    type="email"
-                    value={newClient.email}
-                    onChange={(e) =>
-                      setNewClient({ ...newClient, email: e.target.value })
-                    }
-                    placeholder="email@exemplo.pt"
-                    data-testid="new-client-email"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="telefone" className="text-muted-foreground">
-                    Telefone <span className="text-xs font-normal">(Opcional)</span>
-                  </Label>
-                  <Input
-                    id="telefone"
-                    value={newClient.telefone}
-                    onChange={(e) =>
-                      setNewClient({ ...newClient, telefone: e.target.value })
-                    }
-                    placeholder="912 345 678"
-                    data-testid="new-client-phone"
-                  />
-                </div>
-              </div>
-              
-              {/* NIF - Opcional mas com validação */}
-              <div className="space-y-2">
-                <Label htmlFor="nif" className="text-muted-foreground">
-                  NIF <span className="text-xs font-normal">(Opcional)</span>
-                </Label>
-                <Input
-                  id="nif"
-                  value={newClient.nif}
-                  onChange={(e) => {
-                    // Permitir apenas dígitos
-                    const value = e.target.value.replace(/[^\d]/g, '');
-                    setNewClient({ ...newClient, nif: value });
-                  }}
-                  placeholder="123456789"
-                  maxLength={9}
-                  data-testid="new-client-nif"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Se preenchido, deve conter exatamente 9 dígitos
-                </p>
-              </div>
-            </form>
-            <DialogFooter>
-              <Button
-                variant="outline"
-                onClick={() => setShowCreateDialog(false)}
-              >
-                Cancelar
-              </Button>
-              <Button onClick={handleCreateClient} data-testid="submit-new-client">
-                Criar Cliente
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
-        )}
+        {/* Create Client/Process Modal — mesmo fluxo que MyClientsPage */}
+        <CreateClientModal
+          open={showCreateModal}
+          onOpenChange={setShowCreateModal}
+          onSuccess={handleCreateModalSuccess}
+        />
 
         {/* Create Process Modal — reutiliza CreateProcessModal com cliente pré-selecionado */}
         {canCreateProcess && (

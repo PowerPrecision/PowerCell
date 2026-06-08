@@ -1088,6 +1088,99 @@ class ScheduledTasksService:
             logger.error(f"Erro ao enviar relatório de IA: {e}")
             return False
     
+    async def send_weekly_ceo_report(self) -> bool:
+        """
+        Envia o relatório semanal de produtividade da equipa ao CEO.
+
+        Corre todas as Segundas-feiras às ~06:00 (quando run_all_tasks
+        é invocado pelo worker/scheduler). Gera o relatório via
+        analytics_service, formata HTML profissional e envia para o
+        e-mail definido na variável de ambiente CEO_EMAIL (ou, em
+        fallback, para todos os utilizadores com role=ceo).
+
+        Returns:
+            True se o email foi enviado, False caso contrário
+        """
+        today = datetime.now(timezone.utc)
+
+        # Só enviar à Segunda-feira (weekday 0)
+        if today.weekday() != 0:
+            logger.info("[CEO Report] Hoje não é Segunda-feira — a ignorar")
+            return False
+
+        logger.info("[CEO Report] A gerar relatório semanal de produtividade para o CEO...")
+
+        try:
+            # 1. Gerar dados de agregação
+            from services.analytics_service import generate_weekly_team_report, format_report_html
+
+            report = await generate_weekly_team_report(self.db)
+
+            # 2. Formatar HTML
+            html_content = format_report_html(report)
+
+            # 3. Determinar destinatário(s)
+            ceo_email = os.environ.get("CEO_EMAIL", "").strip()
+            recipient_emails: List[str] = []
+
+            if ceo_email:
+                # Suporta múltiplos e-mails separados por vírgula
+                recipient_emails = [e.strip() for e in ceo_email.split(",") if e.strip()]
+
+            if not recipient_emails:
+                # Fallback: buscar utilizadores com role ceo na base de dados
+                from services.role_query import deep_role_in_filter
+                ceo_users = await self.db.users.find(
+                    {"$and": [deep_role_in_filter(["ceo"]), {"is_active": {"$ne": False}}]},
+                    {"_id": 0, "email": 1, "name": 1}
+                ).to_list(10)
+                recipient_emails = [u["email"] for u in ceo_users if u.get("email")]
+
+            if not recipient_emails:
+                logger.warning("[CEO Report] Nenhum destinatário encontrado — CEO_EMAIL não configurado e sem utilizadores CEO")
+                return False
+
+            # 4. Resumo em texto simples (fallback)
+            summary = report.get("summary", {})
+            period_start = datetime.fromisoformat(report["period_start"])
+            period_end = datetime.fromisoformat(report["period_end"])
+
+            plain_body = (
+                f"Relatório Semanal de Produtividade\n"
+                f"Período: {period_start.strftime('%d/%m/%Y')} - {period_end.strftime('%d/%m/%Y')}\n\n"
+                f"Processos Movidos: {summary.get('total_processes_moved', 0)}\n"
+                f"Tarefas Concluídas: {summary.get('total_tasks_completed', 0)}\n"
+                f"Tarefas Atrasadas: {summary.get('total_tasks_overdue', 0)}\n"
+                f"Tarefas Pendentes: {summary.get('total_tasks_pending', 0)}\n"
+                f"Utilizadores: {summary.get('total_users', 0)}\n"
+            )
+
+            # 5. Enviar e-mail
+            from services.email_service import send_email
+
+            result = await send_email(
+                account_name="precision",
+                to_emails=recipient_emails,
+                subject=f"Relatório Semanal de Produtividade - {period_start.strftime('%d/%m')} a {period_end.strftime('%d/%m/%Y')}",
+                body=plain_body,
+                body_html=html_content,
+                force_system=True,
+                system_purpose="CEO_REPORT",
+            )
+
+            if result.get("success"):
+                logger.info(
+                    f"[CEO Report] Relatório enviado para {len(recipient_emails)} destinatário(s)"
+                )
+                return True
+            else:
+                logger.error(f"[CEO Report] Falha ao enviar: {result.get('error')}")
+                return False
+
+        except Exception as e:
+            logger.error(f"[CEO Report] Erro ao gerar/enviar relatório: {e}")
+            return False
+
     def _get_weekly_insight(self, total: int, success_rate: float, doc_variation: float) -> str:
         """Gera insight para o email."""
         if total == 0:
@@ -1266,7 +1359,8 @@ class ScheduledTasksService:
             temp_files_count = await self.cleanup_temp_files()
             cache_count = await self.cleanup_scraper_cache()
             weekly_report_sent = await self.send_weekly_ai_report()
-            
+            ceo_report_sent = await self.send_weekly_ceo_report()
+
             logger.info("=" * 50)
             logger.info("RESUMO DAS TAREFAS")
             logger.info(f"- Alertas de documentos: {docs_count}")
@@ -1281,6 +1375,7 @@ class ScheduledTasksService:
             logger.info(f"- Ficheiros temp. limpos: {temp_files_count}")
             logger.info(f"- Cache scraper limpo: {cache_count}")
             logger.info(f"- Relatório AI semanal: {'Enviado' if weekly_report_sent else 'Não enviado (não é segunda-feira)'}")
+            logger.info(f"- Relatório CEO semanal: {'Enviado' if ceo_report_sent else 'Não enviado (não é segunda-feira ou sem destinatário)'}")
             logger.info("=" * 50)
             
         except Exception as e:
@@ -1301,11 +1396,13 @@ class ScheduledTasksService:
         Returns:
             Dict com resumo da sincronização
         """
-        # 🛑 KILL SWITCH: Sincronização IMAP só em produção (ENVIRONMENT=production).
+        # 🛑 KILL SWITCH: Só sincroniza se ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true.
         import os
-        if os.environ.get('ENVIRONMENT') != 'production':
-            logger.info("[auto_sync_emails] BLOCKED — ENVIRONMENT != production")
-            return {"success": True, "error": "Email sync desativado (ENVIRONMENT != production)", "total_synced": 0}
+        env = os.environ.get('ENVIRONMENT', '')
+        sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+        if env != 'production' and not sync_enabled:
+            logger.info("[auto_sync_emails] BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true")
+            return {"success": False, "error": "Email sync desactivado (ENVIRONMENT != production). Defina EMAIL_SYNC_ENABLED=true.", "total_synced": 0}
 
         logger.info("[Auto-Sync Email] Iniciando sincronização automática de emails...")
         
@@ -1431,8 +1528,11 @@ class ScheduledTasksService:
 
 async def run_email_auto_sync(interval_seconds: int = 180):
     import os
-    if os.environ.get('ENVIRONMENT') != 'production':
-        return  # Aborta imediatamente em DEV
+    env = os.environ.get('ENVIRONMENT', '')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        logger.info("[run_email_auto_sync] BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true")
+        return  # Aborta em DEV a menos que EMAIL_SYNC_ENABLED=true
 
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
     await asyncio.sleep(30)
@@ -1462,10 +1562,12 @@ async def run_daemon(interval_hours: int = 24):
     Executar tarefas em loop (modo daemon).
     Por defeito, executa a cada 24 horas.
     """
-    # KILL SWITCH — BLOQUEIO RADICAL: SÓ PRODUÇÃO PERMITE DAEMON
+    # KILL SWITCH — Só permite daemon em ENVIRONMENT=production ou EMAIL_SYNC_ENABLED=true
     import os
-    if os.environ.get('ENVIRONMENT', 'dev') != 'production':
-        logger.warning("[RADICAL BLOCK] run_daemon BLOCKED — ENVIRONMENT != production — daemon will NOT start")
+    env = os.environ.get('ENVIRONMENT', 'dev')
+    sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
+    if env != 'production' and not sync_enabled:
+        logger.warning("[BLOCK] run_daemon BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true — daemon will NOT start")
         return
 
     service = ScheduledTasksService()

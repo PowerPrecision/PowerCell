@@ -121,14 +121,17 @@ async def login(request: Request, data: UserLogin, response: Response):
 
 
 @router.get("/me")
-async def get_me(user: dict = Depends(get_current_user)):
+async def get_me(request: Request, user: dict = Depends(get_current_user)):
     """Retorna o utilizador atual incluindo info de impersonate e permissões se aplicável.
     
     Sincroniza as permissões com as defaults do role em cada request,
     garantindo que alterações a DEFAULT_PERMISSIONS_BY_ROLE são refletidas
     imediatamente para todos os utilizadores (resolve permissões legacy).
+    
+    INCLUI: Lista de empresas associadas (user_company_roles) e empresa ativa.
     """
     from services.permissions import get_default_permissions_for_role, sync_permissions_with_role_defaults
+    from services.auth import get_user_companies, get_active_company_id_async
     
     # Sincronizar permissões: garantir que actions novas no role são adicionadas
     user_perms = user.get("permissions")
@@ -170,46 +173,121 @@ async def get_me(user: dict = Depends(get_current_user)):
     # Para admin/ceo/diretor/administrativo, também verificar se existe config global (SystemConfigPage)
     if not email_configured and user.get("role") in ("admin", "ceo", "diretor", "administrativo"):
         try:
-            config = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "email": 1, "system_webmail": 1})
+            config = await db.system_config.find_one({"_id": "main"}, {"_id": 0, "email": 1, "system_smtp": 1, "system_webmail": 1})
             if config:
-                # Verificar Bloco A (system_smtp) ou Bloco C (system_webmail)
+                # Verificar Bloco A (system_smtp — Resend API ou SMTP legado)
+                system_smtp_block = config.get("system_smtp", {})
+                has_resend_api = bool(
+                    system_smtp_block.get("resend_api_key") and
+                    system_smtp_block.get("resend_api_key") != "••••••••"
+                )
+                has_legacy_smtp = bool(
+                    system_smtp_block.get("smtp_host") and
+                    system_smtp_block.get("smtp_username")
+                )
+                # Verificar Bloco B (email legacy — dupla conta)
                 email_config_block = config.get("email", {})
-                system_webmail_block = config.get("system_webmail", {})
                 has_smtp_config = bool(
                     email_config_block.get("provider") == "smtp" and
                     email_config_block.get("smtp_host") and
                     email_config_block.get("smtp_user")
                 )
+                # Verificar Bloco C (system_webmail — indexação IMAP)
+                system_webmail_block = config.get("system_webmail", {})
                 has_webmail_config = bool(
                     system_webmail_block.get("imap_host") and
                     system_webmail_block.get("email_user") and
                     system_webmail_block.get("app_password")
                 )
                 # Também verificar contas de email via env vars (get_email_accounts)
-                if has_smtp_config or has_webmail_config:
+                # e provider transacional via email_v2 (EMAIL_API_KEY)
+                if has_resend_api or has_legacy_smtp or has_smtp_config or has_webmail_config:
                     email_configured = True
                 else:
                     from services.email_service import get_email_accounts
                     if get_email_accounts():
                         email_configured = True
+                    else:
+                        import os
+                        if os.environ.get("EMAIL_API_KEY"):
+                            email_configured = True
         except Exception:
             pass  # Falha silenciosa — não bloqueia o request
 
+    # ── Multi-Empresa: empresas associadas e empresa ativa ──
+    # ── Multi-Perfil: Ler X-Active-Role para context switching ──
+    active_role_header = request.headers.get("X-Active-Role", "")
+
+    # Valores por defeito (dados globais do user)
+    effective_phone = user.get("phone")
+    effective_email_signature = user.get("email_signature", "")
+    active_company_id = None
+    active_assoc = None
+
+    try:
+        user_companies = await get_user_companies(user["id"])
+        if user_companies:
+            # Determinar empresa ativa (X-Company-Id header ou default)
+            active_company_id = await get_active_company_id_async(request, user)
+            # Encontrar a associação na empresa ativa
+            active_assoc = next(
+                (c for c in user_companies if c.get("company_id") == active_company_id),
+                None
+            )
+            if active_assoc:
+                # ── MERGE: Sobrepor campos globais com dados da empresa ativa ──
+                # Se houver professional_phone para a empresa ativa, sobrepõe o
+                # phone global. Se houver signature, sobrepõe o email_signature.
+                # Isto garante que o frontend vê sempre os dados correctos
+                # independentemente de ler user.phone ou user.email_signature.
+                if active_assoc.get("professional_phone"):
+                    effective_phone = active_assoc["professional_phone"]
+                if active_assoc.get("signature"):
+                    effective_email_signature = active_assoc["signature"]
+    except Exception as e:
+        logger.warning(f"[auth/me] Erro ao carregar empresas do utilizador: {e}")
+        # Não bloquear o request — empresas são opcional
+        user_companies = []
+
+    # Construir resposta com os valores mergeados
+    # IMPORTANTE: 'companies' e 'active_company_id' devem estar SEMPRE presentes
+    # na resposta, mesmo que vazios, para que o React possa saber os IDs das
+    # empresas e alternar entre elas no ContextSwitcher.
     response = {
         "id": user["id"],
         "email": user["email"],
         "name": user["name"],
-        "phone": user.get("phone"),
+        "phone": effective_phone,  # ← Mergeado: professional_phone da empresa ativa ou phone global
         "role": user["role"],
+        "company": user.get("company"),
         "created_at": user["created_at"],
         "onedrive_folder": user.get("onedrive_folder"),
         "is_active": user.get("is_active", True),
         "permissions": synced_perms,
         "additional_roles": user.get("additional_roles", []),
-        # Indica se o utilizador tem email configurado para sincronização
         "email_configured": email_configured,
-        "email_signature": user.get("email_signature", ""),
+        "email_signature": effective_email_signature,  # ← Mergeado: signature da empresa ativa ou global
+        # ── Multi-empresa: SEMPRE presentes (fallback vazio) ──
+        "companies": user_companies or [],
+        "active_company_id": active_company_id or user.get("company"),
     }
+
+    # Popular campos detalhados da empresa activa
+    if user_companies and active_assoc:
+        company_role = active_assoc.get("role")
+        effective_active_role = active_role_header if active_role_header else company_role
+        response["active_company_role"] = effective_active_role
+        response["active_company_name"] = active_assoc.get("company_name")
+        response["active_company_signature"] = active_assoc.get("signature", "")
+        response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
+        response["active_company_job_title"] = active_assoc.get("job_title", "")
+    else:
+        # Fallback: sem associação activa ou sem empresas
+        response["active_company_role"] = active_role_header or user.get("role")
+        response["active_company_name"] = ""
+        response["active_company_signature"] = ""
+        response["active_company_professional_phone"] = ""
+        response["active_company_job_title"] = ""
     
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):
@@ -291,47 +369,197 @@ async def get_preferences(user: dict = Depends(get_current_user)):
 @router.put("/profile")
 async def update_profile(
     data: dict,
+    request: Request,
     user: dict = Depends(get_current_user)
 ):
     """
-    Permite ao utilizador atualizar o seu próprio perfil (nome e telefone).
+    Permite ao utilizador atualizar o seu próprio perfil.
+    
+    MULTI-EMPRESA — Lógica de Separação (sem fuga de dados):
+    
+    - Empresa DEFAULT (ou sem contexto):  phone e email_signature gravam-se
+      normalmente no documento global do utilizador (users collection).
+    
+    - Empresa NÃO-DEFAULT: phone e email_signature são EXTRAÍDOS do
+      update_data via .pop() e redirecionados para a tabela
+      user_company_roles (como professional_phone e signature).
+      Isto impede que dados específicos de uma empresa secundária
+      sobrescrevam os dados globais do utilizador.
+    
+    - Campos explicitamente da empresa (signature, professional_phone,
+      job_title) vão sempre para user_company_roles, independentemente
+      da empresa activa.
+    
+    - O campo "name" é sempre global (não varia por empresa).
     """
     user_id = user["id"]
     
-    # Campos permitidos para actualização pelo próprio utilizador
+    # ── Determinar o contexto de empresa ativa ──
+    from services.auth import get_active_company_id_async, get_user_companies
+    active_company_id = None
+    active_assoc = None
+    user_companies = []
+    try:
+        active_company_id = await get_active_company_id_async(request, user)
+        user_companies = await get_user_companies(user_id)
+        if active_company_id and user_companies:
+            active_assoc = next(
+                (c for c in user_companies if c.get("company_id") == active_company_id),
+                None
+            )
+    except Exception as e:
+        logger.warning(f"[auth/profile] Erro ao determinar empresa ativa: {e}")
+    
+    # Empresa default = sem contexto, ou is_default=True, ou company_id = user.company
+    is_default_company = (
+        not active_company_id
+        or (active_assoc and active_assoc.get("is_default"))
+        or active_company_id == user.get("company")
+    )
+
+    # ── Recolher campos globais permitidos ──
     allowed_fields = ["name", "phone", "email_signature"]
     update_data = {}
     
     for field in allowed_fields:
         if field in data and data[field] is not None:
             if field == "email_signature":
-                # Assinatura de email: guardar HTML tal como está (sem strip)
                 update_data[field] = data[field]
             else:
-                # Aceitar qualquer valor — sem validação de formato
                 update_data[field] = str(data[field]).strip()
-    
-    if not update_data:
-        raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
-    
-    update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
-    
-    result = await db.users.update_one(
-        {"id": user_id},
-        {"$set": update_data}
+
+    # Verificar se há campos específicos da empresa (enviados explicitamente)
+    has_company_fields = any(
+        k in data and data[k] is not None
+        for k in ("signature", "professional_phone", "job_title")
     )
     
-    if result.modified_count == 0 and result.matched_count == 0:
-        raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+    # ── Campos específicos por empresa — guardar em user_company_roles ──
+    company_specific_fields = {}
+    if "signature" in data and data["signature"] is not None:
+        company_specific_fields["signature"] = data["signature"]
+    if "professional_phone" in data and data["professional_phone"] is not None:
+        company_specific_fields["professional_phone"] = str(data["professional_phone"]).strip()
+    if "job_title" in data and data["job_title"] is not None:
+        company_specific_fields["job_title"] = str(data["job_title"]).strip()
+
+    # ── SEPARAÇÃO: Empresa não-default → extrair campos do global ──
+    # Quando a empresa activa NÃO é a default, phone e email_signature
+    # NÃO devem ser gravados no documento global (fuga de dados!).
+    # Em vez disso, são redirecionados para user_company_roles.
+    if active_company_id and not is_default_company:
+        # .pop() remove do update_data (não será gravado no global)
+        # e adiciona ao company_specific_fields (será gravado no UCR)
+        prof_phone = update_data.pop("phone", None)
+        if prof_phone is not None and "professional_phone" not in company_specific_fields:
+            company_specific_fields["professional_phone"] = prof_phone
+        
+        comp_sig = update_data.pop("email_signature", None)
+        if comp_sig is not None and "signature" not in company_specific_fields:
+            company_specific_fields["signature"] = comp_sig
+        
+        logger.info(
+            f"[auth/profile] Empresa não-default ({active_company_id!r}): "
+            f"phone/email_signature redirecionados para UCR. "
+            f"update_data restante={list(update_data.keys())}, "
+            f"company_fields={list(company_specific_fields.keys())}"
+        )
+
+    # ── Validação final: tem de haver algo para gravar ──
+    if not update_data and not has_company_fields and not company_specific_fields:
+        raise HTTPException(status_code=400, detail="Nenhum campo válido para atualizar")
     
-    # Retornar o utilizador actualizado
+    # ── Gravação Global Segura ──
+    # Só gravar no documento global se ainda houver campos (ex: name,
+    # ou phone/email_signature quando a empresa É a default).
+    # Se update_data ficou vazio após os .pop(), saltamos esta gravação.
+    if update_data:
+        update_data["updated_at"] = datetime.now(timezone.utc).isoformat()
+        
+        result = await db.users.update_one(
+            {"id": user_id},
+            {"$set": update_data}
+        )
+        
+        if result.modified_count == 0 and result.matched_count == 0:
+            raise HTTPException(status_code=404, detail="Utilizador não encontrado")
+
+    # ── Gravação Específica (user_company_roles) ──
+    profile_warnings = []
+
+    if company_specific_fields:
+        try:
+            logger.info(
+                f"[auth/profile] Campos empresa: {list(company_specific_fields.keys())}, "
+                f"active_company_id={active_company_id!r}, user_id={user_id}, "
+                f"is_default={is_default_company}"
+            )
+            if active_company_id:
+                company_specific_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+                result = await db.user_company_roles.update_one(
+                    {"user_id": user_id, "company_id": active_company_id},
+                    {"$set": company_specific_fields},
+                    upsert=True
+                )
+                logger.info(
+                    f"[auth/profile] UCR update_one: matched={result.matched_count}, "
+                    f"modified={result.modified_count}, upserted={result.upserted_id}"
+                )
+            else:
+                profile_warnings.append(
+                    "Não foi possível determinar a empresa ativa. "
+                    "Os dados profissionais não foram guardados por empresa. "
+                    "Tente recarregar a página e repetir."
+                )
+                logger.warning(
+                    f"[auth/profile] active_company_id é None — campos da empresa NÃO guardados! "
+                    f"X-Company-Id header={request.headers.get('X-Company-Id')!r}, "
+                    f"user.company={user.get('company')!r}"
+                )
+        except Exception as e:
+            profile_warnings.append(f"Erro ao guardar dados da empresa: {e}")
+            logger.warning(f"[auth/profile] Erro ao guardar campos específicos da empresa: {e}")
+
+    # ── Retornar o utilizador actualizado COM merge (igual ao GET /auth/me) ──
     updated_user = await db.users.find_one({"id": user_id}, {"_id": 0, "password": 0})
-    
-    return {
+
+    # Adicionar campos da empresa ativa + MERGE (igual ao GET /auth/me)
+    # Re-ler o UCR para obter os dados actualizados (o upsert acima pode
+    # ter modificado professional_phone e signature)
+    active_role_header_resp = request.headers.get("X-Active-Role", "")
+    try:
+        # Re-ler empresas para obter dados actualizados após o upsert
+        refreshed_companies = await get_user_companies(user_id)
+        if active_company_id and refreshed_companies:
+            active_assoc_refreshed = next(
+                (c for c in refreshed_companies if c.get("company_id") == active_company_id),
+                None
+            )
+            if active_assoc_refreshed:
+                updated_user["active_company_id"] = active_company_id
+                company_role = active_assoc_refreshed.get("role")
+                updated_user["active_company_role"] = active_role_header_resp if active_role_header_resp else company_role
+                updated_user["active_company_name"] = active_assoc_refreshed.get("company_name")
+                updated_user["active_company_signature"] = active_assoc_refreshed.get("signature", "")
+                updated_user["active_company_professional_phone"] = active_assoc_refreshed.get("professional_phone", "")
+                updated_user["active_company_job_title"] = active_assoc_refreshed.get("job_title", "")
+                updated_user["companies"] = refreshed_companies
+                # ── MERGE: Sobrepor campos globais com dados da empresa ativa ──
+                if active_assoc_refreshed.get("professional_phone"):
+                    updated_user["phone"] = active_assoc_refreshed["professional_phone"]
+                if active_assoc_refreshed.get("signature"):
+                    updated_user["email_signature"] = active_assoc_refreshed["signature"]
+    except Exception as e:
+        logger.warning(f"[auth/profile] Erro ao adicionar campos da empresa na resposta: {e}")
+
+    response_data = {
         "success": True,
         "message": "Perfil atualizado com sucesso",
         "user": updated_user
     }
+    if profile_warnings:
+        response_data["warnings"] = profile_warnings
+    return response_data
 
 
 @router.post("/change-password")

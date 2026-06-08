@@ -57,7 +57,7 @@ import {
   Upload,
   FolderUp,
 } from "lucide-react";
-import { safeDateStr } from "../lib/utils";
+import { formatDate } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -230,15 +230,6 @@ const MinutasPage = () => {
       selectedCategory === "all" || minuta.categoria === selectedCategory;
     return matchesSearch && matchesCategory;
   });
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "N/D";
-    try {
-      return new Date(safeDateStr(dateStr)).toLocaleDateString("pt-PT");
-    } catch {
-      return dateStr;
-    }
-  };
 
   const getCategoryLabel = (categoryId) => {
     const cat = CATEGORIAS.find(c => c.id === categoryId);

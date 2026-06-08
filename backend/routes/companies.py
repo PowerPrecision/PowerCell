@@ -73,7 +73,7 @@ async def get_available_companies():
     com indicação de quais já têm config de email.
     """
     pipeline = [
-        {"$match": {"company": {"$exists": True, "$ne": "", "$ne": None}}},
+        {"$match": {"company": {"$exists": True, "$nin": ["", None]}}},
         {"$group": {"_id": "$company", "total": {"$sum": 1}}},
         {"$sort": {"total": -1}},
     ]

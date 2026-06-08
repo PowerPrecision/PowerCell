@@ -51,7 +51,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onCancel, companyId = "default" }) => {
   const isSelf = mode === "self";
-  const { user, effectiveRole } = useAuth();
+  const { user, effectiveRole, effectiveCompanyId } = useAuth();
 
   // Whether the user has multiple roles (and thus per-role email configs)
   const hasMultipleRoles = isSelf && user?.additional_roles?.length > 0;
@@ -80,6 +80,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     smtp_port: 465,
     password: "",
   });
+  const [hasPassword, setHasPassword] = useState(false);
   const [webmailConfigured, setWebmailConfigured] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -93,10 +94,31 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   // Whether form fields should be disabled (configured + not editing)
   const isFieldsLocked = webmailConfigured && !isEditing;
 
-  // Load existing config
+  // Load existing config — recarregar quando companyId muda (troca de empresa)
+  // O effectiveCompanyId garante reatividade quando o ContextSwitcher muda a empresa ativa.
+  //
+  // PORQUÊ: Quando o utilizador troca de empresa no ContextSwitcher:
+  // 1. O AuthContext atualiza `effectiveCompanyId` via switchActiveCompany()
+  // 2. Este useEffect deteta a mudança e chama loadConfig()
+  // 3. loadConfig() faz GET /users/me/email-config com o header X-Company-Id atualizado
+  // 4. O formulário reflete a configuração da nova empresa ativa
+  //
+  // LIMPEZA VISUAL: Ao trocar de empresa, também limpamos:
+  // - Modo de edição (isEditing → false) para não mostrar dados da empresa anterior
+  // - Resultado de teste de ligação (testResult → null)
+  // - Estado de visibilidade da password (showPassword → false)
+  // - Flag de Google OAuth conectado (para reavaliar com base na nova empresa)
   useEffect(() => {
+    // Limpar cache visual antes de carregar nova config
+    setIsEditing(false);
+    setShowPassword(false);
+    setTestResult(null);
+    setGoogleOAuthConnected(false);
+    // Resetar password visual (nunca vem do servidor, mas limpa lixo de input anterior)
+    setEmailConfig(prev => ({ ...prev, password: "" }));
+
     loadConfig();
-  }, []);
+  }, [companyId, effectiveCompanyId, effectiveRole]); // ← effectiveRole adicionado: troca de perfil recarrega config
 
   // Listen for Google OAuth popup messages (two-step flow)
   useEffect(() => {
@@ -119,6 +141,20 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   const loadConfig = async () => {
     setLoading(true);
+    // ── Limpeza visual ANTES do fetch ──
+    // Garante que o formulário não mostra dados da empresa/perfil anterior
+    // enquanto carrega os novos. Isto é redundante com o useEffect mas
+    // protege contra chamadas diretas a loadConfig() (ex: Google OAuth callback).
+    setWebmailConfigured(false);
+    setEmailConfig({
+      email_address: "",
+      imap_server: "",
+      imap_port: 993,
+      smtp_server: "",
+      smtp_port: 465,
+      password: "",
+    });
+    setHasPassword(false);
     try {
       const response = await api.get(getConfigUrl());
       const config = response.data;
@@ -131,14 +167,36 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
           smtp_port: config.smtp_port || 465,
           password: "",  // Never populate password from server
         });
+        setHasPassword(config.has_password || false);
         setWebmailConfigured(true);
         // Check Google OAuth status
         if (config.auth_method?.includes("google_oauth") || config.has_google_oauth || config.google_refresh_token) {
           setGoogleOAuthConnected(true);
         }
+      } else {
+        // Sem config para esta empresa — resetar formulário
+        setEmailConfig({
+          email_address: "",
+          imap_server: "",
+          imap_port: 993,
+          smtp_server: "",
+          smtp_port: 465,
+          password: "",
+        });
+        setHasPassword(false);
+        setWebmailConfigured(false);
       }
     } catch (error) {
       setWebmailConfigured(false);
+      setEmailConfig({
+        email_address: "",
+        imap_server: "",
+        imap_port: 993,
+        smtp_server: "",
+        smtp_port: 465,
+        password: "",
+      });
+      setHasPassword(false);
     } finally {
       setLoading(false);
     }
@@ -363,9 +421,16 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         )}
         {webmailConfigured && !isEditing && (
           <>
-            <span className="text-xs text-muted-foreground">
-              Deixe a password em branco para manter a atual
-            </span>
+            {hasPassword ? (
+              <span className="text-xs text-green-600 flex items-center gap-1">
+                <Shield className="h-3 w-3" />
+                Password configurada
+              </span>
+            ) : (
+              <span className="text-xs text-amber-600">
+                Sem password — configure para ativar sincronização
+              </span>
+            )}
             <Button
               variant="outline"
               size="sm"
@@ -449,42 +514,59 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         <div className="space-y-2">
           <Label htmlFor="ec_password">
             Password
-            {webmailConfigured && (
+            {webmailConfigured && hasPassword && (
               <span className="text-xs text-muted-foreground ml-1">(nova, opcional)</span>
             )}
           </Label>
           <div className="relative">
             <Input
               id="ec_password"
-              type={showPassword ? "text" : "password"}
+              type={isFieldsLocked ? "password" : (showPassword ? "text" : "password")}
               value={emailConfig.password}
               onChange={(e) =>
                 setEmailConfig({ ...emailConfig, password: e.target.value })
               }
               placeholder={
-                webmailConfigured
+                webmailConfigured && hasPassword
+                  ? "********"
+                  : webmailConfigured
                   ? "Nova password (deixar em branco para manter)"
                   : "Password do email"
               }
               disabled={isFieldsLocked}
-              className={isFieldsLocked ? "bg-muted cursor-not-allowed pr-9" : "pr-9"}
+              className={isFieldsLocked ? "bg-muted cursor-not-allowed" : "pr-9"}
             />
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              className="absolute right-0 top-0 h-full"
-              onClick={() => setShowPassword(!showPassword)}
-              tabIndex={isFieldsLocked ? -1 : 0}
-              disabled={isFieldsLocked}
-            >
-              {showPassword ? (
-                <EyeOff className="h-4 w-4" />
-              ) : (
-                <Eye className="h-4 w-4" />
-              )}
-            </Button>
+            {/* ── UX: Ocultar botão "Olho" quando campos estão trancados ──
+                Se o email já está configurado e o utilizador NÃO está em modo
+                de edição, o campo mostra "********" (placeholder). O botão do
+                olho não faz sentido aqui porque:
+                1. A password real nunca é enviada do servidor
+                2. O campo está vazio (value=""), só tem placeholder visual
+                3. Clicar no olho só mostraria um campo vazio em texto plano
+                Só mostramos o botão quando o utilizador pode editar (isEditing
+                ou email ainda não configurado). */}
+            {!isFieldsLocked && (
+              <Button
+                type="button"
+                variant="ghost"
+                size="icon"
+                className="absolute right-0 top-0 h-full"
+                onClick={() => setShowPassword(!showPassword)}
+              >
+                {showPassword ? (
+                  <EyeOff className="h-4 w-4" />
+                ) : (
+                  <Eye className="h-4 w-4" />
+                )}
+              </Button>
+            )}
           </div>
+          {webmailConfigured && hasPassword && !isFieldsLocked && (
+            <p className="text-xs text-green-600 flex items-center gap-1">
+              <Shield className="h-3 w-3" />
+              Password configurada com sucesso. Preencha apenas se quiser alterar.
+            </p>
+          )}
         </div>
         <div className="space-y-2">
           <Label htmlFor="ec_imap_server">Servidor IMAP</Label>

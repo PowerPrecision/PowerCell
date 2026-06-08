@@ -218,12 +218,35 @@ def get_base_template(content: str, title: str = "") -> str:
 # TEMPLATES DE EMAIL
 # ====================================================================
 
-async def send_registration_confirmation(client_email: str, client_name: str) -> bool:
+async def send_registration_confirmation(client_email: str, client_name: str, portal_access_code: str = None) -> bool:
     """
     Email de confirmação de registo para o cliente.
     Enviado imediatamente após submissão do formulário.
+    
+    Se portal_access_code for fornecido, inclui informações de acesso ao Portal.
     """
     subject = "Recebemos o seu pedido - Power Real Estate & Precision"
+    
+    # Bloco opcional com credenciais do portal
+    portal_section_text = ""
+    portal_section_html = ""
+    if portal_access_code:
+        portal_section_text = f"""
+
+Os seus dados de acesso ao Portal do Cliente:
+- Email: {client_email}
+- Código de Acesso: {portal_access_code}
+
+Através do Portal poderá acompanhar o estado do seu processo e carregar documentação.
+"""
+        portal_section_html = f"""
+<div class="info-box" style="border-left-color: #0d9488; background: linear-gradient(135deg, #f0fdfa 0%, #ccfbf1 100%);">
+    <h3 style="color: #0f766e;">Acesso ao Portal do Cliente</h3>
+    <p><strong>Email:</strong> {client_email}</p>
+    <p><strong>Código de Acesso:</strong> <span style="font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: #0f766e; letter-spacing: 3px;">{portal_access_code}</span></p>
+    <p style="font-size: 13px; color: #64748b; margin-top: 10px;">Através do Portal poderá acompanhar o estado do seu processo e carregar documentação.</p>
+</div>
+"""
     
     body = f"""
 Olá {client_name},
@@ -232,7 +255,7 @@ Recebemos o seu pedido de análise de crédito habitação.
 
 A nossa equipa irá analisar a sua informação e entrará em contacto consigo brevemente, 
 normalmente dentro de 24-48 horas úteis.
-
+{portal_section_text}
 Enquanto aguarda, pode preparar os seguintes documentos:
 - Cartão de Cidadão (frente e verso)
 - Últimos 3 recibos de vencimento
@@ -255,6 +278,8 @@ Cumprimentos,
 
 <p>A nossa equipa irá analisar a sua informação e entrará em contacto consigo 
 <strong>brevemente</strong>, normalmente dentro de <strong>24-48 horas úteis</strong>.</p>
+
+{portal_section_html}
 
 <div class="info-box">
     <h3>O que acontece a seguir?</h3>

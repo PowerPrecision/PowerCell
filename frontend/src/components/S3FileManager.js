@@ -118,7 +118,7 @@ import {
 import { Input } from "./ui/input";
 import { format } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr } from "../lib/utils";
+import { safeDate, safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -127,7 +127,7 @@ const getContrastColor = (bgColor) => {
   if (!bgColor) return '#ffffff';
   const namedColors = {
     yellow: '#EAB308', orange: '#F97316', blue: '#3B82F6',
-    green: '#22C55E', red: '#EF4444', purple: '#A855F7', gray: '#6B7280',
+    green: '#22C55E', red: '#EF4444', purple: '#A855F7', gray: '#6B7280', teal: '#14B8A6',
   };
   let hex = namedColors[bgColor?.toLowerCase()] || bgColor;
   if (!hex.startsWith('#')) return '#ffffff';
@@ -145,6 +145,7 @@ const CATEGORIES = [
   { id: "Financeiros", label: "Financeiros", icon: Briefcase, color: "green" },
   { id: "Imóvel", label: "Imóvel", icon: Building2, color: "purple" },
   { id: "Bancários", label: "Bancários", icon: CreditCard, color: "orange" },
+  { id: "Index", label: "Index", icon: FileText, color: "teal" },
   { id: "Outros", label: "Outros", icon: FolderOpen, color: "gray" },
 ];
 
@@ -272,8 +273,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       let comparison = 0;
       
       if (sortBy === "date") {
-        const dateA = new Date(a.last_modified ? safeDateStr(a.last_modified) : 0);
-        const dateB = new Date(b.last_modified ? safeDateStr(b.last_modified) : 0);
+        const dateA = safeDate(a.last_modified) || new Date(0);
+        const dateB = safeDate(b.last_modified) || new Date(0);
         comparison = dateA - dateB;
       } else if (sortBy === "name") {
         comparison = (a.name || "").localeCompare(b.name || "");
@@ -964,16 +965,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
-  // Formatar data - dd/mm/AA hh:mm
+  // Formatar data - dd/mm/AA hh:mm (protecção defensiva contra datas inválidas / Safari)
   const formatDate = (dateStr) => {
     if (!dateStr) return "-";
-    try {
-      const date = new Date(dateStr);
-      if (isNaN(date.getTime())) return "-";
-      return format(date, "dd/MM/yy HH:mm", { locale: pt });
-    } catch {
-      return "-";
-    }
+    return safeFormat(dateStr, "dd/MM/yy HH:mm", { locale: pt });
   };
 
   // Contar ficheiros por categoria
@@ -2085,6 +2080,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                       purple: "text-purple-500",
                       orange: "text-orange-500",
                       gray: "text-gray-500",
+                      teal: "text-teal-500",
                     };
                     const isDropTarget = dropTarget === cat.id;
                     const isDraggingMultiple = draggedFiles.length > 1;

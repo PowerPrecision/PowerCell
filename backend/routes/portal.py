@@ -1,7 +1,7 @@
 """
 CLIENT PORTAL - Routes
 ======================
-Endpoints públicos para o Portal do Cliente (Magic Link / Passwordless).
+Endpoints públicos para o Portal do Cliente.
 
 SEGURANÇA:
 - Todos os endpoints usam get_current_client (role="client_portal")
@@ -12,11 +12,16 @@ SEGURANÇA:
 FLUXOS DE AUTENTICAÇÃO:
 1. Magic Link (legado): short_id → resolve → JWT type=magic_link
 2. Verificação NIF + Nº Processo: POST /portal/{client_id}/verify → JWT type=verified_session
+3. Código de Acesso Fixo: POST /portal/auth/login → JWT type=access_code_session
 
 ENDPOINTS:
+- POST /portal/auth/login          → Login com Email + Código de Acesso
 - POST /portal/{client_id}/verify  → Verifica NIF + Nº Processo, devolve token de sessão
 - GET  /portal/resolve/{short_id}  → Resolve short_id para JWT
+- GET  /portal/me                  → Dados pessoais do cliente (perfil)
+- PUT  /portal/me                  → Atualiza dados pessoais (bloqueado se tem processo)
 - GET  /portal/status              → Status do processo + stepper + documentos
+- GET  /portal/download-url        → Gera pre-signed URL para download de documento
 - POST /portal/upload-url          → Gera pre-signed URL para upload
 - POST /portal/confirm-upload      → Confirma upload após PUT para S3
 - POST /portal/authenticate        → Valida magic link e retorna info
@@ -28,7 +33,12 @@ import uuid
 import gc as _gc
 import logging
 import os
-from datetime import datetime, timezone
+import re
+import json
+import asyncio
+from datetime import datetime, timezone, timedelta
+from typing import Optional
+from pydantic import BaseModel, field_validator, EmailStr
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from fastapi.responses import JSONResponse
 
@@ -37,17 +47,280 @@ from services.portal_security import (
     get_current_client,
     PORTAL_ROLE,
     create_verified_session_token,
+    create_access_code_session_token,
     verify_client_credentials,
 )
 from services.auth import get_current_user, require_roles
 from services.s3_storage import s3_service
-from services.redis_cache import invalidate_stats_cache
+from services.redis_cache import invalidate_stats_cache, get_redis
 from services.notification_service import send_notification_with_preference_check
 from services.websocket_manager import manager, WSEventType, create_ws_message
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal", tags=["Client Portal"])
+
+
+# ====================================================================
+# MODELOS PYDANTIC — Login com Código de Acesso Fixo
+# ====================================================================
+
+class PortalLoginRequest(BaseModel):
+    """Pedido de login no Portal do Cliente.
+    
+    O cliente fornece o seu Email e o Código de Acesso fixo
+    que foi gerado automaticamente quando o seu registo foi criado.
+    """
+    email: str
+    access_code: str
+
+    @field_validator('email', mode='before')
+    @classmethod
+    def validate_email_field(cls, v):
+        if v is None or v == '':
+            raise ValueError('Email é obrigatório.')
+        return str(v).strip().lower()
+
+    @field_validator('access_code', mode='before')
+    @classmethod
+    def validate_access_code_field(cls, v):
+        if v is None or v == '':
+            raise ValueError('Código de acesso é obrigatório.')
+        code = str(v).strip().upper()
+        # Aceitar com ou sem hífen (A4B9X2 ou A4B-9X2)
+        code = re.sub(r'[^A-Z0-9]', '', code)
+        if len(code) != 6:
+            raise ValueError('Código de acesso deve conter 6 caracteres.')
+        return code
+
+
+# ====================================================================
+# LOGIN COM CÓDIGO DE ACESSO FIXO
+# ====================================================================
+
+# Tentativas máximas de login por email (prevenção de brute-force)
+MAX_LOGIN_ATTEMPTS = 5
+LOGIN_LOCKOUT_MINUTES = 15
+
+
+@router.post("/auth/login")
+async def portal_login(data: PortalLoginRequest):
+    """
+    Login do Portal do Cliente com Email + Código de Acesso.
+
+    Fluxo:
+    1. Recebe email e código de acesso
+    2. Verifica rate limiting (5 tentativas, lockout de 15 min)
+    3. Pesquisa o cliente pelo email (case-insensitive, suporta blind index)
+    4. Compara o código de acesso com o armazenado na BD
+    5. Se válido, gera JWT de sessão (type=access_code_session, 4h)
+    6. Retorna {"token": token, "client_id": client_id, "client_name": nome}
+
+    SEGURANÇA:
+    - Pesquisa por email suporta dados encriptados (blind index) e plaintext
+    - Código de acesso é comparado com timing-safe comparison quando possível
+    - Rate limiting: 5 tentativas por email, lockout de 15 minutos
+    - Mensagens de erro genéricas (não revelam se o email existe)
+    - JWT tem validade de 4 horas (sessão interactiva)
+    """
+    email = data.email
+    access_code = data.access_code
+
+    # ── 1. Verificar rate limiting por email ──
+    lockout_key = f"portal_login:{email}"
+    lockout_doc = await db.portal_login_attempts.find_one({"_id": lockout_key})
+
+    if lockout_doc:
+        attempts = lockout_doc.get("attempts", 0)
+        locked_until = lockout_doc.get("locked_until")
+
+        if locked_until:
+            try:
+                locked_until_dt = datetime.fromisoformat(
+                    locked_until.replace('Z', '+00:00') if isinstance(locked_until, str) else locked_until
+                )
+                if datetime.now(timezone.utc) < locked_until_dt:
+                    remaining = int((locked_until_dt - datetime.now(timezone.utc)).total_seconds() / 60)
+                    logger.warning(
+                        f"[PORTAL LOGIN] Conta bloqueada para email={email}. "
+                        f"Tenta novamente em {remaining} min."
+                    )
+                    raise HTTPException(
+                        status_code=429,
+                        detail=f"Muitas tentativas falhadas. Tente novamente em {remaining} minutos."
+                    )
+            except (ValueError, TypeError):
+                pass  # Data inválida, ignorar lockout
+
+        if attempts >= MAX_LOGIN_ATTEMPTS:
+            locked_until_str = (
+                datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+            ).isoformat()
+            await db.portal_login_attempts.update_one(
+                {"_id": lockout_key},
+                {"$set": {"locked_until": locked_until_str}}
+            )
+            raise HTTPException(
+                status_code=429,
+                detail=f"Muitas tentativas falhadas. Conta bloqueada por {LOGIN_LOCKOUT_MINUTES} minutos."
+            )
+
+    # ── 2. Pesquisar cliente pelo email ──
+    # Tentar via blind index primeiro (dados encriptados)
+    client = None
+    try:
+        from services.encryption import generate_email_hash
+        email_hash = generate_email_hash(email)
+        if email_hash:
+            client = await db.clients.find_one(
+                {"contacto.email_hash": email_hash},
+                {"_id": 0, "id": 1, "nome": 1, "portal_access_code": 1, "process_ids": 1}
+            )
+    except Exception:
+        logger.debug("[PORTAL LOGIN] Erro ao pesquisar por email_hash, a tentar texto limpo")
+
+    # Fallback: pesquisar por email em texto limpo (case-insensitive)
+    if not client:
+        client = await db.clients.find_one(
+            {"contacto.email": email.lower()},
+            {"_id": 0, "id": 1, "nome": 1, "portal_access_code": 1, "process_ids": 1}
+        )
+
+    # Fallback adicional: email encriptado (desencriptar e comparar)
+    if not client:
+        try:
+            from services.encryption import decrypt_value
+            async for c in db.clients.find(
+                {"contacto.email": {"$exists": True}},
+                {"_id": 0, "id": 1, "nome": 1, "portal_access_code": 1, "process_ids": 1, "contacto.email": 1}
+            ).limit(500):
+                stored_email = c.get("contacto", {}).get("email")
+                if stored_email and isinstance(stored_email, str) and stored_email.startswith("ENC:"):
+                    try:
+                        decrypted = decrypt_value(stored_email)
+                        if decrypted and decrypted.lower().strip() == email:
+                            client = c
+                            break
+                    except Exception:
+                        continue
+        except Exception:
+            logger.debug("[PORTAL LOGIN] Fallback de desencriptação não disponível")
+
+    # ── 3. Validar credenciais ──
+    if not client:
+        # Segurança: não revelar que o email não existe — mensagem genérica
+        logger.info(f"[PORTAL LOGIN] Email não encontrado: {email[:3]}***@***")
+        # Registar tentativa falhada (mesmo sem cliente, para rate limiting)
+        await _record_login_attempt(lockout_key)
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu email e código de acesso."
+        )
+
+    stored_code = client.get("portal_access_code")
+
+    if not stored_code:
+        # Cliente sem código de acesso — pode ser um cliente antigo antes da migração
+        logger.warning(f"[PORTAL LOGIN] Cliente {client.get('id')} sem portal_access_code")
+        await _record_login_attempt(lockout_key)
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu email e código de acesso."
+        )
+
+    # Normalizar código armazenado para comparação (remover hífen)
+    stored_code_clean = re.sub(r'[^A-Z0-9]', '', stored_code.upper())
+
+    # Comparação de códigos (usando hmac para timing-safe comparison quando possível)
+    import hmac
+    if not hmac.compare_digest(stored_code_clean, access_code):
+        logger.info(f"[PORTAL LOGIN] Código incorrecto para email={email[:3]}***@***")
+        await _record_login_attempt(lockout_key)
+        raise HTTPException(
+            status_code=401,
+            detail="Credenciais inválidas. Verifique o seu email e código de acesso."
+        )
+
+    # ── 4. Login bem-sucedido — limpar tentativas falhadas ──
+    await db.portal_login_attempts.delete_one({"_id": lockout_key})
+
+    client_id = client.get("id")
+    client_name = client.get("nome", "Cliente")
+
+    # ── 5. Buscar o primeiro processo do cliente para o token ──
+    # O JWT do portal precisa de um process_id. Para clientes com código de acesso,
+    # usamos o primeiro processo associado ou None se ainda não tiver processo.
+    process_id = None
+    process_ids = client.get("process_ids", [])
+    if process_ids:
+        # Buscar o primeiro processo activo
+        process = await db.processes.find_one(
+            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1}
+        )
+        if process:
+            process_id = process.get("id")
+        else:
+            # Fallback: usar o primeiro ID da lista
+            process_id = process_ids[0]
+
+    # ── 6. Gerar JWT de sessão ──
+    if process_id:
+        token = create_access_code_session_token(
+            process_id=process_id,
+            client_id=client_id,
+        )
+    else:
+        # Cliente sem processo — gerar token com process_id placeholder
+        # O frontend deve lidar com este caso (mostrar mensagem "sem processo")
+        token = create_access_code_session_token(
+            process_id="no_process",
+            client_id=client_id,
+        )
+
+    logger.info(
+        f"[PORTAL LOGIN] Login bem-sucedido: client_id={client_id}, "
+        f"email={email[:3]}***@***"
+    )
+
+    return JSONResponse(content={
+        "token": token,
+        "client_id": client_id,
+        "client_name": client_name,
+        "process_id": process_id,
+        "token_type": "access_code_session",
+        "expires_in": 4 * 60 * 60,  # 4 horas em segundos
+    })
+
+
+async def _record_login_attempt(lockout_key: str) -> None:
+    """
+    Regista uma tentativa falhada de login e aplica lockout se necessário.
+    """
+    now = datetime.now(timezone.utc).isoformat()
+
+    result = await db.portal_login_attempts.update_one(
+        {"_id": lockout_key},
+        {
+            "$inc": {"attempts": 1},
+            "$set": {"last_attempt_at": now},
+        },
+        upsert=True,
+    )
+
+    doc = await db.portal_login_attempts.find_one({"_id": lockout_key})
+    if doc and doc.get("attempts", 0) >= MAX_LOGIN_ATTEMPTS:
+        locked_until_str = (
+            datetime.now(timezone.utc) + timedelta(minutes=LOGIN_LOCKOUT_MINUTES)
+        ).isoformat()
+        await db.portal_login_attempts.update_one(
+            {"_id": lockout_key},
+            {"$set": {"locked_until": locked_until_str}}
+        )
+        logger.warning(
+            f"[PORTAL LOGIN] Lockout aplicado para {lockout_key} "
+            f"após {MAX_LOGIN_ATTEMPTS} tentativas"
+        )
 
 
 # ====================================================================
@@ -144,6 +417,9 @@ DOCUMENT_CATEGORY_MAP = {
     "Outros": {"label": "Outro Documento", "icon": "📎"},
 }
 
+# Categorias internas que NÃO devem ser visíveis no Portal do Cliente
+PORTAL_HIDDEN_CATEGORIES = {"Index"}
+
 # Fallback categories usadas quando o admin não criou docs REQUESTED
 DEFAULT_PENDING_CATEGORIES = [
     "Cartao_Cidadao",
@@ -236,10 +512,23 @@ async def resolve_portal_token(short_id: str):
 @router.post("/authenticate")
 async def authenticate_portal(client_data: dict = Depends(get_current_client)):
     """
-    Valida o magic link JWT e retorna informações básicas do processo.
+    Valida o JWT e retorna informações básicas do processo/cliente.
     """
-    process = client_data["process"]
+    process = client_data.get("process")
     token_payload = client_data["token_payload"]
+    client_id = client_data.get("client_id")
+
+    # Para access_code_session sem processo, retornar dados mínimos
+    if not process:
+        return JSONResponse(content={
+            "valid": True,
+            "process_id": None,
+            "client_name": "",
+            "process_type": None,
+            "token_expires": token_payload.get("exp"),
+            "client_id": client_id,
+            "has_process": False,
+        })
 
     return JSONResponse(content={
         "valid": True,
@@ -248,6 +537,254 @@ async def authenticate_portal(client_data: dict = Depends(get_current_client)):
         "process_type": process.get("process_type", "credito_habitacao"),
         "token_expires": token_payload.get("exp"),
     })
+
+
+# ====================================================================
+# PERFIL DO CLIENTE — GET /me + PUT /me
+# ====================================================================
+
+# Campos que o cliente pode atualizar no seu perfil (camada de segurança)
+PROFILE_UPDATABLE_CONTACT_FIELDS = {"email", "email_secundario", "telefone", "telefone_secundario"}
+PROFILE_UPDATABLE_PERSONAL_FIELDS = {
+    "morada_fiscal", "estado_civil", "profissao", "naturalidade",
+    "nacionalidade", "data_nascimento", "documento_id", "data_validade_cc",
+    "sexo",
+}
+# Campos SENSÍVEIS que NÃO são devolvidos ao frontend (mesmo encriptados)
+PROFILE_HIDDEN_FIELDS = {"nif", "nome_pai", "nome_mae", "altura"}
+
+
+def _decrypt_if_needed(value):
+    """Desencripta um valor se tiver o prefixo ENC:."""
+    if not value or not isinstance(value, str) or not value.startswith("ENC:"):
+        return value
+    try:
+        from services.encryption import decrypt_value
+        decrypted = decrypt_value(value)
+        return decrypted if decrypted else value
+    except Exception:
+        return value
+
+
+def _get_client_id_from_token(client_data: dict) -> Optional[str]:
+    """
+    Extrai o client_id dos dados do token do portal.
+
+    Para access_code_session com "no_process": client_id vem no payload.
+    Para outros tipos: client_id vem do campo client_id do processo.
+    """
+    # Caso 1: token access_code_session com "no_process"
+    if client_data.get("client_id"):
+        return client_data["client_id"]
+
+    # Caso 2: processo com client_id
+    process = client_data.get("process")
+    if process and process.get("client_id"):
+        return process["client_id"]
+
+    return None
+
+
+@router.get("/me")
+async def get_client_profile(
+    client_data: dict = Depends(get_current_client)
+):
+    """
+    Retorna os dados pessoais do cliente autenticado para o formulário
+    de perfil no Portal do Cliente.
+
+    SEGURANÇA:
+    - Requer autenticação via token do portal (get_current_client)
+    - NÃO devolve campos sensíveis (NIF, nome dos pais, etc.)
+    - Desencripta campos encriptados (ENC:) antes de enviar
+    - Indica se o cliente tem processo associado (para bloqueio de edição)
+    """
+    client_id = _get_client_id_from_token(client_data)
+
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível identificar o cliente. Verifique a sua autenticação."
+        )
+
+    # Buscar dados do cliente
+    client = await db.clients.find_one(
+        {"id": client_id},
+        {"_id": 0, "portal_access_code": 0, "notas": 0, "fonte": 0, "tags": 0, "created_by": 0}
+    )
+
+    if not client:
+        raise HTTPException(
+            status_code=404,
+            detail="Cliente não encontrado."
+        )
+
+    # Determinar se o cliente tem processo associado (para bloqueio de edição)
+    process_ids = client.get("process_ids", [])
+    has_process = False
+    if process_ids:
+        # Verificar se existe pelo menos um processo activo
+        active_process = await db.processes.find_one(
+            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1}
+        )
+        has_process = active_process is not None
+
+    # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
+    dados_pessoais = client.get("dados_pessoais", {}) or {}
+    clean_dados_pessoais = {}
+    for key, value in dados_pessoais.items():
+        if key in PROFILE_HIDDEN_FIELDS:
+            continue  # Não devolver campos sensíveis
+        clean_dados_pessoais[key] = _decrypt_if_needed(value)
+
+    # Preparar dados de contacto (desencriptar campos encriptados)
+    contacto = client.get("contacto", {}) or {}
+    clean_contacto = {}
+    for key, value in contacto.items():
+        # Ocultar email_hash (campo interno para blind index)
+        if key.endswith("_hash"):
+            continue
+        clean_contacto[key] = _decrypt_if_needed(value)
+
+    return {
+        "id": client.get("id"),
+        "nome": client.get("nome", ""),
+        "contacto": clean_contacto,
+        "dados_pessoais": clean_dados_pessoais,
+        "has_process": has_process,
+    }
+
+
+class ClientProfileUpdate(BaseModel):
+    """Schema para atualização de perfil do cliente via Portal."""
+    contacto: Optional[dict] = None
+    dados_pessoais: Optional[dict] = None
+
+
+@router.put("/me")
+async def update_client_profile(
+    data: ClientProfileUpdate,
+    client_data: dict = Depends(get_current_client)
+):
+    """
+    Atualiza os dados pessoais do cliente autenticado.
+
+    REGRAS DE SEGURANÇA:
+    - Requer autenticação via token do portal
+    - BLOQUEIA a atualização se o cliente já tiver um Process associado
+      → Retorna 403: 'Dados trancados. Processo já em análise.'
+    - Apenas campos permitidos são atualizados (whitelist)
+    - NIF e nome NÃO podem ser alterados pelo cliente
+    - Campos encriptados são re-encriptados antes de guardar
+    """
+    client_id = _get_client_id_from_token(client_data)
+
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Não foi possível identificar o cliente. Verifique a sua autenticação."
+        )
+
+    # ── REGRA CRÍTICA: Verificar se o cliente tem processo associado ──
+    client = await db.clients.find_one(
+        {"id": client_id},
+        {"_id": 0, "process_ids": 1}
+    )
+
+    if not client:
+        raise HTTPException(
+            status_code=404,
+            detail="Cliente não encontrado."
+        )
+
+    process_ids = client.get("process_ids", [])
+    if process_ids:
+        # Verificar se existe pelo menos um processo activo (não eliminado)
+        active_process = await db.processes.find_one(
+            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1}
+        )
+        if active_process:
+            raise HTTPException(
+                status_code=403,
+                detail="Dados trancados. Processo já em análise."
+            )
+
+    # ── Filtrar campos permitidos (whitelist) ──
+    update_fields = {}
+    now = datetime.now(timezone.utc).isoformat()
+
+    # Processar contacto
+    if data.contacto:
+        contacto_updates = {}
+        for key, value in data.contacto.items():
+            if key in PROFILE_UPDATABLE_CONTACT_FIELDS:
+                # Encriptar campos sensíveis (email)
+                if key in ("email", "email_secundario") and value:
+                    try:
+                        from services.encryption import encrypt_value, generate_email_hash
+                        encrypted = encrypt_value(str(value).strip().lower())
+                        if encrypted:
+                            contacto_updates[key] = encrypted
+                            # Atualizar blind index para pesquisa
+                            if key == "email":
+                                email_hash = generate_email_hash(str(value).strip().lower())
+                                if email_hash:
+                                    contacto_updates["email_hash"] = email_hash
+                        else:
+                            contacto_updates[key] = str(value).strip().lower()
+                    except Exception:
+                        # Se a encriptação falhar, guardar em texto limpo (fallback)
+                        contacto_updates[key] = str(value).strip().lower()
+                else:
+                    contacto_updates[key] = value
+
+        if contacto_updates:
+            update_fields["contacto"] = contacto_updates
+
+    # Processar dados pessoais
+    if data.dados_pessoais:
+        dp_updates = {}
+        for key, value in data.dados_pessoais.items():
+            if key in PROFILE_UPDATABLE_PERSONAL_FIELDS:
+                dp_updates[key] = value
+
+        if dp_updates:
+            update_fields["dados_pessoais"] = dp_updates
+
+    if not update_fields:
+        return {"success": True, "message": "Nenhum campo para atualizar.", "updated_fields": []}
+
+    # ── Aplicar atualização no MongoDB (merge com dados existentes) ──
+    mongo_update = {"updated_at": now}
+
+    # Para contacto: usar notação dot para merge (não substituir o documento inteiro)
+    if "contacto" in update_fields:
+        for key, value in update_fields["contacto"].items():
+            mongo_update[f"contacto.{key}"] = value
+
+    # Para dados_pessoais: usar notação dot para merge
+    if "dados_pessoais" in update_fields:
+        for key, value in update_fields["dados_pessoais"].items():
+            mongo_update[f"dados_pessoais.{key}"] = value
+
+    result = await db.clients.update_one(
+        {"id": client_id},
+        {"$set": mongo_update}
+    )
+
+    updated_fields = list(update_fields.keys())
+
+    logger.info(
+        f"[PORTAL PROFILE] Cliente {client_id} atualizou perfil: {updated_fields}"
+    )
+
+    return {
+        "success": True,
+        "message": "Perfil atualizado com sucesso.",
+        "updated_fields": updated_fields,
+    }
 
 
 # ====================================================================
@@ -273,7 +810,32 @@ async def get_portal_status(
     - Fallback: Se não existem docs solicitados, mostra categorias padrão
       que ainda não têm qualquer documento submetido
     """
-    process = client_data["process"]
+    process = client_data.get("process")
+    
+    # Para access_code_session sem processo, retornar estado pendente
+    if not process:
+        client_id = client_data.get("client_id")
+        token_payload = client_data.get("token_payload", {})
+        return {
+            "process": {
+                "id": None,
+                "client_name": "",
+                "status": "no_process",
+                "status_label": "Sem processo atribuído",
+                "status_color": "#94a3b8",
+                "process_type": None,
+            },
+            "progress": {"percent": 0, "current_step": 0, "total_steps": 0},
+            "stepper": [],
+            "documents": {"requested": [], "uploaded": [], "received": [], "has_pending": False},
+            "rgpd": {"status": "none", "has_rgpd": False},
+            "team": {"consultores": [], "mediadores": []},
+            "consultor": None,
+            "welcome_message": None,
+            "has_process": False,
+            "client_id": client_id,
+        }
+    
     process_id = process["id"]
 
     # ── Workflow statuses para o stepper ──
@@ -341,7 +903,8 @@ async def get_portal_status(
         {
             "process_id": process_id,
             "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
-            "source": {"$ne": "admin_received"}  # Exclude admin-marked received docs
+            "source": {"$ne": "admin_received"},  # Exclude admin-marked received docs
+            "category": {"$nin": list(PORTAL_HIDDEN_CATEGORIES)}  # Hide internal categories
         },
         {"_id": 0, "file_content": 0}
     ).sort("created_at", 1)
@@ -372,7 +935,8 @@ async def get_portal_status(
     uploaded_cursor = db.documents.find(
         {
             "process_id": process_id,
-            "status": {"$in": ["UPLOADED", "SUBMITTED", "uploaded", "submitted"]}
+            "status": {"$in": ["UPLOADED", "SUBMITTED", "uploaded", "submitted"]},
+            "category": {"$nin": list(PORTAL_HIDDEN_CATEGORIES)}  # Hide internal categories
         },
         {"_id": 0, "file_content": 0}
     ).sort("uploaded_at", -1)
@@ -394,6 +958,7 @@ async def get_portal_status(
             "uploaded_at": doc.get("uploaded_at", ""),
             "file_size": doc.get("file_size"),
             "status": doc.get("status", "UPLOADED"),
+            "s3_path": doc.get("s3_path") or doc.get("file_key"),
         })
 
     # ── Documentos recebidos pelo admin (marcados como RECEIVED) ──
@@ -401,7 +966,8 @@ async def get_portal_status(
     received_cursor = db.documents.find(
         {
             "process_id": process_id,
-            "status": {"$in": ["RECEIVED", "received"]}
+            "status": {"$in": ["RECEIVED", "received"]},
+            "category": {"$nin": list(PORTAL_HIDDEN_CATEGORIES)}  # Hide internal categories
         },
         {"_id": 0, "file_content": 0}
     ).sort("updated_at", -1)
@@ -419,6 +985,7 @@ async def get_portal_status(
             "category_label": cat_info["label"],
             "icon": cat_info["icon"],
             "received_at": doc.get("reviewed_at", doc.get("updated_at", "")),
+            "s3_path": doc.get("s3_path") or doc.get("file_key"),
         })
 
     # ── Fallback: se não há docs REQUESTED, calcular pendentes por categoria ──
@@ -672,6 +1239,10 @@ async def generate_portal_upload_url(
     if not filename:
         raise HTTPException(status_code=400, detail="Nome do ficheiro é obrigatório")
 
+    # Bloquear categorias internas no portal do cliente
+    if category in PORTAL_HIDDEN_CATEGORIES:
+        raise HTTPException(status_code=403, detail="Categoria de documento não disponível no portal")
+
     # Normalizar nome
     safe_filename = filename.replace(" ", "_").replace("/", "-").replace("\\", "-")
 
@@ -864,6 +1435,20 @@ async def confirm_portal_upload(
     # ── Notificar equipa atribuída ──
     await _notify_assigned_team_upload(process, original_filename, category)
 
+    # ── Gatilho de Onboarding — verificar se o cliente completou os docs ──
+    # Executar de forma assíncrona (não bloquear a resposta ao cliente)
+    try:
+        from services.onboarding_service import check_onboarding_completion
+        # Determinar o client_id a partir do token ou do processo
+        token_payload = client_data.get("token_payload", {})
+        client_id = token_payload.get("client_id") or process.get("client_id")
+
+        if client_id:
+            # Verificar de forma assíncrona (fire-and-forget)
+            asyncio.create_task(_trigger_onboarding_check(client_id))
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao agendar verificação de onboarding: {e}")
+
     logger.info(
         f"[PORTAL] Upload confirmado: {original_filename} "
         f"({category}) para processo {process_id}"
@@ -881,8 +1466,130 @@ async def confirm_portal_upload(
 
 
 # ====================================================================
-# HELPERS: Document Creation & Notification
+# DOWNLOAD DE DOCUMENTOS (Portal do Cliente)
 # ====================================================================
+
+@router.get("/download-url")
+async def get_portal_download_url(
+    file_key: str,
+    client_data: dict = Depends(get_current_client)
+):
+    """
+    Gera uma pre-signed URL para download de um documento do processo do cliente.
+
+    SEGURANÇA:
+    - Requer autenticação via token do portal
+    - Valida que o ficheiro pertence ao processo do cliente (escopo do token)
+    - URL temporária com validade de 1 hora
+    - Bloqueia acesso a ficheiros de outros processos
+
+    Query Params:
+    - file_key: Caminho S3 do ficheiro (obrigatório)
+    """
+    if not file_key:
+        raise HTTPException(status_code=400, detail="file_key é obrigatório.")
+
+    if not s3_service.is_configured():
+        raise HTTPException(
+            status_code=503,
+            detail="Serviço de armazenamento indisponível."
+        )
+
+    # ── Validação de segurança: o ficheiro deve pertencer ao processo do cliente ──
+    process = client_data.get("process")
+    if not process:
+        raise HTTPException(
+            status_code=403,
+            detail="Sem processo associado. Não é possível descarregar documentos."
+        )
+
+    process_id = process["id"]
+
+    # Verificar se o documento existe na BD e pertence a este processo
+    doc = await db.documents.find_one(
+        {"s3_path": file_key, "process_id": process_id},
+        {"_id": 0, "id": 1, "s3_path": 1}
+    )
+
+    # Fallback: verificar por file_key se s3_path não existir
+    if not doc:
+        doc = await db.documents.find_one(
+            {"file_key": file_key, "process_id": process_id},
+            {"_id": 0, "id": 1, "s3_path": 1}
+        )
+
+    if not doc:
+        # Tentativa de acesso a ficheiro de outro processo — negar
+        logger.warning(
+            f"[PORTAL DOWNLOAD] Acesso negado: file_key={file_key} "
+            f"não pertence ao processo {process_id}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail="Ficheiro não encontrado ou sem permissão de acesso."
+        )
+
+    # Verificar se o ficheiro existe no S3
+    if not s3_service.file_exists(file_key):
+        raise HTTPException(
+            status_code=404,
+            detail="Ficheiro não encontrado no armazenamento."
+        )
+
+    # Gerar URL pré-assinada (válida por 1 hora)
+    presigned_url = s3_service.get_presigned_url(file_key, expiration=3600)
+
+    if not presigned_url:
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao gerar link de download."
+        )
+
+    logger.info(
+        f"[PORTAL DOWNLOAD] Download autorizado: file_key={file_key} "
+        f"para processo {process_id}"
+    )
+
+    return {
+        "success": True,
+        "url": presigned_url,
+        "expires_in": 3600,
+    }
+
+
+# ====================================================================
+# HELPERS: Document Creation, Notification & Onboarding
+# ====================================================================
+
+async def _trigger_onboarding_check(client_id: str):
+    """
+    Gatilho assíncrono para verificar se o cliente completou o onboarding.
+
+    Executado via asyncio.create_task() após cada upload de documento.
+    Se o cliente tiver todos os documentos obrigatórios, um Process
+    é criado automaticamente e os documentos são ancorados.
+
+    Esta função é fire-and-forget — erros são logados mas não propagados.
+    """
+    try:
+        from services.onboarding_service import check_onboarding_completion
+        result = await check_onboarding_completion(client_id)
+
+        if result.get("completed"):
+            logger.info(
+                f"[ONBOARDING] Processo criado automaticamente para "
+                f"cliente {client_id}: processo #{result.get('process_number')} "
+                f"({result.get('anchored_docs', 0)} docs ancorados)"
+            )
+        else:
+            missing = result.get("missing", [])
+            if missing:
+                logger.info(
+                    f"[ONBOARDING] Cliente {client_id} ainda precisa de: {missing}"
+                )
+    except Exception as e:
+        logger.error(f"[ONBOARDING] Erro na verificação de onboarding para {client_id}: {e}")
+
 
 async def _create_document_record(
     doc_id: str, process_id: str, file_key: str,

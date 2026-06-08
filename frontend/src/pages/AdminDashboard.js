@@ -38,7 +38,7 @@ import {
   FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
   Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
   TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight,
-  MessageSquare, Inbox
+  MessageSquare, Inbox, BarChart3
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, parseISO } from "date-fns";
@@ -63,6 +63,7 @@ import { StatsGridSkeleton, TableSkeleton } from "../components/ui/skeletons";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
+import TeamPerformanceTab from "../components/admin/TeamPerformanceTab";
 import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -80,6 +81,26 @@ const AdminDashboard = () => {
   const [showStaleList, setShowStaleList] = useState(false);
   const [recentActivities, setRecentActivities] = useState([]);
   const [commsFeed, setCommsFeed] = useState({ portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 });
+
+  // ── Derived data com fallbacks defensivos (Bloco B: anti-crash) ──
+  const safeCommsFeed = useMemo(() => ({
+    portal_messages: commsFeed?.portal_messages || [],
+    unread_emails: commsFeed?.unread_emails || [],
+    portal_unread_count: commsFeed?.portal_unread_count || 0,
+    email_unread_count: commsFeed?.email_unread_count || 0,
+  }), [commsFeed]);
+
+  const safeStaleStats = useMemo(() => {
+    if (!staleStats) return null;
+    return {
+      ...staleStats,
+      total: staleStats.total || 0,
+      critical: staleStats.critical || 0,
+      high: staleStats.high || 0,
+      medium: staleStats.medium || 0,
+      processes: staleStats.processes || [],
+    };
+  }, [staleStats]);
   
   const [activeTab, setActiveTab] = useState("overview");
   const [consultorFilter, setConsultorFilter] = useState("all");
@@ -174,13 +195,13 @@ const AdminDashboard = () => {
         }).then(r => r.json()).catch(() => ({ configured: false })),
         getUpcomingExpiries(60).catch(() => ({ data: [] })),
       ]);
-      setStats(statsRes.data);
-      setUsers(usersRes.data);
+      setStats(statsRes?.data || {});
+      setUsers(Array.isArray(usersRes?.data) ? usersRes.data : []);
       // O endpoint /api/processes retorna um objeto paginado {items: [...], total, page, size, pages}
       setProcesses(processesRes.data?.items || processesRes.data || []);
-      setWorkflowStatuses(statusesRes.data);
+      setWorkflowStatuses(Array.isArray(statusesRes?.data) ? statusesRes.data : []);
       setStorageStatus(storageRes);
-      setUpcomingExpiries(expiriesRes.data);
+      setUpcomingExpiries(Array.isArray(expiriesRes?.data) ? expiriesRes.data : []);
       
       // Fetch stale processes stats
       try {
@@ -387,16 +408,16 @@ const AdminDashboard = () => {
         </div>
 
         {/* ── Communications Feed: Portal Messages + Unread Emails ── */}
-        {(commsFeed.portal_unread_count > 0 || commsFeed.email_unread_count > 0) && (
+        {(safeCommsFeed.portal_unread_count > 0 || safeCommsFeed.email_unread_count > 0) && (
           <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
             {/* Portal Messages Panel */}
-            <Card className={`border-border ${commsFeed.portal_unread_count > 0 ? "border-amber-200 dark:border-amber-800" : ""}`}>
+            <Card className={`border-border ${safeCommsFeed.portal_unread_count > 0 ? "border-amber-200 dark:border-amber-800" : ""}`}>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <MessageSquare className="h-5 w-5 shrink-0 text-amber-500" />
                   Mensagens do Portal Não Lidas
-                  {commsFeed.portal_unread_count > 0 && (
-                    <Badge className="bg-amber-500 text-white ml-2">{commsFeed.portal_unread_count}</Badge>
+                  {safeCommsFeed.portal_unread_count > 0 && (
+                    <Badge className="bg-amber-500 text-white ml-2">{safeCommsFeed.portal_unread_count}</Badge>
                   )}
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -404,11 +425,11 @@ const AdminDashboard = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
-                {commsFeed.portal_messages.length === 0 ? (
+                {safeCommsFeed.portal_messages.length === 0 ? (
                   <p className="text-muted-foreground text-center py-6 text-sm">Sem mensagens por ler</p>
                 ) : (
                   <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {commsFeed.portal_messages.map((msg) => (
+                    {safeCommsFeed.portal_messages.map((msg) => (
                       <div
                         key={msg.id}
                         className="flex items-start gap-3 p-3 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/50 cursor-pointer hover:bg-amber-100/50 dark:hover:bg-amber-950/30 transition-colors"
@@ -435,13 +456,13 @@ const AdminDashboard = () => {
             </Card>
 
             {/* Unread Emails Panel */}
-            <Card className={`border-border ${commsFeed.email_unread_count > 0 ? "border-blue-200 dark:border-blue-800" : ""}`}>
+            <Card className={`border-border ${safeCommsFeed.email_unread_count > 0 ? "border-blue-200 dark:border-blue-800" : ""}`}>
               <CardHeader className="pb-3">
                 <CardTitle className="text-base flex items-center gap-2">
                   <Inbox className="h-5 w-5 shrink-0 text-blue-500" />
                   E-mails Recentes Não Lidos
-                  {commsFeed.email_unread_count > 0 && (
-                    <Badge className="bg-blue-500 text-white ml-2">{commsFeed.email_unread_count}</Badge>
+                  {safeCommsFeed.email_unread_count > 0 && (
+                    <Badge className="bg-blue-500 text-white ml-2">{safeCommsFeed.email_unread_count}</Badge>
                   )}
                 </CardTitle>
                 <CardDescription className="text-xs">
@@ -449,11 +470,11 @@ const AdminDashboard = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent className="pt-0">
-                {commsFeed.unread_emails.length === 0 ? (
+                {safeCommsFeed.unread_emails.length === 0 ? (
                   <p className="text-muted-foreground text-center py-6 text-sm">Sem emails por ler</p>
                 ) : (
                   <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {commsFeed.unread_emails.map((email) => (
+                    {safeCommsFeed.unread_emails.map((email) => (
                       <div
                         key={email.id}
                         className="flex items-start gap-3 p-3 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-950/30 transition-colors"
@@ -477,7 +498,7 @@ const AdminDashboard = () => {
         )}
 
         {/* Stale Processes Alert */}
-        {staleStats && staleStats.total > 0 && (
+        {safeStaleStats && safeStaleStats.total > 0 && (
           <Card className="border-orange-200 dark:border-orange-800 bg-orange-50/50 dark:bg-orange-950/20" data-testid="stale-processes-alert">
             <CardContent className="p-4">
               <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-3">
@@ -487,14 +508,14 @@ const AdminDashboard = () => {
                   </div>
                   <div>
                     <p className="text-sm font-semibold text-orange-900 dark:text-orange-200">
-                      {staleStats.total} processo{staleStats.total !== 1 ? 's' : ''} sem atualização
+                      {safeStaleStats.total} processo{safeStaleStats.total !== 1 ? 's' : ''} sem atualização
                     </p>
                     <p className="text-xs text-orange-700 dark:text-orange-400">
-                      {staleStats.critical > 0 && <span className="font-medium">{staleStats.critical} crítico{staleStats.critical !== 1 ? 's' : ''}</span>}
-                      {staleStats.critical > 0 && staleStats.high > 0 && ' · '}
-                      {staleStats.high > 0 && <span>{staleStats.high} atrasado{staleStats.high !== 1 ? 's' : ''}</span>}
-                      {(staleStats.critical > 0 || staleStats.high > 0) && staleStats.medium > 0 && ' · '}
-                      {staleStats.medium > 0 && <span>{staleStats.medium} urgente{staleStats.medium !== 1 ? 's' : ''}</span>}
+                      {safeStaleStats.critical > 0 && <span className="font-medium">{safeStaleStats.critical} crítico{safeStaleStats.critical !== 1 ? 's' : ''}</span>}
+                      {safeStaleStats.critical > 0 && safeStaleStats.high > 0 && ' · '}
+                      {safeStaleStats.high > 0 && <span>{safeStaleStats.high} atrasado{safeStaleStats.high !== 1 ? 's' : ''}</span>}
+                      {(safeStaleStats.critical > 0 || safeStaleStats.high > 0) && safeStaleStats.medium > 0 && ' · '}
+                      {safeStaleStats.medium > 0 && <span>{safeStaleStats.medium} urgente{safeStaleStats.medium !== 1 ? 's' : ''}</span>}
                     </p>
                   </div>
                 </div>
@@ -508,7 +529,7 @@ const AdminDashboard = () => {
                   {showStaleList ? 'Esconder' : 'Ver processos'}
                 </Button>
               </div>
-              {showStaleList && staleStats.processes && (
+              {showStaleList && safeStaleStats.processes && (
                 <div className="mt-4 border-t border-orange-200 dark:border-orange-800 pt-3 space-y-1 max-h-[400px] overflow-x-auto overflow-y-auto" data-testid="stale-processes-list">
                   <div className="grid grid-cols-12 gap-2 px-2 py-1.5 text-xs font-medium text-orange-800 dark:text-orange-300 border-b border-orange-200 dark:border-orange-700 min-w-[700px]">
                     <div className="col-span-3">Cliente</div>
@@ -517,7 +538,7 @@ const AdminDashboard = () => {
                     <div className="col-span-2">Dias s/ atualização</div>
                     <div className="col-span-2 text-right">Urgência</div>
                   </div>
-                  {staleStats.processes.map((p) => (
+                  {safeStaleStats.processes.map((p) => (
                     <div
                       key={p.id}
                       className="grid grid-cols-12 gap-2 px-2 py-2 items-center rounded hover:bg-orange-100 dark:hover:bg-orange-900/30 cursor-pointer transition-colors min-w-[700px]"
@@ -573,8 +594,9 @@ const AdminDashboard = () => {
               <TabsTrigger value="leads" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-leads">
                 <Building className="h-4 w-4 shrink-0" />Leads
               </TabsTrigger>
-
-
+              <TabsTrigger value="performance" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3" data-testid="tab-performance">
+                <BarChart3 className="h-4 w-4 shrink-0" /><span className="hidden sm:inline">Desempenho</span><span className="sm:hidden">Perf</span>
+              </TabsTrigger>
             </TabsList>
           </div>
 
@@ -678,7 +700,10 @@ const AdminDashboard = () => {
             <LeadsKanban />
           </TabsContent>
 
-
+          {/* Team Performance Tab */}
+          <TabsContent value="performance" className="mt-6">
+            <TeamPerformanceTab token={localStorage.getItem('token')} />
+          </TabsContent>
         </Tabs>
 
         {/* Create Event Dialog */}

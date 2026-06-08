@@ -654,7 +654,8 @@ async def get_document_recipients(
 ):
     """
     Obter lista de destinatários disponíveis para envio de documentação.
-    Apenas Admin e CEO podem editar as configurações.
+    Retorna balcões globais (sistema) + balcões personalizados do utilizador.
+    Os personalizados são identificados com is_custom: true.
     """
     from services.system_config import get_system_config
     
@@ -673,13 +674,30 @@ async def get_document_recipients(
     
     import json
     
-    # Parse recipients JSON
+    # Parse recipients JSON (balcões globais do sistema)
     recipients = []
     if doc_config.recipients:
         try:
             recipients = json.loads(doc_config.recipients)
         except (json.JSONDecodeError, TypeError):
             recipients = []
+    
+    # Marcar balcões globais como não-personalizados
+    for r in recipients:
+        r["is_custom"] = False
+    
+    # Adicionar balcões personalizados do utilizador
+    user_id = current_user["id"]
+    cursor = db["user_custom_branches"].find({"user_id": user_id}).sort("name", 1)
+    user_branches = await cursor.to_list(100)
+    for b in user_branches:
+        recipients.append({
+            "id": str(b["_id"]),
+            "name": b["name"],
+            "email": b["email"],
+            "is_custom": True,
+            "active": True,
+        })
     
     # Parse default_to_emails (múltiplos emails TO)
     default_to_emails = []
@@ -804,7 +822,7 @@ async def preview_documentation_email(
     return {
         "success": True,
         "html": email_body,
-        "subject": f"Documentação - {client_name} (Processo #{process_number})",
+        "subject": f"Documentação - {client_name}",
         "template_vars": template_vars,
         "available_variables": list(template_vars.keys()),
         "documents_count": len(documents) if documents else 0
@@ -848,6 +866,22 @@ async def send_documentation_email(
         HTTPException: 404 se processo não encontrado, 400 se parâmetros
             inválidos, 500 se falha no envio de email.
     """
+    try:
+        return await _send_documentation_email_impl(process_id, data, current_user)
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        logger.error(f"[send-documentation] Erro inesperado: {e}\n{traceback.format_exc()}")
+        raise HTTPException(status_code=500, detail=f"Erro ao enviar documentação: {str(e)}")
+
+
+async def _send_documentation_email_impl(
+    process_id: str,
+    data: dict,
+    current_user: dict,
+):
+    """Implementação do envio de documentação (separada para error handling)."""
     from services.system_config import get_system_config
     
     # Obter processo
@@ -1103,7 +1137,19 @@ async def send_documentation_email(
     # Último fallback: email do utilizador actual
     if not to_emails:
         to_emails = [current_user["email"]]
-    subject = f"Documentação - {client_name} (Processo #{process_number})"
+    # Subject: usar o assunto enviado pelo frontend (editável), ou gerar sem Proc-xxxx
+    custom_subject = data.get("subject")
+    if custom_subject and custom_subject.strip():
+        subject = custom_subject.strip()
+        # Remover tag [Proc-xxxx] caso exista no subject customizado
+        subject = re.sub(r'\s*\[Proc-[\w-]+\]\s*', ' ', subject).strip()
+    else:
+        subject = f"Documentação - {client_name}"
+    
+    # BCC adicional: emails introduzidos manualmente pelo utilizador
+    bcc_manual = [e for e in (sanitize_email(e) for e in data.get("bcc_emails", [])) if e]
+    # Combinar BCC dos destinatários validados + BCC manual
+    all_bcc = validated_bcc + [e for e in bcc_manual if e not in validated_bcc]
     
     # ==== PREPARAR ANEXOS (download do S3) ====
     email_attachments = []
@@ -1115,8 +1161,7 @@ async def send_documentation_email(
         if s3_path:
             try:
                 from services.s3_storage import s3_service
-                loop = asyncio.get_event_loop()
-                content_bytes = await loop.run_in_executor(
+                content_bytes = await asyncio.get_running_loop().run_in_executor(
                     None, lambda p=s3_path: s3_service.get_file_content(p)
                 )
                 if content_bytes:
@@ -1141,7 +1186,6 @@ async def send_documentation_email(
     
     # ==== ENVIAR EMAIL COM ANEXOS ====
     # Gerar versão plain-text a partir do HTML (strip tags) como fallback
-    import re
     plain_text_body = re.sub(r'<[^>]+>', '', email_body).strip()
     plain_text_body = re.sub(r'\n{3,}', '\n\n', plain_text_body)
     
@@ -1152,12 +1196,15 @@ async def send_documentation_email(
         body=plain_text_body,
         body_html=email_body,
         cc_emails=cc_emails if cc_emails else None,
-        bcc_emails=validated_bcc,
+        bcc_emails=all_bcc,
+        reply_to=current_user.get("email"),
+        from_email=current_user.get("email"),
         process_id=process_id,
         created_by=current_user["id"],
         attachments=email_attachments if email_attachments else None,
         force_system=True,
         system_purpose="DOCUMENTS",
+        skip_proc_tag=True,
     )
     
     if not result["success"]:
@@ -1180,13 +1227,13 @@ async def send_documentation_email(
     except Exception as e:
         logger.warning(f"Não foi possível adicionar label 'documentação' ao registo: {e}")
     
-    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(validated_bcc)} destinatários, {len(email_attachments)} anexos")
+    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(all_bcc)} destinatários BCC, {len(email_attachments)} anexos")
     
     return {
         "success": True,
-        "message": f"Documentação enviada com sucesso para {len(validated_bcc)} destinatário(s) ({len(email_attachments)} anexo(s))",
+        "message": f"Documentação enviada com sucesso para {len(all_bcc)} destinatário(s) ({len(email_attachments)} anexo(s))",
         "warnings": warnings,
-        "sent_to": validated_bcc,
+        "sent_to": all_bcc,
         "attachments_sent": len(email_attachments),
         "attachments_failed": len(failed_attachments) if failed_attachments else 0
     }
@@ -2008,31 +2055,60 @@ async def get_email_timeline(
 
 @router.get("/templates", response_model=List[EmailTemplateResponse])
 async def get_email_templates(
+    request: Request,
     category: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    """Listar templates de resposta rápida."""
+    """Listar templates de resposta rápida filtrados pela empresa ativa."""
+    from services.auth import get_active_company_id_async
+
     query = {}
     if category:
         query["category"] = category
-    
+
+    # MULTI-EMPRESA: filtrar templates por empresa ativa
+    # Mostrar: templates da empresa ativa + templates globais (sem company_id)
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+        if active_company_id:
+            query["$or"] = [
+                {"company_id": active_company_id},
+                {"company_id": {"$exists": False}},
+                {"company_id": None},
+                {"company_id": ""},
+            ]
+    except Exception:
+        pass  # Fallback: mostrar todos se não houver contexto
+
     templates = await db.email_templates.find(
         query,
         {"_id": 0}
     ).sort("usage_count", -1).to_list(50)
-    
+
     return templates
 
 
 @router.post("/templates", response_model=EmailTemplateResponse)
 async def create_email_template(
     template: EmailTemplateCreate,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Criar novo template de resposta."""
+    from services.auth import get_active_company_id_async
+
     template_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
-    
+
+    # MULTI-EMPRESA: determinar company_id para este template
+    company_id = "default"
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+        if active_company_id:
+            company_id = active_company_id
+    except Exception:
+        pass
+
     template_doc = {
         "id": template_id,
         "name": sanitize_string(template.name, max_length=200),
@@ -2040,6 +2116,7 @@ async def create_email_template(
         "body": sanitize_string(template.body, max_length=10000),
         "category": template.category,
         "is_default": template.is_default,
+        "company_id": company_id,  # MULTI-EMPRESA
         "created_by": current_user["id"],
         "created_at": now,
         "usage_count": 0
@@ -2925,7 +3002,9 @@ async def webmail_sync_user(
     # Usar o resolver que suporta config individual, company e system (herança)
     active_role = user_role  # já obtido acima via get_effective_role
     from services.email_config_resolver import resolve_email_config_for_sync
-    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role)
+    from services.auth import get_active_company_id_async
+    active_company_id = await get_active_company_id_async(request, current_user)
+    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role, active_company_id=active_company_id)
     
     if not resolved:
         return {
@@ -3502,7 +3581,7 @@ async def send_email_endpoint(
 
             try:
                 # Download content from temp S3 path
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 content_bytes = await loop.run_in_executor(
                     None, lambda tk=temp_key: s3_service.get_file_content(tk)
                 )
@@ -3560,7 +3639,7 @@ async def send_email_endpoint(
             for att_rec in temp_attachment_records:
                 permanent_s3_key = f"Emails/{sent_email['id']}/{att_rec['file_name']}"
                 try:
-                    loop = asyncio.get_event_loop()
+                    loop = asyncio.get_running_loop()
                     moved = await loop.run_in_executor(
                         None,
                         lambda sk=att_rec["temp_key"], pk=permanent_s3_key: s3_service.rename_file(sk, pk)
@@ -3597,7 +3676,7 @@ async def send_email_endpoint(
         from services.s3_storage import s3_service
         for temp_key in temp_keys_to_cleanup:
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 await loop.run_in_executor(None, lambda tk=temp_key: s3_service.delete_file(tk))
             except Exception as e:
                 logger.warning(f"Failed to cleanup temp file {temp_key}: {e}")

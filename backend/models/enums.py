@@ -12,7 +12,7 @@ from typing import List
 
 class ProcessStatus(str, Enum):
     """
-    Status do processo no workflow de 14 fases.
+    Status do processo no workflow de 15 fases.
     Valores correspondem aos nomes das colunas do Kanban.
     """
     # Fase 1-3: Início
@@ -36,6 +36,9 @@ class ProcessStatus(str, Enum):
     ARQUIVO = "arquivo"
     PERDIDO = "perdido"
     DESISTENCIAS = "desistencias"
+
+    # Fila de Espera — sem indexador disponível
+    FILA_ESPERA = "fila_espera"
     
     @classmethod
     def active_statuses(cls) -> List[str]:
@@ -51,6 +54,7 @@ class ProcessStatus(str, Enum):
             cls.CPCV.value,
             cls.MINUTA.value,
             cls.ESCRITURA.value,
+            cls.FILA_ESPERA.value,
         ]
     
     @classmethod
@@ -202,6 +206,7 @@ class DocumentCategory(str, Enum):
     FISCAIS = "Fiscais"
     SIMULACOES = "Simulações"
     MINUTAS = "Minutas"
+    INDEX = "Index"
     OUTROS = "Outros"
     
     @classmethod

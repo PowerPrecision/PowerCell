@@ -38,16 +38,17 @@
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
+import { queryClient } from "../lib/queryClient";
 
 const AuthContext = createContext(null);
 
 // ── Brand Theme Helper ──
 // Aplica classe de tema no <html> consoante a empresa do utilizador.
-// "power" ou null = tema por defeito (sem classe extra)
-// "precision" = adiciona .theme-precision que sobrepõe --color-brand
+// "Power Real Estate" ou null = tema por defeito (sem classe extra)
+// "Precision Crédito" = adiciona .theme-precision que sobrepõe --color-brand
 function applyBrandTheme(company) {
   document.documentElement.classList.remove('theme-precision');
-  if (company === 'precision') {
+  if (company && company.toLowerCase().includes('precision')) {
     document.documentElement.classList.add('theme-precision');
   }
 }
@@ -66,8 +67,10 @@ export function AuthProvider({ children }) {
   const [isImpersonating, setIsImpersonating] = useState(false);
   const [originalAdminName, setOriginalAdminName] = useState(null);
   const [activeRole, setActiveRole] = useState(null);
+  const [activeCompanyId, setActiveCompanyId] = useState(null);
   const refreshTimeoutRef = useRef(null);
   const activeRoleInitialized = useRef(false);
+  const activeCompanyInitialized = useRef(false);
 
   // Função para decodificar JWT e obter expiração
   // (stable — empty deps, no outer references)
@@ -190,6 +193,33 @@ export function AuthProvider({ children }) {
         activeRoleInitialized.current = true;
       }
       
+      // Initialize activeCompanyId only once
+      if (!activeCompanyInitialized.current) {
+        const savedCompanyId = sessionStorage.getItem("activeCompanyId");
+        const companies = userData.companies || [];
+        if (companies.length > 0) {
+          if (savedCompanyId && companies.some(c => c.company_id === savedCompanyId)) {
+            setActiveCompanyId(savedCompanyId);
+          } else {
+            // Usar a empresa default (is_default=True) ou a primeira
+            const defaultCompany = companies.find(c => c.is_default) || companies[0];
+            const companyId = defaultCompany.company_id;
+            setActiveCompanyId(companyId);
+            sessionStorage.setItem("activeCompanyId", companyId);
+            // Atualizar brand theme para a empresa ativa
+            applyBrandTheme(defaultCompany.company_name || userData.company);
+          }
+        } else {
+          // Sem empresas na tabela — usar campo company como fallback
+          const fallbackId = userData.company || null;
+          if (fallbackId) {
+            setActiveCompanyId(fallbackId);
+            sessionStorage.setItem("activeCompanyId", fallbackId);
+          }
+        }
+        activeCompanyInitialized.current = true;
+      }
+      
       // Verificar se está em modo impersonate
       if (userData.is_impersonated) {
         setIsImpersonating(true);
@@ -289,10 +319,13 @@ export function AuthProvider({ children }) {
     document.documentElement.classList.remove('theme-precision');
     setOriginalAdminName(null);
 
-    // Clear active role on logout
+    // Clear active role and company on logout
     sessionStorage.removeItem("activeRole");
+    sessionStorage.removeItem("activeCompanyId");
     setActiveRole(null);
+    setActiveCompanyId(null);
     activeRoleInitialized.current = false;
+    activeCompanyInitialized.current = false;
   }, []);
 
   // Impersonate - ver como outro utilizador
@@ -372,13 +405,103 @@ export function AuthProvider({ children }) {
     }
   }, []);
 
-  // Context Switching - Múltiplos Perfis
-  const switchActiveRole = useCallback((newRole) => {
+  // ── Context Switching — Múltiplos Perfis (Hard Reload) ──
+  // Recebe newRole e opcionalmente newCompanyId. Se newCompanyId não for
+  // fornecido, infere a empresa a partir de user.companies (procura a
+  // primeira empresa cujo role corresponda ao newRole).
+  // Após atualizar sessionStorage, faz hard reload para garantir que
+  // TODOS os componentes montam de novo, o interceptor api.js lê os
+  // cabeçalhos actualizados do sessionStorage, e cada ecrã carrega os
+  // dados da empresa/perfil certo — sem depender de invalidateQueries
+  // nem de refetch manual que pode falhar silenciosamente.
+  const switchActiveRole = useCallback((newRole, newCompanyId = null) => {
     if (!newRole) return;
-    setActiveRole(newRole);
-    // Persist to sessionStorage for reload survival
+
+    // Determinar a empresa associada ao novo role
+    let resolvedCompanyId = newCompanyId;
+    if (!resolvedCompanyId && user?.companies) {
+      const matchingCompany = user.companies.find(c => c.role === newRole);
+      if (matchingCompany) {
+        resolvedCompanyId = matchingCompany.company_id;
+      }
+    }
+
+    // ── RASTREIO: Log para debugging do context switch ──
+    console.log(
+      "[ContextSwitch] Mudança para:", newRole,
+      "Empresa:", resolvedCompanyId,
+      "newCompanyId arg:", newCompanyId,
+      "user.companies:", user?.companies?.map(c => ({ id: c.company_id, role: c.role }))
+    );
+
+    // Gravar AMBOS os valores no sessionStorage ANTES do reload
+    // Isto garante que o interceptor api.js injecta os headers correctos
+    // em todos os pedidos subsequentes após o reload.
     sessionStorage.setItem("activeRole", newRole);
-  }, []);
+    if (resolvedCompanyId) {
+      sessionStorage.setItem("activeCompanyId", resolvedCompanyId);
+    }
+
+    // Hard Reload — refresh completo da aplicação
+    // O interceptor api.js lê os novos cabeçalhos limpos do
+    // sessionStorage e todos os ecrãs carregam os dados da
+    // empresa certa, sem cache residual.
+    window.location.reload();
+  }, [user]);
+
+  // Context Switching - Múltiplas Empresas
+  const switchActiveCompany = useCallback(async (companyId) => {
+    if (!companyId) return;
+
+    // ── RASTREIO: Log para debugging do context switch de empresa ──
+    console.log("[ContextSwitch] Troca de empresa:", companyId, "anterior:", sessionStorage.getItem("activeCompanyId"));
+
+    setActiveCompanyId(companyId);
+    sessionStorage.setItem("activeCompanyId", companyId);
+
+    // Verificar que o sessionStorage foi actualizado
+    const verified = sessionStorage.getItem("activeCompanyId");
+    console.log("[ContextSwitch] Verificação sessionStorage activeCompanyId:", verified, "→ match:", verified === companyId);
+    
+    // Notificar o backend para atualizar a empresa ativa
+    try {
+      await api.post("/admin/user-company-roles/set-active-company", { company_id: companyId });
+    } catch (error) {
+      console.warn("[AuthContext] Erro ao definir empresa ativa no backend:", error);
+    }
+    
+    // Atualizar brand theme
+    const companies = user?.companies || [];
+    const target = companies.find(c => c.company_id === companyId);
+    if (target) {
+      applyBrandTheme(target.company_name);
+    }
+
+    // ── REATIVIDADE: Recarregar dados do utilizador após troca de empresa ──
+    // Isto garante que os campos específicos da empresa (assinatura, cargo,
+    // telefone profissional) sejam atualizados no estado do AuthContext,
+    // propagando automaticamente para todos os componentes consumidores
+    // (ProfilePage, EmailConfigForm, etc.)
+    try {
+      const response = await api.get("/auth/me");
+      setUser(response.data);
+
+      // Atualizar activeRole se a nova empresa tem role diferente
+      if (target && target.role && target.role !== activeRole) {
+        setActiveRole(target.role);
+        sessionStorage.setItem("activeRole", target.role);
+      }
+    } catch (error) {
+      console.warn("[AuthContext] Erro ao recarregar dados após troca de empresa:", error);
+    }
+
+    // ── REATIVIDADE: Invalidar toda a cache do TanStack Query ──
+    // Quando o utilizador troca de empresa, os dados em cache pertencem
+    // à empresa anterior (ex: processos, emails, templates, kanban).
+    // Ao invalidar, forçamos todos os componentes a voltar a pedir dados
+    // ao backend com o novo header X-Company-Id (injetado pelo interceptor).
+    queryClient.invalidateQueries();
+  }, [user]);
 
   // Refresh user data from /auth/me (e.g. after email config save)
   const refreshUser = useCallback(async () => {
@@ -407,9 +530,12 @@ export function AuthProvider({ children }) {
     stopImpersonating,
     activeRole,
     switchActiveRole,
+    activeCompanyId,
+    switchActiveCompany,
     refreshUser,
     effectiveRole: activeRole || user?.role,
-  }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole, refreshUser]);
+    effectiveCompanyId: activeCompanyId || user?.company,
+  }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole, activeCompanyId, switchActiveCompany, refreshUser]);
 
   return (
     <AuthContext.Provider value={value}>

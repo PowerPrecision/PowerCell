@@ -43,6 +43,7 @@ from services.encryption import (
     generate_nif_hash,
     generate_email_hash,
 )
+from models.client import generate_portal_access_code
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, log_sanitization_rejection
@@ -209,6 +210,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             "dados_financeiros": {},  # Dados financeiros pertencem ao Processo
             "dados_imobiliarios": {},  # Dados do imóvel recolhidos depois
             "process_ids": [],  # Será preenchido quando o staff criar o processo
+            "portal_access_code": generate_portal_access_code(),  # Código de acesso ao Portal
             "fonte": "public_form",
             "has_property": has_property,
             "idade_menos_35": False,
@@ -274,17 +276,36 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # PÓS-REGISTO: Email, Notificações, Alertas
     # =========================================
     
+    # Obter o código de acesso ao portal do cliente (para incluir no email)
+    portal_access_code = None
+    try:
+        client_doc = await db.clients.find_one({"id": client_id}, {"portal_access_code": 1, "_id": 0})
+        if client_doc:
+            portal_access_code = client_doc.get("portal_access_code")
+            # Se o cliente existente não tem código (caso raro), gerar um
+            if not portal_access_code:
+                from models.client import generate_portal_access_code as _gen_code
+                portal_access_code = _gen_code()
+                await db.clients.update_one(
+                    {"id": client_id},
+                    {"$set": {"portal_access_code": portal_access_code}}
+                )
+    except Exception as e:
+        logger.warning(f"Erro ao obter/gerar portal_access_code para {client_id}: {e}")
+    
     # Enviar email de confirmação ao cliente
     from services.task_queue import task_queue
     job_id = await task_queue.send_registration_email(
         client_email=clean_email,
-        client_name=clean_name
+        client_name=clean_name,
+        portal_access_code=portal_access_code
     )
     if not job_id:
         logger.info("Task Queue não disponível, enviando email directamente")
         await send_registration_confirmation(
             client_email=clean_email,
-            client_name=clean_name
+            client_name=clean_name,
+            portal_access_code=portal_access_code
         )
     
     # Criar alertas no sistema de notificações (passar dados do cliente — SEM processo)

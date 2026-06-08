@@ -390,6 +390,9 @@ async def populate_client_data(process: dict) -> dict:
     os dados pessoais na estrutura antiga (personal_data, titular2_data,
     financial_data) que o Frontend ainda espera.
 
+    Se existir second_client_id, popula também second_client_data com os
+    dados do 2º titular (pesquisa na coleção `clients`).
+
     Isto garante que o Frontend NÃO quebra durante a Fase 3 (refactor do FE).
     Quando o FE for migrado, este helper deixa de ser necessário.
 
@@ -470,6 +473,69 @@ async def populate_client_data(process: dict) -> dict:
     # ── Montar financial_data (vazio — dados financeiros estão no processo) ──
     if not result.get("financial_data"):
         result["financial_data"] = {}
+
+    # ── Popular second_client_data (2º titular ligado via second_client_id) ──
+    second_client_id = result.get("second_client_id")
+    if second_client_id:
+        second_client_doc = await db.clients.find_one({"id": second_client_id}, {"_id": 0})
+        if second_client_doc:
+            try:
+                from services.encryption import decrypt_client_data
+                second_client_doc = decrypt_client_data(second_client_doc)
+            except Exception as e:
+                logger.warning(f"Erro ao desencriptar dados do 2º titular {second_client_id}: {e}")
+
+            sc_contacto = second_client_doc.get("contacto") or {}
+            sc_dados_pessoais = second_client_doc.get("dados_pessoais") or {}
+
+            result["second_client_data"] = {
+                "id": second_client_doc.get("id"),
+                "nome": second_client_doc.get("nome", ""),
+                "email": sc_contacto.get("email", ""),
+                "telefone": sc_contacto.get("telefone", ""),
+                "nif": sc_dados_pessoais.get("nif", ""),
+                "documento_id": sc_dados_pessoais.get("documento_id", ""),
+                "data_nascimento": sc_dados_pessoais.get("data_nascimento", ""),
+                "birth_date": sc_dados_pessoais.get("birth_date", sc_dados_pessoais.get("data_nascimento", "")),
+                "morada_fiscal": sc_dados_pessoais.get("morada_fiscal", ""),
+                "estado_civil": sc_dados_pessoais.get("estado_civil", ""),
+                "profissao": sc_dados_pessoais.get("profissao", ""),
+                "nacionalidade": sc_dados_pessoais.get("nacionalidade", ""),
+                "naturalidade": sc_dados_pessoais.get("naturalidade", ""),
+                "sexo": sc_dados_pessoais.get("sexo", ""),
+                "nome_pai": sc_dados_pessoais.get("nome_pai", ""),
+                "nome_mae": sc_dados_pessoais.get("nome_mae", ""),
+                "financial_data": second_client_doc.get("financial_data", {}),
+                "titular2_data": second_client_doc.get("titular2_data", {}),
+            }
+
+            # Sincronizar titular2_data do processo com dados do 2º cliente
+            # (mantém retrocompatibilidade — o Frontend lê titular2_data)
+            result["titular2_data"] = {
+                "name": second_client_doc.get("nome", ""),
+                "nome": second_client_doc.get("nome", ""),
+                "email": sc_contacto.get("email", ""),
+                "phone": sc_contacto.get("telefone", ""),
+                "telefone": sc_contacto.get("telefone", ""),
+                "nif": sc_dados_pessoais.get("nif", ""),
+                "documento_id": sc_dados_pessoais.get("documento_id", ""),
+                "birth_date": sc_dados_pessoais.get("birth_date", sc_dados_pessoais.get("data_nascimento", "")),
+                "data_nascimento": sc_dados_pessoais.get("data_nascimento", ""),
+                "morada_fiscal": sc_dados_pessoais.get("morada_fiscal", ""),
+                "estado_civil": sc_dados_pessoais.get("estado_civil", ""),
+                "profissao": sc_dados_pessoais.get("profissao", ""),
+                "nacionalidade": sc_dados_pessoais.get("nacionalidade", ""),
+                "naturalidade": sc_dados_pessoais.get("naturalidade", ""),
+                "sexo": sc_dados_pessoais.get("sexo", ""),
+                "nome_pai": sc_dados_pessoais.get("nome_pai", ""),
+                "nome_mae": sc_dados_pessoais.get("nome_mae", ""),
+            }
+
+            # Atualizar second_client_name para retrocompatibilidade
+            result["second_client_name"] = second_client_doc.get("nome", "")
+        else:
+            logger.warning(f"2º titular {second_client_id} não encontrado na coleção clients")
+            result["second_client_data"] = None
 
     return result
 

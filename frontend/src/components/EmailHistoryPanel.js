@@ -219,20 +219,28 @@ const EmailHistoryPanel = ({
       filtered = filtered.filter(e => e.account === advancedFilters.account);
     }
     
-    // Filtro por data
+    // Filtro por data (protecção defensiva: safeParseISO pode retornar null)
     if (advancedFilters.dateFrom) {
-      const fromDate = startOfDay(safeParseISO(advancedFilters.dateFrom));
-      filtered = filtered.filter(e => {
-        if (!e.sent_at) return false;
-        return isAfter(safeParseISO(e.sent_at), fromDate);
-      });
+      const fromParsed = safeParseISO(advancedFilters.dateFrom);
+      if (fromParsed) {
+        const fromDate = startOfDay(fromParsed);
+        filtered = filtered.filter(e => {
+          if (!e.sent_at) return false;
+          const sentParsed = safeParseISO(e.sent_at);
+          return sentParsed ? isAfter(sentParsed, fromDate) : false;
+        });
+      }
     }
     if (advancedFilters.dateTo) {
-      const toDate = endOfDay(safeParseISO(advancedFilters.dateTo));
-      filtered = filtered.filter(e => {
-        if (!e.sent_at) return false;
-        return isBefore(safeParseISO(e.sent_at), toDate);
-      });
+      const toParsed = safeParseISO(advancedFilters.dateTo);
+      if (toParsed) {
+        const toDate = endOfDay(toParsed);
+        filtered = filtered.filter(e => {
+          if (!e.sent_at) return false;
+          const sentParsed = safeParseISO(e.sent_at);
+          return sentParsed ? isBefore(sentParsed, toDate) : false;
+        });
+      }
     }
     
     // Filtro por anexos

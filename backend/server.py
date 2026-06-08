@@ -113,10 +113,12 @@ from routes.portal import router as portal_router
 from routes.google_auth import router as google_auth_router
 from routes.shared_email import router as shared_email_router
 from routes.companies import router as companies_router
+from routes.user_company_roles import router as user_company_roles_router
 from routes.portal_settings import router as portal_settings_router
 from routes.ai_analysis import router as ai_analysis_router
 from routes.announcements import router as announcements_router
 from routes.gov_auth import router as gov_auth_router
+from routes.user_branches import router as user_branches_router
 try:
     from routes.admin_process_migration import router as admin_process_migration_router
     _admin_process_migration_import_error = None
@@ -144,7 +146,13 @@ if SENTRY_DSN:
     )
 
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger(__name__)
+
+# ── Configuração de Logging para Render ──
+# O utils/logger.py configura o root logger com sys.stdout e formato limpo.
+# Deve ser importado ANTES de criar o logger do server.py para que o
+# handler de stdout seja registado primeiro.
+from utils.logger import get_logger
+logger = get_logger(__name__)
 
 app = FastAPI(title="Sistema de Gestão de Processos")
 
@@ -425,11 +433,35 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
         f"Validation error on {request.method} {request.url.path}: "
         f"errors={safe_errors}"
     )
+    # Obter origin do request para CORS (igual ao http_exception_handler)
+    origin = request.headers.get("origin", "")
+
+    # Verificar se a origin é permitida
+    allowed_origin = None
+    if origin in CORS_ORIGINS:
+        allowed_origin = origin
+    elif CORS_ORIGIN_REGEX:
+        import re as _re_422
+        for pattern in CORS_ORIGIN_REGEX:
+            if _re_422.match(pattern, origin):
+                allowed_origin = origin
+                break
+    # Fallback: permitir previews do Vercel mesmo sem regex
+    if not allowed_origin and origin and origin.startswith("https://") and origin.endswith(".vercel.app"):
+        allowed_origin = origin
+
+    cors_headers = {}
+    if allowed_origin:
+        cors_headers = {
+            "Access-Control-Allow-Origin": allowed_origin,
+            "Access-Control-Allow-Credentials": "true",
+        }
+
     # Retornar erro formatado ao cliente
     return JSONResponse(
         status_code=422,
         content={"detail": safe_errors},
-        headers={"Access-Control-Allow-Origin": "*", "Access-Control-Allow-Credentials": "true"}
+        headers=cors_headers
     )
 
 
@@ -437,12 +469,24 @@ async def validation_exception_handler(request: Request, exc: RequestValidationE
 async def general_exception_handler(request: Request, exc: Exception):
     """
     Handler para excepções não tratadas.
-    Regista o erro e retorna 500.
+    Regista o erro, imprime traceback completo na consola e retorna 500.
     Inclui headers CORS para garantir que erros não bloqueiam o frontend.
     """
+    exception_type = type(exc).__name__
+    import traceback as _tb
+    full_tb = _tb.format_exc()
+
+    # === SEMPRE imprimir traceback completo na consola ===
+    logger.error(
+        f"!!! EXCEPÇÃO NÃO TRATADA: {exception_type}: {exc}\n"
+        f"    Path: {request.method} {request.url.path}\n"
+        f"    Traceback completo:\n{full_tb}"
+    )
+
+    # Registar no sistema de logs do MongoDB
     try:
         from services.system_error_logger import system_error_logger
-        
+
         await system_error_logger.log_error(
             error_type="unhandled_exception",
             message=str(exc),
@@ -450,41 +494,33 @@ async def general_exception_handler(request: Request, exc: Exception):
             details={
                 "path": str(request.url.path),
                 "method": request.method,
-                "exception_type": type(exc).__name__,
+                "exception_type": exception_type,
+                "traceback": full_tb,
             },
             severity="critical",
             request_path=str(request.url.path)
         )
     except Exception as log_error:
-        logger.error(f"Erro ao registar excepção: {type(log_error).__name__}: {log_error}")
+        logger.error(f"Erro ao registar excepção no system_error_logger: {type(log_error).__name__}: {log_error}")
 
-    logger.exception(f"Unhandled exception: {exc}")
-    
     # Obter origin do request para CORS
     origin = request.headers.get("origin", "*")
-    
-    # Construir detalhe do erro com info de debug (sem expor stack trace)
+
+    # Construir detalhe do erro
     error_detail = "Erro interno do servidor"
-    exception_type = type(exc).__name__
-    
-    # Incluir tipo de excepção para facilitar diagnóstico
-    # (não incluímos str(exc) para evitar leak de info sensível)
     if exception_type not in ("HTTPException", "ValidationError", "RequestValidationError"):
         error_detail = f"Erro interno do servidor [{exception_type}]"
-    
-    # === DIAGNÓSTICO TEMPORÁRIO: Para TypeErrors, incluir traceback e linha exata ===
-    if exception_type == "TypeError":
-        import traceback as _tb
-        full_tb = _tb.format_exc()
-        logger.error(f"!!! TypeError DETALHADO:\n{full_tb}")
+
+    # Em modo de desenvolvimento, incluir traceback na resposta para debug
+    is_dev = os.getenv("ENVIRONMENT", "dev") == "dev"
+    if is_dev:
         # Extrair a linha relevante do traceback
         error_line = ""
         for line in full_tb.split('\n'):
             if '.py"' in line or '.py' in line:
                 error_line = line.strip()
-        # Incluir traceback parcial na resposta para diagnóstico
-        error_detail = f"TypeError: {str(exc)} | Linha: {error_line} | TB: {full_tb[-800:]}"
-    
+        error_detail = f"{exception_type}: {str(exc)} | Linha: {error_line} | TB: {full_tb[-800:]}"
+
     # Verificar se a origin é permitida
     allowed_origin = None
     if origin in CORS_ORIGINS:
@@ -495,14 +531,14 @@ async def general_exception_handler(request: Request, exc: Exception):
             if re.match(pattern, origin):
                 allowed_origin = origin
                 break
-    
+
     headers = {}
     if allowed_origin:
         headers = {
             "Access-Control-Allow-Origin": allowed_origin,
             "Access-Control-Allow-Credentials": "true",
         }
-    
+
     return JSONResponse(
         status_code=500,
         content={"detail": error_detail},
@@ -565,10 +601,12 @@ app.include_router(portal_router, prefix="/api")
 app.include_router(google_auth_router, prefix="/api")
 app.include_router(shared_email_router, prefix="/api")
 app.include_router(companies_router, prefix="/api")
+app.include_router(user_company_roles_router, prefix="/api")
 app.include_router(portal_settings_router, prefix="/api")
 app.include_router(ai_analysis_router, prefix="/api")
 app.include_router(announcements_router, prefix="/api")
 app.include_router(gov_auth_router, prefix="/api")
+app.include_router(user_branches_router, prefix="/api")
 if admin_process_migration_router:
     app.include_router(admin_process_migration_router, prefix="/api")
 else:
@@ -588,6 +626,63 @@ else:
 @app.get("/health")
 async def health_check():
     return {"status": "healthy"}
+
+
+@app.get("/api/cors-debug")
+async def cors_debug_endpoint(request: Request):
+    """
+    Endpoint de diagnóstico CORS.
+    
+    Retorna a configuração CORS atual e verifica se uma determinada
+    origin seria permitida. Use o query parameter ?origin=URL para
+    testar uma origin específica.
+    
+    Exemplo: /api/cors-debug?origin=https://power-cell.vercel.app
+    """
+    import re as _re_debug
+    
+    test_origin = request.query_params.get("origin", "")
+    
+    # Verificar se a origin seria permitida
+    origin_status = {
+        "in_explicit_list": test_origin in CORS_ORIGINS if test_origin else False,
+        "matches_regex": False,
+        "is_vercel_preview": False,
+        "would_be_allowed": False,
+    }
+    
+    if test_origin and CORS_ORIGIN_REGEX:
+        for pattern in CORS_ORIGIN_REGEX:
+            if _re_debug.match(pattern, test_origin):
+                origin_status["matches_regex"] = True
+                break
+    
+    if test_origin:
+        origin_status["is_vercel_preview"] = (
+            test_origin.startswith("https://") and
+            test_origin.endswith(".vercel.app") and
+            len(test_origin) > len("https://.vercel.app")
+        )
+    
+    origin_status["would_be_allowed"] = (
+        origin_status["in_explicit_list"] or
+        origin_status["matches_regex"] or
+        origin_status["is_vercel_preview"]  # Fallback middleware
+    )
+    
+    return {
+        "cors_config": {
+            "explicit_origins": CORS_ORIGINS,
+            "origin_regex": CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else None,
+            "allow_credentials": CORS_ALLOW_CREDENTIALS,
+            "allow_methods": CORS_ALLOW_METHODS,
+            "allow_headers": CORS_ALLOW_HEADERS,
+            "max_age": CORS_MAX_AGE,
+            "vercel_fallback_middleware": True,
+        },
+        "test_origin": test_origin or "(nenhuma fornecida)",
+        "origin_status": origin_status,
+    }
 
 
 # Root path — Render health check uses HEAD / by default
@@ -731,6 +826,51 @@ async def background_job_monitor():
             logger.error(f"Erro no background job monitor: {monitor_err}")
 
 # ====================================================================
+# LOGGING / RASTREABILIDADE MIDDLEWARE
+# Regista todos os pedidos HTTP com método, path, status, duração e user.
+# Adicionado ANTES do CORS para que execute DEPOIS na cadeia (reverse order).
+# ====================================================================
+from middleware.logging_middleware import LoggingMiddleware
+app.add_middleware(LoggingMiddleware)
+
+# ====================================================================
+# CORS DEBUG MIDDLEWARE — Regista origens rejeitadas para diagnóstico.
+# Adicionado ANTES do CORSMiddleware (executa DEPOIS na cadeia).
+# Isto permite-nos ver no log qual origin foi rejeitada e porquê.
+# ====================================================================
+import re as _re
+
+@app.middleware("http")
+async def cors_debug_middleware(request, call_next):
+    """
+    Middleware de debug CORS — regista origins que falham validação.
+    
+    Ajuda a diagnosticar erros CORS em produção, especialmente com
+    Vercel preview URLs que mudam frequentemente.
+    
+    Só regista quando o pedido é OPTIONS (preflight) e a origin
+    não está nas origens permitidas.
+    """
+    response = await call_next(request)
+    
+    # Só diagnosticar pedidos OPTIONS (CORS preflight)
+    if request.method == "OPTIONS":
+        origin = request.headers.get("origin", "")
+        if origin:
+            # Verificar se a origin foi permitida
+            allow_origin = response.headers.get("access-control-allow-origin", "")
+            if not allow_origin:
+                logger.warning(
+                    f"🚫 CORS REJEITADO: Origin '{origin}' não permitida | "
+                    f"Origins explícitas: {CORS_ORIGINS} | "
+                    f"Regex: {CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else 'nenhum'}"
+                )
+            else:
+                logger.debug(f"✅ CORS OK: Origin '{origin}' permitida")
+    
+    return response
+
+# ====================================================================
 # CORS MIDDLEWARE — MUST be last middleware added so it is OUTERMOST.
 #
 # In Starlette, middleware executes in REVERSE order of addition.
@@ -748,6 +888,92 @@ app.add_middleware(
     allow_headers=CORS_ALLOW_HEADERS,
     max_age=CORS_MAX_AGE,
 )
+
+# ====================================================================
+# VERCEL CORS FALLBACK MIDDLEWARE — Camada de segurança extra.
+#
+# Adicionado DEPOIS do CORSMiddleware → torna-se o OUTERMOST middleware.
+# Isto garante que pedidos preflight OPTIONS de URLs do Vercel são
+# sempre tratados, mesmo que o CORSMiddleware não faça match da regex.
+#
+# PROBLEMA: Alguns deployments no Render podem ter ALLOW_VERCEL_PREVIEWS
+# desativado ou a regex pode falhar por motivos de parsing. Este middleware
+# garante que previews do Vercel funcionam SEMPRE.
+#
+# Segurança: Apenas aceita origins HTTPS que terminem em .vercel.app
+# ====================================================================
+from starlette.responses import Response as StarletteResponse
+
+@app.middleware("http")
+async def vercel_cors_fallback_middleware(request, call_next):
+    """
+    Fallback CORS middleware para URLs de preview do Vercel.
+    
+    Garante que pedidos preflight OPTIONS de *.vercel.app são sempre
+    tratados com HTTP 200 e headers CORS correctos, mesmo que o
+    CORSMiddleware principal não faça match da origin.
+    
+    Isto resolve o erro: "Response to preflight request doesn't pass
+    access control check: It does not have HTTP ok status."
+    
+    Segurança:
+    - Apenas origens HTTPS (nunca HTTP)
+    - Apenas domínios .vercel.app (verificado por sufixo)
+    - Respeita a configuração de credentials
+    """
+    origin = request.headers.get("origin", "")
+    
+    # Detectar se é uma URL de preview do Vercel
+    is_vercel_preview = (
+        origin and
+        origin.startswith("https://") and
+        origin.endswith(".vercel.app") and
+        len(origin) > len("https://.vercel.app")  # Tem subdomínio
+    )
+    
+    # Para pedidos preflight OPTIONS de Vercel: responder directamente
+    if request.method == "OPTIONS" and is_vercel_preview:
+        # Verificar se o CORSMiddleware já adicionou headers
+        # (se passou pelo CORSMiddleware com sucesso, já terá resposta)
+        # Como este middleware é OUTERMOST, chamar call_next passa ao CORSMiddleware
+        response = await call_next(request)
+        
+        # Se o CORSMiddleware não adicionou o header, o preflight falhou
+        if not response.headers.get("access-control-allow-origin"):
+            logger.info(
+                f"🔄 Vercel CORS fallback: Origin '{origin}' não foi tratada pelo CORSMiddleware. "
+                f"A adicionar headers CORS manualmente."
+            )
+            return StarletteResponse(
+                status_code=200,
+                headers={
+                    "Access-Control-Allow-Origin": origin,
+                    "Access-Control-Allow-Methods": ",".join(CORS_ALLOW_METHODS),
+                    "Access-Control-Allow-Headers": ",".join(CORS_ALLOW_HEADERS),
+                    "Access-Control-Allow-Credentials": "true" if CORS_ALLOW_CREDENTIALS else "false",
+                    "Access-Control-Max-Age": str(CORS_MAX_AGE),
+                }
+            )
+        return response
+    
+    # Para pedidos normais (GET, POST, etc.) de Vercel
+    response = await call_next(request)
+    
+    # Se o CORSMiddleware não adicionou headers CORS, adicionar manualmente
+    if is_vercel_preview and not response.headers.get("access-control-allow-origin"):
+        logger.debug(f"🔄 Vercel CORS fallback: Adicionando headers CORS para origin '{origin}'")
+        response.headers["Access-Control-Allow-Origin"] = origin
+        if CORS_ALLOW_CREDENTIALS:
+            response.headers["Access-Control-Allow-Credentials"] = "true"
+    
+    return response
+
+# Log da configuração CORS no arranque
+logger.info(f"📋 CORS: {len(CORS_ORIGINS)} origins explícitas = {CORS_ORIGINS}")
+logger.info(f"📋 CORS: regex = {CORS_ORIGIN_REGEX[0] if CORS_ORIGIN_REGEX else 'nenhum'}")
+logger.info(f"📋 CORS: credentials = {CORS_ALLOW_CREDENTIALS}")
+logger.info(f"📋 CORS: max_age = {CORS_MAX_AGE}")
+logger.info("📋 CORS: Vercel fallback middleware ATIVO (qualquer *.vercel.app HTTPS é permitido)")
 
 @app.on_event("startup")
 async def startup():

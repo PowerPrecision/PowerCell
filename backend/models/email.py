@@ -194,6 +194,7 @@ class EmailTemplateResponse(BaseModel):
     subject: Optional[str] = None
     body: str
     category: Optional[str] = None
+    company_id: Optional[str] = None  # MULTI-EMPRESA
     created_by: Optional[str] = None
     created_at: str
     is_default: bool = False

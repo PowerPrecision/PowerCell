@@ -657,7 +657,7 @@ async def get_config(
         "smtp_password_2", "imap_password_2",
         "api_key", "api_token", "dropbox_access_token",
         "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password",
-        "resend_api_key",
+        "resend_api_key", "app_password",  # system_smtp + system_webmail
     ]
     
     def mask_sensitive(obj, parent_key=""):
@@ -1131,7 +1131,7 @@ async def reveal_secrets(
         "smtp_password_2", "imap_password_2",
         "api_key", "api_token", "dropbox_access_token",
         "hcpro_password", "decisoes_password", "doutorfinancas_password", "custom_portal_password",
-        "resend_api_key",
+        "resend_api_key", "app_password",  # system_smtp + system_webmail
     ]
     
     # Filtrar apenas a secção pedida

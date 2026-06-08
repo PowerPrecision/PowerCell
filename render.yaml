@@ -57,8 +57,19 @@ services:
         sync: false
 
       # ── CORS ──
+      # Origens explícitas (o regex ALLOW_VERCEL_PREVIEWS cobre *.vercel.app)
       - key: CORS_ORIGINS
-        value: https://powercell.onrender.com,https://powercell-frontend.onrender.com,https://powercell.pt,https://www.powercell.pt
+        value: https://powercell.onrender.com,https://powercell-1.onrender.com,https://powercell-frontend.onrender.com,https://powercell.pt,https://www.powercell.pt
+      # Permitir qualquer subdomínio .vercel.app (previews de branch/PR)
+      - key: ALLOW_VERCEL_PREVIEWS
+        value: "true"
+      # Headers permitidos em pedidos CORS (inclui headers custom do frontend)
+      # IMPORTANTE: X-Company-Id e X-Active-Role são enviados pelo ContextSwitcher
+      - key: CORS_ALLOW_HEADERS
+        value: Authorization,Content-Type,Accept,Origin,X-Requested-With,X-Active-Role,X-Company-Id
+      # Métodos HTTP permitidos em pedidos CORS
+      - key: CORS_ALLOW_METHODS
+        value: GET,POST,PUT,DELETE,OPTIONS,PATCH
 
       # ── AWS S3 (SECRETS) ──
       - key: AWS_ACCESS_KEY_ID
@@ -103,6 +114,16 @@ services:
       # ── Playwright ──
       - key: PLAYWRIGHT_BROWSERS_PATH
         value: /ms-playwright
+
+      # ── Logging / Anti-Buffering ──
+      # PYTHONUNBUFFERED=1 obriga o Python a enviar logs imediatamente
+      # para stdout, sem reter em memória. Essencial para o Render capturar
+      # logs em tempo real. Já definido no Dockerfile, mas repetido aqui
+      # para garantir que funciona mesmo sem Docker (e.g. render start command).
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
 
       # ── Uvicorn ──
       # IMPORTANTE: Com 2GB RAM, usar MÁXIMO 2 workers.
@@ -180,6 +201,12 @@ services:
         value: production
       - key: APP_ENV
         value: production
+
+      # ── Logging / Anti-Buffering ──
+      - key: PYTHONUNBUFFERED
+        value: "1"
+      - key: LOG_LEVEL
+        value: INFO
 
       # ── Base de Dados (SECRETS) ──
       - key: MONGO_URL

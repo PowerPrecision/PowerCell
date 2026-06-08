@@ -10,7 +10,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { safeDateStr } from "../lib/utils";
+import { safeDateStr, formatDate } from "../lib/utils";
 import DashboardLayout from "../layouts/DashboardLayout";
 import KanbanBoard from "../components/KanbanBoard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -152,11 +152,11 @@ const StaffDashboard = () => {
         getCalendarDeadlines().catch(() => ({ data: [] })),
         getWebmailStats("personal").catch(() => ({ data: { unread_count: 0, sent_today_count: 0, drafts_count: 0 } })),
       ]);
-      setStats(statsRes.data);
-      setUsers(usersRes.data);
-      setExpiries(expiriesRes.data);
-      setDeadlines(deadlinesRes.data);
-      setWebmailStats(webmailRes.data);
+      setStats(statsRes.data || {});
+      setUsers(Array.isArray(usersRes?.data) ? usersRes.data : []);
+      setExpiries(Array.isArray(expiriesRes?.data) ? expiriesRes.data : []);
+      setDeadlines(Array.isArray(deadlinesRes?.data) ? deadlinesRes.data : []);
+      setWebmailStats(webmailRes.data || { unread_count: 0, sent_today_count: 0, drafts_count: 0 });
     } catch (error) {
       console.error("Error fetching data:", error);
       toast.error("Erro ao carregar dados");
@@ -476,7 +476,7 @@ const StaffDashboard = () => {
                 </span>
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                {dstiAlerts.processes.slice(0, 6).map((p) => (
+                {dstiAlerts?.processes?.slice(0, 6).map((p) => (
                   <button
                     key={p.process_id}
                     onClick={() => navigate(`/processo/${p.process_id}`)}
@@ -669,7 +669,7 @@ const StaffDashboard = () => {
                           <p className="text-sm text-muted-foreground">{deadline.client_name}</p>
                         </div>
                         <div className="text-right">
-                          <p className="text-sm font-medium">{new Date(safeDateStr(deadline.due_date)).toLocaleDateString('pt-PT')}</p>
+                          <p className="text-sm font-medium">{formatDate(deadline.due_date)}</p>
                           <Badge variant={deadline.priority === "high" ? "destructive" : "outline"}>
                             {deadline.priority === "high" ? "Alta" : deadline.priority === "medium" ? "Média" : "Baixa"}
                           </Badge>
@@ -757,7 +757,7 @@ const StaffDashboard = () => {
                                       <Badge variant="outline" className="text-xs">{doc.document_type}</Badge>
                                     </div>
                                     <div className="flex items-center gap-2">
-                                      <span className="text-xs">{new Date(safeDateStr(doc.expiry_date)).toLocaleDateString('pt-PT')}</span>
+                                      <span className="text-xs">{formatDate(doc.expiry_date)}</span>
                                       <Badge className={daysUntil <= 7 ? 'bg-red-500' : daysUntil <= 30 ? 'bg-amber-500' : 'bg-blue-500'}>
                                         {daysUntil}d
                                       </Badge>

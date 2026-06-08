@@ -43,7 +43,7 @@ import { pt } from "date-fns/locale";
 import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole, excludeRoles } from "../utils/roleUtils";
-import { safeFormat } from "../lib/utils";
+import { safeFormat, safeDate } from "../lib/utils";
 
 
 
@@ -200,9 +200,10 @@ const TasksPanel = ({
         process_id: processId
       };
       
-      // Adicionar due_date apenas se preenchido
+      // Adicionar due_date apenas se preenchido (protecção defensiva contra datas inválidas / Safari)
       if (newTask.due_date) {
-        taskData.due_date = new Date(newTask.due_date).toISOString();
+        const parsedDate = safeDate(newTask.due_date);
+        taskData.due_date = parsedDate ? parsedDate.toISOString() : newTask.due_date;
       }
       
       await createTask(taskData);

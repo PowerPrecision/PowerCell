@@ -68,6 +68,7 @@ import {
   ChevronDown,
   ChevronUp,
   Euro,
+  Plus,
 } from "lucide-react";
 import { toast } from "sonner";
 import { RichTextViewer } from "./ui/RichTextEditor";
@@ -175,6 +176,7 @@ const SendDocumentationModal = ({
   const [selectedRecipients, setSelectedRecipients] = useState([]);
   const [emailTemplate, setEmailTemplate] = useState("");
   const [ccEmails, setCcEmails] = useState("");
+  const [bccEmails, setBccEmails] = useState("");
   const [config, setConfig] = useState(null);
   const [warnings, setWarnings] = useState([]);
   const [selectedToEmails, setSelectedToEmails] = useState([]);
@@ -186,6 +188,12 @@ const SendDocumentationModal = ({
   const [activeTab, setActiveTab] = useState("preview"); // "preview" | "edit"
   const [tagsExpanded, setTagsExpanded] = useState(false);
   const [copiedTag, setCopiedTag] = useState(null);
+
+  // Estado para criação de novo balcão personalizado
+  const [showNewBranch, setShowNewBranch] = useState(false);
+  const [newBranchName, setNewBranchName] = useState("");
+  const [newBranchEmail, setNewBranchEmail] = useState("");
+  const [savingBranch, setSavingBranch] = useState(false);
 
   // Carregar configuração e documentos
   useEffect(() => {
@@ -272,6 +280,68 @@ const SendDocumentationModal = ({
       console.error("Erro ao carregar preview:", error);
     } finally {
       setPreviewLoading(false);
+    }
+  };
+
+  // Criar novo balcão personalizado via POST /api/user-branches
+  const handleCreateBranch = async () => {
+    if (!newBranchName.trim() || !newBranchEmail.trim()) {
+      toast.error("Preencha o nome e o email do balcão.");
+      return;
+    }
+
+    // Validação básica de email
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(newBranchEmail.trim())) {
+      toast.error("Introduza um email válido.");
+      return;
+    }
+
+    setSavingBranch(true);
+    try {
+      const response = await fetch(`${API_URL}/api/user-branches`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({
+          name: newBranchName.trim(),
+          email: newBranchEmail.trim(),
+        }),
+      });
+
+      if (response.ok) {
+        const newBranch = await response.json();
+
+        // Adicionar o novo balcão à lista de recipients e pré-selecioná-lo
+        setRecipients((prev) => [
+          ...prev,
+          {
+            id: newBranch.id,
+            name: newBranch.name,
+            email: newBranch.email,
+            is_custom: true,
+            active: true,
+          },
+        ]);
+        setSelectedRecipients((prev) => [...prev, newBranch.email]);
+
+        // Limpar formulário e fechar
+        setNewBranchName("");
+        setNewBranchEmail("");
+        setShowNewBranch(false);
+
+        toast.success(`Balcão "${newBranch.name}" guardado com sucesso!`);
+      } else {
+        const data = await response.json();
+        toast.error(data.detail || "Erro ao guardar balcão.");
+      }
+    } catch (error) {
+      console.error("Erro ao criar balcão:", error);
+      toast.error("Erro ao guardar balcão.");
+    } finally {
+      setSavingBranch(false);
     }
   };
 
@@ -384,6 +454,8 @@ const SendDocumentationModal = ({
         to_emails: selectedToEmails,
         bcc_recipients: selectedRecipients,
         cc_emails: ccEmails ? ccEmails.split(",").map(e => e.trim()) : [],
+        bcc_emails: bccEmails ? bccEmails.split(",").map(e => e.trim()) : [],
+        subject: emailSubject || undefined,
       };
 
       // Enviar HTML customizado do editor (disponível para todos os utilizadores)
@@ -416,6 +488,7 @@ const SendDocumentationModal = ({
         setEmailHtml("");
         setEmailSubject("");
         setCcEmails("");
+        setBccEmails("");
       } else {
         if (response.status === 404) {
           toast.error(data.detail || "Processo ou documento não encontrado.", { duration: 6000 });
@@ -561,21 +634,93 @@ const SendDocumentationModal = ({
 
               {/* Destinatários */}
               <div className="border rounded-lg p-3">
-                <Label className="flex items-center gap-2 mb-2">
-                  <Building2 className="h-4 w-4" />
-                  Destinatários (BCC) - {selectedRecipients.length} seleccionado(s)
-                </Label>
+                <div className="flex items-center justify-between mb-2">
+                  <Label className="flex items-center gap-2">
+                    <Building2 className="h-4 w-4" />
+                    Destinatários (BCC) - {selectedRecipients.length} seleccionado(s)
+                  </Label>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-6 text-xs gap-1"
+                    onClick={() => setShowNewBranch(!showNewBranch)}
+                  >
+                    <Plus className="h-3 w-3" />
+                    Adicionar Novo Balcão
+                  </Button>
+                </div>
+
+                {/* Formulário de novo balcão personalizado */}
+                {showNewBranch && (
+                  <div className="mb-3 p-2.5 border rounded-md bg-blue-50/50 dark:bg-blue-950/20 space-y-2">
+                    <p className="text-xs text-muted-foreground">
+                      Guarde um balcão para si — ficará disponível apenas no seu utilizador.
+                    </p>
+                    <div className="grid grid-cols-2 gap-2">
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Nome do Balcão</Label>
+                        <Input
+                          placeholder="Ex: BCP Alvalade"
+                          value={newBranchName}
+                          onChange={(e) => setNewBranchName(e.target.value)}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-[11px]">Email do Balcão</Label>
+                        <Input
+                          placeholder="balcao@banco.pt"
+                          type="email"
+                          value={newBranchEmail}
+                          onChange={(e) => setNewBranchEmail(e.target.value)}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button
+                        size="sm"
+                        className="h-7 text-xs"
+                        disabled={savingBranch || !newBranchName.trim() || !newBranchEmail.trim()}
+                        onClick={handleCreateBranch}
+                      >
+                        {savingBranch ? (
+                          <Loader2 className="h-3 w-3 mr-1 animate-spin" />
+                        ) : (
+                          <CheckCircle className="h-3 w-3 mr-1" />
+                        )}
+                        Guardar para mim
+                      </Button>
+                      <Button
+                        variant="ghost"
+                        size="sm"
+                        className="h-7 text-xs"
+                        onClick={() => {
+                          setShowNewBranch(false);
+                          setNewBranchName("");
+                          setNewBranchEmail("");
+                        }}
+                      >
+                        Cancelar
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 <ScrollArea className="h-40">
                   <div className="space-y-1">
                     {recipients.map((recipient) => {
                       const isBlocked = isRecipientBlocked(recipient);
+                      const isCustom = recipient.is_custom === true;
                       return (
                         <label
-                          key={recipient.email}
+                          key={`${recipient.email}-${recipient.id || recipient.name}`}
                           className={`flex items-center gap-2 p-2 rounded cursor-pointer ${
                             isBlocked 
                               ? "bg-red-50 dark:bg-red-950/20 opacity-75" 
-                              : "hover:bg-muted"
+                              : isCustom
+                                ? "bg-blue-50/40 dark:bg-blue-950/10 hover:bg-blue-50 dark:hover:bg-blue-950/20"
+                                : "hover:bg-muted"
                           }`}
                         >
                           <Checkbox
@@ -584,7 +729,14 @@ const SendDocumentationModal = ({
                             disabled={isBlocked && !isAdminOrCEO}
                           />
                           <div className="flex-1">
-                            <span className="text-sm font-medium">{recipient.name}</span>
+                            <div className="flex items-center gap-1.5">
+                              <span className="text-sm font-medium">{recipient.name}</span>
+                              {isCustom && (
+                                <Badge variant="outline" className="text-[10px] px-1 py-0 bg-blue-50 text-blue-700 border-blue-200 dark:bg-blue-900/30 dark:text-blue-300 dark:border-blue-700">
+                                  Meu
+                                </Badge>
+                              )}
+                            </div>
                             <span className="text-xs text-muted-foreground block">
                               {recipient.email}
                             </span>
@@ -650,6 +802,22 @@ const SendDocumentationModal = ({
                   value={ccEmails}
                   onChange={(e) => setCcEmails(e.target.value)}
                 />
+              </div>
+
+              {/* BCC (emails adicionais) */}
+              <div className="space-y-1">
+                <Label className="text-xs text-muted-foreground flex items-center gap-1.5">
+                  <Users className="h-3.5 w-3.5" />
+                  BCC Emails (adicional, separar por vírgula)
+                </Label>
+                <Input
+                  placeholder="email1@exemplo.pt, email2@exemplo.pt"
+                  value={bccEmails}
+                  onChange={(e) => setBccEmails(e.target.value)}
+                />
+                <p className="text-[10px] text-muted-foreground">
+                  Estes emails serão adicionados à lista de BCC (cópia oculta) além dos destinatários seleccionados acima.
+                </p>
               </div>
             </div>
 

@@ -1,20 +1,26 @@
 /**
- * ClientPortal — Portal do Cliente (Login Obrigatório + Magic Link).
+ * ClientPortal — Portal do Cliente (Email + Código de Acesso + Sliding Session).
  *
  * Layout: Dashboard profissional full-width — horizontal stepper + 2 colunas.
  * - Topo (lg:col-span-12): Resumo + Timeline Horizontal (Stepper)
  * - Esquerda (lg:col-span-7): Gestão de Documentos + RGPD + Equipa
  * - Direita (lg:col-span-5): Mensagens / Chat
  *
- * Fluxo de autenticação (v2 — Login obrigatório):
- *   1. Utilizador acede ao portal (via link com client_id ou magic link)
- *   2. Se não tem verified_session token → Mostra ecrã de login
- *   3. Login: NIF + Nº Processo → POST /portal/{client_id}/verify → JWT
- *   4. Token gravado em localStorage → Acesso concedido ao portal
+ * Fluxo de autenticação (v4 — Código de Acesso Fixo):
+ *   1. Utilizador acede ao portal (/portal)
+ *   2. Se não tem token em localStorage → Mostra ecrã de login
+ *   3. Login: Email + Código de Acesso → POST /portal/auth/login → Token JWT
+ *   4. Token gravado em localStorage com Sliding Session (15 min de inactividade)
  *   5. Fluxo legado (magic link) ainda funciona como fallback
+ *
+ * Sliding Session:
+ *   - A sessão não expira enquanto o utilizador estiver activo
+ *   - Após 15 min de inactividade → logout automático
+ *   - Ao fechar a aba → limpa storage (obriga novo login)
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { toast } from 'sonner';
+import useSlidingSession from '../hooks/useSlidingSession';
 import {
   FileText,
   Upload,
@@ -41,11 +47,18 @@ import {
   Home,
   MapPin,
   CalendarClock,
+  User,
+  Save,
+  Lock,
+  Download,
+  Calculator,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
-import { safeDateStr } from '../lib/utils';
+import { formatDate, safeDate } from '../lib/utils';
+import ClientPortalLogin from './ClientPortalLogin';
+import SimulatorCH from '../components/portal/SimulatorCH';
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -69,6 +82,11 @@ function LoaderFallback() {
 }
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
+
+// ── Helper: obter token do portal (localStorage > sessionStorage legado) ──
+function getPortalToken() {
+  return localStorage.getItem('portalToken') || localStorage.getItem('portal_token') || sessionStorage.getItem('portalToken');
+}
 
 // ====================================================================
 // FETCH WITH RETRY — handles Render cold starts (503) automatically
@@ -200,7 +218,7 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
     setProgress(0);
 
     try {
-      const token = localStorage.getItem('portal_token');
+      const token = getPortalToken();
       if (!token) throw new Error('Sessão expirada. Recarregue a página.');
 
       // Step 1: pre-signed URL
@@ -471,13 +489,13 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
     setMfaSubmitting(true);
     setError(null);
     try {
-      const token = localStorage.getItem('portal_token');
+      const token = getPortalToken();
       if (!token) throw new Error('Sessão expirada.');
 
       const res = await fetchWithRetry(`${BACKEND_URL}/portal/submit-mfa`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-        body: JSON.stringify({ process_id: localStorage.getItem('portal_process_id') || '', mfa_code: mfaCode }),
+        body: JSON.stringify({ process_id: localStorage.getItem('portalProcessId') || localStorage.getItem('portal_process_id') || '', mfa_code: mfaCode }),
       });
 
       let data;
@@ -519,7 +537,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
     setLoading(true);
     let startedAsyncJob = false;
     try {
-      const token = localStorage.getItem('portal_token');
+      const token = getPortalToken();
       if (!token) throw new Error('Sessão expirada.');
 
       const endpoint = isFinancas ? 'fetch-financas' : 'fetch-seguranca-social';
@@ -1003,19 +1021,48 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
             <CheckCircle2 className="w-5 h-5 text-teal-500" />
             Documentos Recebidos ({received.length})
           </h3>
-          <p className="text-xs text-gray-400 mb-3">Documentos submetidos e já recebidos pela nossa equipa.</p>
-          <div className="space-y-2 max-h-64 overflow-y-auto">
+          <p className="text-xs text-gray-400 mb-3">Documentos submetidos e já recebidos pela nossa equipa. Clique no ícone para descarregar.</p>
+          <div className="space-y-2 max-h-80 overflow-y-auto">
             {received.map((doc) => (
-              <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-teal-50/50 hover:bg-teal-50 transition-colors">
+              <div key={doc.id} className="flex items-center gap-3 p-2.5 rounded-lg bg-teal-50/50 hover:bg-teal-50 transition-colors group">
                 <span className="text-base flex-shrink-0">{doc.icon || '📄'}</span>
                 <div className="min-w-0 flex-1">
                   <p className="text-sm text-gray-700 truncate font-medium">{typeof doc.filename === 'string' ? doc.filename : String(doc.filename || '')}</p>
                   <p className="text-xs text-gray-400">
                     {typeof (doc.category_label || doc.category) === 'string' ? (doc.category_label || doc.category) : String(doc.category_label || doc.category || '')}
-                    {doc.received_at && ` · ${new Date(safeDateStr(doc.received_at)).toLocaleDateString('pt-PT')}`}
+                    {doc.received_at && ` · ${formatDate(doc.received_at)}`}
+                    {doc.file_size && ` · ${(doc.file_size / 1024).toFixed(0)} KB`}
                   </p>
                 </div>
-                <Check className="w-4 h-4 text-teal-500 flex-shrink-0" />
+                {/* Botão Download — chama /portal/download-url com o token de sessão */}
+                {doc.s3_path ? (
+                  <button
+                    onClick={async () => {
+                      try {
+                        const token = getPortalToken();
+                        if (!token) { toast.error('Sessão expirada.'); return; }
+                        const res = await fetchWithRetry(
+                          `${BACKEND_URL}/portal/download-url?file_key=${encodeURIComponent(doc.s3_path)}`,
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        const data = await res.json().catch(() => ({}));
+                        if (res.ok && data.url) {
+                          window.open(data.url, '_blank', 'noopener');
+                        } else {
+                          toast.error(data.detail || 'Erro ao gerar link de download.');
+                        }
+                      } catch (err) {
+                        toast.error('Erro de ligação ao tentar descarregar.');
+                      }
+                    }}
+                    className="flex-shrink-0 p-1.5 rounded-lg text-teal-500 hover:bg-teal-100 hover:text-teal-700 transition-colors opacity-60 group-hover:opacity-100"
+                    title="Descarregar documento"
+                  >
+                    <Download className="w-4 h-4" />
+                  </button>
+                ) : (
+                  <Check className="w-4 h-4 text-teal-500 flex-shrink-0" />
+                )}
               </div>
             ))}
           </div>
@@ -1108,8 +1155,9 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
   // Relative timestamp in Portuguese
   const formatRelativeTime = (isoDate) => {
     if (!isoDate) return '';
+    const date = safeDate(isoDate);
+    if (!date) return '';
     const now = new Date();
-    const date = new Date(safeDateStr(isoDate));
     const diffMs = now - date;
     const diffSec = Math.floor(diffMs / 1000);
     const diffMin = Math.floor(diffSec / 60);
@@ -1121,7 +1169,7 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
     if (diffHour < 24) return `há ${diffHour} hora${diffHour > 1 ? 's' : ''}`;
     if (diffDay === 1) return 'ontem';
     if (diffDay < 7) return `há ${diffDay} dias`;
-    return date.toLocaleDateString('pt-PT');
+    return formatDate(isoDate);
   };
 
   // In Sheet mode: no card wrapper, fill full height, hide header (Sheet provides it)
@@ -1218,6 +1266,358 @@ function PortalMessages({ messages, loading, newMessage, setNewMessage, onSend, 
     </div>
   );
 }
+
+// ====================================================================
+// PROFILE PANEL — "O Meu Perfil" tab content
+// ====================================================================
+function ProfilePanel() {
+  const [profile, setProfile] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState(null);
+  const [saveResult, setSaveResult] = useState(null);
+  const [formData, setFormData] = useState({
+    // Contacto
+    email: '',
+    email_secundario: '',
+    telefone: '',
+    telefone_secundario: '',
+    // Dados Pessoais
+    morada_fiscal: '',
+    estado_civil: '',
+    profissao: '',
+    naturalidade: '',
+    nacionalidade: '',
+    data_nascimento: '',
+    documento_id: '',
+    data_validade_cc: '',
+    sexo: '',
+  });
+
+  // ── Fetch profile data ──
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const token = getPortalToken();
+        if (!token) throw new Error('Sessão expirada.');
+
+        const res = await fetchWithRetry(`${BACKEND_URL}/portal/me`, {
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        if (cancelled) return;
+
+        if (!res.ok) {
+          const e = await res.json().catch(() => ({}));
+          throw new Error(e.detail || 'Erro ao carregar perfil.');
+        }
+
+        const data = await res.json();
+        if (cancelled) return;
+
+        setProfile(data);
+        setFormData({
+          email: data.contacto?.email || '',
+          email_secundario: data.contacto?.email_secundario || '',
+          telefone: data.contacto?.telefone || '',
+          telefone_secundario: data.contacto?.telefone_secundario || '',
+          morada_fiscal: data.dados_pessoais?.morada_fiscal || '',
+          estado_civil: data.dados_pessoais?.estado_civil || '',
+          profissao: data.dados_pessoais?.profissao || '',
+          naturalidade: data.dados_pessoais?.naturalidade || '',
+          nacionalidade: data.dados_pessoais?.nacionalidade || '',
+          data_nascimento: data.dados_pessoais?.data_nascimento || data.dados_pessoais?.birth_date || '',
+          documento_id: data.dados_pessoais?.documento_id || '',
+          data_validade_cc: data.dados_pessoais?.data_validade_cc || '',
+          sexo: data.dados_pessoais?.sexo || '',
+        });
+      } catch (err) {
+        if (!cancelled) setError(err.message);
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, []);
+
+  const handleChange = (field, value) => {
+    setFormData(prev => ({ ...prev, [field]: value }));
+    setSaveResult(null);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    setError(null);
+    setSaveResult(null);
+
+    try {
+      const token = getPortalToken();
+      if (!token) throw new Error('Sessão expirada.');
+
+      const payload = {
+        contacto: {
+          email: formData.email || null,
+          email_secundario: formData.email_secundario || null,
+          telefone: formData.telefone || null,
+          telefone_secundario: formData.telefone_secundario || null,
+        },
+        dados_pessoais: {
+          morada_fiscal: formData.morada_fiscal || null,
+          estado_civil: formData.estado_civil || null,
+          profissao: formData.profissao || null,
+          naturalidade: formData.naturalidade || null,
+          nacionalidade: formData.nacionalidade || null,
+          data_nascimento: formData.data_nascimento || null,
+          documento_id: formData.documento_id || null,
+          data_validade_cc: formData.data_validade_cc || null,
+          sexo: formData.sexo || null,
+        },
+      };
+
+      const res = await fetchWithRetry(`${BACKEND_URL}/portal/me`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify(payload),
+      });
+
+      const data = await res.json().catch(() => ({}));
+
+      if (res.status === 403) {
+        setError(data.detail || 'Dados trancados. Processo já em análise.');
+        return;
+      }
+
+      if (!res.ok) {
+        throw new Error(data.detail || 'Erro ao guardar perfil.');
+      }
+
+      setSaveResult({ success: true, message: data.message || 'Perfil atualizado com sucesso.' });
+      toast.success('Perfil atualizado com sucesso!');
+    } catch (err) {
+      setError(err.message);
+      setSaveResult({ success: false, message: err.message });
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const isLocked = profile?.has_process === true;
+
+  if (loading) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <div className="flex items-center justify-center gap-2 text-sm text-gray-400">
+          <Loader2 className="w-5 h-5 animate-spin text-blue-500" />
+          A carregar o seu perfil...
+        </div>
+      </div>
+    );
+  }
+
+  if (error && !profile) {
+    return (
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-8">
+        <div className="flex items-start gap-2 text-sm text-red-600 bg-red-50 rounded-lg px-4 py-3">
+          <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      </div>
+    );
+  }
+
+  // ── Field component for consistency ──
+  const Field = ({ label, field, type = 'text', placeholder = '', options = null }) => (
+    <div>
+      <label className="text-xs font-medium text-gray-600 mb-1 block">{label}</label>
+      {options ? (
+        <select
+          value={formData[field]}
+          onChange={(e) => handleChange(field, e.target.value)}
+          disabled={isLocked}
+          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors ${
+            isLocked ? 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed' : 'border-gray-200 bg-white'
+          }`}
+        >
+          <option value="">—</option>
+          {options.map(opt => (
+            <option key={opt.value} value={opt.value}>{opt.label}</option>
+          ))}
+        </select>
+      ) : (
+        <input
+          type={type}
+          value={formData[field]}
+          onChange={(e) => handleChange(field, e.target.value)}
+          placeholder={placeholder}
+          disabled={isLocked}
+          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors ${
+            isLocked ? 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed' : 'border-gray-200 bg-white'
+          }`}
+        />
+      )}
+    </div>
+  );
+
+  return (
+    <div className="space-y-5">
+      {/* ── Banner de bloqueio condicional ── */}
+      {isLocked && (
+        <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <Lock className="w-5 h-5 text-blue-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-bold text-blue-800">Processo em Análise</h3>
+              <p className="text-xs text-blue-600 mt-0.5">
+                O seu processo já se encontra em análise pela nossa equipa. Os dados estão protegidos e não podem ser alterados.
+              </p>
+              <p className="text-xs text-blue-500 mt-1">
+                Se precisar de corrigir algum dado, contacte o seu consultor através do chat.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Perfil editável (quando não tem processo) ── */}
+      {!isLocked && (
+        <div className="bg-emerald-50 border border-emerald-200 rounded-2xl p-5 sm:p-6">
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-emerald-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <User className="w-5 h-5 text-emerald-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-bold text-emerald-800">Complete o seu Perfil</h3>
+              <p className="text-xs text-emerald-600 mt-0.5">
+                Preencha os seus dados pessoais para agilizar o processo. Assim que o seu processo for criado, os dados ficarão protegidos.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Nome (read-only, nunca editável pelo cliente) ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <User className="w-5 h-5 text-blue-500" />
+          Dados Pessoais
+        </h3>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          {/* Nome — read-only */}
+          <div className="sm:col-span-2">
+            <label className="text-xs font-medium text-gray-600 mb-1 block">Nome Completo</label>
+            <input
+              type="text"
+              value={profile?.nome || ''}
+              disabled
+              className="w-full px-3 py-2 text-sm border border-gray-100 rounded-lg bg-gray-50 text-gray-400 cursor-not-allowed"
+            />
+            <p className="text-[10px] text-gray-400 mt-0.5">O nome não pode ser alterado. Contacte o seu consultor se precisar.</p>
+          </div>
+
+          <Field label="Data de Nascimento" field="data_nascimento" type="date" />
+          <Field
+            label="Estado Civil"
+            field="estado_civil"
+            options={[
+              { value: 'solteiro', label: 'Solteiro(a)' },
+              { value: 'casado', label: 'Casado(a)' },
+              { value: 'divorciado', label: 'Divorciado(a)' },
+              { value: 'viuvo', label: 'Viúvo(a)' },
+              { value: 'uniao_de_facto', label: 'União de Facto' },
+              { value: 'separado', label: 'Separado(a)' },
+            ]}
+          />
+          <Field label="Nacionalidade" field="nacionalidade" placeholder="Portuguesa" />
+          <Field label="Naturalidade" field="naturalidade" placeholder="Lisboa" />
+          <Field label="Profissão" field="profissao" placeholder="Engenheiro(a)" />
+          <Field
+            label="Sexo"
+            field="sexo"
+            options={[
+              { value: 'M', label: 'Masculino' },
+              { value: 'F', label: 'Feminino' },
+            ]}
+          />
+        </div>
+      </div>
+
+      {/* ── Documento de Identificação ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Shield className="w-5 h-5 text-teal-500" />
+          Documento de Identificação
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Nº do Documento (CC/Passaporte)" field="documento_id" placeholder="00000000" />
+          <Field label="Validade do Documento" field="data_validade_cc" type="date" />
+        </div>
+      </div>
+
+      {/* ── Morada ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <MapPin className="w-5 h-5 text-rose-500" />
+          Morada Fiscal
+        </h3>
+        <div className="grid grid-cols-1 gap-4">
+          <Field label="Morada Fiscal" field="morada_fiscal" placeholder="Rua Exemplo, Nº 1, 1000-001 Lisboa" />
+        </div>
+      </div>
+
+      {/* ── Contactos ── */}
+      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
+          <Phone className="w-5 h-5 text-violet-500" />
+          Contactos
+        </h3>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+          <Field label="Email Principal" field="email" type="email" placeholder="email@exemplo.pt" />
+          <Field label="Email Secundário" field="email_secundario" type="email" placeholder="email2@exemplo.pt" />
+          <Field label="Telefone" field="telefone" type="tel" placeholder="912345678" />
+          <Field label="Telefone Secundário" field="telefone_secundario" type="tel" placeholder="912345678" />
+        </div>
+      </div>
+
+      {/* ── Botão Guardar (só visível se NÃO bloqueado) ── */}
+      {!isLocked && (
+        <div className="flex items-center justify-end gap-3">
+          {saveResult?.success && (
+            <div className="flex items-center gap-1.5 text-sm text-emerald-600">
+              <CheckCircle2 className="w-4 h-4" />
+              <span>{saveResult.message}</span>
+            </div>
+          )}
+          <button
+            onClick={handleSave}
+            disabled={saving}
+            className="flex items-center gap-2 px-6 py-2.5 text-sm font-semibold bg-blue-600 text-white rounded-xl hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors shadow-sm"
+          >
+            {saving ? (
+              <><Loader2 className="w-4 h-4 animate-spin" /> A guardar...</>
+            ) : (
+              <><Save className="w-4 h-4" /> Guardar Alterações</>
+            )}
+          </button>
+        </div>
+      )}
+
+      {/* ── Erro de atualização (ex: 403 bloqueado) ── */}
+      {error && profile && (
+        <div className="flex items-start gap-1.5 text-xs text-red-600 bg-red-50 rounded-lg px-4 py-2.5">
+          <AlertCircle className="w-3.5 h-3.5 mt-0.5 flex-shrink-0" />
+          <span>{error}</span>
+        </div>
+      )}
+    </div>
+  );
+}
+
 
 // ====================================================================
 // IFRAME DETECTOR (non-intrusive)
@@ -1459,20 +1859,24 @@ export default function ClientPortal() {
 
   const rawToken = useRef(window.location.pathname.split('/portal/')[1]);
 
+  // ── Sliding Session — auto-logout após 15 min de inactividade ──
+  const { logout: sessionLogout } = useSlidingSession({
+    onExpired: () => {
+      setIsVerified(false);
+      setData(null);
+    },
+  });
+
   // Verificar se já tem sessão verificada — validar token no backend
-  // (nunca confiar apenas no flag portal_verified; o token pode ter expirado)
+  // (nunca confiar apenas na presença do token; pode ter expirado)
+  // Suporta localStorage (Código de Acesso v4) e sessionStorage legado (OTP v3)
   useEffect(() => {
     let cancelled = false;
-    const token = localStorage.getItem('portal_token');
-    const verified = localStorage.getItem('portal_verified') === 'true';
+    const token = getPortalToken();
 
-    if (!token || !verified) {
-      // Sem token ou sem flag — mostrar login
-      localStorage.removeItem('portal_verified');
-      return;
-    }
+    if (!token) return;
 
-    // Tem token e flag — validar no backend antes de conceder acesso
+    // Tem token — validar no backend antes de conceder acesso
     (async () => {
       try {
         const res = await fetch(`${BACKEND_URL}/portal/status`, {
@@ -1481,19 +1885,29 @@ export default function ClientPortal() {
         if (cancelled) return;
 
         if (res.ok) {
-          // Token válido — auto-verificar
+          // Token válido — auto-verificar e registar actividade
           setIsVerified(true);
+          localStorage.setItem('portalLastActivity', String(Date.now()));
         } else {
           // Token inválido/expirado — limpar sessão e mostrar login
+          localStorage.removeItem('portalToken');
+          localStorage.removeItem('portalClientId');
+          localStorage.removeItem('portalClientName');
+          localStorage.removeItem('portalProcessId');
+          localStorage.removeItem('portalAuthMethod');
+          localStorage.removeItem('portalLastActivity');
           localStorage.removeItem('portal_token');
           localStorage.removeItem('portal_verified');
           localStorage.removeItem('portal_client_id');
           localStorage.removeItem('portal_client_name');
           localStorage.removeItem('portal_process_id');
+          sessionStorage.removeItem('portalToken');
+          sessionStorage.removeItem('portalClientId');
+          sessionStorage.removeItem('portalAuthMethod');
+          sessionStorage.removeItem('portalVerified');
         }
       } catch {
-        // Erro de rede — não auto-verificar, mostrar login
-        localStorage.removeItem('portal_verified');
+        // Erro de rede — não limpar sessão, pode ser temporário
       }
     })();
 
@@ -1515,12 +1929,13 @@ export default function ClientPortal() {
 
   // ── Resolve magic link (apenas extrai client_id, NÃO carrega dados) ──
   // Os dados do portal só são carregados APÓS o login ser verificado.
+  // Se não há token na URL (fluxo OTP via /portal), simplesmente ignorar.
   useEffect(() => {
     let cancelled = false;
     const token = rawToken.current;
 
     if (!token) {
-      setError('Link inválido. Contacte o seu consultor.');
+      // Sem token na URL — fluxo OTP normal (/portal), não fazer nada
       setLoading(false);
       return;
     }
@@ -1591,7 +2006,7 @@ export default function ClientPortal() {
     let cancelled = false;
 
     const fetchStatus = async () => {
-      const jwt = localStorage.getItem('portal_token');
+      const jwt = getPortalToken();
       if (!jwt) {
         setError('Sessão inválida. Recarregue a página.');
         setLoading(false);
@@ -1654,7 +2069,7 @@ export default function ClientPortal() {
   const [visitRequestResult, setVisitRequestResult] = useState(null);
 
   const fetchMessages = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/messages`, {
@@ -1672,7 +2087,7 @@ export default function ClientPortal() {
   }, []);
 
   const fetchUnreadCount = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/messages/unread`, {
@@ -1689,7 +2104,7 @@ export default function ClientPortal() {
 
   const sendMessage = useCallback(async () => {
     if (!newMessage.trim()) return;
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     setSendingMessage(true);
     try {
@@ -1722,7 +2137,7 @@ export default function ClientPortal() {
 
   // ── Fetch recommended properties ──
   const fetchRecommendations = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/recommendations`, {
@@ -1745,7 +2160,7 @@ export default function ClientPortal() {
 
   // ── Fetch visits ──
   const fetchVisits = useCallback(async () => {
-    const token = localStorage.getItem('portal_token');
+    const token = getPortalToken();
     if (!token) return;
     try {
       const res = await fetch(`${BACKEND_URL}/portal/visits`, {
@@ -1778,15 +2193,14 @@ export default function ClientPortal() {
   const handleLoginSuccess = useCallback((token) => {
     // Login verificado — o useEffect [isVerified, refreshKey] vai carregar os dados
     setIsVerified(true);
+    // Registar actividade para o sliding session
+    localStorage.setItem('portalLastActivity', String(Date.now()));
   }, []);
 
   if (!isVerified) {
     return (
       <ClientOnly>
-        <PortalLoginScreen
-          onLoginSuccess={handleLoginSuccess}
-          client_id={clientId}
-        />
+        <ClientPortalLogin onLoginSuccess={handleLoginSuccess} />
       </ClientOnly>
     );
   }
@@ -1849,14 +2263,10 @@ export default function ClientPortal() {
             <span>Acesso Seguro</span>
           </div>
           {/* Botão Terminar Sessão */}
-          {localStorage.getItem('portal_verified') === 'true' && (
+          {isVerified && (
             <button
               onClick={() => {
-                localStorage.removeItem('portal_token');
-                localStorage.removeItem('portal_verified');
-                localStorage.removeItem('portal_client_id');
-                localStorage.removeItem('portal_client_name');
-                localStorage.removeItem('portal_process_id');
+                sessionLogout(false); // false = sem toast (foi o utilizador que escolheu sair)
                 setIsVerified(false);
                 setData(null);
               }}
@@ -1917,7 +2327,7 @@ export default function ClientPortal() {
             </div>
           </div>
 
-          {/* ═══ LEFT COLUMN: Tabs — Documentos / As Minhas Visitas ═══ */}
+          {/* ═══ LEFT COLUMN: Tabs — Documentos / O Meu Perfil / As Minhas Visitas ═══ */}
           <div className="lg:col-span-7 space-y-5">
             {/* ── Tab Navigation ── */}
             <div className="flex gap-1 bg-white rounded-2xl shadow-sm border border-gray-100 p-1.5">
@@ -1930,7 +2340,32 @@ export default function ClientPortal() {
                 }`}
               >
                 <FileText className="w-4 h-4" />
-                Documentos
+                <span className="hidden sm:inline">Documentos</span>
+                <span className="sm:hidden">Docs</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('perfil')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === 'perfil'
+                    ? 'bg-blue-600 text-white shadow-md'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                }`}
+              >
+                <User className="w-4 h-4" />
+                <span className="hidden sm:inline">O Meu Perfil</span>
+                <span className="sm:hidden">Perfil</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('simulador')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === 'simulador'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'text-gray-500 hover:bg-gray-50 hover:text-gray-700'
+                }`}
+              >
+                <Calculator className="w-4 h-4" />
+                <span className="hidden sm:inline">Simulador</span>
+                <span className="sm:hidden">Calc</span>
               </button>
               <button
                 onClick={() => setActiveTab('visitas')}
@@ -1941,7 +2376,8 @@ export default function ClientPortal() {
                 }`}
               >
                 <Home className="w-4 h-4" />
-                As Minhas Visitas
+                <span className="hidden sm:inline">As Minhas Visitas</span>
+                <span className="sm:hidden">Visitas</span>
                 {visits.filter(v => v.status === 'solicitada').length > 0 && (
                   <span className="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full bg-violet-200 text-violet-800 text-[10px] font-bold">
                     {visits.filter(v => v.status === 'solicitada').length}
@@ -1951,7 +2387,7 @@ export default function ClientPortal() {
             </div>
 
             {/* ── Tab Content ── */}
-            {activeTab === 'documentos' ? (
+            {activeTab === 'documentos' && (
               <>
                 <DocumentsPanel documents={documents} onUploadSuccess={handleUploadSuccess} />
 
@@ -1970,7 +2406,7 @@ export default function ClientPortal() {
                         <p className="text-xs text-emerald-600 mt-0.5">
                           O consentimento para tratamento de dados pessoais foi assinado
                           {rgpd.signed_at && (
-                            <> a <strong>{new Date(safeDateStr(rgpd.signed_at)).toLocaleDateString('pt-PT')}</strong></>
+                            <> a <strong>{formatDate(rgpd.signed_at)}</strong></>
                           )}.
                         </p>
                         {rgpd.signed_by && (
@@ -1995,7 +2431,7 @@ export default function ClientPortal() {
                         </p>
                         {rgpd.requested_at && (
                           <p className="text-xs text-amber-500 mt-1">
-                            Pedido enviado a <strong>{new Date(safeDateStr(rgpd.requested_at)).toLocaleDateString('pt-PT')}</strong>
+                            Pedido enviado a <strong>{formatDate(rgpd.requested_at)}</strong>
                           </p>
                         )}
                         {rgpd.requested_by_name && (
@@ -2041,10 +2477,21 @@ export default function ClientPortal() {
 
             <TeamCard team={team} consultor={consultor} />
               </>
-            ) : (
-              <>
-            {/* ═══ Tab: As Minhas Visitas ═══ */}
+            )}
 
+            {/* ═══ Tab: O Meu Perfil ═══ */}
+            {activeTab === 'perfil' && (
+              <ProfilePanel />
+            )}
+
+            {/* ═══ Tab: Simulador de Crédito Habitação ═══ */}
+            {activeTab === 'simulador' && (
+              <SimulatorCH />
+            )}
+
+            {/* ═══ Tab: As Minhas Visitas ═══ */}
+            {activeTab === 'visitas' && (
+              <>
             {/* ── Pedir Visita ── */}
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5">
               <h3 className="text-base font-bold text-gray-800 mb-1 flex items-center gap-2">
@@ -2071,7 +2518,7 @@ export default function ClientPortal() {
                     setRequestingVisit(true);
                     setVisitRequestResult(null);
                     try {
-                      const token = localStorage.getItem('portal_token');
+                      const token = getPortalToken();
                       if (!token) throw new Error('Sessão expirada.');
                       const res = await fetchWithRetry(`${BACKEND_URL}/portal/visits/request`, {
                         method: 'POST',
@@ -2158,8 +2605,9 @@ export default function ClientPortal() {
                           return { label: 'A aguardar contacto do consultor', color: 'bg-violet-100 text-violet-700 border-violet-200', icon: <Clock className="w-3.5 h-3.5" /> };
                         case 'agendada':
                           if (scheduledDate) {
-                            const dateStr = new Date(safeDateStr(scheduledDate)).toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' });
-                            const timeStr = new Date(safeDateStr(scheduledDate)).toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' });
+                            const scheduledDateObj = safeDate(scheduledDate);
+                            const dateStr = scheduledDateObj ? scheduledDateObj.toLocaleDateString('pt-PT', { day: 'numeric', month: 'long' }) : '';
+                            const timeStr = scheduledDateObj ? scheduledDateObj.toLocaleTimeString('pt-PT', { hour: '2-digit', minute: '2-digit' }) : '';
                             return { label: `Agendada para ${dateStr} às ${timeStr}`, color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <CalendarClock className="w-3.5 h-3.5" /> };
                           }
                           return { label: 'Agendada', color: 'bg-amber-100 text-amber-700 border-amber-200', icon: <CalendarClock className="w-3.5 h-3.5" /> };
@@ -2296,7 +2744,7 @@ export default function ClientPortal() {
                           <p className="text-[10px] text-gray-400">
                             Recomendado por <span className="font-medium text-purple-600">{rec.recommended_by_name || 'Consultor'}</span>
                             {rec.recommended_at && (
-                              <> · {new Date(safeDateStr(rec.recommended_at)).toLocaleDateString('pt-PT')}</>
+                              <> · {formatDate(rec.recommended_at)}</>
                             )}
                           </p>
                         </div>
