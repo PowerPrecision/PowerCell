@@ -67,7 +67,7 @@ import {
 import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
 import CreateProcessModal from "../components/CreateProcessModal";
-import { safeDateStr } from "../lib/utils";
+import { formatDate, formatDateTime } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -200,34 +200,6 @@ const ClientRegistrationsPage = () => {
   useEffect(() => {
     fetchClients();
   }, [fetchClients]);
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "-";
-    try {
-      return new Date(safeDateStr(dateStr)).toLocaleString("pt-PT", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-        hour: "2-digit",
-        minute: "2-digit"
-      });
-    } catch {
-      return dateStr;
-    }
-  };
-
-  const formatDateOnly = (dateStr) => {
-    if (!dateStr) return "-";
-    try {
-      return new Date(safeDateStr(dateStr)).toLocaleDateString("pt-PT", {
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric"
-      });
-    } catch {
-      return dateStr;
-    }
-  };
 
   const handleViewClientDetails = async (clientId) => {
     setDetailsLoading(true);
@@ -547,7 +519,7 @@ const ClientRegistrationsPage = () => {
                     <div className="col-span-2 text-sm">
                       <div className="flex items-center gap-1.5 text-muted-foreground">
                         <Calendar className="h-3.5 w-3.5" />
-                        <span>{formatDate(client.created_at)}</span>
+                        <span>{formatDateTime(client.created_at)}</span>
                       </div>
                       {client.assigned_to_name && (
                         <div className="text-xs mt-1.5 flex items-center gap-1 text-primary">
@@ -703,7 +675,7 @@ const ClientRegistrationsPage = () => {
                     <Calendar className="h-4 w-4 text-muted-foreground" />
                     <div>
                       <p className="text-xs text-muted-foreground">Data de Nascimento</p>
-                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.data_nascimento ? formatDateOnly(safeString(detailsDialog.client.dados_pessoais.data_nascimento)) : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
+                      <p className="text-sm">{detailsDialog.client.dados_pessoais?.data_nascimento ? formatDate(detailsDialog.client.dados_pessoais.data_nascimento) : <span className="text-muted-foreground italic">Não preenchido</span>}</p>
                     </div>
                   </div>
                   <div className="flex items-center gap-2 p-2 bg-muted/50 rounded-lg">

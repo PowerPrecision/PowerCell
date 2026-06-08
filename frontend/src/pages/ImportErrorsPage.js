@@ -38,7 +38,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import api from "../services/api";
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime } from "../lib/utils";
 
 const ImportErrorsPage = () => {
   const [errors, setErrors] = useState([]);
@@ -142,7 +142,7 @@ const ImportErrorsPage = () => {
   const exportToCSV = useCallback(() => {
     const headers = ["Data", "Pasta", "Ficheiro", "Tipo Erro", "Mensagem", "Resolvido"];
     const rows = errors.map(e => [
-      new Date(safeDateStr(e.created_at)).toLocaleString("pt-PT"),
+      formatDateTime(e.created_at),
       e.folder_name || "",
       e.filename || "",
       e.error_type || "",
@@ -337,12 +337,7 @@ const ImportErrorsPage = () => {
                   {filteredErrors.slice(0, 100).map((error, index) => (
                     <TableRow key={error.id || index} className={error.resolved ? "opacity-50" : ""}>
                       <TableCell className="text-sm text-muted-foreground">
-                        {new Date(safeDateStr(error.created_at)).toLocaleString("pt-PT", {
-                          day: "2-digit",
-                          month: "2-digit",
-                          hour: "2-digit",
-                          minute: "2-digit"
-                        })}
+                        {formatDateTime(error.created_at)}
                       </TableCell>
                       <TableCell className="font-medium max-w-[150px] truncate" title={error.folder_name}>
                         {error.folder_name || "-"}

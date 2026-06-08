@@ -217,7 +217,9 @@ export default function NotificationsPage() {
 
   // Formatar data
   const formatDate = (dateStr) => {
+    if (!dateStr) return "-";
     const date = new Date(safeDateStr(dateStr));
+    if (isNaN(date.getTime())) return "-";
     const now = new Date();
     const diff = now - date;
     

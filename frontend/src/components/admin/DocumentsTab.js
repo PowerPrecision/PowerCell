@@ -6,7 +6,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { FileText, Users, Eye } from "lucide-react";
-import { safeDateStr } from "../../lib/utils";
+import { safeDateStr, formatDate } from "../../lib/utils";
 
 const DocumentsTab = ({ upcomingExpiries }) => {
   const navigate = useNavigate();
@@ -104,7 +104,7 @@ const DocumentsTab = ({ upcomingExpiries }) => {
                         </div>
                         <div className="flex items-center gap-2">
                           <span className="text-sm">
-                            {new Date(safeDateStr(doc.expiry_date)).toLocaleDateString('pt-PT')}
+                            {formatDate(doc.expiry_date)}
                           </span>
                           <Badge className={daysUntil <= 7 ? 'bg-red-500' : daysUntil <= 30 ? 'bg-amber-500' : 'bg-blue-500'}>
                             {daysUntil} dias

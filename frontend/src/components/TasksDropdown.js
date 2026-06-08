@@ -46,7 +46,7 @@ import {
   User,
   CalendarClock,
 } from "lucide-react";
-import { cn, safeDateStr } from "../lib/utils";
+import { cn, safeDate } from "../lib/utils";
 
 /**
  * Ícones por tipo de tarefa
@@ -94,7 +94,8 @@ const StatusLabels = {
 const formatDueDate = (dueDate) => {
   if (!dueDate) return null;
   const now = new Date();
-  const due = new Date(safeDateStr(dueDate));
+  const due = safeDate(dueDate);
+  if (!due) return null;
   const diffMs = due - now;
   const diffDays = Math.ceil(diffMs / (1000 * 60 * 60 * 24));
   const isOverdue = diffMs < 0;

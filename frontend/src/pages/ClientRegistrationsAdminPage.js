@@ -58,7 +58,7 @@ import {
   AdminSearchFilter,
   PageHeader
 } from "../components/admin/AdminPageShared";
-import { safeDateStr } from "../lib/utils";
+import { formatDate, formatDateTime } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -466,11 +466,6 @@ const EditModal = ({ open, onClose, registration, onSave }) => {
 const ViewModal = ({ open, onClose, registration }) => {
   if (!registration) return null;
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "N/A";
-    try { return new Date(safeDateStr(dateStr)).toLocaleString("pt-PT"); } catch { return dateStr; }
-  };
-
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
@@ -549,8 +544,8 @@ const ViewModal = ({ open, onClose, registration }) => {
           <Card className="bg-muted/30">
             <CardContent className="pt-4 text-sm space-y-2">
               <div className="flex justify-between"><span className="text-muted-foreground">Processo nº</span><span className="font-mono">{registration.process_number || registration.id}</span></div>
-              <div className="flex justify-between"><span className="text-muted-foreground">Registado em</span><span>{formatDate(registration.created_at)}</span></div>
-              {registration.updated_at && <div className="flex justify-between"><span className="text-muted-foreground">Atualizado em</span><span>{formatDate(registration.updated_at)}</span></div>}
+              <div className="flex justify-between"><span className="text-muted-foreground">Registado em</span><span>{formatDateTime(registration.created_at)}</span></div>
+              {registration.updated_at && <div className="flex justify-between"><span className="text-muted-foreground">Atualizado em</span><span>{formatDateTime(registration.updated_at)}</span></div>}
             </CardContent>
           </Card>
         </div>
@@ -747,7 +742,7 @@ const ClientRegistrationsAdminPage = () => {
                     <div className="col-span-2 text-sm">{reg.personal_data?.nif || "-"}</div>
                     <div className="col-span-2"><SourceBadge source={reg.source} /></div>
                     <div className="col-span-2"><StatusBadge status={reg.status} /></div>
-                    <div className="col-span-1 text-sm text-muted-foreground">{reg.created_at ? new Date(safeDateStr(reg.created_at)).toLocaleDateString("pt-PT") : "-"}</div>
+                    <div className="col-span-1 text-sm text-muted-foreground">{formatDate(reg.created_at)}</div>
                     <div className="col-span-2 flex justify-end gap-1">
                       <Button variant="ghost" size="sm" onClick={() => handleView(reg)} title="Ver detalhes"><Eye className="h-4 w-4" /></Button>
                       <Button variant="ghost" size="sm" onClick={() => handleEdit(reg)} title="Editar"><Edit className="h-4 w-4" /></Button>
@@ -777,7 +772,7 @@ const ClientRegistrationsAdminPage = () => {
                       </div>
                       <div className="flex justify-between items-center text-sm">
                         <span className="text-muted-foreground">Data:</span>
-                        <span>{reg.created_at ? new Date(safeDateStr(reg.created_at)).toLocaleDateString("pt-PT") : "-"}</span>
+                        <span>{formatDate(reg.created_at)}</span>
                       </div>
                       <div className="flex justify-end gap-2 pt-2 border-t">
                         <Button variant="outline" size="sm" onClick={() => handleView(reg)}><Eye className="h-4 w-4 mr-1" />Ver</Button>

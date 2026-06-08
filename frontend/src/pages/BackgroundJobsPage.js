@@ -51,7 +51,7 @@ import {
   SheetDescription,
 } from "../components/ui/sheet";
 
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime, safeDate } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -77,8 +77,9 @@ const STATUS_CONFIG = {
 // ── Helper: Formatar duração ──────────────────────────────
 function formatDuration(isoStart, isoEnd) {
   if (!isoStart) return "—";
-  const start = new Date(safeDateStr(isoStart));
-  const end = isoEnd ? new Date(safeDateStr(isoEnd)) : new Date();
+  const start = safeDate(isoStart);
+  if (!start) return "—";
+  const end = isoEnd ? (safeDate(isoEnd) || new Date()) : new Date();
   const diffMs = end - start;
   if (diffMs < 0) return "0s";
   const totalSecs = Math.floor(diffMs / 1000);
@@ -124,13 +125,7 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
 
   const formatDate = (isoString) => {
     if (!isoString) return "-";
-    const date = new Date(safeDateStr(isoString));
-    return date.toLocaleString("pt-PT", {
-      day: "2-digit",
-      month: "2-digit",
-      hour: "2-digit",
-      minute: "2-digit"
-    });
+    return formatDateTime(isoString);
   };
 
   const isRunning = job.status === "running";
@@ -358,7 +353,8 @@ const JobLogSheet = ({ job, open, onOpenChange }) => {
   const stepLog = job.step_log || [];
   const formatDate = (isoString) => {
     if (!isoString) return "";
-    const date = new Date(safeDateStr(isoString));
+    const date = safeDate(isoString);
+    if (!date) return "";
     return date.toLocaleString("pt-PT", {
       hour: "2-digit",
       minute: "2-digit",

@@ -11,17 +11,20 @@ export function cn(...inputs) {
  * Safari não consegue fazer parse de 'YYYY-MM-DD HH:mm:ss' — precisa de
  * 'YYYY/MM/DD HH:mm:ss' ou 'YYYY-MM-DDTHH:mm:ss'.
  *
- * Retorna a string normalizada, ou null se a data for inválida.
+ * Retorna a string normalizada, ou undefined se a data for inválida.
  *
- * ⚠️ NOTA: Quando retorna null, parseISO(null) crasha com "Invalid time value".
- * Use safeParseISO() para parse seguro, ou safeFormat() para formatação segura.
+ * ⚠️ NOTA IMPORTANTE: Retorna undefined (NÃO null) para datas inválidas.
+ * Isto é intencional: new Date(null) = 01/01/1970 (epoch!), enquanto
+ * new Date(undefined) = Invalid Date (NaN). Todos os call sites que fazem
+ * new Date(safeDateStr(x)) devem verificar isNaN() antes de usar o resultado.
+ * Para formatação segura, use formatDate(x), formatDateTime(x), ou safeFormat().
  */
 export const safeDateStr = (dateString) => {
-  if (!dateString) return null;
+  if (!dateString) return undefined;
   if (typeof dateString !== "string") {
     // Pode já ser um Date object
-    if (dateString instanceof Date) return isNaN(dateString.getTime()) ? null : dateString;
-    return null;
+    if (dateString instanceof Date) return isNaN(dateString.getTime()) ? undefined : dateString;
+    return undefined;
   }
   // Substituir dash por slash na parte da data (antes do T ou espaço)
   // Isto converte '2025-03-15 14:30:00' → '2025/03/15T14:30:00'
@@ -32,9 +35,9 @@ export const safeDateStr = (dateString) => {
   // Verificar se o resultado é uma data válida antes de retornar
   try {
     const testDate = new Date(normalized);
-    if (isNaN(testDate.getTime())) return null;
+    if (isNaN(testDate.getTime())) return undefined;
   } catch {
-    return null;
+    return undefined;
   }
   return normalized;
 };

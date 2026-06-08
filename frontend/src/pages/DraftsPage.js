@@ -42,7 +42,7 @@ import {
   AlertDialogTrigger,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
-import { safeDateStr } from "../lib/utils";
+import { formatDate } from "../lib/utils";
 import {
   FileText,
   Plus,
@@ -206,15 +206,6 @@ const DraftsPage = () => {
       selectedCategory === "all" || draft.categoria === selectedCategory;
     return matchesSearch && matchesCategory;
   });
-
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "N/D";
-    try {
-      return new Date(safeDateStr(dateStr)).toLocaleDateString("pt-PT");
-    } catch {
-      return dateStr;
-    }
-  };
 
   const getCategoryLabel = (categoryId) => {
     const cat = CATEGORIAS.find(c => c.id === categoryId);

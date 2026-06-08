@@ -20,6 +20,7 @@ import {
   Mail, Phone, CreditCard, MapPin, Briefcase, Unlink
 } from "lucide-react";
 import { toast } from "sonner";
+import { formatDate } from "../lib/utils";
 
 const SecondTitularCard = ({ process: processData, onUpdate }) => {
   const navigate = useNavigate();
@@ -213,7 +214,7 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
               )}
               {secondClientData.birth_date && (
                 <span>
-                  {new Date(secondClientData.birth_date).toLocaleDateString("pt-PT")}
+                  {formatDate(secondClientData.birth_date)}
                 </span>
               )}
               {secondClientData.nacionalidade && (

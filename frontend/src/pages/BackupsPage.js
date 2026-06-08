@@ -20,7 +20,7 @@ import {
   AlertDialogTrigger,
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
-import { safeDateStr } from "../lib/utils";
+import { formatDateTime } from "../lib/utils";
 import {
   Database,
   Download,
@@ -192,15 +192,6 @@ const BackupsPage = ({ embedded = false }) => {
     }
   };
 
-  const formatDate = (dateStr) => {
-    if (!dateStr) return "N/D";
-    try {
-      return new Date(safeDateStr(dateStr)).toLocaleString("pt-PT");
-    } catch {
-      return dateStr;
-    }
-  };
-
   const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return "0 B";
     const k = 1024;
@@ -331,7 +322,7 @@ const BackupsPage = ({ embedded = false }) => {
             <CardContent>
               <div className="text-lg font-bold">
                 {statistics?.last_backup?.started_at
-                  ? formatDate(statistics.last_backup.started_at)
+                  ? formatDateTime(statistics.last_backup.started_at)
                   : "Nunca"}
               </div>
               <p className="text-xs text-muted-foreground">
@@ -358,7 +349,7 @@ const BackupsPage = ({ embedded = false }) => {
                 Resultado da Verificacao
               </CardTitle>
               <CardDescription>
-                Verificado em: {formatDate(verificationResult.verified_at)}
+                Verificado em: {formatDateTime(verificationResult.verified_at)}
               </CardDescription>
             </CardHeader>
             <CardContent>
@@ -464,7 +455,7 @@ const BackupsPage = ({ embedded = false }) => {
                           <div className="flex items-center gap-2">
                             <Calendar className="h-4 w-4 text-muted-foreground" />
                             <span className="font-medium">
-                              {formatDate(backup.started_at)}
+                              {formatDateTime(backup.started_at)}
                             </span>
                           </div>
                           <div className="flex items-center gap-2 text-sm text-muted-foreground">
