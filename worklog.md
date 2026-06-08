@@ -562,3 +562,30 @@ Stage Summary:
 - Apenas 1 alteração de código necessária: "Quadro Geral" no menu do indexacao
 - Todos os outros bugs reportados já estavam resolvidos em sessões anteriores
 - Ficheiros alterados: frontend/src/layouts/DashboardLayout.js, CHANGELOG.md
+
+---
+Task ID: fix-null-dates-2nd-titular
+Agent: Main Agent
+Task: Fix dates appearing as null + Show processes where client is 2º titular in client detail
+
+Work Log:
+- Investigated date formatting across entire frontend: formatDate, safeFormat, safeParseISO all handle null/undefined correctly
+- Found formatDate in ClientDetailPage.js only accepted strings — updated to also accept Date objects
+- Backend GET /clients/{client_id} only returned processes via client.process_ids — updated to also search processes where client is second_client_id
+- Backend GET /clients/{client_id}/processes had same limitation — updated similarly
+- Added client_role field ("titular" or "2º titular") to each process in both endpoints
+- Added process projection fields: updated_at, client_id, second_client_id, client_name to the main endpoint
+- Updated ClientDetailPage.js:
+  - Added Users icon import for 2º titular badge
+  - Added "2º Titular" cyan badge when client_role === "2º titular"
+  - Added "Titular principal: [name]" line when client is 2º titular in that process
+  - Added "Atualizado em" date display when updated_at is present
+  - Improved formatDate to handle Date objects in addition to strings
+
+Stage Summary:
+- 2 files modified: backend/routes/clients.py, frontend/src/pages/ClientDetailPage.js
+- Client detail page now shows ALL processes, including those where the client is 2º titular
+- "2º Titular" badge clearly identifies the client's role in each process
+- Titular principal name is shown when client is 2º titular
+- Date formatting is more robust — handles Date objects and null values
+- Both GET /clients/{id} and GET /clients/{id}/processes now find processes via second_client_id

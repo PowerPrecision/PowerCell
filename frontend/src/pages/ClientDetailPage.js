@@ -22,6 +22,7 @@ import { Input } from "../components/ui/input";
 import {
   ArrowLeft,
   User,
+  Users,
   Phone,
   Mail,
   Hash,
@@ -109,7 +110,7 @@ const getStatusBadgeClasses = (statusColor) => {
 };
 
 const formatDate = (dateString) => {
-  if (!dateString || typeof dateString !== 'string') return "-";
+  if (!dateString || (typeof dateString !== 'string' && !(dateString instanceof Date))) return "-";
   return safeFormat(dateString, "dd MMM yyyy", { locale: pt });
 };
 
@@ -599,6 +600,14 @@ export default function ClientDetailPage() {
                             #{process.process_number || process.id?.substring(0, 8) || "-"}
                           </span>
 
+                          {/* Badge: 2º Titular */}
+                          {process.client_role === "2\u00BA titular" && (
+                            <Badge className="text-xs font-medium bg-cyan-100 text-cyan-800 border-cyan-300 dark:bg-cyan-900/30 dark:text-cyan-300 dark:border-cyan-700 gap-1">
+                              <Users className="h-3 w-3" />
+                              2\u00BA Titular
+                            </Badge>
+                          )}
+
                           <Badge variant="outline" className="text-xs font-medium">
                             {formatProcessType(process.process_type)}
                           </Badge>
@@ -612,6 +621,14 @@ export default function ClientDetailPage() {
                             </Badge>
                           ) : null}
                         </div>
+
+                        {/* Nome do titular principal (se este cliente é 2º titular) */}
+                        {process.client_role === "2\u00BA titular" && process.client_name && (
+                          <div className="mb-3 text-xs text-muted-foreground flex items-center gap-1.5">
+                            <User className="h-3 w-3" />
+                            Titular principal: <span className="font-medium text-foreground">{process.client_name}</span>
+                          </div>
+                        )}
 
                         {/* Middle: Priority */}
                         {(process.prioridade || process.priority) && (
@@ -627,9 +644,16 @@ export default function ClientDetailPage() {
 
                         {/* Bottom row: Date + Action */}
                         <div className="flex items-center justify-between pt-2 border-t border-border/50">
-                          <div className="flex items-center gap-1.5 text-xs text-muted-foreground">
-                            <Calendar className="h-3.5 w-3.5" />
-                            Criado em {formatDate(process.created_at)}
+                          <div className="flex items-center gap-3 text-xs text-muted-foreground">
+                            <div className="flex items-center gap-1.5">
+                              <Calendar className="h-3.5 w-3.5" />
+                              Criado em {formatDate(process.created_at)}
+                            </div>
+                            {process.updated_at && (
+                              <div className="flex items-center gap-1">
+                                Atualizado em {formatDate(process.updated_at)}
+                              </div>
+                            )}
                           </div>
                           <Button
                             variant="ghost"
