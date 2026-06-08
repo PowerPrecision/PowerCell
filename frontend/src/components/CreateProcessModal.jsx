@@ -60,7 +60,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
   });
 
   const isClientLocked = !!preSelectedClient?.id;
-  const canSubmit = (selectedClient?.id || (clientMode === 'new' && newClientData.nome.trim().length >= 2)) && !submitting;
+  const canSubmit = (selectedClient?.id || (clientMode === 'new' && newClientData.nome.trim().length >= 2 && newClientData.email.trim().length >= 3)) && !submitting;
 
   // Reset state when modal opens/closes
   React.useEffect(() => {
@@ -392,7 +392,14 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
                       onChange={(e) => setNewClientData(prev => ({ ...prev, nome: e.target.value }))}
                       autoFocus
                     />
-                    <div className="grid grid-cols-3 gap-2">
+                    <Input
+                      placeholder="Email * (obrigatório para o Portal do Cliente)"
+                      type="email"
+                      value={newClientData.email}
+                      onChange={(e) => setNewClientData(prev => ({ ...prev, email: e.target.value }))}
+                      required
+                    />
+                    <div className="grid grid-cols-2 gap-2">
                       <Input
                         placeholder="NIF"
                         value={newClientData.nif}
@@ -400,12 +407,6 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
                           const v = e.target.value.replace(/[^\d]/g, '').slice(0, 9);
                           setNewClientData(prev => ({ ...prev, nif: v }));
                         }}
-                      />
-                      <Input
-                        placeholder="Email"
-                        type="email"
-                        value={newClientData.email}
-                        onChange={(e) => setNewClientData(prev => ({ ...prev, email: e.target.value }))}
                       />
                       <Input
                         placeholder="Telefone"

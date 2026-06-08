@@ -516,6 +516,14 @@ async def assign_client_to_user(
         client_phone = client.get("contacto", {}).get("telefone", "")
         client_name = client.get("nome", "")
         
+        # VALIDAÇÃO: E-mail obrigatório para acesso ao Portal do Cliente
+        if not client_email or not client_email.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="O e-mail é obrigatório para a criação do Portal do Cliente. "
+                       "Adicione um e-mail de contacto ao cliente antes de atribuir."
+            )
+        
         personal_data = client.get("dados_pessoais", {}) or {}
         if client_email and not personal_data.get("email"):
             personal_data["email"] = client_email
@@ -587,6 +595,7 @@ async def assign_client_to_user(
         elif target_role == "consultor":
             process_doc["assigned_consultor_id"] = target_user_id
             process_doc["consultor_name"] = target_user.get("name")
+            process_doc["consultor_id"] = target_user_id  # Consultor associado ao processo
         elif target_role == "indexacao":
             process_doc["assigned_indexacao_id"] = target_user_id
 
@@ -597,6 +606,29 @@ async def assign_client_to_user(
 
         # Inserir processo
         await db.processes.insert_one(process_doc)
+        
+        # ============================================================
+        # AUTO-ATRIBUIÇÃO DE INDEXADOR
+        # Se o destino NÃO é indexação, invocar assign_to_indexer() para:
+        # 1. Encontrar o indexador com menor carga (< 15 processos ativos)
+        # 2. Atribuir o processo ao indexador (assigned_indexacao_id)
+        # 3. Se nenhum indexador disponível → status = fila_espera
+        # ============================================================
+        if target_role != "indexacao" and process_id:
+            try:
+                from services.process_assignment import assign_to_indexer
+                assign_success, assign_data, assign_msg = await assign_to_indexer(process_id)
+                if assign_success and assign_data.get("assigned"):
+                    logger.info(
+                        f"[ASSIGN-CLIENT] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
+                        f"para processo {process_id}"
+                    )
+                else:
+                    logger.warning(
+                        f"[ASSIGN-CLIENT] Sem indexador disponível para processo {process_id}: {assign_msg}"
+                    )
+            except Exception as e:
+                logger.warning(f"[ASSIGN-CLIENT] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
     
     # Actualizar cliente + marcar lead como convertido
     if process_id:
@@ -1147,6 +1179,13 @@ async def create_client(
     if not sanitized_nome:
         log_sanitization_rejection("nome", client_data.nome or "", "Nome vazio ou inválido após sanitização")
         raise HTTPException(status_code=400, detail="Nome inválido. Use apenas letras e espaços.")
+    
+    # VALIDAÇÃO: E-mail obrigatório para acesso ao Portal do Cliente
+    if not client_data.email or not client_data.email.strip():
+        raise HTTPException(
+            status_code=400,
+            detail="O e-mail é obrigatório para a criação do Portal do Cliente."
+        )
     
     sanitized_email = sanitize_email(client_data.email) if client_data.email else None
     if client_data.email and not sanitized_email:

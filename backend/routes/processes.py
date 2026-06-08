@@ -999,6 +999,15 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         nif_val = decrypted.get("dados_pessoais", {}).get("nif", "")
         if nif_val:
             client_nif = nif_val
+        
+        # VALIDAÇÃO: E-mail obrigatório para acesso ao Portal do Cliente
+        if not client_email or not client_email.strip():
+            raise HTTPException(
+                status_code=400,
+                detail="O e-mail é obrigatório para a criação do Portal do Cliente. "
+                       "Adicione um e-mail de contacto ao cliente antes de criar o processo."
+            )
+        
         logger.info(f"Cliente existente usado via client_id: {client_id}")
     else:
         # Esta ramificação não deve ser alcançada devido à validação acima,
@@ -1083,18 +1092,50 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     }
     
     # Atribuir automaticamente ao criador baseado no seu papel
+    # REGRA: consultor_id = quem cria o processo (consultor)
+    #         assigned_indexacao_id = atribuído pelo algoritmo de auto-atribuição (NÃO o consultor)
     if user["role"] == UserRole.INTERMEDIARIO:
         process_doc["assigned_mediador_id"] = user["id"]
         process_doc["mediador_name"] = user["name"]
     elif user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR]:
         process_doc["assigned_consultor_id"] = user["id"]
         process_doc["consultor_name"] = user["name"]
+        process_doc["consultor_id"] = user["id"]  # Consultor que criou o processo
     
     # Encriptar campos sensíveis antes de guardar
     process_doc = encrypt_sensitive_data(process_doc)
     
     # Inserir na base de dados
     await db.processes.insert_one(process_doc)
+    
+    # ============================================================
+    # AUTO-ATRIBUIÇÃO DE INDEXADOR
+    # Após criar o processo, invocar assign_to_indexer() para:
+    # 1. Encontrar o indexador com menor carga (< 15 processos ativos)
+    # 2. Atribuir o processo ao indexador (assigned_indexacao_id)
+    # 3. Se nenhum indexador disponível → status = fila_espera
+    # ============================================================
+    try:
+        from services.process_assignment import assign_to_indexer
+        assign_success, assign_data, assign_msg = await assign_to_indexer(process_id)
+        if assign_success and assign_data.get("assigned"):
+            logger.info(
+                f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
+                f"para processo {process_id}"
+            )
+            # Atualizar o process_doc local para a resposta (já foi atualizado na BD por assign_to_indexer)
+            process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
+            process_doc["indexacao_name"] = assign_data.get("indexacao_name")
+            if assign_data.get("status"):
+                process_doc["status"] = assign_data["status"]
+        else:
+            logger.warning(
+                f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg}"
+            )
+            if assign_data.get("status"):
+                process_doc["status"] = assign_data["status"]
+    except Exception as e:
+        logger.warning(f"[CREATE-PROCESS] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
     
     # === AUTO-CRIAR DOCUMENTOS PORTAL POR DEFEITO ===
     # Criar pedidos de documentos padrão para o portal do cliente,

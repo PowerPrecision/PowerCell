@@ -4,11 +4,6 @@
 - Environments: .env
 
 ✓ Starting...
-Attention: Next.js now collects completely anonymous telemetry regarding usage.
-This information is used to shape Next.js' roadmap and prioritize features.
-You can learn more, including how to opt-out if you'd not like to participate in this anonymous program, by visiting the following URL:
-https://nextjs.org/telemetry
-
-✓ Ready in 676ms
- GET / 200 in 3.2s (compile: 3.1s, render: 143ms)
-n 3.2s (compile: 3.1s, render: 143ms)
+✓ Ready in 539ms
+ GET / 200 in 2.2s (compile: 2.1s, render: 114ms)
+ GET / 200 in 1043ms (compile: 885ms, render: 158ms)

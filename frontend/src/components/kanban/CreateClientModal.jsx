@@ -161,7 +161,7 @@ const CreateClientModal = memo(({
 
   // ── Validação do formulário ───────────────────────────────────────
   const isExistingClientReady = clientMode === 'existing' && selectedClient?.id;
-  const isNewClientReady = clientMode === 'new' && newClientData.nome.trim().length >= 2;
+  const isNewClientReady = clientMode === 'new' && newClientData.nome.trim().length >= 2 && newClientData.email.trim().length >= 3;
   const canSubmit = (isExistingClientReady || isNewClientReady) && formData.process_type && !isCreating;
 
   // ── Submissão ─────────────────────────────────────────────────────
@@ -367,7 +367,14 @@ const CreateClientModal = memo(({
                   onChange={(e) => setNewClientData(prev => ({ ...prev, nome: e.target.value }))}
                   autoFocus
                 />
-                <div className="grid grid-cols-3 gap-2">
+                <Input
+                  placeholder="Email * (obrigatório para o Portal do Cliente)"
+                  type="email"
+                  value={newClientData.email}
+                  onChange={(e) => setNewClientData(prev => ({ ...prev, email: e.target.value }))}
+                  required
+                />
+                <div className="grid grid-cols-2 gap-2">
                   <Input
                     placeholder="NIF"
                     value={newClientData.nif}
@@ -375,12 +382,6 @@ const CreateClientModal = memo(({
                       const v = e.target.value.replace(/[^\d]/g, '').slice(0, 9);
                       setNewClientData(prev => ({ ...prev, nif: v }));
                     }}
-                  />
-                  <Input
-                    placeholder="Email"
-                    type="email"
-                    value={newClientData.email}
-                    onChange={(e) => setNewClientData(prev => ({ ...prev, email: e.target.value }))}
                   />
                   <Input
                     placeholder="Telefone"
