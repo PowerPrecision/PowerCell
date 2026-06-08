@@ -273,8 +273,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       let comparison = 0;
       
       if (sortBy === "date") {
-        const dateA = safeDate(a.last_modified) || new Date(0);
-        const dateB = safeDate(b.last_modified) || new Date(0);
+        const dateA = safeDate(a.last_modified);
+        const dateB = safeDate(b.last_modified);
+        // Push items without dates to the end
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
         comparison = dateA - dateB;
       } else if (sortBy === "name") {
         comparison = (a.name || "").localeCompare(b.name || "");

@@ -1170,12 +1170,14 @@ async def get_client(
     # Desencriptar dados sensíveis
     client = decrypt_client_data(client)
     
-    # Safeguard: garantir que created_at e updated_at são sempre válidos
+    # Safeguard: garantir que created_at, updated_at e assigned_at são sempre válidos
     now_iso = datetime.now(timezone.utc).isoformat()
     if not client.get("created_at"):
         client["created_at"] = now_iso
     if not client.get("updated_at"):
         client["updated_at"] = now_iso
+    if client.get("assigned_at") == "" or client.get("assigned_at") is False:
+        client["assigned_at"] = None
     
     return client
 

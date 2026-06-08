@@ -43,3 +43,33 @@ Stage Summary:
 - Fixed 5 date-related bugs across backend and frontend
 - The 01/01/1970 epoch was caused by: (1) sorting fallback using `|| 0` which creates new Date(0), (2) missing updated_at in API responses, (3) empty string defaults for date fields instead of None
 - All Bloco C items were already implemented in previous sessions
+
+## Task 1: Fix Date Display Bugs (01/01/1970 Unix Epoch)
+
+### Date: 2026-03-04
+
+### Changes Made
+
+#### 1. `backend/services/process_service.py` — Empty string → None for date fields
+- **Lines 491-510** (`second_client_data` dict): Changed `"documento_id"`, `"data_nascimento"`, `"birth_date"`, and `"morada_fiscal"` from defaulting to `""` to using `or None`. Empty strings are truthy in JS and get misinterpreted as dates (Unix epoch).
+- **Lines 514-532** (`titular2_data` dict): Same four fields changed from `""` defaults to `or None`.
+
+**Before**: `sc_dados_pessoais.get("data_nascimento", "")` → empty string → JS interprets as date → 01/01/1970
+**After**: `sc_dados_pessoais.get("data_nascimento") or None` → `null` in JSON → JS handles gracefully
+
+#### 2. `frontend/src/components/S3FileManager.js` — Remove `new Date(0)` fallback
+- **Lines 276-282**: Replaced `new Date(0)` fallback with explicit null-date handling that pushes items without dates to the end of the sort order.
+
+**Before**: `safeDate(a.last_modified) || new Date(0)` → missing dates render as 01/01/1970
+**After**: Explicit checks for falsy dates; items without dates sort to the end instead of appearing as epoch dates.
+
+#### 3. `backend/routes/clients.py` — Add `assigned_at` safeguard
+- **Lines 1173-1180**: Added safeguard for `assigned_at` alongside existing `created_at` and `updated_at` safeguards. Empty string or falsy `assigned_at` is now normalized to `None` instead of being passed through as an invalid date.
+
+### Root Cause
+Empty strings (`""`) were used as default values for date fields in the backend. In JavaScript, `new Date("")` returns an Invalid Date object, and some UI libraries fall back to Unix epoch (01/01/1970) when encountering invalid dates. By using `None` instead, the JSON response sends `null`, which the frontend can properly detect and handle.
+
+### Files Modified
+- `backend/services/process_service.py`
+- `frontend/src/components/S3FileManager.js`
+- `backend/routes/clients.py`
