@@ -445,6 +445,7 @@ const IntegrationsConfigSection = () => {
     resend_api_key: "",
     smtp_from_email: "",
     smtp_from_name: "",
+    email_signature: "",
   });
   const [storage, setStorage] = useState({
     provider: "none",
@@ -484,6 +485,7 @@ const IntegrationsConfigSection = () => {
               resend_api_key: data.system_smtp.resend_api_key || "",
               smtp_from_email: data.system_smtp.smtp_from_email || "",
               smtp_from_name: data.system_smtp.smtp_from_name || "",
+              email_signature: data.system_smtp.email_signature || "",
             }));
           }
           if (data.storage) {
@@ -680,6 +682,19 @@ const IntegrationsConfigSection = () => {
                 </p>
               </div>
             </div>
+          </div>
+          {/* Email Signature */}
+          <div className="space-y-2">
+            <Label>Assinatura de Email</Label>
+            <RichTextEditor
+              value={systemSmtp.email_signature || ""}
+              onChange={(val) => setSystemSmtp((p) => ({ ...p, email_signature: val }))}
+              placeholder="Escreva a assinatura que será anexada automaticamente ao final de todos os emails enviados por esta conta..."
+              minHeight={120}
+            />
+            <p className="text-xs text-muted-foreground">
+              Esta assinatura será automaticamente anexada ao final de todos os emails transacionais enviados pelo sistema.
+            </p>
           </div>
           <div className="flex items-center gap-3 pt-2">
             <Button onClick={() => handleSave("system_smtp")} disabled={saving === "system_smtp"}>

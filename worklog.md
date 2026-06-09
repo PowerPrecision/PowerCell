@@ -168,3 +168,29 @@ Stage Summary:
 - Files modified:
   - backend/routes/auth.py (3 locations: GET /auth/me, PUT /auth/profile UCR update, PUT /auth/profile response)
   - frontend/src/pages/ProfilePage.js (signature fallback logic with comments)
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Fix email signature not saving in production (works in DEV but not in PROD)
+
+Work Log:
+- Investigated the complete email signature flow across ProfilePage, SystemConfigPage, email_service, and rgpd_service
+- Identified root cause: In email_service.py, `system_email_signature` was set from config at line 568 but then RESET to None at line 635, and the re-read at lines 636-642 only fetched `from_name` but NOT `email_signature`
+- This means the system-wide email signature (from SystemSMTPConfig) was NEVER appended to sent emails, even though it was correctly saved in the database
+- Identified secondary issue: UCR fallback for signature lookup only checked the user's default company, missing signatures stored for non-default companies
+- Same secondary issue existed in rgpd_service.py
+
+Fixes applied:
+1. `backend/services/email_service.py` line 640: Added `system_email_signature = sys_config.system_smtp.email_signature or None` to re-read the signature from config after the reset
+2. `backend/services/email_service.py` lines 767-775: Added Fallback 2 to check UCR of ANY company (not just default) when looking for user's personal signature
+3. `backend/services/rgpd_service.py` lines 1187-1194: Same Fallback 2 pattern for RGPD consent emails
+4. Verified SystemConfigPage.js already has `email_signature` field in systemSmtp state and RichTextEditor UI (was added previously)
+
+Stage Summary:
+- PRIMARY BUG: `system_email_signature` was reset to None at line 635 and never re-read from config, causing the system-wide email signature to never be appended to sent emails
+- This explains why it "works in DEV but not in production" — in DEV, emails are often not actually sent (just logged), so the missing signature is not noticed; in production, the signature is expected in real emails
+- SECONDARY: UCR signature fallback now checks all companies, not just the default
+- Files modified:
+  - backend/services/email_service.py (2 fixes: system_email_signature reset + UCR fallback)
+  - backend/services/rgpd_service.py (1 fix: UCR fallback)

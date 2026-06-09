@@ -630,7 +630,7 @@ async def send_email(
             if not account:
                 return {"success": False, "error": "Nenhuma conta de email configurada"}
     
-    # Resolve from_name for system_smtp (Bloco A) — used in From header and footer
+    # Resolve from_name and email_signature for system_smtp (Bloco A) — used in From header and footer
     from_name = ""
     system_email_signature = None
     if account and account.name == "system_smtp":
@@ -638,6 +638,7 @@ async def send_email(
             from services.system_config import get_system_config
             sys_config = await get_system_config()
             from_name = sys_config.system_smtp.smtp_from_name or ""
+            system_email_signature = sys_config.system_smtp.email_signature or None
         except Exception:
             pass
 
@@ -746,12 +747,32 @@ async def send_email(
                 email_sig = system_email_signature
             elif created_by:
                 # Buscar assinatura pessoal do utilizador que envia o email
+                # Prioridade: users.email_signature (global) > UCR.signature (empresa default) > UCR.signature (qualquer empresa)
                 try:
                     sender_user = await db.users.find_one(
                         {"id": created_by},
-                        {"email_signature": 1, "_id": 0}
+                        {"email_signature": 1, "company": 1, "_id": 0}
                     )
                     email_sig = sender_user.get("email_signature") if sender_user else None
+                    # Fallback 1: UCR da empresa default
+                    if not email_sig and sender_user:
+                        default_company = sender_user.get("company")
+                        if default_company:
+                            ucr = await db.user_company_roles.find_one(
+                                {"user_id": created_by, "company_id": default_company},
+                                {"signature": 1, "_id": 0}
+                            )
+                            if ucr and ucr.get("signature"):
+                                email_sig = ucr["signature"]
+                    # Fallback 2: UCR de qualquer empresa (o utilizador pode ter
+                    # assinatura noutra empresa que não a default)
+                    if not email_sig:
+                        ucr_any = await db.user_company_roles.find_one(
+                            {"user_id": created_by, "signature": {"$exists": True, "$ne": None, "$ne": ""}},
+                            {"signature": 1, "_id": 0}
+                        )
+                        if ucr_any and ucr_any.get("signature"):
+                            email_sig = ucr_any["signature"]
                 except Exception:
                     pass
 

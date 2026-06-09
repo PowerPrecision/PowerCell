@@ -461,13 +461,27 @@ async def update_profile(
         if prof_phone is not None and "professional_phone" not in company_specific_fields:
             company_specific_fields["professional_phone"] = prof_phone
         
-        comp_sig = update_data.pop("email_signature", None)
-        if comp_sig is not None and "signature" not in company_specific_fields:
-            company_specific_fields["signature"] = comp_sig
+        # ── email_signature: só redirecionar para UCR se não houver
+        # `signature` explícito nos company_specific_fields ──
+        # Quando o frontend envia AMBOS `signature` e `email_signature`
+        # (handleSaveSignature), o `signature` já está nos
+        # company_specific_fields. Nesse caso, NÃO fazemos .pop() —
+        # o `email_signature` fica em update_data e é gravado no
+        # documento global (users collection) para backward compat
+        # com o email_service, que lê users.email_signature.
+        # Quando só `email_signature` é enviado (sem `signature`), o
+        # .pop() + redirecionamento para UCR continua a funcionar.
+        if "signature" not in company_specific_fields:
+            comp_sig = update_data.pop("email_signature", None)
+            if comp_sig is not None:
+                company_specific_fields["signature"] = comp_sig
+        # else: signature já em company_specific_fields (veio do
+        # frontend), email_signature fica em update_data → global
         
         logger.info(
             f"[auth/profile] Empresa não-default ({active_company_id!r}): "
-            f"phone/email_signature redirecionados para UCR. "
+            f"phone redirecionado para UCR. "
+            f"email_signature em update_data={('email_signature' in update_data)}, "
             f"update_data restante={list(update_data.keys())}, "
             f"company_fields={list(company_specific_fields.keys())}"
         )

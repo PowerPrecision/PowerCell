@@ -1167,13 +1167,33 @@ Mais uma vez, obrigado(a) pela sua colaboração."""
 </html>"""
     
     # Append user's email signature if configured
+    # Prioridade: users.email_signature (global) > UCR.signature (empresa default) > UCR.signature (qualquer empresa)
     try:
         sender_user = await db.users.find_one(
             {"email": consent_data.get("created_by_email", "")},
-            {"email_signature": 1, "_id": 0}
+            {"email_signature": 1, "company": 1, "id": 1, "_id": 0}
         )
-        if sender_user and sender_user.get("email_signature"):
-            body_html += f"<br/><hr/>{sender_user['email_signature']}"
+        sig = sender_user.get("email_signature") if sender_user else None
+        # Fallback 1: UCR da empresa default
+        if not sig and sender_user:
+            default_company = sender_user.get("company")
+            if default_company:
+                ucr = await db.user_company_roles.find_one(
+                    {"user_id": sender_user.get("id"), "company_id": default_company},
+                    {"signature": 1, "_id": 0}
+                )
+                if ucr and ucr.get("signature"):
+                    sig = ucr["signature"]
+        # Fallback 2: UCR de qualquer empresa
+        if not sig and sender_user:
+            ucr_any = await db.user_company_roles.find_one(
+                {"user_id": sender_user.get("id"), "signature": {"$exists": True, "$ne": None, "$ne": ""}},
+                {"signature": 1, "_id": 0}
+            )
+            if ucr_any and ucr_any.get("signature"):
+                sig = ucr_any["signature"]
+        if sig:
+            body_html += f"<br/><hr/>{sig}"
     except Exception:
         pass
     
