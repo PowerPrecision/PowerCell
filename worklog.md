@@ -75,145 +75,204 @@ Empty strings (`""`) were used as default values for date fields in the backend.
 - `backend/routes/clients.py`
 
 ---
-Task ID: 3
-Agent: General-Purpose Sub Agent
-Task: Backend code cleanup — remove debug prints, unused imports, dead code
+Task ID: 2
+Agent: Main Agent
+Task: Centro de Operações — Mostrar detalhes das tarefas em background
 
 Work Log:
-- Searched ALL .py files in backend/routes/ and backend/services/ for print() statements
-- Found zero debug print() statements in backend/routes/ (all clean)
-- Found 1 debug print in backend/services/openai_privacy.py (line 402): `print(warning, file=__import__('sys').stderr)` — converted to `logger.warning(warning)`
-- Found print() statements in backend/services/migrate_encryption.py — SKIPPED (migration script per rules)
-- Found print() statements in backend/config.py — SKIPPED (startup validation diagnostics, not debug)
-- Found print() statements in backend/scripts/, backend/seed*.py, backend/fix_*.py — SKIPPED (seed/migration scripts per rules)
-- Found print() statements in backend/tests/ — SKIPPED (test files per rules)
-- Searched for unused imports across priority files and broader routes/services
-- Searched for commented-out code blocks across routes/ and services/ — none found
-- Searched for commented-out debug prints (# print(...)) — none found
-
-Changes Made:
-
-1. **backend/routes/users.py** — Removed unused imports `EmailConfigResponse` and `EmailConfigTestResult` from `models.email_config`. These were imported but never referenced in the file; only `EmailConfigCreate` is actually used.
-
-2. **backend/services/process_service.py** — Removed unused type hints `Dict` and `Any` from `typing` import. Only `Optional` and `Tuple` are actually used in function signatures.
-
-3. **backend/services/openai_privacy.py** — Converted `print(warning, file=__import__('sys').stderr)` to `logger.warning(warning)` in `validate_privacy_config_on_startup()`. The `__import__('sys')` hack was a debug-style pattern; the official logger is the correct channel for startup warnings.
-
-4. **backend/routes/ai_bulk/__init__.py** — Removed unused `import sys`. The module only uses `os` and `importlib.util` for dynamic module loading; `sys` was never referenced.
-
-Files Verified Clean (no changes needed):
-- backend/routes/auth.py — No prints, no unused imports, no dead code
-- All other files in backend/routes/ — No print() statements found
-- All other files in backend/services/ — Only migration/script prints (excluded per rules)
+- Analyzed existing BackgroundJobsPage.js from the React/Vite frontend (frontend/src/pages/BackgroundJobsPage.js)
+- Analyzed the FastAPI backend background_jobs route (backend/routes/ai_bulk/background_jobs.py)
+- Updated Prisma schema with BackgroundJob model (progress, total, processed, errors, currentStep, stepLog, errorMessages, details, etc.)
+- Ran `bun run db:push` to sync the schema with SQLite
+- Created 7 API routes in Next.js:
+  - GET/POST/DELETE /api/background-jobs (list, create, clear finished)
+  - GET/DELETE /api/background-jobs/[jobId] (get, delete)
+  - POST /api/background-jobs/[jobId]/cancel
+  - POST /api/background-jobs/[jobId]/pause
+  - POST /api/background-jobs/[jobId]/resume
+  - GET /api/background-jobs/metrics
+  - POST /api/background-jobs/clear-all
+  - POST /api/background-jobs/seed
+- Built the full Centro de Operações page (src/app/page.tsx) with:
+  - Header with auto-refresh toggle, metrics toggle, reload, clear buttons
+  - 5 stat cards (Total, A correr, Concluídos, Pausados, Falhados) with click-to-filter
+  - Job cards showing: type icon, status badge, timestamps, elapsed timer (live), progress bar, current step, error count, error log, details
+  - Action buttons: Pausar/Cancelar for running jobs, Retomar/Cancelar for paused jobs, Ver detalhes (terminal-style log viewer), Delete for finished jobs
+  - Job detail dialog with terminal-style log viewer (dark background, colored timestamps, step entries, error log, error messages list, raw details JSON)
+  - Metrics dashboard: success rate, avg duration, total jobs, stuck count, by status breakdown, by type breakdown
+  - Sticky footer with auto-refresh indicator and last update time
+  - Responsive design (mobile and desktop)
+  - Auto-seeding of demo data when no jobs exist
+- Fixed lint error in ElapsedTimer (setState in effect → queueMicrotask)
+- Fixed "Falhados" filter to include both "failed" and "cancelled" statuses
+- Updated API to support comma-separated status values for filtering
+- Verified with Agent Browser: page loads, job details display, dialog opens with logs, metrics dashboard works, filters work
 
 Stage Summary:
-- 4 files cleaned across routes/ and services/
-- 1 debug print converted to logger call
-- 4 unused imports removed
-- 0 dead/commented-out code blocks found (codebase is clean)
-- All logger.info/error/warning/debug calls preserved (official logging system untouched)
-- All migration/seed/script prints preserved per task rules
+- Full Centro de Operações page built from scratch showing all background task details
+- 7 demo jobs seeded (2 running, 1 paused, 2 success, 1 failed, 1 cancelled)
+- All features working: real-time auto-refresh, pause/resume/cancel actions, terminal-style log viewer, metrics dashboard, status filtering
+- Files created/modified:
+  - prisma/schema.prisma (added BackgroundJob model)
+  - src/app/page.tsx (complete Centro de Operações page)
+  - src/app/api/background-jobs/route.ts
+  - src/app/api/background-jobs/[jobId]/route.ts
+  - src/app/api/background-jobs/[jobId]/cancel/route.ts
+  - src/app/api/background-jobs/[jobId]/pause/route.ts
+  - src/app/api/background-jobs/[jobId]/resume/route.ts
+  - src/app/api/background-jobs/metrics/route.ts
+  - src/app/api/background-jobs/clear-all/route.ts
+  - src/app/api/background-jobs/seed/route.ts
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix email signature not saving
+
+Work Log:
+- Investigated the email signature save flow across frontend and backend
+- ProfilePage.js sends PUT /auth/profile with { signature, email_signature } fields
+- Backend auth.py update_profile routes signature to user_company_roles (UCR) and email_signature to global users collection
+- Identified 3 bugs causing the signature to not display after save:
+  1. Backend GET /auth/me returns active_company_signature="" (empty string) when no UCR record exists
+     - Frontend uses ?? (nullish coalescing) which doesn't fall through for empty strings
+     - So "" ?? user.email_signature evaluates to "" instead of falling through to the global email_signature
+  2. Backend update_profile skips UCR update when active_company_id is None
+     - This happens when the user has no X-Company-Id header and no user.company field
+     - The signature is saved globally but not in UCR, causing display issues on reload
+  3. Frontend fallback for professionalPhone was missing the user.phone global fallback
+
+- Fixed backend auth.py GET /auth/me:
+  - Changed active_company_signature from "" to None when no UCR record or no signature field in UCR
+  - Changed active_company_professional_phone and active_company_job_title similarly
+  - Changed active_company_name from "" to None for consistency
+  - Added check "signature" in active_assoc to distinguish between "not set" (None) and "intentionally cleared" ("")
+
+- Fixed backend auth.py PUT /auth/profile (update_profile):
+  - Added fallback for UCR company_id: ucr_company_id = active_company_id or user.get("company") or "default"
+  - This ensures the signature is ALWAYS saved to UCR, even when active_company_id is None
+  - Removed the warning about missing company context (no longer needed)
+  - Updated lookup_company_id to use ucr_company_id when company_specific_fields were saved
+
+- Fixed backend auth.py PUT /auth/profile response:
+  - Same None vs "" fix for active_company_signature and related fields in the response
+
+- Fixed frontend ProfilePage.js:
+  - Added detailed comment explaining the null vs "" distinction and how ?? works
+  - Changed professionalPhone fallback to include user.phone as global fallback
+  - Email signature fallback already correct with the backend fix (None now properly falls through)
+
+Stage Summary:
+- Root cause: Backend returned "" (empty string) for active_company_signature when no UCR record existed, preventing the frontend's ?? operator from falling through to the global email_signature value
+- Secondary cause: When active_company_id was None, the UCR update was skipped entirely, leaving the signature only in the global user document but not in UCR
+- Files modified:
+  - backend/routes/auth.py (3 locations: GET /auth/me, PUT /auth/profile UCR update, PUT /auth/profile response)
+  - frontend/src/pages/ProfilePage.js (signature fallback logic with comments)
 
 ---
 Task ID: 4
-Agent: General-Purpose Sub Agent
-Task: Fix RequestsDependencyWarning on server startup
+Agent: Main Agent
+Task: Fix email signature not saving in production (works in DEV but not in PROD)
 
 Work Log:
-- Read `/home/z/PowerCell/backend/requirements.txt` and identified dependency versions
-- Current versions: `requests==2.32.5`, `urllib3==2.6.3`, `charset-normalizer==3.4.4`
-- Inspected `requests` source code (`__init__.py`) to understand the `check_compatibility()` function that triggers the warning
-- The warning `RequestsDependencyWarning: urllib3 (2.6.3) or chardet... doesn't match a supported version!` is raised when `check_compatibility()` raises AssertionError/ValueError
-- Verified that `urllib3==2.6.3` is too new for `requests==2.32.5` — while it technically passes the version range check (`>=1.21.1`), it was released well after requests 2.32.5 and can cause runtime incompatibilities and the dependency warning
-- Checked all reverse dependencies of urllib3 to ensure compatibility:
-  - `requests` requires `urllib3<3,>=1.21.1` ✓
-  - `botocore` (Python >=3.10) requires `urllib3!=2.2.0,<3,>=1.25.4` ✓
-  - No other base dependencies require urllib3 >= 2.4
-- Confirmed `charset-normalizer==3.4.4` is compatible with `requests>=2,<4` ✓
-- Confirmed `chardet` is NOT in requirements.txt (good — requests uses charset-normalizer by default since v2.26)
-- Installed and tested `urllib3==2.3.0` — all compatibility checks pass, no warning
+- Investigated the complete email signature flow across ProfilePage, SystemConfigPage, email_service, and rgpd_service
+- Identified root cause: In email_service.py, `system_email_signature` was set from config at line 568 but then RESET to None at line 635, and the re-read at lines 636-642 only fetched `from_name` but NOT `email_signature`
+- This means the system-wide email signature (from SystemSMTPConfig) was NEVER appended to sent emails, even though it was correctly saved in the database
+- Identified secondary issue: UCR fallback for signature lookup only checked the user's default company, missing signatures stored for non-default companies
+- Same secondary issue existed in rgpd_service.py
 
-Changes Made:
-1. **backend/requirements.txt** — Changed `urllib3==2.6.3` → `urllib3==2.3.0`
-
-Why this fixes the warning:
-- `urllib3==2.3.0` is a well-tested, stable version within the compatibility range for `requests==2.32.5` (`urllib3>=1.21.1,<3`)
-- It satisfies `botocore`'s requirement (`urllib3!=2.2.0,<3,>=1.25.4`)
-- The 2.6.3 version was too far ahead of what requests 2.32.5 was tested against, triggering the dependency mismatch warning
-- `charset-normalizer==3.4.4` was already compatible and required no changes
-- No chardet entry exists in requirements.txt (correct — not needed since requests v2.26+)
-
-Files Modified:
-- `backend/requirements.txt` (1 line changed)
-
----
-Task ID: 2
-Agent: General-Purpose Sub Agent
-Task: Frontend code cleanup — remove debug console statements, unused imports, dead code
-
-Work Log:
-- Searched ALL .js and .jsx files in frontend/src/ for console.log, console.warn, console.error
-- Found 150+ console statements across ~60 files; categorized into:
-  - console.log (always debugging) → REMOVE
-  - console.error/warn in catch blocks (actual error handling) → KEEP
-  - Standalone console.error/warn (debugging) → REMOVE
-- Read and cleaned 3 priority files + 5 additional files
-- Verified no remaining console.log statements (except JSDoc comment in useWebSocket.js)
-- Checked for unused imports in all modified files
-- Checked for commented-out code blocks across frontend/src/ — found 1 (commented-out import in RGPDPage.jsx)
-- React 19 uses new JSX transform — removed unnecessary `import React from "react"` where `React` was not used directly
-
-Changes Made:
-
-1. **frontend/src/components/layout/ContextSwitcher.jsx**
-   - Removed `console.log("[ContextSwitcher] Company click:...", ...)` (line 135) — debug logging on company switch
-   - Removed `console.log("A mudar perfil para:...", ...)` (lines 194-198) — debug logging on role switch
-   - Removed unused `import React from "react"` (React 19 new JSX transform)
-   - Removed unused destructured variable `activeCompanyId` from useAuth() hook
-
-2. **frontend/src/contexts/AuthContext.js**
-   - Removed `console.log("[ContextSwitch] Mudança para:...", ...)` (lines 430-435) — debug logging with full object dump on role switch
-   - Removed `console.log("[ContextSwitch] Troca de empresa:...", ...)` (line 457) — debug logging on company switch
-   - Removed `console.log("[ContextSwitch] Verificação sessionStorage...", ...)` (line 464) — debug verification logging
-   - Removed associated debugging comments ("RASTREIO: Log para debugging")
-   - Removed unused `const verified = sessionStorage.getItem(...)` that only served the removed console.log
-   - Preserved all console.error/warn in catch blocks (actual error handling)
-
-3. **frontend/src/components/EmailConfigForm.jsx**
-   - No console statements found (clean file)
-   - Removed unused `import React from "react"` (React 19 new JSX transform)
-
-4. **frontend/src/pages/ProfilePage.js**
-   - Removed `console.log("[ProfilePage] Sincronizando emailCompanyId:...", ...)` (line 144) — debug logging on company sync
-   - Removed `console.log("[ProfilePage] Dados reidratados — empresa:...", ...)` (lines 178-185) — debug dump of all company fields
-   - Removed associated comment ("Debug: confirmar que os dados da empresa estão a chegar")
-   - Removed `console.log("[ProfilePage] Dropdown email empresa:...", ...)` (line 1097) — debug logging on dropdown change
-   - Removed unused `import React from "react"` (React 19 new JSX transform)
-
-5. **frontend/src/pages/FilesExplorerPage.jsx**
-   - Removed `console.log("Arquivos carregados:", data)` (line 173) — debug logging of API response data
-   - Removed unused `import React from "react"` (React 19 new JSX transform)
-
-6. **frontend/src/hooks/useSlidingSession.js**
-   - Removed `console.log('[SlidingSession] Sessão expirada por inactividade', {...})` (lines 132-135) — debug logging of session expiry with elapsed/limit data
-
-7. **frontend/src/pages/ProcessDetails.js**
-   - Removed `console.error("Erro ao carregar imóveis do processo")` (line 940) — standalone error (not in catch block; the catch block on line 943 was preserved)
-   - Removed `console.warn("loadOneDriveFolder is deprecated. Use S3FileManager component.")` (line 1311) — deprecation warning in empty stub function (comment already documents deprecation)
-
-8. **frontend/src/pages/RGPDPage.jsx**
-   - Removed commented-out import: `// import { ScrollArea } from '../components/ui/scroll-area';` (line 24) — dead code, replaced by div per comment
-
-Files Verified Clean (no changes needed):
-- frontend/src/components/EmailConfigForm.jsx — no console statements, all imports used
-- All other .js/.jsx files — remaining console.error/warn are in catch blocks (legitimate error handling)
+Fixes applied:
+1. `backend/services/email_service.py` line 640: Added `system_email_signature = sys_config.system_smtp.email_signature or None` to re-read the signature from config after the reset
+2. `backend/services/email_service.py` lines 767-775: Added Fallback 2 to check UCR of ANY company (not just default) when looking for user's personal signature
+3. `backend/services/rgpd_service.py` lines 1187-1194: Same Fallback 2 pattern for RGPD consent emails
+4. Verified SystemConfigPage.js already has `email_signature` field in systemSmtp state and RichTextEditor UI (was added previously)
 
 Stage Summary:
-- 8 files cleaned
-- 8 console.log statements removed (all debugging)
-- 2 standalone console.error/warn removed (not in catch blocks)
-- 4 unused `import React from "react"` removed (React 19 new JSX transform)
-- 1 unused destructured variable removed (`activeCompanyId` in ContextSwitcher)
-- 1 commented-out import removed (RGPDPage.jsx ScrollArea)
-- 0 catch-block console.error/warn removed (all preserved as error handling)
-- 0 test files modified
+- PRIMARY BUG: `system_email_signature` was reset to None at line 635 and never re-read from config, causing the system-wide email signature to never be appended to sent emails
+- This explains why it "works in DEV but not in production" — in DEV, emails are often not actually sent (just logged), so the missing signature is not noticed; in production, the signature is expected in real emails
+- SECONDARY: UCR signature fallback now checks all companies, not just the default
+- Files modified:
+  - backend/services/email_service.py (2 fixes: system_email_signature reset + UCR fallback)
+  - backend/services/rgpd_service.py (1 fix: UCR fallback)
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Fix email signature not saving in production — X-Company-Id header is None when user has no companies
+
+Work Log:
+- Analyzed production log: `WARNING routes.auth [auth/profile] active_company_id é None — campos da empresa NÃO guardados! X-Company-Id header=None, user.company=None`
+- Traced the complete flow: AuthContext → api.js interceptor → backend get_active_company_id_async → update_profile
+- Identified root cause chain:
+  1. User has no entries in user_company_roles AND user.company is None
+  2. AuthContext.fetchUser() sets activeCompanyId = null (no company to set)
+  3. api.js interceptor doesn't send X-Company-Id header (sessionStorage has null)
+  4. Backend get_active_company_id_async() returns None
+  5. Backend treats None as "no company context" and fails to save company-specific fields properly
+- Applied 3-part fix:
+
+1. Frontend (AuthContext.js): When no companies exist and user.company is null, set activeCompanyId to "default" sentinel instead of leaving it null. This ensures X-Company-Id header is ALWAYS sent by the api.js interceptor.
+
+2. Backend (services/auth.py): In both get_active_company_id() and get_active_company_id_async(), accept "default" as a valid company_id without UCR validation. The "default" sentinel represents "no specific company context" and should not be validated against user_company_roles (which has no entry for it).
+
+3. Backend (routes/auth.py):
+   - Added "default" to is_default_company check in update_profile
+   - Added warning log when active_company_id is None (matches production message format)
+   - Fixed GET /auth/me to always call get_active_company_id_async (even with empty user_companies) so "default" sentinel propagates correctly
+
+Stage Summary:
+- Root cause: When user has no companies (user_company_roles empty + user.company null), the X-Company-Id header was never sent, causing active_company_id=None on the backend
+- Fix: "default" sentinel value flows end-to-end: Frontend → sessionStorage → X-Company-Id header → backend accepts without validation
+- The "default" sentinel ensures email_signature is always saved: globally (users collection) AND in UCR (with company_id="default")
+- Files modified:
+  - frontend/src/contexts/AuthContext.js (activeCompanyId fallback to "default")
+  - backend/services/auth.py (both get_active_company_id functions accept "default")
+  - backend/routes/auth.py (GET /auth/me + PUT /auth/profile handle "default" + warning log)
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Add process number to email subject when sending to balcões
+
+Work Log:
+- Investigated the email sending flow for balcões (SendDocumentationModal + backend routes)
+- Found that the default email subject was `Documentação - {client_name}` — no process number
+- The frontend fallback display already included process number but backend didn't
+- Fixed backend `preview-documentation` endpoint: subject now includes `(Proc. {process_number})`
+- Fixed backend `send-documentation` endpoint: default subject now includes `(Proc. {process_number})`
+- Updated frontend fallback text to match backend format: `(Proc. {number})` instead of `(Processo #{number})`
+- Confirmed `skip_proc_tag=True` prevents duplicate Tag Mágica `[Proc-{uuid}]` injection
+
+Stage Summary:
+- Email subject for balcões changed from "Documentação - João Silva" to "Documentação - João Silva (Proc. 123)"
+- Files modified:
+  - backend/routes/emails.py (2 locations: preview + send endpoints)
+  - frontend/src/components/SendDocumentationModal.js (fallback text)
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Correção Crítica: Formatação HTML nos E-mails para Balcões + Nº Processo no Assunto
+
+Work Log:
+- Investigated the complete email sending pipeline for balcões (counters/banks)
+- Traced flow: Frontend RichTextEditor (React Quill) → custom_html_body → backend sanitize_html() → send_email() → MIME/Resend
+- **ROOT CAUSE FOUND**: `sanitize_html(custom_html_body)` at line 1058 of `backend/routes/emails.py` strips ALL HTML tags because `allow_basic_formatting` defaults to `False` and `ALLOWED_TAGS = []`. The `bleach.clean()` call with empty tags list removes `<div>`, `<table>`, `<h3>`, `<strong>`, `<br>`, etc., leaving only plain text.
+- Even with `allow_basic_formatting=True`, only 10 basic tags were allowed (`b, i, u, strong, em, p, br, ul, ol, li`) — not the professional email tags like `<div>`, `<table>`, `<span>`, `<a>`, `<hr>`, `<h1>`-`<h6>` needed for bank emails.
+- Verified MIME type handling in `send_email()` is CORRECT: `MIMEText(body_html, "html", "utf-8")` is used when body_html is provided.
+- Verified Resend API path is CORRECT: `params["html"] = html_content` is set when body_html exists.
+- The bug was exclusively in the sanitization step BEFORE the email reached send_email().
+
+Fixes applied:
+1. `backend/utils/input_sanitization.py` — Added `EMAIL_SAFE_TAGS` (40+ tags) and `EMAIL_SAFE_ATTRIBUTES` (comprehensive attributes per tag including style, class, href, src, colspan, etc.) for professional email HTML. Added `allow_email_html` parameter to `sanitize_html()`.
+2. `backend/routes/emails.py` line 1063 — Changed `sanitize_html(custom_html_body)` to `sanitize_html(custom_html_body, allow_email_html=True)` — preserves all email formatting (tables, bold, paragraphs, etc.) while still removing dangerous scripts/iframe/form.
+3. `backend/routes/emails.py` line 1094 — Added `sanitize_html(email_template, allow_email_html=True)` for the email_template path.
+4. `backend/routes/emails.py` lines 1145-1167 — Added process number enforcement in the subject: if the custom subject doesn't contain the process number, it's automatically appended as `(Proc. {process_number})`.
+
+Stage Summary:
+- PRIMARY BUG: `sanitize_html()` was stripping ALL HTML tags from the Rich Text Editor content, causing emails to balcões to arrive as plain text ("texto corrido") without any formatting.
+- FIX: New `allow_email_html=True` mode preserves 40+ HTML tags needed for professional emails while still removing dangerous elements (script, iframe, form, event handlers).
+- SECONDARY: Process number is now ALWAYS included in the email subject when sending to balcões, even with custom subjects.
+- Files modified:
+  - backend/utils/input_sanitization.py (EMAIL_SAFE_TAGS, EMAIL_SAFE_ATTRIBUTES, allow_email_html parameter)
+  - backend/routes/emails.py (3 changes: custom_html_body sanitization, email_template sanitization, subject process number enforcement)

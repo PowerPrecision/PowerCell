@@ -470,6 +470,11 @@ def get_active_company_id(request: Request, user: dict) -> Optional[str]:
 
     active_company = active_company.strip()
 
+    # ── Sentinel "default": aceitar sem validação na UCR ──
+    # (mesma lógica que get_active_company_id_async — ver comentário lá)
+    if active_company == "default":
+        return "default"
+
     # Importar db aqui para evitar circular imports
     import asyncio
     from database import db as _db
@@ -518,6 +523,17 @@ async def get_active_company_id_async(request: Request, user: dict) -> Optional[
 
     Preferir esta versão em endpoints FastAPI (que já são async).
 
+    Prioridade:
+    1. Header X-Company-Id — se presente e válido para este utilizador
+    2. user["company"] — empresa padrão do utilizador (fallback)
+
+    Nota: O valor especial "default" é aceite sem validação na tabela
+    user_company_roles. Este sentinel é usado quando o utilizador não
+    tem associações a empresas (user_company_roles vazio) mas o frontend
+    precisa de enviar um X-Company-Id para que o backend possa guardar
+    campos como a assinatura de email. Sem isto, o backend recebe
+    active_company_id=None e não consegue gravar os dados da empresa.
+
     Args:
         request: Objeto FastAPI Request (para ler headers)
         user: Dicionário do utilizador (do JWT)
@@ -531,6 +547,14 @@ async def get_active_company_id_async(request: Request, user: dict) -> Optional[
         return user.get("company") or None
 
     active_company = active_company.strip()
+
+    # ── Sentinel "default": aceitar sem validação na UCR ──
+    # Quando o utilizador não tem empresas em user_company_roles, o
+    # frontend envia X-Company-Id: "default" como sentinel. Não faz
+    # sentido validar este valor na UCR porque não existe registo
+    # correspondente — é um contexto sem empresa específica.
+    if active_company == "default":
+        return "default"
 
     # Cache em request.state
     cache_key = f"_company_valid_{active_company}"

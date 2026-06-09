@@ -953,7 +953,7 @@ async def preview_documentation_email(
     return {
         "success": True,
         "html": email_body,
-        "subject": f"Documentação - {client_name}",
+        "subject": f"Documentação - {client_name} (Proc. {process_number})",
         "template_vars": template_vars,
         "available_variables": list(template_vars.keys()),
         "documents_count": len(documents) if documents else 0
@@ -1185,8 +1185,13 @@ async def _send_documentation_email_impl(
     
     if custom_html_body:
         # USAR HTML CUSTOMIZADO DO EDITOR WYSIWYG (disponível para todos os utilizadores)
-        # Sanitizar para segurança (remover scripts perigosos)
-        email_body = sanitize_html(custom_html_body)
+        # Sanitizar para segurança (remover scripts perigosos) MAS preservar formatação HTML
+        # que o Rich Text Editor gera (tabelas, negritos, parágrafos, etc.)
+        # CRITICAL: allow_email_html=True preserva tags de formatação profissional
+        # (div, table, h3, strong, etc.) enquanto remove scripts/iframe/form perigosos.
+        # Antes usava sanitize_html() sem allow_email_html, o que stripava TODAS as tags
+        # e os emails chegavam aos balcões como texto corrido sem formatação.
+        email_body = sanitize_html(custom_html_body, allow_email_html=True)
         logger.info(f"Usando custom_html_body do Rich Text Editor para processo {process_id} (utilizador: {current_user['role']})")
     
     elif custom_message:
@@ -1216,6 +1221,8 @@ async def _send_documentation_email_impl(
             + "</div>"
         )
     elif email_template:
+        # Sanitizar o template ANTES de resolver variáveis (preserva tags HTML de email)
+        email_template = sanitize_html(email_template, allow_email_html=True)
         # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
         normalized_template = re.sub(r'\[([A-Z_]+)\]', r'{\1}', email_template)
         # Usar template personalizado da configuração com todas as variáveis
@@ -1268,14 +1275,29 @@ async def _send_documentation_email_impl(
     # Último fallback: email do utilizador actual
     if not to_emails:
         to_emails = [current_user["email"]]
-    # Subject: usar o assunto enviado pelo frontend (editável), ou gerar sem Proc-xxxx
+    # Subject: usar o assunto enviado pelo frontend (editável), ou gerar padrão
+    # CRITICAL: O processo Nº deve SEMPRE constar no assunto quando se envia
+    # documentação para balcões (requisito regulatório dos bancos).
     custom_subject = data.get("subject")
     if custom_subject and custom_subject.strip():
         subject = custom_subject.strip()
         # Remover tag [Proc-xxxx] caso exista no subject customizado
         subject = re.sub(r'\s*\[Proc-[\w-]+\]\s*', ' ', subject).strip()
     else:
-        subject = f"Documentação - {client_name}"
+        subject = f"Documentação - {client_name} (Proc. {process_number})"
+    
+    # Garantir que o número do processo está sempre no assunto
+    # (mesmo em assunto customizado pelo utilizador)
+    if process_number and str(process_number) != "N/A":
+        # Verificar se já contém o número do processo
+        proc_patterns = [
+            re.escape(str(process_number)),  # Número exato
+            r'Proc\.?\s*' + re.escape(str(process_number)),  # "Proc. XXX" ou "Proc XXX"
+            r'Processo\s*' + re.escape(str(process_number)),  # "Processo XXX"
+        ]
+        has_proc_in_subject = any(re.search(p, subject, re.IGNORECASE) for p in proc_patterns)
+        if not has_proc_in_subject:
+            subject = f"{subject} (Proc. {process_number})"
     
     # BCC adicional: emails introduzidos manualmente pelo utilizador
     bcc_manual = [e for e in (sanitize_email(e) for e in data.get("bcc_emails", [])) if e]

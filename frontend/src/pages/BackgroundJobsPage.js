@@ -67,8 +67,10 @@ const JOB_TYPE_ICONS = {
 // Mapeamento de status para badges
 const STATUS_CONFIG = {
   running: { label: "A correr", variant: "default", className: "bg-blue-500", icon: Loader2 },
+  processing: { label: "A processar", variant: "default", className: "bg-blue-500", icon: Loader2 },
   paused: { label: "Pausado", variant: "default", className: "bg-amber-500", icon: Clock },
   success: { label: "Concluído", variant: "default", className: "bg-green-500", icon: CheckCircle },
+  completed: { label: "Concluído", variant: "default", className: "bg-green-500", icon: CheckCircle },
   failed: { label: "Falhado", variant: "destructive", icon: XCircle },
   cancelled: { label: "Cancelado", variant: "secondary", className: "bg-gray-500", icon: XCircle },
   pending: { label: "Pendente", variant: "secondary", icon: Clock },
@@ -128,35 +130,36 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
     return formatDateTime(isoString);
   };
 
-  const isRunning = job.status === "running";
+  const isRunning = job.status === "running" || job.status === "processing";
   const isPaused = job.status === "paused";
   const isActive = isRunning || isPaused;
+  const isCompleted = job.status === "success" || job.status === "completed";
 
   // Cor da barra de progresso baseada no estado
   const progressColor = isRunning
     ? "bg-blue-500"
     : isPaused
     ? "bg-amber-500"
-    : job.status === "success"
+    : isCompleted
     ? "bg-green-500"
     : "bg-red-500";
 
   return (
-    <Card className={`transition-all ${isRunning ? 'border-blue-300 shadow-md dark:border-blue-700' : isPaused ? 'border-amber-300 dark:border-amber-700' : ''}`}>
+    <Card className={`transition-all ${isRunning ? 'border-blue-300 shadow-md dark:border-blue-700' : isPaused ? 'border-amber-300 dark:border-amber-700' : isCompleted ? 'border-green-200 dark:border-green-800' : ''}`}>
       <CardContent className="p-4">
         <div className="flex items-start justify-between gap-4">
           {/* Ícone e Info Principal */}
           <div className="flex items-start gap-3 flex-1 min-w-0">
             <div className={`p-2.5 rounded-lg shrink-0 ${
               isRunning ? 'bg-blue-100 dark:bg-blue-900/30' :
-              job.status === 'success' ? 'bg-green-100 dark:bg-green-900/30' :
+              isCompleted ? 'bg-green-100 dark:bg-green-900/30' :
               job.status === 'failed' ? 'bg-red-100 dark:bg-red-900/30' :
               isPaused ? 'bg-amber-100 dark:bg-amber-900/30' :
               'bg-gray-100 dark:bg-gray-800'
             }`}>
               <Icon className={`h-5 w-5 ${
                 isRunning ? 'text-blue-600' :
-                job.status === 'success' ? 'text-green-600' :
+                isCompleted ? 'text-green-600' :
                 job.status === 'failed' ? 'text-red-600' :
                 isPaused ? 'text-amber-600' :
                 'text-gray-600'
@@ -167,10 +170,13 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
               {/* Header: tipo + status badge */}
               <div className="flex items-center gap-2 flex-wrap">
                 <h4 className="font-medium text-sm">
-                  {job.type === 'bulk_import' ? 'Importação Massiva' :
+                  {['bulk_import', 'excel_import'].includes(job.type) ? 'Importação Massiva' :
                    job.type === 'document_analysis' ? 'Análise de Documentos' :
                    job.type === 'email_sync' ? 'Sincronização de Email' :
-                   job.type === 'aggregated_import' ? 'Importação Agregada' :
+                   ['aggregated_import', 'async_import', 'sync_import'].includes(job.type) ? 'Importação Agregada' :
+                   job.type === 'bulk_analysis' ? 'Análise em Massa' :
+                   job.type === 'data_export' ? 'Exportação de Dados' :
+                   job.type === 'pdf_gen' ? 'Geração de PDF' :
                    job.type}
                 </h4>
                 <Badge 
@@ -184,35 +190,50 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
               
               {/* Meta info: início + tempo decorrido */}
               <div className="flex items-center gap-4 mt-1 text-xs text-muted-foreground">
-                <span>Início: {formatDate(job.started_at)}</span>
-                <ElapsedTimer startedAt={job.started_at} finishedAt={job.finished_at} />
-                {job.finished_at && <span>Fim: {formatDate(job.finished_at)}</span>}
+                <span>Início: {formatDate(job.started_at || job.created_at)}</span>
+                <ElapsedTimer startedAt={job.started_at || job.created_at} finishedAt={job.finished_at || job.completed_at} />
+                {(job.finished_at || job.completed_at) && <span>Fim: {formatDate(job.finished_at || job.completed_at)}</span>}
               </div>
 
-              {/* ══ PROGRESS BAR (sempre visível para jobs com total > 0) ══ */}
-              {(job.total > 0 || job.progress > 0) && (
-                <div className="mt-3">
-                  <div className="flex items-center justify-between text-xs mb-1.5">
-                    <span className="text-muted-foreground">
-                      {job.processed ?? 0} de {job.total || "?"} processados
-                    </span>
-                    <span className="font-semibold">{job.progress ?? 0}%</span>
+              {/* ══ PROGRESS BAR ══ */}
+              {(() => {
+                // Compatibilidade: progress pode ser número ou objecto
+                const progressVal = typeof job.progress === 'object' && job.progress !== null
+                  ? (job.progress.percentage ?? 0)
+                  : (job.progress ?? 0);
+                const progressMsg = typeof job.progress === 'object' && job.progress !== null
+                  ? job.progress.message : null;
+                const totalItems = typeof job.progress === 'object' && job.progress !== null
+                  ? (job.progress.total ?? 0) : (job.total ?? 0);
+                const processedItems = typeof job.progress === 'object' && job.progress !== null
+                  ? (job.progress.current ?? 0) : (job.processed ?? 0);
+                const showProgress = totalItems > 0 || progressVal > 0;
+                if (!showProgress) return null;
+                return (
+                  <div className="mt-3">
+                    <div className="flex items-center justify-between text-xs mb-1.5">
+                      <span className="text-muted-foreground">
+                        {processedItems} de {totalItems || "?"} processados
+                      </span>
+                      <span className="font-semibold">{progressVal}%</span>
+                    </div>
+                    <div className="relative">
+                      <Progress 
+                        value={progressVal} 
+                        className={`h-2.5 ${isRunning ? 'animate-pulse' : ''}`} 
+                      />
+                    </div>
+                    {progressMsg && <p className="text-xs text-muted-foreground mt-1">{progressMsg}</p>}
                   </div>
-                  <div className="relative">
-                    <Progress 
-                      value={job.progress ?? 0} 
-                      className={`h-2.5 ${isRunning ? 'animate-pulse' : ''}`} 
-                    />
-                  </div>
-                </div>
-              )}
+                );
+              })()}
 
               {/* ══ CURRENT STEP — itálico abaixo da barra ══ */}
-              {job.current_step && isActive && (
+              {(job.current_step || (typeof job.progress === 'object' && job.progress?.message)) && isActive && (
                 <div className="mt-2 flex items-start gap-1.5">
                   <ChevronRight className={`h-3.5 w-3.5 mt-0.5 shrink-0 ${isRunning ? 'text-blue-500' : 'text-amber-500'}`} />
                   <p className="text-xs italic text-muted-foreground leading-relaxed">
-                    {job.current_step}
+                    {job.current_step || job.progress?.message}
                   </p>
                 </div>
               )}
@@ -372,9 +393,13 @@ const JobLogSheet = ({ job, open, onOpenChange }) => {
             Logs do Processo
           </SheetTitle>
           <SheetDescription>
-            {job.type === 'bulk_import' ? 'Importação Massiva' :
+            {['bulk_import', 'excel_import'].includes(job.type) ? 'Importação Massiva' :
              job.type === 'document_analysis' ? 'Análise de Documentos' :
              job.type === 'email_sync' ? 'Sincronização de Email' :
+             ['aggregated_import', 'async_import', 'sync_import'].includes(job.type) ? 'Importação Agregada' :
+             job.type === 'bulk_analysis' ? 'Análise em Massa' :
+             job.type === 'data_export' ? 'Exportação de Dados' :
+             job.type === 'pdf_gen' ? 'Geração de PDF' :
              job.type} — {job.id?.slice(0, 8)}...
           </SheetDescription>
         </SheetHeader>
@@ -385,21 +410,29 @@ const JobLogSheet = ({ job, open, onOpenChange }) => {
             <Badge className={STATUS_CONFIG[job.status]?.className || ""}>
               {STATUS_CONFIG[job.status]?.label || job.status}
             </Badge>
-            {job.total > 0 && (
-              <span className="text-muted-foreground">
-                {job.processed ?? 0}/{job.total} processados ({job.progress ?? 0}%)
-              </span>
-            )}
-            {job.started_at && (
+            {(() => {
+              const progressVal = typeof job.progress === 'object' && job.progress !== null
+                ? (job.progress.percentage ?? 0) : (job.progress ?? 0);
+              const totalItems = typeof job.progress === 'object' && job.progress !== null
+                ? (job.progress.total ?? 0) : (job.total ?? 0);
+              const processedItems = typeof job.progress === 'object' && job.progress !== null
+                ? (job.progress.current ?? 0) : (job.processed ?? 0);
+              return totalItems > 0 ? (
+                <span className="text-muted-foreground">
+                  {processedItems}/{totalItems} processados ({progressVal}%)
+                </span>
+              ) : null;
+            })()}
+            {(job.started_at || job.created_at) && (
               <span className="text-muted-foreground">
                 <Timer className="h-3 w-3 inline mr-1" />
-                {formatDuration(job.started_at, job.finished_at)}
+                {formatDuration(job.started_at || job.created_at, job.finished_at || job.completed_at)}
               </span>
             )}
           </div>
-          {job.current_step && (
+          {(job.current_step || (typeof job.progress === 'object' && job.progress?.message)) && (
             <p className="text-xs italic text-muted-foreground mt-1.5">
-              → {job.current_step}
+              → {job.current_step || job.progress?.message}
             </p>
           )}
         </div>
