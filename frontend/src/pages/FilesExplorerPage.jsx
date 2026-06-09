@@ -17,7 +17,7 @@
  * - Consultores/Intermediários têm acesso de leitura e download.
  * - Admin/CEO/Diretor/Administrativo têm acesso total (upload, rename, delete).
  */
-import React, { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
@@ -170,7 +170,6 @@ const FilesExplorerPage = () => {
       );
       if (res.ok) {
         const data = await res.json();
-        console.log("Arquivos carregados:", data);
         setS3Configured(true);
         setFolders(data.subfolders || []);
         setFiles(data.files || []);

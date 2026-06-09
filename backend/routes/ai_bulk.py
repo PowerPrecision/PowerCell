@@ -201,10 +201,12 @@ class UpdateSessionRequest(BaseModel):
         processed: Número de ficheiros já processados.
         errors: Número de ficheiros com erro.
         error_message: Mensagem de erro do último ficheiro falhado.
+        current_step: Descrição da etapa actual (mostrado no centro de operações).
     """
     processed: Optional[int] = None
     errors: Optional[int] = None
     error_message: Optional[str] = None
+    current_step: Optional[str] = None
 
 
 class AggregatedSessionRequest(BaseModel):
@@ -611,6 +613,8 @@ async def update_import_session(
             error_messages = background_processes[session_id].get("error_messages", [])
             error_messages.append(request.error_message)
             update_fields["error_messages"] = error_messages[-50:]
+    if request.current_step:
+        update_fields["current_step"] = request.current_step
     
     if update_fields:
         await update_background_job_db(session_id, **update_fields)

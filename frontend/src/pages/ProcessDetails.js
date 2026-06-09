@@ -937,7 +937,7 @@ const ProcessDetails = () => {
         const data = await response.json();
         setVisitasProperties(Array.isArray(data) ? data : []);
       } else {
-        console.error("Erro ao carregar imóveis do processo");
+        // Non-OK response handled silently; error already surfaced via UI state
       }
     } catch (error) {
       console.error("Erro ao carregar imóveis:", error);
@@ -1308,7 +1308,6 @@ const ProcessDetails = () => {
   // Legacy OneDrive functions - kept for compatibility but use S3FileManager instead
   const loadOneDriveFolder = async (subfolder = "") => {
     // Deprecated - S3FileManager handles this now
-    console.warn("loadOneDriveFolder is deprecated. Use S3FileManager component.");
   };
 
   const handleDownloadFile = async (filePath) => {
@@ -1797,12 +1796,16 @@ const ProcessDetails = () => {
 
   // Função para eliminar o cliente/processo
   const handleDeleteClient = async () => {
+    if (!clientId) {
+      toast.error("Não foi possível identificar o cliente associado a este processo.");
+      return;
+    }
     if (!window.confirm(`Tem a certeza que deseja eliminar o cliente "${process?.client_name}"?\n\nEsta ação é irreversível.`)) {
       return;
     }
     
     try {
-      await deleteClient(id);
+      await deleteClient(clientId);
       toast.success("Cliente eliminado com sucesso");
       navigate("/clientes");
     } catch (error) {

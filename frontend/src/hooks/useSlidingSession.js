@@ -129,10 +129,6 @@ export default function useSlidingSession({
       const elapsed = Date.now() - parseInt(lastActivity, 10);
       if (elapsed > inactivityMs) {
         // Sessão expirou por inactividade — fazer logout
-        console.log('[SlidingSession] Sessão expirada por inactividade', {
-          elapsed: Math.round(elapsed / 1000) + 's',
-          limit: Math.round(inactivityMs / 1000) + 's',
-        });
         logout(true); // true = mostrar toast
       }
     };
