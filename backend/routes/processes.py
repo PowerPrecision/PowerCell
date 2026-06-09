@@ -1960,6 +1960,41 @@ async def get_kanban_board(
             p.setdefault("client_phone", cinfo["telefone"])
             p.setdefault("client_nif", cinfo["nif"])
 
+    # ====================================================================
+    # BATCH ENRIQUECIMENTO: has_unread_messages & has_new_documents
+    # Pistas visuais silenciosas para interações do cliente no portal.
+    # Evita fadiga de notificações — apenas dots coloridos no cartão.
+    # ====================================================================
+    process_ids = [p["id"] for p in processes]
+
+    # 1) Mensagens não lidas do cliente (portal_messages)
+    unread_pipeline = [
+        {"$match": {
+            "process_id": {"$in": process_ids},
+            "sender_type": "client",
+            "read_by_staff": False
+        }},
+        {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+    ]
+    unread_results = await db.portal_messages.aggregate(unread_pipeline).to_list(1000)
+    unread_map = {r["_id"]: r["unread_count"] > 0 for r in unread_results}
+
+    # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
+    new_docs_pipeline = [
+        {"$match": {
+            "process_id": {"$in": process_ids},
+            "status": "uploaded"
+        }},
+        {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+    ]
+    new_docs_results = await db.documents.aggregate(new_docs_pipeline).to_list(1000)
+    new_docs_map = {r["_id"]: r["new_count"] > 0 for r in new_docs_results}
+
+    # Inject computed boolean flags into each process
+    for p in processes:
+        p["has_unread_messages"] = unread_map.get(p["id"], False)
+        p["has_new_documents"] = new_docs_map.get(p["id"], False)
+
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
     user_map = {u["id"]: u for u in users}
@@ -2695,17 +2730,70 @@ async def mark_process_indexed(
             "is_indexed": True,
         }
     
-    # Atualizar para is_indexed=true
+    # ==================================================================
+    # SALTO DINÂMICO DE ESTADO — Consultar pipeline de workflow_statuses
+    # ==================================================================
+    # Em vez de hardcode do ID do estado seguinte (ex: status_id = 4),
+    # consultamos a ordem dos estados configurados na BD, identificamos
+    # a posição actual do processo e fazemos next_status = current + 1.
+    current_status = process.get("status", "clientes_espera")
+    next_status = None  # Inicializar — pode ficar None se for o último estado
+
+    # Buscar todos os workflow_statuses ordenados por 'order'
+    all_statuses = await db.workflow_statuses.find(
+        {}, {"_id": 0}
+    ).sort("order", 1).to_list(100)
+
+    # Montar lista ordenada de nomes de estado
+    status_pipeline = [s["name"] for s in all_statuses]
+
+    # Encontrar a posição actual e calcular o próximo estado
+    if current_status in status_pipeline:
+        current_idx = status_pipeline.index(current_status)
+        if current_idx < len(status_pipeline) - 1:
+            next_status = status_pipeline[current_idx + 1]
+            logger.info(
+                f"[INDEXACAO-DYNAMIC] Salto dinâmico: '{current_status}' (pos {current_idx}) "
+                f"→ '{next_status}' (pos {current_idx + 1})"
+            )
+        else:
+            logger.info(
+                f"[INDEXACAO-DYNAMIC] Processo já está no último estado da pipeline "
+                f"('{current_status}'). Sem salto automático."
+            )
+    else:
+        # Status actual não está na pipeline — avançar para o 1º estado
+        # (fallback seguro — processo não fica órfão)
+        if status_pipeline:
+            next_status = status_pipeline[0]
+            logger.warning(
+                f"[INDEXACAO-DYNAMIC] Status actual '{current_status}' não encontrado "
+                f"na pipeline. Fallback para o 1º estado: '{next_status}'"
+            )
+
+    # ==================================================================
+    # LIMPEZA E TRANSIÇÃO DE RESPONSABILIDADE
+    # ==================================================================
+    # Após calcular o próximo estado, o campo assigned_indexacao_id é limpo
+    # (null), pois o trabalho de indexação/triagem acabou.
     now = datetime.now(timezone.utc).isoformat()
+    update_set = {
+        "is_indexed": True,
+        "indexed_at": now,
+        "indexed_by": user.get("id"),
+        "indexed_by_name": user.get("name", ""),
+        "assigned_indexacao_id": None,   # Limpar — trabalho de indexação concluído
+        "indexacao_name": None,          # Limpar nome do indexador
+        "updated_at": now,
+    }
+
+    # Se conseguimos calcular o próximo estado, adicioná-lo ao update
+    if next_status:
+        update_set["status"] = next_status
+
     result = await db.processes.update_one(
         {"id": process_id},
-        {"$set": {
-            "is_indexed": True,
-            "indexed_at": now,
-            "indexed_by": user.get("id"),
-            "indexed_by_name": user.get("name", ""),
-            "updated_at": now,
-        }}
+        {"$set": update_set}
     )
     
     # Verificar se a atualização foi persistida
@@ -2718,7 +2806,7 @@ async def mark_process_indexed(
     if result.modified_count == 0 and not process.get("is_indexed"):
         logger.warning(f"[INDEXACAO] update_one modified 0 documents para processo {process_id} (já estava indexado?)")
     
-    # ── Registar no histórico ──
+    # ── Registar no histórico — Indexação concluída ──
     try:
         await log_history(
             process_id,
@@ -2730,6 +2818,36 @@ async def mark_process_indexed(
         )
     except Exception as e:
         logger.warning(f"Erro ao registar histórico de indexação: {e}")
+
+    # ── Registar no histórico — Salto dinâmico de estado ──
+    if next_status and next_status != current_status:
+        try:
+            system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+            await log_history(
+                process_id,
+                user=system_user,
+                action=f"Salto dinâmico: {current_status} → {next_status} (indexação concluída)",
+                field="status",
+                old_value=current_status,
+                new_value=next_status,
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao registar histórico de salto de estado: {e}")
+
+    # ── Registar no histórico — Limpeza do indexador ──
+    if process.get("assigned_indexacao_id"):
+        try:
+            system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+            await log_history(
+                process_id,
+                user=system_user,
+                action="Responsabilidade do indexador removida (indexação concluída)",
+                field="assigned_indexacao_id",
+                old_value=process.get("indexacao_name") or process.get("assigned_indexacao_id"),
+                new_value=None,
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao registar histórico de limpeza do indexador: {e}")
     
     # ── Disparar notificação para utilizadores atribuídos ──
     client_name = process.get("client_name", "Cliente")
@@ -2780,6 +2898,8 @@ async def mark_process_indexed(
             event_type=WSEventType.PROCESS_UPDATED,
             process_id=process_id,
             client_name=client_name,
+            status=next_status or current_status,
+            old_status=current_status,
             updated_at=now,
         )
     except Exception as ws_err:
@@ -2787,6 +2907,8 @@ async def mark_process_indexed(
     
     logger.info(
         f"[INDEXACAO] Processo {process_ref} marcado como indexado por {user.get('email')}. "
+        f"Estado: {current_status} → {next_status or current_status}. "
+        f"Indexador limpo: {process.get('assigned_indexacao_id') is not None}. "
         f"Notificações enviadas para {len(assigned_ids)} utilizadores."
     )
     
@@ -2816,13 +2938,62 @@ async def mark_process_indexed(
                 asyncio.create_task(process_queue_for_freed_indexer(idx["id"]))
     except Exception as waitlist_err:
         logger.warning(f"[INDEXACAO] Erro ao verificar fila de espera: {waitlist_err}")
-    
+
+    # ==================================================================
+    # AUTO-ATRIBUIÇÃO DE CONSULTOR/INTERMEDIÁRIO (FALLBACK)
+    # ==================================================================
+    # Verifica o campo consultor_id / assigned_consultor_id.
+    # Se já tiver um ID (o consultor original), o processo segue para ele.
+    # Se for nulo ou vazio, o sistema invoca assign_to_least_busy_consultant()
+    # que procura o utilizador com role 'Intermediário' ou 'Consultor' com
+    # menos processos ativos e define esse ID como o novo consultor_id.
+    consultant_result = None
+    try:
+        from services.process_assignment import assign_to_least_busy_consultant
+
+        existing_consultor = (
+            process.get("assigned_consultor_id")
+            or process.get("consultant_id")
+        )
+        if not existing_consultor:
+            logger.info(
+                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} sem consultor. "
+                f"A invocar auto-atribuição..."
+            )
+            success, data, msg = await assign_to_least_busy_consultant(process_id)
+            if success:
+                consultant_result = data
+                logger.info(
+                    f"[INDEXACAO-AUTOASSIGN] Auto-atribuição concluída: {msg}"
+                )
+            else:
+                logger.warning(
+                    f"[INDEXACAO-AUTOASSIGN] Falha na auto-atribuição: {msg}"
+                )
+        else:
+            logger.info(
+                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} já tem consultor "
+                f"({process.get('consultor_name') or existing_consultor}). "
+                f"A manter atribuição existente."
+            )
+    except Exception as assign_err:
+        logger.warning(
+            f"[INDEXACAO-AUTOASSIGN] Erro na auto-atribuição de consultor: {assign_err}"
+        )
+
     return {
         "success": True,
         "message": f"Indexação do processo {process_ref} marcada como concluída.",
         "process_id": process_id,
         "is_indexed": True,
         "notified_users": len(assigned_ids),
+        # Novos campos — Progressão Dinâmica
+        "status_transition": {
+            "from": current_status,
+            "to": next_status,
+        } if next_status and next_status != current_status else None,
+        "indexer_cleared": process.get("assigned_indexacao_id") is not None,
+        "consultant_auto_assigned": consultant_result,
     }
 
 

@@ -6,9 +6,9 @@ Endpoints de leitura para utilizadores do sistema.
 CRUD de admin está em admin.py
 ====================================================================
 """
-from typing import List
+from typing import List, Optional
 from datetime import datetime, timezone
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Request, Query
 
 from database import db
 from models.auth import UserRole, UserResponse
@@ -49,6 +49,7 @@ async def get_user(user_id: str, user: dict = Depends(require_staff())):
 @router.get("/me/email-config")
 async def get_my_email_config(
     request: Request,
+    company_id: Optional[str] = Query(None, description="ID da empresa (fallback para X-Company-Id header)"),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -56,7 +57,10 @@ async def get_my_email_config(
     NUNCA devolve a password real nem o refresh_token — apenas flags booleanas.
 
     MULTI-EMPRESA:
-      Lê a empresa ativa via X-Company-Id header (ou fallback).
+      Lê a empresa ativa por ordem de prioridade:
+        1. Query param ?company_id=... (explícito do frontend)
+        2. Header X-Company-Id (injetado pelo interceptor api.js)
+        3. Campo user["company"] (fallback do utilizador)
       A config é resolvida para essa empresa específica.
 
     HERANÇA (Caminho da Configuração):
@@ -84,8 +88,14 @@ async def get_my_email_config(
     else:
         active_role = None  # Resolver will use "default" / flat fallback
 
-    # Determinar empresa ativa (X-Company-Id header ou fallback)
-    active_company_id = await get_active_company_id_async(request, current_user)
+    # Determinar empresa ativa — PRIORIDADE:
+    # 1. Query param ?company_id=... (explícito do frontend, mais fiável)
+    # 2. Header X-Company-Id (injetado pelo interceptor api.js)
+    # 3. Campo user["company"] (fallback)
+    # FIX: Sem company_id, o MongoDB devolve sempre a config do primeiro
+    # perfil que encontrar (sem filtro por empresa). Obrigatório filtrar.
+    header_company_id = await get_active_company_id_async(request, current_user)
+    active_company_id = company_id or header_company_id
 
     # Para roles forçados, retornar info do shared role config
     if user_role in FORCED_SHARED_ROLES:
@@ -323,6 +333,7 @@ async def save_my_email_config(
 @router.post("/me/email-config/test")
 async def test_my_email_config(
     request: Request,
+    company_id: Optional[str] = Query(None, description="ID da empresa (fallback para X-Company-Id header)"),
     current_user: dict = Depends(get_current_user),
 ):
     """
@@ -353,8 +364,9 @@ async def test_my_email_config(
     else:
         active_role = None
 
-    # Determinar empresa ativa
-    active_company_id = await get_active_company_id_async(request, current_user)
+    # FIX: Determinar empresa ativa — mesma lógica do GET (query param > header > fallback)
+    header_company_id = await get_active_company_id_async(request, current_user)
+    active_company_id = company_id or header_company_id
 
     # Para roles com config partilhada, usar a config resolvida
     if user_role in FORCED_SHARED_ROLES:

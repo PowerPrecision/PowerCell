@@ -675,6 +675,206 @@ async def assign_to_indexer(process_id: str) -> Tuple[bool, dict, str]:
     )
 
 
+# ==== AUTO-ATRIBUIÇÃO DE CONSULTOR/INTERMEDIÁRIO (FALLBACK) ====
+
+# Status que NÃO contam como processos ativos para o consultor/intermediário
+CONSULTANT_INACTIVE_STATUSES = {
+    "concluidos",
+    "arquivo",
+    "perdido",
+    "desistencias",
+    "eliminados",
+}
+
+
+async def _count_active_processes_for_consultant(consultant_id: str) -> int:
+    """
+    Conta quantos processos ATIVOS um consultor/intermediário tem atualmente.
+
+    Um processo conta como "ativo" se:
+    - Está atribuído a ele (assigned_consultor_id == consultant_id OU consultant_id == consultant_id)
+    - O seu status NÃO está na lista de estados inativos
+
+    Args:
+        consultant_id: ID do utilizador consultor/intermediário
+
+    Returns:
+        Número de processos ativos atribuídos ao consultor
+    """
+    active_query = {
+        "$or": [
+            {"assigned_consultor_id": consultant_id},
+            {"consultant_id": consultant_id},
+        ],
+        "status": {"$nin": list(CONSULTANT_INACTIVE_STATUSES)},
+    }
+
+    count = await db.processes.count_documents(active_query)
+    return count
+
+
+async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, str]:
+    """
+    Atribui automaticamente um processo ao consultor/intermediário com menor carga.
+
+    Algoritmo de distribuição:
+    1. Encontra todos os utilizadores com o role 'consultor' ou 'intermediario'
+       (incluindo additional_roles).
+    2. Para cada consultor, conta os processos ativos (status não terminal).
+    3. Ordena pelo número de processos ativos (ascendente) — distribui a quem tem menos.
+    4. Se houver consultor disponível:
+       - Atribui o processo (assigned_consultor_id + consultor_name).
+       - Envia notificação em tempo real (in-app).
+    5. Se NÃO houver consultores no sistema:
+       - O processo avança de estado mas fica sem consultor atribuído (não órfão de estado).
+
+    Args:
+        process_id: ID do processo a atribuir
+
+    Returns:
+        Tuple com (sucesso, dados atualizados, mensagem)
+    """
+    from services.role_query import build_deep_role_query
+    from services.history import log_history
+
+    # ── 1. Obter o processo ──
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        return False, {}, f"Processo {process_id} não encontrado"
+
+    # Verificar se já tem consultor atribuído
+    existing_consultor = (
+        process.get("assigned_consultor_id")
+        or process.get("consultant_id")
+    )
+    if existing_consultor:
+        existing_name = (
+            process.get("consultor_name")
+            or process.get("assigned_consultor_id")
+        )
+        return True, {
+            "assigned_consultor_id": existing_consultor,
+        }, f"Processo já tem consultor atribuído: {existing_name}"
+
+    # ── 2. Encontrar todos os consultores/intermediários ativos ──
+    # Pesquisar por ambos os roles
+    consultor_query = build_deep_role_query({"is_active": True}, role="consultor")
+    intermediario_query = build_deep_role_query({"is_active": True}, role="intermediario")
+
+    consultores_cursor = db.users.find(
+        consultor_query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
+    )
+    intermediarios_cursor = db.users.find(
+        intermediario_query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
+    )
+
+    consultores = await consultores_cursor.to_list(length=100)
+    intermediarios = await intermediarios_cursor.to_list(length=100)
+
+    # Combinar e remover duplicados (alguém pode ter ambos os roles)
+    seen_ids = set()
+    all_consultants = []
+    for c in consultores + intermediarios:
+        if c["id"] not in seen_ids:
+            seen_ids.add(c["id"])
+            all_consultants.append(c)
+
+    if not all_consultants:
+        logger.warning(
+            f"[ASSIGN-CONSULTANT] Nenhum consultor/intermediário encontrado no sistema. "
+            f"Processo {process_id} avança de estado sem consultor atribuído."
+        )
+        return True, {
+            "assigned": False,
+            "reason": "no_consultants",
+        }, "Nenhum consultor/intermediário disponível — processo avança sem atribuição"
+
+    # ── 3. Contar processos ativos por consultor ──
+    consultant_loads: List[Dict] = []
+    for consultant in all_consultants:
+        active_count = await _count_active_processes_for_consultant(consultant["id"])
+        consultant_loads.append({
+            "id": consultant["id"],
+            "name": consultant.get("name", ""),
+            "email": consultant.get("email", ""),
+            "role": consultant.get("role", ""),
+            "active_count": active_count,
+        })
+        logger.debug(
+            f"[ASSIGN-CONSULTANT] Consultor {consultant.get('name')} "
+            f"({consultant['id'][:8]}): {active_count} processos ativos"
+        )
+
+    # ── 4. Ordenar por carga (ascendente) e escolher o menos carregado ──
+    consultant_loads.sort(key=lambda c: c["active_count"])
+    chosen = consultant_loads[0]
+
+    logger.info(
+        f"[ASSIGN-CONSULTANT] Consultor escolhido: {chosen['name']} "
+        f"com {chosen['active_count']} processos ativos "
+        f"(de {len(consultant_loads)} disponíveis)"
+    )
+
+    # ── 5. Atribuir processo ao consultor ──
+    now = datetime.now(timezone.utc).isoformat()
+    update_data = {
+        "assigned_consultor_id": chosen["id"],
+        "consultant_id": chosen["id"],
+        "consultor_name": chosen["name"],
+        "updated_at": now,
+    }
+
+    result = await db.processes.update_one(
+        {"id": process_id},
+        {"$set": update_data}
+    )
+
+    if result.modified_count == 0:
+        return False, {}, "Erro ao atribuir processo ao consultor"
+
+    # Registar no histórico (utilizador sistema)
+    system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+    await log_history(
+        process_id=process_id,
+        user=system_user,
+        action=f"Auto-atribuição ao consultor/intermediário {chosen['name']}",
+        field="assigned_consultor_id",
+        old_value=None,
+        new_value=chosen["name"],
+    )
+
+    # ── 6. Enviar notificação in-app ──
+    try:
+        from services.realtime_notifications import send_realtime_notification
+
+        client_name = process.get("client_name", "Cliente")
+        await send_realtime_notification(
+            user_id=chosen["id"],
+            title="Novo Processo Atribuído",
+            message=f"Foi-lhe atribuído automaticamente o processo de {client_name}",
+            notification_type="process_assigned",
+            link=f"/processo/{process_id}",
+            process_id=process_id,
+        )
+    except Exception as e:
+        logger.warning(
+            f"[ASSIGN-CONSULTANT] Erro ao enviar notificação in-app para {chosen['id']}: {e}"
+        )
+
+    return True, {
+        "assigned_consultor_id": chosen["id"],
+        "consultant_id": chosen["id"],
+        "consultor_name": chosen["name"],
+        "assigned": True,
+        "consultant_active_count": chosen["active_count"] + 1,
+    }, (
+        f"Processo atribuído automaticamente a {chosen['name']} "
+        f"({chosen['active_count']} → {chosen['active_count'] + 1} processos ativos)"
+    )
+
+
 async def process_queue_for_freed_indexer(indexer_id: str) -> int:
     """
     Processa a fila de espera quando um indexador liberta capacidade.
