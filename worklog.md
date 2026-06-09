@@ -194,3 +194,37 @@ Stage Summary:
 - Files modified:
   - backend/services/email_service.py (2 fixes: system_email_signature reset + UCR fallback)
   - backend/services/rgpd_service.py (1 fix: UCR fallback)
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Fix email signature not saving in production — X-Company-Id header is None when user has no companies
+
+Work Log:
+- Analyzed production log: `WARNING routes.auth [auth/profile] active_company_id é None — campos da empresa NÃO guardados! X-Company-Id header=None, user.company=None`
+- Traced the complete flow: AuthContext → api.js interceptor → backend get_active_company_id_async → update_profile
+- Identified root cause chain:
+  1. User has no entries in user_company_roles AND user.company is None
+  2. AuthContext.fetchUser() sets activeCompanyId = null (no company to set)
+  3. api.js interceptor doesn't send X-Company-Id header (sessionStorage has null)
+  4. Backend get_active_company_id_async() returns None
+  5. Backend treats None as "no company context" and fails to save company-specific fields properly
+- Applied 3-part fix:
+
+1. Frontend (AuthContext.js): When no companies exist and user.company is null, set activeCompanyId to "default" sentinel instead of leaving it null. This ensures X-Company-Id header is ALWAYS sent by the api.js interceptor.
+
+2. Backend (services/auth.py): In both get_active_company_id() and get_active_company_id_async(), accept "default" as a valid company_id without UCR validation. The "default" sentinel represents "no specific company context" and should not be validated against user_company_roles (which has no entry for it).
+
+3. Backend (routes/auth.py):
+   - Added "default" to is_default_company check in update_profile
+   - Added warning log when active_company_id is None (matches production message format)
+   - Fixed GET /auth/me to always call get_active_company_id_async (even with empty user_companies) so "default" sentinel propagates correctly
+
+Stage Summary:
+- Root cause: When user has no companies (user_company_roles empty + user.company null), the X-Company-Id header was never sent, causing active_company_id=None on the backend
+- Fix: "default" sentinel value flows end-to-end: Frontend → sessionStorage → X-Company-Id header → backend accepts without validation
+- The "default" sentinel ensures email_signature is always saved: globally (users collection) AND in UCR (with company_id="default")
+- Files modified:
+  - frontend/src/contexts/AuthContext.js (activeCompanyId fallback to "default")
+  - backend/services/auth.py (both get_active_company_id functions accept "default")
+  - backend/routes/auth.py (GET /auth/me + PUT /auth/profile handle "default" + warning log)

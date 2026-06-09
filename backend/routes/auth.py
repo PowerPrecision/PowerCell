@@ -226,9 +226,11 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
 
     try:
         user_companies = await get_user_companies(user["id"])
+        # Determinar empresa ativa (X-Company-Id header ou default)
+        # Fazemos isto SEMPRE (mesmo com user_companies vazio) para
+        # que o sentinel "default" seja correctamente propagado.
+        active_company_id = await get_active_company_id_async(request, user)
         if user_companies:
-            # Determinar empresa ativa (X-Company-Id header ou default)
-            active_company_id = await get_active_company_id_async(request, user)
             # Encontrar a associação na empresa ativa
             active_assoc = next(
                 (c for c in user_companies if c.get("company_id") == active_company_id),
@@ -418,11 +420,24 @@ async def update_profile(
         logger.warning(f"[auth/profile] Erro ao determinar empresa ativa: {e}")
     
     # Empresa default = sem contexto, ou is_default=True, ou company_id = user.company
+    # Ou sentinel "default" (quando o frontend envia X-Company-Id: default
+    # porque o utilizador não tem empresas em user_company_roles).
     is_default_company = (
         not active_company_id
+        or active_company_id == "default"
         or (active_assoc and active_assoc.get("is_default"))
         or active_company_id == user.get("company")
     )
+
+    # ── Aviso quando não há contexto de empresa ──
+    # Isto ajuda a diagnosticar problemas de gravação de assinatura.
+    if not active_company_id:
+        logger.warning(
+            f"[auth/profile] active_company_id é None — a gravar campos "
+            f"da empresa no documento global do utilizador. "
+            f"X-Company-Id header={request.headers.get('X-Company-Id')!r}, "
+            f"user.company={user.get('company')!r}"
+        )
 
     # ── Recolher campos globais permitidos ──
     allowed_fields = ["name", "phone", "email_signature"]

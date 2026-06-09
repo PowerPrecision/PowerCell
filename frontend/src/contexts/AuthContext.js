@@ -211,11 +211,13 @@ export function AuthProvider({ children }) {
           }
         } else {
           // Sem empresas na tabela — usar campo company como fallback
-          const fallbackId = userData.company || null;
-          if (fallbackId) {
-            setActiveCompanyId(fallbackId);
-            sessionStorage.setItem("activeCompanyId", fallbackId);
-          }
+          // IMPORTANTE: Se não houver empresa nenhuma, usar "default" como
+          // sentinel. Isto garante que o header X-Company-Id é SEMPRE enviado
+          // pelo interceptor api.js, evitando que o backend receba
+          // active_company_id=None e não guarde a assinatura de email.
+          const fallbackId = userData.company || "default";
+          setActiveCompanyId(fallbackId);
+          sessionStorage.setItem("activeCompanyId", fallbackId);
         }
         activeCompanyInitialized.current = true;
       }
