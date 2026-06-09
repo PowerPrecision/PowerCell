@@ -110,6 +110,10 @@ const DocumentRecipientsManager = ({ token, user }) => {
   // Dialog states
   const [showEditDialog, setShowEditDialog] = useState(false);
   const [showDeleteDialog, setShowDeleteDialog] = useState(false);
+  const [showPreviewDialog, setShowPreviewDialog] = useState(false);
+  const [previewHtml, setPreviewHtml] = useState("");
+  const [previewSubject, setPreviewSubject] = useState("");
+  const [previewLoading, setPreviewLoading] = useState(false);
   const [editingRecipient, setEditingRecipient] = useState(null);
   const [deletingRecipient, setDeletingRecipient] = useState(null);
 
@@ -485,6 +489,38 @@ const DocumentRecipientsManager = ({ token, user }) => {
     }
   };
 
+  // Pré-visualizar template com dados de exemplo
+  const handlePreviewTemplate = async () => {
+    if (!emailTemplate) {
+      toast.error("Nenhum template definido. Escreva ou restaure o template pré-definido antes de pré-visualizar.");
+      return;
+    }
+    setPreviewLoading(true);
+    try {
+      const response = await fetch(`${API_URL}/api/emails/preview-template`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ email_template: emailTemplate }),
+      });
+      if (response.ok) {
+        const data = await response.json();
+        setPreviewHtml(data.html);
+        setPreviewSubject(data.subject);
+        setShowPreviewDialog(true);
+      } else {
+        const data = await response.json().catch(() => ({}));
+        toast.error(data.detail || "Erro ao gerar pré-visualização");
+      }
+    } catch (error) {
+      toast.error("Erro ao gerar pré-visualização");
+    } finally {
+      setPreviewLoading(false);
+    }
+  };
+
   // Verificar permissões
   const canEdit = user?.role?.match(/admin|ceo/i);
 
@@ -713,16 +749,32 @@ const DocumentRecipientsManager = ({ token, user }) => {
                     Personalize a mensagem que será enviada
                   </p>
                 </div>
-                <Button
-                  variant="outline"
-                  size="sm"
-                  onClick={() => {
-                    setEmailTemplate(defaultTemplate);
-                    setHasChanges(true);
-                  }}
-                >
-                  Restaurar Predefinição
-                </Button>
+                <div className="flex items-center gap-2">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={handlePreviewTemplate}
+                    disabled={previewLoading || !emailTemplate}
+                    className="gap-2"
+                  >
+                    {previewLoading ? (
+                      <Loader2 className="h-4 w-4 animate-spin" />
+                    ) : (
+                      <Eye className="h-4 w-4" />
+                    )}
+                    Pré-visualizar
+                  </Button>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    onClick={() => {
+                      setEmailTemplate(defaultTemplate);
+                      setHasChanges(true);
+                    }}
+                  >
+                    Restaurar Predefinição
+                  </Button>
+                </div>
               </div>
               <div className="border rounded-md overflow-hidden">
                 <ReactQuill
@@ -876,6 +928,42 @@ const DocumentRecipientsManager = ({ token, user }) => {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* Dialog Pré-visualização do Template */}
+      <Dialog open={showPreviewDialog} onOpenChange={setShowPreviewDialog}>
+        <DialogContent className="sm:max-w-[750px] max-h-[90vh] overflow-hidden flex flex-col">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Eye className="h-5 w-5 text-primary" />
+              Pré-visualização do Template
+            </DialogTitle>
+            <DialogDescription>
+              Visualização do email tal como o destinatário o receberá (dados de exemplo)
+            </DialogDescription>
+          </DialogHeader>
+          {previewSubject && (
+            <div className="flex items-center gap-2 px-1 text-sm">
+              <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
+              <span className="text-muted-foreground">Assunto:</span>
+              <span className="font-medium truncate">{previewSubject}</span>
+            </div>
+          )}
+          <div className="flex-1 overflow-y-auto border rounded-lg bg-white dark:bg-gray-950">
+            <div
+              className="p-6 break-words"
+              dangerouslySetInnerHTML={{ __html: previewHtml }}
+            />
+          </div>
+          <div className="flex items-center justify-between pt-2">
+            <p className="text-xs text-muted-foreground">
+              💡 Os dados mostrados são de exemplo. No envio real, serão substituídos pelos dados do processo.
+            </p>
+            <Button variant="outline" onClick={() => setShowPreviewDialog(false)}>
+              Fechar
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
     </Card>
   );
 };

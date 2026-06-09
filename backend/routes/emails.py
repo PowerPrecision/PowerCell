@@ -724,6 +724,135 @@ async def get_document_recipients(
     }
 
 
+# ==== PREVIEW TEMPLATE (na config, com dados de exemplo — sem process_id) ====
+
+@router.post("/preview-template")
+async def preview_email_template(
+    data: dict = Body(...),
+    current_user: dict = Depends(get_current_user)
+):
+    """
+    Pré-visualiza o template de email de documentação com dados de exemplo.
+
+    PORQUÊ: No painel de administração (Configurações → Destinatários → Template),
+    o administrador precisa de visualizar como o email ficará antes de guardar
+    o template. Ao contrário do /preview-documentation/{process_id}, este endpoint
+    não requer um processo real — usa dados de exemplo preenchidos automaticamente.
+
+    Funciona de forma idêntica ao "Pré-visualizar RGPD" do template de RGPD:
+    o utilizador clica no botão e vê imediatamente o resultado renderizado.
+
+    Args:
+        data: Corpo do request com campo opcional `email_template`.
+            Se não fornecido, usa o template guardado na configuração do sistema.
+        current_user: Utilizador autenticado (injetado pelo Depends).
+
+    Returns:
+        dict: Contém html (string com dados de exemplo substituídos),
+            subject, e sample_data (para referência).
+    """
+    from services.system_config import get_system_config
+
+    # Obter template: do body ou da configuração guardada
+    email_template = data.get("email_template")
+
+    if not email_template:
+        config = await get_system_config()
+        doc_config = config.document_recipients
+        email_template = doc_config.email_template
+
+    if not email_template:
+        raise HTTPException(
+            status_code=400,
+            detail="Nenhum template definido. Escreva ou restaure o template pré-definido antes de pré-visualizar."
+        )
+
+    # Dados de exemplo (simulam um processo real para o admin ver o resultado)
+    sample_vars = {
+        # Dados básicos
+        "client_name": "João Manuel Silva",
+        "client_nif": "234567890",
+        "process_number": "PC-2025-0042",
+        "documents_list": "- Cartão de Cidadão.pdf\n- Comprovativo de IBAN.pdf\n- Último IRS.pdf\n- Mapa de Responsabilidades.pdf",
+
+        # 1º Proponente
+        "p1_nome": "João Manuel Silva",
+        "p1_email": "joao.silva@email.pt",
+        "p1_telefone": "+351 912 345 678",
+        "p1_data_nascimento": "15/03/1988",
+        "p1_tipo_doc": "CC 12345678",
+        "p1_nif": "234567890",
+        "p1_estado_civil": "Casado",
+        "p1_regime_casamento": "Comunhão de Adquiridos",
+        "p1_profissao": "Engenheiro de Software",
+        "p1_vinculo": "Contrato Efetivo",
+        "p1_salario": "2.150,00 €",
+        "p1_dependentes": "1",
+        "p1_despesas": "450,00 €",
+        "p1_situacao_bancaria": "Sem situações registadas",
+
+        # 2º Proponente
+        "p2_nome": "Maria Ana Santos",
+        "p2_email": "maria.santos@email.pt",
+        "p2_telefone": "+351 923 456 789",
+
+        # Crédito Atual
+        "banco_atual": "Millennium bcp",
+        "num_titulares": 2,
+        "contrato_mais_2_anos": "Sim",
+        "valor_aquisicao": "285.000,00 €",
+        "montante_divida": "195.000,00 €",
+
+        # Transferência Pretendida
+        "valor_extra": "30.000,00 €",
+        "localidade_imovel": "Lisboa",
+        "possibilidade_fiador": "Não",
+
+        # Variáveis Financeiras
+        "CAPITAIS_PROPRIOS": "90.000,00 €",
+        "VALOR_IMOVEL": "285.000,00 €",
+        "VALOR_FINANCIAMENTO": "195.000,00 €",
+        "PRAZO_FINANCIAMENTO": "30 anos",
+        "COMPRA_SOZINHO": "Não (Com Co-titular)",
+
+        # Remetente
+        "sender_name": current_user.get("name", "Consultor PowerCell"),
+        "sender_email": current_user.get("email", "consultor@powercell.pt"),
+        "sender_phone": current_user.get("phone", "+351 210 000 000"),
+    }
+
+    # Normalizar placeholders: [VAR_NAME] → {VAR_NAME}
+    normalized_template = re.sub(r'\[([A-Z_]+)\]', r'{\1}', email_template)
+
+    # Substituir variáveis no template
+    try:
+        email_body = normalized_template.format(**sample_vars)
+    except KeyError as e:
+        # Fallback: substituir apenas as variáveis encontradas
+        logger.warning(f"[preview-template] Variável não encontrada: {e}")
+        safe_vars = {k: v for k, v in sample_vars.items()}
+        # Substituir as que existem e deixar as outras como placeholder visível
+        import string
+        class SafeFormatter(string.Formatter):
+            def get_value(self, key, args, kwargs):
+                try:
+                    return super().get_value(key, args, kwargs)
+                except (KeyError, IndexError):
+                    return f'<span style="background:#fef3c7;color:#92400e;padding:2px 6px;border-radius:4px;font-size:12px;">⚠️ {{{key}}}</span>'
+        formatter = SafeFormatter()
+        try:
+            email_body = formatter.format(normalized_template, **safe_vars)
+        except Exception:
+            email_body = normalized_template
+
+    return {
+        "success": True,
+        "html": email_body,
+        "subject": "Documentação - João Manuel Silva (Processo #PC-2025-0042)",
+        "sample_data": sample_vars,
+    }
+
+
 # ==== PREVIEW DOCUMENTATION (gera HTML sem enviar) ====
 
 @router.get("/preview-documentation/{process_id}")
