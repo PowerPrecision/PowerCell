@@ -642,6 +642,55 @@ async def send_email(
         except Exception:
             pass
 
+    # === RESOLVER ASSINATURA DE EMAIL ===
+    # A assinatura é injetada no corpo ANTES da construção MIME para que
+    # funcione tanto no caminho Resend como no SMTP directo.
+    # Prioridade: UCR da empresa > users.email_signature (global) > system_smtp.signature
+    resolved_signature = None
+    if account and account.name == "system_smtp":
+        resolved_signature = system_email_signature
+    elif created_by:
+        try:
+            sender_user = await db.users.find_one(
+                {"id": created_by},
+                {"email_signature": 1, "company": 1, "_id": 0}
+            )
+            # Prioridade 1: assinatura global do utilizador
+            resolved_signature = sender_user.get("email_signature") if sender_user else None
+            # Prioridade 2: UCR da empresa default
+            if not resolved_signature and sender_user:
+                default_company = sender_user.get("company")
+                if default_company:
+                    ucr = await db.user_company_roles.find_one(
+                        {"user_id": created_by, "company_id": default_company},
+                        {"signature": 1, "_id": 0}
+                    )
+                    if ucr and ucr.get("signature"):
+                        resolved_signature = ucr["signature"]
+            # Prioridade 3: UCR de qualquer empresa
+            if not resolved_signature:
+                ucr_any = await db.user_company_roles.find_one(
+                    {"user_id": created_by, "signature": {"$exists": True, "$ne": None, "$ne": ""}},
+                    {"signature": 1, "_id": 0}
+                )
+                if ucr_any and ucr_any.get("signature"):
+                    resolved_signature = ucr_any["signature"]
+            # Fallback: assinatura do sistema
+            if not resolved_signature and system_email_signature:
+                resolved_signature = system_email_signature
+        except Exception:
+            pass
+
+    # Injetar assinatura no corpo do email (HTML + plain text)
+    if resolved_signature:
+        if body_html:
+            body_html = f"{body_html}<br/><hr/>{resolved_signature}"
+        # Versão plain text: strip HTML da assinatura
+        sig_text = re.sub(r'<[^>]+>', '', resolved_signature).strip()
+        if sig_text:
+            body = f"{body}\n\n---\n{sig_text}"
+        logger.info(f"[Send Email] Assinatura injetada no corpo do email (source={'system' if account and account.name == 'system_smtp' else 'user'})")
+
     try:
         # === TAG MÁGICA: Injetar [Proc-{id}] no assunto ===
         # Se o email está associado a um processo e o assunto ainda não tem a tag
@@ -741,41 +790,8 @@ async def send_email(
         # === ENVIAR: Resend API vs SMTP ===
         if account.smtp_server == "resend" and account.password:
             # --- Resend API (HTTP) ---
-            # Determinar assinatura de email a usar
-            email_sig = None
-            if account.name == "system_smtp":
-                email_sig = system_email_signature
-            elif created_by:
-                # Buscar assinatura pessoal do utilizador que envia o email
-                # Prioridade: users.email_signature (global) > UCR.signature (empresa default) > UCR.signature (qualquer empresa)
-                try:
-                    sender_user = await db.users.find_one(
-                        {"id": created_by},
-                        {"email_signature": 1, "company": 1, "_id": 0}
-                    )
-                    email_sig = sender_user.get("email_signature") if sender_user else None
-                    # Fallback 1: UCR da empresa default
-                    if not email_sig and sender_user:
-                        default_company = sender_user.get("company")
-                        if default_company:
-                            ucr = await db.user_company_roles.find_one(
-                                {"user_id": created_by, "company_id": default_company},
-                                {"signature": 1, "_id": 0}
-                            )
-                            if ucr and ucr.get("signature"):
-                                email_sig = ucr["signature"]
-                    # Fallback 2: UCR de qualquer empresa (o utilizador pode ter
-                    # assinatura noutra empresa que não a default)
-                    if not email_sig:
-                        ucr_any = await db.user_company_roles.find_one(
-                            {"user_id": created_by, "signature": {"$exists": True, "$ne": None, "$ne": ""}},
-                            {"signature": 1, "_id": 0}
-                        )
-                        if ucr_any and ucr_any.get("signature"):
-                            email_sig = ucr_any["signature"]
-                except Exception:
-                    pass
-
+            # NOTA: A assinatura já foi injetada no body_html/body acima,
+            # não passamos email_signature ao _send_via_resend para evitar duplicação.
             _send_via_resend(
                 api_key=account.password,
                 from_email=account.email,
@@ -787,7 +803,7 @@ async def send_email(
                 body=body,
                 body_html=body_html,
                 attachments=attachments,
-                email_signature=email_sig,
+                email_signature=None,  # Já injetada no corpo acima
                 reply_to=reply_to,
                 from_email_override=from_email,
             )
