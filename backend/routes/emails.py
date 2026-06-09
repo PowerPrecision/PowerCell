@@ -953,7 +953,7 @@ async def preview_documentation_email(
     return {
         "success": True,
         "html": email_body,
-        "subject": f"Documentação - {client_name}",
+        "subject": f"Documentação - {client_name} (Proc. {process_number})",
         "template_vars": template_vars,
         "available_variables": list(template_vars.keys()),
         "documents_count": len(documents) if documents else 0
@@ -1275,7 +1275,7 @@ async def _send_documentation_email_impl(
         # Remover tag [Proc-xxxx] caso exista no subject customizado
         subject = re.sub(r'\s*\[Proc-[\w-]+\]\s*', ' ', subject).strip()
     else:
-        subject = f"Documentação - {client_name}"
+        subject = f"Documentação - {client_name} (Proc. {process_number})"
     
     # BCC adicional: emails introduzidos manualmente pelo utilizador
     bcc_manual = [e for e in (sanitize_email(e) for e in data.get("bcc_emails", [])) if e]

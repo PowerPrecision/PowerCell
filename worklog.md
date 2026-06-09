@@ -228,3 +228,23 @@ Stage Summary:
   - frontend/src/contexts/AuthContext.js (activeCompanyId fallback to "default")
   - backend/services/auth.py (both get_active_company_id functions accept "default")
   - backend/routes/auth.py (GET /auth/me + PUT /auth/profile handle "default" + warning log)
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Add process number to email subject when sending to balcões
+
+Work Log:
+- Investigated the email sending flow for balcões (SendDocumentationModal + backend routes)
+- Found that the default email subject was `Documentação - {client_name}` — no process number
+- The frontend fallback display already included process number but backend didn't
+- Fixed backend `preview-documentation` endpoint: subject now includes `(Proc. {process_number})`
+- Fixed backend `send-documentation` endpoint: default subject now includes `(Proc. {process_number})`
+- Updated frontend fallback text to match backend format: `(Proc. {number})` instead of `(Processo #{number})`
+- Confirmed `skip_proc_tag=True` prevents duplicate Tag Mágica `[Proc-{uuid}]` injection
+
+Stage Summary:
+- Email subject for balcões changed from "Documentação - João Silva" to "Documentação - João Silva (Proc. 123)"
+- Files modified:
+  - backend/routes/emails.py (2 locations: preview + send endpoints)
+  - frontend/src/components/SendDocumentationModal.js (fallback text)

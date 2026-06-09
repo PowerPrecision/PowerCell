@@ -950,7 +950,7 @@ const SendDocumentationModal = ({
               {/* Info sobre o email */}
               <div className="text-xs text-muted-foreground space-y-1">
                 <p>
-                  <strong>Assunto:</strong> {emailSubject || `Documentação - ${safeString(process?.client_name) || "N/A"} (Processo #${safeString(process?.process_number) || "N/A"})`}
+                  <strong>Assunto:</strong> {emailSubject || `Documentação - ${safeString(process?.client_name) || "N/A"} (Proc. ${safeString(process?.process_number) || "N/A"})`}
                 </p>
                 <p>
                   <strong>Nota:</strong> Pode editar o conteúdo visualmente no separador "Editar" ou alternar para o modo HTML no botão {'</>'} Editar HTML.
