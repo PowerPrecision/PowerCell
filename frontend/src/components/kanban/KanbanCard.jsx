@@ -24,7 +24,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle, CheckCircle2 } from 'lucide-react';
+import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle, CheckCircle2, MessageSquare, FileText } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { formatDate } from '../../lib/utils';
 
@@ -42,6 +42,8 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.under_35 === nextProps.process.under_35 &&
     prevProps.process.updated_at === nextProps.process.updated_at &&
     prevProps.process.labels === nextProps.process.labels &&
+    prevProps.process.has_unread_messages === nextProps.process.has_unread_messages &&
+    prevProps.process.has_new_documents === nextProps.process.has_new_documents &&
     prevProps.isDragging === nextProps.isDragging &&
     prevProps.isLocked === nextProps.isLocked &&
     prevProps.lockedBy === nextProps.lockedBy
@@ -138,6 +140,45 @@ const KanbanCard = memo(({
         >
           <Lock className="h-2.5 w-2.5" />
           <span className="hidden sm:inline max-w-[80px] truncate">{lockedBy}</span>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════
+          HEAT DOTS — Pistas Visuais Silenciosas
+          Azul = Mensagem não lida | Verde = Novo documento
+          Posicionados no canto superior direito (abaixo do lock)
+          ═══════════════════════════════════════════════════ */}
+      {(process.has_unread_messages || process.has_new_documents) && !isLocked && (
+        <div className="absolute top-2 right-2 flex items-center gap-1.5 z-10">
+          {process.has_unread_messages && (
+            <span className="relative flex h-3 w-3" title="Nova Mensagem">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500" />
+            </span>
+          )}
+          {process.has_new_documents && (
+            <span className="relative flex h-3 w-3" title="Novo Documento">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+            </span>
+          )}
+        </div>
+      )}
+      {/* When locked, show dots below the lock badge */}
+      {(process.has_unread_messages || process.has_new_documents) && isLocked && (
+        <div className="absolute top-8 right-2 flex items-center gap-1.5 z-10">
+          {process.has_unread_messages && (
+            <span className="relative flex h-3 w-3" title="Nova Mensagem">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-blue-500" />
+            </span>
+          )}
+          {process.has_new_documents && (
+            <span className="relative flex h-3 w-3" title="Novo Documento">
+              <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+              <span className="relative inline-flex rounded-full h-3 w-3 bg-emerald-500" />
+            </span>
+          )}
         </div>
       )}
       <CardContent className="p-2">
@@ -248,6 +289,24 @@ const KanbanCard = memo(({
                   {safeString(label)}
                 </Badge>
               ))}
+            </div>
+          )}
+          
+          {/* Linha 5c: Alert indicators — Mensagem / Documento pendente */}
+          {(process.has_unread_messages || process.has_new_documents) && (
+            <div className="flex items-center gap-2 pt-1 border-t border-dashed border-border/60">
+              {process.has_unread_messages && (
+                <div className="flex items-center gap-1 text-[10px] text-blue-600 dark:text-blue-400 font-medium">
+                  <MessageSquare className="h-2.5 w-2.5" />
+                  <span>Msg</span>
+                </div>
+              )}
+              {process.has_new_documents && (
+                <div className="flex items-center gap-1 text-[10px] text-emerald-600 dark:text-emerald-400 font-medium">
+                  <FileText className="h-2.5 w-2.5" />
+                  <span>Docs</span>
+                </div>
+              )}
             </div>
           )}
           

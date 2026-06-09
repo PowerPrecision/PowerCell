@@ -30,7 +30,9 @@ import {
   WifiOff,
   Archive,
   Download,
-  Loader2
+  Loader2,
+  Bell,
+  BellOff
 } from 'lucide-react';
 import { formatDate } from '../../lib/utils';
 
@@ -54,6 +56,10 @@ const KanbanHeader = memo(({
   onScrollRight,
   isFetchingCompleted = false,
   columns = [],
+  // ═══ Filtro "A Aguardar Ação" ═══
+  showOnlyPendingActions = false,
+  onTogglePendingActions,
+  pendingActionsCount = 0,
 }) => {
   const [exporting, setExporting] = useState(false);
 
@@ -257,6 +263,35 @@ const KanbanHeader = memo(({
           )}
         </div>
         
+        {/* ═══════════════════════════════════════════════════
+            TOGGLE: "🔔 A Aguardar Ação"
+            Filtra para mostrar APENAS processos com
+            has_unread_messages ou has_new_documents
+            ═══════════════════════════════════════════════════ */}
+        <Button
+          variant={showOnlyPendingActions ? 'default' : 'outline'}
+          size="sm"
+          className={`h-8 text-xs gap-1.5 shrink-0 ${
+            showOnlyPendingActions 
+              ? 'bg-amber-600 hover:bg-amber-700 text-white border-amber-700' 
+              : 'hover:bg-amber-50 dark:hover:bg-amber-950/30 hover:text-amber-700 dark:hover:text-amber-400 hover:border-amber-300 dark:hover:border-amber-800'
+          }`}
+          onClick={onTogglePendingActions}
+          data-testid="kanban-pending-actions-filter"
+        >
+          {showOnlyPendingActions ? (
+            <Bell className="h-3.5 w-3.5" />
+          ) : (
+            <BellOff className="h-3.5 w-3.5" />
+          )}
+          A Aguardar Ação
+          {pendingActionsCount > 0 && (
+            <span className="ml-0.5 bg-amber-100 text-amber-800 dark:bg-amber-900/50 dark:text-amber-300 text-[10px] px-1.5 py-0 rounded-full font-bold">
+              {pendingActionsCount}
+            </span>
+          )}
+        </Button>
+
         {(dateFilter !== 'all' || urgencyFilter !== 'all' || completedDays !== 30) && (
           <Button 
             variant="ghost" 

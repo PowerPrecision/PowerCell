@@ -42,6 +42,7 @@ import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
 import { hasAnyRole } from '../utils/roleUtils';
 import { safeDateStr } from '../lib/utils';
+import { Bell, BellOff } from 'lucide-react';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';
@@ -116,6 +117,13 @@ const KanbanBoard = ({
   const [urgencyFilter, setUrgencyFilter] = useState('all');
   const [viewMode, setViewMode] = useState('kanban');
   const [scrollPosition, setScrollPosition] = useState(0);
+
+  // ═══════════════════════════════════════════════════════════
+  // FILTRO MÁGICO "A Aguardar Ação"
+  // Quando ativo, mostra APENAS processos com:
+  //   has_unread_messages === true OU has_new_documents === true
+  // ═══════════════════════════════════════════════════════════
+  const [showOnlyPendingActions, setShowOnlyPendingActions] = useState(false);
 
   // === FILTRO ISOLADO DE CONCLUÍDOS ===
   // O estado do completedDays vive isolado NESTE hook, NÃO no estado global.
@@ -351,7 +359,17 @@ const KanbanBoard = ({
         if (indexStatusFilter === 'completed' && !process.is_indexed) matchesIndexStatus = false;
         if (indexStatusFilter === 'pending' && process.is_indexed) matchesIndexStatus = false;
 
-        return matchesSearch && matchesDate && matchesUrgency && matchesIndexStatus;
+        // ═══════════════════════════════════════════════════
+        // FILTRO "A Aguardar Ação"
+        // Mostra APENAS processos com mensagens não lidas
+        // ou novos documentos do portal do cliente
+        // ═══════════════════════════════════════════════════
+        const matchesPendingAction =
+          !showOnlyPendingActions ||
+          process.has_unread_messages === true ||
+          process.has_new_documents === true;
+
+        return matchesSearch && matchesDate && matchesUrgency && matchesIndexStatus && matchesPendingAction;
       }),
       column.name
     ),
@@ -361,6 +379,19 @@ const KanbanBoard = ({
   const allFilteredProcesses = searchTerm.length >= 2
     ? filteredColumns.flatMap(col => col.processes.map(p => ({ ...p, columnLabel: col.label, columnColor: col.color })))
     : [];
+
+  // ═══════════════════════════════════════════════════════════
+  // CONTAGEM DE PROCESSOS COM AÇÕES PENDENTES
+  // Para o badge do botão "A Aguardar Ação"
+  // ═══════════════════════════════════════════════════════════
+  const pendingActionsCount = useMemo(() => {
+    if (!columns || columns.length === 0) return 0;
+    return columns.reduce((count, col) => {
+      return count + (col.processes || []).filter(
+        p => p.has_unread_messages || p.has_new_documents
+      ).length;
+    }, 0);
+  }, [columns]);
 
   // === SCROLL HANDLERS ===
   const scrollContainer = useCallback((direction) => {
@@ -413,6 +444,10 @@ const KanbanBoard = ({
         isFetching={isFetching}
         isFetchingCompleted={isFetchingCompleted}
         columns={filteredColumns}
+        // ═══ Filtro "A Aguardar Ação" ═══
+        showOnlyPendingActions={showOnlyPendingActions}
+        onTogglePendingActions={() => setShowOnlyPendingActions(prev => !prev)}
+        pendingActionsCount={pendingActionsCount}
       />
 
       {/* Search Results List View */}

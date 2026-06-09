@@ -1960,6 +1960,41 @@ async def get_kanban_board(
             p.setdefault("client_phone", cinfo["telefone"])
             p.setdefault("client_nif", cinfo["nif"])
 
+    # ====================================================================
+    # BATCH ENRIQUECIMENTO: has_unread_messages & has_new_documents
+    # Pistas visuais silenciosas para interações do cliente no portal.
+    # Evita fadiga de notificações — apenas dots coloridos no cartão.
+    # ====================================================================
+    process_ids = [p["id"] for p in processes]
+
+    # 1) Mensagens não lidas do cliente (portal_messages)
+    unread_pipeline = [
+        {"$match": {
+            "process_id": {"$in": process_ids},
+            "sender_type": "client",
+            "read_by_staff": False
+        }},
+        {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+    ]
+    unread_results = await db.portal_messages.aggregate(unread_pipeline).to_list(1000)
+    unread_map = {r["_id"]: r["unread_count"] > 0 for r in unread_results}
+
+    # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
+    new_docs_pipeline = [
+        {"$match": {
+            "process_id": {"$in": process_ids},
+            "status": "uploaded"
+        }},
+        {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+    ]
+    new_docs_results = await db.documents.aggregate(new_docs_pipeline).to_list(1000)
+    new_docs_map = {r["_id"]: r["new_count"] > 0 for r in new_docs_results}
+
+    # Inject computed boolean flags into each process
+    for p in processes:
+        p["has_unread_messages"] = unread_map.get(p["id"], False)
+        p["has_new_documents"] = new_docs_map.get(p["id"], False)
+
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
     user_map = {u["id"]: u for u in users}
