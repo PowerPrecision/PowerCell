@@ -123,3 +123,48 @@ Stage Summary:
   - src/app/api/background-jobs/metrics/route.ts
   - src/app/api/background-jobs/clear-all/route.ts
   - src/app/api/background-jobs/seed/route.ts
+
+---
+Task ID: 3
+Agent: Main Agent
+Task: Fix email signature not saving
+
+Work Log:
+- Investigated the email signature save flow across frontend and backend
+- ProfilePage.js sends PUT /auth/profile with { signature, email_signature } fields
+- Backend auth.py update_profile routes signature to user_company_roles (UCR) and email_signature to global users collection
+- Identified 3 bugs causing the signature to not display after save:
+  1. Backend GET /auth/me returns active_company_signature="" (empty string) when no UCR record exists
+     - Frontend uses ?? (nullish coalescing) which doesn't fall through for empty strings
+     - So "" ?? user.email_signature evaluates to "" instead of falling through to the global email_signature
+  2. Backend update_profile skips UCR update when active_company_id is None
+     - This happens when the user has no X-Company-Id header and no user.company field
+     - The signature is saved globally but not in UCR, causing display issues on reload
+  3. Frontend fallback for professionalPhone was missing the user.phone global fallback
+
+- Fixed backend auth.py GET /auth/me:
+  - Changed active_company_signature from "" to None when no UCR record or no signature field in UCR
+  - Changed active_company_professional_phone and active_company_job_title similarly
+  - Changed active_company_name from "" to None for consistency
+  - Added check "signature" in active_assoc to distinguish between "not set" (None) and "intentionally cleared" ("")
+
+- Fixed backend auth.py PUT /auth/profile (update_profile):
+  - Added fallback for UCR company_id: ucr_company_id = active_company_id or user.get("company") or "default"
+  - This ensures the signature is ALWAYS saved to UCR, even when active_company_id is None
+  - Removed the warning about missing company context (no longer needed)
+  - Updated lookup_company_id to use ucr_company_id when company_specific_fields were saved
+
+- Fixed backend auth.py PUT /auth/profile response:
+  - Same None vs "" fix for active_company_signature and related fields in the response
+
+- Fixed frontend ProfilePage.js:
+  - Added detailed comment explaining the null vs "" distinction and how ?? works
+  - Changed professionalPhone fallback to include user.phone as global fallback
+  - Email signature fallback already correct with the backend fix (None now properly falls through)
+
+Stage Summary:
+- Root cause: Backend returned "" (empty string) for active_company_signature when no UCR record existed, preventing the frontend's ?? operator from falling through to the global email_signature value
+- Secondary cause: When active_company_id was None, the UCR update was skipped entirely, leaving the signature only in the global user document but not in UCR
+- Files modified:
+  - backend/routes/auth.py (3 locations: GET /auth/me, PUT /auth/profile UCR update, PUT /auth/profile response)
+  - frontend/src/pages/ProfilePage.js (signature fallback logic with comments)

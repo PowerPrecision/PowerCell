@@ -273,21 +273,28 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
     }
 
     # Popular campos detalhados da empresa activa
+    #
+    # IMPORTANTE: Os campos active_company_* usam None (não "") como fallback
+    # para que o frontend possa distinguir entre:
+    #   - None → sem dados da empresa, usar o valor global (email_signature)
+    #   - "" → assinatura intencionalmente limpa pelo utilizador
+    # Isto é crucial para o operador ?? do JS funcionar correctamente.
     if user_companies and active_assoc:
         company_role = active_assoc.get("role")
         effective_active_role = active_role_header if active_role_header else company_role
         response["active_company_role"] = effective_active_role
         response["active_company_name"] = active_assoc.get("company_name")
-        response["active_company_signature"] = active_assoc.get("signature", "")
-        response["active_company_professional_phone"] = active_assoc.get("professional_phone", "")
-        response["active_company_job_title"] = active_assoc.get("job_title", "")
+        # Usar None se o campo não existe no UCR (nunca foi definido)
+        response["active_company_signature"] = active_assoc.get("signature") if "signature" in active_assoc else None
+        response["active_company_professional_phone"] = active_assoc.get("professional_phone") if "professional_phone" in active_assoc else None
+        response["active_company_job_title"] = active_assoc.get("job_title") if "job_title" in active_assoc else None
     else:
         # Fallback: sem associação activa ou sem empresas
         response["active_company_role"] = active_role_header or user.get("role")
-        response["active_company_name"] = ""
-        response["active_company_signature"] = ""
-        response["active_company_professional_phone"] = ""
-        response["active_company_job_title"] = ""
+        response["active_company_name"] = None
+        response["active_company_signature"] = None
+        response["active_company_professional_phone"] = None
+        response["active_company_job_title"] = None
     
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):
@@ -494,28 +501,23 @@ async def update_profile(
                 f"active_company_id={active_company_id!r}, user_id={user_id}, "
                 f"is_default={is_default_company}"
             )
-            if active_company_id:
-                company_specific_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
-                result = await db.user_company_roles.update_one(
-                    {"user_id": user_id, "company_id": active_company_id},
-                    {"$set": company_specific_fields},
-                    upsert=True
-                )
-                logger.info(
-                    f"[auth/profile] UCR update_one: matched={result.matched_count}, "
-                    f"modified={result.modified_count}, upserted={result.upserted_id}"
-                )
-            else:
-                profile_warnings.append(
-                    "Não foi possível determinar a empresa ativa. "
-                    "Os dados profissionais não foram guardados por empresa. "
-                    "Tente recarregar a página e repetir."
-                )
-                logger.warning(
-                    f"[auth/profile] active_company_id é None — campos da empresa NÃO guardados! "
-                    f"X-Company-Id header={request.headers.get('X-Company-Id')!r}, "
-                    f"user.company={user.get('company')!r}"
-                )
+            # ── Garantir que active_company_id está definido ──
+            # Se for None (sem X-Company-Id header e sem user.company),
+            # usar "default" como fallback para que a assinatura seja sempre
+            # guardada no UCR. Isto evita que a assinatura se perca quando
+            # o utilizador não tem contexto de empresa explícito.
+            ucr_company_id = active_company_id or user.get("company") or "default"
+            company_specific_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
+            result = await db.user_company_roles.update_one(
+                {"user_id": user_id, "company_id": ucr_company_id},
+                {"$set": company_specific_fields},
+                upsert=True
+            )
+            logger.info(
+                f"[auth/profile] UCR update_one: matched={result.matched_count}, "
+                f"modified={result.modified_count}, upserted={result.upserted_id}, "
+                f"company_id={ucr_company_id!r}"
+            )
         except Exception as e:
             profile_warnings.append(f"Erro ao guardar dados da empresa: {e}")
             logger.warning(f"[auth/profile] Erro ao guardar campos específicos da empresa: {e}")
@@ -530,9 +532,12 @@ async def update_profile(
     try:
         # Re-ler empresas para obter dados actualizados após o upsert
         refreshed_companies = await get_user_companies(user_id)
-        if active_company_id and refreshed_companies:
+        # Usar ucr_company_id (que tem fallback) em vez de active_company_id
+        # (que pode ser None) para procurar a associação actualizada
+        lookup_company_id = ucr_company_id if company_specific_fields else active_company_id
+        if lookup_company_id and refreshed_companies:
             active_assoc_refreshed = next(
-                (c for c in refreshed_companies if c.get("company_id") == active_company_id),
+                (c for c in refreshed_companies if c.get("company_id") == lookup_company_id),
                 None
             )
             if active_assoc_refreshed:
@@ -540,9 +545,9 @@ async def update_profile(
                 company_role = active_assoc_refreshed.get("role")
                 updated_user["active_company_role"] = active_role_header_resp if active_role_header_resp else company_role
                 updated_user["active_company_name"] = active_assoc_refreshed.get("company_name")
-                updated_user["active_company_signature"] = active_assoc_refreshed.get("signature", "")
-                updated_user["active_company_professional_phone"] = active_assoc_refreshed.get("professional_phone", "")
-                updated_user["active_company_job_title"] = active_assoc_refreshed.get("job_title", "")
+                updated_user["active_company_signature"] = active_assoc_refreshed.get("signature") if "signature" in active_assoc_refreshed else None
+                updated_user["active_company_professional_phone"] = active_assoc_refreshed.get("professional_phone") if "professional_phone" in active_assoc_refreshed else None
+                updated_user["active_company_job_title"] = active_assoc_refreshed.get("job_title") if "job_title" in active_assoc_refreshed else None
                 updated_user["companies"] = refreshed_companies
                 # ── MERGE: Sobrepor campos globais com dados da empresa ativa ──
                 if active_assoc_refreshed.get("professional_phone"):

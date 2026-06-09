@@ -168,8 +168,15 @@ const ProfilePage = () => {
       // Prioridade: active_company_* (campos separados do UCR) > campos
       // mergeados no user (phone/email_signature). Isto permite mostrar
       // valores diferentes quando o utilizador troca de empresa.
+      //
+      // IMPORTANTE: O backend retorna `null` (não "") quando o campo UCR
+      // nunca foi definido, e `""` quando o utilizador limpou intencionalmente.
+      // O operador ?? distingue estes casos:
+      //   - null → não definido, usar fallback (email_signature global)
+      //   - "" → limpo intencionalmente, mostrar vazio
+      //   - "algo" → valor definido, mostrar valor
       setEmailSignature(user.active_company_signature ?? user.email_signature ?? "");
-      setProfessionalPhone(user.active_company_professional_phone ?? "");
+      setProfessionalPhone(user.active_company_professional_phone ?? user.phone ?? "");
       setJobTitle(user.active_company_job_title ?? "");
       setLoading(false);
 
