@@ -155,15 +155,21 @@ const ProfilePage = () => {
   // user.email_signature ← signature da empresa). Por isso, ao ler
   // user.phone e user.email_signature já obtemos os valores correctos
   // para o contexto actual, sem necessidade de fallback manual.
+  //
+  // FIX: useState(user?.phone) só corre no PRIMEIRO mount. Quando o
+  // ContextSwitcher faz switchActiveCompany(), o AuthContext atualiza o
+  // user object mas os estados locais NÃO são automaticamente repostos.
+  // Este useEffect é ESSENCIAL para forçar a reidratação do formulário.
   useEffect(() => {
     if (user) {
       // Campos mergeados pelo backend (phone/email_signature podem vir
       // da empresa ativa ou dos campos globais, conforme o contexto)
-      setProfileData({
+      setProfileData(prev => ({
+        ...prev,
         name: user.name || "",
         phone: user.phone || "",
         email: user.email || "",
-      });
+      }));
       // ── Campos específicos da empresa ativa ──
       // Prioridade: active_company_* (campos separados do UCR) > campos
       // mergeados no user (phone/email_signature). Isto permite mostrar
@@ -180,6 +186,9 @@ const ProfilePage = () => {
       setJobTitle(user.active_company_job_title ?? "");
       setLoading(false);
 
+      // FIX: Forçar recarga da config de email quando o user object muda
+      // (ex: após switchActiveCompany que faz refreshUser)
+      loadEmailConfigInfo();
     }
   }, [user, effectiveCompanyId, effectiveRole]);
 
@@ -205,13 +214,16 @@ const ProfilePage = () => {
   }, []);
 
   // Carregar info de config de email (para mostrar herança)
-  // O header X-Company-Id é injetado automaticamente pelo interceptor api.js
-  // a partir do sessionStorage. O emailCompanyId serve para forçar o reload
-  // quando o utilizador muda a empresa no dropdown LOCAL (sem ContextSwitcher).
+  // FIX: Passar company_id como query param EXPLÍCITO para garantir que o
+  // backend resolve a config da empresa correcta, mesmo se o header
+  // X-Company-Id estiver dessincronizado com o sessionStorage.
+  // O header continua a ser injectado pelo interceptor api.js, mas o
+  // query param serve como fallback de redundância.
   const loadEmailConfigInfo = async () => {
     setLoadingEmailConfig(true);
     try {
-      const response = await api.get("/users/me/email-config");
+      const companyIdParam = emailCompanyId || effectiveCompanyId || "default";
+      const response = await api.get(`/users/me/email-config?company_id=${encodeURIComponent(companyIdParam)}`);
       setEmailConfigInfo(response.data);
       // MULTI-EMPRESA: popular lista de empresas disponíveis
       if (response.data.available_companies) {

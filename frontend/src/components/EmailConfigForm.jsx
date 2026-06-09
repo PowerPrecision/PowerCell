@@ -58,8 +58,12 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   // Build API URLs based on mode
   const getConfigUrl = () => {
-    if (isSelf) return "/users/me/email-config";
-    return `/admin/users/${userId}/email-config`;
+    const cid = companyId || effectiveCompanyId || "default";
+    const base = isSelf ? "/users/me/email-config" : `/admin/users/${userId}/email-config`;
+    // FIX: Passar company_id como query param EXPLÍCITO para garantir que
+    // o backend resolve a config da empresa correcta, mesmo se o header
+    // X-Company-Id estiver dessincronizado com o sessionStorage.
+    return `${base}?company_id=${encodeURIComponent(cid)}`;
   };
 
   const saveConfigUrl = () => {
