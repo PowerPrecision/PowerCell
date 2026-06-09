@@ -250,6 +250,7 @@ async def list_registered_clients(
     search: Optional[str] = Query(None, description="Pesquisar por nome, email ou NIF"),
     has_process: Optional[bool] = Query(None, description="Filtrar por ter processo criado"),
     assigned_to_me: bool = Query(False, description="Mostrar apenas clientes atribuídos ao utilizador atual"),
+    include_ghosts: bool = Query(False, description="Incluir clientes fantasma (2º titular apenas). Admin/CEO podem ver todos."),
     sort_field: str = Query("nome", description="Campo de ordenação"),
     sort_order: str = Query("asc", description="Ordem: asc ou desc"),
     limit: int = Query(50, le=200),
@@ -284,7 +285,46 @@ async def list_registered_clients(
     # - lead_status="new" → Lead pendente de triagem na página de Registos
     # - lead_status="converted" → Lead já transformado em Processo → NÃO aparece por defeito
     # - Sem lead_status → Compatibilidade retroactiva (tratar como "new")
+    #
+    # REGRA DE NEGÓCIO (Clientes Fantasmas):
+    # - Um cliente que apenas foi registado para atuar como 2º Titular
+    #   (second_client_id) NÃO deve aparecer na listagem geral.
+    # - Só ganha "vida" se for titular principal (client_id) em pelo menos
+    #   um processo, ou se for um novo lead sem processo atribuído.
     query = {"registration_completed": True}
+
+    # ── Filtro de Clientes Fantasmas ──
+    # Um cliente "fantasma" é aquele que apenas foi registado para atuar como
+    # 2º Titular (second_client_id) num processo. Não deve poluir a listagem
+    # geral — só aparece se for 1º Titular em pelo menos um processo, ou se
+    # for um novo lead sem processo associado (pendente de triagem).
+    #
+    # O filtro pode ser bypassado com include_ghosts=True (útil para admin/debug).
+    primary_client_ids = []
+    if not include_ghosts:
+        # Obter todos os IDs de clientes que são titular principal (client_id)
+        # em pelo menos um processo — estes clientes têm "vida" no sistema.
+        primary_client_ids = await db.processes.distinct(
+            "client_id",
+            {"client_id": {"$nin": [None, ""]}}
+        )
+
+        # Um cliente deve aparecer na listagem SE:
+        # 1. É titular principal em pelo menos um processo (tem "vida")
+        # 2. OU é um novo lead sem nenhum processo associado (pendente de triagem)
+        ghost_filter = {
+            "$or": [
+                {"id": {"$in": primary_client_ids}},           # É 1º titular → tem "vida"
+                {"process_ids": {"$exists": False}},            # Novo lead — sem processos
+                {"process_ids": []},                             # Novo lead — lista vazia
+                {"process_ids": None},                           # Novo lead — null
+            ]
+        }
+
+        # Aplicar o filtro de fantasmas como $and (nunca como $or directo na query
+        # para evitar conflito com o $or de pesquisa que vem a seguir)
+        query["$and"] = query.get("$and", [])
+        query["$and"].append(ghost_filter)
 
     # Filtro de pesquisa - ignora acentos no nome
     # NOTA: Para NIF, usamos blind index (nif_hash) para pesquisa exata
@@ -388,10 +428,22 @@ async def list_registered_clients(
     
     # Enriquecer dados dos clientes
     enriched_clients = []
+    primary_ids_set = set(primary_client_ids) if primary_client_ids else None
     for c in clients:
         # Verificar se tem processos
         process_ids = c.get("process_ids", [])
         has_process_flag = bool(process_ids)
+        
+        # Determinar se o cliente é "fantasma"
+        # Fantasma = tem process_ids preenchido MAS o seu ID nunca aparece
+        # como client_id (titular principal) em nenhum processo
+        client_id_val = c.get("id")
+        is_ghost = False
+        if primary_ids_set is not None and client_id_val:
+            is_ghost = (
+                client_id_val not in primary_ids_set
+                and bool(process_ids)  # Tem processos, mas só como 2º titular
+            )
         
         # Buscar informação dos processos
         processes_info = []
@@ -415,6 +467,7 @@ async def list_registered_clients(
             "dados_pessoais": c.get("dados_pessoais", {}),
             "nif": c.get("dados_pessoais", {}).get("nif"),
             "is_active": c.get("is_active", True),
+            "is_ghost": is_ghost,  # Cliente fantasma (apenas 2º titular)
             "has_process": has_process_flag,
             "process_count": len(process_ids),
             "processes": processes_info,
@@ -445,6 +498,8 @@ async def list_registered_clients(
         "total": total,
         "has_process_filter": has_process,
         "assigned_to_me": assigned_to_me,
+        "include_ghosts": include_ghosts,
+        "ghost_count": sum(1 for c in enriched_clients if c.get("is_ghost")),
         "sort_field": sort_field,
         "sort_order": sort_order,
         "next_cursor": next_cursor,
