@@ -1380,13 +1380,20 @@ async def _send_documentation_email_impl(
     except Exception as e:
         logger.warning(f"Não foi possível adicionar label 'documentação' ao registo: {e}")
     
-    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {len(all_bcc)} destinatários BCC, {len(email_attachments)} anexos")
+    # Contagem total de destinatários (TO + CC + BCC)
+    total_recipients = len(to_emails) + len(cc_emails) + len(all_bcc)
+    
+    logger.info(f"Documentação enviada para processo {process_id} por {current_user['email']}: {total_recipients} destinatário(s) (TO:{len(to_emails)} CC:{len(cc_emails)} BCC:{len(all_bcc)}), {len(email_attachments)} anexos")
     
     return {
         "success": True,
-        "message": f"Documentação enviada com sucesso para {len(all_bcc)} destinatário(s) ({len(email_attachments)} anexo(s))",
+        "message": f"Documentação enviada com sucesso para {total_recipients} destinatário(s) ({len(email_attachments)} anexo(s))",
         "warnings": warnings,
         "sent_to": all_bcc,
+        "sent_to_emails": to_emails,
+        "sent_cc_emails": cc_emails,
+        "sent_bcc_emails": all_bcc,
+        "total_recipients": total_recipients,
         "attachments_sent": len(email_attachments),
         "attachments_failed": len(failed_attachments) if failed_attachments else 0
     }
