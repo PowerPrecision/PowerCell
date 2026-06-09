@@ -20,6 +20,64 @@ ALLOWED_TAGS = []  # Nenhuma tag HTML permitida por defeito
 # Atributos HTML permitidos (vazio por defeito)
 ALLOWED_ATTRIBUTES = {}
 
+# Tags seguras para conteúdo de email HTML profissional
+# Inclui todas as tags necessárias para emails formatados a balcões/bancos:
+# - Estrutura: div, p, br, hr, span, section, article
+# - Cabeçalhos: h1-h6
+# - Formatação: b, i, u, strong, em, s, small, sub, sup, mark
+# - Listas: ul, ol, li, dl, dt, dd
+# - Tabelas: table, thead, tbody, tfoot, tr, td, th, caption, colgroup, col
+# - Links/Imagens: a, img
+# - Outros: blockquote, pre, code, figure, figcaption, details, summary
+EMAIL_SAFE_TAGS = [
+    # Estrutura
+    'div', 'p', 'br', 'hr', 'span', 'section', 'article', 'main', 'header', 'footer',
+    # Cabeçalhos
+    'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    # Formatação de texto
+    'b', 'i', 'u', 'strong', 'em', 's', 'strike', 'small', 'sub', 'sup', 'mark',
+    # Listas
+    'ul', 'ol', 'li', 'dl', 'dt', 'dd',
+    # Tabelas (crítico para emails a balcões)
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'td', 'th', 'caption', 'colgroup', 'col',
+    # Links e imagens
+    'a', 'img',
+    # Outros
+    'blockquote', 'pre', 'code', 'figure', 'figcaption', 'details', 'summary',
+]
+
+# Atributos seguros para email HTML
+# Inclui style (essencial para formatação de emails), href, src, etc.
+EMAIL_SAFE_ATTRIBUTES = {
+    '*': ['style', 'class', 'id', 'title', 'lang'],
+    'a': ['href', 'target', 'rel', 'title'],
+    'img': ['src', 'alt', 'width', 'height', 'style'],
+    'td': ['style', 'class', 'colspan', 'rowspan', 'width', 'align', 'valign'],
+    'th': ['style', 'class', 'colspan', 'rowspan', 'width', 'align', 'valign'],
+    'table': ['style', 'class', 'width', 'cellpadding', 'cellspacing', 'border', 'align'],
+    'col': ['style', 'span', 'width'],
+    'colgroup': ['style', 'span'],
+    'hr': ['style', 'size', 'width'],
+    'br': ['style'],
+    'p': ['style', 'class', 'align'],
+    'div': ['style', 'class', 'align'],
+    'span': ['style', 'class'],
+    'h1': ['style', 'class', 'align'],
+    'h2': ['style', 'class', 'align'],
+    'h3': ['style', 'class', 'align'],
+    'h4': ['style', 'class', 'align'],
+    'h5': ['style', 'class', 'align'],
+    'h6': ['style', 'class', 'align'],
+    'ol': ['style', 'class', 'start', 'type'],
+    'ul': ['style', 'class', 'type'],
+    'li': ['style', 'class', 'value'],
+    'blockquote': ['style', 'class', 'cite'],
+    'figure': ['style', 'class'],
+    'figcaption': ['style', 'class'],
+    'details': ['style', 'class', 'open'],
+    'summary': ['style', 'class'],
+}
+
 # Protocolos permitidos em URLs
 ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
@@ -73,13 +131,17 @@ def sanitize_string(value: str, max_length: int = 200) -> str:
     return value.strip()
 
 
-def sanitize_html(value: str, allow_basic_formatting: bool = False) -> str:
+def sanitize_html(value: str, allow_basic_formatting: bool = False, allow_email_html: bool = False) -> str:
     """
     Sanitiza HTML removendo tags e atributos perigosos.
     
     Args:
         value: HTML a sanitizar
         allow_basic_formatting: Se True, permite tags básicas como <b>, <i>, <p>
+        allow_email_html: Se True, permite todas as tags seguras para email HTML
+            profissional (tabelas, cabeçalhos, divs, links, imagens, etc.).
+            Isto é necessário para preservar a formatação dos emails enviados
+            a balcões/bancos. Tem precedência sobre allow_basic_formatting.
     
     Returns:
         HTML sanitizado
@@ -93,7 +155,12 @@ def sanitize_html(value: str, allow_basic_formatting: bool = False) -> str:
     # Remover caracteres nulos
     value = value.replace('\x00', '')
     
-    if allow_basic_formatting:
+    if allow_email_html:
+        # Permitir todas as tags seguras para email profissional
+        # Preserva tabelas, formatação rica, links, imagens, etc.
+        allowed = EMAIL_SAFE_TAGS
+        attrs = EMAIL_SAFE_ATTRIBUTES
+    elif allow_basic_formatting:
         # Permitir formatação básica
         allowed = ['b', 'i', 'u', 'strong', 'em', 'p', 'br', 'ul', 'ol', 'li']
         attrs = {}

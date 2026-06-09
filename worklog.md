@@ -248,3 +248,31 @@ Stage Summary:
 - Files modified:
   - backend/routes/emails.py (2 locations: preview + send endpoints)
   - frontend/src/components/SendDocumentationModal.js (fallback text)
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Correção Crítica: Formatação HTML nos E-mails para Balcões + Nº Processo no Assunto
+
+Work Log:
+- Investigated the complete email sending pipeline for balcões (counters/banks)
+- Traced flow: Frontend RichTextEditor (React Quill) → custom_html_body → backend sanitize_html() → send_email() → MIME/Resend
+- **ROOT CAUSE FOUND**: `sanitize_html(custom_html_body)` at line 1058 of `backend/routes/emails.py` strips ALL HTML tags because `allow_basic_formatting` defaults to `False` and `ALLOWED_TAGS = []`. The `bleach.clean()` call with empty tags list removes `<div>`, `<table>`, `<h3>`, `<strong>`, `<br>`, etc., leaving only plain text.
+- Even with `allow_basic_formatting=True`, only 10 basic tags were allowed (`b, i, u, strong, em, p, br, ul, ol, li`) — not the professional email tags like `<div>`, `<table>`, `<span>`, `<a>`, `<hr>`, `<h1>`-`<h6>` needed for bank emails.
+- Verified MIME type handling in `send_email()` is CORRECT: `MIMEText(body_html, "html", "utf-8")` is used when body_html is provided.
+- Verified Resend API path is CORRECT: `params["html"] = html_content` is set when body_html exists.
+- The bug was exclusively in the sanitization step BEFORE the email reached send_email().
+
+Fixes applied:
+1. `backend/utils/input_sanitization.py` — Added `EMAIL_SAFE_TAGS` (40+ tags) and `EMAIL_SAFE_ATTRIBUTES` (comprehensive attributes per tag including style, class, href, src, colspan, etc.) for professional email HTML. Added `allow_email_html` parameter to `sanitize_html()`.
+2. `backend/routes/emails.py` line 1063 — Changed `sanitize_html(custom_html_body)` to `sanitize_html(custom_html_body, allow_email_html=True)` — preserves all email formatting (tables, bold, paragraphs, etc.) while still removing dangerous scripts/iframe/form.
+3. `backend/routes/emails.py` line 1094 — Added `sanitize_html(email_template, allow_email_html=True)` for the email_template path.
+4. `backend/routes/emails.py` lines 1145-1167 — Added process number enforcement in the subject: if the custom subject doesn't contain the process number, it's automatically appended as `(Proc. {process_number})`.
+
+Stage Summary:
+- PRIMARY BUG: `sanitize_html()` was stripping ALL HTML tags from the Rich Text Editor content, causing emails to balcões to arrive as plain text ("texto corrido") without any formatting.
+- FIX: New `allow_email_html=True` mode preserves 40+ HTML tags needed for professional emails while still removing dangerous elements (script, iframe, form, event handlers).
+- SECONDARY: Process number is now ALWAYS included in the email subject when sending to balcões, even with custom subjects.
+- Files modified:
+  - backend/utils/input_sanitization.py (EMAIL_SAFE_TAGS, EMAIL_SAFE_ATTRIBUTES, allow_email_html parameter)
+  - backend/routes/emails.py (3 changes: custom_html_body sanitization, email_template sanitization, subject process number enforcement)
