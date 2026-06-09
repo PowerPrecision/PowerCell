@@ -238,7 +238,7 @@ const SendDocumentationModal = ({
         setDocuments(allDocs);
         
         // Separar documentos RGPD assinados (categoria "RGPD") e pré-selecionar
-        const rgpdDocs = allDocs.filter(d => d.category === "RGPD" || (d.original_name || "").toLowerCase().includes("rgpd"));
+        const rgpdDocs = allDocs.filter(d => d.category === "RGPD" || String(d.original_name || "").toLowerCase().includes("rgpd"));
         setRgpdDocuments(rgpdDocs);
         if (rgpdDocs.length > 0) {
           // Pré-selecionar documentos RGPD assinados
@@ -356,11 +356,13 @@ const SendDocumentationModal = ({
     const financialData = process.financial_data;
     const bancosCreditos = financialData.bancos_creditos || [];
     const bancosSimulacoes = financialData.bancos_simulacoes || [];
-    const blockedBanks = [...bancosCreditos, ...bancosSimulacoes].map(b => 
-      (b || "").toLowerCase().trim()
-    );
+    const blockedBanks = [...bancosCreditos, ...bancosSimulacoes].map(b => {
+      // bancos_creditos pode conter objectos { banco, valor } ou strings
+      const name = typeof b === 'object' && b !== null ? (b.banco || '') : (b || '');
+      return String(name).toLowerCase().trim();
+    });
     
-    const recipientName = (recipient.name || "").toLowerCase().trim();
+    const recipientName = String(recipient.name || "").toLowerCase().trim();
     
     return blockedBanks.some(blocked => 
       recipientName.includes(blocked) || blocked.includes(recipientName)
