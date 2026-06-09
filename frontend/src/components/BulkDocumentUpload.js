@@ -404,17 +404,19 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
     
     // Função auxiliar para actualizar sessão no backend
     // A sessão agregada actualiza automaticamente via /analyze, mas actualizamos o background_job
-    const updateBackendSession = async () => {
+    const updateBackendSession = async (currentStep = null) => {
       if (!backendSessionId) return;
       try {
         // Actualizar o job directamente na colecção background_jobs
+        const body = { processed, errors };
+        if (currentStep) body.current_step = currentStep;
         await fetch(`${API_URL}/api/ai/bulk/background-job/${backendSessionId}/progress`, {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ processed, errors }),
+          body: JSON.stringify(body),
         });
       } catch (e) {
         // Ignorar erros de actualização - a sessão continua a funcionar
@@ -444,7 +446,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
           }
 
           updateProgress(jobId, { processed, errors });
-          if (processed % 5 === 0) await updateBackendSession();
+          if (processed % 5 === 0) await updateBackendSession(`A processar ficheiro ${processed}/${filesToProcess.length}`);
           await new Promise((resolve) => setTimeout(resolve, 100));
         }
       } 
@@ -467,7 +469,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
               errors++;
             }
             updateProgress(jobId, { errors });
-            await updateBackendSession();
+            await updateBackendSession(`Cliente "${clientName}" não encontrado`);
             continue;
           }
 
@@ -488,7 +490,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
             }
 
             updateProgress(jobId, { processed, errors });
-            if (processed % 5 === 0) await updateBackendSession();
+            if (processed % 5 === 0) await updateBackendSession(`A processar ${clientName}: ${fileName}`);
             await new Promise((resolve) => setTimeout(resolve, 100));
           }
         }
@@ -500,6 +502,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
       try {
         setCurrentFile({ name: "A consolidar dados...", client: "Todos" });
         updateProgress(jobId, { currentFile: "A consolidar dados agregados..." });
+        await updateBackendSession("A consolidar dados agregados...");
         
         const finishResponse = await fetch(`${API_URL}/api/ai/bulk/aggregated-session/${backendSessionId}/finish`, {
           method: "POST",

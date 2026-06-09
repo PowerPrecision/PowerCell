@@ -2,9 +2,11 @@
 Background Jobs Management
 ==========================
 Gestão de jobs em background para importação em massa.
-Inclui criação, actualização, tracking e métricas.
+Endpoints REST para consultar e manipular jobs.
+
+NOTA: As funções de gestão (criar, actualizar, finalizar) estão em jobs.py.
+Este ficheiro contém apenas os endpoints HTTP.
 """
-import uuid
 import logging
 from datetime import datetime, timezone, timedelta
 from typing import Dict, Optional, List, Any
@@ -16,178 +18,19 @@ from database import db
 from models.auth import UserRole
 from services.auth import require_roles
 
+# Importar funções partilhadas de jobs.py (fonte de verdade única)
+from .jobs import (
+    background_processes,
+    create_background_job_db,
+    update_background_job_db,
+    finish_background_job_db,
+    load_background_jobs_from_db,
+    delete_job,
+    cleanup_stuck_jobs,
+)
+
 logger = logging.getLogger(__name__)
 router = APIRouter()
-
-# Cache em memória para performance (a DB é a fonte de verdade)
-background_processes: Dict[str, dict] = {}
-
-
-# ====================================================================
-# FUNÇÕES DE GESTÃO DE JOBS
-# ====================================================================
-
-async def create_background_job_db(job_type: str, user_email: str, details: dict = None, total_files: int = 0) -> str:
-    """Criar registo de job em background (persistido na DB)."""
-    job_id = str(uuid.uuid4())
-    job = {
-        "id": job_id,
-        "type": job_type,
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "user_email": user_email,
-        "progress": 0,
-        "total": total_files,
-        "processed": 0,
-        "errors": 0,
-        "details": details or {},
-        "error_messages": [],
-        "error_log": None,
-        "current_step": "Iniciando...",
-        "step_log": [{"ts": datetime.now(timezone.utc).isoformat(), "step": "Iniciando..."}],
-        "finished_at": None
-    }
-    
-    # Guardar em memória e na DB
-    background_processes[job_id] = job
-    await db.background_jobs.insert_one({**job, "_id": job_id})
-    
-    logger.info(f"Job background criado: {job_id} ({job_type}) com {total_files} ficheiros")
-    return job_id
-
-
-async def update_background_job_db(job_id: str, **kwargs):
-    """Actualizar estado de um job em background (persistido na DB)."""
-    update_data = {**kwargs, "updated_at": datetime.now(timezone.utc).isoformat()}
-    
-    # Se current_step foi actualizado, adicionar ao step_log
-    if "current_step" in update_data:
-        step_entry = {"ts": datetime.now(timezone.utc).isoformat(), "step": update_data["current_step"]}
-        if job_id in background_processes:
-            background_processes[job_id].setdefault("step_log", []).append(step_entry)
-            # Manter no máximo 100 entradas no log
-            if len(background_processes[job_id]["step_log"]) > 100:
-                background_processes[job_id]["step_log"] = background_processes[job_id]["step_log"][-100:]
-        # Usar $push na DB para adicionar ao array sem sobrescrever
-        await db.background_jobs.update_one(
-            {"id": job_id},
-            {"$push": {"step_log": {"$each": [step_entry], "$slice": -100}}}
-        )
-    
-    # Actualizar cache em memória
-    if job_id in background_processes:
-        background_processes[job_id].update(update_data)
-        if background_processes[job_id].get("total", 0) > 0:
-            processed = background_processes[job_id].get("processed", 0)
-            total = background_processes[job_id]["total"]
-            update_data["progress"] = int((processed / total) * 100)
-            background_processes[job_id]["progress"] = update_data["progress"]
-    
-    # Actualizar na DB (excepto current_step que já foi feito com $push)
-    db_update = {k: v for k, v in update_data.items() if k != "step_log"}
-    await db.background_jobs.update_one(
-        {"id": job_id},
-        {"$set": db_update}
-    )
-
-
-async def finish_background_job_db(job_id: str, success: bool, message: str = None):
-    """Marcar job como terminado (persistido na DB)."""
-    status = "success" if success else "failed"
-    finished_at = datetime.now(timezone.utc).isoformat()
-    
-    update_data = {
-        "status": status,
-        "finished_at": finished_at,
-        "current_step": "Concluído" if success else "Falhado",
-        # Garantir que acknowledged_at existe como None para que o frontend
-        # possa detetar a conclusão na primeira poll e exibir o toast.
-        # O endpoint GET /tasks/active fará auto-acknowledge após a primeira leitura.
-        "acknowledged_at": None,
-    }
-    if message:
-        update_data["message"] = message
-    if not success and message:
-        update_data["error_log"] = message
-    
-    # Adicionar step final ao log
-    step_entry = {"ts": finished_at, "step": update_data["current_step"]}
-    if job_id in background_processes:
-        background_processes[job_id].setdefault("step_log", []).append(step_entry)
-        background_processes[job_id].update(update_data)
-        # Push step final na DB
-        await db.background_jobs.update_one(
-            {"id": job_id},
-            {"$push": {"step_log": {"$each": [step_entry], "$slice": -100}}}
-        )
-    
-    # Actualizar na DB
-    db_update = {k: v for k, v in update_data.items()}
-    await db.background_jobs.update_one(
-        {"id": job_id},
-        {"$set": db_update}
-    )
-    
-    logger.info(f"Job background terminado: {job_id} ({status})")
-
-
-async def load_background_jobs_from_db():
-    """Carregar jobs da DB para memória (chamado no startup)."""
-    try:
-        # Carregar apenas jobs recentes (últimos 7 dias)
-        cutoff = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()
-        jobs = await db.background_jobs.find(
-            {"started_at": {"$gte": cutoff}},
-            {"_id": 0}
-        ).to_list(100)
-        
-        for job in jobs:
-            background_processes[job["id"]] = job
-        
-        logger.info(f"[BACKGROUND JOBS] {len(jobs)} jobs carregados da DB")
-    except Exception as e:
-        logger.error(f"[BACKGROUND JOBS] Erro ao carregar da DB: {e}")
-
-
-# Funções legadas para compatibilidade
-def create_background_job(job_type: str, user_email: str, details: dict = None) -> str:
-    """[LEGACY] Criar registo de job em background (apenas memória)."""
-    job_id = str(uuid.uuid4())
-    background_processes[job_id] = {
-        "id": job_id,
-        "type": job_type,
-        "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
-        "user_email": user_email,
-        "progress": 0,
-        "total": 0,
-        "processed": 0,
-        "errors": 0,
-        "details": details or {},
-        "error_messages": [],
-        "finished_at": None
-    }
-    return job_id
-
-
-def update_background_job(job_id: str, **kwargs):
-    """[LEGACY] Actualizar estado de um job em background (apenas memória)."""
-    if job_id in background_processes:
-        background_processes[job_id].update(kwargs)
-        
-        if background_processes[job_id].get("total", 0) > 0:
-            processed = background_processes[job_id].get("processed", 0)
-            total = background_processes[job_id]["total"]
-            background_processes[job_id]["progress"] = int((processed / total) * 100)
-
-
-def finish_background_job(job_id: str, success: bool, message: str = None):
-    """[LEGACY] Marcar job como terminado (apenas memória)."""
-    if job_id in background_processes:
-        background_processes[job_id]["status"] = "success" if success else "failed"
-        background_processes[job_id]["finished_at"] = datetime.now(timezone.utc).isoformat()
-        if message:
-            background_processes[job_id]["message"] = message
 
 
 def _format_duration(seconds: float) -> str:
@@ -222,7 +65,7 @@ async def get_background_jobs(
         {"_id": 0}
     ).sort("started_at", -1).limit(limit).to_list(limit)
     
-    # Adicionar informação sobre jobs em memória
+    # Adicionar informação sobre jobs em memória que possam não estar na DB ainda
     memory_jobs = []
     for job_id, job in background_processes.items():
         if status and job.get("status") != status:
@@ -297,7 +140,7 @@ async def get_job_metrics(
                 end = datetime.fromisoformat(job["finished_at"].replace("Z", "+00:00"))
                 duration = (end - start).total_seconds()
                 durations.append(duration)
-            except:
+            except Exception:
                 pass
         
         # Jobs stuck
@@ -308,7 +151,7 @@ async def get_job_metrics(
                     updated_dt = datetime.fromisoformat(updated.replace("Z", "+00:00"))
                     if (datetime.now(timezone.utc) - updated_dt).total_seconds() > 7200:  # 2 horas
                         stuck_count += 1
-                except:
+                except Exception:
                     pass
     
     success_count = by_status.get("success", 0)
@@ -322,7 +165,7 @@ async def get_job_metrics(
             date = job.get("started_at", "")[:10]
             if date:
                 trend[date] = trend.get(date, 0) + 1
-        except:
+        except Exception:
             pass
     
     trend_list = [{"date": d, "count": c} for d, c in sorted(trend.items())]
@@ -411,14 +254,8 @@ async def delete_background_job(
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Remove um job em background."""
-    # Remover de memória
-    if job_id in background_processes:
-        del background_processes[job_id]
-    
-    # Remover da DB
-    result = await db.background_jobs.delete_one({"id": job_id})
-    
-    return {"success": result.deleted_count > 0}
+    success = await delete_job(job_id)
+    return {"success": success}
 
 
 @router.post("/background-jobs/{job_id}/cancel")
@@ -471,27 +308,13 @@ async def resume_background_job(
 
 
 @router.post("/background-jobs/cleanup-stuck")
-async def cleanup_stuck_jobs(
+async def cleanup_stuck_jobs_endpoint(
     hours: int = Query(2, ge=1, le=24),
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
     """Limpa jobs que estão stuck há mais de X horas."""
-    cutoff = datetime.now(timezone.utc) - timedelta(hours=hours)
-    
-    stuck_jobs = await db.background_jobs.find({
-        "status": {"$in": ["running", "pending"]},
-        "$or": [
-            {"updated_at": {"$lt": cutoff.isoformat()}},
-            {"updated_at": None, "started_at": {"$lt": cutoff.isoformat()}}
-        ]
-    }, {"_id": 0, "id": 1}).to_list(100)
-    
-    cleaned = 0
-    for job in stuck_jobs:
-        await finish_background_job_db(job["id"], False, f"Limpo automaticamente (stuck > {hours}h)")
-        cleaned += 1
-    
-    return {"cleaned": cleaned}
+    result = await cleanup_stuck_jobs(hours)
+    return {"cleaned": result.get("cleaned", 0)}
 
 
 @router.delete("/background-jobs")

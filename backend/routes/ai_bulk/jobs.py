@@ -51,6 +51,9 @@ async def create_background_job_db(
     job_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc)
     
+    initial_step = "Iniciando..."
+    initial_step_entry = {"ts": now.isoformat(), "step": initial_step}
+    
     job = {
         "id": job_id,
         "type": job_type,
@@ -63,7 +66,11 @@ async def create_background_job_db(
         "errors": 0,
         "details": details or {},
         "error_messages": [],
-        "finished_at": None
+        "error_log": None,
+        "current_step": initial_step,
+        "step_log": [initial_step_entry],
+        "finished_at": None,
+        "acknowledged_at": None,
     }
     
     # Guardar em memória e na DB
@@ -76,8 +83,25 @@ async def create_background_job_db(
 
 
 async def update_background_job_db(job_id: str, **kwargs):
-    """Actualizar estado de um job em background (persistido na DB)."""
+    """Actualizar estado de um job em background (persistido na DB).
+    
+    Se `current_step` for passado, adiciona automaticamente ao step_log.
+    """
     update_data = {**kwargs, "updated_at": datetime.now(timezone.utc).isoformat()}
+    
+    # Se current_step foi actualizado, adicionar ao step_log
+    if "current_step" in update_data:
+        step_entry = {"ts": datetime.now(timezone.utc).isoformat(), "step": update_data["current_step"]}
+        if job_id in background_processes:
+            background_processes[job_id].setdefault("step_log", []).append(step_entry)
+            # Manter no máximo 100 entradas no log
+            if len(background_processes[job_id]["step_log"]) > 100:
+                background_processes[job_id]["step_log"] = background_processes[job_id]["step_log"][-100:]
+        # Usar $push na DB para adicionar ao array sem sobrescrever
+        await db.background_jobs.update_one(
+            {"id": job_id},
+            {"$push": {"step_log": {"$each": [step_entry], "$slice": -100}}}
+        )
     
     # Actualizar cache em memória
     if job_id in background_processes:
@@ -88,10 +112,11 @@ async def update_background_job_db(job_id: str, **kwargs):
             update_data["progress"] = int((processed / total) * 100)
             background_processes[job_id]["progress"] = update_data["progress"]
     
-    # Actualizar na DB
+    # Actualizar na DB (excepto step_log que já foi feito com $push)
+    db_update = {k: v for k, v in update_data.items() if k != "step_log"}
     await db.background_jobs.update_one(
         {"id": job_id},
-        {"$set": update_data}
+        {"$set": db_update}
     )
 
 
@@ -103,22 +128,35 @@ async def finish_background_job_db(
     """Marcar job como terminado (persistido na DB)."""
     status = "success" if success else "failed"
     finished_at = datetime.now(timezone.utc).isoformat()
+    final_step = "Concluído" if success else "Falhado"
     
     update_data = {
         "status": status,
-        "finished_at": finished_at
+        "finished_at": finished_at,
+        "current_step": final_step,
+        "acknowledged_at": None,
     }
     if message:
         update_data["message"] = message
+    if not success and message:
+        update_data["error_log"] = message
     
-    # Actualizar cache em memória
+    # Adicionar step final ao log
+    step_entry = {"ts": finished_at, "step": final_step}
     if job_id in background_processes:
+        background_processes[job_id].setdefault("step_log", []).append(step_entry)
         background_processes[job_id].update(update_data)
+        # Push step final na DB
+        await db.background_jobs.update_one(
+            {"id": job_id},
+            {"$push": {"step_log": {"$each": [step_entry], "$slice": -100}}}
+        )
     
     # Actualizar na DB
+    db_update = {k: v for k, v in update_data.items()}
     await db.background_jobs.update_one(
         {"id": job_id},
-        {"$set": update_data}
+        {"$set": db_update}
     )
     
     logger.info(f"[BG JOB] Terminado: status={status}")
@@ -149,11 +187,13 @@ async def load_background_jobs_from_db():
 def create_background_job(job_type: str, user_email: str, details: dict = None) -> str:
     """[LEGACY] Criar registo de job em background (apenas memória)."""
     job_id = str(uuid.uuid4())
+    now = datetime.now(timezone.utc)
+    initial_step = "Iniciando..."
     background_processes[job_id] = {
         "id": job_id,
         "type": job_type,
         "status": "running",
-        "started_at": datetime.now(timezone.utc).isoformat(),
+        "started_at": now.isoformat(),
         "user_email": user_email,
         "progress": 0,
         "total": 0,
@@ -161,6 +201,9 @@ def create_background_job(job_type: str, user_email: str, details: dict = None) 
         "errors": 0,
         "details": details or {},
         "error_messages": [],
+        "error_log": None,
+        "current_step": initial_step,
+        "step_log": [{"ts": now.isoformat(), "step": initial_step}],
         "finished_at": None
     }
     logger.info(f"[BG JOB] Criado (legacy): tipo={_sanitize_for_log(job_type)}")
