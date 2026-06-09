@@ -22,7 +22,6 @@
  * <ContextSwitcher />
  * // Mostra dropdown de empresa + role se aplicável
  */
-import React from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Button } from "../ui/button";
 import {
@@ -39,7 +38,7 @@ import { ROLE_LABELS, ROLE_ICONS } from "../../utils/roleUtils";
 const ContextSwitcher = () => {
   const {
     user, effectiveRole, switchActiveRole,
-    activeCompanyId, switchActiveCompany, effectiveCompanyId,
+    switchActiveCompany, effectiveCompanyId,
   } = useAuth();
 
   const companies = user?.companies || [];
@@ -132,7 +131,6 @@ const ContextSwitcher = () => {
                 <DropdownMenuItem
                   key={company.company_id}
                   onClick={() => {
-                    console.log("[ContextSwitcher] Company click:", company.company_id, company.company_name, "role:", company.role);
                     switchActiveCompany(company.company_id);
                   }}
                   className={`gap-2 cursor-pointer ${isActive ? "bg-primary/10 font-semibold" : ""}`}
@@ -191,11 +189,6 @@ const ContextSwitcher = () => {
                     // Antes: iterava allRoles (strings) e fazia find() — falhava
                     // se companies=[] ou role duplicado. Agora: o company_id vem
                     // directamente do mesmo objeto, garantido.
-                    console.log(
-                      "A mudar perfil para:", selectedRole,
-                      "Empresa ID:", selectedCompanyId,
-                      "company_name:", profile.company_name
-                    );
                     switchActiveRole(selectedRole, selectedCompanyId);
                   }}
                   className={`gap-2 cursor-pointer ${isActive ? "bg-primary/10 font-semibold" : ""}`}

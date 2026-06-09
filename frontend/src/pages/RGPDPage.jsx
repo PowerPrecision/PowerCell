@@ -21,7 +21,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '.
 import { Card, CardContent, CardHeader, CardTitle } from '../components/ui/card';
 import { Alert, AlertDescription } from '../components/ui/alert';
 import { RadioGroup, RadioGroupItem } from '../components/ui/radio-group';
-// import { ScrollArea } from '../components/ui/scroll-area'; // substituído por div overflow-y-auto (mais fiável em mobile)
 import {
   Loader2,
   CheckCircle,

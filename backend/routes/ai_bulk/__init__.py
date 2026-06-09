@@ -23,7 +23,6 @@ Este __init__.py fornece uma forma limpa de importar o router.
 
 # Importar do ficheiro original ai_bulk.py (que está um nível acima)
 # O ficheiro ai_bulk.py contém todas as rotas implementadas
-import sys
 import os
 
 # Obter o caminho do ficheiro ai_bulk.py original

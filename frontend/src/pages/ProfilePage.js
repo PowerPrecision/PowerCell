@@ -6,7 +6,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Card,
   CardContent,
@@ -141,7 +141,6 @@ const ProfilePage = () => {
   useEffect(() => {
     const newId = effectiveCompanyId || "default";
     if (newId !== emailCompanyId) {
-      console.log("[ProfilePage] Sincronizando emailCompanyId:", emailCompanyId, "→", newId);
       setEmailCompanyId(newId);
     }
   }, [effectiveCompanyId]);
@@ -174,15 +173,6 @@ const ProfilePage = () => {
       setJobTitle(user.active_company_job_title ?? "");
       setLoading(false);
 
-      // ── Debug: confirmar que os dados da empresa estão a chegar ──
-      console.log(
-        "[ProfilePage] Dados reidratados — empresa:", effectiveCompanyId,
-        "phone:", user.phone, "signature:", user.email_signature,
-        "active_company_name:", user.active_company_name,
-        "active_company_signature:", user.active_company_signature,
-        "active_company_professional_phone:", user.active_company_professional_phone,
-        "active_company_job_title:", user.active_company_job_title
-      );
     }
   }, [user, effectiveCompanyId, effectiveRole]);
 
@@ -1094,7 +1084,6 @@ const ProfilePage = () => {
                   <Select
                     value={emailCompanyId}
                     onValueChange={(newId) => {
-                      console.log("[ProfilePage] Dropdown email empresa:", emailCompanyId, "→", newId);
                       setEmailCompanyId(newId);
                       // Sincronizar com o sessionStorage para que o interceptor
                       // api.js envie o header X-Company-Id correcto nos pedidos

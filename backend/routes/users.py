@@ -12,7 +12,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from database import db
 from models.auth import UserRole, UserResponse
-from models.email_config import EmailConfigCreate, EmailConfigResponse, EmailConfigTestResult
+from models.email_config import EmailConfigCreate
 from services.auth import require_staff, get_current_user
 
 

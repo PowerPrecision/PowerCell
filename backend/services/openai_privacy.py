@@ -399,6 +399,6 @@ def validate_privacy_config_on_startup():
         )
     
     for warning in warnings:
-        print(warning, file=__import__('sys').stderr)
+        logger.warning(warning)
     
     return warnings
