@@ -130,7 +130,9 @@ const FinanceTab = () => {
       }
     } catch (err) {
       console.error("Erro ao carregar configuração:", err);
-      setError(err.response?.data?.detail || "Erro ao carregar configuração financeira.");
+      const rawDetail = err.response?.data?.detail;
+      const msg = typeof rawDetail === 'string' ? rawDetail : (Array.isArray(rawDetail) ? rawDetail.map(e => e.msg || String(e)).join(' • ') : "Erro ao carregar configuração financeira.");
+      setError(msg);
     } finally {
       setLoading(false);
     }

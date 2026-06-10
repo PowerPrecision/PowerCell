@@ -1053,6 +1053,10 @@ const ProcessDetails = () => {
       if (response.ok) {
         const data = await response.json();
         setPortalUnreadCount(data.unread_count || 0);
+      } else if (response.status === 404) {
+        // Endpoint não disponível nesta versão do backend — desativar polling
+        setPortalUnreadCount(0);
+        return 'ENDPOINT_NOT_AVAILABLE';
       }
     } catch (error) {
       // Silent
@@ -1094,11 +1098,26 @@ const ProcessDetails = () => {
   }, [activeTab, fetchPortalMessages, fetchPortalUnreadCount]);
 
   // Polling para unread count (a cada 30s)
+  // Desativa automaticamente se o endpoint não existir (404)
+  const portalUnreadAvailableRef = useRef(true);
   useEffect(() => {
-    const interval = setInterval(() => {
-      fetchPortalUnreadCount();
+    if (!portalUnreadAvailableRef.current) return;
+    const interval = setInterval(async () => {
+      if (!portalUnreadAvailableRef.current) {
+        clearInterval(interval);
+        return;
+      }
+      const result = await fetchPortalUnreadCount();
+      if (result === 'ENDPOINT_NOT_AVAILABLE') {
+        portalUnreadAvailableRef.current = false;
+        clearInterval(interval);
+      }
     }, 30000);
-    fetchPortalUnreadCount();
+    fetchPortalUnreadCount().then(result => {
+      if (result === 'ENDPOINT_NOT_AVAILABLE') {
+        portalUnreadAvailableRef.current = false;
+      }
+    });
     return () => clearInterval(interval);
   }, [fetchPortalUnreadCount]);
 
