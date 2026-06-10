@@ -3,6 +3,31 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-03-13] — Reestruturação da Área Pessoal: Login Comum + Dados Profissionais por Empresa
+
+### Corrigido
+- **Botão "Guardar Dados Profissionais" sem feedback visual** (`fix` — **UX**): Ao carregar no botão, o utilizador não obtinha qualquer indicação de sucesso ou erro. Adicionado estado visual: spinner durante o save → checkmark verde "Guardado!" por 2 segundos após sucesso. Toast agora menciona o nome da empresa ativa.
+
+### Alterado
+- **Reestruturação completa da Área Pessoal** (`refactor` — **UX CRÍTICO**): A página foi reorganizada para separar claramente os dados comuns (login) dos dados por empresa (profissionais):
+  - **"Informação de Login"** (comum a todos os perfis) — Email (read-only), alteração de password, badge de role e empresa, data de registo. Sem botão de guardar.
+  - **"Dados Profissionais"** (por empresa, com badge) — Nome, Telefone e Cargo/Função consolidados num único card com UM botão "Guardar Dados Profissionais". Os campos refletem sempre a empresa selecionada no Modo de Operação (ContextSwitcher).
+  - **"Assinatura de Email"** (por empresa) — mantido.
+  - **"Sessões Ativas"** (comum) — mantido.
+- **Consolidação do campo Telefone** (`refactor`): Removida a duplicação entre "Telefone" (card Informação do Perfil) e "Telefone Profissional" (card Dados Profissionais). Agora existe UM campo "Telefone" nos Dados Profissionais que guarda como `professional_phone` no UCR e `phone` global para retro-compatibilidade.
+- **Nome passou para Dados Profissionais** (`refactor`): O campo "Nome" foi movido do card de Informação do Perfil para Dados Profissionais, permitindo que o nome apresentado seja específico por empresa.
+
+### Adicionado
+- **Campo `display_name` por empresa no UCR** (`feat` — `backend/routes/auth.py`, `backend/services/auth.py`): Novo campo `display_name` na coleção `user_company_roles` que permite ao utilizador ter um nome de apresentação diferente por empresa. O GET /auth/me faz merge: se `active_company_display_name` existe, sobrepõe o `name` global.
+- **`active_company_display_name` na resposta do GET /auth/me** (`feat`): O endpoint agora retorna o campo `active_company_display_name` com a mesma lógica de `null` vs `""` dos outros campos UCR.
+- **`display_name` no `update_profile`** (`feat`): O PUT /auth/profile aceita e persiste `display_name` na coleção `user_company_roles`.
+- **Projeção MongoDB expandida** (`feat` — `backend/services/auth.py`): `get_user_companies()` agora inclui `display_name` na projeção.
+
+### Notas
+- MongoDB é schemaless — o campo `display_name` é automaticamente disponível sem migração
+- O campo global `name` (users collection) continua a ser guardado para retro-compatibilidade
+- Se `display_name` não está definido no UCR, o sistema usa o `name` global
+
 ## [2026-03-12] — Afinação Crítica Multi-Tenant: Reatividade de Contexto, Perfis e Assinaturas
 
 ### Corrigido

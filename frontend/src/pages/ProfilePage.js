@@ -73,6 +73,7 @@ import {
   Info,
   PenLine,
   Building2,
+  CheckCircle2,
 } from "lucide-react";
 
 // ====================================================================
@@ -86,20 +87,15 @@ const ProfilePage = () => {
   // Lista de empresas do utilizador (do GET /auth/me, sempre presente)
   const userCompanies = user?.companies || [];
 
-  // Estados para dados do perfil
-  const [profileData, setProfileData] = useState({
-    name: "",
-    phone: "",
-    email: "",
-  });
-  // ── Campos específicos por empresa (multi-tenant) ──
+  // ── Campos por empresa (multi-tenant) ──
+  const [displayName, setDisplayName] = useState("");           // per-company display name
+  const [professionalPhone, setProfessionalPhone] = useState(""); // per-company phone
+  const [jobTitle, setJobTitle] = useState("");                   // per-company job title
   const [emailSignature, setEmailSignature] = useState("");
-  const [professionalPhone, setProfessionalPhone] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
   const [savingSignature, setSavingSignature] = useState(false);
   const [savingCompanyFields, setSavingCompanyFields] = useState(false);
+  const [savedCompanyFields, setSavedCompanyFields] = useState(false);
   const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
 
   // Estados para alteração de password
   const [passwordDialog, setPasswordDialog] = useState(false);
@@ -162,28 +158,14 @@ const ProfilePage = () => {
   // Este useEffect é ESSENCIAL para forçar a reidratação do formulário.
   useEffect(() => {
     if (user) {
-      // Campos mergeados pelo backend (phone/email_signature podem vir
-      // da empresa ativa ou dos campos globais, conforme o contexto)
-      setProfileData(prev => ({
-        ...prev,
-        name: user.name || "",
-        phone: user.phone || "",
-        email: user.email || "",
-      }));
-      // ── Campos específicos da empresa ativa ──
-      // Prioridade: active_company_* (campos separados do UCR) > campos
-      // mergeados no user (phone/email_signature). Isto permite mostrar
-      // valores diferentes quando o utilizador troca de empresa.
-      //
-      // IMPORTANTE: O backend retorna `null` (não "") quando o campo UCR
-      // nunca foi definido, e `""` quando o utilizador limpou intencionalmente.
-      // O operador ?? distingue estes casos:
-      //   - null → não definido, usar fallback (email_signature global)
-      //   - "" → limpo intencionalmente, mostrar vazio
-      //   - "algo" → valor definido, mostrar valor
-      setEmailSignature(user.active_company_signature ?? user.email_signature ?? "");
+      // Display name: active_company_display_name > global name
+      setDisplayName(user.active_company_display_name ?? user.name ?? "");
+      // Phone: active_company_professional_phone > global phone
       setProfessionalPhone(user.active_company_professional_phone ?? user.phone ?? "");
+      // Cargo: active_company_job_title
       setJobTitle(user.active_company_job_title ?? "");
+      // Email signature
+      setEmailSignature(user.active_company_signature ?? user.email_signature ?? "");
       setLoading(false);
 
       // FIX: Forçar recarga da config de email quando o user object muda
@@ -270,13 +252,16 @@ const ProfilePage = () => {
     loadEmailConfigInfo();
   }, [emailCompanyId, effectiveCompanyId, effectiveRole]); // Recarregar quando troca de empresa ou perfil
 
-  // Guardar alterações do perfil
-  const handleSaveProfile = async () => {
-    setSaving(true);
+  // Guardar campos profissionais da empresa (nome, telefone, cargo — consolidado)
+  const handleSaveCompanyFields = async () => {
+    setSavingCompanyFields(true);
     try {
       const response = await api.put("/auth/profile", {
-        name: profileData.name,
-        phone: profileData.phone,
+        display_name: displayName,           // Per-company name → UCR
+        name: displayName,                   // Also save globally for backward compat
+        professional_phone: professionalPhone, // Per-company phone → UCR
+        phone: professionalPhone,            // Also save globally for backward compat
+        job_title: jobTitle,                 // Per-company cargo → UCR
       });
 
       // Verificar avisos do backend
@@ -288,25 +273,30 @@ const ProfilePage = () => {
         });
       } else {
         toast({
-          title: "Perfil atualizado",
-          description: "Os seus dados foram atualizados com sucesso.",
+          title: "Dados profissionais guardados",
+          description: user?.active_company_name
+            ? `Dados profissionais guardados para ${user.active_company_name}`
+            : "Os seus dados profissionais foram atualizados com sucesso.",
         });
       }
 
       // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
-      // O PUT /auth/profile retorna o user da coleção users, mas os campos
-      // active_company_* só vêm em GET /auth/me. refreshUser() atualiza
-      // o AuthContext, que por sua vez dispara o useEffect [user, effectiveCompanyId]
-      // que atualiza os campos locais (signature, jobTitle, etc.).
+      // O await garante que o user no AuthContext é atualizado ANTES de
+      // o componente tentar usar os dados. Sem await, o useEffect pode
+      // ler dados antigos do user antes do refreshUser completar.
       if (refreshUser) await refreshUser();
+
+      // Feedback visual: mostrar checkmark temporário
+      setSavedCompanyFields(true);
+      setTimeout(() => setSavedCompanyFields(false), 2000);
     } catch (error) {
       toast({
         variant: "destructive",
-        title: "Erro ao atualizar",
-        description: error.response?.data?.detail || "Não foi possível atualizar o perfil.",
+        title: "Erro ao guardar",
+        description: error.response?.data?.detail || "Não foi possível guardar os dados profissionais.",
       });
     } finally {
-      setSaving(false);
+      setSavingCompanyFields(false);
     }
   };
 
@@ -346,45 +336,6 @@ const ProfilePage = () => {
       });
     } finally {
       setSavingSignature(false);
-    }
-  };
-
-  // Guardar campos específicos da empresa (cargo, telefone profissional)
-  const handleSaveCompanyFields = async () => {
-    setSavingCompanyFields(true);
-    try {
-      const response = await api.put("/auth/profile", {
-        job_title: jobTitle,
-        professional_phone: professionalPhone,
-      });
-
-      // Verificar avisos do backend
-      if (response.data.warnings?.length > 0) {
-        toast({
-          variant: "destructive",
-          title: "Aviso",
-          description: response.data.warnings.join("; "),
-        });
-      } else {
-        toast({
-          title: "Dados profissionais guardados",
-          description: "O seu cargo e telefone profissional foram atualizados para esta empresa.",
-        });
-      }
-
-      // ── REATIVIDADE: Recarregar dados via GET /auth/me ──
-      // O await garante que o user no AuthContext é atualizado ANTES de
-      // o componente tentar usar os dados. Sem await, o useEffect pode
-      // ler dados antigos do user antes do refreshUser completar.
-      if (refreshUser) await refreshUser();
-    } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao guardar",
-        description: error.response?.data?.detail || "Não foi possível guardar os dados profissionais.",
-      });
-    } finally {
-      setSavingCompanyFields(false);
     }
   };
 
@@ -561,67 +512,37 @@ const ProfilePage = () => {
           </Button>
         </div>
 
-        {/* Informação do Perfil */}
+        {/* ── Card 1: Informação de Login (comum a todos os perfis) ── */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
-              <User className="h-5 w-5" />
-              Informação do Perfil
+              <Lock className="h-5 w-5" />
+              Informação de Login
             </CardTitle>
             <CardDescription>
-              Atualize os seus dados pessoais
+              Dados de acesso à sua conta — comuns a todos os perfis
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="name">Nome</Label>
-                <Input
-                  id="name"
-                  value={profileData.name}
-                  onChange={(e) =>
-                    setProfileData({ ...profileData, name: e.target.value })
-                  }
-                  placeholder="O seu nome"
-                />
-              </div>
-              <div className="space-y-2">
-                <div className="flex items-center gap-2">
-                  <Label htmlFor="phone">Telefone</Label>
-                  {user?.active_company_name && user?.active_company_professional_phone && (
-                    <Badge variant="outline" className="text-[10px] px-1.5 py-0 font-normal">
-                      <Building2 className="h-3 w-3 mr-0.5" />
-                      {user.active_company_name}
-                    </Badge>
-                  )}
-                </div>
-                <Input
-                  id="phone"
-                  value={profileData.phone}
-                  onChange={(e) =>
-                    setProfileData({ ...profileData, phone: e.target.value })
-                  }
-                  placeholder="O seu telefone"
-                />
-                {user?.active_company_name && user?.active_company_professional_phone && (
-                  <p className="text-xs text-muted-foreground">
-                    Telefone específico de <strong>{user.active_company_name}</strong>. Alterar aqui atualiza também o contacto profissional desta empresa.
-                  </p>
-                )}
-              </div>
-            </div>
+            {/* Email (read-only) */}
             <div className="space-y-2">
-              <Label htmlFor="email">Email</Label>
-              <Input
-                id="email"
-                value={profileData.email}
-                disabled
-                className="bg-muted"
-              />
+              <Label>Email</Label>
+              <Input value={user?.email || ""} disabled className="bg-muted" />
               <p className="text-xs text-muted-foreground">
                 O email não pode ser alterado. Contacte o administrador se precisar de mudar.
               </p>
             </div>
+            {/* Password */}
+            <div className="flex items-center justify-between p-4 border rounded-lg">
+              <div>
+                <h3 className="font-medium">Password</h3>
+                <p className="text-sm text-muted-foreground">Altere a sua password de acesso</p>
+              </div>
+              <Button variant="outline" onClick={() => setPasswordDialog(true)}>
+                Alterar Password
+              </Button>
+            </div>
+            {/* Role + Company badge */}
             <div className="flex items-center gap-2">
               <Badge variant="secondary">{getRoleLabel(effectiveRole || user?.role)}</Badge>
               {user?.active_company_name && (
@@ -634,40 +555,10 @@ const ProfilePage = () => {
                 Membro desde {formatDateTime(user?.created_at)}
               </span>
             </div>
-            <Button onClick={handleSaveProfile} disabled={saving} className="gap-2">
-              <Save className="h-4 w-4" />
-              {saving ? "A guardar..." : "Guardar Alterações"}
-            </Button>
           </CardContent>
         </Card>
 
-        {/* Segurança */}
-        <Card>
-          <CardHeader>
-            <CardTitle className="flex items-center gap-2">
-              <Lock className="h-5 w-5" />
-              Segurança
-            </CardTitle>
-            <CardDescription>
-              Altere a sua password e gerir sessões ativas
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="flex items-center justify-between p-4 border rounded-lg">
-              <div>
-                <h3 className="font-medium">Password</h3>
-                <p className="text-sm text-muted-foreground">
-                  Altere a sua password de acesso
-                </p>
-              </div>
-              <Button variant="outline" onClick={() => setPasswordDialog(true)}>
-                Alterar Password
-              </Button>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* Dados Profissionais por Empresa */}
+        {/* ── Card 2: Dados Profissionais (por empresa) ── */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -680,26 +571,26 @@ const ProfilePage = () => {
               )}
             </CardTitle>
             <CardDescription>
-              Cargo e telefone profissional específicos para a empresa ativa.
+              Nome, telefone e cargo específicos para a empresa ativa no Modo de Operação.
               Estes dados são utilizados na assinatura de email e nos templates.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="job_title">Cargo / Função</Label>
+                <Label htmlFor="display_name">Nome</Label>
                 <Input
-                  id="job_title"
-                  value={jobTitle}
-                  onChange={(e) => setJobTitle(e.target.value)}
-                  placeholder="Ex: Consultor Imobiliário, Intermediário de Crédito..."
+                  id="display_name"
+                  value={displayName}
+                  onChange={(e) => setDisplayName(e.target.value)}
+                  placeholder="O seu nome profissional"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Cargo específico para esta empresa (pode diferir entre empresas).
+                  Nome apresentado nesta empresa.
                 </p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="professional_phone">Telefone Profissional</Label>
+                <Label htmlFor="professional_phone">Telefone</Label>
                 <Input
                   id="professional_phone"
                   value={professionalPhone}
@@ -707,7 +598,19 @@ const ProfilePage = () => {
                   placeholder="Ex: +351 912 345 678"
                 />
                 <p className="text-xs text-muted-foreground">
-                  Contacto profissional específico para esta empresa.
+                  Contacto profissional para esta empresa.
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="job_title">Cargo / Função</Label>
+                <Input
+                  id="job_title"
+                  value={jobTitle}
+                  onChange={(e) => setJobTitle(e.target.value)}
+                  placeholder="Ex: Consultor Imobiliário"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Cargo específico para esta empresa.
                 </p>
               </div>
             </div>
@@ -715,26 +618,21 @@ const ProfilePage = () => {
               <Button
                 onClick={handleSaveCompanyFields}
                 disabled={savingCompanyFields}
-                size="sm"
                 className="gap-2"
               >
                 {savingCompanyFields ? (
-                  <>
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    A guardar...
-                  </>
+                  <><Loader2 className="h-4 w-4 animate-spin" /> A guardar...</>
+                ) : savedCompanyFields ? (
+                  <><CheckCircle2 className="h-4 w-4 text-green-500" /> Guardado!</>
                 ) : (
-                  <>
-                    <Save className="h-4 w-4" />
-                    Guardar Dados Profissionais
-                  </>
+                  <><Save className="h-4 w-4" /> Guardar Dados Profissionais</>
                 )}
               </Button>
             </div>
           </CardContent>
         </Card>
 
-        {/* Assinatura de Email — Específica da Empresa Ativa */}
+        {/* ── Card 3: Assinatura de Email — Específica da Empresa Ativa ── */}
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -783,7 +681,7 @@ const ProfilePage = () => {
           </CardContent>
         </Card>
 
-        {/* Sessões Ativas */}
+        {/* ── Card 4: Sessões Ativas ── */}
         <Card>
           <CardHeader>
             <div className="flex items-center justify-between">
@@ -866,6 +764,135 @@ const ProfilePage = () => {
             )}
           </CardContent>
         </Card>
+
+        {/* ── Card 5: Configuração de Webmail ── */}
+        {hasRole(user, "indexacao") ? (
+          /* ── BLOQUEIO: Indexação — config gerida centralmente ── */
+          <Card className="border-amber-200 bg-amber-50/50">
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2 text-amber-800">
+                <AlertTriangle className="h-5 w-5" />
+                Configuração de Webmail
+              </CardTitle>
+              <CardDescription className="text-amber-700">
+                Acesso gerido centralmente pelo departamento
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              <div className="flex items-start gap-3 p-4 border border-amber-200 rounded-lg bg-amber-50">
+                <Shield className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
+                <div className="space-y-2">
+                  <p className="text-amber-800 font-medium">
+                    O seu acesso ao email é gerido centralmente pelo departamento.
+                  </p>
+                  <p className="text-sm text-amber-700">
+                    Contacte o Administrador para alterações na configuração de email.
+                    As definições de IMAP/SMTP são aplicadas uniformemente a todos os membros do departamento.
+                  </p>
+                  {emailConfigInfo?.display_name && (
+                    <p className="text-sm text-amber-700">
+                      Caixa partilhada: <strong>{emailConfigInfo.display_name}</strong>
+                      {emailConfigInfo.email_address && (
+                        <> ({emailConfigInfo.email_address})</>
+                      )}
+                    </p>
+                  )}
+                  {emailConfigInfo?.is_configured ? (
+                    <Badge className="bg-green-600 hover:bg-green-700 text-white">
+                      Configuração ativa
+                    </Badge>
+                  ) : (
+                    <Badge variant="secondary">Pendente de configuração</Badge>
+                  )}
+                </div>
+              </div>
+            </CardContent>
+          </Card>
+        ) : (
+          /* ── NORMAL: Config individual com info de herança ── */
+          <Card>
+            <CardHeader>
+              <CardTitle className="flex items-center gap-2">
+                <Mail className="h-5 w-5" />
+                Configuração de Webmail
+              </CardTitle>
+              <CardDescription>
+                Configure o seu email para integração IMAP/SMTP
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-4">
+              {/* MULTI-EMPRESA: Seletor de Empresa para config de email */}
+              {emailCompanies.length > 1 && (
+                <div className="flex items-center gap-3 p-3 bg-muted/50 border rounded-lg">
+                  <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
+                  <div className="flex-1">
+                    <Label htmlFor="email-company-select" className="text-sm font-medium">
+                      Empresa / Perfil
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      Selecione a empresa para a qual esta config de email se aplica
+                    </p>
+                  </div>
+                  <Select
+                    value={emailCompanyId}
+                    onValueChange={(newId) => {
+                      setEmailCompanyId(newId);
+                      // Sincronizar com o sessionStorage para que o interceptor
+                      // api.js envie o header X-Company-Id correcto nos pedidos
+                      // GET/POST /users/me/email-config subsequentes.
+                      sessionStorage.setItem("activeCompanyId", newId);
+                    }}
+                  >
+                    <SelectTrigger id="email-company-select" className="w-48">
+                      <SelectValue placeholder="Empresa..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {emailCompanies.map((cid) => {
+                        // Tentar obter nome legível do AuthContext
+                        const companyInfo = userCompanies?.find(c => c.company_id === cid);
+                        const displayName = cid === "default"
+                          ? "Principal (Padrão)"
+                          : companyInfo?.company_name || cid;
+                        return (
+                          <SelectItem key={cid} value={cid}>
+                            {displayName}
+                          </SelectItem>
+                        );
+                      })}
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+              {/* Indicador de herança de config */}
+              {emailConfigInfo?.config_source && emailConfigInfo.config_source !== "user" && emailConfigInfo.config_source !== "none" && (
+                <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
+                  <Info className="h-4 w-4 shrink-0" />
+                  <span>
+                    {emailConfigInfo.config_source === "company" && (
+                      <>
+                        Servidores IMAP/SMTP herdados da empresa
+                        {emailConfigInfo.company_name && (
+                          <> <strong>{emailConfigInfo.company_name}</strong></>
+                        )}
+                        . Apenas o email e a password são individuais.
+                      </>
+                    )}
+                    {emailConfigInfo.config_source === "system" && (
+                      <>Servidores IMAP/SMTP herdados da configuração global do sistema.</>
+                    )}
+                  </span>
+                </div>
+              )}
+              {emailConfigInfo?.config_source === "user" && (
+                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
+                  <Mail className="h-4 w-4 shrink-0" />
+                  <span>A utilizar configuração individual. Os servidores foram definidos manualmente.</span>
+                </div>
+              )}
+              <EmailConfigForm mode="self" onSuccess={refreshUser} companyId={emailCompanyId} />
+            </CardContent>
+          </Card>
+        )}
 
         {/* Dialog Alterar Password */}
         <Dialog open={passwordDialog} onOpenChange={setPasswordDialog}>
@@ -1032,135 +1059,6 @@ const ProfilePage = () => {
           </DialogContent>
         </Dialog>
 
-        {/* Configuração de Webmail */}
-        {hasRole(user, "indexacao") ? (
-          /* ── BLOQUEIO: Indexação — config gerida centralmente ── */
-          <Card className="border-amber-200 bg-amber-50/50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2 text-amber-800">
-                <AlertTriangle className="h-5 w-5" />
-                Configuração de Webmail
-              </CardTitle>
-              <CardDescription className="text-amber-700">
-                Acesso gerido centralmente pelo departamento
-              </CardDescription>
-            </CardHeader>
-            <CardContent>
-              <div className="flex items-start gap-3 p-4 border border-amber-200 rounded-lg bg-amber-50">
-                <Shield className="h-5 w-5 text-amber-600 mt-0.5 shrink-0" />
-                <div className="space-y-2">
-                  <p className="text-amber-800 font-medium">
-                    O seu acesso ao email é gerido centralmente pelo departamento.
-                  </p>
-                  <p className="text-sm text-amber-700">
-                    Contacte o Administrador para alterações na configuração de email.
-                    As definições de IMAP/SMTP são aplicadas uniformemente a todos os membros do departamento.
-                  </p>
-                  {emailConfigInfo?.display_name && (
-                    <p className="text-sm text-amber-700">
-                      Caixa partilhada: <strong>{emailConfigInfo.display_name}</strong>
-                      {emailConfigInfo.email_address && (
-                        <> ({emailConfigInfo.email_address})</>
-                      )}
-                    </p>
-                  )}
-                  {emailConfigInfo?.is_configured ? (
-                    <Badge className="bg-green-600 hover:bg-green-700 text-white">
-                      Configuração ativa
-                    </Badge>
-                  ) : (
-                    <Badge variant="secondary">Pendente de configuração</Badge>
-                  )}
-                </div>
-              </div>
-            </CardContent>
-          </Card>
-        ) : (
-          /* ── NORMAL: Config individual com info de herança ── */
-          <Card>
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Mail className="h-5 w-5" />
-                Configuração de Webmail
-              </CardTitle>
-              <CardDescription>
-                Configure o seu email para integração IMAP/SMTP
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              {/* MULTI-EMPRESA: Seletor de Empresa para config de email */}
-              {emailCompanies.length > 1 && (
-                <div className="flex items-center gap-3 p-3 bg-muted/50 border rounded-lg">
-                  <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                  <div className="flex-1">
-                    <Label htmlFor="email-company-select" className="text-sm font-medium">
-                      Empresa / Perfil
-                    </Label>
-                    <p className="text-xs text-muted-foreground">
-                      Selecione a empresa para a qual esta config de email se aplica
-                    </p>
-                  </div>
-                  <Select
-                    value={emailCompanyId}
-                    onValueChange={(newId) => {
-                      setEmailCompanyId(newId);
-                      // Sincronizar com o sessionStorage para que o interceptor
-                      // api.js envie o header X-Company-Id correcto nos pedidos
-                      // GET/POST /users/me/email-config subsequentes.
-                      sessionStorage.setItem("activeCompanyId", newId);
-                    }}
-                  >
-                    <SelectTrigger id="email-company-select" className="w-48">
-                      <SelectValue placeholder="Empresa..." />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {emailCompanies.map((cid) => {
-                        // Tentar obter nome legível do AuthContext
-                        const companyInfo = userCompanies?.find(c => c.company_id === cid);
-                        const displayName = cid === "default"
-                          ? "Principal (Padrão)"
-                          : companyInfo?.company_name || cid;
-                        return (
-                          <SelectItem key={cid} value={cid}>
-                            {displayName}
-                          </SelectItem>
-                        );
-                      })}
-                    </SelectContent>
-                  </Select>
-                </div>
-              )}
-              {/* Indicador de herança de config */}
-              {emailConfigInfo?.config_source && emailConfigInfo.config_source !== "user" && emailConfigInfo.config_source !== "none" && (
-                <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-blue-800 text-sm">
-                  <Info className="h-4 w-4 shrink-0" />
-                  <span>
-                    {emailConfigInfo.config_source === "company" && (
-                      <>
-                        Servidores IMAP/SMTP herdados da empresa
-                        {emailConfigInfo.company_name && (
-                          <> <strong>{emailConfigInfo.company_name}</strong></>
-                        )}
-                        . Apenas o email e a password são individuais.
-                      </>
-                    )}
-                    {emailConfigInfo.config_source === "system" && (
-                      <>Servidores IMAP/SMTP herdados da configuração global do sistema.</>
-                    )}
-                  </span>
-                </div>
-              )}
-              {emailConfigInfo?.config_source === "user" && (
-                <div className="flex items-center gap-2 p-3 bg-green-50 border border-green-200 rounded-lg text-green-800 text-sm">
-                  <Mail className="h-4 w-4 shrink-0" />
-                  <span>A utilizar configuração individual. Os servidores foram definidos manualmente.</span>
-                </div>
-              )}
-              <EmailConfigForm mode="self" onSuccess={refreshUser} companyId={emailCompanyId} />
-            </CardContent>
-          </Card>
-        )}
-
         {/* Dialog Confirmar Revogação de Sessão */}
         <AlertDialog
           open={!!sessionToRevoke}
@@ -1192,4 +1090,3 @@ const ProfilePage = () => {
 };
 
 export default ProfilePage;
-

@@ -276,3 +276,25 @@ Stage Summary:
 - Files modified:
   - backend/utils/input_sanitization.py (EMAIL_SAFE_TAGS, EMAIL_SAFE_ATTRIBUTES, allow_email_html parameter)
   - backend/routes/emails.py (3 changes: custom_html_body sanitization, email_template sanitization, subject process number enforcement)
+
+---
+Task ID: 8
+Agent: Main Agent
+Task: Reestruturação da Área Pessoal + Fix feedback botão Guardar
+
+Work Log:
+- Analisou o ProfilePage.js completo (1192 linhas) e identificou 2 problemas
+- Problema 1: Botão "Guardar Dados Profissionais" sem feedback visual claro (sem checkmark, toast genérico)
+- Problema 2: Estrutura de cards misturava dados comuns (login) com dados por empresa (telefone, cargo)
+- Adicionou campo `display_name` por empresa no backend (UCR, GET /auth/me, update_profile, get_user_companies)
+- Reestruturou ProfilePage.js: "Informação do Perfil" + "Segurança" → "Informação de Login" (comum); "Dados Profissionais" agora inclui Nome + Telefone + Cargo
+- Consolidou campo Telefone: removida duplicação entre profileData.phone e professionalPhone
+- Adicionou feedback visual no botão: spinner → checkmark "Guardado!" por 2s + toast com nome da empresa
+- Save consolidado: handleSaveCompanyFields agora envia display_name + name + professional_phone + phone + job_title
+- Atualizou CHANGELOG.md com entrada detalhada
+
+Stage Summary:
+- 3 ficheiros alterados: auth.py (backend), auth service, ProfilePage.js
+- Cards reorganizados: Login (comum) → Dados Profissionais (por empresa) → Assinatura → Sessões → Webmail
+- Campo `display_name` por empresa disponível no UCR (MongoDB schemaless, sem migração)
+- Feedback visual completo no botão guardar: loading → sucesso → idle
