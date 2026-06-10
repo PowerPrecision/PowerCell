@@ -53,6 +53,7 @@ import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { toast } from "sonner";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Settings,
   Cloud,
@@ -548,7 +549,7 @@ const IntegrationsConfigSection = () => {
         toast.success("Configuração guardada com sucesso");
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao guardar configuração");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração"));
       }
     } catch (error) {
       toast.error("Erro ao guardar configuração");
@@ -582,8 +583,8 @@ const IntegrationsConfigSection = () => {
         }
       } else {
         const data = await res.json();
-        setTestResults(prev => ({ ...prev, smtp: { success: false, message: data.detail || data.message || "Falha na conexão" } }));
-        toast.error(data.detail || data.message || "Falha na conexão");
+        setTestResults(prev => ({ ...prev, smtp: { success: false, message: extractErrorMessage(data.detail || data.message, "Falha na conexão") } }));
+        toast.error(extractErrorMessage(data.detail || data.message, "Falha na conexão"));
       }
     } catch (err) {
       const msg = err.name === "AbortError" ? "Timeout: o teste demorou demasiado tempo (30s)" : "Erro no teste de conexão";
@@ -945,7 +946,7 @@ const SharedEmailConfigSection = () => {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao iniciar autenticação Google");
+        toast.error(extractErrorMessage(data.detail, "Erro ao iniciar autenticação Google"));
         setAuthenticating(null);
         return;
       }
@@ -983,7 +984,7 @@ const SharedEmailConfigSection = () => {
         fetchConfigs();
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao sincronizar");
+        toast.error(extractErrorMessage(data.detail, "Erro ao sincronizar"));
       }
     } catch (error) {
       toast.error("Erro ao sincronizar");
@@ -1268,7 +1269,7 @@ const CompanyEmailConfigSection = () => {
         fetchCompanies();
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao guardar");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
       }
     } catch (error) {
       toast.error("Erro de conexão");
@@ -1577,7 +1578,7 @@ const PortalSettingsSection = ({ token }) => {
         fetchSettings();
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao guardar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
       }
     } catch {
       toast.error("Erro de ligação");
@@ -2072,7 +2073,7 @@ const SystemConfigPage = ({ embedded = false }) => {
           // Actualizar lista local
           loadS3MappingData();
         } else {
-          toast.error(data.detail || "Erro ao guardar mapeamento");
+          toast.error(extractErrorMessage(data.detail, "Erro ao guardar mapeamento"));
         }
       } catch (error) {
         toast.error("Erro ao guardar mapeamento");
@@ -2157,7 +2158,7 @@ const SystemConfigPage = ({ embedded = false }) => {
           }
           loadS3MappingData();
         } else {
-          toast.error(data.detail || "Erro no auto-mapeamento");
+          toast.error(extractErrorMessage(data.detail, "Erro no auto-mapeamento"));
         }
       } catch (error) {
         toast.error("Erro ao auto-mapear clientes");
@@ -2184,7 +2185,7 @@ const SystemConfigPage = ({ embedded = false }) => {
           }
           loadS3MappingData();
         } else {
-          toast.error(data.detail || "Erro ao corrigir nomes");
+          toast.error(extractErrorMessage(data.detail, "Erro ao corrigir nomes"));
         }
       } catch (error) {
         toast.error("Erro ao corrigir nomes de clientes");
@@ -2259,7 +2260,7 @@ const SystemConfigPage = ({ embedded = false }) => {
 
         if (!response.ok) {
           const data = await response.json().catch(() => ({}));
-          toast.error(data.detail || `Erro ${response.status}: Não foi possível iniciar a sincronização`);
+          toast.error(extractErrorMessage(data.detail, `Erro ${response.status}: Não foi possível iniciar a sincronização`));
           setSyncing(false);
           return;
         }
@@ -2270,7 +2271,7 @@ const SystemConfigPage = ({ embedded = false }) => {
           setShowSyncConfirmModal(false);
           setSyncPolling(true);
         } else {
-          toast.error(data.detail || "Erro ao iniciar sincronização");
+          toast.error(extractErrorMessage(data.detail, "Erro ao iniciar sincronização"));
         }
       } catch (error) {
         toast.error("Erro de conexão ao iniciar sincronização");
@@ -3445,7 +3446,7 @@ const SystemEmailsSection = ({ token }) => {
         fetchConfigs();
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao guardar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
       }
     } catch (e) {
       toast.error("Erro de ligação");

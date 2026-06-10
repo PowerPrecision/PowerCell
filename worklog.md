@@ -410,3 +410,116 @@ Stage Summary:
 - 2 funcionalidades confirmadas como já implementadas: Filtro + Multi-seleção
 - Ficheiros modificados: s3_storage.py, system_config.py, server.py, documents.py, email_service.py, FilesExplorerPage.jsx, ProcessDetails.js, ProcessDetailsModal.jsx
 - Documentação atualizada: CHANGELOG.md, PRD.md, worklog.md
+
+---
+Task ID: 1
+Agent: Backend/Frontend Fix Agent
+Task: Fix GET /api/clients 422 validation error
+
+Work Log:
+- Made backend query params Optional[bool]/Optional[int] in clients.py list_clients endpoint
+- Added default value application in function body (show_all, exclude_deleted, deleted_only, limit, skip)
+- Verified ImportErrorsPage.js already uses correct path `/clients` (no double /api prefix)
+- Made getClients() in api.js filter empty values (empty string, null, undefined) before sending as query params
+
+Stage Summary:
+- /api/clients now tolerates empty string query params (Pydantic v2 treats empty string as None for Optional types)
+- ImportErrorsPage already had correct API path (no double /api prefix needed)
+- getClients() utility is now resilient to empty values — filters them before making the request
+- Files modified:
+  - backend/routes/clients.py (Optional types + default value application)
+  - frontend/src/services/api.js (getClients filters empty params)
+
+---
+Task ID: 2
+Agent: React Error #31 Fix Agent
+Task: Create extractErrorMessage utility and fix all unsafe error handling
+
+Work Log:
+- Created /frontend/src/utils/extractErrorMessage.js utility
+- Fixed ClientsPage.js error handling (added else clause for non-200 fetchClients, replaced inline Pydantic parsing with extractErrorMessage)
+- Fixed ProcessDetails.js toast.error calls (3 locations: data.detail for assignments, data.detail for property association, error.response?.data?.detail for client deletion)
+- Fixed EmailAccountsPage.js toast.error calls (7 locations: SMTP save, SMTP test result, IMAP save, Google auth, sync error, company email save)
+- Fixed SystemConfigPage.js toast.error calls (11 locations: config save, SMTP test result, Google auth, sync, company email save, S3 mapping save, auto-mapping, name correction, sync start errors)
+- Fixed WebmailPage.jsx toast.error calls (2 locations: sync error, folder save error)
+- Fixed PropertiesPage.jsx toast.error calls (3 locations: save property, delete property, import error)
+- Fixed SendDocumentationModal.js toast.error calls (3 locations: branch save, 404 error, send documentation)
+- Fixed S3FileManager.js toast.error calls (16 locations: file load, mapping save, upload errors x2, download, delete file, bulk delete, template generation, preview, AI analysis, apply suggestions, rename docs, rename file, analysis throw, organize throw, bulk download)
+
+Stage Summary:
+- extractErrorMessage() utility created and imported in 9 files
+- 50+ unsafe data.detail || fallback patterns replaced with extractErrorMessage()
+- React Error #31 from Pydantic objects should no longer occur
+
+---
+Task ID: 3
+Agent: Axios Error Fix Agent
+Task: Fix Axios-based and remaining unsafe error handling locations
+
+Work Log:
+- Created `/frontend/src/utils/extractErrorMessage.js` (Task 2 hadn't created it yet)
+- Fixed UsersManagementPage.js (4 locations + removed duplicate import from Task 2 partial fix)
+- Fixed ProfilePage.js (3 locations: professional data, signature, password)
+- Fixed ClientDetailPage.js (2 locations: email, telefone)
+- Fixed LoginPage.js (1 location)
+- Fixed RegisterPage.js (1 location)
+- Fixed AdminDashboard.js (2 locations: create event, delete event)
+- Fixed StaffDashboard.js (2 locations: create client, create process)
+- Fixed ImportErrorsPage.js (1 location)
+- Fixed DashboardShared.js (2 locations: add expiry, analyze document)
+- Fixed AITrainingPage.js (1 location: raw fetch data.detail)
+- Fixed MinutasPage.js (1 location: raw fetch error.detail)
+- Fixed EmailConfigForm.jsx (4 locations: Google auth, disconnect, test, save)
+- Fixed EmailHistoryPanel.js (1 location)
+- Fixed DriveLinks.js (2 locations: save folder link, add link)
+- Fixed SecondTitularCard.jsx (1 location)
+- Fixed CreateClientModal.jsx (2 locations: create client, create process)
+- Fixed AssignUsersModal.jsx (1 location: raw fetch)
+- Fixed DocumentRecipientsManager.js (6 locations: save config, save changes x3, toggle, preview)
+- Fixed PortalDocumentRequests.js (1 location)
+- Fixed AIAnalysisTab.js (1 location)
+- Fixed ProcessMigrationTab.js (4 locations: load status, simulate, migrate, rollback)
+- Fixed WorkflowEditor.js (3 locations: create, update, delete status)
+- Fixed TasksPanel.js (2 locations: create, delete task)
+
+Stage Summary:
+- 23 files fixed with 46+ unsafe error handling locations replaced with extractErrorMessage()
+- All major Axios-based and raw fetch error handling patterns now properly handle Pydantic validation error arrays
+- Import paths correctly set per directory depth (../utils, ../../utils)
+- React Error #31 should be fully eliminated across all fixed files
+
+---
+Task ID: 4
+Agent: Remaining Error Fix Agent
+Task: Fix remaining unsafe .detail || patterns across frontend
+
+Work Log:
+- Fixed api.js 500+ interceptor: replaced `data?.detail || ""` with `extractErrorMessage(data?.detail, "")`
+- Fixed SystemConfigPage.js remaining locations (2: lines 1581, 3449)
+- Fixed ProcessDetails.js remaining locations (2: lines 659, 815)
+- Fixed VisitsPage.js (2: lines 482, 710) + added import
+- Fixed AIConfigPage.js (5: lines 264, 313, 335, 369, 391) + added import
+- Fixed AIInsightsPage.js (1: line 86) + added import
+- Fixed IdealistaImportPage.js (3: lines 156, 204, 268) + added import
+- Fixed AutomationPage.js (1: line 109) + added import
+- Fixed BackgroundJobsPage.js (4: lines 679, 699, 753, 776) + added import
+- Fixed RGPDMigrationPage.js (2: lines 179, 214) + added import
+- Fixed FilesExplorerPage.jsx (7: lines 184, 272, 315, 353, 391, 425, 458) + added import
+- Fixed FormManagementPage.js (6: lines 766, 787, 910, 928, 947, 974) + added import
+- Fixed RGPDAdminPage.js (2: lines 789, 836) + added import
+- Fixed TempLinkUploadPage.js (1: line 170) + added import
+- Fixed ClientRegistrationsAdminPage.js (1: line 644) + added import
+- Fixed CreateProcessModal.jsx (2: lines 155, 185) + added import
+- Fixed SendDocumentationModal.js (1: line 281) — already had import
+- Fixed DocumentChecklist.js (1: line 158) + added import
+- Fixed DocumentSearchPanel.jsx (1: line 171) + added import
+- Fixed LeadsKanban.js (1: line 728) + added import
+- Fixed ProcessDetailsModal.jsx (2: lines 284, 637) + added import
+- Additionally fixed: HtmlImportModal.js (2 toast.error patterns) + ClientPortal.jsx (1 toast.error pattern) + ProcessesPage.js (1 Axios pattern with typeof check)
+
+Stage Summary:
+- 22 additional files fixed with extractErrorMessage()
+- Axios interceptor now handles Pydantic arrays for 500+ errors
+- All toast.error() calls in the listed files now safely extract string messages
+- Total patterns fixed: ~50 across 22 files (including 3 bonus files beyond the task list)
+- Import paths follow convention: ../utils for pages/components, ../../utils for kanban/ subdirectory

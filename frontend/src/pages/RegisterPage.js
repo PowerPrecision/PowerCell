@@ -16,6 +16,7 @@ import { Label } from "../components/ui/label";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Building2, Mail, Lock, User, Phone, Loader2, Eye, EyeOff } from "lucide-react";
 import { toast } from "sonner";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 const RegisterPage = () => {
   const [name, setName] = useState("");
@@ -50,7 +51,7 @@ const RegisterPage = () => {
       navigate("/cliente");
     } catch (error) {
       console.error("Register error:", error);
-      toast.error(error.response?.data?.detail || "Erro ao fazer registo");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao fazer registo"));
     } finally {
       setLoading(false);
     }

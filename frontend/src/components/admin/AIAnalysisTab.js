@@ -2,6 +2,7 @@
  * AIAnalysisTab - Componente de Análise de Documentos por IA
  */
 import { useState } from "react";
+import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Input } from "../ui/input";
@@ -32,7 +33,7 @@ const AIAnalysisTab = () => {
       setAnalysisResult(response.data);
       toast.success("Documento analisado com sucesso!");
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao analisar documento");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao analisar documento"));
     } finally {
       setAnalyzing(false);
     }

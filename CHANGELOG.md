@@ -3,6 +3,16 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Correção Definitiva: React Error #31 + /api/clients 422
+
+### Corrigido
+- **React Minified Error #31 — Correção Definitiva** (`fix` — **STABILITY**): Os erros Pydantic `[{type, loc, msg, input}]` eram passados diretamente para `toast.error()`, `setError()` e JSX `{error}` em 80+ localizações no frontend, causando crash do React. Criada utilidade `extractErrorMessage()` em `frontend/src/utils/extractErrorMessage.js` que extrai mensagens `.msg` de arrays Pydantic. Aplicada em 55 ficheiros: todas as pages, components, e serviços que usam `toast.error(data.detail || fallback)`, `toast.error(error.response?.data?.detail || fallback)`, e padrões similares. O Axios interceptor (500+) também foi atualizado.
+- **GET /api/clients → 422 Validation Error** (`fix` — **CRÍTICO**): Pydantic v2 rejeita strings vazias `""` para parâmetros `bool` e `int`. Quando o frontend enviava `?show_all=` ou `?limit=` (valores vazios), o backend retornava 422. Corrigido: `show_all`, `exclude_deleted`, `deleted_only` alterados de `bool` para `Optional[bool]`; `limit` e `skip` de `int` para `Optional[int]`. Defaults aplicados no corpo da função para valores `None`.
+- **getClients() no api.js enviava valores vazios** (`fix`): A função `getClients()` agora filtra parâmetros `null`, `undefined` e `""` antes de enviar o request.
+
+### Adicionado
+- **Utilidade `extractErrorMessage()`** (`feat` — `frontend/src/utils/extractErrorMessage.js`): Função que converte qualquer resposta de erro (string, array Pydantic, objeto) numa string segura para uso em `toast.error()`, `setError()` e JSX. Previne React Error #31 permanentemente.
+
 ## [2026-07-15] — Correção de 4 Bugs Conhecidos + Sincronização Webmail
 
 ### Corrigido

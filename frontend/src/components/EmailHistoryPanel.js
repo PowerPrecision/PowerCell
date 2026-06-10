@@ -10,6 +10,7 @@
  * - Timeline de emails no processo
  */
 import { useState, useEffect, useMemo } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -482,7 +483,7 @@ const EmailHistoryPanel = ({
       setNewMonitoredEmail("");
       fetchMonitoredEmails();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao adicionar email");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao adicionar email"));
     } finally {
       setAddingEmail(false);
     }

@@ -3,6 +3,7 @@
  * Elimina código duplicado entre ConsultorDashboard e MediadorDashboard
  */
 import React, { useState, useEffect, useMemo } from "react";
+import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -580,7 +581,7 @@ export const useDocumentManagement = (fetchData) => {
       setExpiryFormData({ document_type: "", document_name: "", expiry_date: "", notes: "" });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao adicionar");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao adicionar"));
     } finally {
       setFormLoading(false);
     }
@@ -643,7 +644,7 @@ export const useDocumentManagement = (fetchData) => {
         }
       }
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao analisar documento");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao analisar documento"));
     } finally {
       setIsAnalyzing(false);
     }

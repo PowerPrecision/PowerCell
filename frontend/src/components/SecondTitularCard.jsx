@@ -13,6 +13,7 @@ import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
 import { searchClients, updateProcess } from "../services/api";
 import { queryKeys } from "../lib/queryClient";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
@@ -97,7 +98,7 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
       if (onUpdate) onUpdate();
     } catch (err) {
       console.error("Detalhe do Erro API [linkSecondClient]:", err);
-      toast.error(err.response?.data?.detail || "Erro ao ligar 2º titular");
+      toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao ligar 2º titular"));
     } finally {
       setLinking(false);
     }

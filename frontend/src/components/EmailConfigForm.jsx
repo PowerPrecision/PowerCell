@@ -28,6 +28,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -237,7 +238,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
       if (!response.ok) {
         const data = await response.json().catch(() => ({}));
-        toast.error(data.detail || "Erro ao iniciar autenticação Google");
+        toast.error(extractErrorMessage(data.detail, "Erro ao iniciar autenticação Google"));
         setGoogleOAuthConnecting(false);
         return;
       }
@@ -274,7 +275,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
       toast.success("Google OAuth desconectado");
       loadConfig();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao desconectar Google OAuth");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao desconectar Google OAuth"));
     }
   };
 
@@ -319,7 +320,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         toast.error(`Erro na ligação: ${result.error || "Desconhecido"}`);
       }
     } catch (error) {
-      const msg = error.response?.data?.detail || "Erro ao testar a ligação";
+      const msg = extractErrorMessage(error.response?.data?.detail, "Erro ao testar a ligação");
       toast.error(msg);
       setTestResult({ success: false, error: msg });
     } finally {
@@ -357,7 +358,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
       loadConfig();
       if (onSuccess) onSuccess();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao guardar a configuração");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao guardar a configuração"));
     } finally {
       setSaving(false);
     }

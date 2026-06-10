@@ -71,6 +71,7 @@ import {
   MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { format, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
@@ -569,7 +570,7 @@ const WebmailPage = () => {
       const data = await response.json().catch(() => ({}));
 
       if (!response.ok) {
-        toast.error(data.detail || "Erro na sincronização");
+        toast.error(extractErrorMessage(data.detail, "Erro na sincronização"));
         setSyncing(false);
         return;
       }
@@ -1138,7 +1139,7 @@ const WebmailPage = () => {
         fetchCustomFolders();
       } else {
         const data = await res.json().catch(() => ({}));
-        toast.error(data.detail || "Erro ao guardar pasta");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar pasta"));
       }
     } catch {
       toast.error("Erro de ligação ao servidor");

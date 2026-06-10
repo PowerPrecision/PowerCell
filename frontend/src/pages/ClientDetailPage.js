@@ -49,6 +49,7 @@ import { getClient, getClientFiles, updateClient } from "../services/api";
 import { pt } from "date-fns/locale";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { safeFormat } from "../lib/utils";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -412,7 +413,7 @@ export default function ClientDetailPage() {
                         }));
                         toast.success("Email atualizado com sucesso");
                       } catch (err) {
-                        toast.error(err.response?.data?.detail || "Erro ao guardar email");
+                        toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao guardar email"));
                       } finally {
                         setSavingField(null);
                       }
@@ -445,7 +446,7 @@ export default function ClientDetailPage() {
                         }));
                         toast.success("Telefone atualizado com sucesso");
                       } catch (err) {
-                        toast.error(err.response?.data?.detail || "Erro ao guardar telefone");
+                        toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao guardar telefone"));
                       } finally {
                         setSavingField(null);
                       }

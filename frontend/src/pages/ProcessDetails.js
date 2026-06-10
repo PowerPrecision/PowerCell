@@ -158,6 +158,7 @@ import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeDateStr, safeParseISO, safeFormat } from "../lib/utils";
 
 // eslint-disable-next-line no-undef
@@ -579,7 +580,7 @@ const ProcessDetails = () => {
         fetchData();
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao actualizar atribuições");
+        toast.error(extractErrorMessage(data.detail, "Erro ao actualizar atribuições"));
       }
     } catch (error) {
       console.error("Erro ao guardar atribuições:", error);
@@ -655,7 +656,7 @@ const ProcessDetails = () => {
         fetchData();
       } else {
         const errorData = await response.json();
-        toast.error(errorData.detail || "Erro ao reatribuir cliente");
+        toast.error(extractErrorMessage(errorData.detail, "Erro ao reatribuir cliente"));
       }
     } catch (error) {
       console.error("Erro ao reatribuir cliente:", error);
@@ -811,7 +812,7 @@ const ProcessDetails = () => {
         } else if (res.status === 503) {
           toast.error("Serviço de IA não configurado. Contacte o administrador.");
         } else {
-          toast.error(errData.detail || "Erro ao gerar análise IA");
+          toast.error(extractErrorMessage(errData.detail, "Erro ao gerar análise IA"));
         }
         return;
       }
@@ -991,7 +992,7 @@ const ProcessDetails = () => {
         fetchVisitasProperties();
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao associar imóvel");
+        toast.error(extractErrorMessage(data.detail, "Erro ao associar imóvel"));
       }
     } catch (error) {
       console.error("Erro ao associar imóvel:", error);
@@ -1831,8 +1832,7 @@ const ProcessDetails = () => {
       toast.success("Cliente eliminado com sucesso");
       navigate("/clientes");
     } catch (error) {
-      const message = error.response?.data?.detail || "Erro ao eliminar cliente";
-      toast.error(message);
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar cliente"));
     }
   };
 

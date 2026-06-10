@@ -22,6 +22,7 @@ import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { hasAnyRole } from "../utils/roleUtils";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -181,7 +182,7 @@ const FilesExplorerPage = () => {
         } else if (res.status === 503) {
           setS3Configured(false);
         } else {
-          toast.error(err.detail || "Erro ao carregar ficheiros");
+          toast.error(extractErrorMessage(err.detail, "Erro ao carregar ficheiros"));
         }
       }
     } catch (err) {
@@ -269,7 +270,7 @@ const FilesExplorerPage = () => {
           successCount++;
         } else {
           const err = await res.json().catch(() => ({}));
-          toast.error(`${file.name}: ${err.detail || "Erro"}`);
+          toast.error(`${file.name}: ${extractErrorMessage(err.detail, "Erro")}`);
           errorCount++;
         }
       } catch (err) {
@@ -312,7 +313,7 @@ const FilesExplorerPage = () => {
         URL.revokeObjectURL(url);
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao fazer download");
+        toast.error(extractErrorMessage(err.detail, "Erro ao fazer download"));
       }
     } catch (err) {
       toast.error("Erro ao fazer download");
@@ -350,7 +351,7 @@ const FilesExplorerPage = () => {
         setRenameDialog({ open: false, item: null, newName: "" });
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao renomear");
+        toast.error(extractErrorMessage(err.detail, "Erro ao renomear"));
       }
     } catch {
       toast.error("Erro ao renomear");
@@ -388,7 +389,7 @@ const FilesExplorerPage = () => {
         setDeleteDialog({ open: false, item: null });
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao eliminar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao eliminar"));
       }
     } catch {
       toast.error("Erro ao eliminar");
@@ -422,7 +423,7 @@ const FilesExplorerPage = () => {
         setNewFolderDialog({ open: false, name: "" });
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao criar pasta");
+        toast.error(extractErrorMessage(err.detail, "Erro ao criar pasta"));
       }
     } catch {
       toast.error("Erro ao criar pasta");
@@ -455,7 +456,7 @@ const FilesExplorerPage = () => {
         fetchContents(currentPath);
       } else {
         const err = await res.json().catch(() => ({}));
-        toast.error(err.detail || "Erro ao guardar configuração");
+        toast.error(extractErrorMessage(err.detail, "Erro ao guardar configuração"));
       }
     } catch {
       toast.error("Erro de ligação ao servidor");

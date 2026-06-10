@@ -5,6 +5,7 @@
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -786,7 +787,7 @@ const RGPDPedidosTab = () => {
         fetchData();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao atualizar");
+        toast.error(extractErrorMessage(error.detail, "Erro ao atualizar"));
         throw new Error();
       }
     } catch (error) {
@@ -833,7 +834,7 @@ const RGPDPedidosTab = () => {
         fetchData();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao reenviar");
+        toast.error(extractErrorMessage(error.detail, "Erro ao reenviar"));
       }
     } catch (error) {
       toast.error("Erro ao reenviar email");

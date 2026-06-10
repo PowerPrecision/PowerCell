@@ -3,6 +3,7 @@
  * Visualiza erros de upload massivo e permite resolver associações
  */
 import { useState, useEffect, useCallback } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -91,7 +92,7 @@ const ImportErrorsPage = () => {
 
   const fetchClients = async () => {
     try {
-      const response = await api.get("/api/clients?limit=500");
+      const response = await api.get("/clients", { params: { limit: 500 } });
       setClients(response.data.clients || response.data || []);
     } catch (error) {
       console.error("Erro ao carregar clientes:", error);
@@ -127,7 +128,7 @@ const ImportErrorsPage = () => {
       fetchErrors();
     } catch (error) {
       console.error("Erro ao resolver:", error);
-      toast.error(error.response?.data?.detail || "Erro ao resolver associação");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao resolver associação"));
     } finally {
       setResolving(false);
     }

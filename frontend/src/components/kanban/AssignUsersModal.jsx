@@ -13,6 +13,7 @@
  * - Não causa re-renders no KanbanBoard
  */
 import React, { memo, useState, useCallback, useEffect } from 'react';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import {
   Dialog,
   DialogContent,
@@ -102,7 +103,7 @@ const AssignUsersModal = memo(({
         onSuccess?.();
       } else {
         const data = await response.json();
-        toast.error(data.detail || 'Erro ao actualizar atribuições');
+        toast.error(extractErrorMessage(data.detail, 'Erro ao actualizar atribuições'));
       }
     } catch (error) {
       console.error('Erro ao guardar atribuições:', error);

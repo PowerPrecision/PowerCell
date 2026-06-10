@@ -5,6 +5,7 @@
 import React, { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { parseBackendError } from "../utils/errorFormatter";
 import {
   Dialog,
@@ -725,7 +726,7 @@ const LeadsKanban = () => {
         fetchLeads();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao eliminar");
+        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar"));
       }
     } catch (error) {
       console.error("Erro ao eliminar:", error);

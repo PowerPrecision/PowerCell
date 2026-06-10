@@ -13,6 +13,7 @@
  */
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -479,7 +480,7 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
         if (onSuccess) onSuccess();
       } else {
         const err = await response.json();
-        toast.error(err.detail || "Erro ao criar visita");
+        toast.error(extractErrorMessage(err.detail, "Erro ao criar visita"));
       }
     } catch {
       toast.error("Erro de ligação ao servidor");
@@ -707,7 +708,7 @@ function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
         if (onSuccess) onSuccess();
       } else {
         const err = await response.json();
-        toast.error(err.detail || "Erro ao agendar visita");
+        toast.error(extractErrorMessage(err.detail, "Erro ao agendar visita"));
       }
     } catch {
       toast.error("Erro de ligação ao servidor");

@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Button } from "./ui/button";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -155,7 +156,7 @@ const DocumentChecklist = ({ processId, clientName, onUpdate }) => {
         if (onUpdate) onUpdate(data);
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao gerar checklist");
+        toast.error(extractErrorMessage(error.detail, "Erro ao gerar checklist"));
       }
     } catch (error) {
       console.error("Erro ao gerar checklist:", error);

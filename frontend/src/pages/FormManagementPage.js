@@ -26,6 +26,7 @@
 import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -763,7 +764,7 @@ const FormManagementPage = ({ embedded = false }) => {
         fetchConfig();
       } else {
         const err = await res.json();
-        toast.error(err.detail || "Erro ao criar campo");
+        toast.error(extractErrorMessage(err.detail, "Erro ao criar campo"));
       }
     } catch {
       toast.error("Erro de rede");
@@ -784,7 +785,7 @@ const FormManagementPage = ({ embedded = false }) => {
         fetchConfig();
       } else {
         const err = await res.json();
-        toast.error(err.detail || "Erro ao eliminar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao eliminar"));
       }
     } catch {
       toast.error("Erro de rede");
@@ -907,7 +908,7 @@ const FormManagementPage = ({ embedded = false }) => {
         fetchConfig();
       } else {
         const err = await res.json();
-        toast.error(err.detail || "Erro ao ativar template");
+        toast.error(extractErrorMessage(err.detail, "Erro ao ativar template"));
       }
     } catch {
       toast.error("Erro de rede");
@@ -925,7 +926,7 @@ const FormManagementPage = ({ embedded = false }) => {
         fetchTemplates();
       } else {
         const err = await res.json();
-        toast.error(err.detail || "Erro ao duplicar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao duplicar"));
       }
     } catch {
       toast.error("Erro de rede");
@@ -944,7 +945,7 @@ const FormManagementPage = ({ embedded = false }) => {
         fetchTemplates();
       } else {
         const err = await res.json();
-        toast.error(err.detail || "Erro ao eliminar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao eliminar"));
       }
     } catch {
       toast.error("Erro de rede");
@@ -971,7 +972,7 @@ const FormManagementPage = ({ embedded = false }) => {
         fetchTemplates();
       } else {
         const err = await res.json();
-        toast.error(err.detail || "Erro ao guardar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
       }
     } catch {
       toast.error("Erro de rede");

@@ -34,6 +34,7 @@ import { toast } from "sonner";
 import * as XLSX from 'xlsx';
 import { safeDateStr } from "../lib/utils";
 import { getErrorMessage } from "../utils/errorFormatter";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Users,
   Plus,
@@ -199,6 +200,9 @@ export default function ClientsPage() {
         const data = await response.json();
         setClients(data.clients || []);
         setAvailablePhases(data.available_statuses || []);
+      } else {
+        const errorData = await response.json().catch(() => ({}));
+        toast.error(extractErrorMessage(errorData.detail, "Erro ao carregar clientes"));
       }
     } catch (error) {
       console.error("Erro ao carregar clientes:", error);
@@ -335,13 +339,7 @@ export default function ClientsPage() {
         fetchClients();
       } else {
         const errorData = await response.json();
-        // detail pode ser string ou array de Pydantic errors [{type, loc, msg, input}]
-        const msg = typeof errorData.detail === 'string'
-          ? errorData.detail
-          : Array.isArray(errorData.detail)
-            ? errorData.detail.map(e => e.msg || String(e)).join(' • ')
-            : "Erro ao eliminar cliente";
-        toast.error(msg);
+        toast.error(extractErrorMessage(errorData.detail, "Erro ao eliminar cliente"));
       }
     } catch (error) {
       console.error("Erro ao eliminar cliente:", error);
