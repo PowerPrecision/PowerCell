@@ -105,6 +105,12 @@ async def get_my_assigned_clients(
     else:
         query = {"created_by": user_email}
     
+    # Filter out soft-deleted processes
+    if "$or" in query:
+        query = {"$and": [query, {"is_deleted": {"$ne": True}}]}
+    else:
+        query["is_deleted"] = {"$ne": True}
+    
     # Search filter
     if search:
         search = sanitize_string(search, max_length=200)
@@ -291,7 +297,7 @@ async def list_registered_clients(
     #   (second_client_id) NÃO deve aparecer na listagem geral.
     # - Só ganha "vida" se for titular principal (client_id) em pelo menos
     #   um processo, ou se for um novo lead sem processo atribuído.
-    query = {"registration_completed": True}
+    query = {"registration_completed": True, "is_deleted": {"$ne": True}}
 
     # ── Filtro de Clientes Fantasmas ──
     # Um cliente "fantasma" é aquele que apenas foi registado para atuar como
@@ -1651,7 +1657,7 @@ async def create_process_for_client(
         "financial_data": client.get("dados_financeiros", {}),
         "real_estate_data": {},
         "credit_data": {},
-        # Co-compradores herdados do cliente
+        # 2º Titular / Fiador herdados do cliente
         "co_buyers": client.get("co_buyers", []),
         "co_applicants": client.get("co_applicants", []),
         # Metadados
@@ -1956,39 +1962,20 @@ async def delete_client(
         }}
     )
     
-    # CASCADE: Marcar todos os processos associados como eliminados
-    # para evitar processos órfãos
+    # Remove client reference from processes but do NOT delete the processes
+    # Process deletion is now independent — use DELETE /api/processes/{process_id} instead
     cascade_count = 0
     if client.get("process_ids"):
-        cascade_result = await db.processes.update_many(
-            {"id": {"$in": client["process_ids"]}, "is_deleted": {"$ne": True}},
-            {"$set": {
-                "status": "eliminado",
-                "is_deleted": True,
-                "is_active": False,
-                "deleted_at": now,
-                "deleted_by": user["id"],
-                "updated_at": now
-            }}
+        await db.processes.update_many(
+            {"id": {"$in": client["process_ids"]}},
+            {"$unset": {"client_id": ""}, "$set": {"updated_at": now}}
         )
-        cascade_count = cascade_result.modified_count
-        
-        # Soft delete de documentos e tarefas dos processos em cascade
-        for pid in client["process_ids"]:
-            await db.documents.update_many(
-                {"process_id": pid},
-                {"$set": {"deleted": True, "is_deleted": True, "deleted_at": now, "deleted_by": user["id"]}}
-            )
-            await db.tasks.update_many(
-                {"process_id": pid},
-                {"$set": {"deleted": True, "is_deleted": True, "deleted_at": now, "deleted_by": user["id"]}}
-            )
     
-    logger.info(f"Cliente {client_id} movido para lixo por {user.get('email')} ({cascade_count} processos em cascade)")
+    logger.info(f"Cliente {client_id} movido para lixo por {user.get('email')} (referência removida de processos)")
     
     return {
         "success": True, 
-        "message": f"Cliente movido para o lixo" + (f" ({cascade_count} processo(s) eliminado(s) em cascade)" if cascade_count > 0 else ""),
+        "message": f"Cliente movido para o lixo",
         "can_undo": True,
         "restore_endpoint": f"/api/clients/{client_id}/restore",
         "cascade_count": cascade_count

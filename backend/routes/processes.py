@@ -49,7 +49,6 @@ from services.alerts import (
     notify_cpcv_or_deed_document_check
 )
 from services.realtime_notifications import notify_process_status_change
-from services.trello import trello_service, status_to_trello_list, build_card_description
 from services.encryption import decrypt_client_data
 
 # Importar serviços refatorados
@@ -541,24 +540,6 @@ def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
     
     return {"$and": word_filters}
 
-
-async def sync_process_to_trello(process: dict):
-    """Sincronizar processo com o Trello (nome e descrição do card)."""
-    if not process.get("trello_card_id") or not trello_service.api_key:
-        return False
-    
-    try:
-        description = build_card_description(process)
-        await trello_service.update_card(
-            process["trello_card_id"],
-            name=process.get("client_name", "Sem nome"),
-            desc=description
-        )
-        logger.info(f"Card {process['trello_card_id']} atualizado no Trello: {process.get('client_name')}")
-        return True
-    except Exception as e:
-        logger.error(f"Erro ao sincronizar com Trello: {e}")
-        return False
 
 
 # ====================================================================
@@ -1245,12 +1226,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         mediador_names=[user["name"]] if user["role"] == UserRole.INTERMEDIARIO else [],
         updated_at=now
     )
-    
-    # Sincronizar com Trello (criar cartão)
-    try:
-        await sync_process_to_trello(process_doc)
-    except Exception as e:
-        logger.warning(f"Erro ao sincronizar com Trello: {e}")
     
     # Desencriptar para a resposta
     response_doc = decrypt_sensitive_data(process_doc)
@@ -2464,20 +2439,6 @@ async def move_process_kanban(
         changed_by=user
     )
     
-    # === SINCRONIZAR COM TRELLO ===
-    if process.get("trello_card_id") and trello_service.api_key:
-        try:
-            trello_list_name = status_to_trello_list(new_status)
-            if trello_list_name:
-                # Encontrar a lista do Trello pelo nome
-                trello_list = await trello_service.get_list_by_name(trello_list_name)
-                if trello_list:
-                    await trello_service.move_card(process["trello_card_id"], trello_list["id"])
-                    logger.info(f"Card {process['trello_card_id']} movido para {trello_list_name} no Trello")
-        except Exception as e:
-            logger.error(f"Erro ao sincronizar com Trello: {e}")
-            # Não falhar a operação por erro no Trello
-    
     # === GATILHO: Fila de espera ao mover para estado terminal ===
     # Se o processo foi atribuído a um indexador e moveu para concluídos/desistências,
     # o indexador libertou um slot — verificar se há processos na fila_espera.
@@ -2997,6 +2958,69 @@ async def mark_process_indexed(
     }
 
 
+@router.delete("/{process_id}")
+async def delete_process(
+    process_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+):
+    """Soft delete a process. Does NOT affect the client document."""
+    # Find the process
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    now = datetime.now(timezone.utc)
+    
+    # Soft delete the process
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": {
+            "is_deleted": True,
+            "status": "eliminado",
+            "is_active": False,
+            "deleted_at": now,
+            "deleted_by": user.get("id", ""),
+            "updated_at": now,
+        }}
+    )
+    
+    # Cascade: soft-delete documents and tasks for this process
+    await db.documents.update_many(
+        {"process_id": process_id, "is_deleted": {"$ne": True}},
+        {"$set": {
+            "deleted": True,
+            "is_deleted": True,
+            "deleted_at": now,
+        }}
+    )
+    await db.tasks.update_many(
+        {"process_id": process_id, "is_deleted": {"$ne": True}},
+        {"$set": {
+            "deleted": True,
+            "is_deleted": True,
+            "deleted_at": now,
+        }}
+    )
+    
+    # IMPORTANT: Do NOT touch the client document. Process deletion must be independent.
+    
+    # Log activity
+    await db.process_activities.insert_one({
+        "id": str(uuid.uuid4()),
+        "process_id": process_id,
+        "type": "process_deleted",
+        "description": f"Processo eliminado (soft delete) por {user.get('name', 'Utilizador')}",
+        "created_at": now,
+        "user_id": user.get("id", ""),
+        "user_name": user.get("name", ""),
+    })
+    
+    return {"message": "Processo eliminado com sucesso", "id": process_id}
+
+
 @router.put("/{process_id}", response_model=ProcessResponse)
 async def update_process(process_id: str, data: ProcessUpdate, request: Request, user: dict = Depends(get_current_user)):
     """Atualiza os dados de um processo existente com controlo de acesso por role.
@@ -3459,9 +3483,6 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     
     # ── FASE 2: Popular dados do cliente na resposta (retrocompatibilidade) ──
     updated = await populate_client_data(updated)
-    
-    # Sincronizar com Trello (nome e descrição do card)
-    await sync_process_to_trello(updated)
     
     try:
         return ProcessResponse(**updated)

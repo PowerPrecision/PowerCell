@@ -316,6 +316,8 @@ const ProcessDetails = () => {
   const [titular2Data, setTitular2Data] = useState({});  // Estado para 2º titular
   const [financialData, setFinancialData] = useState({});
   const [editingCreditField, setEditingCreditField] = useState(null); // 'creditos' | 'contas' | 'simulacoes' | null
+  // Per-card editing states (default: read-only). Null = no card in edit mode.
+  const [editingCard, setEditingCard] = useState(null); // 'personal' | 'financial' | 'realestate' | 'credit' | null
   const [showPortalSenha, setShowPortalSenha] = useState(false);
   const [showSegSocialSenha, setShowSegSocialSenha] = useState(false);
   const [realEstateData, setRealEstateData] = useState({});
@@ -1635,6 +1637,7 @@ const ProcessDetails = () => {
       await Promise.all(promises);
 
       toast.success("Processo e Cliente atualizados com sucesso!");
+      setEditingCard(null); // Exit editing mode after save
       fetchData();
     } catch (error) {
       console.error("Error saving:", error);
@@ -1849,6 +1852,47 @@ const ProcessDetails = () => {
       return { badge: "bg-red-100 text-red-700 border-red-300", label: `${pct}%`, borderClass: "border-l-4 border-l-red-400", level: "low" };
     }
   };
+
+  // Reusable card header with edit toggle (pencil → Cancelar/Guardar)
+  const CardHeaderWithEdit = ({ title, cardKey, icon: Icon, canEdit }) => (
+    <div className="flex items-center justify-between">
+      <div className="flex items-center gap-2">
+        {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
+        <h4 className="font-semibold text-sm">{title}</h4>
+      </div>
+      {canEdit && !isProcessLocked && editingCard !== cardKey && (
+        <Button
+          variant="ghost"
+          size="icon"
+          className="h-7 w-7"
+          onClick={() => setEditingCard(cardKey)}
+          title="Editar"
+        >
+          <Pencil className="h-3.5 w-3.5" />
+        </Button>
+      )}
+      {canEdit && !isProcessLocked && editingCard === cardKey && (
+        <div className="flex items-center gap-1">
+          <Button
+            variant="ghost"
+            size="sm"
+            className="h-7 text-xs"
+            onClick={() => setEditingCard(null)}
+          >
+            Cancelar
+          </Button>
+          <Button
+            size="sm"
+            className="h-7 text-xs"
+            onClick={handleSave}
+            disabled={saving}
+          >
+            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Guardar"}
+          </Button>
+        </div>
+      )}
+    </div>
+  );
 
   if (loading) {
     return (
@@ -2828,7 +2872,7 @@ const ProcessDetails = () => {
                 <CardTitle className="text-lg">Dados do Processo</CardTitle>
               </CardHeader>
               <CardContent>
-                <Tabs value={activeTab} onValueChange={setActiveTab}>
+                <Tabs value={activeTab} onValueChange={(v) => { setEditingCard(null); setActiveTab(v); }}>
                   <TabsList className="grid w-full grid-cols-3 sm:grid-cols-9 gap-1 h-auto p-1">
                     {/* ── DADOS DO CLIENTE ── */}
                     <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
@@ -2884,12 +2928,9 @@ const ProcessDetails = () => {
                         </div>
                       )}
                       {/* Contactos */}
-                      <Card className="border-l-4 border-l-blue-500">
+                      <Card className={`border-l-4 border-l-blue-500 ${editingCard !== 'personal' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <Phone className="h-4 w-4 text-blue-500" />
-                            Contactos
-                          </h4>
+                          <CardHeaderWithEdit title="Contactos" cardKey="personal" icon={Phone} canEdit={canEditPersonal} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Email</Label>
@@ -2901,7 +2942,7 @@ const ProcessDetails = () => {
                                   setProcess({ ...process, client_email: val });
                                   setPersonalData(prev => ({ ...prev, email: val }));
                                 }}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 placeholder="email@exemplo.com"
                                 className="h-9"
                               />
@@ -2915,7 +2956,7 @@ const ProcessDetails = () => {
                                   setProcess({ ...process, client_phone: val });
                                   setPersonalData(prev => ({ ...prev, telefone: val }));
                                 }}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 placeholder="+351 000 000 000"
                                 className="h-9"
                               />
@@ -2925,19 +2966,16 @@ const ProcessDetails = () => {
                       </Card>
                       
                       {/* Identificação */}
-                      <Card className="border-l-4 border-l-amber-500">
+                      <Card className={`border-l-4 border-l-amber-500 ${editingCard !== 'personal' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <CreditCard className="h-4 w-4 text-amber-500" />
-                            Identificação
-                          </h4>
+                          <CardHeaderWithEdit title="Identificação" cardKey="personal" icon={CreditCard} canEdit={canEditPersonal} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1 md:col-span-2">
                               <Label className="text-xs text-muted-foreground">Nome Completo</Label>
                               <Input
                                 value={personalData.nome_completo || process?.client_name || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, nome_completo: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                                 placeholder="Nome completo do cliente (pode ser diferente do nome do processo)"
                               />
@@ -2963,7 +3001,7 @@ const ProcessDetails = () => {
                                   const validation = validateNIF(value);
                                   setNifError(validation.error);
                                 }}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 data-testid="personal-nif"
                                 className={`h-9 ${nifError ? 'border-red-500 focus:ring-red-500' : ''} ${getConfidenceIndicator("nif")?.borderClass || ''}`}
                                 placeholder="9 dígitos"
@@ -2977,7 +3015,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.niss || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, niss: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                                 placeholder="11 dígitos"
                               />
@@ -2994,7 +3032,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.documento_id || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, documento_id: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className={`h-9 ${getConfidenceIndicator("documento_id")?.borderClass || ''}`}
                               />
                             </div>
@@ -3011,7 +3049,7 @@ const ProcessDetails = () => {
                                 type="date"
                                 value={formatDateForInput(personalData.data_validade_cc)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_validade_cc: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className={`h-9 ${getConfidenceIndicator("cc_validity")?.borderClass || ''}`}
                               />
                             </div>
@@ -3028,7 +3066,7 @@ const ProcessDetails = () => {
                                 type="date"
                                 value={formatDateForInput(personalData.data_nascimento || personalData.birth_date)}
                                 onChange={(e) => setPersonalData({ ...personalData, data_nascimento: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className={`h-9 ${getConfidenceIndicator("birth_date")?.borderClass || ''}`}
                               />
                             </div>
@@ -3037,7 +3075,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={personalData.compra_tipo || ""}
                                 onValueChange={(value) => setPersonalData({ ...personalData, compra_tipo: value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3053,7 +3091,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={personalData.estado_civil || personalData.marital_status || ""}
                                 onValueChange={(value) => setPersonalData({ ...personalData, estado_civil: value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3073,7 +3111,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={personalData.sexo || ""}
                                 onValueChange={(value) => setPersonalData({ ...personalData, sexo: value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3087,7 +3125,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.naturalidade || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, naturalidade: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                               />
                             </div>
@@ -3096,7 +3134,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.nacionalidade || personalData.nationality || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, nacionalidade: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                               />
                             </div>
@@ -3105,7 +3143,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.altura || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, altura: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                               />
                             </div>
@@ -3114,7 +3152,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.profissao || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, profissao: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                                 placeholder="Profissão do titular"
                               />
@@ -3126,7 +3164,7 @@ const ProcessDetails = () => {
                                   id="menor_35_anos"
                                   checked={personalData.menor_35_anos || false}
                                   onChange={(e) => setPersonalData({ ...personalData, menor_35_anos: e.target.checked })}
-                                  disabled={!canEditPersonal}
+                                  disabled={editingCard !== 'personal' || !canEditPersonal}
                                   className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                                 />
                                 <Label htmlFor="menor_35_anos" className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
@@ -3142,19 +3180,16 @@ const ProcessDetails = () => {
                       </Card>
                       
                       {/* Filiação */}
-                      <Card className="border-l-4 border-l-orange-500">
+                      <Card className={`border-l-4 border-l-orange-500 ${editingCard !== 'personal' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <Users className="h-4 w-4 text-orange-500" />
-                            Filiação
-                          </h4>
+                          <CardHeaderWithEdit title="Filiação" cardKey="personal" icon={Users} canEdit={canEditPersonal} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Nome do Pai</Label>
                               <Input
                                 value={personalData.nome_pai || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, nome_pai: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                               />
                             </div>
@@ -3163,7 +3198,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.nome_mae || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, nome_mae: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                               />
                             </div>
@@ -3172,19 +3207,16 @@ const ProcessDetails = () => {
                       </Card>
                       
                       {/* Morada */}
-                      <Card className="border-l-4 border-l-teal-500">
+                      <Card className={`border-l-4 border-l-teal-500 ${editingCard !== 'personal' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <MapPin className="h-4 w-4 text-teal-500" />
-                            Morada
-                          </h4>
+                          <CardHeaderWithEdit title="Morada" cardKey="personal" icon={MapPin} canEdit={canEditPersonal} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1 sm:col-span-2">
                               <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
                               <Input
                                 value={personalData.morada_fiscal || personalData.address || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, morada_fiscal: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                                 placeholder="Rua, número, andar"
                               />
@@ -3194,7 +3226,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={personalData.codigo_postal || ""}
                                 onChange={(e) => setPersonalData({ ...personalData, codigo_postal: e.target.value })}
-                                disabled={!canEditPersonal}
+                                disabled={editingCard !== 'personal' || !canEditPersonal}
                                 className="h-9"
                                 placeholder="0000-000"
                               />
@@ -3206,13 +3238,13 @@ const ProcessDetails = () => {
                       {/* 2º Titular — Componente com pesquisa e ficha */}
                       <SecondTitularCard process={process} onUpdate={fetchData} />
                       
-                      {/* Co-Compradores / Co-Proponentes */}
+                      {/* 2º Titular / Fiador */}
                       {(process?.co_buyers?.length > 0 || process?.co_applicants?.length > 0) && (
                         <Card className="border-l-4 border-l-indigo-500">
                           <CardContent className="pt-4">
                             <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
                               <Users className="h-4 w-4 text-indigo-500" />
-                              Co-Compradores / Co-Proponentes
+                              2º Titular / Fiador
                               <Badge variant="secondary" className="ml-2">
                                 {(process?.co_buyers?.length || 0) + (process?.co_applicants?.length || 0)} pessoa(s)
                               </Badge>
@@ -3323,12 +3355,9 @@ const ProcessDetails = () => {
                       {/* DSTI Automático */}
                       <AutoDSTIBadge processId={id} token={token} compact={false} showDetails={true} />
                       {/* Rendimentos */}
-                      <Card className="border-l-4 border-l-green-500">
+                      <Card className={`border-l-4 border-l-green-500 ${editingCard !== 'financial' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <Briefcase className="h-4 w-4 text-green-500" />
-                            Rendimentos
-                          </h4>
+                          <CardHeaderWithEdit title="Rendimentos" cardKey="financial" icon={Briefcase} canEdit={canEditFinancial} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Rendimento Mensal (€)</Label>
@@ -3336,7 +3365,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.monthly_income || financialData.salario_liquido || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, monthly_income: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -3346,7 +3375,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.rendimento_bruto || financialData.salario_bruto || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, rendimento_bruto: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -3356,7 +3385,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.rendimento_anual || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, rendimento_anual: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -3366,7 +3395,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.capital_proprio || financialData.other_income || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, capital_proprio: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -3375,7 +3404,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={financialData.valor_financiado || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, valor_financiado: e.target.value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Ex: 200.000€ ou 80%"
                               />
@@ -3386,7 +3415,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.renda_habitacao_atual || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, renda_habitacao_atual: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -3396,7 +3425,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.rendimento_co_titular || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, rendimento_co_titular: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Rendimento do 2º titular"
                               />
@@ -3408,7 +3437,7 @@ const ProcessDetails = () => {
                                 min="0"
                                 value={financialData.nr_dependentes || financialData.number_of_dependents || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, nr_dependentes: parseInt(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="0"
                               />
@@ -3418,19 +3447,16 @@ const ProcessDetails = () => {
                       </Card>
                       
                       {/* Situação Financeira */}
-                      <Card className="border-l-4 border-l-blue-500">
+                      <Card className={`border-l-4 border-l-blue-500 ${editingCard !== 'financial' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <CreditCard className="h-4 w-4 text-blue-500" />
-                            Situação Financeira
-                          </h4>
+                          <CardHeaderWithEdit title="Situação Financeira" cardKey="financial" icon={CreditCard} canEdit={canEditFinancial} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Contrato Efetivo?</Label>
                               <Select
                                 value={financialData.efetivo || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, efetivo: value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3444,7 +3470,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={financialData.precisa_vender_casa || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, precisa_vender_casa: value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3458,7 +3484,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={financialData.fiador || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, fiador: value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3473,7 +3499,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.creditos_existentes || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, creditos_existentes: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Valor total em dívida"
                               />
@@ -3484,7 +3510,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.prestacao_creditos_mensal || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, prestacao_creditos_mensal: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Total prestações mensais"
                               />
@@ -3494,7 +3520,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={financialData.acesso_portal_financas || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, acesso_portal_financas: value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3510,7 +3536,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={financialData.chave_movel_digital || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, chave_movel_digital: value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3524,12 +3550,9 @@ const ProcessDetails = () => {
                       </Card>
 
                       {/* Credenciais de Portais Oficiais */}
-                      <Card className="border-l-4 border-l-orange-500">
+                      <Card className={`border-l-4 border-l-orange-500 ${editingCard !== 'financial' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <Database className="h-4 w-4 text-orange-500" />
-                            Credenciais de Portais Oficiais
-                          </h4>
+                          <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial" icon={Database} canEdit={canEditFinancial} />
                           <p className="text-xs text-muted-foreground mb-3">
                             Preencha as credenciais de acesso aos portais oficiais para facilitar a gestão do processo.
                           </p>
@@ -3540,7 +3563,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={financialData.portal_financas_utilizador || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, portal_financas_utilizador: e.target.value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="NIF ou email"
                               />
@@ -3552,7 +3575,7 @@ const ProcessDetails = () => {
                                   type={showPortalSenha ? "text" : "password"}
                                   value={financialData.portal_financas_senha || ""}
                                   onChange={(e) => setFinancialData({ ...financialData, portal_financas_senha: e.target.value })}
-                                  disabled={!canEditFinancial}
+                                  disabled={editingCard !== 'financial' || !canEditFinancial}
                                   className="h-9 pr-9"
                                   placeholder="Senha de acesso"
                                 />
@@ -3572,7 +3595,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={financialData.seg_social_utilizador || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, seg_social_utilizador: e.target.value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="NISS ou email"
                               />
@@ -3584,7 +3607,7 @@ const ProcessDetails = () => {
                                   type={showSegSocialSenha ? "text" : "password"}
                                   value={financialData.seg_social_senha || ""}
                                   onChange={(e) => setFinancialData({ ...financialData, seg_social_senha: e.target.value })}
-                                  disabled={!canEditFinancial}
+                                  disabled={editingCard !== 'financial' || !canEditFinancial}
                                   className="h-9 pr-9"
                                   placeholder="Senha de acesso"
                                 />
@@ -3604,13 +3627,12 @@ const ProcessDetails = () => {
 
                       {/* Credenciais de Portais Oficiais - 2º Proponente */}
                       {(process?.titular2_data || Object.keys(titular2Data).length > 0) && (
-                        <Card className="border-l-4 border-l-orange-300">
+                        <Card className={`border-l-4 border-l-orange-300 ${editingCard !== 'financial' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-1 flex items-center gap-2">
-                              <Database className="h-4 w-4 text-orange-400" />
-                              Credenciais de Portais Oficiais
-                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-600 border-orange-200 ml-1">2º Proponente</Badge>
-                            </h4>
+                            <div className="flex items-center gap-2">
+                              <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial" icon={Database} canEdit={canEditFinancial} />
+                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-600 border-orange-200">2º Proponente</Badge>
+                            </div>
                             <p className="text-xs text-muted-foreground mb-3">
                               Credenciais de acesso aos portais oficiais do segundo proponente/titular.
                             </p>
@@ -3621,7 +3643,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={titular2Data.portal_financas_utilizador || ""}
                                   onChange={(e) => setTitular2Data({ ...titular2Data, portal_financas_utilizador: e.target.value })}
-                                  disabled={!canEditFinancial}
+                                  disabled={editingCard !== 'financial' || !canEditFinancial}
                                   className="h-9"
                                   placeholder="NIF ou email"
                                 />
@@ -3632,7 +3654,7 @@ const ProcessDetails = () => {
                                   type="password"
                                   value={titular2Data.portal_financas_senha || ""}
                                   onChange={(e) => setTitular2Data({ ...titular2Data, portal_financas_senha: e.target.value })}
-                                  disabled={!canEditFinancial}
+                                  disabled={editingCard !== 'financial' || !canEditFinancial}
                                   className="h-9"
                                   placeholder="Senha de acesso"
                                 />
@@ -3643,7 +3665,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={titular2Data.seg_social_utilizador || ""}
                                   onChange={(e) => setTitular2Data({ ...titular2Data, seg_social_utilizador: e.target.value })}
-                                  disabled={!canEditFinancial}
+                                  disabled={editingCard !== 'financial' || !canEditFinancial}
                                   className="h-9"
                                   placeholder="NISS ou email"
                                 />
@@ -3654,7 +3676,7 @@ const ProcessDetails = () => {
                                   type="password"
                                   value={titular2Data.seg_social_senha || ""}
                                   onChange={(e) => setTitular2Data({ ...titular2Data, seg_social_senha: e.target.value })}
-                                  disabled={!canEditFinancial}
+                                  disabled={editingCard !== 'financial' || !canEditFinancial}
                                   className="h-9"
                                   placeholder="Senha de acesso"
                                 />
@@ -3961,19 +3983,16 @@ const ProcessDetails = () => {
                       )}
                       
                       {/* Emprego */}
-                      <Card className="border-l-4 border-l-purple-500">
+                      <Card className={`border-l-4 border-l-purple-500 ${editingCard !== 'financial' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <User className="h-4 w-4 text-purple-500" />
-                            Situação Profissional
-                          </h4>
+                          <CardHeaderWithEdit title="Situação Profissional" cardKey="financial" icon={User} canEdit={canEditFinancial} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Tipo de Emprego</Label>
                               <Select
                                 value={financialData.employment_type || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, employment_type: value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -3992,7 +4011,7 @@ const ProcessDetails = () => {
                               <Select
                                 value={financialData.trabalha_estrangeiro || ""}
                                 onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                               >
                                 <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                 <SelectContent>
@@ -4006,7 +4025,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={financialData.employment_duration || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, employment_duration: e.target.value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -4015,7 +4034,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={financialData.employer_name || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, employer_name: e.target.value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -4027,7 +4046,7 @@ const ProcessDetails = () => {
                                   const val = e.target.value.replace(/\D/g, '').slice(0, 9);
                                   setFinancialData({ ...financialData, employer_nif: val });
                                 }}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="NIF da empresa"
                               />
@@ -4037,7 +4056,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={financialData.categoria_profissional || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, categoria_profissional: e.target.value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="Ex: Técnico superior, Operário..."
                               />
@@ -4048,7 +4067,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={financialData.subsidiario_alimentacao || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, subsidiario_alimentacao: parseFloat(e.target.value) || null })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                                 placeholder="0.00"
                               />
@@ -4059,7 +4078,7 @@ const ProcessDetails = () => {
                                 type="month"
                                 value={financialData.data_referencia || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, data_referencia: e.target.value })}
-                                disabled={!canEditFinancial}
+                                disabled={editingCard !== 'financial' || !canEditFinancial}
                                 className="h-9"
                               />
                             </div>
@@ -4080,12 +4099,9 @@ const ProcessDetails = () => {
                       <div className="space-y-4">
 
                         {/* ====== Grupo D: Estado da Procura ====== */}
-                        <Card className="border-l-4 border-l-indigo-500">
+                        <Card className={`border-l-4 border-l-indigo-500 ${editingCard !== 'realestate' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <Search className="h-4 w-4 text-indigo-500" />
-                              Estado da Procura
-                            </h4>
+                            <CardHeaderWithEdit title="Estado da Procura" cardKey="realestate" icon={Search} canEdit={canEditRealEstate} />
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="space-y-1 flex items-center gap-3 pb-1">
                                 <input
@@ -4093,7 +4109,7 @@ const ProcessDetails = () => {
                                   id="ja_tem_imovel"
                                   checked={realEstateData.ja_tem_imovel || realEstateData.has_property || false}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, ja_tem_imovel: e.target.checked, has_property: e.target.checked })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                 />
                                 <Label htmlFor="ja_tem_imovel" className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
@@ -4106,7 +4122,7 @@ const ProcessDetails = () => {
                                   id="ja_tem_casa_escolhida"
                                   checked={realEstateData.ja_tem_casa_escolhida || false}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, ja_tem_casa_escolhida: e.target.checked })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
                                 />
                                 <Label htmlFor="ja_tem_casa_escolhida" className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
@@ -4118,7 +4134,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.proprietario_nome || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, proprietario_nome: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Nome do proprietário do imóvel"
                                 />
@@ -4128,7 +4144,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.proprietario_contacto || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, proprietario_contacto: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="+351 000 000 000"
                                 />
@@ -4138,19 +4154,16 @@ const ProcessDetails = () => {
                         </Card>
 
                         {/* ====== Grupo A: Características do Imóvel ====== */}
-                        <Card className="border-l-4 border-l-green-500">
+                        <Card className={`border-l-4 border-l-green-500 ${editingCard !== 'realestate' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <Building2 className="h-4 w-4 text-green-500" />
-                              Características do Imóvel
-                            </h4>
+                            <CardHeaderWithEdit title="Características do Imóvel" cardKey="realestate" icon={Building2} canEdit={canEditRealEstate} />
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Tipo de Imóvel</Label>
                                 <Select
                                   value={realEstateData.tipo_imovel || ""}
                                   onValueChange={(value) => setRealEstateData({ ...realEstateData, tipo_imovel: value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                 >
                                   <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                   <SelectContent>
@@ -4167,7 +4180,7 @@ const ProcessDetails = () => {
                                 <Select
                                   value={realEstateData.num_quartos || ""}
                                   onValueChange={(value) => setRealEstateData({ ...realEstateData, num_quartos: value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                 >
                                   <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                   <SelectContent>
@@ -4184,7 +4197,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.tipologia || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, tipologia: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: T2, T3, T4"
                                 />
@@ -4195,7 +4208,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={realEstateData.valor_imovel || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, valor_imovel: parseFloat(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
                                 />
@@ -4206,7 +4219,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={realEstateData.valor_patrimonial || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, valor_patrimonial: parseFloat(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
                                 />
@@ -4216,7 +4229,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.certificado_energetico || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, certificado_energetico: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: A, B-, C"
                                 />
@@ -4227,7 +4240,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={realEstateData.area_bruta || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, area_bruta: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0"
                                 />
@@ -4238,7 +4251,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={realEstateData.area_util || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, area_util: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0"
                                 />
@@ -4248,7 +4261,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.fracao || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, fracao: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: A, B, C"
                                 />
@@ -4258,7 +4271,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.artigo_matricial || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, artigo_matricial: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: 1234"
                                 />
@@ -4268,7 +4281,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.conservatoria || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, conservatoria: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Nome da conservatória"
                                 />
@@ -4278,7 +4291,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.numero_predial || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, numero_predial: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: 000"
                                 />
@@ -4288,7 +4301,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.estacionamento || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, estacionamento: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: Garagem dupla, Lugar 12"
                                 />
@@ -4298,7 +4311,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.arrecadacao || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, arrecadacao: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: Arrecadação A, Caixa 5"
                                 />
@@ -4308,7 +4321,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.outras_caracteristicas || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, outras_caracteristicas: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: Varanda, Piscina, Solar"
                                 />
@@ -4318,7 +4331,7 @@ const ProcessDetails = () => {
                                 <Textarea
                                   value={realEstateData.descricao_imovel || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, descricao_imovel: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   rows={2}
                                   placeholder="Descrição detalhada do imóvel"
                                 />
@@ -4328,19 +4341,16 @@ const ProcessDetails = () => {
                         </Card>
 
                         {/* ====== Grupo B: Localização ====== */}
-                        <Card className="border-l-4 border-l-blue-500">
+                        <Card className={`border-l-4 border-l-blue-500 ${editingCard !== 'realestate' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <MapPin className="h-4 w-4 text-blue-500" />
-                              Localização
-                            </h4>
+                            <CardHeaderWithEdit title="Localização" cardKey="realestate" icon={MapPin} canEdit={canEditRealEstate} />
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Localização Pretendida</Label>
                                 <Input
                                   value={realEstateData.localizacao || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, localizacao: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                 />
                               </div>
@@ -4350,7 +4360,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={realEstateData.area_pretendida || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, area_pretendida: parseFloat(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                 />
                               </div>
@@ -4360,7 +4370,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={realEstateData.valor_maximo_imovel || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, valor_maximo_imovel: parseFloat(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                 />
                               </div>
@@ -4369,7 +4379,7 @@ const ProcessDetails = () => {
                                 <Select
                                   value={realEstateData.finalidade || ""}
                                   onValueChange={(value) => setRealEstateData({ ...realEstateData, finalidade: value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                 >
                                   <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
                                   <SelectContent>
@@ -4386,7 +4396,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.codigo_postal || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, codigo_postal: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0000-000"
                                 />
@@ -4396,7 +4406,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.localidade || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, localidade: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Cidade"
                                 />
@@ -4406,7 +4416,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.freguesia || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, freguesia: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Freguesia"
                                 />
@@ -4416,7 +4426,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.concelho || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, concelho: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Concelho"
                                 />
@@ -4445,7 +4455,7 @@ const ProcessDetails = () => {
                               <Textarea
                                 value={realEstateData.outras_informacoes || ""}
                                 onChange={(e) => setRealEstateData({ ...realEstateData, outras_informacoes: e.target.value })}
-                                disabled={!canEditRealEstate}
+                                disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                 rows={2}
                               />
                             </div>
@@ -4453,12 +4463,9 @@ const ProcessDetails = () => {
                         </Card>
 
                         {/* ====== Grupo C: Dados do CPCV e Prazos ====== */}
-                        <Card className="border-l-4 border-l-amber-500">
+                        <Card className={`border-l-4 border-l-amber-500 ${editingCard !== 'realestate' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <FileSignature className="h-4 w-4 text-amber-500" />
-                              Dados do CPCV e Prazos
-                            </h4>
+                            <CardHeaderWithEdit title="Dados do CPCV e Prazos" cardKey="realestate" icon={FileSignature} canEdit={canEditRealEstate} />
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                               {/* Valores Financeiros do CPCV (Fase 3) */}
                               <div className="space-y-1">
@@ -4467,7 +4474,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={financialData.valor_entrada || ""}
                                   onChange={(e) => setFinancialData({ ...financialData, valor_entrada: parseFloat(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
                                 />
@@ -4478,7 +4485,7 @@ const ProcessDetails = () => {
                                   type="date"
                                   value={financialData.data_sinal || ""}
                                   onChange={(e) => setFinancialData({ ...financialData, data_sinal: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                 />
                               </div>
@@ -4488,7 +4495,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={financialData.reforco_sinal || ""}
                                   onChange={(e) => setFinancialData({ ...financialData, reforco_sinal: parseFloat(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
                                 />
@@ -4499,7 +4506,7 @@ const ProcessDetails = () => {
                                   type="number"
                                   value={financialData.comissao_mediacao || ""}
                                   onChange={(e) => setFinancialData({ ...financialData, comissao_mediacao: parseFloat(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="0.00"
                                 />
@@ -4510,7 +4517,7 @@ const ProcessDetails = () => {
                                   type="date"
                                   value={realEstateData.data_cpcv || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, data_cpcv: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                 />
                               </div>
@@ -4520,7 +4527,7 @@ const ProcessDetails = () => {
                                   type="date"
                                   value={realEstateData.data_escritura_prevista || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, data_escritura_prevista: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                 />
                               </div>
@@ -4531,7 +4538,7 @@ const ProcessDetails = () => {
                                   min="0"
                                   value={realEstateData.prazo_escritura_dias || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, prazo_escritura_dias: parseInt(e.target.value) || null })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: 90"
                                 />
@@ -4542,7 +4549,7 @@ const ProcessDetails = () => {
                                   type="date"
                                   value={realEstateData.data_entrega_chaves || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, data_entrega_chaves: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                 />
                               </div>
@@ -4551,7 +4558,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.condicao_suspensiva || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, condicao_suspensiva: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Ex: Aprovação de financiamento bancário"
                                 />
@@ -4561,7 +4568,7 @@ const ProcessDetails = () => {
                                 <Textarea
                                   value={realEstateData.observacoes_cpcv || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, observacoes_cpcv: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   rows={2}
                                   placeholder="Observações adicionais sobre o CPCV"
                                 />
@@ -4571,19 +4578,16 @@ const ProcessDetails = () => {
                         </Card>
 
                         {/* Dados do Proprietário (existente) */}
-                        <Card className="border-l-4 border-l-orange-500">
+                        <Card className={`border-l-4 border-l-orange-500 ${editingCard !== 'realestate' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <Users className="h-4 w-4 text-orange-500" />
-                              Dados do Proprietário / Vendedor
-                            </h4>
+                            <CardHeaderWithEdit title="Dados do Proprietário / Vendedor" cardKey="realestate" icon={Users} canEdit={canEditRealEstate} />
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Nome</Label>
                                 <Input
                                   value={realEstateData.owner_name || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, owner_name: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="Nome completo"
                                 />
@@ -4594,7 +4598,7 @@ const ProcessDetails = () => {
                                   type="email"
                                   value={realEstateData.owner_email || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, owner_email: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="email@exemplo.com"
                                 />
@@ -4604,7 +4608,7 @@ const ProcessDetails = () => {
                                 <Input
                                   value={realEstateData.owner_phone || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, owner_phone: e.target.value })}
-                                  disabled={!canEditRealEstate}
+                                  disabled={editingCard !== 'realestate' || !canEditRealEstate}
                                   className="h-9"
                                   placeholder="+351 000 000 000"
                                 />
@@ -4620,14 +4624,18 @@ const ProcessDetails = () => {
                   {/* Credit Tab */}
                   <TabsContent value="credit" className="space-y-4 mt-4">
                       <>
-                      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      {/* Dados do Crédito */}
+                      <Card className={`border-l-4 border-l-teal-500 ${editingCard !== 'credit' ? 'read-only-card' : ''}`}>
+                        <CardContent className="pt-4">
+                          <CardHeaderWithEdit title="Dados do Crédito" cardKey="credit" icon={CreditCard} canEdit={canEditCredit} />
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Valor do Empréstimo (€)</Label>
                           <Input
                             type="number"
                             value={creditData.requested_amount || ""}
                             onChange={(e) => setCreditData({ ...creditData, requested_amount: parseFloat(e.target.value) || null })}
-                            disabled={!canEditCredit}
+                            disabled={editingCard !== 'credit' || !canEditCredit}
                           />
                         </div>
                         <div className="space-y-2">
@@ -4636,7 +4644,7 @@ const ProcessDetails = () => {
                             type="number"
                             value={creditData.loan_term_years || ""}
                             onChange={(e) => setCreditData({ ...creditData, loan_term_years: parseInt(e.target.value) || null })}
-                            disabled={!canEditCredit}
+                            disabled={editingCard !== 'credit' || !canEditCredit}
                           />
                         </div>
                         <div className="space-y-2">
@@ -4646,7 +4654,7 @@ const ProcessDetails = () => {
                             step="0.01"
                             value={creditData.interest_rate || ""}
                             onChange={(e) => setCreditData({ ...creditData, interest_rate: parseFloat(e.target.value) || null })}
-                            disabled={!canEditCredit}
+                            disabled={editingCard !== 'credit' || !canEditCredit}
                           />
                         </div>
                         <div className="space-y-2">
@@ -4655,7 +4663,7 @@ const ProcessDetails = () => {
                             type="number"
                             value={creditData.monthly_payment || ""}
                             onChange={(e) => setCreditData({ ...creditData, monthly_payment: parseFloat(e.target.value) || null })}
-                            disabled={!canEditCredit}
+                            disabled={editingCard !== 'credit' || !canEditCredit}
                           />
                         </div>
                         <div className="space-y-2">
@@ -4663,7 +4671,7 @@ const ProcessDetails = () => {
                           <Input
                             value={creditData.bank_name || ""}
                             onChange={(e) => setCreditData({ ...creditData, bank_name: e.target.value })}
-                            disabled={!canEditCredit}
+                            disabled={editingCard !== 'credit' || !canEditCredit}
                           />
                         </div>
                         <div className="space-y-2">
@@ -4672,7 +4680,7 @@ const ProcessDetails = () => {
                             type="date"
                             value={formatDateForInput(creditData.bank_approval_date)}
                             onChange={(e) => setCreditData({ ...creditData, bank_approval_date: e.target.value })}
-                            disabled={!canEditCredit}
+                            disabled={editingCard !== 'credit' || !canEditCredit}
                           />
                         </div>
                         <div className="space-y-2 md:col-span-2">
@@ -4680,18 +4688,17 @@ const ProcessDetails = () => {
                           <Textarea
                             value={creditData.bank_approval_notes || ""}
                             onChange={(e) => setCreditData({ ...creditData, bank_approval_notes: e.target.value })}
-                            disabled={!canEditCredit}
+                            disabled={editingCard !== 'credit' || !canEditCredit}
                           />
                         </div>
                       </div>
+                        </CardContent>
+                      </Card>
 
                       {/* ====== Avaliação Bancária (Fase 3) ====== */}
-                      <Card className="border-l-4 border-l-emerald-500 mt-4">
+                      <Card className={`border-l-4 border-l-emerald-500 ${editingCard !== 'credit' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                            <Building2 className="h-4 w-4 text-emerald-500" />
-                            Avaliação Bancária
-                          </h4>
+                          <CardHeaderWithEdit title="Avaliação Bancária" cardKey="credit" icon={Building2} canEdit={canEditCredit} />
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Valor da Avaliação (€)</Label>
@@ -4699,7 +4706,7 @@ const ProcessDetails = () => {
                                 type="number"
                                 value={creditData.valuation_value || ""}
                                 onChange={(e) => setCreditData({ ...creditData, valuation_value: parseFloat(e.target.value) || null })}
-                                disabled={!canEditCredit}
+                                disabled={editingCard !== 'credit' || !canEditCredit}
                                 className="h-9"
                                 placeholder="0.00"
                               />
@@ -4710,7 +4717,7 @@ const ProcessDetails = () => {
                                 type="date"
                                 value={creditData.valuation_date || ""}
                                 onChange={(e) => setCreditData({ ...creditData, valuation_date: e.target.value })}
-                                disabled={!canEditCredit}
+                                disabled={editingCard !== 'credit' || !canEditCredit}
                                 className="h-9"
                               />
                             </div>
@@ -4719,7 +4726,7 @@ const ProcessDetails = () => {
                               <Input
                                 value={creditData.valuation_bank || ""}
                                 onChange={(e) => setCreditData({ ...creditData, valuation_bank: e.target.value })}
-                                disabled={!canEditCredit}
+                                disabled={editingCard !== 'credit' || !canEditCredit}
                                 className="h-9"
                                 placeholder="Ex: CGD, Millennium BCP"
                               />
@@ -4729,7 +4736,7 @@ const ProcessDetails = () => {
                               <Textarea
                                 value={creditData.valuation_notes || ""}
                                 onChange={(e) => setCreditData({ ...creditData, valuation_notes: e.target.value })}
-                                disabled={!canEditCredit}
+                                disabled={editingCard !== 'credit' || !canEditCredit}
                                 rows={2}
                                 placeholder="Observações sobre a avaliação bancária"
                               />
@@ -5188,7 +5195,6 @@ const ProcessDetails = () => {
                             <div className="flex items-start justify-between gap-1">
                               <div className="flex-1 min-w-0">
                                 <span className="font-medium">{safeString(activity.user_name)}</span>
-                                {activity.source === 'trello' && <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0">trello</Badge>}
                                 <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{safeString(activity.comment)}</p>
                                 <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
                               </div>

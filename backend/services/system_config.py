@@ -9,7 +9,7 @@ from datetime import datetime, timezone
 from database import db
 from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
-    TrelloConfig, SystemSettings, StorageProvider, CreditServicesConfig,
+    SystemSettings, StorageProvider, CreditServicesConfig,
     DocumentRecipientsConfig, DSTIConfig, AutoDraftConfig, AuditTrailConfig,
     SystemSMTPConfig, SystemWebmailConfig
 )
@@ -120,13 +120,6 @@ def _build_default_config(company_id: str = "default") -> SystemConfig:
             api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("EMERGENT_LLM_KEY"),
             model="gpt-4o-mini",
         ),
-        trello=TrelloConfig(
-            enabled=bool(os.environ.get("TRELLO_API_KEY")),
-            api_key=os.environ.get("TRELLO_API_KEY"),
-            api_token=os.environ.get("TRELLO_API_TOKEN"),
-            board_id=os.environ.get("TRELLO_BOARD_ID"),
-            webhook_base_url=os.environ.get("WEBHOOK_BASE_URL"),
-        ),
         settings=SystemSettings(),
         setup_completed=False,
         created_at=datetime.now(timezone.utc).isoformat(),
@@ -228,25 +221,6 @@ async def update_config_section(section: str, data: Dict[str, Any], company_id: 
         current = config.ai.model_dump()
         current.update(filtered_data)
         config.ai = AIConfig(**current)
-    elif section == "trello":
-        current = config.trello.model_dump()
-        current.update(filtered_data)
-        config.trello = TrelloConfig(**current)
-        
-        # Sincronizar com trello_service em tempo real
-        try:
-            from services.trello import trello_service
-            if config.trello.enabled:
-                # Actualizar a instância global do TrelloService
-                if config.trello.api_key:
-                    trello_service.api_key = config.trello.api_key
-                if config.trello.api_token:
-                    trello_service.token = config.trello.api_token
-                if config.trello.board_id:
-                    trello_service.board_id = config.trello.board_id
-                logger.info(f"TrelloService atualizado com novas credenciais - Board: {config.trello.board_id}")
-        except ImportError:
-            logger.warning("Não foi possível sincronizar com trello_service")
     elif section == "settings":
         current = config.settings.model_dump()
         current.update(filtered_data)

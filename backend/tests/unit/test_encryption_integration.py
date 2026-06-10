@@ -104,7 +104,7 @@ class TestProcessEncryption:
         assert decrypted["financial_data"]["portal_financas_senha"] == "senha123"
     
     def test_encrypt_co_buyers(self):
-        """Testa encriptação de co-compradores."""
+        """Testa encriptação de 2º Titular / Fiador."""
         from services.process_service import encrypt_sensitive_data, decrypt_sensitive_data
         
         process = {

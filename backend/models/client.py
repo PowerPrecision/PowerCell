@@ -2,7 +2,7 @@
 Modelo de Cliente
 
 O Cliente representa apenas a entidade pessoa/fiscal — dados pessoais e de contacto.
-Dados financeiros e de negócio (co-compradores, co-applicants, dados financeiros)
+Dados financeiros e de negócio (2º Titular / Fiador, co-applicants, dados financeiros)
 pertencem à entidade Processo, não ao Cliente.
 
 Um cliente pode ter múltiplos processos de compra/financiamento.
@@ -86,7 +86,7 @@ class Client(BaseModel):
     Modelo de Cliente — entidade pessoa/fiscal.
 
     O cliente representa apenas a pessoa física e os seus dados de identificação.
-    Dados financeiros e de negócio (co-compradores, dados financeiros) pertencem
+    Dados financeiros e de negócio (2º Titular / Fiador, dados financeiros) pertencem
     ao Processo associado, não ao Cliente.
     """
     id: str

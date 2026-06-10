@@ -16,9 +16,6 @@ Uso:
     
     # Processar documento com IA
     await task_queue.process_document(process_id, document_data, user_id)
-    
-    # Sincronizar com Trello
-    await task_queue.sync_trello(process_id)
 
 ====================================================================
 """
@@ -189,28 +186,6 @@ class TaskQueueService:
             process_id=process_id,
             document_data=document_data,
             user_id=user_id
-        )
-    
-    # ================================================================
-    # MÉTODOS DE CONVENIÊNCIA - TRELLO
-    # ================================================================
-    
-    async def sync_trello(
-        self,
-        process_id: str,
-        action: str = "sync"
-    ) -> Optional[str]:
-        """
-        Enfileira sincronização com Trello.
-        
-        Args:
-            process_id: ID do processo
-            action: "sync" | "create_card" | "update_card"
-        """
-        return await self.enqueue(
-            "sync_trello_task",
-            process_id=process_id,
-            action=action
         )
     
     # ================================================================

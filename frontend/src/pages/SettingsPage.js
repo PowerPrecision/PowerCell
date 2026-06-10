@@ -43,7 +43,6 @@ import {
 } from "lucide-react";
 import WorkflowEditor from "../components/WorkflowEditor";
 import NotificationSettings from "../components/NotificationSettings";
-import TrelloIntegration from "../components/TrelloIntegration";
 import BulkDocumentUpload from "../components/BulkDocumentUpload";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -568,9 +567,6 @@ const SettingsPage = () => {
                   </CardContent>
                 </Card>
 
-                {/* Integração Trello */}
-                <TrelloIntegration />
-                
                 {/* Editor de Workflow */}
                 <WorkflowEditor />
                 

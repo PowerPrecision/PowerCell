@@ -3,6 +3,22 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-17] — Pacote 1: Segurança de Dados, Soft Delete e UI Block
+
+### Removido
+- **Integração Trello — Deprecation completa** (`deprecation` — **CLEANUP**): Removida toda a integração do Trello do código. Apagados 5 ficheiros dedicados (`backend/routes/trello.py`, `backend/services/trello.py`, 2 testes, `frontend/src/components/TrelloIntegration.js`). Removidos imports e referências em 16 ficheiros: `server.py` (router + startup init), `config.py` (3 env vars), `models/process.py` (2 campos), `models/system_config.py` (TrelloConfig), `routes/processes.py` (3 sync calls), `routes/admin.py` (member auto-association), `routes/system_config.py` (section + test-connection), `routes/diagnostics.py` (check_trello_service), `services/system_config.py`, `services/task_queue.py`, `worker.py`, `SettingsPage.js`, `DiagnosticsPage.js`, `SystemConfigPage.js`, `ProcessDetails.js`, `api.js`, `UnifiedAuditTrail.js`.
+
+### Corrigido
+- **Soft Delete de Processos — Endpoint dedicado** (`fix` — **CRÍTICO**): Adicionado `DELETE /api/processes/{process_id}` que faz soft delete (`is_deleted: True`, `status: "eliminado"`) sem afetar o documento do cliente. Cascade para documentos e tarefas do processo. Registo de atividade no histórico.
+- **DELETE /clients/{id} — Cascade delete de processos removido** (`fix` — **CRÍTICO**): Antes, apagar um cliente marcava TODOS os processos associados como eliminados. Agora apenas remove a referência `client_id` dos processos (unset), deixando-os intactos. A independência entre Cliente e Processo é garantida.
+- **GET /clients/registered — Filtro is_deleted em falta** (`fix`): Adicionado `is_deleted: {"$ne": True}` na query para não devolver clientes eliminados.
+- **GET /clients/me — Filtro is_deleted em falta** (`fix`): Adicionado filtro `is_deleted` na query.
+- **Admin hard delete → soft delete** (`fix`): O endpoint `DELETE /admin/client-registrations/{process_id}` usava `delete_one()` (hard delete). Alterado para soft delete com `update_one()`.
+
+### Alterado
+- **Cartões de Processo em Read-Only (ProcessDetails)** (`feat` — **UX CRÍTICO**): Os cartões com informações (Contactos, Identificação, Rendimentos, Situação Financeira, Credenciais, Imóvel, Crédito) estão agora em modo de leitura por defeito. Adicionado estado `editingCard` (null por defeito) e componente `CardHeaderWithEdit` com ícone de Lápis no cabeçalho. Só ao clicar no lápis os campos ficam editáveis e aparecem os botões "Cancelar" e "Guardar". Permissões existentes (`canEdit*`, `isViewMode`, `isProcessLocked`) continuam a ser aplicadas. CSS `.read-only-card` torna inputs disabled visualmente limpos (sem borda, fundo transparente).
+- **Uniformização de Nomenclatura** (`refactor` — **UX**): Substituído "Co-Proponente"/"Co-Comprador" por "2º Titular / Fiador" em todo o código user-facing: `ProcessDetails.js`, `CPCVModal.js`, `models/process.py`, `models/client.py`, `scripts/seed_completo.py`, e mais 8 ficheiros. Nomes de campos da BD (`co_buyers`, `co_applicants`) mantidos para retro-compatibilidade.
+
 ## [2026-07-16] — Correção Definitiva: React Error #31 + /api/clients 422
 
 ### Corrigido

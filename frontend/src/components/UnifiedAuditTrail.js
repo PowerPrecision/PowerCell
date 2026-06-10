@@ -64,7 +64,6 @@ const EventItem = ({ event }) => {
             {type === "comment" && (
               <div>
                 <span className="text-sm font-medium">{event.user_name || "Anónimo"}</span>
-                {event.source === "trello" && <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0">trello</Badge>}
                 <p className="text-sm text-muted-foreground mt-0.5 whitespace-pre-wrap">{event.comment}</p>
               </div>
             )}

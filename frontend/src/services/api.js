@@ -628,10 +628,6 @@ export const createAutoDraft = (processId, docType) =>
 export const getWebmailStats = (box) =>
   api.get("/emails/webmail-stats", { params: box ? { box } : {} });
 
-// Trello
-export const getTrelloStatus = () => api.get("/trello/status");
-export const syncProcessWithTrello = (processId) => api.post(`/trello/sync/${processId}`);
-
 // Clients
 export const getClients = (params = {}) => {
     const cleanParams = Object.fromEntries(

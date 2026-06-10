@@ -364,8 +364,8 @@ def gerar_processo(process_number: int, clientes: list, is_multi_titular: bool =
         "client_nif": cliente_principal["dados_pessoais"]["nif"],
         
         # Dados dos titulares adicionais
-        "co_buyers": [],  # Co-compradores
-        "co_applicants": [],  # Co-proponentes
+        "co_buyers": [],  # 2º Titular / Fiador
+        "co_applicants": [],  # 2º Titular / Fiador
         
         "process_type": process_type,
         "status": status,

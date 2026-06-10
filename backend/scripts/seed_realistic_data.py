@@ -518,7 +518,7 @@ def gerar_processo(
         "compra_sozinho": compra_sozinho,
         "titular2_data": titular2_data,
 
-        # Co-compradores (legado — mantido vazio se há titular2)
+        # 2º Titular / Fiador (legado — mantido vazio se há titular2)
         "co_buyers": [],
         "co_applicants": [titular2_data] if titular2_data else [],
 

@@ -239,7 +239,7 @@ class EncryptionService:
             if section in result and isinstance(result[section], dict):
                 result[section] = self.encrypt_dict(result[section], fields)
         
-        # Encriptar listas de co-compradores/co-proponentes
+        # Encriptar listas de 2º Titular / Fiador
         for list_field in ["co_buyers", "co_applicants"]:
             if list_field in result and isinstance(result[list_field], list):
                 fields_to_encrypt = SENSITIVE_FIELDS.get(list_field, [])
@@ -278,7 +278,7 @@ class EncryptionService:
             if section in result and isinstance(result[section], dict):
                 result[section] = self.decrypt_dict(result[section], fields)
         
-        # Desencriptar listas de co-compradores/co-proponentes
+        # Desencriptar listas de 2º Titular / Fiador
         for list_field in ["co_buyers", "co_applicants"]:
             if list_field in result and isinstance(result[list_field], list):
                 fields_to_decrypt = SENSITIVE_FIELDS.get(list_field, [])

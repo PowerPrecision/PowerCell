@@ -2,7 +2,7 @@
  * SystemConfigPage — Página de configurações do sistema, exclusiva para Admin/CEO.
  *
  * PORQUÊ: O PowerCell tem múltiplas integrações externas (AWS S3, OpenAI, Gmail,
- * Trello, envio de emails) que precisam de configuração centralizada. Esta página
+ * envio de emails) que precisam de configuração centralizada. Esta página
  * permite ao administrador configurar credenciais, activar/desactivar funcionalidades
  * e executar tarefas de manutenção sem aceder directamente ao backend ou a variáveis
  * de ambiente. Inclui ferramentas de diagnóstico (reparação de índices, limpeza de logs)
@@ -59,7 +59,6 @@ import {
   Cloud,
   Mail,
   Sparkles,
-  Trello,
   Building,
   Building2,
   Save,
@@ -101,7 +100,6 @@ const SECTION_ICONS = {
   storage: Cloud,
   email: Mail,
   ai: Sparkles,
-  trello: Trello,
   settings: Building,
   maintenance: Wrench,
   document_recipients: Building2,
@@ -420,7 +418,7 @@ const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) 
             Guardar
           </Button>
 
-          {["storage", "email", "ai", "trello"].includes(sectionKey) && (
+          {["storage", "email", "ai"].includes(sectionKey) && (
             <Button variant="outline" onClick={handleTest} disabled={testing}>
               {testing ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />

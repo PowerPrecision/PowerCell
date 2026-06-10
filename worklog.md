@@ -523,3 +523,188 @@ Stage Summary:
 - All toast.error() calls in the listed files now safely extract string messages
 - Total patterns fixed: ~50 across 22 files (including 3 bonus files beyond the task list)
 - Import paths follow convention: ../utils for pages/components, ../../utils for kanban/ subdirectory
+
+---
+Task ID: 2
+Agent: Soft Delete Fix Agent
+Task: Fix Soft Delete gaps for Processes and Clients
+
+Work Log:
+- Added DELETE /api/processes/{process_id} endpoint with soft delete in processes.py (line 3000)
+  - Soft deletes the process (is_deleted=True, status=eliminado, is_active=False)
+  - Cascade: soft-deletes documents and tasks for the process
+  - Does NOT touch the client document (process deletion is independent)
+  - Logs activity in process_activities collection
+- Fixed DELETE /clients/{client_id} to NOT cascade-delete processes (clients.py lines 1959-1966)
+  - Changed from cascade-soft-deleting all processes to just removing client_id reference from processes
+  - Processes remain intact when a client is deleted; use DELETE /api/processes/{process_id} instead
+- Added is_deleted filter to GET /clients/registered (clients.py line 294)
+  - Query now includes "is_deleted": {"$ne": True} to exclude soft-deleted clients
+- Added is_deleted filter to GET /clients/me (clients.py lines 108-112)
+  - For queries with $or: wraps in $and with is_deleted filter
+  - For flat queries: adds is_deleted directly to query dict
+- Fixed hard delete in admin route (admin.py line 2974)
+  - Changed db.processes.delete_one to db.processes.update_one with soft delete fields
+  - Removed associated history and RGPD hard deletes (data is preserved)
+  - Updated docstring to reflect soft delete instead of irreversible action
+
+Stage Summary:
+- Process deletion now independent from client deletion
+- All GET endpoints properly filter soft-deleted records
+- No more hard deletes in the system for processes
+- Files modified:
+  - backend/routes/processes.py (added DELETE /{process_id} endpoint)
+  - backend/routes/clients.py (3 fixes: cascade removal, is_deleted filters)
+  - backend/routes/admin.py (hard delete → soft delete)
+
+---
+Task ID: 1
+Agent: Trello Removal Agent
+Task: Remove Trello integration completely
+
+Work Log:
+- Deleted 5 dedicated Trello files:
+  - backend/routes/trello.py
+  - backend/services/trello.py
+  - backend/tests/integration/test_iteration14_trello_integration.py
+  - backend/tests/test_iteration16_leads_trello.py
+  - frontend/src/components/TrelloIntegration.js
+- Modified backend/server.py (3 removals):
+  - Removed `from routes.trello import router as trello_router` import
+  - Removed `app.include_router(trello_router, prefix="/api")` router registration
+  - Removed `from services.trello import init_trello_from_config` and `await init_trello_from_config()` startup call
+- Modified backend/config.py (3 env vars removed):
+  - Removed TRELLO_API_KEY, TRELLO_TOKEN, TRELLO_BOARD_ID environment variables
+- Modified backend/models/process.py (2 fields removed):
+  - Removed `trello_card_id: Optional[str]` field
+  - Removed `trello_list_id: Optional[str]` field
+- Modified backend/models/system_config.py (3 removals):
+  - Removed `TrelloConfig` class
+  - Removed `trello: TrelloConfig = TrelloConfig()` field from SystemConfig
+  - Updated ConfigUpdateRequest.section comment to remove "trello"
+- Modified backend/routes/processes.py (4 removals):
+  - Removed `from services.trello import trello_service, status_to_trello_list, build_card_description` import
+  - Removed `sync_process_to_trello()` function
+  - Removed trello sync call on process creation
+  - Removed trello sync call on status change
+  - Removed trello sync call on process update
+- Modified backend/routes/admin.py (1 removal):
+  - Removed Trello member auto-association logic (~30 lines)
+- Modified backend/routes/system_config.py (3 removals):
+  - Removed entire "trello" section from CONFIG_FIELDS
+  - Removed Trello test-connection endpoint handler
+  - Removed "trello" from reveal-secrets section list and query description
+- Modified backend/routes/diagnostics.py (4 removals):
+  - Removed `check_trello_service()` function
+  - Removed trello service check from all_services endpoint
+  - Removed trello from checkers dict in service detail endpoint
+  - Removed trello member mappings extra info
+  - Updated quick-check comments to remove Trello references
+- Modified backend/services/system_config.py (3 removals):
+  - Removed TrelloConfig from import
+  - Removed trello=TrelloConfig(...) from _build_default_config()
+  - Removed entire trello section handler from update_config_section()
+- Modified backend/services/task_queue.py (2 removals):
+  - Removed `sync_trello()` method
+  - Removed Trello usage example from module docstring
+- Modified backend/worker.py (3 removals):
+  - Removed `services.trello` from lazy-loading module list in docstring
+  - Removed `services.trello` from NOT IMPORTED comment block
+  - Removed sync_trello task handler (elif block)
+- Modified frontend/src/pages/SettingsPage.js (2 removals):
+  - Removed `TrelloIntegration` import
+  - Removed `<TrelloIntegration />` render
+- Modified frontend/src/pages/DiagnosticsPage.js (2 removals):
+  - Removed `Trello` icon import from lucide-react
+  - Removed `trello: Trello` from serviceIcons map
+- Modified frontend/src/pages/SystemConfigPage.js (3 removals):
+  - Removed `Trello` icon import from lucide-react
+  - Removed `trello: Trello` from SECTION_ICONS map
+  - Removed "trello" from test-connection section filter
+  - Updated file header comment to remove "Trello" mention
+- Modified frontend/src/pages/ProcessDetails.js (1 removal):
+  - Removed `trello` source badge from activity rendering
+- Modified frontend/src/services/api.js (2 removals):
+  - Removed `getTrelloStatus()` export
+  - Removed `syncProcessWithTrello()` export
+- Modified frontend/src/components/UnifiedAuditTrail.js (1 removal):
+  - Removed `trello` source badge from event rendering
+
+Stage Summary:
+- Trello integration fully removed from backend and frontend
+- 5 files deleted, 16 files modified
+- No functional Trello code remains — only historical comments in docstrings/comments (admin.py lines 1496, 1548; client.py line 104)
+- Backend will no longer attempt to sync with Trello on process creation, status change, or update
+- System config no longer includes Trello section in UI or API
+- Diagnostics no longer checks Trello service status
+- Worker no longer handles sync_trello tasks
+
+---
+Task ID: 4
+Agent: Nomenclature Agent
+Task: Uniformize Co-Proponente/Co-Comprador to 2º Titular / Fiador
+
+Work Log:
+- Updated ProcessDetails.js: comment (line 3209) and header (line 3215) from "Co-Compradores / Co-Proponentes" to "2º Titular / Fiador"
+- Updated CPCVModal.js: 7 user-facing text changes:
+  - Comment: "// Co-comprador (se aplicável)" → "// 2º Titular / Fiador (se aplicável)"
+  - Comment: "// Co-comprador (segundo titular)" → "// 2º Titular / Fiador"
+  - Comment: "// Co-comprador" → "// 2º Titular / Fiador"
+  - JSX comment: "{/* Co-comprador (se existir) */}" → "{/* 2º Titular / Fiador (se existir) */}"
+  - Header label: "Co-comprador (2º Titular)" → "2º Titular / Fiador"
+  - Placeholder: "Nome do co-comprador" → "Nome do 2º Titular / Fiador"
+  - Placeholder: "Morada do co-comprador" → "Morada do 2º Titular / Fiador"
+- Updated backend/models/process.py: 3 Field description changes (ProcessCreate, ProcessUpdate, ProcessResponse) from "co-proponente" to "Fiador"
+- Updated backend/models/client.py: 2 docstring changes from "co-compradores" to "2º Titular / Fiador"
+- Updated backend/scripts/seed_completo.py: section header "CO-PROPONENTE" → "2º TITULAR / FIADOR", section comment, and docstring entry
+- Updated backend/scripts/seed_test_clients.py: 2 comments "Co-compradores"/"Co-proponentes" → "2º Titular / Fiador"
+- Updated backend/scripts/seed_realistic_data.py: comment "Co-compradores" → "2º Titular / Fiador"
+- Updated backend/routes/clients.py: comment "Co-compradores herdados do cliente" → "2º Titular / Fiador herdados do cliente"
+- Updated backend/services/encryption.py: 2 comments (encrypt/decrypt) from "co-compradores/co-proponentes" → "2º Titular / Fiador"
+- Updated backend/services/process_service.py: 3 comments from "co-compradores/co-proponentes" → "2º Titular / Fiador"
+- Updated backend/services/ai_document.py: 2 comments from "co-proponentes"/"co-compradores" → "2º Titular / Fiador"
+- Updated backend/services/migrate_encryption.py: 1 comment from "co-compradores" → "2º Titular / Fiador"
+- Updated backend/tests/unit/test_encryption_integration.py: 1 docstring from "co-compradores" → "2º Titular / Fiador"
+
+Stage Summary:
+- All user-facing text now uses "2º Titular / Fiador" consistently across frontend and backend
+- Database field names (co_buyers, co_applicants, co_comprador_nome, etc.) unchanged
+- API parameter names unchanged
+- Function names (gerar_co_proponente, test_encrypt_co_buyers) unchanged
+- Template placeholders ([CO_COMPRADOR_NOME], etc.) unchanged — tied to internal field names
+- 13 files modified across frontend and backend
+- Zero remaining occurrences of "co-comprador", "co-compradores", "co-proponente", or "co-proponentes" in the codebase
+
+---
+Task ID: 3
+Agent: Read-Only Cards Agent
+Task: Add isEditing state to ProcessDetails cards
+
+Work Log:
+- Added editingCard state variable (null | 'personal' | 'financial' | 'realestate' | 'credit')
+- Created CardHeaderWithEdit helper component with Pencil icon toggle → Cancelar/Guardar buttons
+- Added .read-only-card CSS class to index.css — makes disabled inputs/selects/textareas appear as plain text (no border, no background, full opacity)
+- Modified Personal tab: Contactos, Identificação, Filiação, Morada cards now use CardHeaderWithEdit and read-only-card class
+- Modified Financial tab: Rendimentos, Situação Financeira, Credenciais de Portais, 2º Proponente Credenciais, Situação Profissional cards now use CardHeaderWithEdit and read-only-card class
+- Modified Real Estate tab: Estado da Procura, Características do Imóvel, Localização, Dados do CPCV, Dados do Proprietário cards now use CardHeaderWithEdit and read-only-card class
+- Modified Credit tab: Wrapped main credit fields in a new Card (Dados do Crédito) with CardHeaderWithEdit; Avaliação Bancária card also updated
+- Changed all disabled={!canEditPersonal} to disabled={editingCard !== 'personal' || !canEditPersonal} in Personal tab inputs
+- Changed all disabled={!canEditFinancial} to disabled={editingCard !== 'financial' || !canEditFinancial} in Financial tab inputs
+- Changed all disabled={!canEditRealEstate} to disabled={editingCard !== 'realestate' || !canEditRealEstate} in Real Estate tab inputs
+- Changed all disabled={!canEditCredit} to disabled={editingCard !== 'credit' || !canEditCredit} in Credit tab inputs
+- Reverted disabled prop changes in "Dados do Processo" and "Organização do Processo" top-section cards (they have independent edit flow)
+- Added setEditingCard(null) in executeSave after successful save
+- Added setEditingCard(null) on tab change (onValueChange handler)
+- Left Créditos Ativos, Contas de Crédito, Simulações cards unchanged (they have their own inline editingCreditField toggle)
+- Left Co-Compradores / 2º Titular / Fiador cards unchanged (always read-only)
+- Left "Tempo Restante do Crédito" card unchanged (display-only, no inputs)
+
+Stage Summary:
+- Process details cards now default to read-only mode with plain text appearance
+- Pencil icon in card header enables editing; Cancelar/Guardar buttons replace pencil in edit mode
+- Tab switching resets editing state to prevent accidental edits across tabs
+- Existing permissions (canEdit*, isViewMode, isProcessLocked) still enforced
+- CSS-based read-only appearance avoids per-field conditional rendering
+- Files modified:
+  - frontend/src/index.css (added .read-only-card CSS rules)
+  - frontend/src/pages/ProcessDetails.js (editingCard state, CardHeaderWithEdit, card headers, disabled props, save handler, tab change handler)

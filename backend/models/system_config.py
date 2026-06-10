@@ -100,15 +100,6 @@ class AIConfig(BaseModel):
     max_tokens: int = 4000
 
 
-class TrelloConfig(BaseModel):
-    """Configuração do Trello"""
-    enabled: bool = False
-    api_key: Optional[str] = None
-    api_token: Optional[str] = None
-    board_id: Optional[str] = None
-    webhook_base_url: Optional[str] = None
-
-
 class ReportFrequency(str, Enum):
     """Frequência de envio do relatório de IA"""
     DAILY = "daily"
@@ -283,7 +274,6 @@ class SystemConfig(BaseModel):
     storage: StorageConfig = StorageConfig()
     email: EmailConfig = EmailConfig()
     ai: AIConfig = AIConfig()
-    trello: TrelloConfig = TrelloConfig()
     settings: SystemSettings = SystemSettings()
     credit_services: CreditServicesConfig = CreditServicesConfig()
     document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
@@ -299,7 +289,7 @@ class SystemConfig(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     """Request para actualizar configuração"""
-    section: str  # "storage", "email", "ai", "trello", "settings"
+    section: str  # "storage", "email", "ai", "settings"
     data: Dict[str, Any]
 
 
