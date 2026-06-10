@@ -17,7 +17,7 @@
  * - Consultores/Intermediários têm acesso de leitura e download.
  * - Admin/CEO/Diretor/Administrativo têm acesso total (upload, rename, delete).
  */
-import { useState, useCallback, useEffect, useRef } from "react";
+import { useState, useCallback, useEffect, useRef, Fragment } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
@@ -613,7 +613,7 @@ const FilesExplorerPage = () => {
             {breadcrumb.map((crumb, idx) => {
               const isLast = idx === breadcrumb.length - 1;
               return (
-                <React.Fragment key={crumb.path}>
+                <Fragment key={crumb.path}>
                   {idx > 0 && <BreadcrumbSeparator />}
                   <BreadcrumbItem>
                     {isLast ? (
@@ -627,7 +627,7 @@ const FilesExplorerPage = () => {
                       </button>
                     )}
                   </BreadcrumbItem>
-                </React.Fragment>
+                </Fragment>
               );
             })}
           </BreadcrumbList>
