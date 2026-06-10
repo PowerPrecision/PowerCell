@@ -1386,7 +1386,7 @@ function ProfilePanel() {
       const data = await res.json().catch(() => ({}));
 
       if (res.status === 403) {
-        setError(data.detail || 'Dados trancados. Processo já em análise.');
+        setError(typeof data.detail === 'string' ? data.detail : 'Dados trancados. Processo já em análise.');
         return;
       }
 
@@ -1719,7 +1719,7 @@ function PortalLoginScreen({ onLoginSuccess, client_id }) {
           onLoginSuccess(data.token);
         }
       } else {
-        setError(data.detail || 'Credenciais inválidas. Verifique o seu NIF e Número de Processo.');
+        setError(typeof data.detail === 'string' ? data.detail : 'Credenciais inválidas. Verifique o seu NIF e Número de Processo.');
       }
     } catch (err) {
       setError(err.message || 'Erro de ligação. Tente novamente.');

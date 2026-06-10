@@ -33,6 +33,7 @@ import {
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
 import { safeDateStr } from "../lib/utils";
+import { getErrorMessage } from "../utils/errorFormatter";
 import {
   Users,
   Plus,
@@ -333,8 +334,14 @@ export default function ClientsPage() {
         toast.success("Cliente eliminado");
         fetchClients();
       } else {
-        const error = await response.json();
-        toast.error(error.detail || "Erro ao eliminar cliente");
+        const errorData = await response.json();
+        // detail pode ser string ou array de Pydantic errors [{type, loc, msg, input}]
+        const msg = typeof errorData.detail === 'string'
+          ? errorData.detail
+          : Array.isArray(errorData.detail)
+            ? errorData.detail.map(e => e.msg || String(e)).join(' • ')
+            : "Erro ao eliminar cliente";
+        toast.error(msg);
       }
     } catch (error) {
       console.error("Erro ao eliminar cliente:", error);

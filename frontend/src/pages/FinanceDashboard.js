@@ -429,7 +429,9 @@ const PoolDistributionPanel = ({ companyId }) => {
       setPoolData(res.data);
     } catch (err) {
       console.error("Erro ao carregar distribuição do pool:", err);
-      setError(err.response?.data?.detail || "Erro ao carregar distribuição do pool.");
+      const rawDetail = err.response?.data?.detail;
+      const msg = typeof rawDetail === 'string' ? rawDetail : (Array.isArray(rawDetail) ? rawDetail.map(e => e.msg || String(e)).join(' • ') : "Erro ao carregar distribuição do pool.");
+      setError(msg);
     } finally {
       setLoading(false);
     }
@@ -906,7 +908,9 @@ const ProcessFinancesTab = ({ companyId }) => {
       setSummary(sumRes.data || null);
     } catch (err) {
       console.error("Erro ao carregar ProcessFinances:", err);
-      setError(err.response?.data?.detail || "Erro ao carregar registos financeiros.");
+      const rawDetail2 = err.response?.data?.detail;
+      const msg2 = typeof rawDetail2 === 'string' ? rawDetail2 : (Array.isArray(rawDetail2) ? rawDetail2.map(e => e.msg || String(e)).join(' • ') : "Erro ao carregar registos financeiros.");
+      setError(msg2);
     } finally {
       setLoading(false);
     }
@@ -1201,7 +1205,9 @@ const FinanceDashboard = () => {
       }
     } catch (err) {
       console.error("Erro ao carregar dados financeiros:", err);
-      setError(err.response?.data?.detail || "Erro ao carregar dados financeiros.");
+      const rawDetail3 = err.response?.data?.detail;
+      const msg3 = typeof rawDetail3 === 'string' ? rawDetail3 : (Array.isArray(rawDetail3) ? rawDetail3.map(e => e.msg || String(e)).join(' • ') : "Erro ao carregar dados financeiros.");
+      setError(msg3);
     } finally {
       setLoading(false);
     }

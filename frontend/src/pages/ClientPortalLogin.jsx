@@ -148,12 +148,12 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
         }
       } else if (res.status === 429) {
         // Rate limited — muitas tentativas falhadas
-        setError(data.detail || 'Muitas tentativas falhadas. Tente novamente mais tarde.');
+        setError(typeof data.detail === 'string' ? data.detail : 'Muitas tentativas falhadas. Tente novamente mais tarde.');
       } else if (res.status === 401) {
         // Credenciais inválidas
-        setError(data.detail || 'Credenciais inválidas. Verifique o seu email e código.');
+        setError(typeof data.detail === 'string' ? data.detail : 'Credenciais inválidas. Verifique o seu email e código.');
       } else {
-        setError(data.detail || 'Erro ao fazer login. Tente novamente.');
+        setError(typeof data.detail === 'string' ? data.detail : 'Erro ao fazer login. Tente novamente.');
       }
     } catch (err) {
       setError(err.message || 'Erro de ligação. Tente novamente.');
