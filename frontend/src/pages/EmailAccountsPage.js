@@ -32,6 +32,7 @@ import {
 import { hasAnyRole } from "../utils/roleUtils";
 import RichTextEditor from "../components/ui/RichTextEditor";
 import { toast } from "sonner";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { formatDate } from "../lib/utils";
 import {
   Mail,
@@ -119,7 +120,7 @@ const SystemSmtpCard = () => {
         toast.success("Configuração guardada com sucesso");
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao guardar configuração");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração"));
       }
     } catch (error) {
       toast.error("Erro ao guardar configuração");
@@ -153,8 +154,8 @@ const SystemSmtpCard = () => {
         }
       } else {
         const data = await res.json();
-        setTestResult({ success: false, message: data.detail || data.message || "Falha na conexão" });
-        toast.error(data.detail || data.message || "Falha na conexão");
+        setTestResult({ success: false, message: extractErrorMessage(data.detail || data.message, "Falha na conexão") });
+        toast.error(extractErrorMessage(data.detail || data.message, "Falha na conexão"));
       }
     } catch (err) {
       const msg = err.name === "AbortError" ? "Timeout: o teste demorou demasiado tempo (30s)" : "Erro no teste de conexão";
@@ -345,7 +346,7 @@ const IndexationImapCard = () => {
         toast.success("Configuração IMAP guardada com sucesso");
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao guardar configuração IMAP");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração IMAP"));
       }
     } catch (error) {
       toast.error("Erro ao guardar configuração IMAP");
@@ -489,7 +490,7 @@ const SharedEmailCard = () => {
       });
       if (!res.ok) {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao iniciar autenticação Google");
+        toast.error(extractErrorMessage(data.detail, "Erro ao iniciar autenticação Google"));
         setAuthenticating(null);
         return;
       }
@@ -531,7 +532,7 @@ const SharedEmailCard = () => {
       } else {
         const data = await res.json();
         // Mostrar mensagem de erro detalhada do backend
-        const errorMsg = data.detail || "Erro ao sincronizar";
+        const errorMsg = extractErrorMessage(data.detail, "Erro ao sincronizar");
         if (res.status === 404) {
           toast.error(`Configuração em falta — ${errorMsg}`, { duration: 6000 });
         } else if (res.status === 422) {
@@ -835,7 +836,7 @@ const CompanyEmailCard = () => {
         fetchCompanies();
       } else {
         const data = await res.json();
-        toast.error(data.detail || "Erro ao guardar");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
       }
     } catch (error) {
       toast.error("Erro de conexão");

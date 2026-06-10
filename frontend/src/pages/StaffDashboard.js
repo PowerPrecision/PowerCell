@@ -11,6 +11,7 @@ import { useState, useEffect, useMemo, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { safeDateStr, formatDate } from "../lib/utils";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import KanbanBoard from "../components/KanbanBoard";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -266,7 +267,7 @@ const StaffDashboard = () => {
           }
         } catch (createErr) {
           console.error('Erro ao criar cliente:', createErr);
-          toast.error(createErr.response?.data?.detail || 'Erro ao criar cliente na base de dados');
+          toast.error(extractErrorMessage(createErr.response?.data?.detail, 'Erro ao criar cliente na base de dados'));
           return;
         }
       }
@@ -298,7 +299,7 @@ const StaffDashboard = () => {
       fetchData();
     } catch (error) {
       console.error("Erro ao criar lead:", error);
-      toast.error(error.response?.data?.detail || "Erro ao criar processo");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao criar processo"));
     } finally {
       setCreatingLead(false);
     }

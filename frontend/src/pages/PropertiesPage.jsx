@@ -29,6 +29,7 @@ import { Label } from '../components/ui/label';
 import { Textarea } from '../components/ui/textarea';
 import { Alert, AlertTitle, AlertDescription } from '../components/ui/alert';
 import { toast } from 'sonner';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 import { hasAnyRole } from '../utils/roleUtils';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -833,7 +834,7 @@ const PropertiesPage = () => {
         fetchStats();
       } else {
         const error = await response.json();
-        toast.error(error.detail || 'Erro ao guardar');
+        toast.error(extractErrorMessage(error.detail, 'Erro ao guardar'));
       }
     } catch (error) {
       console.error('Erro:', error);
@@ -856,7 +857,7 @@ const PropertiesPage = () => {
         fetchStats();
       } else {
         const error = await response.json();
-        toast.error(error.detail || 'Erro ao eliminar');
+        toast.error(extractErrorMessage(error.detail, 'Erro ao eliminar'));
       }
     } catch (error) {
       toast.error('Erro ao eliminar imóvel');
@@ -962,7 +963,7 @@ const PropertiesPage = () => {
         
         pollProgress();
       } else {
-        toast.error(data.detail || 'Erro na importação');
+        toast.error(extractErrorMessage(data.detail, 'Erro na importação'));
         setImporting(false);
       }
     } catch (error) {

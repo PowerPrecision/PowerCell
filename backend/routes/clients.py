@@ -766,14 +766,14 @@ async def search_clients(
 async def list_clients(
     search: Optional[str] = Query(None, description="Pesquisar por nome, email ou NIF"),
     has_active_process: Optional[bool] = Query(None, description="Filtrar por ter processo activo"),
-    show_all: bool = Query(True, description="Se True, mostra todos os clientes da empresa. Se False, apenas os do utilizador"),
+    show_all: Optional[bool] = Query(True, description="Se True, mostra todos os clientes da empresa. Se False, apenas os do utilizador"),
     status_filter: Optional[str] = Query(None, description="Filtrar por fase do processo"),
     assignment_filter: Optional[str] = Query(None, description="Filtrar por tipo de atribuição: 'both', 'consultor', 'intermediario', 'none'"),
     indexacao_filter: Optional[str] = Query(None, description="Filtrar por indexação: 'assigned' (com indexação), 'unassigned' (sem indexação)"),
-    exclude_deleted: bool = Query(False, description="Excluir clientes eliminados (status=eliminado)"),
-    deleted_only: bool = Query(False, description="Mostrar apenas clientes eliminados (status=eliminado)"),
-    limit: int = Query(100, le=500),
-    skip: int = Query(0),
+    exclude_deleted: Optional[bool] = Query(False, description="Excluir clientes eliminados (status=eliminado)"),
+    deleted_only: Optional[bool] = Query(False, description="Mostrar apenas clientes eliminados (status=eliminado)"),
+    limit: Optional[int] = Query(100, le=500),
+    skip: Optional[int] = Query(0),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -788,6 +788,13 @@ async def list_clients(
     Nota: Todos podem ver a lista de clientes para referência,
     mas apenas têm acesso total a processos que lhes estão atribuídos.
     """
+    # Apply defaults for None values (handles empty string from query params)
+    show_all = show_all if show_all is not None else True
+    exclude_deleted = exclude_deleted if exclude_deleted is not None else False
+    deleted_only = deleted_only if deleted_only is not None else False
+    limit = limit if limit is not None else 100
+    skip = skip if skip is not None else 0
+
     user_role = user.get("role", "")
     user_id = user.get("id", "")
     user_email = user.get("email", "")

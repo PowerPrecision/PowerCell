@@ -3,6 +3,7 @@
  * Permite configurar instruções personalizadas para o agente de análise de documentos
  */
 import React, { useState, useEffect, useCallback } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -215,7 +216,7 @@ const AITrainingPage = () => {
         fetchEntries();
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao guardar");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
       }
     } catch (error) {
       toast.error("Erro ao guardar entrada");

@@ -42,6 +42,7 @@ import 'react-quill-new/dist/quill.snow.css';
  * // Usado dentro de SystemConfigPage como tab
  */
 import React, { useState, useEffect } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Card,
   CardContent,
@@ -181,7 +182,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         await loadConfig();
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao guardar configuração");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração"));
       }
     } catch (error) {
       console.error("Erro ao guardar:", error);
@@ -257,7 +258,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         await loadConfig();
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao guardar alterações");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar alterações"));
       }
     } catch (error) {
       console.error("Erro ao guardar:", error);
@@ -301,7 +302,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         await loadConfig();
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao guardar alterações");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar alterações"));
         // Reverter localmente se falhou
         setRecipients(recipients);
       }
@@ -343,7 +344,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         setHasChanges(false);
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao guardar alterações");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar alterações"));
         // Reverter se falhou
         setRecipients(recipients);
       }
@@ -512,7 +513,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         setShowPreviewDialog(true);
       } else {
         const data = await response.json().catch(() => ({}));
-        toast.error(data.detail || "Erro ao gerar pré-visualização");
+        toast.error(extractErrorMessage(data.detail, "Erro ao gerar pré-visualização"));
       }
     } catch (error) {
       toast.error("Erro ao gerar pré-visualização");

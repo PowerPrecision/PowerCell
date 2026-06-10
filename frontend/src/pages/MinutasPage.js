@@ -4,6 +4,7 @@
  * Disponivel para todos os utilizadores
  */
 import React, { useState, useEffect, useCallback } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -144,7 +145,7 @@ const MinutasPage = () => {
         fetchMinutas();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao guardar minuta");
+        toast.error(extractErrorMessage(error.detail, "Erro ao guardar minuta"));
       }
     } catch (error) {
       toast.error("Erro ao guardar minuta");

@@ -71,6 +71,7 @@ import {
   Plus,
 } from "lucide-react";
 import { toast } from "sonner";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { RichTextViewer } from "./ui/RichTextEditor";
 import SmartRichEditor from "./ui/SmartRichEditor";
 import { safeString } from "../utils/safeString";
@@ -277,7 +278,7 @@ const SendDocumentationModal = ({
         }
       } else {
         const errorData = await response.json().catch(() => ({}));
-        toast.error(errorData.detail || "Erro ao carregar preview do email");
+        toast.error(extractErrorMessage(errorData.detail, "Erro ao carregar preview do email"));
       }
     } catch (error) {
       console.error("Erro ao carregar preview:", error);
@@ -339,7 +340,7 @@ const SendDocumentationModal = ({
         toast.success(`Balcão "${newBranch.name}" guardado com sucesso!`);
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao guardar balcão.");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar balcão."));
       }
     } catch (error) {
       console.error("Erro ao criar balcão:", error);
@@ -497,9 +498,9 @@ const SendDocumentationModal = ({
         setBccEmails("");
       } else {
         if (response.status === 404) {
-          toast.error(data.detail || "Processo ou documento não encontrado.", { duration: 6000 });
+          toast.error(extractErrorMessage(data.detail, "Processo ou documento não encontrado."), { duration: 6000 });
         } else {
-          toast.error(data.detail || "Erro ao enviar documentação");
+          toast.error(extractErrorMessage(data.detail, "Erro ao enviar documentação"));
         }
       }
     } catch (error) {

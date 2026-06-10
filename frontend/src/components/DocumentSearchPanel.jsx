@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -168,7 +169,7 @@ const DocumentSearchPanel = ({ processId, clientName }) => {
         setShowCategorizeDialog(false);
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao categorizar documentos");
+        toast.error(extractErrorMessage(error.detail, "Erro ao categorizar documentos"));
       }
     } catch (error) {
       console.error("Erro ao categorizar:", error);

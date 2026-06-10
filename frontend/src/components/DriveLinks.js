@@ -6,6 +6,7 @@
  * Cenário B (Página do Cliente): Usa force_client_id, ignora nome da pasta
  */
 import { useState, useEffect } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -160,7 +161,7 @@ const DriveLinks = ({ processId, clientName }) => {
         setSavedFolderUrl(url);
       } else {
         const data = await response.json();
-        toast.error(data.detail || "Erro ao guardar link");
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar link"));
       }
     } catch (error) {
       toast.error("Erro ao guardar link da pasta");
@@ -203,7 +204,7 @@ const DriveLinks = ({ processId, clientName }) => {
       setFormData({ name: "", url: "", description: "" });
       fetchLinks();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao adicionar link");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao adicionar link"));
     } finally {
       setSaving(false);
     }

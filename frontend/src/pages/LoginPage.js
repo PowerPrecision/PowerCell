@@ -18,6 +18,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Alert, AlertDescription } from "../components/ui/alert";
 import { Mail, Lock, Loader2, Eye, EyeOff, Info } from "lucide-react";
 import { toast } from "sonner";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 export default function LoginPage() {
   const [email, setEmail] = useState("");
@@ -49,7 +50,7 @@ export default function LoginPage() {
       }
     } catch (error) {
       console.error("Login error:", error);
-      toast.error(error.response?.data?.detail || "Erro ao fazer login");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao fazer login"));
     } finally {
       setLoading(false);
     }

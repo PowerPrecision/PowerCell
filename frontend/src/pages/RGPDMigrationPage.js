@@ -9,6 +9,7 @@
  */
 import React, { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -176,7 +177,7 @@ const RGPDMigrationPage = () => {
         
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao iniciar migração");
+        toast.error(extractErrorMessage(error.detail, "Erro ao iniciar migração"));
         setMigrating(false);
       }
     } catch (error) {
@@ -210,8 +211,8 @@ const RGPDMigrationPage = () => {
         }
       } else {
         const error = await response.json();
-        setTestResult({ success: false, message: error.detail || "Erro ao migrar cliente" });
-        toast.error(error.detail || "Erro ao migrar cliente");
+        setTestResult({ success: false, message: extractErrorMessage(error.detail, "Erro ao migrar cliente") });
+        toast.error(extractErrorMessage(error.detail, "Erro ao migrar cliente"));
       }
     } catch (error) {
       console.error("Erro:", error);

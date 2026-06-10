@@ -36,6 +36,7 @@ import {
   ADDITIONAL_ROLE_OPTIONS,
   STAFF_ROLES,
 } from "../utils/roleUtils";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 const UsersManagementPage = ({ embedded = false }) => {
   const { user: currentUser, impersonate } = useAuth();
@@ -152,7 +153,7 @@ const UsersManagementPage = ({ embedded = false }) => {
       setShowPassword(false);
       fetchUsers();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao criar utilizador");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao criar utilizador"));
     } finally {
       setFormLoading(false);
     }
@@ -182,7 +183,7 @@ const UsersManagementPage = ({ embedded = false }) => {
       fetchUsers();
     } catch (error) {
       console.error("Erro ao atualizar:", error);
-      toast.error(error.response?.data?.detail || "Erro ao atualizar utilizador");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao atualizar utilizador"));
     } finally {
       setFormLoading(false);
     }
@@ -213,7 +214,7 @@ const UsersManagementPage = ({ embedded = false }) => {
         } catch (error) {
           // Se falhar, restaurar o utilizador
           setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
-          toast.error(error.response?.data?.detail || "Erro ao eliminar utilizador");
+          toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar utilizador"));
         }
       },
     });
@@ -225,7 +226,7 @@ const UsersManagementPage = ({ embedded = false }) => {
       toast.success(`Utilizador ${!currentStatus ? 'ativado' : 'desativado'} com sucesso`);
       fetchUsers();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao atualizar utilizador");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao atualizar utilizador"));
     }
   };
 

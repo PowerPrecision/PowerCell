@@ -17,6 +17,7 @@
  */
 import React, { memo, useCallback, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import {
   Dialog,
   DialogContent,
@@ -281,8 +282,8 @@ const ProcessDetailsModal = memo(({
 
     } catch (error) {
       console.error('Erro ao guardar:', error);
-      const detail = error.response?.data?.detail || error.message || 'Erro ao guardar alterações';
-      toast.error(typeof detail === 'string' ? detail : 'Erro ao guardar alterações');
+      const detail = extractErrorMessage(error.response?.data?.detail, error.message || 'Erro ao guardar alterações');
+      toast.error(detail);
     } finally {
       setSaving(false);
     }
@@ -634,8 +635,8 @@ const ProcessDetailsModal = memo(({
                           onProcessUpdate(process.id, { is_indexed: true });
                         }
                       } catch (error) {
-                        const detail = error.response?.data?.detail || error.message || 'Erro ao marcar indexação.';
-                        toast.error(typeof detail === 'string' ? detail : 'Erro ao marcar indexação.');
+                        const detail = extractErrorMessage(error.response?.data?.detail, error.message || 'Erro ao marcar indexação.');
+                        toast.error(detail);
                       } finally {
                         setMarkingIndexed(false);
                       }

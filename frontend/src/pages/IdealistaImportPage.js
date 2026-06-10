@@ -9,6 +9,7 @@
  */
 import React, { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -153,7 +154,7 @@ const IdealistaImportPage = () => {
         toast.success("Dados extraídos automaticamente!");
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao extrair dados");
+        toast.error(extractErrorMessage(error.detail, "Erro ao extrair dados"));
       }
     } catch (error) {
       console.error("Erro:", error);
@@ -201,7 +202,7 @@ const IdealistaImportPage = () => {
         toast.success("Dados extraídos com sucesso!");
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao extrair dados");
+        toast.error(extractErrorMessage(error.detail, "Erro ao extrair dados"));
       }
     } catch (error) {
       console.error("Erro:", error);
@@ -265,7 +266,7 @@ const IdealistaImportPage = () => {
         setHtmlContent("");
       } else {
         const errorData = await response.json();
-        toast.error(errorData.detail || "Erro ao criar lead");
+        toast.error(extractErrorMessage(errorData.detail, "Erro ao criar lead"));
       }
     } catch (error) {
       console.error("Erro ao criar lead:", error);

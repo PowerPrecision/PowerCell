@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -106,7 +107,7 @@ const AutomationPage = ({ embedded = false }) => {
         fetchRules();
       } else {
         const err = await res.json();
-        toast.error(err.detail || "Erro ao guardar");
+        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
       }
     } catch {
       toast.error("Erro de rede");

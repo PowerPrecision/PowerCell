@@ -40,6 +40,7 @@
  */
 import axios from "axios";
 import { toast } from "../hooks/use-toast";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 // ====================================================================
 // CONFIGURAÇÃO
@@ -356,7 +357,7 @@ api.interceptors.response.use(
     if (status >= 500) {
       // Show the actual error detail from backend when available,
       // otherwise show generic message
-      const serverDetail = data?.detail || "";
+      const serverDetail = extractErrorMessage(data?.detail, "");
       const isGenericError = !serverDetail || serverDetail === "Erro interno do servidor";
       const description = isGenericError
         ? "Ocorreu um erro interno. Contacte o suporte se o problema persistir."
@@ -632,7 +633,12 @@ export const getTrelloStatus = () => api.get("/trello/status");
 export const syncProcessWithTrello = (processId) => api.post(`/trello/sync/${processId}`);
 
 // Clients
-export const getClients = (params = {}) => api.get("/clients", { params });
+export const getClients = (params = {}) => {
+    const cleanParams = Object.fromEntries(
+        Object.entries(params).filter(([_, v]) => v !== '' && v !== null && v !== undefined)
+    );
+    return api.get("/clients", { params: cleanParams });
+};
 export const getClient = (id) => api.get(`/clients/${id}`);
 export const getClientFiles = (clientId) => api.get(`/documents/client/${clientId}/files`);
 export const createClient = (data) => api.post("/clients", data);

@@ -15,6 +15,7 @@
  */
 import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Dialog,
   DialogContent,
@@ -152,7 +153,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
         toast.success(`Cliente "${newClientData.nome}" criado com sucesso!`);
       } catch (createErr) {
         console.error('Erro ao criar cliente:', createErr);
-        toast.error(createErr.response?.data?.detail || 'Erro ao criar cliente na base de dados');
+        toast.error(extractErrorMessage(createErr.response?.data?.detail, 'Erro ao criar cliente na base de dados'));
         setSubmitting(false);
         return;
       }
@@ -182,7 +183,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
         navigate(`/process/${data.id}`);
       }
     } catch (err) {
-      const errMsg = err.response?.data?.detail || err.message || 'Erro ao criar processo';
+      const errMsg = extractErrorMessage(err.response?.data?.detail, err.message || 'Erro ao criar processo');
       toast.error(errMsg);
     } finally {
       setSubmitting(false);

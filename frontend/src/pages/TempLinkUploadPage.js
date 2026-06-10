@@ -8,6 +8,7 @@
  */
 import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Button } from "../components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
@@ -167,7 +168,7 @@ export default function TempLinkUploadPage() {
           toast.success(response.message || "Ficheiros carregados com sucesso!");
         } else {
           const error = JSON.parse(xhr.responseText);
-          toast.error(error.detail || "Erro ao carregar ficheiros");
+          toast.error(extractErrorMessage(error.detail, "Erro ao carregar ficheiros"));
         }
         setUploading(false);
       });

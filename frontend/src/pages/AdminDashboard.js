@@ -65,6 +65,7 @@ import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
 import TeamPerformanceTab from "../components/admin/TeamPerformanceTab";
 import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -249,7 +250,7 @@ const AdminDashboard = () => {
       toast.success("Evento criado com sucesso");
       fetchCalendarData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao criar evento");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao criar evento"));
       throw error;
     }
   };
@@ -261,7 +262,7 @@ const AdminDashboard = () => {
       toast.success("Evento eliminado");
       fetchCalendarData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao eliminar evento");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar evento"));
     }
   };
 

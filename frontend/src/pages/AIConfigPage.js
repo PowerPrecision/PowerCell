@@ -12,6 +12,7 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -261,7 +262,7 @@ const AIConfigPage = ({ embedded = false }) => {
         setHasChanges(false);
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao guardar configuração");
+        toast.error(extractErrorMessage(error.detail, "Erro ao guardar configuração"));
       }
     } catch (error) {
       console.error("Erro:", error);
@@ -310,7 +311,7 @@ const AIConfigPage = ({ embedded = false }) => {
         loadConfig();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao guardar modelo");
+        toast.error(extractErrorMessage(error.detail, "Erro ao guardar modelo"));
       }
     } catch (error) {
       toast.error("Erro de conexão");
@@ -332,7 +333,7 @@ const AIConfigPage = ({ embedded = false }) => {
         loadConfig();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao eliminar modelo");
+        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar modelo"));
       }
     } catch (error) {
       toast.error("Erro de conexão");
@@ -366,7 +367,7 @@ const AIConfigPage = ({ embedded = false }) => {
         loadConfig();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao guardar tarefa");
+        toast.error(extractErrorMessage(error.detail, "Erro ao guardar tarefa"));
       }
     } catch (error) {
       toast.error("Erro de conexão");
@@ -388,7 +389,7 @@ const AIConfigPage = ({ embedded = false }) => {
         loadConfig();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao eliminar tarefa");
+        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar tarefa"));
       }
     } catch (error) {
       toast.error("Erro de conexão");

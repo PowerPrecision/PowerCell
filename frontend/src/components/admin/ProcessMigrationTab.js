@@ -10,6 +10,7 @@
  * Acesso: Apenas Admin (no separador "Técnico" do SystemAdminPanel)
  */
 import { useState, useEffect, useCallback } from "react";
+import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
@@ -63,7 +64,7 @@ const ProcessMigrationTab = ({ embedded = false }) => {
       toast({
         variant: "destructive",
         title: "Erro ao carregar estado",
-        description: err.response?.data?.detail || "Não foi possível obter o estado da migração.",
+        description: extractErrorMessage(err.response?.data?.detail, "Não foi possível obter o estado da migração."),
       });
     } finally {
       setLoading(false);
@@ -98,7 +99,7 @@ const ProcessMigrationTab = ({ embedded = false }) => {
       toast({
         variant: "destructive",
         title: "Erro ao iniciar simulação",
-        description: err.response?.data?.detail || "Não foi possível iniciar a simulação.",
+        description: extractErrorMessage(err.response?.data?.detail, "Não foi possível iniciar a simulação."),
       });
     } finally {
       setActionLoading(null);
@@ -120,7 +121,7 @@ const ProcessMigrationTab = ({ embedded = false }) => {
       toast({
         variant: "destructive",
         title: "Erro ao iniciar migração",
-        description: err.response?.data?.detail || "Não foi possível iniciar a migração.",
+        description: extractErrorMessage(err.response?.data?.detail, "Não foi possível iniciar a migração."),
       });
     } finally {
       setActionLoading(null);
@@ -142,7 +143,7 @@ const ProcessMigrationTab = ({ embedded = false }) => {
       toast({
         variant: "destructive",
         title: "Erro ao reverter",
-        description: err.response?.data?.detail || "Não foi possível reverter a migração.",
+        description: extractErrorMessage(err.response?.data?.detail, "Não foi possível reverter a migração."),
       });
     } finally {
       setActionLoading(null);

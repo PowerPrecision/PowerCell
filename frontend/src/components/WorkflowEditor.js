@@ -9,6 +9,7 @@
  * ====================================================================
  */
 import { useState, useEffect } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -107,7 +108,7 @@ const WorkflowEditor = () => {
       resetForm();
       fetchStatuses();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao criar estado");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao criar estado"));
     } finally {
       setFormLoading(false);
     }
@@ -133,7 +134,7 @@ const WorkflowEditor = () => {
       resetForm();
       fetchStatuses();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao atualizar estado");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao atualizar estado"));
     } finally {
       setFormLoading(false);
     }
@@ -158,7 +159,7 @@ const WorkflowEditor = () => {
       setSelectedStatus(null);
       fetchStatuses();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao eliminar estado");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar estado"));
     } finally {
       setFormLoading(false);
     }

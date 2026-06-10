@@ -7,6 +7,7 @@
  * Suporta navegação para links de agências para extrair mais dados.
  */
 import React, { useState, useEffect } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Dialog,
   DialogContent,
@@ -137,7 +138,7 @@ const HtmlImportModal = ({ open, onOpenChange, onLeadCreated }) => {
         toast.success("Dados extraídos com sucesso!");
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao extrair dados");
+        toast.error(extractErrorMessage(error.detail, "Erro ao extrair dados"));
       }
     } catch (error) {
       console.error("Erro:", error);
@@ -276,7 +277,7 @@ const HtmlImportModal = ({ open, onOpenChange, onLeadCreated }) => {
         }
       } else {
         const errorData = await response.json();
-        toast.error(errorData.detail || "Erro ao criar lead");
+        toast.error(extractErrorMessage(errorData.detail, "Erro ao criar lead"));
       }
     } catch (error) {
       console.error("Erro ao criar lead:", error);

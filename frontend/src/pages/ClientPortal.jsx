@@ -20,6 +20,7 @@
  */
 import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { toast } from 'sonner';
+import { extractErrorMessage } from '../utils/extractErrorMessage';
 import useSlidingSession from '../hooks/useSlidingSession';
 import {
   FileText,
@@ -1049,7 +1050,7 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
                         if (res.ok && data.url) {
                           window.open(data.url, '_blank', 'noopener');
                         } else {
-                          toast.error(data.detail || 'Erro ao gerar link de download.');
+                          toast.error(extractErrorMessage(data.detail, 'Erro ao gerar link de download.'));
                         }
                       } catch (err) {
                         toast.error('Erro de ligação ao tentar descarregar.');

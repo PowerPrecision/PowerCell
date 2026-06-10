@@ -3,6 +3,7 @@
  * Componente para gerir tarefas (criar, listar, concluir)
  */
 import { useState, useEffect } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -212,7 +213,7 @@ const TasksPanel = ({
       setNewTask({ title: "", description: "", assigned_to: [], due_date: "" });
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao criar tarefa");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao criar tarefa"));
     } finally {
       setCreating(false);
     }
@@ -245,7 +246,7 @@ const TasksPanel = ({
       toast.success("Tarefa eliminada");
       fetchData();
     } catch (error) {
-      toast.error(error.response?.data?.detail || "Erro ao eliminar tarefa");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar tarefa"));
     }
   };
 

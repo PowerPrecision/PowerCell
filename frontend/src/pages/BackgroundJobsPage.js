@@ -6,6 +6,7 @@
  */
 import React, { useState, useEffect, useCallback, useRef } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -676,7 +677,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
         fetchJobs();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Não foi possível pausar o processo");
+        toast.error(extractErrorMessage(error.detail, "Não foi possível pausar o processo"));
       }
     } catch (error) {
       toast.error("Erro ao pausar processo");
@@ -696,7 +697,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
         fetchJobs();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Não foi possível retomar o processo");
+        toast.error(extractErrorMessage(error.detail, "Não foi possível retomar o processo"));
       }
     } catch (error) {
       toast.error("Erro ao retomar processo");
@@ -750,7 +751,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
         fetchJobs();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao limpar jobs bloqueados");
+        toast.error(extractErrorMessage(error.detail, "Erro ao limpar jobs bloqueados"));
       }
     } catch (error) {
       toast.error("Erro ao limpar jobs bloqueados");
@@ -773,7 +774,7 @@ const BackgroundJobsPage = ({ embedded = false }) => {
         fetchJobs();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao limpar todos os jobs");
+        toast.error(extractErrorMessage(error.detail, "Erro ao limpar todos os jobs"));
       }
     } catch (error) {
       toast.error("Erro ao limpar todos os jobs");

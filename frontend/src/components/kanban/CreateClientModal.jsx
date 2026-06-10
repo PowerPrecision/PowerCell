@@ -21,6 +21,7 @@
  * - Não causa re-renders no KanbanBoard quando o utilizador digita
  */
 import React, { memo, useState, useCallback } from 'react';
+import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import {
   Dialog,
   DialogContent,
@@ -191,7 +192,7 @@ const CreateClientModal = memo(({
           toast.success(`Cliente "${newClientData.nome}" criado com sucesso!`);
         } catch (createErr) {
           console.error('Erro ao criar cliente:', createErr);
-          const errMsg = createErr.response?.data?.detail || createErr.message || 'Erro ao criar cliente na base de dados';
+          const errMsg = extractErrorMessage(createErr.response?.data?.detail, 'Erro ao criar cliente na base de dados') || createErr.message;
           toast.error(errMsg);
           return;
         }
@@ -214,7 +215,7 @@ const CreateClientModal = memo(({
       onSuccess?.(processRes.data);
     } catch (error) {
       console.error('Erro ao criar processo:', error);
-      toast.error(error.response?.data?.detail || 'Erro ao criar processo');
+      toast.error(extractErrorMessage(error.response?.data?.detail, 'Erro ao criar processo'));
     } finally {
       setIsCreating(false);
     }

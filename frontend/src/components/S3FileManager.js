@@ -69,6 +69,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { toast } from "sonner";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
 import { hasRole } from "../utils/roleUtils";
 import {
@@ -330,7 +331,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       } else {
         const error = await response.json();
         if (error.detail !== "S3 não configurado") {
-          toast.error(error.detail || "Erro ao carregar ficheiros");
+          toast.error(extractErrorMessage(error.detail, "Erro ao carregar ficheiros"));
         }
       }
     } catch (error) {
@@ -399,7 +400,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         fetchFiles();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao guardar mapeamento");
+        toast.error(extractErrorMessage(error.detail, "Erro ao guardar mapeamento"));
       }
     } catch (error) {
       console.error("Erro ao guardar mapeamento:", error);
@@ -532,7 +533,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         } else {
           const error = await response.json();
           // Mensagem de erro mais amigável
-          const errorMsg = error.detail || `Erro ${response.status}`;
+          const errorMsg = extractErrorMessage(error.detail, `Erro ${response.status}`);
           toast.error(`${file.name}: ${errorMsg}`);
           errorCount++;
         }
@@ -757,7 +758,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           continue;
         } else {
           const error = await response.json();
-          const errorMsg = error.detail || `Erro ${response.status}`;
+          const errorMsg = extractErrorMessage(error.detail, `Erro ${response.status}`);
           toast.error(`${file.name}: ${errorMsg}`);
           errorCount++;
         }
@@ -817,7 +818,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         URL.revokeObjectURL(url);
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao fazer download");
+        toast.error(extractErrorMessage(error.detail, "Erro ao fazer download"));
       }
     } catch (error) {
       console.error("Erro ao fazer download:", error);
@@ -851,7 +852,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         fetchFiles();
       } else {
         const error = await response.json().catch(() => ({}));
-        toast.error(error.detail || "Erro ao eliminar ficheiro");
+        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar ficheiro"));
       }
     } catch (error) {
       toast.error("Erro ao eliminar ficheiro");
@@ -897,7 +898,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         fetchFiles();
       } else {
         const error = await response.json().catch(() => ({}));
-        toast.error(error.detail || "Erro ao eliminar ficheiros");
+        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar ficheiros"));
       }
     } catch (error) {
       console.error("Erro ao eliminar ficheiros em massa:", error);
@@ -958,7 +959,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             missingFields: error.detail.missing_fields
           });
         } else {
-          toast.error(error.detail?.message || error.detail || "Erro ao gerar minuta");
+          toast.error(extractErrorMessage(error.detail?.message || error.detail, "Erro ao gerar minuta"));
         }
       }
     } catch (error) {
@@ -1058,7 +1059,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         setPreviewUrl(url);
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao carregar preview");
+        toast.error(extractErrorMessage(error.detail, "Erro ao carregar preview"));
         setPreviewFile(null);
       }
     } catch (error) {
@@ -1201,7 +1202,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         fetchFiles();
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro na análise IA");
+        toast.error(extractErrorMessage(error.detail, "Erro na análise IA"));
       }
     } catch (error) {
       console.error("Erro na análise IA:", error);
@@ -1239,7 +1240,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         setAiDialog({ open: false, results: null });
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao aplicar sugestões");
+        toast.error(extractErrorMessage(error.detail, "Erro ao aplicar sugestões"));
       }
     } catch (error) {
       console.error("Erro ao aplicar sugestões:", error);
@@ -1292,7 +1293,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         if (error.detail?.includes("categorizado")) {
           toast.warning("Execute primeiro a análise IA para categorizar os documentos");
         } else {
-          toast.error(error.detail || "Erro ao renomear documentos");
+          toast.error(extractErrorMessage(error.detail, "Erro ao renomear documentos"));
         }
       }
     } catch (error) {
@@ -1352,7 +1353,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         fetchFiles(); // Recarregar lista
       } else {
         const error = await response.json();
-        toast.error(error.detail || "Erro ao renomear ficheiro");
+        toast.error(extractErrorMessage(error.detail, "Erro ao renomear ficheiro"));
       }
     } catch (error) {
       console.error("Erro ao renomear ficheiro:", error);
@@ -1407,7 +1408,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
       if (!analyzeResponse.ok) {
         const error = await analyzeResponse.json();
-        throw new Error(error.detail || "Erro na análise IA");
+        throw new Error(extractErrorMessage(error.detail, "Erro na análise IA"));
       }
 
       const analyzeResult = await analyzeResponse.json();
@@ -1451,7 +1452,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         fetchFiles(); // Recarregar lista
       } else {
         const error = await organizeResponse.json();
-        throw new Error(error.detail || "Erro ao organizar documentos");
+        throw new Error(extractErrorMessage(error.detail, "Erro ao organizar documentos"));
       }
 
     } catch (error) {
@@ -2337,7 +2338,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               setSelectedFilesForAI([]);
                             } else {
                               const error = await response.json();
-                              toast.error(error.detail || "Erro ao descarregar documentos");
+                              toast.error(extractErrorMessage(error.detail, "Erro ao descarregar documentos"));
                             }
                           } catch (error) {
                             console.error("Erro no download em massa:", error);

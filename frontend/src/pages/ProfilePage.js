@@ -50,6 +50,7 @@ import { hasRole } from "../utils/roleUtils";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import { formatDateTime } from "../lib/utils";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import EmailConfigForm from "../components/EmailConfigForm";
 import RichTextEditor from "../components/ui/RichTextEditor";
@@ -293,7 +294,7 @@ const ProfilePage = () => {
       toast({
         variant: "destructive",
         title: "Erro ao guardar",
-        description: error.response?.data?.detail || "Não foi possível guardar os dados profissionais.",
+        description: extractErrorMessage(error.response?.data?.detail, "Não foi possível guardar os dados profissionais."),
       });
     } finally {
       setSavingCompanyFields(false);
@@ -332,7 +333,7 @@ const ProfilePage = () => {
       toast({
         variant: "destructive",
         title: "Erro ao guardar",
-        description: error.response?.data?.detail || "Não foi possível guardar a assinatura.",
+        description: extractErrorMessage(error.response?.data?.detail, "Não foi possível guardar a assinatura."),
       });
     } finally {
       setSavingSignature(false);
@@ -385,7 +386,7 @@ const ProfilePage = () => {
       toast({
         variant: "destructive",
         title: "Erro ao alterar password",
-        description: error.response?.data?.detail || "Não foi possível alterar a password.",
+        description: extractErrorMessage(error.response?.data?.detail, "Não foi possível alterar a password."),
       });
     } finally {
       setChangingPassword(false);

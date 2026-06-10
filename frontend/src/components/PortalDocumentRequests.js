@@ -10,6 +10,7 @@
  * Integra-se na página de detalhes do processo (ProcessDetails.js).
  */
 import { useState, useEffect, useCallback } from "react";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -163,7 +164,7 @@ export default function PortalDocumentRequests({ processId }) {
       setShowAddDialog(false);
       fetchDocuments();
     } catch (err) {
-      toast.error(err.response?.data?.detail || "Erro ao solicitar documento");
+      toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao solicitar documento"));
     } finally {
       setActionLoading(null);
     }

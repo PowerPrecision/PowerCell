@@ -9,6 +9,7 @@
 
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
+import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -217,8 +218,8 @@ const ProcessesPage = () => {
       // Atualizar localmente o processo
       setProcesses(prev => prev.map(p => p.id === processId ? { ...p, is_indexed: true } : p));
     } catch (error) {
-      const detail = error.response?.data?.detail || error.message || 'Erro ao marcar indexação.';
-      toast.error(typeof detail === 'string' ? detail : 'Erro ao marcar indexação.');
+      const detail = extractErrorMessage(error.response?.data?.detail, error.message || 'Erro ao marcar indexação.');
+      toast.error(detail);
     } finally {
       setMarkingProcessIds(prev => {
         const next = new Set(prev);
