@@ -290,6 +290,10 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
         response["active_company_signature"] = active_assoc.get("signature") if "signature" in active_assoc else None
         response["active_company_professional_phone"] = active_assoc.get("professional_phone") if "professional_phone" in active_assoc else None
         response["active_company_job_title"] = active_assoc.get("job_title") if "job_title" in active_assoc else None
+        response["active_company_display_name"] = active_assoc.get("display_name") if "display_name" in active_assoc else None
+        # ── MERGE: Sobrepõe nome global com display_name da empresa activa ──
+        if active_assoc.get("display_name"):
+            response["name"] = active_assoc["display_name"]
     else:
         # Fallback: sem associação activa ou sem empresas
         response["active_company_role"] = active_role_header or user.get("role")
@@ -297,6 +301,7 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
         response["active_company_signature"] = None
         response["active_company_professional_phone"] = None
         response["active_company_job_title"] = None
+        response["active_company_display_name"] = None
     
     # Incluir informação de impersonate se presente
     if user.get("is_impersonated"):
@@ -453,7 +458,7 @@ async def update_profile(
     # Verificar se há campos específicos da empresa (enviados explicitamente)
     has_company_fields = any(
         k in data and data[k] is not None
-        for k in ("signature", "professional_phone", "job_title")
+        for k in ("signature", "professional_phone", "job_title", "display_name")
     )
     
     # ── Campos específicos por empresa — guardar em user_company_roles ──
@@ -464,6 +469,8 @@ async def update_profile(
         company_specific_fields["professional_phone"] = str(data["professional_phone"]).strip()
     if "job_title" in data and data["job_title"] is not None:
         company_specific_fields["job_title"] = str(data["job_title"]).strip()
+    if "display_name" in data and data["display_name"] is not None:
+        company_specific_fields["display_name"] = str(data["display_name"]).strip()
 
     # ── SEPARAÇÃO: Empresa não-default → extrair campos do global ──
     # Quando a empresa activa NÃO é a default, phone e email_signature
@@ -577,12 +584,15 @@ async def update_profile(
                 updated_user["active_company_signature"] = active_assoc_refreshed.get("signature") if "signature" in active_assoc_refreshed else None
                 updated_user["active_company_professional_phone"] = active_assoc_refreshed.get("professional_phone") if "professional_phone" in active_assoc_refreshed else None
                 updated_user["active_company_job_title"] = active_assoc_refreshed.get("job_title") if "job_title" in active_assoc_refreshed else None
+                updated_user["active_company_display_name"] = active_assoc_refreshed.get("display_name") if "display_name" in active_assoc_refreshed else None
                 updated_user["companies"] = refreshed_companies
                 # ── MERGE: Sobrepor campos globais com dados da empresa ativa ──
                 if active_assoc_refreshed.get("professional_phone"):
                     updated_user["phone"] = active_assoc_refreshed["professional_phone"]
                 if active_assoc_refreshed.get("signature"):
                     updated_user["email_signature"] = active_assoc_refreshed["signature"]
+                if active_assoc_refreshed.get("display_name"):
+                    updated_user["name"] = active_assoc_refreshed["display_name"]
     except Exception as e:
         logger.warning(f"[auth/profile] Erro ao adicionar campos da empresa na resposta: {e}")
 
