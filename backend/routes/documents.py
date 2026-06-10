@@ -4135,6 +4135,17 @@ async def create_portal_document_request(
     Solicita um documento ao cliente via portal.
     Cria um registo com status REQUESTED que aparece no portal do cliente.
     """
+    # ── 0. Log incoming request data for debugging ──
+    logger.info(
+        f"[PORTAL-REQUESTS] Creating request for process_id={process_id}, "
+        f"category={data.category!r}, notes={data.notes!r}, custom_label={data.custom_label!r}, "
+        f"user={user.get('id', '?')}"
+    )
+
+    # ── 0b. Validate process_id is not empty / obviously invalid ──
+    if not process_id or not process_id.strip():
+        raise HTTPException(status_code=400, detail="ID do processo inválido")
+
     try:
         # ── 1. Verify process exists (wrapped in own try/except) ──
         try:
@@ -4289,8 +4300,11 @@ async def create_portal_document_request(
         raise
     except Exception as e:
         logger.error(
-            f"[PORTAL-REQUESTS] Error creating portal request for process "
-            f"{process_id}: {type(e).__name__}: {e}", exc_info=True
+            f"[PORTAL-REQUESTS] Unhandled error creating portal request for process "
+            f"{process_id}: {type(e).__name__}: {e} | "
+            f"input_data: category={data.category!r}, notes={data.notes!r}, "
+            f"custom_label={data.custom_label!r}",
+            exc_info=True
         )
         raise HTTPException(
             status_code=500,

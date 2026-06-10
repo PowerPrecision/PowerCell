@@ -503,22 +503,29 @@ const FilesExplorerPage = () => {
           </div>
           <div className="flex items-center gap-3">
             {isFullAccess && (
-              <Button
-                variant="outline"
-                onClick={() => setConfigDialog({ open: true })}
-                className="gap-2"
-              >
-                <Settings className="h-4 w-4" />
-                Configurar Agora
-              </Button>
+              <>
+                <Button
+                  variant="outline"
+                  onClick={() => setConfigDialog({ open: true })}
+                  className="gap-2"
+                >
+                  <Settings className="h-4 w-4" />
+                  Configurar Agora
+                </Button>
+                <Button
+                  variant="ghost"
+                  onClick={() => navigate("/configuracoes")}
+                  className="gap-2"
+                >
+                  Ir para Configurações
+                </Button>
+              </>
             )}
-            <Button
-              variant="ghost"
-              onClick={() => navigate(isFullAccess ? "/configuracoes" : "/definicoes")}
-              className="gap-2"
-            >
-              Ir para Configurações
-            </Button>
+            {!isFullAccess && (
+              <p className="text-xs text-amber-600 dark:text-amber-400">
+                Contacte um administrador para configurar o armazenamento S3.
+              </p>
+            )}
           </div>
         </div>
       </CardContent>

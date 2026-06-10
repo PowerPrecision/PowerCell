@@ -207,13 +207,16 @@ const BANK_COLORS = {
 const getBankColor = (bankName) => {
   if (!bankName) return "bg-gray-200 text-gray-800";
   
+  // Garantir que bankName é uma string (pode vir como objecto {value, label})
+  const name = typeof bankName === 'string' ? bankName : (bankName?.label || bankName?.value || String(bankName));
+  
   // Tentar match exato primeiro
-  if (BANK_COLORS[bankName]) {
-    return BANK_COLORS[bankName];
+  if (BANK_COLORS[name]) {
+    return BANK_COLORS[name];
   }
   
   // Tentar match parcial (case-insensitive)
-  const bankLower = bankName.toLowerCase();
+  const bankLower = name.toLowerCase();
   for (const [bank, color] of Object.entries(BANK_COLORS)) {
     if (bankLower.includes(bank.toLowerCase()) || bank.toLowerCase().includes(bankLower)) {
       return color;
@@ -2222,17 +2225,17 @@ const ProcessDetails = () => {
             <div className="flex-1 min-w-0">
               <div className="flex items-center gap-3 flex-wrap">
                 <h2 className="text-xl font-semibold truncate">
-                  Processo #{process?.process_number || ''} — {clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome || 'Cliente'}
+                  Processo #{safeString(process?.process_number || '')} — {safeString(clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome) || 'Cliente'}
                 </h2>
                 <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
                   {safeLabel(currentStatusInfo.label)}
                 </Badge>
               </div>
               <p className="text-sm text-muted-foreground">
-                {typeLabels[process.process_type]}
+                {typeLabels[safeString(process.process_type)] || safeString(process.process_type)}
                 {process?.process_number && (
                   <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono">
-                    Nº {process.process_number}
+                    Nº {safeString(process.process_number)}
                   </span>
                 )}
               </p>
@@ -3747,7 +3750,7 @@ const ProcessDetails = () => {
                               <div className="space-y-2">
                                 {Array.isArray(financialData.bancos_creditos) && financialData.bancos_creditos.length > 0 ? (
                                   financialData.bancos_creditos.map((item, idx) => {
-                                    const banco = typeof item === 'object' ? item.banco : item;
+                                    const banco = typeof item === 'object' ? safeString(item.banco) : safeString(item);
                                     const valor = typeof item === 'object' ? item.valor : null;
                                     return (
                                       <div key={idx} className="flex items-center gap-2">
@@ -5165,9 +5168,9 @@ const ProcessDetails = () => {
                           <div key={activity.id} className="p-1.5 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
                             <div className="flex items-start justify-between gap-1">
                               <div className="flex-1 min-w-0">
-                                <span className="font-medium">{activity.user_name}</span>
+                                <span className="font-medium">{safeString(activity.user_name)}</span>
                                 {activity.source === 'trello' && <Badge variant="outline" className="ml-1 text-[9px] px-1 py-0">trello</Badge>}
-                                <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{activity.comment}</p>
+                                <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{safeString(activity.comment)}</p>
                                 <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
                               </div>
                               {(activity.user_id === user.id || hasRole(user, "admin")) && (
@@ -5348,7 +5351,7 @@ const ProcessDetails = () => {
                                 </button>
                                 <div>
                                   <p className={`text-sm ${deadline.completed ? "line-through text-muted-foreground" : ""}`}>
-                                    {deadline.title}
+                                    {safeString(deadline.title)}
                                   </p>
                                   <p className="text-xs text-muted-foreground font-mono">
                                     {safeFormat(deadline.due_date, "dd/MM/yyyy")}
@@ -5595,7 +5598,7 @@ const ProcessDetails = () => {
               <p className="text-xs text-muted-foreground mb-1">Cliente actual</p>
               <p className="font-medium">{safeString(clientData?.nome || process?.client_name || personalData?.nome_completo) || 'Cliente'}</p>
               {process?.client_email && (
-                <p className="text-sm text-muted-foreground">{process.client_email}</p>
+                <p className="text-sm text-muted-foreground">{safeString(process.client_email)}</p>
               )}
             </div>
 
@@ -5631,22 +5634,22 @@ const ProcessDetails = () => {
                     onClick={() => setReassignSelected(client)}
                     data-testid={`reassign-client-option-${client.id}`}
                   >
-                    <div className="font-medium text-sm">{client.nome}</div>
+                    <div className="font-medium text-sm">{safeString(client.nome)}</div>
                     <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
                       {client.email && (
                         <span className="flex items-center gap-1">
                           <Mail className="h-3 w-3" />
-                          {client.email}
+                          {safeString(client.email)}
                         </span>
                       )}
                       {client.telefone && (
                         <span className="flex items-center gap-1">
                           <Phone className="h-3 w-3" />
-                          {client.telefone}
+                          {safeString(client.telefone)}
                         </span>
                       )}
                       {client.nif && (
-                        <span className="font-mono">{client.nif}</span>
+                        <span className="font-mono">{safeString(client.nif)}</span>
                       )}
                     </div>
                   </button>
@@ -5664,10 +5667,10 @@ const ProcessDetails = () => {
             {reassignSelected && (
               <div className="p-3 border border-amber-300 bg-amber-50 rounded-lg">
                 <p className="text-xs text-amber-700 mb-1">Novo cliente seleccionado</p>
-                <p className="font-medium">{reassignSelected.nome}</p>
+                <p className="font-medium">{safeString(reassignSelected.nome)}</p>
                 {(reassignSelected.email || reassignSelected.telefone) && (
                   <p className="text-sm text-muted-foreground">
-                    {reassignSelected.email || reassignSelected.telefone}
+                    {safeString(reassignSelected.email || reassignSelected.telefone)}
                   </p>
                 )}
               </div>

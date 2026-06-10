@@ -1008,6 +1008,14 @@ async def startup():
     except (ImportError, ValueError, KeyError) as trello_err:
         logger.debug(f"Trello não configurado: {trello_err}")
     
+    # Inicializar S3 a partir da config da base de dados
+    try:
+        from services.s3_storage import sync_s3_from_db_config
+        await sync_s3_from_db_config()
+        logger.info("✅ S3 Service sincronizado com config da BD")
+    except (ImportError, ValueError, KeyError) as s3_err:
+        logger.debug(f"S3 sync não disponível: {s3_err}")
+    
     # ==========================================
     # TAREFAS DE BACKGROUND
     # =========================================

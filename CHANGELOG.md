@@ -3,6 +3,21 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-15] — Correção de 4 Bugs Conhecidos + Sincronização Webmail
+
+### Corrigido
+- **Explorador de Ficheiros não mostra ficheiros S3** (`fix` — **CRÍTICO**): O `S3Service` lia apenas variáveis de ambiente na inicialização. Quando o admin configurava S3 via UI (`/configuracoes`), as credenciais eram guardadas na BD mas o serviço nunca as lia. Adicionado método `reconfigure()` ao S3Service e sincronização automática: (1) no startup via `sync_s3_from_db_config()`, (2) em tempo real quando a config de storage é atualizada via UI (`update_config_section`). O `_build_default_config()` agora também lê as variáveis AWS do ambiente.
+- **Rota `/definicoes` vs `/configuracoes` no Explorador** (`fix` — **UX**): Quando o S3 não estava configurado, o banner "Ir para Configurações" enviava utilizadores não-admin para `/definicoes` (definições pessoais) em vez de `/configuracoes` (config do sistema). Corrigido: admins veem "Configurar Agora" + "Ir para Configurações" (`/configuracoes`); não-admins veem mensagem "Contacte um administrador".
+- **React Minified Error #31 em ProcessDetails** (`fix` — **STABILITY**): Objetos `{value, label}` do backend eram renderizados como React children, causando crash. Adicionados `safeString()` wrappers em 10+ locais no `ProcessDetails.js` e 6+ no `ProcessDetailsModal.jsx`: título do processo, número, tipo, email do cliente, campos de reatribuição, comentários de atividade, deadlines, visitas, tipologia, localização, dados bancários.
+- **500 Error em POST /api/documents/portal-requests/{processId}** (`fix`): Adicionada validação de `process_id` vazio (400), logging detalhado do input data no início e no except exterior para debugging post-mortem.
+
+### Alterado
+- **Sincronização Webmail — Enviados/Rascunhos/Lixo** (`fix` — **FUNCIONALIDADE**): O `_fetch_all_from_folder_sync` inferia a direção do email comparando `from_email == account.email`, o que é pouco fiável (casing, aliases). Adicionado `em["direction"] = "sent"` explícito após a obtenção de emails da pasta Sent IMAP nas 3 funções de sync: `sync_webmail_emails`, `sync_user_emails`, `sync_shared_role_emails`. Isto garante que emails enviados aparecem na pasta "Enviados" em vez de "Caixa de Entrada".
+
+### Notas
+- As funcionalidades "Filtro de documentos já solicitados" e "Multi-seleção de tipos de documento" já estavam implementadas no `PortalDocumentRequests.js` (linhas 128-139 e 292-319). O PRD foi atualizado para refletir isto.
+- O PRD foi atualizado para marcar os 4 bugs como corrigidos e as 3 funcionalidades como completas.
+
 ## [2026-03-13] — Reestruturação da Área Pessoal: Login Comum + Dados Profissionais por Empresa
 
 ### Corrigido

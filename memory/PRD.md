@@ -46,6 +46,7 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Nenhuma tarefa prioritária pendente (P1/P2 removidos por opção do utilizador)
 
 ## Correções Recentes
+- **2026-07-15**: Corrigidos 4 bugs conhecidos: (1) Explorador de Ficheiros S3 — S3Service não lia config da BD, adicionado `reconfigure()` + `sync_s3_from_db_config()` no startup e em tempo real; (2) Rota `/definicoes` vs `/configuracoes` no banner do explorador; (3) React Error #31 em ProcessDetails e ProcessDetailsModal — 16+ safeString() wrappers; (4) 500 em portal-requests — validação + logging melhorado. Funcionalidades completadas: Sincronização Webmail Enviados/Rascunhos/Lixo (direction="sent" explícito no sync). Confirmed: Filtro de docs já solicitados e Multi-seleção já estavam implementados.
 - **2026-07-04**: Documentação atualizada com issues conhecidos, funcionalidades pendentes e referência de rotas. Identificados 4 bugs e 3 pedidos de funcionalidade pendentes.
 - **2026-07-03**: Correções de CSP (vercel.live frame-src, wss: connect-src, non-portal completo), React error #31 na gestão de formulários ({value, label} objects como React children), stop-impersonate 400 (metadados de impersonate perdidos no refresh), menu lateral "Estados do Workflow" adicionado
 - **2026-06-29**: Portal do cliente redesenho completo (layout 2 colunas, stepper vertical, upload categorizado, pedidos de documentos), S3 CORS auto-config, mapeamento de categorias portal→S3, show mediador no portal
@@ -68,18 +69,18 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Perfis: `/configuracoes-perfis`
 - Gestão formulário: `/gestao-formulario`
 
-## Issues Conhecidos e Bugs (2026-07-04)
+## Issues Conhecidos e Bugs (2026-07-15 — ATUALIZADO)
 
-### Bugs Reportados
-1. **Explorador de Ficheiros não mostra ficheiros**: O S3 está configurado mas o explorador mostra "Nenhum ficheiro encontrado". Causas possíveis: Base Path incorreto, credenciais S3 inválidas, ou permissões insuficientes. Os consultores e intermediários têm acesso de leitura/download ao explorador (`canViewExplorer`).
-2. **Rota /definicoes incorreta para "Definições Gerais"**: Ao clicar para aceder às definições gerais, alguns elementos da UI navegam para `/definicoes` (SettingsPage - definições pessoais do utilizador) em vez de `/configuracoes` (SystemConfigPage - configurações do sistema). Estas são páginas diferentes.
-3. **React Minified Error #31**: Em ProcessDetails, objetos `{value, label}` são renderizados como React children. Já corrigido em FormManagementPage com helpers `optStr()` e `optVal()`, mas pode persistir noutros componentes.
-4. **500 Internal Server Error em POST /api/documents/portal-requests/{processId}**: O endpoint para criar pedidos de documentos via portal do cliente retorna erro 500 em determinados cenários.
+### Bugs Corrigidos ✅
+1. **✅ Explorador de Ficheiros não mostra ficheiros** (corrigido 2026-07-15): O `S3Service` lia apenas variáveis de ambiente na inicialização. Adicionado `reconfigure()` + `sync_s3_from_db_config()` no startup e sincronização em tempo real quando config é guardada via UI.
+2. **✅ Rota /definicoes incorreta para "Definições Gerais"** (corrigido 2026-07-15): Banner do Explorador de Ficheiros agora navega corretamente: admins → `/configuracoes`, não-admins → mensagem "Contacte um administrador".
+3. **✅ React Minified Error #31** (corrigido 2026-07-15): Adicionados 16+ `safeString()` wrappers em `ProcessDetails.js` e `ProcessDetailsModal.jsx` para evitar renderização de objetos `{value, label}` como React children.
+4. **✅ 500 Internal Server Error em POST /api/documents/portal-requests/{processId}** (corrigido 2026-07-15): Adicionada validação de process_id vazio (400) e logging detalhado para debugging.
 
-### Funcionalidades Pedidas (Pending)
-1. **Filtro de documentos já solicitados**: Ao pedir documentos ao cliente, filtrar da lista de seleção os tipos de documento que já foram solicitados (evitar pedidos duplicados).
-2. **Multi-seleção de tipos de documento**: Permitir selecionar múltiplos tipos de documento ao mesmo tempo ao solicitar documentos ao cliente (atualmente só permite um de cada vez).
-3. **Pastas do Webmail - Enviados/Rascunhos/Lixo**: As pastas de Enviados, Rascunhos e Lixo devem aparecer e ser corretamente sincronizadas no webmail. O frontend já define 5 pastas (inbox, sent, starred, drafts, trash) mas a sincronização IMAP pode não estar a popular estas pastas corretamente.
+### Funcionalidades Completadas ✅
+1. **✅ Filtro de documentos já solicitados** (já implementado): O `PortalDocumentRequests.js` filtra automaticamente categorias já solicitadas da lista de seleção (linhas 128-139, `availableCategories`).
+2. **✅ Multi-seleção de tipos de documento** (já implementado): O `PortalDocumentRequests.js` permite selecionar múltiplas categorias com checkboxes e cria pedidos em batch (linhas 292-319, `newDoc.categories`).
+3. **✅ Pastas do Webmail - Enviados/Rascunhos/Lixo** (corrigido 2026-07-15): Adicionado `direction="sent"` explícito nas 3 funções de sync IMAP (`sync_webmail_emails`, `sync_user_emails`, `sync_shared_role_emails`). O frontend já definia as 5 pastas e o backend já sincroniza Drafts/Trash — o problema era que emails enviados apareciam na Inbox por causa da inferência pouco fiável de `direction`.
 
 ## Rotas Importantes (Referência Rápida)
 

@@ -89,6 +89,24 @@ class S3Service:
         else:
             logger.warning("Credenciais S3 não encontradas. O serviço não funcionará.")
 
+    def reconfigure(self, access_key: str, secret_key: str, bucket_name: str, region: str = "eu-west-3"):
+        """Reinitialize S3 client with new credentials (e.g., from UI config)."""
+        try:
+            self.s3_client = boto3.client(
+                's3',
+                aws_access_key_id=access_key,
+                aws_secret_access_key=secret_key,
+                region_name=region
+            )
+            self.bucket_name = bucket_name
+            logger.info(f"S3 Service reconfigurado com sucesso. Bucket: {bucket_name}, Region: {region}")
+            self._ensure_cors_configured()
+            return True
+        except Exception as e:
+            logger.error(f"Erro ao reconfigurar S3: {e}")
+            self.s3_client = None
+            return False
+
     def _ensure_cors_configured(self):
         """
         Garante que o bucket S3 tem CORS configurado para uploads diretos do browser.
@@ -1200,3 +1218,37 @@ class S3Service:
 
 # Instância global
 s3_service = S3Service()
+
+
+async def sync_s3_from_db_config():
+    """
+    Sync S3Service with database config on startup.
+    Called after database is available.
+    If DB has S3 credentials and S3Service is not yet configured,
+    this reconfigures it.
+    """
+    try:
+        from database import db
+        config_doc = await db.system_config.find_one({"_id": "main"})
+        if not config_doc:
+            return
+
+        storage = config_doc.get("storage", {})
+        provider = storage.get("provider", "none")
+
+        if provider == "aws_s3":
+            access_key = storage.get("aws_access_key_id")
+            secret_key = storage.get("aws_secret_access_key")
+            bucket_name = storage.get("aws_bucket_name")
+            region = storage.get("aws_region", "eu-west-3")
+
+            if access_key and secret_key and bucket_name:
+                if not s3_service.is_configured():
+                    s3_service.reconfigure(access_key, secret_key, bucket_name, region)
+                    logger.info(f"S3Service inicializado a partir da config da BD — Bucket: {bucket_name}")
+                # Even if already configured from env, DB config takes precedence if bucket differs
+                elif s3_service.bucket_name != bucket_name:
+                    s3_service.reconfigure(access_key, secret_key, bucket_name, region)
+                    logger.info(f"S3Service atualizado com config da BD — Bucket: {bucket_name}")
+    except Exception as e:
+        logger.debug(f"Sync S3 from DB config falhou (normal se BD não disponível): {e}")
