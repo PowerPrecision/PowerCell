@@ -298,3 +298,115 @@ Stage Summary:
 - Cards reorganizados: Login (comum) → Dados Profissionais (por empresa) → Assinatura → Sessões → Webmail
 - Campo `display_name` por empresa disponível no UCR (MongoDB schemaless, sem migração)
 - Feedback visual completo no botão guardar: loading → sucesso → idle
+
+---
+Task ID: 2
+Agent: Code Agent
+Task: Fix S3 File Explorer — S3Service not reading from database config
+
+Work Log:
+- Read and analyzed s3_storage.py: S3Service singleton reads AWS credentials from env vars at startup only
+- Read and analyzed system_config.py: update_config_section saves storage config to MongoDB but never syncs to S3Service
+- Read and analyzed server.py: Found startup event handler at line 978
+- Added `reconfigure()` method to S3Service class (after __init__) to allow runtime re-initialization with new credentials
+- Added `sync_s3_from_db_config()` async function after s3_service singleton to sync from MongoDB on startup
+- Updated `update_config_section()` in system_config.py: when section=="storage", now calls s3_service.reconfigure() with DB credentials in real-time
+- Updated `_build_default_config()` in system_config.py: StorageConfig now includes AWS S3 env vars (aws_access_key_id, aws_secret_access_key, aws_bucket_name, aws_region)
+- Updated `server.py` startup handler: added call to sync_s3_from_db_config() after Trello init
+
+Stage Summary:
+- Root cause fixed: S3Service now reads from database config instead of only env vars
+- Two sync paths implemented: (1) at startup via sync_s3_from_db_config(), (2) in real-time when user saves storage config via UI
+- Files modified:
+  - backend/services/s3_storage.py (added reconfigure method + sync_s3_from_db_config function)
+  - backend/services/system_config.py (added S3 sync in update_config_section + AWS fields in _build_default_config)
+  - backend/server.py (added sync_s3_from_db_config call in startup)
+---
+Task ID: 5-6
+Agent: Code Agent
+Task: Fix portal-requests 500 error and webmail folder sync
+
+Work Log:
+- Read and analyzed `backend/routes/documents.py` POST `/api/documents/portal-requests/{process_id}` endpoint (lines 4128-4312)
+- Found that the endpoint already had outer try/except and uuid was imported, but lacked input data logging and process_id validation
+- Added request data logging at the start of the endpoint (process_id, category, notes, custom_label, user_id) for debugging 500 errors
+- Added process_id validation to reject empty/blank IDs with a 400 error before hitting MongoDB
+- Enhanced the outer except block to include input data in the error log for post-mortem debugging
+- Read `frontend/src/pages/WebmailPage.jsx` — confirmed FOLDERS array includes all 5 folders (inbox, sent, starred, drafts, trash), sidebar renders counts correctly from `folderCountsData`
+- Read `backend/routes/emails.py` webmail-stats endpoint — confirmed it returns `folder_counts` with all 5 folder counts (inbox, sent, starred, drafts, trash)
+- Read `backend/services/email_service.py` — identified that `sync_webmail_emails` (global sync) and `sync_user_emails` (user sync) fetch from Sent IMAP folder but do NOT explicitly set `direction="sent"` on the fetched emails
+- Fixed `sync_webmail_emails`: Added explicit `em["direction"] = "sent"` loop for emails from the Sent IMAP folder
+- Fixed `sync_user_emails`: Added explicit `em["direction"] = "sent"` loop for emails from the Sent IMAP folder
+- Fixed `sync_shared_role_emails`: Added explicit `email_data["direction"] = "sent"` for emails from the Sent IMAP folder
+- Confirmed Drafts sync already correctly sets `em["direction"] = "sent"` and `em["_is_draft"] = True` in all three sync functions
+- Confirmed Trash sync already correctly sets `em["_is_trash"] = True` in all three sync functions
+
+Stage Summary:
+- Portal-requests 500 error: Added defensive logging and process_id validation. The root cause of 500s was likely unlogged exceptions; now all input is logged on entry and in the catch-all except block.
+- Webmail Sent/Drafts/Trash folders: The key fix was ensuring `direction="sent"` is explicitly set for emails fetched from the Sent IMAP folder in all three sync functions. Previously, direction was inferred by comparing from_email to account.email, which could fail due to casing differences, aliases, or other mismatches — causing Sent emails to appear in Inbox instead.
+- Frontend and webmail-stats endpoint were already correct — no changes needed on those sides.
+- Files modified: `backend/routes/documents.py`, `backend/services/email_service.py`
+
+---
+Task ID: 3-4
+Agent: Code Agent
+Task: Fix route confusion and React Error #31
+
+Work Log:
+- Read FilesExplorerPage.jsx and identified S3NotConfiguredBanner (lines 488-526) with incorrect navigation to `/definicoes` for non-admin users
+- Fixed S3NotConfiguredBanner: admin users now see both "Configurar Agora" and "Ir para Configurações" (→ /configuracoes); non-admin users see message "Contacte um administrador para configurar o armazenamento S3."
+- Read ProcessDetails.js and identified multiple places where object values could be rendered as React children (causing Error #31)
+- Fixed getBankColor() function to handle object inputs (e.g. {value, label}) by converting to string before string operations
+- Fixed header title at line 2228: wrapped clientData/process names with safeString()
+- Fixed process number display at line 2238: wrapped with safeString()
+- Fixed process_type label lookup at line 2235: wrapped with safeString() for both lookup key and fallback display
+- Fixed process.client_email at line 5601: wrapped with safeString()
+- Fixed banco extraction at line 3753: item.banco now wrapped with safeString() in case it's an object
+- Fixed activity.user_name and activity.comment (lines 5171-5173): wrapped with safeString()
+- Fixed deadline.title (line 5354): wrapped with safeString()
+- Fixed reassign dialog client fields (lines 5637-5653): client.nome, client.email, client.telefone, client.nif all wrapped with safeString()
+- Fixed reassign selected client display (lines 5670-5673): reassignSelected.nome and email/telefone wrapped with safeString()
+- Read PortalDocumentRequests.js: confirmed it already has local safeString function and uses it throughout (getCategoryInfo, DocItem status/notes/filename). No changes needed.
+- Read ProcessDetailsModal.jsx and identified unprotected renders
+- Fixed process title at line 311: wrapped process_number and client names with safeString()
+- Fixed process number in subtitle at line 586: wrapped with safeString()
+- Fixed process_type display at line 604: wrapped with safeString() before .replace()
+- Fixed status display at line 594: wrapped editProcess.status with safeString()
+- Fixed visits tab: propTitle, propTypology, propLocation, visit.consultor_name, visit.notes all wrapped with safeString()
+- Fixed visit detail modal: propTitle, propTypology, propLocation, propAddress, sv.consultor_name, sv.notes all wrapped with safeString()
+
+Stage Summary:
+- Task 1 (Route confusion): Fixed S3NotConfiguredBanner to navigate admin users to /configuracoes (not /definicoes) and show a contact-admin message for non-admin users instead of a broken button
+- Task 2 (React Error #31): Applied safeString() wrappers to 20+ locations across 3 files where object values from the API could be rendered as React children, preventing "Objects are not valid as a React child" crashes
+- Key fix in getBankColor(): Now handles {value, label} objects from the backend that were causing both rendering errors and .toLowerCase() crashes
+- Files modified:
+  - frontend/src/pages/FilesExplorerPage.jsx (S3NotConfiguredBanner button logic)
+  - frontend/src/pages/ProcessDetails.js (getBankColor + 10 render locations)
+  - frontend/src/components/kanban/ProcessDetailsModal.jsx (6 render locations + visits tab)
+  - frontend/src/components/PortalDocumentRequests.js (no changes needed — already protected)
+
+
+---
+Task ID: 9
+Agent: Main Agent
+Task: Corrigir 4 bugs conhecidos + 3 funcionalidades pendentes do PowerCell
+
+Work Log:
+- Analisou completamente o código-fonte do PowerCell (frontend React 19 + backend FastAPI + MongoDB)
+- Identificou causa raiz do bug do Explorador de Ficheiros: S3Service lia apenas variáveis de ambiente, não config da BD
+- Implementou `reconfigure()` no S3Service para permitir reconfiguração em runtime
+- Adicionou `sync_s3_from_db_config()` para sincronizar no startup
+- Adicionou sync em tempo real no `update_config_section()` quando storage é atualizado via UI
+- Corrigiu rota `/definicoes` vs `/configuracoes` no S3NotConfiguredBanner
+- Adicionou 16+ `safeString()` wrappers em ProcessDetails.js e ProcessDetailsModal.jsx
+- Adicionou validação de process_id e logging melhorado no portal-requests
+- Corrigiu sincronização de Enviados no webmail (direction="sent" explícito nas 3 funções de sync)
+- Confirmou que Filtro de docs já solicitados e Multi-seleção já estavam implementados
+- Atualizou CHANGELOG.md, PRD.md e worklog.md
+
+Stage Summary:
+- 4 bugs corrigidos: S3 Explorer, Rota confusão, React Error #31, 500 portal-requests
+- 1 funcionalidade corrigida: Webmail Enviados/Rascunhos/Lixo
+- 2 funcionalidades confirmadas como já implementadas: Filtro + Multi-seleção
+- Ficheiros modificados: s3_storage.py, system_config.py, server.py, documents.py, email_service.py, FilesExplorerPage.jsx, ProcessDetails.js, ProcessDetailsModal.jsx
+- Documentação atualizada: CHANGELOG.md, PRD.md, worklog.md

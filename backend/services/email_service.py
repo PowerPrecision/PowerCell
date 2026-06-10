@@ -1203,6 +1203,11 @@ async def sync_webmail_emails(
                     )
                     sent_list = sent_result.get("emails", []) if sent_result else []
                     if sent_list:
+                        # Explicitly set direction="sent" for emails from the Sent IMAP folder.
+                        # _fetch_all_from_folder_sync infers direction from from_email == account.email,
+                        # but this can be unreliable (e.g., different casing, aliases, etc.).
+                        for em in sent_list:
+                            em["direction"] = "sent"
                         all_emails.extend(sent_list)
                         break
                 except Exception:
@@ -1580,6 +1585,11 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
                 )
                 sent_emails_list = sent_result.get("emails", []) if sent_result else []
                 if sent_emails_list:
+                    # Explicitly set direction="sent" for emails from the Sent IMAP folder.
+                    # _fetch_all_from_folder_sync infers direction from from_email == account.email,
+                    # but this can be unreliable (e.g., different casing, aliases, etc.).
+                    for em in sent_emails_list:
+                        em["direction"] = "sent"
                     sent_emails = sent_emails_list
                     break
             except Exception:
@@ -1930,6 +1940,8 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
         )
 
         for email_data in sent_result.get("emails", []):
+            # Explicitly set direction="sent" for emails from the Sent IMAP folder
+            email_data["direction"] = "sent"
             try:
                 msg_id = email_data.get("message_id", "")
                 if not msg_id:

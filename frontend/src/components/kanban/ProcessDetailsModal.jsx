@@ -308,7 +308,7 @@ const ProcessDetailsModal = memo(({
           <DialogTitle className="flex items-center justify-between">
             <span className="flex items-center gap-2">
               <FileText className="h-5 w-5 text-blue-600" />
-              Processo #{process.process_number || '—'} — {clientData?.nome || process.client_name || process.personal_data?.nome || 'Cliente'}
+              Processo #{safeString(process.process_number) || '—'} — {safeString(clientData?.nome || process.client_name || process.personal_data?.nome) || 'Cliente'}
             </span>
             <div className="flex items-center gap-2">
               {isEditing ? (
@@ -583,7 +583,7 @@ const ProcessDetailsModal = memo(({
                     Dados do Processo / Negócio
                   </p>
                   <p className="text-[10px] text-blue-600/70 dark:text-blue-400/70">
-                    Editados aqui → guardados no Processo #{process.process_number || '—'}
+                    Editados aqui → guardados no Processo #{safeString(process.process_number) || '—'}
                   </p>
                 </div>
               </div>
@@ -591,7 +591,7 @@ const ProcessDetailsModal = memo(({
               {/* Status e Prioridade (sempre visíveis) */}
               <div className="flex gap-2 flex-wrap">
                 <Badge variant="outline" className="capitalize">
-                  {editProcess.status?.replace(/_/g, ' ') || '—'}
+                  {safeString(editProcess.status).replace(/_/g, ' ') || '—'}
                 </Badge>
                 <Badge
                   variant={editProcess.prioridade === 'alta' ? 'destructive' : editProcess.prioridade === 'media' ? 'secondary' : 'outline'}
@@ -601,7 +601,7 @@ const ProcessDetailsModal = memo(({
                 </Badge>
                 {process.process_type && (
                   <Badge variant="outline" className="capitalize text-teal-700 border-teal-300">
-                    {process.process_type.replace(/_/g, ' ')}
+                    {safeString(process.process_type).replace(/_/g, ' ')}
                   </Badge>
                 )}
                 {/* Badge de Indexação Concluída */}
@@ -945,7 +945,7 @@ const ProcessDetailsModal = memo(({
 
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center justify-between gap-2">
-                          <p className="text-sm font-medium truncate">{propTitle}</p>
+                          <p className="text-sm font-medium truncate">{safeString(propTitle)}</p>
                           <Badge className={`text-[9px] px-1.5 py-0 ${st.color} shrink-0`}>
                             <StatusIcon className="h-2.5 w-2.5 mr-0.5" />
                             {st.label}
@@ -962,12 +962,12 @@ const ProcessDetailsModal = memo(({
                           )}
                           {propTypology && (
                             <span className="text-[11px] text-muted-foreground">
-                              <Home className="h-3 w-3 inline mr-0.5" />{propTypology}
+                              <Home className="h-3 w-3 inline mr-0.5" />{safeString(propTypology)}
                             </span>
                           )}
                           {propLocation && (
                             <span className="text-[11px] text-muted-foreground truncate">
-                              <MapPin className="h-3 w-3 inline mr-0.5" />{propLocation}
+                              <MapPin className="h-3 w-3 inline mr-0.5" />{safeString(propLocation)}
                             </span>
                           )}
                         </div>
@@ -989,7 +989,7 @@ const ProcessDetailsModal = memo(({
                           )}
                           {visit.consultor_name && (
                             <span className="text-[11px] text-muted-foreground">
-                              <Users className="h-3 w-3 inline mr-0.5" />{visit.consultor_name}
+                              <Users className="h-3 w-3 inline mr-0.5" />{safeString(visit.consultor_name)}
                             </span>
                           )}
                           {visit.source === 'portal_client' && (
@@ -1000,7 +1000,7 @@ const ProcessDetailsModal = memo(({
                         </div>
 
                         {visit.notes && (
-                          <p className="text-[11px] text-muted-foreground italic mt-1 truncate">{visit.notes}</p>
+                          <p className="text-[11px] text-muted-foreground italic mt-1 truncate">{safeString(visit.notes)}</p>
                         )}
                       </div>
                     </div>
@@ -1080,7 +1080,7 @@ const ProcessDetailsModal = memo(({
 
                 {/* Título e Status */}
                 <div className="flex items-start justify-between gap-2">
-                  <h3 className="font-semibold text-base">{propTitle}</h3>
+                  <h3 className="font-semibold text-base">{safeString(propTitle)}</h3>
                   <Badge className={`text-[10px] px-2 py-0.5 ${st.color} shrink-0`}>{st.label}</Badge>
                 </div>
 
@@ -1098,19 +1098,19 @@ const ProcessDetailsModal = memo(({
                   {propTypology && (
                     <div>
                       <p className="text-muted-foreground text-xs">Tipologia</p>
-                      <p className="font-medium flex items-center gap-1"><Home className="h-3.5 w-3.5" />{propTypology}</p>
+                      <p className="font-medium flex items-center gap-1"><Home className="h-3.5 w-3.5" />{safeString(propTypology)}</p>
                     </div>
                   )}
                   {propLocation && (
                     <div className="col-span-2">
                       <p className="text-muted-foreground text-xs">Localização</p>
-                      <p className="font-medium flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{propLocation}</p>
+                      <p className="font-medium flex items-center gap-1"><MapPin className="h-3.5 w-3.5" />{safeString(propLocation)}</p>
                     </div>
                   )}
                   {propAddress && (
                     <div className="col-span-2">
                       <p className="text-muted-foreground text-xs">Morada</p>
-                      <p className="font-medium">{propAddress}</p>
+                      <p className="font-medium">{safeString(propAddress)}</p>
                     </div>
                   )}
                   {sourceUrl && (
@@ -1124,7 +1124,7 @@ const ProcessDetailsModal = memo(({
                   {sv.consultor_name && (
                     <div>
                       <p className="text-muted-foreground text-xs">Consultor</p>
-                      <p className="font-medium flex items-center gap-1"><Users className="h-3.5 w-3.5" />{sv.consultor_name}</p>
+                      <p className="font-medium flex items-center gap-1"><Users className="h-3.5 w-3.5" />{safeString(sv.consultor_name)}</p>
                     </div>
                   )}
                   {sv.scheduled_date && (
@@ -1144,7 +1144,7 @@ const ProcessDetailsModal = memo(({
                 {sv.notes && (
                   <div>
                     <p className="text-muted-foreground text-xs mb-1">Comentários</p>
-                    <p className="text-sm bg-gray-50 dark:bg-gray-900/30 rounded-lg p-3 whitespace-pre-wrap">{sv.notes}</p>
+                    <p className="text-sm bg-gray-50 dark:bg-gray-900/30 rounded-lg p-3 whitespace-pre-wrap">{safeString(sv.notes)}</p>
                   </div>
                 )}
 

@@ -93,7 +93,11 @@ def _build_default_config(company_id: str = "default") -> SystemConfig:
     return SystemConfig(
         company_id=company_id,
         storage=StorageConfig(
-            provider=StorageProvider.ONEDRIVE if os.environ.get("ONEDRIVE_CLIENT_ID") else StorageProvider.NONE,
+            provider=StorageProvider.AWS_S3 if os.environ.get("AWS_ACCESS_KEY_ID") else (StorageProvider.ONEDRIVE if os.environ.get("ONEDRIVE_CLIENT_ID") else StorageProvider.NONE),
+            aws_access_key_id=os.environ.get("AWS_ACCESS_KEY_ID"),
+            aws_secret_access_key=os.environ.get("AWS_SECRET_ACCESS_KEY"),
+            aws_bucket_name=os.environ.get("AWS_BUCKET_NAME"),
+            aws_region=os.environ.get("AWS_REGION", "eu-west-3"),
             onedrive_client_id=os.environ.get("ONEDRIVE_CLIENT_ID"),
             onedrive_client_secret=os.environ.get("ONEDRIVE_CLIENT_SECRET"),
             onedrive_tenant_id=os.environ.get("ONEDRIVE_TENANT_ID", "common"),
@@ -191,6 +195,31 @@ async def update_config_section(section: str, data: Dict[str, Any], company_id: 
         current = config.storage.model_dump()
         current.update(filtered_data)
         config.storage = StorageConfig(**current)
+        
+        # ── SYNC: Reconfigurar S3Service em tempo real ──
+        try:
+            from services.s3_storage import s3_service
+            storage = config.storage
+            if (storage.provider == StorageProvider.AWS_S3 
+                and storage.aws_access_key_id 
+                and storage.aws_secret_access_key 
+                and storage.aws_bucket_name):
+                s3_service.reconfigure(
+                    access_key=storage.aws_access_key_id,
+                    secret_key=storage.aws_secret_access_key,
+                    bucket_name=storage.aws_bucket_name,
+                    region=storage.aws_region or "eu-west-3"
+                )
+                logger.info(f"S3Service reconfigurado via UI — Bucket: {storage.aws_bucket_name}")
+            elif storage.provider != StorageProvider.AWS_S3:
+                # Se mudou para outro provider, desativar S3
+                s3_service.s3_client = None
+                s3_service.bucket_name = None
+                logger.info("S3Service desativado (provider alterado)")
+        except ImportError:
+            logger.warning("Não foi possível sincronizar com s3_service")
+        except Exception as e:
+            logger.warning(f"Erro ao sincronizar S3Service: {e}")
     elif section == "email":
         current = config.email.model_dump()
         current.update(filtered_data)
