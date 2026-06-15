@@ -127,6 +127,8 @@ import {
   File,
   Download,
   ChevronRight,
+  ChevronDown,
+  ChevronUp,
   ExternalLink,
   Link as LinkIcon,
   Users,
@@ -318,6 +320,7 @@ const ProcessDetails = () => {
   const [editingCreditField, setEditingCreditField] = useState(null); // 'creditos' | 'contas' | 'simulacoes' | null
   // Per-card editing states (default: read-only). Null = no card in edit mode.
   const [editingCard, setEditingCard] = useState(null); // 'personal' | 'financial' | 'realestate' | 'credit' | null
+  const [collapsedCards, setCollapsedCards] = useState({}); // { cardId: boolean } — empty cards auto-collapse
   const [showPortalSenha, setShowPortalSenha] = useState(false);
   const [showSegSocialSenha, setShowSegSocialSenha] = useState(false);
   const [realEstateData, setRealEstateData] = useState({});
@@ -1562,6 +1565,30 @@ const ProcessDetails = () => {
       const processUpdateData = {};
       const clientUpdateData = {};
       
+      // ── Sincronização Inteligente: Créditos Ativos → Contas Bancárias ──
+      // Quando o utilizador preenche "Créditos Ativos" (bancos_creditos),
+      // os bancos indicados são adicionados automaticamente a "Contas de
+      // Crédito Abertas" (tem_creditos_activos) se ainda não existirem.
+      if (Array.isArray(financialData.bancos_creditos) && financialData.bancos_creditos.length > 0) {
+        const creditBanks = financialData.bancos_creditos.map(item =>
+          typeof item === 'object' ? item.banco : item
+        ).filter(b => b); // extrair nomes dos bancos, ignorar vazios
+        
+        const existingAccounts = financialData.tem_creditos_activos || [];
+        const newAccounts = [...existingAccounts];
+        
+        for (const bank of creditBanks) {
+          if (!newAccounts.includes(bank)) {
+            newAccounts.push(bank);
+          }
+        }
+        
+        if (newAccounts.length !== existingAccounts.length) {
+          financialData.tem_creditos_activos = newAccounts;
+          setFinancialData({ ...financialData, tem_creditos_activos: newAccounts });
+        }
+      }
+      
       // 1. LIMPAR DADOS
       const cleanedPersonalData = cleanPersonalDataForSubmit(personalData);
       const cleanedFinancialData = cleanFinancialDataForSubmit(financialData);
@@ -1853,12 +1880,57 @@ const ProcessDetails = () => {
     }
   };
 
+  // ── Helper: detect if a card has no meaningful data ────────────
+  const isCardEmpty = (cardId) => {
+    switch (cardId) {
+      case 'financial':
+        return !financialData?.monthly_income && !financialData?.salario_liquido &&
+               !financialData?.rendimento_bruto && !financialData?.capital_proprio &&
+               !financialData?.outras_rendas && !(financialData?.bancos_creditos?.length > 0) &&
+               !financialData?.situacao_financeira && !financialData?.emprego_atual;
+      case 'realestate':
+        return !realEstateData?.tipo_imovel && !realEstateData?.property_type &&
+               !realEstateData?.num_quartos && !realEstateData?.ja_tem_imovel &&
+               !realEstateData?.morada && !realEstateData?.localidade;
+      case 'credit':
+        return !creditData?.requested_amount && !creditData?.bank_name &&
+               !creditData?.loan_term_years && !creditData?.interest_rate;
+      default:
+        return false;
+    }
+  };
+
+  // ── Helper: toggle card collapse ───────────────────────────────
+  const toggleCardCollapse = (cardId) => {
+    setCollapsedCards(prev => ({ ...prev, [cardId]: !prev[cardId] }));
+  };
+
+  // ── Helper: should a card be collapsed? ────────────────────────
+  // Auto-collapse empty cards (unless user is editing them or manually expanded)
+  const shouldCardBeCollapsed = (cardId) => {
+    if (editingCard === cardId) return false; // Never collapse while editing
+    if (collapsedCards[cardId] === false) return false; // User explicitly expanded
+    if (collapsedCards[cardId] === true) return true;   // User explicitly collapsed
+    return isCardEmpty(cardId); // Auto-collapse if empty (default)
+  };
+
   // Reusable card header with edit toggle (pencil → Cancelar/Guardar)
-  const CardHeaderWithEdit = ({ title, cardKey, icon: Icon, canEdit }) => (
+  // + Collapse toggle for empty cards
+  const CardHeaderWithEdit = ({ title, cardKey, icon: Icon, canEdit, collapsible }) => {
+    const collapsed = collapsible && shouldCardBeCollapsed(cardKey);
+    const empty = collapsible && isCardEmpty(cardKey);
+    return (
     <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2">
+      <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => collapsible && toggleCardCollapse(cardKey)}>
         {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
         <h4 className="font-semibold text-sm">{title}</h4>
+        {collapsible && (
+          collapsed ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> :
+                      <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
+        )}
+        {empty && !collapsed && (
+          <span className="text-xs text-muted-foreground italic ml-1">— Sem dados preenchidos</span>
+        )}
       </div>
       {canEdit && !isProcessLocked && editingCard !== cardKey && (
         <Button
@@ -3357,7 +3429,8 @@ const ProcessDetails = () => {
                       {/* Rendimentos */}
                       <Card className={`border-l-4 border-l-green-500 ${editingCard !== 'financial' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Rendimentos" cardKey="financial" icon={Briefcase} canEdit={canEditFinancial} />
+                          <CardHeaderWithEdit title="Rendimentos" cardKey="financial" icon={Briefcase} canEdit={canEditFinancial} collapsible />
+                          {!shouldCardBeCollapsed('financial') && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Rendimento Mensal (€)</Label>
@@ -3443,6 +3516,7 @@ const ProcessDetails = () => {
                               />
                             </div>
                           </div>
+                          )}
                         </CardContent>
                       </Card>
                       
@@ -4101,7 +4175,8 @@ const ProcessDetails = () => {
                         {/* ====== Grupo D: Estado da Procura ====== */}
                         <Card className={`border-l-4 border-l-indigo-500 ${editingCard !== 'realestate' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Estado da Procura" cardKey="realestate" icon={Search} canEdit={canEditRealEstate} />
+                            <CardHeaderWithEdit title="Estado da Procura" cardKey="realestate" icon={Search} canEdit={canEditRealEstate} collapsible />
+                            {!shouldCardBeCollapsed('realestate') && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                               <div className="space-y-1 flex items-center gap-3 pb-1">
                                 <input
@@ -4150,6 +4225,7 @@ const ProcessDetails = () => {
                                 />
                               </div>
                             </div>
+                            )}
                           </CardContent>
                         </Card>
 
@@ -4193,7 +4269,7 @@ const ProcessDetails = () => {
                                 </Select>
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Tipologia (CPCV)</Label>
+                                <Label className="text-xs text-muted-foreground">Tipologia</Label>
                                 <Input
                                   value={realEstateData.tipologia || ""}
                                   onChange={(e) => setRealEstateData({ ...realEstateData, tipologia: e.target.value })}
@@ -4627,7 +4703,8 @@ const ProcessDetails = () => {
                       {/* Dados do Crédito */}
                       <Card className={`border-l-4 border-l-teal-500 ${editingCard !== 'credit' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Dados do Crédito" cardKey="credit" icon={CreditCard} canEdit={canEditCredit} />
+                          <CardHeaderWithEdit title="Dados do Crédito" cardKey="credit" icon={CreditCard} canEdit={canEditCredit} collapsible />
+                          {!shouldCardBeCollapsed('credit') && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
                           <Label>Valor do Empréstimo (€)</Label>
@@ -4692,6 +4769,7 @@ const ProcessDetails = () => {
                           />
                         </div>
                       </div>
+                          )}
                         </CardContent>
                       </Card>
 

@@ -144,6 +144,7 @@ const WebmailPage = () => {
 
   // ── Loading guard: prevent premature "not configured" toast ────
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+  const isLoadingConfigRef = useRef(true);
 
   // Auto-select account based on user email domain
   const userDomain = (user?.email || "").split("@")[1]?.toLowerCase() || "";
@@ -460,6 +461,7 @@ const WebmailPage = () => {
       setTotalEmails(data.total || 0);
       setCurrentPage(data.page || 1);
       setIsLoadingConfig(false);  // ← Config check passed — emails loaded
+      isLoadingConfigRef.current = false;
       setTotalPages(data.pages || 1);
       setUnreadCount(data.unread_count || 0);
     } catch (error) {
@@ -599,7 +601,9 @@ const WebmailPage = () => {
       }
 
       if (data.success === false) {
+        const wasInitialLoad = isLoadingConfigRef.current;  // capture before clearing
         setIsLoadingConfig(false);  // ← Config definitively not available
+        isLoadingConfigRef.current = false;
         // If personal sync says "not configured" and user has admin privileges,
         // automatically fallback to global sync
         if (isPersonalSync && showTabs) {
@@ -619,7 +623,7 @@ const WebmailPage = () => {
             const fallbackData = await fallbackResponse.json().catch(() => ({}));
 
             if (fallbackData.success === false) {
-              toast.error(fallbackData.error || "Erro na sincronização global");
+              if (!wasInitialLoad) toast.error(fallbackData.error || "Erro na sincronização global");
               setSyncing(false);
               return;
             }
@@ -629,12 +633,12 @@ const WebmailPage = () => {
             pollJobStatus(fallbackData.job_id);
             return;
           } catch (fallbackError) {
-            toast.error(data.error || "Erro na sincronização");
+            if (!wasInitialLoad) toast.error(data.error || "Erro na sincronização");
             setSyncing(false);
             return;
           }
         }
-        toast.error(data.error || "Erro na sincronização");
+        if (!wasInitialLoad) toast.error(data.error || "Erro na sincronização");
         setSyncing(false);
         return;
       }
@@ -1263,6 +1267,11 @@ const WebmailPage = () => {
   // ============================================================
   return (
     <DashboardLayout title="Email">
+      {isLoadingConfig ? (
+        <div className="flex items-center justify-center h-[calc(100vh-64px)]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
       <TooltipProvider delayDuration={300}>
         <div className="flex flex-col h-[calc(100vh-64px)] -mx-6 -mt-6">
         {/* ===== TOP BAR ===== */}
@@ -2571,6 +2580,7 @@ const WebmailPage = () => {
         </Dialog>
         </div>
       </TooltipProvider>
+      )}
     </DashboardLayout>
   );
 };

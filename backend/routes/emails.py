@@ -2544,6 +2544,21 @@ async def webmail_list(
     # Isso evita que múltiplos $or se sobreponham.
     and_conditions = []
     
+    # === MULTI-EMPRESA: filtrar emails por empresa ativa ===
+    # Mostrar: emails da empresa ativa + emails globais (sem company_id)
+    try:
+        from services.auth import get_active_company_id_async
+        active_company_id = await get_active_company_id_async(request, current_user)
+        if active_company_id:
+            and_conditions.append({"$or": [
+                {"company_id": active_company_id},
+                {"company_id": {"$exists": False}},
+                {"company_id": None},
+                {"company_id": ""},
+            ]})
+    except Exception:
+        pass  # Fallback: mostrar todos se não houver contexto
+    
     # === ISOLAMENTO POR UTILIZADOR ===
     # Quando box é fornecido, ele substitui a lógica de isolamento padrão.
     # Quando box não é fornecido, mantém o comportamento actual.
