@@ -2901,46 +2901,67 @@ async def mark_process_indexed(
         logger.warning(f"[INDEXACAO] Erro ao verificar fila de espera: {waitlist_err}")
 
     # ==================================================================
-    # AUTO-ATRIBUIÇÃO DE CONSULTOR/INTERMEDIÁRIO (FALLBACK)
+    # DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo → Pipeline)
     # ==================================================================
-    # Verifica o campo consultor_id / assigned_consultor_id.
-    # Se já tiver um ID (o consultor original), o processo segue para ele.
-    # Se for nulo ou vazio, o sistema invoca assign_to_least_busy_consultant()
-    # que procura o utilizador com role 'Intermediário' ou 'Consultor' com
-    # menos processos ativos e define esse ID como o novo consultor_id.
+    # Se o processo transitou de pre_registo, dispara a dupla
+    # auto-atribuição (consultor + intermediário em simultâneo).
+    # Caso contrário, usa a lógica de auto-atribuição de consultor apenas.
     consultant_result = None
-    try:
-        from services.process_assignment import assign_to_least_busy_consultant
+    is_pre_registo_transition = (current_status == "pre_registo")
 
-        existing_consultor = (
-            process.get("assigned_consultor_id")
-            or process.get("consultant_id")
-        )
-        if not existing_consultor:
-            logger.info(
-                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} sem consultor. "
-                f"A invocar auto-atribuição..."
+    if is_pre_registo_transition:
+        try:
+            from services.process_assignment import dual_auto_assign_on_pre_registo_transition
+            company_id = process.get("company_id")
+            dual_result = await dual_auto_assign_on_pre_registo_transition(
+                process_id=process_id,
+                company_id=company_id,
+                indexador_user_id=user.get("id"),
             )
-            success, data, msg = await assign_to_least_busy_consultant(process_id)
-            if success:
-                consultant_result = data
+            consultant_result = dual_result
+            logger.info(
+                f"[INDEXACAO-DUAL] Dupla auto-atribuição disparada (pre_registo → pipeline): "
+                f"consultor={dual_result.get('consultant_name', 'N/A')}, "
+                f"intermediario={dual_result.get('mediador_name', 'N/A')}"
+            )
+        except Exception as dual_err:
+            logger.warning(
+                f"[INDEXACAO-DUAL] Erro na dupla auto-atribuição: {dual_err}"
+            )
+    else:
+        # Lógica original: auto-atribuição de consultor apenas (fallback)
+        try:
+            from services.process_assignment import assign_to_least_busy_consultant
+
+            existing_consultor = (
+                process.get("assigned_consultor_id")
+                or process.get("consultant_id")
+            )
+            if not existing_consultor:
                 logger.info(
-                    f"[INDEXACAO-AUTOASSIGN] Auto-atribuição concluída: {msg}"
+                    f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} sem consultor. "
+                    f"A invocar auto-atribuição..."
                 )
+                success, data, msg = await assign_to_least_busy_consultant(process_id)
+                if success:
+                    consultant_result = data
+                    logger.info(
+                        f"[INDEXACAO-AUTOASSIGN] Auto-atribuição concluída: {msg}"
+                    )
+                else:
+                    logger.warning(
+                        f"[INDEXACAO-AUTOASSIGN] Falha na auto-atribuição: {msg}"
+                    )
             else:
-                logger.warning(
-                    f"[INDEXACAO-AUTOASSIGN] Falha na auto-atribuição: {msg}"
+                logger.info(
+                    f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} já tem consultor "
+                    f"({process.get('consultor_name') or existing_consultor}). "
+                    f"A manter atribuição existente."
                 )
-        else:
-            logger.info(
-                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} já tem consultor "
-                f"({process.get('consultor_name') or existing_consultor}). "
-                f"A manter atribuição existente."
+        except Exception as assign_err:
+            logger.warning(
+                f"[INDEXACAO-AUTOASSIGN] Erro na auto-atribuição de consultor: {assign_err}"
             )
-    except Exception as assign_err:
-        logger.warning(
-            f"[INDEXACAO-AUTOASSIGN] Erro na auto-atribuição de consultor: {assign_err}"
-        )
 
     return {
         "success": True,
@@ -2955,6 +2976,9 @@ async def mark_process_indexed(
         } if next_status and next_status != current_status else None,
         "indexer_cleared": process.get("assigned_indexacao_id") is not None,
         "consultant_auto_assigned": consultant_result,
+        # Dupla auto-atribuição (pre_registo → pipeline)
+        "dual_auto_assigned": is_pre_registo_transition,
+        "assignment": consultant_result if is_pre_registo_transition else None,
     }
 
 

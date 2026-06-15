@@ -28,6 +28,7 @@ INDEXER_INACTIVE_STATUSES = {
     "perdido",
     "desistencias",
     "eliminados",
+    "pre_registo",  # pré-registo não conta como carga real do indexador
 }
 
 
@@ -1106,3 +1107,179 @@ async def check_waitlist_for_indexer(user_id: str) -> int:
         )
 
     return assigned
+
+
+# ==== DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo → Pipeline) ====
+
+async def _find_least_busy_user(
+    role: str,
+    company_id: Optional[str] = None
+) -> Optional[Dict]:
+    """
+    Encontra o utilizador activo com menor carga para um dado role.
+    
+    "Menor carga" = menor nº de processos activos atribuídos.
+    Processos em pré-registo NÃO contam como carga real.
+    
+    Args:
+        role: 'consultor' ou 'intermediario'
+        company_id: Filtrar por empresa (Multi-Tenant)
+    
+    Returns:
+        Dict com id, name, current_load ou None
+    """
+    from services.role_query import build_deep_role_query
+
+    query = build_deep_role_query({"is_active": True}, role=role)
+    
+    users = await db.users.find(
+        query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
+    ).to_list(100)
+
+    if not users:
+        logger.warning(f"[DUAL-AUTO] Nenhum utilizador activo com role={role}")
+        return None
+
+    # Contar processos activos por utilizador (excluindo pré-registo)
+    user_loads = []
+    for user in users:
+        if role == "consultor":
+            field = "assigned_consultor_ids"
+        else:
+            field = "assigned_mediador_ids"
+
+        count_query = {
+            field: user["id"],
+            "is_active": True,
+            "status": {"$ne": "pre_registo"},  # pré-registo NÃO conta como carga
+        }
+        if company_id:
+            count_query["company_id"] = company_id
+
+        count = await db.processes.count_documents(count_query)
+        user_loads.append({
+            "id": user["id"],
+            "name": user.get("name", ""),
+            "email": user.get("email", ""),
+            "current_load": count,
+        })
+
+    # Ordenar por carga ascendente — menos ocupado primeiro
+    user_loads.sort(key=lambda u: u["current_load"])
+
+    chosen = user_loads[0]
+    logger.info(
+        f"[DUAL-AUTO] Least-busy {role} seleccionado: "
+        f"{chosen['name']} ({chosen['current_load']} processos, "
+        f"{len(user_loads)} candidatos)"
+    )
+    return chosen
+
+
+async def dual_auto_assign_on_pre_registo_transition(
+    process_id: str,
+    company_id: Optional[str] = None,
+    indexador_user_id: Optional[str] = None
+) -> Dict:
+    """
+    🔥 DUPLA AUTO-ATRIBUIÇÃO — Conversão Mágica
+    
+    Quando o Indexador valida os documentos e clica em "Concluído/Indexado",
+    o status transita de pre_registo para a primeira fase oficial da pipeline.
+    
+    NESTE EXACTO MOMENTO DA TRANSIÇÃO, o backend DISPARA o motor de
+    auto-atribuição para preencher em simultâneo os DOIS papéis:
+    
+    - consultor_id → menos ocupado
+    - mediador_id  → menos ocupado
+    
+    Se os campos já estiverem preenchidos, NÃO sobrescreve.
+    
+    Args:
+        process_id: ID do processo que transitou de pre_registo
+        company_id: Empresa activa (Multi-Tenant)
+        indexador_user_id: O indexador que executou a validação
+    
+    Returns:
+        Dict com consultor_id, consultor_name, mediador_id, mediador_name
+    """
+    from services.history import log_history
+
+    logger.info(
+        f"[DUAL-AUTO] 🚀 Dupla auto-atribuição iniciada "
+        f"processo={process_id} empresa={company_id}"
+    )
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        logger.error(f"[DUAL-AUTO] Processo {process_id} não encontrado")
+        return {}
+
+    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    result_data = {}
+
+    # ── Consultor: só atribui se campo vazio ─────────────────────
+    existing_consultant = process.get("consultant_id")
+    if existing_consultant:
+        user = await db.users.find_one({"id": existing_consultant}, {"name": 1})
+        result_data["consultant_id"] = existing_consultant
+        result_data["consultant_name"] = user.get("name", "") if user else ""
+        logger.info(
+            f"[DUAL-AUTO] Consultor já atribuído: {result_data['consultant_name']} — mantendo"
+        )
+    else:
+        consultor = await _find_least_busy_user("consultor", company_id)
+        if consultor:
+            update_data["consultant_id"] = consultor["id"]
+            result_data["consultant_id"] = consultor["id"]
+            result_data["consultant_name"] = consultor["name"]
+
+    # ── Intermediário: só atribui se campo vazio ─────────────────
+    existing_mediador = process.get("mediador_id")
+    if existing_mediador:
+        user = await db.users.find_one({"id": existing_mediador}, {"name": 1})
+        result_data["mediador_id"] = existing_mediador
+        result_data["mediador_name"] = user.get("name", "") if user else ""
+        logger.info(
+            f"[DUAL-AUTO] Mediador já atribuído: {result_data['mediador_name']} — mantendo"
+        )
+    else:
+        intermediario = await _find_least_busy_user("intermediario", company_id)
+        if intermediario:
+            update_data["mediador_id"] = intermediario["id"]
+            result_data["mediador_id"] = intermediario["id"]
+            result_data["mediador_name"] = intermediario["name"]
+
+    # ── Actualização ATÓMICA: ambos os papéis em simultâneo ──────
+    if len(update_data) > 1:  # Mais do que apenas updated_at
+        await db.processes.update_one(
+            {"id": process_id},
+            {"$set": update_data}
+        )
+
+    # ── Registar no histórico ────────────────────────────────────
+    system_user = {"id": indexador_user_id or "system", "name": "Sistema", "role": "admin"}
+    assigned_parts = []
+    if "consultant_name" in result_data and not existing_consultant:
+        assigned_parts.append(f"Consultor: {result_data['consultant_name']}")
+    if "mediador_name" in result_data and not existing_mediador:
+        assigned_parts.append(f"Intermediário: {result_data['mediador_name']}")
+
+    if assigned_parts:
+        await log_history(
+            process_id=process_id,
+            user=system_user,
+            action=f"Dupla auto-atribuição (pré-registo → pipeline): {', '.join(assigned_parts)}",
+            field="assignment",
+            old_value="",
+            new_value=", ".join(assigned_parts),
+        )
+
+    logger.info(
+        f"[DUAL-AUTO] ✅ Dupla auto-atribuição concluída "
+        f"consultor={result_data.get('consultant_name', 'N/A')} "
+        f"intermediario={result_data.get('mediador_name', 'N/A')}"
+    )
+
+    return result_data

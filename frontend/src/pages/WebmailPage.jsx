@@ -137,6 +137,14 @@ const WebmailPage = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
 
+  // ── Multi-Tenant: active company_id from auth context ──────────
+  // The backend reads company_id from X-Active-Company header or JWT.
+  // We pass it explicitly to avoid cross-tenant data leaks.
+  const activeCompanyId = user?.active_company_id || user?.company_id || "";
+
+  // ── Loading guard: prevent premature "not configured" toast ────
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+
   // Auto-select account based on user email domain
   const userDomain = (user?.email || "").split("@")[1]?.toLowerCase() || "";
   const defaultAccount = userDomain.includes("power") ? "power"
@@ -425,11 +433,18 @@ const WebmailPage = () => {
       if (effectiveBox) {
         params.append("box", effectiveBox);
       }
+      // ── Multi-Tenant: incluir company_id nos params ────────────
+      if (activeCompanyId) {
+        params.append("company_id", activeCompanyId);
+      }
 
       const response = await fetch(
         `${API_URL}/api/emails/webmail?${params.toString()}`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+          },
         }
       );
 
@@ -444,6 +459,7 @@ const WebmailPage = () => {
       setEmails(data.emails || []);
       setTotalEmails(data.total || 0);
       setCurrentPage(data.page || 1);
+      setIsLoadingConfig(false);  // ← Config check passed — emails loaded
       setTotalPages(data.pages || 1);
       setUnreadCount(data.unread_count || 0);
     } catch (error) {
@@ -560,11 +576,18 @@ const WebmailPage = () => {
       if (account && !isGeneralSync) {
         params.append("account", account);
       }
+      // ── Multi-Tenant: incluir company_id nos params ────────────
+      if (activeCompanyId) {
+        params.append("company_id", activeCompanyId);
+      }
       const response = await fetch(
         `${syncEndpoint}?${params.toString()}`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+          },
         }
       );
       const data = await response.json().catch(() => ({}));
@@ -576,16 +599,21 @@ const WebmailPage = () => {
       }
 
       if (data.success === false) {
+        setIsLoadingConfig(false);  // ← Config definitively not available
         // If personal sync says "not configured" and user has admin privileges,
         // automatically fallback to global sync
         if (isPersonalSync && showTabs) {
           try {
             const fallbackParams = new URLSearchParams({ days: "7" });
+            if (activeCompanyId) fallbackParams.append("company_id", activeCompanyId);
             const fallbackResponse = await fetch(
               `${API_URL}/api/emails/webmail/sync?${fallbackParams.toString()}`,
               {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+                },
               }
             );
             const fallbackData = await fallbackResponse.json().catch(() => ({}));
