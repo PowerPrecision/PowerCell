@@ -310,17 +310,26 @@ async def list_registered_clients(
     if not include_ghosts:
         # Obter todos os IDs de clientes que são titular principal (client_id)
         # em pelo menos um processo — estes clientes têm "vida" no sistema.
+        #
+        # IMPORTANTE: A query ignora propositadamente is_active e status.
+        # Se um cliente FOI alguma vez client_id (1º titular) de QUALQUER processo
+        # (activo, cancelado, inactivo, concluído, etc.), ele ganha "vida"
+        # permanente e NÃO deve ser filtrado como fantasma.
         primary_client_ids = await db.processes.distinct(
             "client_id",
-            {"client_id": {"$nin": [None, ""]}}
+            {
+                "client_id": {"$nin": [None, ""]},
+                # NÃO filtrar por is_active nem por status — um 1º titular
+                # mantém-se "vivo" mesmo que o processo seja cancelado/inactivado
+            }
         )
 
         # Um cliente deve aparecer na listagem SE:
-        # 1. É titular principal em pelo menos um processo (tem "vida")
+        # 1. É ou foi titular principal em pelo menos um processo (tem "vida" permanente)
         # 2. OU é um novo lead sem nenhum processo associado (pendente de triagem)
         ghost_filter = {
             "$or": [
-                {"id": {"$in": primary_client_ids}},           # É 1º titular → tem "vida"
+                {"id": {"$in": primary_client_ids}},           # É/foi 1º titular → tem "vida" permanente
                 {"process_ids": {"$exists": False}},            # Novo lead — sem processos
                 {"process_ids": []},                             # Novo lead — lista vazia
                 {"process_ids": None},                           # Novo lead — null
@@ -442,7 +451,8 @@ async def list_registered_clients(
         
         # Determinar se o cliente é "fantasma"
         # Fantasma = tem process_ids preenchido MAS o seu ID nunca aparece
-        # como client_id (titular principal) em nenhum processo
+        # como client_id (titular principal) em NENHUM processo (activo ou não)
+        # Nota: Se FOI 1º titular em qualquer processo (mesmo cancelado), NÃO é fantasma
         client_id_val = c.get("id")
         is_ghost = False
         if primary_ids_set is not None and client_id_val:

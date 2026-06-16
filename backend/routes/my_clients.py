@@ -4,6 +4,12 @@ ROTAS DE CLIENTES DO UTILIZADOR - CREDITOIMO
 ====================================================================
 Endpoints para gestão de "Os Meus Clientes" - clientes atribuídos
 ao utilizador actual.
+
+SINCRONIZAÇÃO COM "Os Meus Processos":
+A query de my-clients deve usar EXATAMENTE o mesmo critério base que
+my-processes (assigned_consultor_ids + is_active + status), para que
+os clientes listados correspondam aos processos visíveis.
+A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
 ====================================================================
 """
 import logging
@@ -16,6 +22,9 @@ from models.auth import UserRole
 from services.auth import get_current_user, require_roles, get_effective_role
 
 logger = logging.getLogger(__name__)
+
+# Mesmos status inactivos que processes.py
+INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
 
 router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 
@@ -35,29 +44,53 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     - Ações pendentes (tarefas, documentos a atualizar)
     
     Permissões:
-    - Consultor: Apenas os seus clientes (assigned_consultor_id)
-    - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_id ou criados por eles)
+    - Consultor: Apenas os seus clientes (assigned_consultor_id/ids) — apenas processos activos
+    - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_id/ids ou criados por eles) — apenas processos activos
     - Indexacao: Todos os processos (para poder atribuir a consultores/intermediários)
     - Admin/CEO/Diretor: Todos os clientes (para supervisão)
+    
+    SINCRONIZAÇÃO:
+    - Consultores e Intermediários: query sincronizada com my-processes
+      (is_active=True, status ∉ INACTIVE_STATUSES, is_deleted≠True)
+    - Leads (clientes sem processo) criados pelo utilizador são adicionados à lista
     """
     user_id = user["id"]
     user_email = user.get("email", "")
     role = get_effective_role(request, user)
     
     # Construir query baseada no papel do utilizador
+    #
+    # SINCRONIZAÇÃO COM "Os Meus Processos":
+    # A query de my-clients deve usar EXATAMENTE o mesmo critério base que
+    # my-processes (assigned_consultor_ids + is_active + status), para que
+    # os clientes listados correspondam aos processos visíveis.
+    # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
     if role == UserRole.CONSULTOR:
-        query = {"assigned_consultor_id": user_id}
-    elif role == UserRole.INTERMEDIARIO:
-        # Intermediários vêem processos atribuídos a eles OU criados por eles
         query = {
-            "$or": [
-                {"assigned_mediador_id": user_id},
-                {"created_by": user_email}
+            "$and": [
+                {"$or": [
+                    {"assigned_consultor_ids": user_id},
+                    {"assigned_consultor_id": user_id}
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
+            ]
+        }
+    elif role == UserRole.INTERMEDIARIO:
+        query = {
+            "$and": [
+                {"$or": [
+                    {"assigned_mediador_ids": user_id},
+                    {"assigned_mediador_id": user_id},
+                    {"created_by": user_email}
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
             ]
         }
     elif role == UserRole.INDEXACAO:
-        # Indexacao vê apenas os processos atribuídos a si (assigned_indexacao_id)
-        # ou processos criados por si (created_by)
         query = {
             "$or": [
                 {"assigned_indexacao_id": user_id},
@@ -88,7 +121,9 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
             "created_at": 1,
             "updated_at": 1,
             "assigned_consultor_id": 1,
+            "assigned_consultor_ids": 1,
             "assigned_mediador_id": 1,
+            "assigned_mediador_ids": 1,
             "next_action": 1,
             "is_active": 1
         }
@@ -97,6 +132,58 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     # Desencriptar dados sensíveis (client_phone, client_nif)
     from services.process_service import decrypt_processes_list
     processes = decrypt_processes_list(processes)
+    
+    # ── BUSCAR LEADS (clientes sem processo) criados pelo utilizador ──
+    leads = []
+    if role in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
+        leads_query = {
+            "$and": [
+                {"created_by": user_id},
+                {"is_deleted": {"$ne": True}},
+                # Sem processo associado (Lead puro)
+                {"$or": [
+                    {"process_ids": {"$exists": False}},
+                    {"process_ids": []},
+                    {"process_ids": None}
+                ]},
+                # Apenas leads pendentes (não convertidos)
+                {"$or": [
+                    {"lead_status": {"$exists": False}},
+                    {"lead_status": "new"}
+                ]}
+            ]
+        }
+        leads_cursor = await db.clients.find(
+            leads_query,
+            {
+                "_id": 0, "id": 1, "nome": 1, "contacto": 1,
+                "created_at": 1, "updated_at": 1, "fonte": 1,
+                "assigned_to": 1, "lead_status": 1
+            }
+        ).to_list(500)
+        
+        # Desencriptar dados sensíveis dos leads
+        from services.encryption import decrypt_clients_list
+        leads_cursor = decrypt_clients_list(leads_cursor)
+        
+        # Converter leads para o mesmo formato dos clientes de processo
+        for lead in leads_cursor:
+            contacto = lead.get("contacto", {})
+            leads.append({
+                "id": lead.get("id"),
+                "process_number": None,
+                "client_name": lead.get("nome", "Sem nome"),
+                "client_email": contacto.get("email", ""),
+                "client_phone": contacto.get("telefone", ""),
+                "status": "lead",
+                "status_label": "Lead",
+                "status_color": "#8B5CF6",
+                "pending_tasks": 0,
+                "pending_actions": [],
+                "created_at": lead.get("created_at"),
+                "updated_at": lead.get("updated_at"),
+                "is_lead": True
+            })
     
     # Enriquecer processos com status_label do workflow
     if processes:
@@ -128,7 +215,10 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
             for t in pending_tasks
         ]
     
-    return {"clients": processes, "total": len(processes)}
+    # Combinar processos + leads
+    all_clients = leads + processes
+    
+    return {"clients": all_clients, "total": len(all_clients), "leads_count": len(leads)}
 
 
 @router.get("/stats")
@@ -144,18 +234,33 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
     user_email = user.get("email", "")
     role = user["role"]
     
-    # Construir query baseada no papel do utilizador
+    # Construir query baseada no papel do utilizador (sincronizada com get_my_clients)
     if role == UserRole.CONSULTOR:
-        query = {"assigned_consultor_id": user_id}
+        query = {
+            "$and": [
+                {"$or": [
+                    {"assigned_consultor_ids": user_id},
+                    {"assigned_consultor_id": user_id}
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
+            ]
+        }
     elif role == UserRole.INTERMEDIARIO:
         query = {
-            "$or": [
-                {"assigned_mediador_id": user_id},
-                {"created_by": user_email}
+            "$and": [
+                {"$or": [
+                    {"assigned_mediador_ids": user_id},
+                    {"assigned_mediador_id": user_id},
+                    {"created_by": user_email}
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
             ]
         }
     elif role == UserRole.INDEXACAO:
-        # Indexacao vê apenas os processos atribuídos a si
         query = {
             "$or": [
                 {"assigned_indexacao_id": user_id},
@@ -163,7 +268,6 @@ async def get_my_clients_stats(user: dict = Depends(require_roles([
             ]
         }
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
-        # Admin/CEO/Diretor/Administrativo veem todos (ativos)
         query = {
             "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
             "is_active": {"$ne": False}

@@ -2108,19 +2108,36 @@ async def get_my_clients(
     role = get_effective_role(request, user)
     
     # Construir query baseada no papel do utilizador
+    #
+    # SINCRONIZAÇÃO COM "OS Meus Processos":
+    # A query de my-clients deve usar EXATAMENTE o mesmo critério base que
+    # my-processes (assigned_consultor_ids + is_active + status), para que
+    # os clientes listados correspondam aos processos visíveis.
+    # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
     if role == UserRole.CONSULTOR:
         query = {
-            "$or": [
-                {"assigned_consultor_ids": user_id},
-                {"assigned_consultor_id": user_id}
+            "$and": [
+                {"$or": [
+                    {"assigned_consultor_ids": user_id},
+                    {"assigned_consultor_id": user_id}
+                ]},
+                # Mesmo filtro de activos que my-processes (view_mode="active_only")
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
             ]
         }
     elif role == UserRole.INTERMEDIARIO:
         query = {
-            "$or": [
-                {"assigned_mediador_ids": user_id},
-                {"assigned_mediador_id": user_id},
-                {"created_by": user_email}
+            "$and": [
+                {"$or": [
+                    {"assigned_mediador_ids": user_id},
+                    {"assigned_mediador_id": user_id},
+                    {"created_by": user_email}
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
             ]
         }
     elif role == UserRole.INDEXACAO:
@@ -2148,37 +2165,102 @@ async def get_my_clients(
         fields_to_decrypt=["client_phone", "client_nif"]
     )
     
+    # ── BUSCAR LEADS (clientes sem processo) criados pelo utilizador ──
+    # Leads são clientes na tabela 'clients' que NÃO têm processo associado
+    # e foram criados pelo utilizador actual. Estes devem aparecer em
+    # "Os Meus Clientes" juntamente com os clientes dos processos activos.
+    leads = []
+    if role in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
+        leads_query = {
+            "$and": [
+                {"created_by": user_id},
+                {"is_deleted": {"$ne": True}},
+                # Sem processo associado (Lead puro)
+                {"$or": [
+                    {"process_ids": {"$exists": False}},
+                    {"process_ids": []},
+                    {"process_ids": None}
+                ]},
+                # Apenas leads pendentes (não convertidos)
+                {"$or": [
+                    {"lead_status": {"$exists": False}},
+                    {"lead_status": "new"}
+                ]}
+            ]
+        }
+        leads_cursor = await db.clients.find(
+            leads_query,
+            {
+                "_id": 0, "id": 1, "nome": 1, "contacto": 1,
+                "created_at": 1, "updated_at": 1, "fonte": 1,
+                "assigned_to": 1, "lead_status": 1
+            }
+        ).to_list(500)
+        
+        # Desencriptar dados sensíveis dos leads
+        from services.encryption import decrypt_clients_list
+        leads_cursor = decrypt_clients_list(leads_cursor)
+        
+        # Converter leads para o mesmo formato dos clientes de processo
+        for lead in leads_cursor:
+            contacto = lead.get("contacto", {})
+            leads.append({
+                "id": lead.get("id"),
+                "client_id": lead.get("id"),
+                "process_number": None,
+                "client_name": lead.get("nome", "Sem nome"),
+                "client_email": contacto.get("email", ""),
+                "client_phone": contacto.get("telefone", ""),
+                "status": "lead",
+                "status_label": "Lead",
+                "status_color": "#8B5CF6",  # Roxo para distinguir leads
+                "process_type": "lead",
+                "consultor_name": "",
+                "pending_actions": [],
+                "pending_count": 0,
+                "created_at": lead.get("created_at"),
+                "updated_at": lead.get("updated_at"),
+                "deed_date": None,
+                "has_property": False,
+                "is_lead": True  # Flag para identificar leads no frontend
+            })
+    
     # Obter labels das fases do workflow ordenadas
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     status_map = {s["name"]: s for s in statuses}
     
     # Ordenar processos por fase (order do status) e depois por nome
     def get_sort_key(p):
-        """Gera chave de ordenação para processos.
+        """Gera chave de ordenação para processos e leads.
 
         Ordena primeiro pela ordem da fase no workflow (phase_order),
-        depois por nome do cliente em ordem alfabética. Isto garante
-        que processos na mesma fase apareçam ordenados por nome.
+        depois por nome do cliente em ordem alfabética. Leads ficam no
+        início (order=0) para destaque.
 
         Args:
-            p: Dicionário do processo.
+            p: Dicionário do processo ou lead.
 
         Returns:
             tuple: (phase_order, client_name_lower).
         """
+        if p.get("is_lead"):
+            return (0, p.get("client_name", "").lower())  # Leads no topo
         status_info = status_map.get(p.get("status"), {})
         phase_order = status_info.get("order", 999)
         client_name = p.get("client_name", "").lower()
         return (phase_order, client_name)
     
-    processes = sorted(processes, key=get_sort_key)
+    # Combinar processos + leads, ordenar e paginar
+    all_items = processes + leads
+    all_items = sorted(all_items, key=get_sort_key)
     
     # Total e paginação (após ordenação)
-    total = len(processes)
-    processes = processes[skip:skip + size]
+    total = len(all_items)
+    paginated_items = all_items[skip:skip + size]
     
     # Obter tarefas pendentes por processo (apenas IDs necessários)
-    process_ids = [p["id"] for p in processes]
+    # Leads não têm tarefas, pelo que apenas processos com id são pesquisados
+    process_ids = [p["id"] for p in paginated_items if not p.get("is_lead")]
     tasks = await db.tasks.find(
         {
             "process_id": {"$in": process_ids},
@@ -2196,7 +2278,7 @@ async def get_my_clients(
         tasks_by_process[pid].append(task)
     
     # Buscar nomes dos consultores
-    consultor_ids = list(set(p.get("assigned_consultor_id") for p in processes if p.get("assigned_consultor_id")))
+    consultor_ids = list(set(p.get("assigned_consultor_id") for p in paginated_items if p.get("assigned_consultor_id")))
     consultores = await db.users.find(
         {"id": {"$in": consultor_ids}},
         {"_id": 0, "id": 1, "name": 1}
@@ -2205,7 +2287,12 @@ async def get_my_clients(
     
     # Construir lista de clientes com informações enriquecidas
     clients_list = []
-    for p in processes:
+    for p in paginated_items:
+        # Leads já vêm formatados — adicionar directamente
+        if p.get("is_lead"):
+            clients_list.append(p)
+            continue
+        
         status_info = status_map.get(p.get("status"), {})
         pending_tasks = tasks_by_process.get(p["id"], [])
         
@@ -2268,7 +2355,8 @@ async def get_my_clients(
         "size": size,
         "pages": pages,
         "user_id": user_id,
-        "user_role": role
+        "user_role": role,
+        "leads_count": len(leads)
     }
 
 
