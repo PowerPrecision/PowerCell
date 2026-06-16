@@ -1965,6 +1965,7 @@ const ProcessDetails = () => {
       )}
     </div>
   );
+  };
 
   if (loading) {
     return (
