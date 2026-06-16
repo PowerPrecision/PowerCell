@@ -173,6 +173,75 @@ def is_vazio(valor):
     return False
 
 
+def ensure_nested_parents(update_nested: dict, doc: dict, parent_fields: list):
+    """
+    Garante que campos-pai que são null no documento sejam inicializados
+    como {} antes de definirmos campos filhos com notação de ponto.
+    
+    MongoDB não permite criar campo 'x' dentro de {parent: null}.
+    Precisamos primeiro setar parent={} e depois parent.x=val.
+    
+    Args:
+        update_nested: dicionário de updates com notação de ponto (modificado in-place)
+        doc: documento original da BD
+        parent_fields: lista de campos-pai a verificar (ex: ["financial_data", "credit_data"])
+    """
+    for parent in parent_fields:
+        # Verificar se algum update_nested começa com este parent
+        has_nested_updates = any(k.startswith(f"{parent}.") for k in update_nested)
+        if not has_nested_updates:
+            continue
+        
+        # Verificar se o parent é null no documento original
+        parent_val = doc.get(parent)
+        if parent_val is None:
+            # Inicializar como dict vazio para que os campos filhos possam ser criados
+            update_nested[parent] = {}
+
+
+def build_safe_update(doc: dict, update_nested: dict) -> dict:
+    """
+    Constrói um update $set seguro que funciona mesmo quando campos-pai são null.
+    
+    Em vez de usar notação de ponto em $set (que falha se o parent é null),
+    construímos o objecto completo e fazemos set do parent inteiro.
+    
+    Args:
+        doc: documento original da BD
+        update_nested: dicionário de updates com notação de ponto
+        
+    Returns:
+        dicionário de $set seguro para MongoDB
+    """
+    # Agrupar updates por campo de topo
+    top_level = {}
+    nested_updates = {}
+    
+    for key, value in update_nested.items():
+        if '.' in key:
+            parent, _, child = key.partition('.')
+            if parent not in nested_updates:
+                nested_updates[parent] = {}
+            nested_updates[parent][child] = value
+        else:
+            top_level[key] = value
+    
+    # Para cada parent com nested updates, merge com dados existentes
+    result = dict(top_level)
+    for parent, children in nested_updates.items():
+        existing = doc.get(parent)
+        if existing is None:
+            existing = {}
+        elif not isinstance(existing, dict):
+            existing = {}
+        # Merge: dados existentes + novos campos (novos sobrepõem se necessário)
+        merged = dict(existing)
+        merged.update(children)
+        result[parent] = merged
+    
+    return result
+
+
 # ==============================================================================
 # FUNÇÃO PRINCIPAL
 # ==============================================================================
@@ -284,8 +353,9 @@ async def seed_fill_mock_data(dry_run: bool = False, company_id: str = None):
                 clientes_skipped += 1
                 continue
 
-            # Montar update
-            update_data = {"$set": update_nested}
+            # Montar update seguro (lida com campos-pai null)
+            safe_set = build_safe_update(cliente, update_nested)
+            update_data = {"$set": safe_set}
 
             if dry_run:
                 campos = [k.split(".")[-1] for k in update_nested.keys()]
@@ -429,7 +499,9 @@ async def seed_fill_mock_data(dry_run: bool = False, company_id: str = None):
                 processos_skipped += 1
                 continue
 
-            update_data = {"$set": update_nested}
+            # Montar update seguro (lida com campos-pai null como financial_data)
+            safe_set = build_safe_update(processo, update_nested)
+            update_data = {"$set": safe_set}
 
             if dry_run:
                 campos = [k.split(".")[-1] for k in update_nested.keys()]
@@ -576,7 +648,9 @@ async def seed_fill_mock_data(dry_run: bool = False, company_id: str = None):
                 imoveis_skipped += 1
                 continue
 
-            update_data = {"$set": update_nested}
+            # Montar update seguro (lida com campos-pai null como real_estate_data, credit_data)
+            safe_set = build_safe_update(processo, update_nested)
+            update_data = {"$set": safe_set}
 
             if dry_run:
                 campos = [k.split(".")[-1] for k in update_nested.keys()]
@@ -658,7 +732,9 @@ async def seed_fill_mock_data(dry_run: bool = False, company_id: str = None):
                 titular2_skipped += 1
                 continue
 
-            update_data = {"$set": update_nested}
+            # Montar update seguro (lida com campos-pai null como titular2_data, financial_data)
+            safe_set = build_safe_update(processo, update_nested)
+            update_data = {"$set": safe_set}
 
             if dry_run:
                 campos = [k.split(".")[-1] for k in update_nested.keys()]
