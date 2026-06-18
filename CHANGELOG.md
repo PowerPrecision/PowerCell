@@ -3,6 +3,22 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-18] — Assinatura de Email por Empresa Ativa + Pré-visualização no Composer
+
+### Corrigido
+- **Assinatura de email usava a empresa default em vez da empresa ativa** (`fix` — **FUNCIONALIDADE**): O `send_email` (`backend/services/email_service.py`) resolvia a assinatura pela empresa **default** do utilizador (`users.company`), ignorando a empresa ativa selecionada na sessão. Cada user pode ter uma assinatura diferente por empresa (UCR `user_company_roles.signature`), pelo que trocar de empresa ativa não mudava a assinatura do email enviado. Agora o `send_email` aceita `active_company_id` (lido do header `X-Company-Id` pelo endpoint) e a UCR da empresa ativa passa a ser a **prioridade 1** na resolução. Nova prioridade: (1) UCR empresa ativa → (2) `users.email_signature` (global) → (3) UCR empresa default → (4) UCR de qualquer empresa → (5) `system_smtp.email_signature`. Log inclui agora a origem da assinatura (`sig_source`) e o `active_company_id` para diagnóstico.
+- **Endpoint `/send` não passava a empresa ativa ao `send_email`** (`fix`): O `POST /api/emails/send` (`backend/routes/emails.py`) não recebia `Request` nem resolvia o `active_company_id`. Adicionado `request: Request` ao endpoint, resolução via `get_active_company_id_async(request, current_user)` (lê header `X-Company-Id`), e passagem de `active_company_id` ao `send_email`.
+- **Endpoint `/send-documentation` não passava a empresa ativa** (`fix`): Aplicada a mesma correção ao `POST /api/emails/send-documentation/{process_id}` e à função `_send_documentation_email_impl` (agora aceita `request: Optional[Request] = None`), propagando o `active_company_id` ao `send_email` (mesmo em `force_system=True`, a assinatura continua a ser resolvida pelo `created_by`+`active_company_id`).
+- **Composer do Webmail não enviava o header `X-Company-Id`** (`fix`): O `handleSendEmail` (`frontend/src/pages/WebmailPage.jsx`) usava `fetch` direto sem o header `X-Company-Id` (que o interceptor do axios envia automaticamente). Agora envia `X-Company-Id: {activeCompanyId}` quando disponível, para o backend resolver a assinatura da empresa ativa.
+- **Resposta rápida (EmailViewerModal) não enviava o header `X-Company-Id`** (`fix`): O `sendReply` lê agora `activeCompanyId` do `sessionStorage` (igual ao axios) e envia o header `X-Company-Id`.
+
+### Adicionado
+- **Pré-visualização da assinatura no composer do Webmail** (`feat` — **UX**): O composer agora mostra a assinatura que será anexada automaticamente no envio (caixa tracejada sob o corpo do email), usando a assinatura resolvida no frontend: prioridade `active_company_signature` (se != null) > `email_signature`. Renderiza o HTML sanitizado via `sanitizeEmailHtml` (DOMPurify). Se não houver assinatura configurada, mostra a dica "Sem assinatura configurada — pode definir a sua em Perfil > Assinatura de Email.". `frontend/src/pages/WebmailPage.jsx`.
+
+### Notas
+- A assinatura continua a ser injetada **no backend** (no corpo MIME, antes do envio) — a pré-visualização do composer é meramente informativa e não é enviada no `body` (evita duplicação).
+- Emails automáticos do sistema (magic link do portal, notificações, RGPD) continuam a usar `force_system` sem `created_by` → assinatura do sistema (comportamento inalterado).
+
 ## [2026-06-18] — Webmail: Seletor de Conta no Composer e Erro 403 ao Enviar
 
 ### Corrigido

@@ -967,6 +967,7 @@ async def preview_documentation_email(
 @router.post("/send-documentation/{process_id}")
 async def send_documentation_email(
     process_id: str,
+    request: Request,
     data: dict = Body(...),
     current_user: dict = Depends(get_current_user)
 ):
@@ -998,7 +999,7 @@ async def send_documentation_email(
             inválidos, 500 se falha no envio de email.
     """
     try:
-        return await _send_documentation_email_impl(process_id, data, current_user)
+        return await _send_documentation_email_impl(process_id, data, current_user, request)
     except HTTPException:
         raise
     except Exception as e:
@@ -1011,6 +1012,7 @@ async def _send_documentation_email_impl(
     process_id: str,
     data: dict,
     current_user: dict,
+    request: Optional[Request] = None,
 ):
     """Implementação do envio de documentação (separada para error handling)."""
     from services.system_config import get_system_config
@@ -1341,7 +1343,19 @@ async def _send_documentation_email_impl(
     # Gerar versão plain-text a partir do HTML (strip tags) como fallback
     plain_text_body = re.sub(r'<[^>]+>', '', email_body).strip()
     plain_text_body = re.sub(r'\n{3,}', '\n\n', plain_text_body)
-    
+
+    # === EMPRESA ATIVA — para resolver a assinatura correta ===
+    # Cada user pode ter uma assinatura diferente por empresa (UCR). Lemos a
+    # empresa ativa da sessão (header X-Company-Id) para que o send_email use
+    # a assinatura da empresa que o utilizador selecionou, e não a default.
+    active_company_id = None
+    if request is not None:
+        try:
+            from services.auth import get_active_company_id_async
+            active_company_id = await get_active_company_id_async(request, current_user)
+        except Exception:
+            active_company_id = None
+
     result = await send_email(
         account_name="power",
         to_emails=to_emails,
@@ -1358,6 +1372,7 @@ async def _send_documentation_email_impl(
         force_system=True,
         system_purpose="DOCUMENTS",
         skip_proc_tag=True,
+        active_company_id=active_company_id
     )
     
     if not result["success"]:
@@ -3641,6 +3656,7 @@ async def search_emails(
 @router.post("/send")
 async def send_email_endpoint(
     payload: EmailSendRequest,
+    request: Request,
     account: str = Query("power", description="Conta de email"),
     current_user: dict = Depends(get_current_user)
 ):
@@ -3780,6 +3796,16 @@ async def send_email_endpoint(
             except Exception as e:
                 logger.error(f"Error downloading temp attachment {file_name}: {e}")
 
+    # === EMPRESA ATIVA — para resolver a assinatura correta ===
+    # Cada user pode ter uma assinatura diferente por empresa (UCR). Lemos a
+    # empresa ativa da sessão (header X-Company-Id) para que o send_email use
+    # a assinatura da empresa que o utilizador selecionou, e não a default.
+    try:
+        from services.auth import get_active_company_id_async
+        active_company_id = await get_active_company_id_async(request, current_user)
+    except Exception:
+        active_company_id = None
+
     result = await send_email(
         account_name=account,
         to_emails=to_emails,
@@ -3789,7 +3815,8 @@ async def send_email_endpoint(
         cc_emails=cc_emails,
         process_id=payload.process_id,
         created_by=current_user["id"],
-        attachments=email_attachments if email_attachments else None
+        attachments=email_attachments if email_attachments else None,
+        active_company_id=active_company_id
     )
     
     if not result["success"]:

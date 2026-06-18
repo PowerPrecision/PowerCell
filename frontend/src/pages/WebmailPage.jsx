@@ -75,7 +75,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { format, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
-import { sanitizeEmailHtml } from "../utils/sanitize";
+import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import { safeFormat } from "../lib/utils";
@@ -245,6 +245,15 @@ const WebmailPage = () => {
   // ignora a conta global e força "personal". Nestes casos o seletor de conta
   // do composer não deve aparecer (o utilizador só tem uma conta útil).
   const canUseGlobalAccounts = hasAnyRole(user, ['admin', 'ceo', 'diretor']);
+  // Assinatura resolvida para pré-visualização no composer.
+  // O /auth/me já devolve email_signature (mergeado: empresa ativa ou global)
+  // e active_company_signature (None se não definida na UCR da empresa ativa).
+  // Prioridade: active_company_signature (se != null) > email_signature.
+  // Nota: "" significa assinatura intencionalmente limpa → sem assinatura.
+  const resolvedSignature =
+    (user?.active_company_signature !== undefined && user?.active_company_signature !== null
+      ? user.active_company_signature
+      : user?.email_signature) || "";
   const pageSubtitle = !showTabs
     ? (hasRole(user, 'indexacao') ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
     : null;
@@ -842,6 +851,9 @@ const WebmailPage = () => {
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
+            // Enviar a empresa ativa para o backend resolver a assinatura
+            // correta (cada user pode ter uma assinatura por empresa — UCR).
+            ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
           },
           body: JSON.stringify(bodyPayload),
         }
@@ -2372,6 +2384,27 @@ const WebmailPage = () => {
                   className="min-h-[200px] resize-y"
                   rows={12}
                 />
+                {/* Pré-visualização da assinatura que será anexada automaticamente
+                    pelo backend ao enviar. Cada user pode ter uma assinatura por
+                    empresa (UCR) — mostra a da empresa ativa ou a global. */}
+                {resolvedSignature && htmlToText(resolvedSignature).trim() ? (
+                  <div className="mt-2 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 p-3">
+                    <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-muted-foreground">
+                      <Mail className="h-3.5 w-3.5" />
+                      Assinatura (anexada automaticamente no envio)
+                    </div>
+                    <div
+                      className="text-xs text-muted-foreground/90 prose prose-sm max-w-none [&_a]:text-primary"
+                      dangerouslySetInnerHTML={{
+                        __html: sanitizeEmailHtml(resolvedSignature),
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground/70">
+                    Sem assinatura configurada — pode definir a sua em Perfil &gt; Assinatura de Email.
+                  </p>
+                )}
               </div>
             </div>
 

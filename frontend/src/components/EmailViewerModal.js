@@ -201,11 +201,16 @@ const EmailViewerModal = ({
 
     setSendingReply(true);
     try {
+      // Enviar a empresa ativa para o backend resolver a assinatura correta
+      // (cada user pode ter uma assinatura por empresa — UCR). Lida-se do
+      // sessionStorage tal como o interceptor do axios faz.
+      const activeCompanyId = sessionStorage.getItem("activeCompanyId");
       const response = await fetch(`${API_URL}/api/emails/send?account=personal`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`
+          Authorization: `Bearer ${token}`,
+          ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {})
         },
         body: JSON.stringify({
           to_emails: [currentEmail.from_email],

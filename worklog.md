@@ -735,3 +735,33 @@ Stage Summary:
   - CHANGELOG.md (entrada [2026-06-18])
   - worklog.md (esta entrada)
 - Nota: o 403 para não-admin sem webmail pessoal configurado é by-design; a correção é de UX (não oferecer contas globais + mostrar mensagem útil).
+
+---
+Task ID: 2
+Agent: Main Agent
+Task: Assinatura de email deve usar a empresa ativa (cada user pode ter a sua assinatura por empresa) + pré-visualização no composer
+
+Work Log:
+- Confirmado o gap no `send_email` (`backend/services/email_service.py`, linhas 651-716): a resolução da assinatura usava `sender_user.company` (empresa default) e não a empresa ativa da sessão, ignorando o `active_company_id` que o `/auth/me` já devolve.
+- Adicionado parâmetro `active_company_id: Optional[str] = None` à assinatura de `send_email` (linha 454) + documentação no docstring.
+- Reescrito o bloco de resolução da assinatura com nova prioridade: (1) UCR da empresa ativa (`active_company_id`, se != "default") → (2) `users.email_signature` (global) → (3) UCR da empresa default → (4) UCR de qualquer empresa → (5) `system_smtp.email_signature`. Adicionada variável `sig_source` para logging diagnóstico.
+- Atualizada a linha de log para incluir `sig_source` e `active_company_id` (facilita diagnóstico de "qual assinatura foi usada?").
+- Endpoint `POST /api/emails/send` (`backend/routes/emails.py`, 3641): adicionado `request: Request`, resolução de `active_company_id` via `get_active_company_id_async(request, current_user)` (lê header `X-Company-Id`), e passagem de `active_company_id` ao `send_email`.
+- Endpoint `POST /api/emails/send-documentation/{process_id}` (967) + `_send_documentation_email_impl` (1010): aplicada a mesma correção — `request: Request` no endpoint, `request: Optional[Request] = None` na impl, e `active_company_id` passado ao `send_email` (mesmo com `force_system=True`, a assinatura é resolvida por `created_by`+`active_company_id`).
+- Frontend `WebmailPage.jsx`: `handleSendEmail` agora envia header `X-Company-Id: {activeCompanyId}` no fetch (igual ao interceptor axios) para o backend resolver a empresa ativa.
+- Frontend `WebmailPage.jsx`: adicionada pré-visualização da assinatura no composer — variável `resolvedSignature` (prioridade `active_company_signature` se != null, senão `email_signature`), caixa tracejada sob a Textarea do body com HTML sanitizado via `sanitizeEmailHtml` (DOMPurify). Import de `htmlToText` adicionado. Se não houver assinatura, mostra dica para configurar em Perfil.
+- Frontend `EmailViewerModal.js`: `sendReply` agora lê `activeCompanyId` do `sessionStorage` (igual ao axios) e envia header `X-Company-Id`.
+- Verificada sintaxe: Python (`py_compile`) OK nos 2 ficheiros backend; JSX (esbuild) OK nos 2 ficheiros frontend.
+- Atualizada documentação: CHANGELOG.md (entrada nova [2026-06-18]) + esta entrada do worklog.
+
+Stage Summary:
+- A assinatura do email agora reflete a empresa ativa selecionada na sessão (cada user pode ter uma assinatura por empresa via UCR `user_company_roles.signature`).
+- O composer do Webmail mostra a assinatura que será anexada, antes de enviar (pré-visualização informativa; a injeção real continua no backend).
+- Ambos os fluxos de envio manual (/send e /send-documentation) propagam o `active_company_id` ao `send_email`.
+- Ficheiros modificados:
+  - backend/services/email_service.py (param active_company_id + bloco de resolução reescrito + log com sig_source)
+  - backend/routes/emails.py (request: Request em /send e /send-documentation; resolução + passagem de active_company_id)
+  - frontend/src/pages/WebmailPage.jsx (X-Company-Id no fetch; resolvedSignature; pré-visualização da assinatura; import htmlToText)
+  - frontend/src/components/EmailViewerModal.js (X-Company-Id no sendReply via sessionStorage)
+  - CHANGELOG.md + worklog.md
+- Comportamento inalterado para emails automáticos do sistema (force_system sem created_by → assinatura do sistema).
