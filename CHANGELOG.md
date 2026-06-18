@@ -3,6 +3,23 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-18] — Hotfix: Dropdown de Estado do Processo Vazia
+
+### Corrigido
+- **Dropdown de estado nos Detalhes do Processo aparecia vazia** (`fix` — **UX CRÍTICO**): O `<Select>` de fase/estado em `ProcessDetails.js` ficava em branco quando a lista dinâmica `workflowStatuses` (vinda de `/admin/workflow-statuses`) estava vazia ou o pedido falhava. O `safeStatusOptions` anterior tinha um `return []` prematuro (`if (!workflowStatuses.length) return [];`) que ignorava totalmente o fallback — mesmo havendo um `process.status` válido, nenhuma opção era renderizada e o `<SelectValue />` aparecia vazio. O `value={status}` (mapeado a `process.status` via estado `status` inicializado em `fetchData`) estava correto, mas sem opções a dropdown mostrava apenas o placeholder. `frontend/src/pages/ProcessDetails.js`.
+
+### Adicionado
+- **Baseline estático de estados do workflow** (`feat` — **RESILIÊNCIA**): Criado `frontend/src/utils/workflowStatuses.js` com a constante `KNOWN_PROCESS_STATUSES` — todos os estados conhecidos do backend: os 16 canónicos do enum `ProcessStatus` (`backend/models/enums.py`: `pre_registo`, `clientes_espera`, `documentacao`, `analise`, `pre_aprovacao`, `credito_aprovado`, `pedido_avaliacao`, `avaliacao`, `cpcv`, `minuta`, `escritura`, `concluido`, `arquivo`, `perdido`, `desistencias`, `fila_espera`) + estados legacy de seeds antigos (`triagem`, `aprovado`, `recusado`, `desistido`, `cancelado`, `concluidos`, `fase_documental`, `fase_documental_ii`, `enviado_bruno`, `enviado_luis`, `enviado_bcp_rui`, `entradas_precision`, `fase_bancaria`, `fase_visitas`, `ch_aprovado`, `fase_escritura`, `escritura_agendada`), cada um com `label` (PT-PT), `color` e `order`. Esta lista serve de baseline quando a API devolve vazio, garantindo que a dropdown nunca fica em branco.
+- **Helper `buildStatusOptions(workflowStatuses, currentStatus)`** (`feat`): Função partilhada que constrói as opções do `<Select>` de estado com 3 níveis de garantia: (1) se a lista dinâmica da API tiver itens, usa-a (respeita a configuração do admin — label/color/order dele prevalecem); (2) se estiver vazia/falhar, recorre ao baseline estático `KNOWN_PROCESS_STATUSES`; (3) **fallback de segurança** — se o `currentStatus` (process.status) não existir na base escolhida, injeta-o como opção extra com label formatada (underscores → espaços + capitalização) marcada com `_isFallback: true`, exibida como `⚠ {Label} (não configurado)`. O resultado é ordenado por `order`.
+- **Helper `formatStatusLabel(statusName)`** (`feat`): Converte nomes técnicos em labels legíveis (ex: `clientes_espera` → `Clientes Espera`, `pre_registo` → `Pre Registo`). Extraído do componente para o utilitário partilhado para reutilização.
+
+### Alterado
+- **`safeStatusOptions` agora delega em `buildStatusOptions`** (`refactor`): O `useMemo` em `ProcessDetails.js` passou a chamar `buildStatusOptions(workflowStatuses, status)` em vez de re-implementar a lógica inline. O `formatStatusLabel` local foi removido (agora importado do utilitário). O `getStatusInfo` (usado no badge de estado) continua a usar `workflowStatuses.find(...)` com fallback para `formatStatusLabel`, agora via o import partilhado.
+
+### Notas
+- O `<Select>` mantém-se controlado por `value={status}` (estado `status` inicializado de `processData.status` em `fetchData`, atualizado via `onValueChange={setStatus}`). Não há `defaultValue` — o componente é totalmente controlado, pelo que o estado exibido reflete sempre `process.status` (ou o valor em edição).
+- A dropdown respeita a configuração do admin quando a API responde com sucesso; o baseline estático só entra em ação quando a API falha/devolve vazio. O fallback final garante que um `process.status` desconhecido (legacy, renomeado, ou de outro ambiente) é sempre visível e selecionável.
+
 ## [2026-06-18] — Assinatura de Email por Empresa Ativa + Pré-visualização no Composer
 
 ### Corrigido

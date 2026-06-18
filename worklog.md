@@ -765,3 +765,34 @@ Stage Summary:
   - frontend/src/components/EmailViewerModal.js (X-Company-Id no sendReply via sessionStorage)
   - CHANGELOG.md + worklog.md
 - Comportamento inalterado para emails automáticos do sistema (force_system sem created_by → assinatura do sistema).
+
+---
+Task ID: 4
+Agent: Main Agent
+Task: Hotfix — Dropdown de estado do processo vazia nos Detalhes do Processo (sincronização do status)
+
+Work Log:
+- Confirmado (via GitHub raw API) que o `safeStatusOptions` já existia em `dev` mas tinha um bug: `if (!workflowStatuses.length) return [];` curto-circuitava o fallback. Quando a API `/admin/workflow-statuses` devolvia `[]` (coleção MongoDB não seeded, pedido falhado, ou role sem acesso), a dropdown ficava completamente vazia — mesmo havendo um `process.status` válido.
+- Inspecionado o enum canónico `ProcessStatus` em `backend/models/enums.py`: 16 estados (pre_registo, clientes_espera, documentacao, analise, pre_aprovacao, credito_aprovado, pedido_avaliacao, avaliacao, cpcv, minuta, escritura, concluido, arquivo, perdido, desistencias, fila_espera). Confirmado em `backend/scripts/seed_completo.py` (linhas 126-129).
+- Inspecionados seeds alternativos com estados legacy: `backend/seed.py` (enviado_bruno, fase_documental, entradas_precision, fase_bancaria, ch_aprovado, fase_escritura, escritura_agendada, concluidos, desistencias) e `backend/seed_database.py` (triagem, aprovado, recusado, desistido, cancelado).
+- Criado `frontend/src/utils/workflowStatuses.js` (novo ficheiro partilhado) com:
+  - `KNOWN_PROCESS_STATUSES`: lista estática com TODOS os estados conhecidos do backend (16 canónicos + 18 legacy), cada um com id/name/label(PT-PT)/color/order.
+  - `formatStatusLabel(statusName)`: converte nome técnico em label legível (underscores → espaços + capitalização). Extraído do componente.
+  - `buildStatusOptions(workflowStatuses, currentStatus)`: constrói as opções do Select com 3 níveis — (1) lista dinâmica da API se existir, (2) senão baseline estático, (3) fallback final injeta `currentStatus` se ainda não estiver presente (marcado `_isFallback: true`). Ordena por `order`.
+- Refactorizado `frontend/src/pages/ProcessDetails.js`:
+  - Adicionado import `import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";`.
+  - Removido o `formatStatusLabel` local (linhas 1807-1812) — agora importado.
+  - Reescrito `safeStatusOptions`: `useMemo(() => buildStatusOptions(workflowStatuses, status), [workflowStatuses, status])`. O `return []` prematuro foi eliminado — a dropdown nunca fica vazia.
+  - `getStatusInfo` (badge de estado) mantém-se, usando agora o `formatStatusLabel` importado.
+- Verificado o bloco do `<Select>` (linha ~2636): `<Select value={status} onValueChange={setStatus}>` — `value` corretamente mapeado ao estado `status` (inicializado de `processData.status` em `fetchData`, linha 1161). `<SelectItem key={s.id} value={s.name}>` com fallback a exibir `⚠ {label} (não configurado)`.
+- Validada a sintaxe JSX de ambos os ficheiros com esbuild (`--loader:.js=jsx`): ambos compilam sem erros.
+- Atualizada documentação: entrada nova no `CHANGELOG.md` ([2026-06-18] Hotfix: Dropdown de Estado do Processo Vazia) + esta entrada no `worklog.md`.
+
+Stage Summary:
+- A dropdown de estado nos Detalhes do Processo deixa de aparecer vazia. Mesmo que a API `/admin/workflow-statuses` falhe ou devolha `[]`, o baseline estático (16 estados canónicos + legacy) garante opções visíveis; e se o `process.status` for um valor desconhecido (legacy/renomeado/outro ambiente), é injetado como opção extra `⚠ (não configurado)`.
+- Ficheiros modificados/criados:
+  - frontend/src/utils/workflowStatuses.js (NOVO — KNOWN_PROCESS_STATUSES, formatStatusLabel, buildStatusOptions)
+  - frontend/src/pages/ProcessDetails.js (import do util; safeStatusOptions delega em buildStatusOptions; formatStatusLabel local removido)
+  - CHANGELOG.md (entrada nova do hotfix)
+  - worklog.md (esta entrada)
+- Próximo passo: commit + push para branch `dev` via Git Database API.

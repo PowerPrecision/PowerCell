@@ -93,6 +93,9 @@ PowerCell/
 │   │   │   └── ThemeContext.js  # Light/Dark mode
 │   │   ├── services/
 │   │   │   └── api.js          # Axios + interceptors (429 retry)
+│   │   ├── utils/
+│   │   │   ├── roleUtils.js          # Helpers de roles/permissões
+│   │   │   └── workflowStatuses.js   # KNOWN_PROCESS_STATUSES + buildStatusOptions (baseline estático + fallback p/ dropdown de estado)
 │   │   └── layouts/
 │   │       └── DashboardLayout.js # Sidebar + header
 │   ├── vercel.json            # SPA rewrite + security headers

@@ -34,6 +34,7 @@ import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { safeLabel, safeNumber } from "../components/dashboard/DashboardShared";
+import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
 import DashboardLayout from "../layouts/DashboardLayout";
 import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -1802,35 +1803,19 @@ const ProcessDetails = () => {
     return statusInfo || { label: formatStatusLabel(statusName), color: "blue" };
   };
 
-  // ── Helper: formatar nome de status como label legível ─────────
-  // Converte "clientes_espera" → "Clientes Espera", "pre_registo" → "Pre Registo", etc.
-  const formatStatusLabel = (statusName) => {
-    if (!statusName || typeof statusName !== "string") return "—";
-    return statusName
-      .replace(/_/g, " ")
-      .replace(/\b\w/g, c => c.toUpperCase());
-  };
-
-  // ── Derived: opções do Select com fallback ──────────────────────
-  // Se o status atual do processo não existe na lista de workflowStatuses,
-  // adiciona-o dinamicamente para que a Dropdown nunca fique em branco.
-  const safeStatusOptions = useMemo(() => {
-    if (!workflowStatuses.length) return [];
-    const namesInList = new Set(workflowStatuses.map(s => s.name));
-    const options = [...workflowStatuses];
-    // Fallback: se o status actual não está na lista, injetar como opção extra
-    if (status && !namesInList.has(status)) {
-      options.push({
-        id: `__fallback_${status}`,
-        name: status,
-        label: formatStatusLabel(status),
-        color: "blue",
-        order: 9999,
-        _isFallback: true,
-      });
-    }
-    return options;
-  }, [workflowStatuses, status]);
+  // ── Derived: opções do Select com baseline estático + fallback ─────
+  // A dropdown de estado NUNCA deve ficar em branco. buildStatusOptions:
+  //   1) usa workflowStatuses (API /admin/workflow-statuses) se existirem;
+  //   2) senão, recorre ao baseline estático KNOWN_PROCESS_STATUSES (16 canónicos
+  //      do enum ProcessStatus + legacy: triagem, fase_documental, etc.);
+  //   3) se o `status` actual (process.status) não estiver na base escolhida,
+  //      injeta-o como opção extra (label formatada, _isFallback=true).
+  // Isto corrige o bug em que a dropdown aparecia vazia quando a API devolvia []
+  // ou falhava (antes havia um `return []` prematuro que ignorava o fallback).
+  const safeStatusOptions = useMemo(
+    () => buildStatusOptions(workflowStatuses, status),
+    [workflowStatuses, status]
+  );
 
   // Normalizar role para comparação case-insensitive
   const userRole = user?.role?.toLowerCase() || "";
