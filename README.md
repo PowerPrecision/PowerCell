@@ -189,6 +189,7 @@ PowerCell/
 - **Sincronização automática**: Background job sincroniza emails via IMAP (30 dias)
 - **Sincronização manual**: Botão "Sincronizar" no WebmailPage para trigger imediato
 - **Múltiplas contas**: Suporte a Precision Crédito e Power Real Estate (IMAP separado)
+- **Seletor de conta no composer (role-based)**: O seletor "Conta:" (Precision/Power) só aparece para admin/CEO/diretor (`canUseGlobalAccounts`). Os restantes perfis (consultor, intermediário, administrativo, indexação) enviam obrigatoriamente pela conta pessoal (ou partilhada, no caso de Indexação) — o seletor é ocultado e o pedido usa `account=personal`. Erros de envio (ex.: 403 por falta de config pessoal) mostram a mensagem acionável do backend num toast alargado (8s).
 - **Pastas padrão e personalizadas**: 5 pastas padrão (Inbox, Sent, Starred, Drafts, Trash) + pastas personalizadas criadas pelo utilizador
 - **Per-user personal config**: Cada utilizador configura o seu IMAP/SMTP em Perfil > Config Webmail
 - **Shared role accounts**: Indexação/Suporte usam conta partilhada global (Google OAuth ou IMAP)

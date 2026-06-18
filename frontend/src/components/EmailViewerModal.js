@@ -34,6 +34,7 @@ import {
 import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";
 import { safeFormat } from "../lib/utils";
+import { toast } from "sonner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -197,10 +198,10 @@ const EmailViewerModal = ({
 
   const sendReply = async () => {
     if (!replyBody.trim()) return;
-    
+
     setSendingReply(true);
     try {
-      const response = await fetch(`${API_URL}/api/emails/send`, {
+      const response = await fetch(`${API_URL}/api/emails/send?account=personal`, {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -210,16 +211,31 @@ const EmailViewerModal = ({
           to_emails: [currentEmail.from_email],
           subject: replySubject,
           body: replyBody,
-          process_id: currentEmail.process_id
+          process_id: currentEmail.process_id,
+          from_box: "personal"
         })
       });
-      
-      if (!response.ok) throw new Error("Erro ao enviar resposta");
-      
+
+      if (!response.ok) {
+        // Preservar a mensagem útil do backend (ex.: 403 "Configuração de
+        // email pessoal não encontrada. Vá ao seu Perfil > Configuração de
+        // Webmail para configurar o seu email antes de enviar.").
+        let detail = "Erro ao enviar resposta";
+        try {
+          const errData = await response.json();
+          detail = errData.detail || errData.message || errData.error || detail;
+        } catch (_) {
+          /* resposta sem corpo JSON — manter mensagem genérica */
+        }
+        throw new Error(detail);
+      }
+
+      toast.success("Resposta enviada com sucesso");
       setShowReplyBox(false);
       // TODO: Actualizar lista de emails
     } catch (error) {
       console.error("Erro ao enviar resposta:", error);
+      toast.error(error.message || "Erro ao enviar resposta", { duration: 8000 });
     } finally {
       setSendingReply(false);
     }

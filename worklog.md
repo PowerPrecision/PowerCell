@@ -708,3 +708,30 @@ Stage Summary:
 - Files modified:
   - frontend/src/index.css (added .read-only-card CSS rules)
   - frontend/src/pages/ProcessDetails.js (editingCard state, CardHeaderWithEdit, card headers, disabled props, save handler, tab change handler)
+
+---
+Task ID: 1
+Agent: Main Agent
+Task: Corrigir erro 403 ao enviar email no Webmail + seletor de conta a aparecer para utilizadores com um só perfil
+
+Work Log:
+- Analisado o endpoint `POST /api/emails/send` em `backend/routes/emails.py` (linha 3641): para roles não-admin/CEO/diretor o backend força `account="personal"` e devolve 403 "Configuração de email pessoal não encontrada..." se o utilizador não tiver `email_config.is_configured`. Confirmado que o 403 é comportamento pretendido (isolamento de remetente).
+- Identificado bug de UX no `frontend/src/pages/WebmailPage.jsx`: o seletor "Conta:" do composer (Precision/Power) era renderizado incondicionalmente, oferecendo contas globais a perfis que só podem usar a conta pessoal.
+- Adicionada flag `canUseGlobalAccounts = hasAnyRole(user, ['admin','ceo','diretor'])` (alinhada com `can_use_global_accounts` do backend) junto a `showTabs`.
+- Seletor do composer agora condicional: visível só para `canUseGlobalAccounts`; para os restantes perfis mostra nota informativa (role-aware: "conta partilhada de Indexação" para indexacao, "conta pessoal — configure em Perfil > Configuração de Webmail" para os outros).
+- Corrigido `handleSendEmail`: introduzido `effectiveAccount` (envia `account=personal` para não-admin em vez de `power`/`precision`) e tratamento de erro que preserva a mensagem do backend (lê `.detail`/`.message`/`.error` do JSON de erro) com toast de duração 8s. Adicionada dependência `canUseGlobalAccounts` ao array do useCallback.
+- Corrigido `sendReply` em `frontend/src/components/EmailViewerModal.js`: antes engolia erros silenciosamente (só `console.error`, sem toast). Adicionado `import { toast } from "sonner"`, `from_box: "personal"` + `account=personal` no pedido, leitura da mensagem de erro do backend, e toasts de sucesso/erro (8s).
+- Verificada a sintaxe JSX de ambos os ficheiros com esbuild (bunx esbuild --loader=jsx): ambos OK.
+- Atualizada documentação: entrada nova no `CHANGELOG.md` ([2026-06-18]) e esta entrada no `worklog.md`.
+
+Stage Summary:
+- O seletor de conta do composer deixa de aparecer para utilizadores com um só perfil não-admin (consultor, intermediário, administrativo, indexação) — apenas admin/CEO/diretor escolhem a conta global.
+- O erro 403 passa a mostrar a mensagem acionável do backend ("...Vá ao seu Perfil > Configuração de Webmail...") em vez de um toast genérico "Erro ao enviar email".
+- O pedido de envio envia agora `account=personal` para não-admin, refletindo o comportamento real do backend.
+- A resposta rápida (EmailViewerModal) passou a dar feedback de sucesso/erro ao utilizador.
+- Ficheiros modificados:
+  - frontend/src/pages/WebmailPage.jsx (canUseGlobalAccounts, seletor condicional, effectiveAccount, tratamento de erro 403)
+  - frontend/src/components/EmailViewerModal.js (import toast, sendReply com feedback + account=personal + from_box)
+  - CHANGELOG.md (entrada [2026-06-18])
+  - worklog.md (esta entrada)
+- Nota: o 403 para não-admin sem webmail pessoal configurado é by-design; a correção é de UX (não oferecer contas globais + mostrar mensagem útil).

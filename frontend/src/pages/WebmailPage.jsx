@@ -239,6 +239,12 @@ const WebmailPage = () => {
   // Derived UI state
   const showTabs = hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo']);
   const showAccountSelector = showTabs && activeBox === 'personal';
+  // Perfis que podem usar contas globais (power/precision) para enviar email.
+  // Os restantes roles (consultor, intermediario, administrativo, indexacao)
+  // enviam obrigatoriamente pela conta pessoal (email_config) — o backend
+  // ignora a conta global e força "personal". Nestes casos o seletor de conta
+  // do composer não deve aparecer (o utilizador só tem uma conta útil).
+  const canUseGlobalAccounts = hasAnyRole(user, ['admin', 'ceo', 'diretor']);
   const pageSubtitle = !showTabs
     ? (hasRole(user, 'indexacao') ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
     : null;
@@ -823,8 +829,14 @@ const WebmailPage = () => {
         bodyPayload.attachment_ids = uploadAttachments.map((a) => a.id);
       }
 
+      // Para perfis sem acesso a contas globais, o envio é sempre feito pela
+      // conta pessoal (o backend força "personal" de qualquer forma). Enviamos
+      // o valor correcto para que o pedido reflicta a realidade e não induza
+      // o backend em ramos de validação de contas globais.
+      const effectiveAccount = canUseGlobalAccounts ? composerData.account : "personal";
+
       const response = await fetch(
-        `${API_URL}/api/emails/send?account=${composerData.account}`,
+        `${API_URL}/api/emails/send?account=${effectiveAccount}`,
         {
           method: "POST",
           headers: {
@@ -835,18 +847,32 @@ const WebmailPage = () => {
         }
       );
 
-      if (!response.ok) throw new Error("Erro ao enviar email");
+      if (!response.ok) {
+        // Preservar a mensagem útil do backend (ex.: 403 "Configuração de email
+        // pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail
+        // para configurar o seu email antes de enviar.").
+        let detail = "Erro ao enviar email";
+        try {
+          const errData = await response.json();
+          detail = errData.detail || errData.message || errData.error || detail;
+        } catch (_) {
+          /* resposta sem corpo JSON — manter mensagem genérica */
+        }
+        throw new Error(detail);
+      }
       toast.success("Email enviado com sucesso");
       setComposerOpen(false);
       setUploadAttachments([]);
       handleRefresh();
     } catch (error) {
       console.error("Erro ao enviar:", error);
-      toast.error("Erro ao enviar email");
+      // Mensagens de configuração (403) costumam ser longas e acionáveis —
+      // dar mais tempo de leitura para o utilizador saber o que fazer.
+      toast.error(error.message || "Erro ao enviar email", { duration: 8000 });
     } finally {
       setComposerSending(false);
     }
-  }, [composerData, token, handleRefresh, uploadAttachments, activeBox]);
+  }, [composerData, token, handleRefresh, uploadAttachments, activeBox, canUseGlobalAccounts]);
 
   // ============================================================
   // LINK TO PROCESS
@@ -2232,24 +2258,38 @@ const WebmailPage = () => {
                 />
               </div>
 
-              {/* Account */}
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium w-12 shrink-0">Conta:</label>
-                <Select
-                  value={composerData.account}
-                  onValueChange={(v) =>
-                    setComposerData((d) => ({ ...d, account: v }))
-                  }
-                >
-                  <SelectTrigger className="flex-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="precision">Precision Crédito</SelectItem>
-                    <SelectItem value="power">Power Real Estate</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Account — só visível para perfis que podem usar contas globais
+                  (admin/CEO/diretor). Os restantes perfis enviam sempre pela sua
+                  conta pessoal (o backend força "personal"), pelo que o seletor
+                  não deve aparecer — o utilizador só tem uma conta útil. */}
+              {canUseGlobalAccounts ? (
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium w-12 shrink-0">Conta:</label>
+                  <Select
+                    value={composerData.account}
+                    onValueChange={(v) =>
+                      setComposerData((d) => ({ ...d, account: v }))
+                    }
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="precision">Precision Crédito</SelectItem>
+                      <SelectItem value="power">Power Real Estate</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Mail className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {hasRole(user, 'indexacao')
+                      ? 'Envio pela conta partilhada de Indexação.'
+                      : 'Envio pela sua conta pessoal — configure em Perfil > Configuração de Webmail.'}
+                  </span>
+                </div>
+              )}
 
               {/* Drag & Drop upload zone */}
               <div

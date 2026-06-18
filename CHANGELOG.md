@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-18] — Webmail: Seletor de Conta no Composer e Erro 403 ao Enviar
+
+### Corrigido
+- **Seletor de conta no composer visível para perfis sem acesso a contas globais** (`fix` — **UX**): O seletor "Conta:" (Precision Crédito / Power Real Estate) aparecia no composer do Webmail para TODOS os utilizadores, incluindo perfis não-admin (consultor, intermediário, administrativo, indexação) que só podem enviar pela conta pessoal. Isto confundia o utilizador ("pede para escolher a conta" mesmo tendo um só perfil) e induzia o envio com `account=power`/`precision`, que o backend rejeita. Agora o seletor só é apresentado a admin/CEO/diretor (`canUseGlobalAccounts = hasAnyRole(user, ['admin','ceo','diretor'])`, alinhado com `can_use_global_accounts` do backend). Para os restantes perfis é mostrada uma nota informativa: "Envio pela sua conta pessoal — configure em Perfil > Configuração de Webmail" (ou "Envio pela conta partilhada de Indexação" para o role indexacao). `frontend/src/pages/WebmailPage.jsx`.
+- **Erro 403 ao enviar email sem mensagem útil** (`fix` — **UX CRÍTICO**): O `handleSendEmail` descartava a resposta de erro do backend (`if (!response.ok) throw new Error("Erro ao enviar email")`) e mostrava um toast genérico, escondendo a mensagem acionável do backend: "Configuração de email pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar.". Agora o corpo do erro (`.detail` / `.message` / `.error`) é lido e exibido num toast com duração alargada (8s) para o utilizador saber o que fazer. `frontend/src/pages/WebmailPage.jsx`.
+- **Conta enviada no pedido não refletia o perfil** (`fix`): Para perfis sem acesso a contas globais, o pedido enviava `account=power`/`precision` (default derivado do domínio do email). Agora envia `account=personal` (`effectiveAccount`), alinhado com o comportamento do backend que força "personal" para não-admin. `frontend/src/pages/WebmailPage.jsx`.
+- **Resposta rápida (EmailViewerModal) sem feedback de erro** (`fix`): O `sendReply` engolia silenciosamente qualquer erro (apenas `console.error`), sem qualquer toast — o utilizador não sabia se a resposta foi enviada ou falhou. Adicionado `import { toast } from "sonner"`, leitura da mensagem de erro do backend, `from_box: "personal"` e `account=personal` no pedido, e toasts de sucesso/erro (duração 8s). `frontend/src/components/EmailViewerModal.js`.
+
+### Notas
+- O 403 do endpoint `POST /api/emails/send` para perfis não-admin sem `email_config` configurada é **comportamento pretendido** (isolamento de remetente — ver docstring da rota em `backend/routes/emails.py`). A correção foca-se em: (1) não oferecer contas globais a quem não as pode usar, e (2) tornar a mensagem de erro visível e acionável. O utilizador deve configurar o webmail pessoal em Perfil > Configuração de Webmail.
+
 ## [2026-07-17] — Pacote 1: Segurança de Dados, Soft Delete e UI Block
 
 ### Removido
