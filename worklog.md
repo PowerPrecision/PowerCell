@@ -1299,3 +1299,29 @@ Stage Summary:
 - Backend NÃO alterado (Pacote H é puramente frontend; o endpoint e motor já suportam o padrão desde o Pacote D).
 - O CEO agora cria regras de automação via 2 blocos visuais (SE fase → ENTÃO criar tarefa) sem ver JSON.
 - Regras antigas de outros tipos continuam editáveis (convertidas ao guardar) e visíveis na lista com badges.
+
+---
+Task ID: 14
+Agent: Main Agent
+Task: Pacote I — Gestão de Documentos Obrigatórios (UI de Tags no Frontend)
+
+Work Log:
+- Lido `backend/models/system_config.py`: `MandatoryDocumentsConfig` JÁ EXISTE (Pacote G, commit 6207eff) com {enabled, documents: [{name, category}]}.
+- Lido `backend/routes/system_config.py`: `PATCH /system-config/mandatory_documents` JÁ ACEITA (em EXTRA_SECTIONS, Pacote G). Backend sem alterações necessárias.
+- Lido `frontend/src/pages/SystemConfigPage.js` linhas 1749-1955: `MandatoryDocumentsSection` JÁ EXISTE (Pacote G) mas com UI de lista vertical (FileEdit + nome + Badge categoria + botão Trash2 separado por linha).
+- Apresentado ao utilizador APENAS o JSX focado no Input + Badges com X para validação — aprovado ("esta ok").
+- Aplicada melhoria visual no ficheiro:
+  * Adicionado `X` ao import do lucide-react (linha 94). Trash2 mantido (usado em 6+ outros sítios).
+  * Substituído bloco de renderização da lista (linhas ~1908-1941): lista vertical de rows → container flex-wrap com Badge secondary (nome) + Badge outline interno (categoria só se ≠ "outros") + botão X embutido com hover destructive.
+  * Estado vazio agora italic dentro do mesmo container (min-h-[3rem] + bg-muted/30).
+  * handleAdd/handleRemove/handleSave inalterados (payload documents:[{name,category}] já correto).
+- Verificado parse JSX via `cat file | bunx esbuild --loader=jsx` → STDIN_PARSE_OK (sem erros de sintaxe).
+- Actualizado CHANGELOG.md com entrada [2026-06-19] Pacote I.
+- Criado `push_pacote_i.py` (3 ficheiros: SystemConfigPage.js + CHANGELOG.md + worklog.md).
+- Executado push → commit em dev.
+
+Stage Summary:
+- 1 ficheiro de código modificado: `frontend/src/pages/SystemConfigPage.js` (+1 import X, refactor do bloco de lista ~35 linhas).
+- 2 ficheiros de docs actualizados: CHANGELOG.md, worklog.md.
+- Backend NÃO alterado (Pacote I é puramente UX; MandatoryDocumentsConfig + endpoint já existiam do Pacote G).
+- A checklist de documentos obrigatórios agora apresenta-se como tags compactas (Badge+X) em vez de lista vertical pesada — mais intuitivo para o CEO.

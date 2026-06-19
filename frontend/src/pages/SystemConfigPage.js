@@ -91,6 +91,7 @@ import {
   Zap,
   Pencil,
   MessageSquare,
+  X,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -1904,36 +1905,40 @@ const MandatoryDocumentsSection = ({ token }) => {
             </div>
           </div>
 
-          <div className="space-y-2">
+          {/* PACOTE I — Lista de Etiquetas (Tags): badges com ícone X.
+              Layout flex-wrap para os badges fluírem em múltiplas linhas.
+              Cada badge mostra o nome do documento + categoria (se não for
+              "outros") + botão X para remover. */}
+          <div className="flex flex-wrap gap-2 min-h-[3rem] p-3 rounded-lg border bg-muted/30 items-center">
             {documents.length === 0 ? (
-              <div className="text-center py-8 text-sm text-muted-foreground border border-dashed rounded-lg">
+              <span className="text-sm text-muted-foreground italic">
                 Sem documentos na checklist. Adicione acima para começar.
-              </div>
+              </span>
             ) : (
               documents.map((doc, idx) => {
                 const cat = CATEGORIES.find((c) => c.value === doc.category);
+                const hasCat = doc.category && doc.category !== "outros";
                 return (
-                  <div
+                  <Badge
                     key={`${doc.name}-${idx}`}
-                    className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/40"
+                    variant="secondary"
+                    className="pl-3 pr-1 py-1 text-sm gap-1.5"
                   >
-                    <div className="flex items-center gap-2 min-w-0">
-                      <FileEdit className="h-4 w-4 text-muted-foreground shrink-0" />
-                      <span className="text-sm font-medium truncate">{doc.name}</span>
-                      <Badge variant="outline" className="ml-1 shrink-0">
-                        {cat?.label || doc.category || "outros"}
+                    <span className="truncate max-w-[16rem]">{doc.name}</span>
+                    {hasCat && (
+                      <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal">
+                        {cat?.label || doc.category}
                       </Badge>
-                    </div>
-                    <Button
+                    )}
+                    <button
                       type="button"
-                      variant="ghost"
-                      size="sm"
                       onClick={() => handleRemove(idx)}
-                      className="text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                      className="ml-0.5 rounded-full hover:bg-destructive/20 hover:text-destructive p-0.5 transition-colors"
+                      aria-label={`Remover ${doc.name}`}
                     >
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
-                  </div>
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
                 );
               })
             )}

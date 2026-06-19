@@ -3,6 +3,21 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-19] — Pacote I: Gestão de Documentos Obrigatórios (UI de Tags)
+
+### Alterado
+- **Secção "Documentos Obrigatórios" refactorizada para padrão de Tags (Badges com X)** (`feat` — **UX/CEO**): A secção `MandatoryDocumentsSection` da `SystemConfigPage.js` (criada no Pacote G) apresentava cada documento numa linha horizontal com ícone `FileEdit` + nome + Badge de categoria + botão `Trash2` separado — visual pesado e pouco compacto para uma lista de etiquetas. Refactorizada para o padrão de "Lista de Etiquetas" (Tags) pedido pelo CEO:
+  - Cada documento é agora um `<Badge variant="secondary">` com o nome + (opcionalmente) um `<Badge variant="outline">` interno com a categoria (só mostrado se a categoria ≠ `outros`) + um botão `<X>` embutido que remove o documento ao clicar.
+  - Layout `flex-wrap` para os badges fluírem em múltiplas linhas (em vez de uma lista vertical de linhas), dentro de um container com `min-h-[3rem]` + `bg-muted/30` para destacar a área de tags.
+  - Botão de remover (`<X>`) com `hover:bg-destructive/20 hover:text-destructive` e `transition-colors` para feedback visual claro, `aria-label={`Remover ${doc.name}`}` para acessibilidade.
+  - Estado vazio: texto italic "Sem documentos na checklist. Adicione acima para começar." dentro do mesmo container (mantém a área visível).
+  - Import adicionado: `X` do `lucide-react`. O `Trash2` mantém-se importado (usado em outras secções do ficheiro).
+  - `handleAdd` / `handleRemove` / `handleSave` inalterados — a lógica de envio da array `documents: [{name, category}]` para `PATCH /api/system-config/mandatory_documents` já estava correta desde o Pacote G.
+
+### Notas
+- O backend **não foi alterado** — `MandatoryDocumentsConfig` (`enabled` + `documents: [{name, category}]`) e o endpoint `PATCH /api/system-config/mandatory_documents` já existiam desde o Pacote G (commit `6207eff`). O Pacote I é puramente uma melhoria visual do frontend (Trash2 → Badge+X) para tornar a gestão da checklist mais compacta e intuitiva para o CEO.
+- A categoria continua a ser enviada no payload (default `outros` quando adicionada via input simples), mantendo compatibilidade com o motor do Pacote G que gera pedidos de documentos por categoria.
+
 ## [2026-06-19] — Pacote H: Construtor Visual de Automações (Frontend)
 
 ### Alterado
