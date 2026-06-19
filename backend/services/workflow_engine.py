@@ -18,7 +18,7 @@ Actions (ações):
 """
 import logging
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database import db
@@ -42,6 +42,7 @@ VALID_ACTIONS = [
     "assign_user",
     "add_comment",
     "send_email",
+    "create_task",  # Pacote D — Criar tarefa automaticamente
 ]
 
 
@@ -303,6 +304,68 @@ async def execute_action(rule: dict, context: dict) -> bool:
                         "created_at": datetime.now(timezone.utc).isoformat(),
                     }}}
                 )
+
+        elif action == "create_task":
+            # Pacote D — Criar tarefa automaticamente
+            # config: {title, urgency (low/medium/high), assigned_role, due_in_days (opcional)}
+            title = config.get("title", "Tarefa automática")
+            # Substituir variáveis de contexto no título
+            title = title.replace("{client_name}", context.get("client_name", "Cliente"))
+            title = title.replace("{status}", context.get("new_status", context.get("status", "")))
+            title = title.replace("{process_id}", context.get("process_id", ""))
+
+            urgency = config.get("urgency", "medium")  # low/medium/high
+            assigned_role = config.get("assigned_role")  # ex: "consultor", "diretor"
+            due_in_days = config.get("due_in_days")
+
+            # Resolver data de vencimento (opcional)
+            due_date_iso = None
+            if due_in_days and isinstance(due_in_days, (int, float)) and due_in_days > 0:
+                due_date_iso = (datetime.now(timezone.utc) + timedelta(days=int(due_in_days))).isoformat()
+
+            # Resolver utilizador atribuído: se houver assigned_role, procurar
+            # o utilizador com esse role associado ao processo (consultor/mediador/
+            # indexador). Se não houver, a tarefa fica sem atribuição (admin vê).
+            assigned_to = None
+            if assigned_role and context.get("process_id"):
+                process = await db.processes.find_one(
+                    {"id": context["process_id"]},
+                    {"_id": 0, "assigned_consultor_id": 1, "assigned_mediador_id": 1, "assigned_indexacao_id": 1}
+                )
+                if process:
+                    role_field_map = {
+                        "consultor": "assigned_consultor_id",
+                        "intermediario": "assigned_mediador_id",
+                        "mediador": "assigned_mediador_id",
+                        "indexacao": "assigned_indexacao_id",
+                    }
+                    role_field = role_field_map.get(assigned_role)
+                    if role_field:
+                        assigned_to = process.get(role_field)
+
+            task_doc = {
+                "id": str(uuid.uuid4()),
+                "title": title,
+                "description": f"Tarefa criada automaticamente pela regra '{rule['name']}' (urgência: {urgency})",
+                "assigned_to": assigned_to,
+                "process_id": context.get("process_id"),
+                "due_date": due_date_iso,
+                "urgency": urgency,
+                "source": "automation",
+                "rule_id": rule["id"],
+                "rule_name": rule["name"],
+                "created_by": None,  # Sistema
+                "completed": False,
+                "completed_at": None,
+                "completed_by": None,
+                "created_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            }
+            await db.tasks.insert_one(task_doc)
+            logger.info(
+                f"[AUTOMATION] Tarefa criada: {title} (urgência: {urgency}, "
+                f"atribuída a: {assigned_to or 'sem atribuição'}, processo: {context.get('process_id')})"
+            )
         
         # Actualizar contagem de execuções
         await db.automation_rules.update_one(

@@ -1,6 +1,17 @@
 /**
  * O22 - Página de Automação de Workflows "No-Code"
- * Interface para criar regras "Se X, Então Y"
+ * Pacote D — Construtor visual If/Then com selects do shadcn/ui.
+ * Interface para criar regras "Se X, Então Y" SEM inputs de JSON em bruto.
+ *
+ * Tipos de config_fields suportados (vindos do backend /admin/automation/*):
+ * - text              → <Input type="text">
+ * - number            → <Input type="number">
+ * - textarea          → <Textarea>
+ * - select            → <Select> com field.options (+ field.option_labels opcional)
+ * - select_status     → <Select> populado por /admin/workflow-statuses
+ * - select_role       → <Select> com roles internos hardcoded (admin/ceo/diretor/...)
+ * - select_user       → <Select> populado por /users
+ * - select_email_template → <Select> populado por /email-templates (se disponível)
  */
 import React, { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -37,7 +48,19 @@ const ACTION_LABELS = {
   assign_user: "Atribuir utilizador",
   add_comment: "Adicionar comentário",
   send_email: "Enviar email",
+  create_task: "Criar tarefa",
 };
+
+// Roles internos para o select_role (alinhado com backend/models/auth.py UserRole)
+const INTERNAL_ROLES = [
+  { value: "admin", label: "Administrador" },
+  { value: "ceo", label: "CEO" },
+  { value: "diretor", label: "Diretor" },
+  { value: "consultor", label: "Consultor" },
+  { value: "intermediario", label: "Intermediário" },
+  { value: "administrativo", label: "Administrativo" },
+  { value: "indexacao", label: "Indexação" },
+];
 
 const AutomationPage = ({ embedded = false }) => {
   const { token } = useAuth();
@@ -47,6 +70,9 @@ const AutomationPage = ({ embedded = false }) => {
   const [editingRule, setEditingRule] = useState(null);
   const [triggers, setTriggers] = useState([]);
   const [actions, setActions] = useState([]);
+  // Pacote D — dados para popular os Selects dos config_fields
+  const [workflowStatuses, setWorkflowStatuses] = useState([]);
+  const [users, setUsers] = useState([]);
 
   const [form, setForm] = useState({
     name: "",
@@ -82,10 +108,36 @@ const AutomationPage = ({ embedded = false }) => {
     } catch { /* silent */ }
   }, [token]);
 
+  // Pacote D — Buscar workflow statuses e utilizadores para popular os
+  // Selects dos config_fields (select_status, select_user). Evita que o
+  // utilizador tenha de digitar o ID do estado/utilizador num input de
+  // texto — agora escolhe de uma dropdown.
+  const fetchSelectOptions = useCallback(async () => {
+    try {
+      const [sRes, uRes] = await Promise.all([
+        fetch(`${API_URL}/api/admin/workflow-statuses`, { headers }).catch(() => null),
+        fetch(`${API_URL}/api/users`, { headers }).catch(() => null),
+      ]);
+      if (sRes && sRes.ok) {
+        const sData = await sRes.json();
+        // workflow-statuses devolve {statuses: [...]} ou array direto
+        const arr = Array.isArray(sData) ? sData : (sData.statuses || sData || []);
+        setWorkflowStatuses(arr);
+      }
+      if (uRes && uRes.ok) {
+        const uData = await uRes.json();
+        // /users devolve {users: [...]} ou array direto
+        const arr = Array.isArray(uData) ? uData : (uData.users || uData || []);
+        setUsers(arr);
+      }
+    } catch { /* silent — os Selects aparecem vazios se falhar */ }
+  }, [token]);
+
   useEffect(() => {
     fetchRules();
     fetchConfig();
-  }, [fetchRules, fetchConfig]);
+    fetchSelectOptions();
+  }, [fetchRules, fetchConfig, fetchSelectOptions]);
 
   const handleSave = async () => {
     if (!form.name || !form.trigger || !form.action) {
@@ -161,6 +213,141 @@ const AutomationPage = ({ embedded = false }) => {
 
   const selectedTrigger = triggers.find(t => t.id === form.trigger);
   const selectedAction = actions.find(a => a.id === form.action);
+
+  // ================================================================
+  // Pacote D — Render helper para config_fields.
+  // Renderiza o controlo certo consoante o `type` do field:
+  //   text/number  → <Input>
+  //   textarea     → <Textarea>
+  //   select       → <Select> com field.options (+ option_labels)
+  //   select_status→ <Select> com workflowStatuses do backend
+  //   select_role  → <Select> com INTERNAL_ROLES
+  //   select_user  → <Select> com users do backend
+  //   select_email_template → <Select> (vazio por agora — sem endpoint)
+  // Nunca mostra um input de JSON em bruto — o utilizador escolhe
+  // sempre de uma dropdown ou digita texto curto.
+  // ================================================================
+  const renderConfigField = (field, configKey) => {
+    const value = form[configKey]?.[field.key] ?? "";
+    const setVal = (v) => setForm({
+      ...form,
+      [configKey]: { ...form[configKey], [field.key]: v }
+    });
+
+    // Para selects, shadcn/ui usa string vazia como placeholder; garantir
+    // que o value é sempre string (evita warning "value undefined").
+    const safeValue = value === null || value === undefined ? "" : String(value);
+
+    if (field.type === "textarea") {
+      return (
+        <Textarea
+          value={value}
+          onChange={e => setVal(e.target.value)}
+          rows={2}
+          placeholder={field.default?.toString() || ""}
+        />
+      );
+    }
+
+    if (field.type === "number") {
+      return (
+        <Input
+          value={value}
+          onChange={e => setVal(e.target.value === "" ? "" : Number(e.target.value))}
+          type="number"
+          placeholder={field.default?.toString() || ""}
+        />
+      );
+    }
+
+    if (field.type === "select") {
+      const options = field.options || [];
+      const labels = field.option_labels || {};
+      return (
+        <Select value={safeValue} onValueChange={v => setVal(v)}>
+          <SelectTrigger>
+            <SelectValue placeholder={field.default ? labels[field.default] || field.default : "Selecionar..."} />
+          </SelectTrigger>
+          <SelectContent>
+            {options.map(opt => (
+              <SelectItem key={opt} value={opt}>{labels[opt] || opt}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    if (field.type === "select_status") {
+      // workflow-statuses pode ter {id, name} ou {name} — usar name como
+      // value e label (o backend compara por string de status).
+      return (
+        <Select value={safeValue} onValueChange={v => setVal(v)}>
+          <SelectTrigger>
+            <SelectValue placeholder="Selecionar estado..." />
+          </SelectTrigger>
+          <SelectContent>
+            {workflowStatuses.map((s, i) => {
+              const val = s.name || s.id || s;
+              const label = s.label || s.name || s;
+              return <SelectItem key={s.id || i} value={val}>{label}</SelectItem>;
+            })}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    if (field.type === "select_role") {
+      return (
+        <Select value={safeValue} onValueChange={v => setVal(v)}>
+          <SelectTrigger>
+            <SelectValue placeholder="Selecionar role..." />
+          </SelectTrigger>
+          <SelectContent>
+            {INTERNAL_ROLES.map(r => (
+              <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    if (field.type === "select_user") {
+      return (
+        <Select value={safeValue} onValueChange={v => setVal(v)}>
+          <SelectTrigger>
+            <SelectValue placeholder="Selecionar utilizador..." />
+          </SelectTrigger>
+          <SelectContent>
+            {users.map(u => (
+              <SelectItem key={u.id} value={u.id}>{u.name} ({u.email})</SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      );
+    }
+
+    if (field.type === "select_email_template") {
+      // Sem endpoint de templates ainda — mostrar input de texto como
+      // fallback transitório. Quando houver endpoint, substituir por Select.
+      return (
+        <Input
+          value={value}
+          onChange={e => setVal(e.target.value)}
+          placeholder="ID do template (ex: welcome_email)"
+        />
+      );
+    }
+
+    // Default: text
+    return (
+      <Input
+        value={value}
+        onChange={e => setVal(e.target.value)}
+        type="text"
+        placeholder={field.default?.toString() || ""}
+      />
+    );
+  };
 
   if (loading) {
     const loadingContent = (
@@ -292,19 +479,13 @@ const AutomationPage = ({ embedded = false }) => {
                     ))}
                   </SelectContent>
                 </Select>
-                {/* Trigger config fields */}
+                {/* Trigger config fields — Pacote D: renderiza Selects
+                    para select_status/select_role/select_user em vez de
+                    inputs de texto em bruto. */}
                 {selectedTrigger?.config_fields?.map(field => (
                   <div key={field.key}>
                     <Label className="text-xs">{field.label}</Label>
-                    <Input
-                      value={form.trigger_config[field.key] || ""}
-                      onChange={e => setForm({
-                        ...form,
-                        trigger_config: { ...form.trigger_config, [field.key]: field.type === "number" ? Number(e.target.value) : e.target.value }
-                      })}
-                      type={field.type === "number" ? "number" : "text"}
-                      placeholder={field.default?.toString() || ""}
-                    />
+                    {renderConfigField(field, "trigger_config")}
                   </div>
                 ))}
               </div>
@@ -326,28 +507,14 @@ const AutomationPage = ({ embedded = false }) => {
                     ))}
                   </SelectContent>
                 </Select>
-                {/* Action config fields */}
+                {/* Action config fields — Pacote D: renderiza Selects
+                    para select/select_status/select_role/select_user.
+                    Ex: "Criar tarefa: [Input: título], urgência: [Select],
+                    atribuída a [Select: role]". */}
                 {selectedAction?.config_fields?.map(field => (
                   <div key={field.key}>
                     <Label className="text-xs">{field.label}</Label>
-                    {field.type === "textarea" ? (
-                      <Textarea
-                        value={form.action_config[field.key] || ""}
-                        onChange={e => setForm({
-                          ...form,
-                          action_config: { ...form.action_config, [field.key]: e.target.value }
-                        })}
-                        rows={2}
-                      />
-                    ) : (
-                      <Input
-                        value={form.action_config[field.key] || ""}
-                        onChange={e => setForm({
-                          ...form,
-                          action_config: { ...form.action_config, [field.key]: e.target.value }
-                        })}
-                      />
-                    )}
+                    {renderConfigField(field, "action_config")}
                   </div>
                 ))}
               </div>

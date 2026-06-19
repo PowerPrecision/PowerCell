@@ -965,3 +965,57 @@ Stage Summary:
   - CHANGELOG.md (entrada nova [2026-06-19] Pacote B)
   - worklog.md (esta entrada)
 - Próximo passo: commit + push para branch `dev` via Git Database API.
+
+---
+Task ID: 9
+Agent: Main Agent
+Task: Pacote D — Afinações de Fluxo (Formulário, Logs Silenciosos e UX Automações)
+
+Work Log:
+- Lido o worklog (Tasks 1-8: hotfixes anteriores + Pacote A seed + Pacote B impersonate).
+- Investigados os 3 alvos do Pacote D em paralelo:
+  1. `backend/routes/public.py` (endpoint `POST /api/public/client-registration`) — confirmado que NÃO criava processo (header dizia "NÃO se cria processo nesta fase"). Apenas criava o cliente + enviava email de confirmação (não magic link).
+  2. `backend/services/history.py::log_history` — JÁ tinha modo fantasma geral para indexacao (bloqueava TODAS as ações). MAS `backend/routes/documents.py` tinha 3 sítios com `db.history.insert_one` DIRETO (linhas 4275, 4364, 4414) que BYPASSAVAM `log_history` → não tinham a proteção.
+  3. `frontend/src/pages/AutomationPage.js` — JÁ tinha construtor If/Then com Selects para trigger/action, MAS os config_fields com type `select_status`/`select_role`/`select_user`/`select` eram TODOS renderizados como `<Input>` de texto (obrigando o utilizador a digitar IDs). Backend `automation.py` já definia estes tipos mas o frontend não os tratava.
+
+Tarefa 1 — Email no Formulário Público (`backend/routes/public.py`):
+- Adicionado `import os` (necessário para `os.environ.get("FRONTEND_URL")`).
+- Inserido bloco "PACOTE D — CRIAÇÃO AUTOMÁTICA DE PROCESSO + EMAIL DE CONVITE" depois da criação do cliente (antes do bloco de notificações). Fluxo: (1) `get_next_process_number()`, (2) `db.processes.insert_one` com `status="pre_registo"`, `is_active=True`, `is_deleted=False`, `fonte="public_form"`, (3) `db.clients.update_one` com `$push: {process_ids: process_id}`, (4) `create_client_magic_token(process_id)` + `secrets.token_urlsafe(6)[:8]` → `short_id`, upsert em `db.portal_tokens` com `source="public_form_auto"`, (5) `send_email(account_name="power", to_emails=[email], force_system=True, system_purpose="NOTIFICATIONS")` com HTML body (botão "Aceder ao meu Portal" + link curto). URL resolvido por Referer/Origin → `os.environ["FRONTEND_URL"]`.
+- Try/except envolve TODO o bloco — se a criação do processo ou envio do email falhar, o registo do cliente NÃO falha (log warning + `magic_link_sent=False`).
+- Resposta do endpoint agora inclui `process_id` e `magic_link_sent`.
+- Atualizado o header do ficheiro para refletir o novo fluxo (era "Triagem Manual", agora "Criação Automática + Email de Convite").
+
+Tarefa 2 — Indexador Silencioso em Documentos (`backend/services/history.py` + `backend/routes/documents.py`):
+- Adicionado IF explícito em `log_history` (ANTES do modo fantasma geral) que bloqueia especificamente ações de upload/delete de documentos para indexacao. Usa `action.startswith(("Carregou documento", "Eliminou documento"))` para cobrir todas as variantes (single, direto, massa). Log debug com action/user/process para auditoria.
+- Adicionadas barras de bloqueio equivalentes (`if user and user.get("role") != "indexacao":`) nos 3 sítios de `documents.py` que fazem `db.history.insert_one` direto: (1) "Documento solicitado via portal" (linha 4280), (2) "Status do documento alterado" (linha 4372), (3) "Pedido de documento removido" (linha 4425). Comentários explicam que estes sítios NÃO passam por `log_history` e precisavam da mesma proteção.
+
+Tarefa 3 — Construtor Visual If/Then com Selects (`frontend/src/pages/AutomationPage.js` + `backend/routes/automation.py` + `backend/services/workflow_engine.py`):
+- Backend `workflow_engine.py`: adicionado `"create_task"` a `VALID_ACTIONS`. Importado `timedelta`. Adicionado handler `elif action == "create_task":` em `execute_action` que cria tarefa em `db.tasks` com `title`, `urgency`, `assigned_role` (resolve para `assigned_consultor_id`/`assigned_mediador_id`/`assigned_indexacao_id` do processo), `due_in_days` (opcional → `due_date`), `source="automation"`, `rule_id`, `rule_name`.
+- Backend `automation.py`: adicionado `create_task` à lista de actions com config_fields: `title` (text, default "Contactar {client_name}"), `urgency` (select com options low/medium/high + option_labels Baixa/Média/Alta), `assigned_role` (select com options consultor/intermediario/mediador/indexacao + option_labels), `due_in_days` (number, default 7).
+- Frontend `AutomationPage.js`:
+  - Adicionado `INTERNAL_ROLES` constante (admin/ceo/diretor/consultor/intermediario/administrativo/indexacao).
+  - Adicionado `create_task: "Criar tarefa"` a `ACTION_LABELS`.
+  - Adicionado state `workflowStatuses` + `users` + `fetchSelectOptions()` que faz `GET /admin/workflow-statuses` + `GET /users` em paralelo.
+  - Adicionado helper `renderConfigField(field, configKey)` que renderiza o controlo certo consoante `field.type`: text/number → `<Input>`, textarea → `<Textarea>`, select → `<Select>` com field.options + field.option_labels, select_status → `<Select>` com workflowStatuses, select_role → `<Select>` com INTERNAL_ROLES, select_user → `<Select>` com users, select_email_template → `<Input>` transitório.
+  - Substituídos os 2 blocos de renderização de config_fields (trigger + action) por chamadas a `renderConfigField`.
+  - Atualizado o header do ficheiro com documentação dos tipos suportados.
+
+Validação:
+- `py_compile` OK em public.py, history.py, documents.py, automation.py, workflow_engine.py.
+- `bunx esbuild --loader:.js=jsx` OK em AutomationPage.js.
+- Documentação atualizada: CHANGELOG.md (entrada nova [2026-06-19] Pacote D) + esta entrada do worklog.
+
+Stage Summary:
+- Tarefa 1: Formulário público agora cria processo em pre_registo + envia email de convite do Portal automaticamente (force_system=True). Cliente recebe link imediatamente. Staff continua a fazer triagem no Kanban.
+- Tarefa 2: Indexador é agora EXPLICITAMENTE silencioso em upload/delete de documentos (IF em log_history + 3 barras de bloqueio em documents.py nos sítios com db.history.insert_one direto).
+- Tarefa 3: Página de Automações tem construtor visual If/Then com Selects do shadcn/ui para select/select_status/select_role/select_user. Nova ação `create_task` com config_fields visuais (título + urgência + role + prazo). Nada de JSON em bruto.
+- Ficheiros modificados:
+  - backend/routes/public.py (criação automática de processo + email de convite)
+  - backend/services/history.py (IF explícito para documentos + indexacao)
+  - backend/routes/documents.py (3 barras de bloqueio nos db.history.insert_one diretos)
+  - backend/services/workflow_engine.py (VALID_ACTIONS + create_task + timedelta import)
+  - backend/routes/automation.py (create_task action com config_fields)
+  - frontend/src/pages/AutomationPage.js (INTERNAL_ROLES, fetchSelectOptions, renderConfigField, render dos config_fields)
+  - CHANGELOG.md (entrada nova [2026-06-19] Pacote D)
+  - worklog.md (esta entrada)
+- Próximo passo: commit + push para branch `dev` via Git Database API.
