@@ -610,12 +610,23 @@ async def generate_magic_link(
     """
     import secrets
 
+    # Nota: não filtramos is_deleted aqui — queremos distinguir
+    # "processo inexistente" (404 genérico) de "processo eliminado"
+    # (404 com mensagem acionável). O consultor pode ver processos
+    # eliminados no CRM (GET /processes/{id} também não filtra), mas
+    # não deve gerar magic links para eles (o Portal do Cliente recusa
+    # acessos a processos eliminados — ver backend/routes/portal.py).
     process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"id": process_id},
         {"_id": 0}
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if process.get("is_deleted"):
+        raise HTTPException(
+            status_code=404,
+            detail="Este processo foi eliminado. Restaure-o para gerar o magic link."
+        )
 
     # Gerar magic link JWT
     token = create_client_magic_token(process_id)
@@ -677,12 +688,19 @@ async def send_magic_link_email(
     import secrets
     from services.email_service import send_email
 
+    # Mesma lógica do generate_magic_link: distinguir "não encontrado"
+    # de "eliminado", para o consultor receber uma mensagem acionável.
     process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"id": process_id},
         {"_id": 0}
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if process.get("is_deleted"):
+        raise HTTPException(
+            status_code=404,
+            detail="Este processo foi eliminado. Restaure-o para enviar o magic link por email."
+        )
 
     client_email = process.get("client_email", "")
     client_name = process.get("client_name", "Cliente")

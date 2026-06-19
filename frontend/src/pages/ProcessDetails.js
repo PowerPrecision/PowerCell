@@ -2562,7 +2562,14 @@ const ProcessDetails = () => {
                               toast.error("Não foi possível gerar o link");
                             }
                           } catch (error) {
-                            toast.error("Erro ao gerar link");
+                            // O interceptor global do api.js é silencioso para 404
+                            // (só faz console.warn). Para o utilizador ver a causa real
+                            // ("processo eliminado", "processo não encontrado", etc.),
+                            // extraímos o detail do backend e mostramos aqui.
+                            // Outros status (400/500/...) já são tratados pelo interceptor.
+                            if (error?.response?.status === 404) {
+                              toast.error(error?.response?.data?.detail || "Processo não encontrado");
+                            }
                           }
                         }}
                       >
@@ -2578,7 +2585,12 @@ const ProcessDetails = () => {
                             await sendMagicLinkEmail(id);
                             toast.success("Email enviado com o link do portal!");
                           } catch (error) {
-                            toast.error("Erro ao enviar email");
+                            // Mesma lógica do botão Copiar Link: o interceptor é
+                            // silencioso para 404, por isso mostramos o detail do
+                            // backend (ex.: "processo eliminado") aqui.
+                            if (error?.response?.status === 404) {
+                              toast.error(error?.response?.data?.detail || "Processo não encontrado");
+                            }
                           }
                         }}
                       >

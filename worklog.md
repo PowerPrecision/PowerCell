@@ -882,3 +882,41 @@ Stage Summary:
 - Execução segura: adiciona aos existentes por defeito; `--clear` remove apenas dados deste script; batches via asyncio.gather; auto-deteta empresa ativa; cria utilizadores dummy se faltar consultor/indexador/intermediário.
 - Comando de execução: `python backend/scripts/seed_massive_dev_data.py` (ou `--num-clients 120 --clear`).
 - Próximo passo: commit + push para branch `dev` via Git Database API (commit em preparação).
+
+---
+Task ID: 7
+Agent: Main Agent
+Task: Hotfix — Erro 404 ao Enviar/Gerar Magic Link do Portal do Cliente (processo eliminado)
+
+Work Log:
+- User reportou: `POST https://powercell.onrender.com/api/processes/71448d96-7efd-47f8-a199-9cbdc6d105b6/generate-magic-link/send 404 (Not Found)` + toast "Erro ao enviar email" ao clicar em "Enviar por Email" do popover do Portal do Cliente em ProcessDetails.
+- Verificado via curl que a rota **existe** no deploy live: `GET /api/processes/{id}/generate-magic-link/send` → 405 Method Not Allowed (prova que a rota está registada); `POST` sem auth → 401 "Not authenticated" (prova que o handler corre com auth). Conclusão: o 404 do user vinha de **dentro do handler**, não de "route not found".
+- Inspecionado `backend/routes/processes.py`:
+  - `GET /processes/{id}` (linha 2676): `db.processes.find_one({"id": process_id}, {"_id": 0})` — **SEM** filtro `is_deleted` → utilizador consegue abrir a página de qualquer processo, mesmo eliminado.
+  - `POST /processes/{id}/generate-magic-link` (linha 613) e `POST /processes/{id}/generate-magic-link/send` (linha 680): `db.processes.find_one({"id": process_id, "is_deleted": {"$ne": True}}, {"_id": 0})` — **COM** filtro `is_deleted` → devolve `None` para processo eliminado → `raise HTTPException(404, "Processo não encontrado")`. Mensagem genérica, indistinguível de "realmente não existe".
+- Inspecionado `frontend/src/services/api.js` (interceptor axios global): para 404 é **silencioso** — só `console.warn` + `Promise.reject(error)`, sem toast. Logo, o utilizador não vê a causa real do 404; só vê o toast genérico do bloco `catch` local em `ProcessDetails.js` ("Erro ao enviar email" / "Erro ao gerar link").
+- Inspecionado `backend/routes/portal.py`: confirma que os endpoints do Portal do Cliente filtram `is_deleted: {"$ne": True}` (linhas 258, 628, 705) — mesmo que um magic link fosse gerado para um processo eliminado, o cliente não conseguiria aceder ao portal. Faz mais sentido bloquear a geração com mensagem clara.
+- Confirmado source do 404: a query `{"id": process_id, "is_deleted": {"$ne": True}}` falha para qualquer processo eliminado. Como o seed massivo (`seed_massive_dev_data.py`) cria 5% dos processos com `is_deleted=True`, e o GET deixa abrir a página, o cenário do user é consistente com um processo eliminado (do seed ou de eliminação manual).
+
+Fix 1 — Backend (`backend/routes/processes.py`):
+- `generate_magic_link` (linha 611-629): removido `is_deleted: {"$ne": True}` da query; adicionado `if process.get("is_deleted"): raise HTTPException(404, "Este processo foi eliminado. Restaure-o para gerar o magic link.")` depois da lookup. Adicionado comentário a explicar a razão (consistência com GET + mensagem acionável).
+- `send_magic_link_email` (linha 688-703): mesma correção (lookup sem filtro + raise 404 com mensagem "Restaure-o para enviar o magic link por email.").
+
+Fix 2 — Frontend (`frontend/src/pages/ProcessDetails.js`):
+- Botão "Copiar Link" (linha 2564-2573) e botão "Enviar por Email" (linha 2587-2594): o bloco `catch` agora extrai `error?.response?.data?.detail` quando `status === 404` e mostra-o num `toast.error`. Outros status (400 sem email, 500 falha de envio, etc.) continuam a ser tratados pelo interceptor global do `api.js` — sem duplicação de toasts. Comentários explicam a razão (interceptor silencioso em 404).
+- Removidos os toasts genéricos "Erro ao gerar link" / "Erro ao enviar email" que mascaravam a causa real.
+
+Validação:
+- `python3 -m py_compile backend/routes/processes.py` → OK.
+- `bunx esbuild --loader:.js=jsx --bundle=false frontend/src/pages/ProcessDetails.js` → OK.
+- Documentação atualizada: CHANGELOG.md (entrada nova [2026-06-19]) + esta entrada do worklog.
+
+Stage Summary:
+- O 404 ao enviar/gerar magic link deixa de ser silencioso e genérico. Se o processo estiver eliminado, o utilizador vê um toast claro: "Este processo foi eliminado. Restaure-o para gerar o magic link." — pode então restaurar o processo (ou contactar um admin) antes de tentar novamente.
+- A causa raiz (inconsistência entre GET /processes/{id} que não filtra is_deleted e os endpoints de magic link que filtravam) fica alinhada: ambos procuram sem filtro; a diferença é que os endpoints de magic link recusam operar sobre eliminados com mensagem clara, enquanto o GET permite visualizá-los (para restauração).
+- Ficheiros modificados:
+  - backend/routes/processes.py (generate_magic_link + send_magic_link_email: lookup sem is_deleted + raise 404 com mensagem acionável)
+  - frontend/src/pages/ProcessDetails.js (catch dos 2 botões do popover do Portal do Cliente: extrai detail do 404 e mostra no toast)
+  - CHANGELOG.md (entrada nova [2026-06-19])
+  - worklog.md (esta entrada)
+- Próximo passo: commit + push para branch `dev` via Git Database API.
