@@ -1072,3 +1072,45 @@ Stage Summary:
   - backend/routes/processes.py (search build_multiword_search_filter + process_number)
   - CHANGELOG.md (entrada [2026-06-19] Pacote E)
   - worklog.md (esta entrada)
+
+---
+Task ID: 10 (Pacote F)
+Agent: Main Agent
+Task: Pacote F — Criar script seed_massive_dev_data_v2.py que itera sobre processos/clientes existentes e preenche dados em falta (cartões financeiros, profissionais, imóvel, vendedor, documentos do Portal).
+
+Work Log:
+- Lido o script v1 (backend/scripts/seed_massive_dev_data.py, 1498 linhas) para entender estrutura, helpers e padrões (seed_mark, batch_insert, gerar_nif_valido, etc.).
+- Lidos os cartões do ProcessDetails.js para extrair os nomes EXATOS dos campos:
+  - BANK_LIST (linha 188) = nomes CURTOS: ABANCA, BBVA, BEST, BIG, BPI, CGD, Crédito Agrícola, CTT, Millennium bcp, Novo Banco, Popular, Santander Totta, Outro. (v1 usava nomes longos → badges não faziam match.)
+  - Créditos Ativos (linha 3868): financialData.bancos_creditos = [{banco, valor}] — v2 adiciona {prestacao, tipo, anos_restantes}.
+  - Contas de Crédito Abertas (linha 3994): financialData.tem_creditos_activos = [string,...].
+  - Simulações (linha 4074): financialData.bancos_simulacoes = [string,...] (badges) — v2 adiciona simulacoes_detalhe = [{banco, spread, taeg, prestacao, montante, prazo}].
+  - Rendimentos (linha 3526): monthly_income, rendimento_bruto, rendimento_anual, capital_proprio, valor_financiado, renda_habitacao_atual, rendimento_co_titular, nr_dependentes.
+  - Situação Financeira (linha 3619): efetivo, precisa_vender_casa, fiador (Selects sim/nao).
+  - Situação Profissional (linha 4163): employment_type (enum: efetivo/termo_certo/termo_incerto/independente/empresario/reformado/desempregado), trabalha_estrangeiro, employment_duration, employer_name, employer_nif, categoria_profissional, subsidiario_alimentacao, data_referencia.
+  - Estado da Procura (linha 4279): ja_tem_imovel, ja_tem_casa_escolhida, proprietario_nome, proprietario_contacto, data_cpcv, data_escritura_prevista.
+  - Dados do Proprietário/Vendedor (linha 4761): realEstateData.owner_name, owner_email, owner_phone.
+  - Vendedor top-level (linha 2797): process.vendedor = {nome, contacto, telefone, name}.
+- Lido backend/routes/documents.py (linha 4339) e backend/routes/portal.py (linhas 1387, 1613) para confirmar valores exatos: status=UPLOADED + source=client_portal + uploaded_by=portal_client (via Portal); status=REQUESTED + source=admin_request (pedido).
+
+Estrutura do script v2 (backend/scripts/seed_massive_dev_data_v2.py):
+- IMPORTANTE: ITERA sobre processos EXISTENTES (não cria novos). Query: is_deleted != True (ignora eliminados). Filtro opcional --only-status.
+- IDEMPOTENTE por defeito: merge_financial/merge_real_estate só preenchem campos vazios/nulos. --force para sobrescrever.
+- gerar_creditos_ativos(): 1-3 objetos {banco, valor, prestacao, tipo} com bancos CURTOS do BANK_LIST (para badges coloridos renderizarem). Calcula prestacao com fórmula francesa.
+- gerar_simulacoes_detalhe(valor_imovel): 1-2 simulações {banco, montante, spread, euribor, taxa, taeg, prestacao, prazo_anos, pct_financiamento, data_simulacao}. TAEG = euribor + spread + 0.4% (custos).
+- gerar_rendimentos_situacao(): monthly_income, salario_bruto (aprox x1.39), rendimento_anual (x14), capital_proprio, renda_habitacao_atual, nr_dependentes, efetivo/precisa_vender_casa/fiador (sim/nao).
+- gerar_situacao_profissional(): employment_type (enum válido do Select), employer_name, employer_nif (válido), categoria_profissional, subsidiario_alimentacao, data_referencia.
+- gerar_estado_procura_e_vendedor(): 3 estados típicos (Em pesquisa / CPCV Assinado / Escritura Marcada) — ajusta ja_tem_imovel/ja_tem_casa_escolhida/data_cpcv/data_escritura_prevista coerentemente + proprietario_nome/contacto + owner_name/email/phone + agencia_imobiliaria (fictícia) + devolve vendedor top-level {nome, contacto, telefone, email, agencia}.
+- garantir_documentos(): conta docs existentes do processo; se <2 UPLOADED, adiciona; se <1 REQUESTED, adiciona; se total <3, completa com mix. Max 6 (não remove). Novos docs marcados com _seed_data_v2 + _seed_script.
+- Sincronização: dados financeiros preenchidos no processo são também gravados no cliente (dados_financeiros + financial_data) para a ficha do cliente mostrar os mesmos valores.
+- CLI: --force, --limit N, --only-status csv, --skip-docs, --dry-run, --help.
+- py_compile OK. motor/faker são deps de runtime (instalados no backend Render).
+
+Stage Summary:
+- Script v2 criado em backend/scripts/seed_massive_dev_data_v2.py (~430 linhas).
+- Preenche TODOS os cartões pedidos: Créditos Ativos, Contas de Crédito Abertas, Simulações, Rendimentos, Situação Financeira, Situação Profissional, Estado da Procura, Dados do Proprietário/Vendedor.
+- Garante 3-6 documentos por processo (>=2 UPLOADED via Portal + >=1 REQUESTED).
+- Idempotente (não destrói dados existentes sem --force).
+- Usa nomes CURTOS de bancos (fix do bug de badges do v1).
+- CHANGELOG.md atualizado com entrada [2026-06-19] Pacote F.
+- Push para dev via Git Database API.

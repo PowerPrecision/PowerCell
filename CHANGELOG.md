@@ -3,6 +3,32 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-19] — Pacote F: Script de Mock Data V2 (Preenchimento Profundo e Portal)
+
+### Adicionado
+- **Script `seed_massive_dev_data_v2.py` — preenchimento profundo de mock data** (`feat` — **DEV/TESTES**): Novo script `backend/scripts/seed_massive_dev_data_v2.py` que **itera sobre os processos e clientes JÁ EXISTENTES** (não cria novos) e preenche obrigatoriamente os dados em falta que o Pacote A (`seed_massive_dev_data.py`) deixou vazios — causando cartões vazios e dificultando os testes de UI. O script é **idempotente por defeito** (só preenche campos vazios/nulos; `--force` para sobrescrever) e não cria nem elimina clientes/processos. Preenche:
+  1. **Cartões Financeiros e Profissionais**:
+     - **Créditos Ativos** (`bancos_creditos`): 1-3 objetos `{banco, valor, prestacao, tipo}` com bancos CURTOS do `BANK_LIST` do frontend (`CGD`, `Millennium bcp`, `Santander Totta`, `BPI`, `Novo Banco`, …) para os badges coloridos (`BANK_COLORS`) renderizarem correctamente. (O v1 usava nomes longos que não faziam match.)
+     - **Contas de Crédito Abertas** (`tem_creditos_activos`): injeta os mesmos bancos dos créditos ativos (sincronização automática que o frontend já faz).
+     - **Simulações de Crédito Efetuadas** (`bancos_simulacoes` + `simulacoes_detalhe`): 1-2 simulações detalhadas `{banco, spread, taeg, prestacao, montante, prazo}`. O array `bancos_simulacoes` (strings) alimenta os badges; o array `simulacoes_detalhe` (objetos) guarda os dados completos.
+     - **Rendimentos / Situação Financeira**: `monthly_income`, `rendimento_bruto`, `rendimento_anual`, `capital_proprio`, `renda_habitacao_atual`, `nr_dependentes`, `efetivo`, `precisa_vender_casa`, `fiador` (Selects `sim`/`nao` com valores válidos do esquema).
+     - **Situação Profissional**: `employment_type` (enum válido: `efetivo`/`termo_certo`/`termo_incerto`/`independente`/`empresario`/`reformado`), `trabalha_estrangeiro` (`sim`/`nao`), `employment_duration`, `employer_name`, `employer_nif` (gerado válido), `categoria_profissional`, `subsidiario_alimentacao`, `data_referencia`.
+  2. **Dados do Imóvel e Vendedor**:
+     - **Estado da Procura**: derivado em 3 estados típicos (`Em pesquisa`, `CPCV Assinado`, `Escritura Marcada`) — ajusta `ja_tem_imovel` / `ja_tem_casa_escolhida` / `data_cpcv` / `data_escritura_prevista` coerentemente + campo novo `estado_procura`.
+     - **Dados do Proprietário/Vendedor**: `proprietario_nome`, `proprietario_contacto`, `owner_name`, `owner_email`, `owner_phone`, `agencia_imobiliaria` (fictícia) no `real_estate_data` E `process.vendedor` (`{nome, contacto, telefone, email, agencia}`) no top-level do processo. Todos os dropdowns (enums) recebem valores **válidos** do esquema.
+  3. **Documentação e Portal do Cliente**:
+     - Garante **3-6 documentos** por processo na coleção `documents` (não duplica se já existirem suficientes — apenas completa o que falta).
+     - **Pelo menos 2** com `status=UPLOADED` + `source=client_portal` + `uploaded_by=portal_client` (submetidos pelo cliente via Portal).
+     - **Pelo menos 1** com `status=REQUESTED` + `source=admin_request` (pendente/pedido ao cliente).
+  - **Sincronização cliente**: os dados financeiros preenchidos no processo são também gravados no `dados_financeiros` + `financial_data` do cliente principal (para que a ficha do cliente mostre os mesmos valores).
+  - **CLI**: `--force` (sobrescrever), `--limit N`, `--only-status csv`, `--skip-docs`, `--dry-run`, `--help`.
+
+### Notas
+- **Idempotente**: por defeito só preenche campos vazios/nulos (merge respeita dados existentes). `--force` sobrescreve tudo.
+- **Marcador**: os documentos criados pelo v2 ficam marcados com `_seed_data_v2=True` + `_seed_script="seed_massive_dev_data_v2"` (para auditoria/remoção futura). Os updates aos processos/clientes não alteram o `_seed_script` existente.
+- **Bancos CURTOS vs LONGOS**: o v1 (`seed_massive_dev_data.py`) usava nomes longos (`CGD - Caixa Geral de Depósitos`) em `bancos_creditos`/`tem_creditos_activos`/`bancos_simulacoes`, pelo que os badges coloridos do frontend (`BANK_COLORS` com chaves curtas como `CGD`, `Santander Totta`) não faziam match e os cartões mostravam "Nenhum crédito registado" mesmo com dados. O v2 usa os nomes curtos exatos do `BANK_LIST`.
+- **Execução**: `python backend/scripts/seed_massive_dev_data_v2.py` (no backend Render/shell onde `motor` + `faker` estão instalados).
+
 ## [2026-06-19] — Pacote E: Refinamentos UX (Pesquisa, Dropdowns e Lógica de Múltiplos Processos)
 
 ### Corrigido
