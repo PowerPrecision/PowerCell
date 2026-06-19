@@ -1,17 +1,17 @@
 /**
  * O22 - Página de Automação de Workflows "No-Code"
- * Pacote D — Construtor visual If/Then com selects do shadcn/ui.
- * Interface para criar regras "Se X, Então Y" SEM inputs de JSON em bruto.
+ * Pacote H — Construtor visual If/Then opinionado para CEO.
  *
- * Tipos de config_fields suportados (vindos do backend /admin/automation/*):
- * - text              → <Input type="text">
- * - number            → <Input type="number">
- * - textarea          → <Textarea>
- * - select            → <Select> com field.options (+ field.option_labels opcional)
- * - select_status     → <Select> populado por /admin/workflow-statuses
- * - select_role       → <Select> com roles internos hardcoded (admin/ceo/diretor/...)
- * - select_user       → <Select> populado por /users
- * - select_email_template → <Select> populado por /email-templates (se disponível)
+ * O CEO não vê nem toca em JSON. A interface apresenta dois blocos
+ * visuais claros:
+ *   1. SE  — "Quando um processo transitar para a fase..." → Select
+ *   2. ENTÃO — "O sistema deve criar uma tarefa" com:
+ *        Título, Atribuir a (role), Urgência, Prazo (dias)
+ *
+ * O trigger é fixo (process_status_changed) e a ação é fixa
+ * (create_task). O handleSave() compila as seleções visuais no
+ * payload exato que POST /api/admin/automation/rules espera,
+ * fazendo a ponte invisível para o utilizador.
  */
 import React, { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -28,12 +28,14 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, Di
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import {
-  Zap, Plus, Trash2, Edit2, Play, Pause,
-  ArrowRight, ChevronRight, RefreshCw
+  Zap, Plus, Trash2, Edit2,
+  ArrowRight, ChevronRight
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+// Labels para os badges da lista de regras (suporta todos os tipos
+// históricos — regras antigas de outros tipos continuam a aparecer).
 const TRIGGER_LABELS = {
   process_status_changed: "Estado do processo alterado",
   process_created: "Novo processo criado",
@@ -51,15 +53,19 @@ const ACTION_LABELS = {
   create_task: "Criar tarefa",
 };
 
-// Roles internos para o select_role (alinhado com backend/models/auth.py UserRole)
-const INTERNAL_ROLES = [
-  { value: "admin", label: "Administrador" },
-  { value: "ceo", label: "CEO" },
-  { value: "diretor", label: "Diretor" },
+// Roles disponíveis para atribuição de tarefa no builder visual.
+// Alinhado com as roles que o motor de automação resolve no backend.
+const TASK_ROLES = [
   { value: "consultor", label: "Consultor" },
   { value: "intermediario", label: "Intermediário" },
-  { value: "administrativo", label: "Administrativo" },
+  { value: "mediador", label: "Mediador" },
   { value: "indexacao", label: "Indexação" },
+];
+
+const URGENCY_OPTIONS = [
+  { value: "low", label: "Baixa" },
+  { value: "medium", label: "Média" },
+  { value: "high", label: "Alta" },
 ];
 
 const AutomationPage = ({ embedded = false }) => {
@@ -68,19 +74,20 @@ const AutomationPage = ({ embedded = false }) => {
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
-  const [triggers, setTriggers] = useState([]);
-  const [actions, setActions] = useState([]);
-  // Pacote D — dados para popular os Selects dos config_fields
+  // Fases do workflow para popular o Select do bloco IF.
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
-  const [users, setUsers] = useState([]);
 
+  // Estado do formulário — campos amigáveis para o CEO (não há JSON).
   const [form, setForm] = useState({
     name: "",
     description: "",
-    trigger: "",
-    trigger_config: {},
-    action: "",
-    action_config: {},
+    // IF — fase que dispara a automação
+    targetStatus: "",
+    // THEN — detalhes da tarefa a criar
+    taskTitle: "",
+    taskRole: "",
+    taskUrgency: "medium",
+    taskDueDays: 2,
     is_active: true,
   });
 
@@ -97,60 +104,74 @@ const AutomationPage = ({ embedded = false }) => {
     setLoading(false);
   }, [token]);
 
-  const fetchConfig = useCallback(async () => {
+  // Busca as fases do workflow para o Select do bloco IF.
+  // O endpoint /admin/workflow-statuses devolve objetos com
+  // {name, label, order, ...}. Usamos name como value (é o que o
+  // motor compara) e label como texto visível.
+  const fetchWorkflowStatuses = useCallback(async () => {
     try {
-      const [tRes, aRes] = await Promise.all([
-        fetch(`${API_URL}/api/admin/automation/triggers`, { headers }),
-        fetch(`${API_URL}/api/admin/automation/actions`, { headers }),
-      ]);
-      if (tRes.ok) setTriggers((await tRes.json()).triggers || []);
-      if (aRes.ok) setActions((await aRes.json()).actions || []);
-    } catch { /* silent */ }
-  }, [token]);
-
-  // Pacote D — Buscar workflow statuses e utilizadores para popular os
-  // Selects dos config_fields (select_status, select_user). Evita que o
-  // utilizador tenha de digitar o ID do estado/utilizador num input de
-  // texto — agora escolhe de uma dropdown.
-  const fetchSelectOptions = useCallback(async () => {
-    try {
-      const [sRes, uRes] = await Promise.all([
-        fetch(`${API_URL}/api/admin/workflow-statuses`, { headers }).catch(() => null),
-        fetch(`${API_URL}/api/users`, { headers }).catch(() => null),
-      ]);
-      if (sRes && sRes.ok) {
-        const sData = await sRes.json();
-        // workflow-statuses devolve {statuses: [...]} ou array direto
-        const arr = Array.isArray(sData) ? sData : (sData.statuses || sData || []);
+      const res = await fetch(`${API_URL}/api/admin/workflow-statuses`, { headers }).catch(() => null);
+      if (res && res.ok) {
+        const data = await res.json();
+        const arr = Array.isArray(data) ? data : (data.statuses || data || []);
         setWorkflowStatuses(arr);
       }
-      if (uRes && uRes.ok) {
-        const uData = await uRes.json();
-        // /users devolve {users: [...]} ou array direto
-        const arr = Array.isArray(uData) ? uData : (uData.users || uData || []);
-        setUsers(arr);
-      }
-    } catch { /* silent — os Selects aparecem vazios se falhar */ }
+    } catch { /* silent — o Select aparece vazio se falhar */ }
   }, [token]);
 
   useEffect(() => {
     fetchRules();
-    fetchConfig();
-    fetchSelectOptions();
-  }, [fetchRules, fetchConfig, fetchSelectOptions]);
+    fetchWorkflowStatuses();
+  }, [fetchRules, fetchWorkflowStatuses]);
 
+  // ================================================================
+  // handleSave — compila as seleções visuais no payload exato que o
+  // POST /api/admin/automation/rules espera. Ponte invisível.
+  //   trigger: "process_status_changed" (fixo)
+  //   trigger_config: { target_status: <workflow_status.name> }
+  //   action: "create_task" (fixo)
+  //   action_config: { title, urgency, assigned_role, due_in_days }
+  // ================================================================
   const handleSave = async () => {
-    if (!form.name || !form.trigger || !form.action) {
-      toast.error("Preencha nome, trigger e ação");
+    if (!form.name.trim()) {
+      toast.error("Indica um nome para a regra.");
       return;
     }
+    if (!form.targetStatus) {
+      toast.error("Escolhe a fase que dispara a automação (bloco SE).");
+      return;
+    }
+    if (!form.taskTitle.trim()) {
+      toast.error("Indica o título da tarefa (bloco ENTÃO).");
+      return;
+    }
+    if (!form.taskRole) {
+      toast.error("Escolhe a quem atribuir a tarefa.");
+      return;
+    }
+
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      trigger: "process_status_changed",
+      trigger_config: { target_status: form.targetStatus },
+      action: "create_task",
+      action_config: {
+        title: form.taskTitle.trim(),
+        urgency: form.taskUrgency,
+        assigned_role: form.taskRole,
+        due_in_days: Number(form.taskDueDays) || 7,
+      },
+      is_active: form.is_active,
+    };
+
     try {
       const url = editingRule
         ? `${API_URL}/api/admin/automation/rules/${editingRule.id}`
         : `${API_URL}/api/admin/automation/rules`;
       const method = editingRule ? "PUT" : "POST";
-      
-      const res = await fetch(url, { method, headers, body: JSON.stringify(form) });
+
+      const res = await fetch(url, { method, headers, body: JSON.stringify(payload) });
       if (res.ok) {
         toast.success(editingRule ? "Regra atualizada" : "Regra criada");
         setShowDialog(false);
@@ -193,160 +214,47 @@ const AutomationPage = ({ embedded = false }) => {
     } catch { /* silent */ }
   };
 
+  // ================================================================
+  // openEdit — reverse-compile: lê o payload do backend e traduz
+  // para os campos amigáveis do formulário visual.
+  // Se a regra não seguir o padrão opinionado (outro trigger/action),
+  // mostra um aviso e prepara o formulário para conversão ao guardar.
+  // ================================================================
   const openEdit = (rule) => {
     setEditingRule(rule);
+    const isOpinionated =
+      rule.trigger === "process_status_changed" && rule.action === "create_task";
+
     setForm({
-      name: rule.name,
+      name: rule.name || "",
       description: rule.description || "",
-      trigger: rule.trigger,
-      trigger_config: rule.trigger_config || {},
-      action: rule.action,
-      action_config: rule.action_config || {},
-      is_active: rule.is_active,
+      targetStatus: rule.trigger_config?.target_status || "",
+      taskTitle: rule.action_config?.title || "",
+      taskRole: rule.action_config?.assigned_role || "",
+      taskUrgency: rule.action_config?.urgency || "medium",
+      taskDueDays: rule.action_config?.due_in_days ?? 2,
+      is_active: rule.is_active ?? true,
     });
+
+    if (!isOpinionated) {
+      toast.info(
+        "Esta regra usa um tipo diferente. Ao guardar será convertida para o construtor visual (Se fase → Criar tarefa)."
+      );
+    }
     setShowDialog(true);
   };
 
   const resetForm = () => {
-    setForm({ name: "", description: "", trigger: "", trigger_config: {}, action: "", action_config: {}, is_active: true });
-  };
-
-  const selectedTrigger = triggers.find(t => t.id === form.trigger);
-  const selectedAction = actions.find(a => a.id === form.action);
-
-  // ================================================================
-  // Pacote D — Render helper para config_fields.
-  // Renderiza o controlo certo consoante o `type` do field:
-  //   text/number  → <Input>
-  //   textarea     → <Textarea>
-  //   select       → <Select> com field.options (+ option_labels)
-  //   select_status→ <Select> com workflowStatuses do backend
-  //   select_role  → <Select> com INTERNAL_ROLES
-  //   select_user  → <Select> com users do backend
-  //   select_email_template → <Select> (vazio por agora — sem endpoint)
-  // Nunca mostra um input de JSON em bruto — o utilizador escolhe
-  // sempre de uma dropdown ou digita texto curto.
-  // ================================================================
-  const renderConfigField = (field, configKey) => {
-    const value = form[configKey]?.[field.key] ?? "";
-    const setVal = (v) => setForm({
-      ...form,
-      [configKey]: { ...form[configKey], [field.key]: v }
+    setForm({
+      name: "",
+      description: "",
+      targetStatus: "",
+      taskTitle: "",
+      taskRole: "",
+      taskUrgency: "medium",
+      taskDueDays: 2,
+      is_active: true,
     });
-
-    // Para selects, shadcn/ui usa string vazia como placeholder; garantir
-    // que o value é sempre string (evita warning "value undefined").
-    const safeValue = value === null || value === undefined ? "" : String(value);
-
-    if (field.type === "textarea") {
-      return (
-        <Textarea
-          value={value}
-          onChange={e => setVal(e.target.value)}
-          rows={2}
-          placeholder={field.default?.toString() || ""}
-        />
-      );
-    }
-
-    if (field.type === "number") {
-      return (
-        <Input
-          value={value}
-          onChange={e => setVal(e.target.value === "" ? "" : Number(e.target.value))}
-          type="number"
-          placeholder={field.default?.toString() || ""}
-        />
-      );
-    }
-
-    if (field.type === "select") {
-      const options = field.options || [];
-      const labels = field.option_labels || {};
-      return (
-        <Select value={safeValue} onValueChange={v => setVal(v)}>
-          <SelectTrigger>
-            <SelectValue placeholder={field.default ? labels[field.default] || field.default : "Selecionar..."} />
-          </SelectTrigger>
-          <SelectContent>
-            {options.map(opt => (
-              <SelectItem key={opt} value={opt}>{labels[opt] || opt}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      );
-    }
-
-    if (field.type === "select_status") {
-      // workflow-statuses pode ter {id, name} ou {name} — usar name como
-      // value e label (o backend compara por string de status).
-      return (
-        <Select value={safeValue} onValueChange={v => setVal(v)}>
-          <SelectTrigger>
-            <SelectValue placeholder="Selecionar estado..." />
-          </SelectTrigger>
-          <SelectContent>
-            {workflowStatuses.map((s, i) => {
-              const val = s.name || s.id || s;
-              const label = s.label || s.name || s;
-              return <SelectItem key={s.id || i} value={val}>{label}</SelectItem>;
-            })}
-          </SelectContent>
-        </Select>
-      );
-    }
-
-    if (field.type === "select_role") {
-      return (
-        <Select value={safeValue} onValueChange={v => setVal(v)}>
-          <SelectTrigger>
-            <SelectValue placeholder="Selecionar role..." />
-          </SelectTrigger>
-          <SelectContent>
-            {INTERNAL_ROLES.map(r => (
-              <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      );
-    }
-
-    if (field.type === "select_user") {
-      return (
-        <Select value={safeValue} onValueChange={v => setVal(v)}>
-          <SelectTrigger>
-            <SelectValue placeholder="Selecionar utilizador..." />
-          </SelectTrigger>
-          <SelectContent>
-            {users.map(u => (
-              <SelectItem key={u.id} value={u.id}>{u.name} ({u.email})</SelectItem>
-            ))}
-          </SelectContent>
-        </Select>
-      );
-    }
-
-    if (field.type === "select_email_template") {
-      // Sem endpoint de templates ainda — mostrar input de texto como
-      // fallback transitório. Quando houver endpoint, substituir por Select.
-      return (
-        <Input
-          value={value}
-          onChange={e => setVal(e.target.value)}
-          placeholder="ID do template (ex: welcome_email)"
-        />
-      );
-    }
-
-    // Default: text
-    return (
-      <Input
-        value={value}
-        onChange={e => setVal(e.target.value)}
-        type="text"
-        placeholder={field.default?.toString() || ""}
-      />
-    );
   };
 
   if (loading) {
@@ -437,7 +345,10 @@ const AutomationPage = ({ embedded = false }) => {
           </div>
         )}
 
-        {/* Create/Edit Dialog */}
+        {/* ================================================================
+            Create/Edit Dialog — Construtor Visual If/Then (Pacote H)
+            Dois blocos: SE (fase) → ENTÃO (criar tarefa). Sem JSON.
+           ================================================================ */}
         <Dialog open={showDialog} onOpenChange={setShowDialog}>
           <DialogContent className="max-w-lg max-h-[85vh] overflow-y-auto" data-testid="rule-dialog">
             <DialogHeader>
@@ -446,88 +357,195 @@ const AutomationPage = ({ embedded = false }) => {
                 {editingRule ? "Editar uma regra de automação existente" : "Criar uma nova regra de automação"}
               </DialogDescription>
             </DialogHeader>
+
             <div className="space-y-4">
+              {/* Nome + Descrição */}
               <div>
-                <Label>Nome da Regra</Label>
+                <Label>Nome da Regra *</Label>
                 <Input
                   value={form.name}
                   onChange={e => setForm({ ...form, name: e.target.value })}
-                  placeholder="Ex: Notificar diretor quando processo aprovado"
+                  placeholder="Ex: Contactar cliente ao entrar em Análise Bancária"
                   data-testid="rule-name-input"
                 />
               </div>
               <div>
-                <Label>Descricao (opcional)</Label>
-                <Textarea
+                <Label>Descrição (opcional)</Label>
+                <Input
                   value={form.description}
                   onChange={e => setForm({ ...form, description: e.target.value })}
-                  placeholder="Breve descricao do que esta regra faz"
-                  rows={2}
+                  placeholder="Breve explicação do objetivo desta automação"
                 />
               </div>
 
-              {/* Trigger Selection */}
-              <div className="p-3 border rounded-lg bg-blue-50/50 dark:bg-blue-950/20 space-y-3">
-                <Label className="text-blue-700 dark:text-blue-300 font-medium">SE (Trigger)</Label>
-                <Select value={form.trigger} onValueChange={v => setForm({ ...form, trigger: v, trigger_config: {} })}>
-                  <SelectTrigger data-testid="trigger-select">
-                    <SelectValue placeholder="Selecionar trigger..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {triggers.map(t => (
-                      <SelectItem key={t.id} value={t.id}>{t.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {/* Trigger config fields — Pacote D: renderiza Selects
-                    para select_status/select_role/select_user em vez de
-                    inputs de texto em bruto. */}
-                {selectedTrigger?.config_fields?.map(field => (
-                  <div key={field.key}>
-                    <Label className="text-xs">{field.label}</Label>
-                    {renderConfigField(field, "trigger_config")}
+              {/* ============================================================
+                  BLOCO 1 — IF (Gatilho)
+                  "Quando um processo transitar para a fase..." → Select.
+                  Trigger fixo: process_status_changed.
+                 ============================================================ */}
+              <Card className="border-blue-200 bg-blue-50/60 dark:bg-blue-950/20 dark:border-blue-900">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-blue-600 text-white text-xs font-bold">
+                      1
+                    </span>
+                    <CardTitle className="text-base text-blue-700 dark:text-blue-300">
+                      SE — Quando acontece isto…
+                    </CardTitle>
                   </div>
-                ))}
-              </div>
+                  <CardDescription className="text-blue-700/70 dark:text-blue-300/70">
+                    Escolhe a fase do processo que vai disparar esta automação.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  <Label className="text-sm font-medium">
+                    Quando um processo transitar para a fase…
+                  </Label>
+                  <Select
+                    value={form.targetStatus}
+                    onValueChange={v => setForm({ ...form, targetStatus: v })}
+                  >
+                    <SelectTrigger data-testid="if-status-select">
+                      <SelectValue placeholder="Selecionar fase do workflow…" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      {workflowStatuses.map((s, i) => {
+                        const val = s.name || s.id || s;
+                        const label = s.label || s.name || s;
+                        return <SelectItem key={s.id || i} value={val}>{label}</SelectItem>;
+                      })}
+                    </SelectContent>
+                  </Select>
+                  {form.targetStatus && (
+                    <p className="text-xs text-muted-foreground">
+                      A automação dispara sempre que um processo entrar em{" "}
+                      <strong>
+                        {workflowStatuses.find(s => (s.name || s.id) === form.targetStatus)?.label || form.targetStatus}
+                      </strong>.
+                    </p>
+                  )}
+                </CardContent>
+              </Card>
 
-              <div className="flex justify-center">
+              {/* Seta descendente entre os dois blocos */}
+              <div className="flex justify-center" aria-hidden="true">
                 <ChevronRight className="h-5 w-5 text-muted-foreground rotate-90" />
               </div>
 
-              {/* Action Selection */}
-              <div className="p-3 border rounded-lg bg-green-50/50 dark:bg-green-950/20 space-y-3">
-                <Label className="text-green-700 dark:text-green-300 font-medium">ENTAO (Acao)</Label>
-                <Select value={form.action} onValueChange={v => setForm({ ...form, action: v, action_config: {} })}>
-                  <SelectTrigger data-testid="action-select">
-                    <SelectValue placeholder="Selecionar acao..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {actions.map(a => (
-                      <SelectItem key={a.id} value={a.id}>{a.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-                {/* Action config fields — Pacote D: renderiza Selects
-                    para select/select_status/select_role/select_user.
-                    Ex: "Criar tarefa: [Input: título], urgência: [Select],
-                    atribuída a [Select: role]". */}
-                {selectedAction?.config_fields?.map(field => (
-                  <div key={field.key}>
-                    <Label className="text-xs">{field.label}</Label>
-                    {renderConfigField(field, "action_config")}
+              {/* ============================================================
+                  BLOCO 2 — THEN (Ação)
+                  Ação fixa: "Criar Tarefa Automática". O CEO só preenche
+                  os detalhes: Título, Atribuir a, Urgência, Prazo.
+                 ============================================================ */}
+              <Card className="border-green-200 bg-green-50/60 dark:bg-green-950/20 dark:border-green-900">
+                <CardHeader className="pb-3">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-7 w-7 items-center justify-center rounded-md bg-green-600 text-white text-xs font-bold">
+                      2
+                    </span>
+                    <CardTitle className="text-base text-green-700 dark:text-green-300">
+                      ENTÃO — O sistema deve fazer o seguinte…
+                    </CardTitle>
                   </div>
-                ))}
-              </div>
+                  <CardDescription className="text-green-700/70 dark:text-green-300/70">
+                    É criada automaticamente uma tarefa com os detalhes abaixo.
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {/* Badge fixa — o CEO vê que a ação é "Criar Tarefa",
+                      sem poder escolher outro tipo de ação. */}
+                  <div className="flex items-center gap-2">
+                    <Badge variant="secondary" className="gap-1">
+                      <Zap className="h-3 w-3" /> Criar Tarefa Automática
+                    </Badge>
+                  </div>
 
-              <div className="flex items-center justify-between">
-                <Label>Ativa</Label>
-                <Switch checked={form.is_active} onCheckedChange={v => setForm({ ...form, is_active: v })} />
+                  {/* Título da tarefa */}
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">Título da tarefa *</Label>
+                    <Input
+                      value={form.taskTitle}
+                      onChange={e => setForm({ ...form, taskTitle: e.target.value })}
+                      placeholder="Ex: Ligar ao Cliente"
+                      data-testid="then-task-title"
+                    />
+                    <p className="text-xs text-muted-foreground">
+                      Podes usar <code className="text-[10px]">{'{client_name}'}</code> e{" "}
+                      <code className="text-[10px]">{'{status}'}</code> para preencher automaticamente.
+                    </p>
+                  </div>
+
+                  {/* Atribuir a (role) */}
+                  <div className="space-y-1.5">
+                    <Label className="text-sm font-medium">Atribuir a *</Label>
+                    <Select
+                      value={form.taskRole}
+                      onValueChange={v => setForm({ ...form, taskRole: v })}
+                    >
+                      <SelectTrigger data-testid="then-task-role">
+                        <SelectValue placeholder="Selecionar responsável…" />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {TASK_ROLES.map(r => (
+                          <SelectItem key={r.value} value={r.value}>{r.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+
+                  {/* Urgência + Prazo (lado a lado no desktop) */}
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">Urgência</Label>
+                      <Select
+                        value={form.taskUrgency}
+                        onValueChange={v => setForm({ ...form, taskUrgency: v })}
+                      >
+                        <SelectTrigger data-testid="then-task-urgency">
+                          <SelectValue />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {URGENCY_OPTIONS.map(u => (
+                            <SelectItem key={u.value} value={u.value}>{u.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                    </div>
+
+                    <div className="space-y-1.5">
+                      <Label className="text-sm font-medium">Prazo (dias)</Label>
+                      <Input
+                        type="number"
+                        min={1}
+                        value={form.taskDueDays}
+                        onChange={e =>
+                          setForm({ ...form, taskDueDays: e.target.value === "" ? "" : Number(e.target.value) })
+                        }
+                        placeholder="Ex: 2"
+                        data-testid="then-task-due-days"
+                      />
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* Toggle ativa */}
+              <div className="flex items-center justify-between rounded-lg border p-3">
+                <div>
+                  <Label className="text-sm font-medium">Regra ativa</Label>
+                  <p className="text-xs text-muted-foreground">Se inativa, a automação não executa.</p>
+                </div>
+                <Switch
+                  checked={form.is_active}
+                  onCheckedChange={v => setForm({ ...form, is_active: v })}
+                />
               </div>
             </div>
+
             <DialogFooter>
               <Button variant="outline" onClick={() => { setShowDialog(false); setEditingRule(null); }}>Cancelar</Button>
               <Button onClick={handleSave} data-testid="save-rule-btn">
-                {editingRule ? "Guardar Alteracoes" : "Criar Regra"}
+                {editingRule ? "Guardar Alterações" : "Guardar Regra"}
               </Button>
             </DialogFooter>
           </DialogContent>

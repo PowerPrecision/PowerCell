@@ -3,6 +3,21 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-19] — Pacote H: Construtor Visual de Automações (Frontend)
+
+### Alterado
+- **Página de Automações refactorizada para construtor visual "If/Then" opinionado** (`feat` — **UX/CEO**): A interface anterior (`AutomationPage.js`) apresentava um builder genérico com Selects de trigger (5 tipos) e action (6 tipos) + config_fields dinâmicos — demasiado flexível e confuso para um CEO não-técnico, que podia escolher combinações inválidas ou irrelevante. A nova interface é **opinionada e simplificada**: o CEO só precisa de preencher dois blocos visuais claros, sem nunca ver ou editar JSON.
+  - **Bloco 1 — SE (Gatilho)**: Card azul com a pergunta "Quando um processo transitar para a fase…" seguida de um `<Select>` populado por `GET /api/admin/workflow-statuses` (mostra o `label` humano, ex: "Análise Bancária", guardando o `name` interno, ex: `fase_bancaria`). O trigger é **fixo** (`process_status_changed`) — o CEO não escolhe o tipo de trigger, só a fase.
+  - **Bloco 2 — ENTÃO (Ação)**: Card verde com a afirmação "O sistema deve fazer o seguinte…" e uma `<Badge>` fixa "Criar Tarefa Automática" (a ação é **fixa** = `create_task`). O CEO preenche 4 campos: **Título** (Input de texto, com dica de placeholders `{client_name}` / `{status}`), **Atribuir a** (Select: Consultor / Intermediário / Mediador / Indexação), **Urgência** (Select: Baixa / Média / Alta), **Prazo em dias** (Input numérico, default 2).
+  - **Ponte invisível**: Ao clicar em "Guardar Regra", o `handleSave()` compila as seleções visuais no payload exato que `POST /api/admin/automation/rules` espera: `{ trigger: "process_status_changed", trigger_config: { target_status }, action: "create_task", action_config: { title, urgency, assigned_role, due_in_days } }`. O CEO nunca vê esta estrutura.
+  - **Edição de regras antigas**: `openEdit()` faz reverse-compile — se a regra seguir o padrão opinionado (`process_status_changed` + `create_task`), popula os campos visuais a partir de `trigger_config`/`action_config`. Se for de outro tipo (ex: `send_notification`), mostra um `toast.info` a avisar que ao guardar a regra será convertida para o construtor visual — prepara o formulário para conversão sem perder o nome/descrição.
+  - **Removido**: `renderConfigField` genérico, `fetchConfig` (triggers/actions), `INTERNAL_ROLES`, imports não usados (`Play`, `Pause`, `RefreshCw`). A lista de regras mantém os badges `TRIGGER_LABELS`/`ACTION_LABELS` para mostrar regras históricas de qualquer tipo.
+  - **Acessibilidade**: `aria-hidden` na seta decorativa, `aria-label` nos botões, `data-testid` em todos os campos para testes E2E, `DialogDescription` com `sr-only`.
+
+### Notas
+- O backend (`routes/automation.py`, `services/workflow_engine.py`) **não foi alterado** — o endpoint `POST /api/admin/automation/rules` e o motor de automação já suportam `process_status_changed` + `create_task` (implementado no Pacote D). O Pacote H é puramente uma refactorização do frontend para tornar a criação de regras acessível ao CEO.
+- Regras criadas com o builder anterior (Pacote D) continuam totalmente funcionais — apenas a interface de criação/edição mudou.
+
 ## [2026-06-19] — Hotfix: Cliente Desaparece quando Processo Fica Terminal (404 no Detalhe)
 
 ### Corrigido

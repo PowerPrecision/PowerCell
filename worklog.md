@@ -1246,3 +1246,56 @@ Stage Summary:
   - `frontend/src/pages/MyClientsPage.js` (passar show_inactive ao backend + useEffect dep)
 - CHANGELOG.md actualizado.
 - Bug on-hold RESOLVIDO.
+
+---
+Task ID: 12 (Hotfix — Push & CI)
+Agent: Main Agent
+Task: Push hotfix para branch dev + verificação CI.
+
+Work Log:
+- Executado push_hotfix_client_terminal.py: 5 blobs → 1 tree → 1 commit → ref update.
+- Commit SHA: b85d8694fce3fbdd2a0f2cf02a2f8c17784bf4ba
+- URL: https://github.com/PowerPrecision/PowerCell/commit/b85d8694fce3fbdd2a0f2cf02a2f8c17784bf4ba
+
+Stage Summary:
+- Push para dev bem-sucedido.
+- CI GitHub Actions (todos os checks):
+  * Backend CI — Fast: completed/success
+  * Backend CI — Full: completed/success
+  * Frontend CI: completed/success
+  * Vercel Preview Comments: completed/success
+  * Notify on Failure: completed/skipped
+- Hotfix COMPLETO e em produção (Render auto-deploy a partir de dev).
+- Bug on-hold RESOLVIDO.
+
+---
+Task ID: 13
+Agent: Main Agent
+Task: Pacote H — Construtor Visual de Automações (refactor frontend AutomationPage.js para If/Then opinionado)
+
+Work Log:
+- Lido `frontend/src/pages/AutomationPage.js` (versão Pacote D — builder genérico com renderConfigField).
+- Lido `backend/routes/automation.py` para confirmar o payload exato de `POST /api/admin/automation/rules`:
+  trigger=process_status_changed + trigger_config={target_status}, action=create_task + action_config={title,urgency,assigned_role,due_in_days}.
+- Lido `backend/routes/admin.py` /workflow-statuses: devolve {name,label,order,...}; usar name como value, label como display.
+- Apresentado ao utilizador APENAS o JSX dos blocos IF/THEN para validação de usabilidade — aprovado ("esta ok").
+- Reescrito `AutomationPage.js` completo (Write):
+  * Removido: renderConfigField genérico, fetchConfig (triggers/actions), INTERNAL_ROLES, imports não usados (Play, Pause, RefreshCw).
+  * Estado `form` com campos amigáveis: targetStatus, taskTitle, taskRole, taskUrgency, taskDueDays (não há trigger_config/action_config dicts).
+  * handleSave(): valida campos amigáveis (PT-PT), compila para payload exato do backend (ponte invisível).
+  * openEdit(): reverse-compile de trigger_config/action_config → campos visuais; toast.info se regra for de outro tipo (conversão ao guardar).
+  * fetchWorkflowStatuses(): subsitui fetchSelectOptions, só busca fases do workflow.
+  * Dialog renderizado com 2 Cards: bloco SE (azul, Select de fase) + seta ChevronRight + bloco ENTÃO (verde, Badge fixa "Criar Tarefa" + 4 campos: Título Input, Atribuir a Select de roles, Urgência Select, Prazo Input number).
+  * Lista de regras, toggle, delete, header, empty state — mantidos inalterados.
+  * data-testid em todos os campos (if-status-select, then-task-title, then-task-role, then-task-urgency, then-task-due-days, save-rule-btn).
+  * aria-hidden na seta decorativa, aria-label nos botões, DialogDescription sr-only.
+- Actualizado CHANGELOG.md com entrada [2026-06-19] Pacote H.
+- Criado `push_pacote_h.py` (segue padrão de push_pacote_g.py: importa TOKEN/OWNER_REPO/BRANCH/REPO/api/create_blob de push_pacote_d.py; 3 ficheiros: AutomationPage.js + CHANGELOG.md + worklog.md).
+- Executado push_pacote_h.py → commit em dev.
+
+Stage Summary:
+- 1 ficheiro de código modificado: `frontend/src/pages/AutomationPage.js` (refactor completo, ~330 linhas).
+- 2 ficheiros de docs actualizados: CHANGELOG.md, worklog.md.
+- Backend NÃO alterado (Pacote H é puramente frontend; o endpoint e motor já suportam o padrão desde o Pacote D).
+- O CEO agora cria regras de automação via 2 blocos visuais (SE fase → ENTÃO criar tarefa) sem ver JSON.
+- Regras antigas de outros tipos continuam editáveis (convertidas ao guardar) e visíveis na lista com badges.
