@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-18] — Hotfix: Tarefas (e Chat) Desapareceram dos Detalhes do Processo
+
+### Corrigido
+- **Card de Tarefas desapareceu dos Detalhes do Processo para consultor, intermediário, administrativo e diretor** (`fix` — **REGRESSÃO DE PERMISSÕES CRÍTICO**): O `canManageTasks` em `ProcessDetails.js` avalia `userActions.length > 0 ? userActions.includes("manage_tasks") : roleFallback`. Como o `/auth/me` corre `sync_permissions_with_role_defaults` em cada pedido e popula `permissions.actions`, `userActions.length > 0` é **sempre true** para staff — pelo que a primeira via executa e exige a action `manage_tasks`. Ora, os `DEFAULT_PERMISSIONS_BY_ROLE` em `backend/services/permissions.py` **não incluíam `manage_tasks`** nos defaults de `diretor`, `consultor`, `intermediario` e `administrativo` (só `admin`/`ceo` via `AVAILABLE_ACTIONS.copy()` e `indexacao` explicitamente). Resultado: estes roles perdiam o card de Tarefas (e o de Chat, mesmo problema com `use_chat`) nos Detalhes do Processo, mesmo sendo staff que deve gerir tarefas. `backend/services/permissions.py`.
+- **Chat do processo também desaparecido para os mesmos roles** (`fix`): O `canUseChat` segue o mesmo padrão e `use_chat` também não estava nos defaults de `diretor`/`consultor`/`intermediario`/`administrativo`. Corrigido em conjunto.
+
+### Alterado
+- **Defaults de permissões alinhados com o fallback por role do frontend** (`fix`): Adicionado `manage_tasks` e `use_chat` aos `DEFAULT_PERMISSIONS_BY_ROLE` de `diretor`, `consultor`, `intermediario` e `administrativo`. Adicionado também `assign_process_users` ao `diretor` (alinhado com `canAssignUsers` que já o permitia via fallback de role para admin/ceo/diretor). Isto garante que estes roles vêem e gerem Tarefas e Chat nos Detalhes do Processo. A propagação é **automática**: o `/auth/me` faz `sync_permissions_with_role_defaults` (merge `set(defaults + user_perms)`) em cada pedido e persiste se houver diferença — pelo que os utilizadores existentes recebem as novas actions no próximo login/refresh, sem necessidade de script de migração. `backend/services/permissions.py`.
+
+### Notas
+- `admin` e `ceo` continuam com todas as actions (via `AVAILABLE_ACTIONS.copy()`); `indexacao` já tinha `manage_tasks`/`use_chat`/`assign_process_users` (mantido); `cliente` e `parceiro` continuam sem actions (sem acesso a staff).
+- A semântica de permissões customizadas é preservada: se um admin remover `manage_tasks` das permissões de um consultor via UI de Permissões, o consultor perde o card (comportamento pretendido). A correção foca-se nos **defaults** — garante que um consultor "fresco" (sem customizações) vê as Tarefas e o Chat.
+- O `canManageTasks`/`canUseChat` do frontend não foi alterado: a correção é toda no backend (defaults), que é o sítio certo para definir "o que cada role pode fazer por defeito".
+
 ## [2026-06-18] — Hotfix: Dropdown de Estado do Processo Vazia
 
 ### Corrigido

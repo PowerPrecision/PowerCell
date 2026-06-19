@@ -796,3 +796,34 @@ Stage Summary:
   - CHANGELOG.md (entrada nova do hotfix)
   - worklog.md (esta entrada)
 - Próximo passo: commit + push para branch `dev` via Git Database API.
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Hotfix — Tarefas (e Chat) desapareceram dos Detalhes do Processo
+
+Work Log:
+- User reportou: "as tarefas dentro dos detalhes de processo, desapareceram".
+- Confirmado (via diff contra o commit anterior em dev) que o hotfix da dropdown (Task ID 4) foi cirúrgico e NÃO tocou em canManageTasks, TasksPanel, ou no tab mensagens — excluída regressão do meu commit.
+- Inspecionados commits recentes que tocaram em ProcessDetails.js (55fc0bcac3 "isolate card editing", cdb825e7 "status dropdown blank"): nenhum tocou em código de tarefas.
+- Localizada a causa raiz no frontend: `canManageTasks` em ProcessDetails.js (linha 1845) avalia `userActions.length > 0 ? userActions.includes("manage_tasks") : roleFallback`. Como o `/auth/me` corre `sync_permissions_with_role_defaults` em cada pedido (backend/routes/auth.py linha 139) e popula `permissions.actions`, `userActions.length > 0` é SEMPRE true para staff → a primeira via executa e exige a action `manage_tasks`.
+- Confirmada a causa no backend: `DEFAULT_PERMISSIONS_BY_ROLE` em backend/services/permissions.py NÃO incluíam `manage_tasks` nos defaults de `diretor`, `consultor`, `intermediario`, `administrativo` (só admin/ceo via AVAILABLE_ACTIONS.copy() e indexacao explicitamente). Mesmo problema com `use_chat` (canUseChat segue o mesmo padrão) → o Chat do processo também desaparecia para estes roles.
+- Corrigido backend/services/permissions.py — DEFAULT_PERMISSIONS_BY_ROLE:
+  - diretor: adicionado `manage_tasks`, `use_chat`, `assign_process_users` (alinhado com canAssignUsers que permite admin/ceo/diretor via fallback de role).
+  - consultor: adicionado `manage_tasks`, `use_chat`.
+  - intermediario: adicionado `manage_tasks`, `use_chat`.
+  - administrativo: adicionado `manage_tasks`, `use_chat`.
+  - admin/ceo/indexacao: inalterados (já tinham as actions).
+- Propagação automática confirmada: o `/auth/me` faz `sync_permissions_with_role_defaults` que mergeia `set(defaults + user_perms)` e persiste se houver diferença (auth.py linhas 139-149). Logo, utilizadores existentes recebem as novas actions no próximo login/refresh — sem script de migração.
+- Validada sintaxe Python: `python3 -m py_compile backend/services/permissions.py` → OK.
+- Frontend não alterado: a correção é no backend (defaults), que é o sítio correcto para definir capacidades por defeito. canManageTasks/canUseChat mantêm a semântica de permissões customizadas (admin pode remover manage_tasks de um consultor via UI e o consultor perde o card — comportamento pretendido).
+- Atualizada documentação: CHANGELOG.md (entrada nova [2026-06-18] Hotfix: Tarefas (e Chat) Desapareceram dos Detalhes do Processo) + esta entrada no worklog.md.
+
+Stage Summary:
+- O card de Tarefas (e o Chat) volta a aparecer nos Detalhes do Processo para consultor, intermediário, administrativo e diretor. A causa era um desfasamento entre os defaults de permissões do backend (não incluíam manage_tasks/use_chat para estes roles) e o fallback por role do frontend (que nunca executava porque userActions vinha sempre populado do /auth/me).
+- Ficheiros modificados:
+  - backend/services/permissions.py (DEFAULT_PERMISSIONS_BY_ROLE: adicionado manage_tasks/use_chat a diretor/consultor/intermediario/administrativo; assign_process_users a diretor)
+  - CHANGELOG.md (entrada nova do hotfix)
+  - worklog.md (esta entrada)
+- Propagação: automática via sync_permissions_with_role_defaults no /auth/me (sem script de migração).
+- Próximo passo: commit + push para branch `dev` via Git Database API.

@@ -76,7 +76,9 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
             "create_client", "edit_client", "delete_client",
             "upload_docs", "delete_docs", "view_financials", "export_data", "assign_clients",
             "manage_properties", "manage_minutas", "manage_leads", "view_reports",
-            "view_drafts", "manage_drafts"
+            "view_drafts", "manage_drafts",
+            # Ações de colaboração nos Detalhes do Processo (tarefas, chat, atribuição)
+            "manage_tasks", "use_chat", "assign_process_users"
         ],
     },
     "consultor": {
@@ -89,7 +91,9 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
             "create_process", "edit_process",
             "create_client", "edit_client",
             "upload_docs", "view_financials", "export_data",
-            "manage_properties", "manage_minutas"
+            "manage_properties", "manage_minutas",
+            # Ações de colaboração nos Detalhes do Processo (tarefas, chat)
+            "manage_tasks", "use_chat"
         ],
     },
     "intermediario": {
@@ -100,7 +104,9 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
         "actions": [
             "create_process", "edit_process",
             "create_client", "edit_client",
-            "upload_docs", "view_financials", "export_data"
+            "upload_docs", "view_financials", "export_data",
+            # Ações de colaboração nos Detalhes do Processo (tarefas, chat)
+            "manage_tasks", "use_chat"
         ],
     },
     "administrativo": {
@@ -112,7 +118,9 @@ DEFAULT_PERMISSIONS_BY_ROLE: Dict[str, Dict[str, List[str]]] = {
             "create_process", "edit_process",
             "create_client", "edit_client",
             "upload_docs", "delete_docs", "export_data",
-            "view_drafts", "manage_drafts"
+            "view_drafts", "manage_drafts",
+            # Ações de colaboração nos Detalhes do Processo (tarefas, chat)
+            "manage_tasks", "use_chat"
         ],
     },
     "indexacao": {
