@@ -928,6 +928,22 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     # Registar no histórico
     await log_history(process_id, user, "Criou processo")
     
+    # === Pacote G — Gerar pedidos de documentos obrigatórios ===
+    # Cria automaticamente REQUESTED docs com base na checklist do SystemConfig
+    # (secção mandatory_documents). Executa em background.
+    try:
+        from services.portal_documents_notify import generate_mandatory_document_requests
+        asyncio.create_task(
+            generate_mandatory_document_requests(
+                process_id=process_id,
+                company_id=process_doc.get("company") or process_doc.get("company_id"),
+                requested_by=user.get("id"),
+                requested_by_name=user.get("name", "Staff"),
+            )
+        )
+    except Exception as md_err:
+        logger.warning(f"[PACOTE-G] Falha ao agendar mandatory docs para processo {process_id}: {md_err}")
+    
     # === WEBSOCKET BROADCAST: Novo processo criado ===
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_CREATED,
@@ -1210,6 +1226,21 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
             logger.info(f"Criados {len(default_docs)} documentos padrão para processo {process_id}")
     except Exception as e:
         logger.warning(f"Erro ao criar documentos padrão para processo {process_id}: {e}")
+    
+    # === Pacote G — Gerar pedidos da checklist de Documentos Obrigatórios ===
+    # Soma-se aos pedidos auto_default acima (idempotente por source).
+    try:
+        from services.portal_documents_notify import generate_mandatory_document_requests
+        asyncio.create_task(
+            generate_mandatory_document_requests(
+                process_id=process_id,
+                company_id=process_doc.get("company") or process_doc.get("company_id"),
+                requested_by=user["id"],
+                requested_by_name=user.get("name", "Staff"),
+            )
+        )
+    except Exception as md_err:
+        logger.warning(f"[PACOTE-G] Falha ao agendar mandatory docs para processo {process_id}: {md_err}")
     
     # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])

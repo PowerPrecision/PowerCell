@@ -1745,6 +1745,216 @@ const PortalSettingsSection = ({ token }) => {
 };
 
 
+// =====================================================================
+// PACOTE G — SECÇÃO: Documentos Obrigatórios (mandatory_documents)
+// Permite ao CEO/Diretor gerir a checklist de documentos que são pedidos
+// automaticamente a cada novo processo (pre_registo ou criação interna).
+// =====================================================================
+const MandatoryDocumentsSection = ({ token }) => {
+  const [enabled, setEnabled] = useState(true);
+  const [documents, setDocuments] = useState([]);
+  const [newName, setNewName] = useState("");
+  const [newCategory, setNewCategory] = useState("outros");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const CATEGORIES = [
+    { value: "identificacao", label: "Identificação" },
+    { value: "irs", label: "IRS" },
+    { value: "recibo_vencimento", label: "Recibo de Vencimento" },
+    { value: "comprovativo_morada", label: "Comprovativo de Morada" },
+    { value: "extrato_bancario", label: "Extrato Bancário" },
+    { value: "mapa_responsabilidades", label: "Mapa de Responsabilidades" },
+    { value: "caderneta_predial", label: "Caderneta Predial" },
+    { value: "certidao_teor", label: "Certidão de Teor" },
+    { value: "outros", label: "Outros" },
+  ];
+
+  const fetchConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/system-config`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const md = data.mandatory_documents || {};
+        setEnabled(md.enabled !== false);
+        setDocuments(Array.isArray(md.documents) ? md.documents : []);
+      } else {
+        toast.error("Erro ao carregar documentos obrigatórios");
+      }
+    } catch {
+      toast.error("Erro de ligação");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  const handleAdd = () => {
+    const name = newName.trim();
+    if (!name) {
+      toast.error("Indique um nome para o documento");
+      return;
+    }
+    // Evitar duplicados (case-insensitive)
+    if (documents.some((d) => (d.name || "").toLowerCase() === name.toLowerCase())) {
+      toast.error("Este documento já está na lista");
+      return;
+    }
+    setDocuments([...documents, { name, category: newCategory }]);
+    setNewName("");
+  };
+
+  const handleRemove = (idx) => {
+    setDocuments(documents.filter((_, i) => i !== idx));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/system-config/mandatory_documents`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled, documents }),
+      });
+      if (res.ok) {
+        toast.success("Checklist de documentos obrigatórios guardada");
+        fetchConfig();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
+      }
+    } catch {
+      toast.error("Erro de ligação");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileEdit className="h-5 w-5 text-primary" />
+            Documentos Obrigatórios por Defeito
+          </CardTitle>
+          <CardDescription>
+            Lista gerida pelo CEO/Diretor. Quando um processo é criado (via formulário público
+            ou criação interna), estes pedidos são gerados automaticamente. Assim que o cliente
+            submeter todos, o sistema envia um email de confirmação em nome do intermediário.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <Label className="font-medium">Ativar checklist automática</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Se inativo, novos processos não geram pedidos automáticos.
+              </p>
+            </div>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+
+          <div className="rounded-lg border p-3 space-y-3">
+            <Label className="font-medium">Adicionar documento</Label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                placeholder="Ex: Bilhete de Identidade / Cartão de Cidadão"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAdd();
+                  }
+                }}
+                className="flex-1"
+              />
+              <Select value={newCategory} onValueChange={setNewCategory}>
+                <SelectTrigger className="w-full sm:w-56">
+                  <SelectValue placeholder="Categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button type="button" onClick={handleAdd} variant="secondary">
+                <Plus className="h-4 w-4 mr-1" /> Adicionar
+              </Button>
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            {documents.length === 0 ? (
+              <div className="text-center py-8 text-sm text-muted-foreground border border-dashed rounded-lg">
+                Sem documentos na checklist. Adicione acima para começar.
+              </div>
+            ) : (
+              documents.map((doc, idx) => {
+                const cat = CATEGORIES.find((c) => c.value === doc.category);
+                return (
+                  <div
+                    key={`${doc.name}-${idx}`}
+                    className="flex items-center justify-between rounded-md border px-3 py-2 hover:bg-muted/40"
+                  >
+                    <div className="flex items-center gap-2 min-w-0">
+                      <FileEdit className="h-4 w-4 text-muted-foreground shrink-0" />
+                      <span className="text-sm font-medium truncate">{doc.name}</span>
+                      <Badge variant="outline" className="ml-1 shrink-0">
+                        {cat?.label || doc.category || "outros"}
+                      </Badge>
+                    </div>
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      onClick={() => handleRemove(idx)}
+                      className="text-destructive hover:text-destructive hover:bg-destructive/10 shrink-0"
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  </div>
+                );
+              })
+            )}
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t">
+            <p className="text-xs text-muted-foreground">
+              {documents.length} documento{documents.length !== 1 ? "s" : ""} na checklist
+            </p>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Guardar Checklist
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
+    </div>
+  );
+};
+
+
 const SystemConfigPage = ({ embedded = false }) => {
   const { token, user } = useAuth();
   const [searchParams] = useSearchParams();
@@ -3224,6 +3434,19 @@ const SystemConfigPage = ({ embedded = false }) => {
                       <span className="truncate">Portal</span>
                       {activeTab === "portal" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("mandatory_documents")}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                        activeTab === "mandatory_documents"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <FileEdit className={`h-4 w-4 shrink-0 ${activeTab === "mandatory_documents" ? "text-primary" : ""}`} />
+                      <span className="truncate">Docs Obrigatórios</span>
+                      {activeTab === "mandatory_documents" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                    </button>
                   </nav>
                 </CardContent>
               </Card>
@@ -3267,6 +3490,12 @@ const SystemConfigPage = ({ embedded = false }) => {
                       Portal
                     </span>
                   </SelectItem>
+                  <SelectItem value="mandatory_documents">
+                    <span className="flex items-center gap-2">
+                      <FileEdit className="h-4 w-4" />
+                      Docs Obrigatórios
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
               {/* Horizontal scrollable chips for quick access */}
@@ -3290,9 +3519,10 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {["rgpd", "maintenance", "portal"].map((key) => {
-                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : Wrench;
+                {["rgpd", "maintenance", "portal", "mandatory_documents"].map((key) => {
+                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : key === "mandatory_documents" ? FileEdit : Wrench;
                   const isActive = activeTab === key;
+                  const label = key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : key === "mandatory_documents" ? "Docs Obrigatórios" : "Manutenção";
                   return (
                     <button
                       key={key}
@@ -3305,7 +3535,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      {key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : "Manutenção"}
+                      {label}
                     </button>
                   );
                 })}
@@ -3319,7 +3549,8 @@ const SystemConfigPage = ({ embedded = false }) => {
             {activeTab === "integrations" && <IntegrationsConfigSection />}
             {activeTab === "system_emails" && <SystemEmailsSection token={token} />}
             {activeTab === "portal" && <PortalSettingsSection token={token} />}
-            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && (
+            {activeTab === "mandatory_documents" && <MandatoryDocumentsSection token={token} />}
+            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && activeTab !== "mandatory_documents" && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}

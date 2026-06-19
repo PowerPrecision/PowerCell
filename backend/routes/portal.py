@@ -1449,6 +1449,17 @@ async def confirm_portal_upload(
     except Exception as e:
         logger.warning(f"[PORTAL] Erro ao agendar verificação de onboarding: {e}")
 
+    # ── Pacote G — Gatilho: Documentação Completa ──────────────────────────
+    # Verifica se TODOS os pedidos REQUESTED/PENDING foram satisfeitos.
+    # Se sim, envia email automático de confirmação ao cliente em nome do
+    # intermediário atribuído (com fallback para o SMTP geral da empresa).
+    try:
+        from services.portal_documents_notify import check_and_notify_documents_complete
+        company_id = process.get("company") or process.get("company_id")
+        asyncio.create_task(check_and_notify_documents_complete(process_id, company_id))
+    except Exception as e:
+        logger.warning(f"[PORTAL] Erro ao agendar gatilho de documentação completa: {e}")
+
     logger.info(
         f"[PORTAL] Upload confirmado: {original_filename} "
         f"({category}) para processo {process_id}"

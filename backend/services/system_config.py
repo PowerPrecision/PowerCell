@@ -11,7 +11,7 @@ from models.system_config import (
     SystemConfig, StorageConfig, EmailConfig, AIConfig, 
     SystemSettings, StorageProvider, CreditServicesConfig,
     DocumentRecipientsConfig, DSTIConfig, AutoDraftConfig, AuditTrailConfig,
-    SystemSMTPConfig, SystemWebmailConfig
+    SystemSMTPConfig, SystemWebmailConfig, MandatoryDocumentsConfig
 )
 
 logger = logging.getLogger(__name__)
@@ -310,6 +310,10 @@ async def update_config_section(section: str, data: Dict[str, Any], company_id: 
         current = config.system_webmail.model_dump()
         current.update(filtered_data)
         config.system_webmail = SystemWebmailConfig(**current)
+    elif section == "mandatory_documents":
+        current = config.mandatory_documents.model_dump()
+        current.update(filtered_data)
+        config.mandatory_documents = MandatoryDocumentsConfig(**current)
     else:
         raise ValueError(f"Secção desconhecida: {section}")
     

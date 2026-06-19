@@ -24,6 +24,7 @@ SEGURANÇA: Rate limiting aplicado para prevenir abusos.
 import os
 import re
 import uuid
+import asyncio
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, BackgroundTasks
@@ -327,6 +328,26 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             f"[PUBLIC FORM] Processo {process_id} (PROC-{process_number:04d}) "
             f"criado em pre_registo para cliente {client_id}"
         )
+
+        # ── Pacote G — Gerar pedidos de documentos obrigatórios ───────────
+        # Cria automaticamente os REQUESTED docs com base na checklist
+        # definida pelo CEO/Diretor no SystemConfig (secção mandatory_documents).
+        # Executa em background — não bloqueia a resposta ao cliente.
+        try:
+            from services.portal_documents_notify import generate_mandatory_document_requests
+            asyncio.create_task(
+                generate_mandatory_document_requests(
+                    process_id=process_id,
+                    company_id=process_doc.get("company") or process_doc.get("company_id"),
+                    requested_by="public_form",
+                    requested_by_name="Formulário Público",
+                )
+            )
+        except Exception as e_md:
+            logger.warning(
+                f"[PUBLIC FORM] Falha ao agendar geração de pedidos obrigatórios "
+                f"para processo {process_id}: {e_md}"
+            )
 
         # Gerar magic link JWT + short_id
         import secrets as _secrets

@@ -258,6 +258,28 @@ class SystemWebmailConfig(BaseModel):
     app_password: Optional[str] = None
 
 
+class MandatoryDocumentsConfig(BaseModel):
+    """Configuração da checklist de Documentos Obrigatórios (Pacote G).
+
+    Lista de documentos que são automaticamente pedidos ao cliente quando um
+    processo é criado (via formulário público → pre_registo, ou via endpoint
+    de automação). O CEO/Diretor gere esta lista no SystemConfigPage.
+
+    Quando todos os pedidos gerados a partir desta lista são satisfeitos
+    (status RECEIVED/UPLOADED/VALIDATED), o gatilho
+    `check_and_notify_documents_complete` envia um email automático ao
+    cliente em nome do intermediário atribuído.
+    """
+    enabled: bool = True
+    documents: List[Dict[str, Any]] = [
+        {"name": "Bilhete de Identidade / Cartão de Cidadão", "category": "identificacao"},
+        {"name": "Comprovativo de IRS do ano anterior", "category": "irs"},
+        {"name": "Últimos 3 recibos de vencimento", "category": "recibo_vencimento"},
+        {"name": "Comprovativo de Morada", "category": "comprovativo_morada"},
+        {"name": "Extrato bancário dos últimos 3 meses", "category": "extrato_bancario"},
+    ]
+
+
 class SystemConfig(BaseModel):
     """Configuração completa do sistema.
 
@@ -282,6 +304,7 @@ class SystemConfig(BaseModel):
     audit_trail: AuditTrailConfig = AuditTrailConfig()
     system_smtp: SystemSMTPConfig = SystemSMTPConfig()
     system_webmail: SystemWebmailConfig = SystemWebmailConfig()
+    mandatory_documents: MandatoryDocumentsConfig = MandatoryDocumentsConfig()
     setup_completed: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

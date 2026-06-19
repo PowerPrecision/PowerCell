@@ -710,7 +710,7 @@ async def update_config(
     MULTI-EMPRESA: Use o parâmetro company_id para actualizar a config de uma empresa específica.
     """
     # Secções válidas: definidas em CONFIG_FIELDS + secções de integração
-    EXTRA_SECTIONS = {"system_smtp", "system_webmail"}
+    EXTRA_SECTIONS = {"system_smtp", "system_webmail", "mandatory_documents"}
     if section not in CONFIG_FIELDS and section not in EXTRA_SECTIONS:
         raise HTTPException(status_code=400, detail=f"Secção inválida: {section}")
     

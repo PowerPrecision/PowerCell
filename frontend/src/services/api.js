@@ -461,6 +461,14 @@ export const getVisits = (processId) => api.get("/visits", { params: { process_i
 export const getExportPermission = (companyId = "default") =>
   api.get("/system-config/public/export-permission", { params: { company_id: companyId } });
 
+// ── Pacote G — Documentos Obrigatórios (mandatory_documents) ───────────
+// Lê/atualiza a checklist gerida pelo CEO/Diretor no SystemConfigPage.
+// section=mandatory_documents com {enabled: bool, documents: [{name, category}]}
+export const getMandatoryDocuments = (companyId = "default") =>
+  api.get("/system-config", { params: { company_id: companyId } });
+export const updateMandatoryDocuments = (data, companyId = "default") =>
+  api.patch("/system-config/mandatory_documents", data, { params: { company_id: companyId } });
+
 // Deadlines
 export const getDeadlines = (processId) => 
   api.get("/deadlines", { params: { process_id: processId } });

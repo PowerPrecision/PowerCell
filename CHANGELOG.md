@@ -1127,3 +1127,32 @@ O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.
 
 ### Documentação
 - Criado README.md e CHANGELOG.md.
+
+## [2026-06-19] — Pacote G: Automação de Documentação Completa (Portal + Email Intermediário)
+
+### Adicionado
+- **Modelo `MandatoryDocumentsConfig` + secção `mandatory_documents` no `SystemConfig`** (`feat` — **BACKEND**): Nova sub-config em `backend/models/system_config.py` com `{enabled: bool, documents: [{name, category}]}`. Defaults com 5 documentos típicos (BI/CC, IRS, Recibos de Vencimento, Comprovativo de Morada, Extrato Bancário). Persistida como secção extra (`EXTRA_SECTIONS` no `routes/system_config.py`); aceita `PATCH /api/system-config/mandatory_documents`. Suporta multi-empresa via `company_id`.
+- **Serviço `backend/services/portal_documents_notify.py`** (`feat` — **BACKEND**): Duas funções principais:
+  - **`check_and_notify_documents_complete(process_id, company_id)`**: Gatilho invocado após cada `confirm_portal_upload`. Verifica se ainda há documentos com `status ∈ {REQUESTED, PENDING}` no processo. Se `0` (tudo submetido), envia email automático "Documentação Recebida com Sucesso - Em Análise" ao cliente usando o SMTP EXATO do intermediário atribuído (`resolve_email_config_for_sync` já implementa herança user→company→system), com fallback para `send_email(force_system=True, system_purpose="DOCUMENTS")`. Idempotente via flag `documents_complete_notified_at` no documento do processo. Regista no histórico: `"Email automático de confirmação de documentação enviado via Portal"`.
+  - **`generate_mandatory_document_requests(process_id, company_id, requested_by, requested_by_name)`**: Gera pedidos `status=REQUESTED` na coleção `documents` com base na checklist `mandatory_documents` do `SystemConfig`. Idempotente por `source="mandatory_checklist"` (não duplica). Aplicável a qualquer novo processo (público ou interno).
+- **Gatilho automático no `confirm_portal_upload`** (`feat` — **PORTAL**): Após cada upload do cliente via Portal, é agendado em background (`asyncio.create_task`) o `check_and_notify_documents_complete`. Não bloqueia a resposta ao cliente. Falhas não quebram o upload — apenas log warning.
+- **Geração automática de pedidos obrigatórios na criação de processos** (`feat` — **LÓGICA DE NEGÓCIO**):
+  - `backend/routes/public.py`: após `db.processes.insert_one` (processo em `pre_registo` via formulário público), `generate_mandatory_document_requests` é agendada em background com `requested_by="public_form"`.
+  - `backend/routes/processes.py` (2 endpoints de criação de processo): a mesma função é agendada após `log_history(..., "Criou processo")`. Idempotente por `source` — não duplica com os `auto_default` já criados pelo `create_client_process`.
+- **Secção "Documentos Obrigatórios por Defeito" no `SystemConfigPage.js`** (`feat` — **FRONTEND**): Nova tab `mandatory_documents` (ícone `FileEdit`) acessível apenas a Admin/CEO. UI com:
+  - Toggle `Switch` para ativar/desativar a checklist automática.
+  - Form de adição (Input nome + Select categoria + botão "Adicionar"). Categorias alinham com as usadas no Portal (`identificacao`, `irs`, `recibo_vencimento`, `comprovativo_morada`, `extrato_bancario`, `mapa_responsabilidades`, `caderneta_predial`, `certidao_teor`, `outros`).
+  - Lista dos documentos atuais com Badge de categoria + botão Trash para remover.
+  - Botão "Guardar Checklist" que faz `PATCH /api/system-config/mandatory_documents` com `{enabled, documents}`.
+  - Prevenção de duplicados (case-insensitive).
+  - Adicionada a todos os navs (desktop sidebar, mobile dropdown, mobile chips).
+- **API helpers em `frontend/src/services/api.js`**: `getMandatoryDocuments(companyId)` e `updateMandatoryDocuments(data, companyId)`.
+
+### Corrigido
+- **Flake8 F824 em `backend/scripts/seed_massive_dev_data.py`** (`fix` — **CI**): A linha `nonlocal inserted` na inner function `_insert_one_batch` (linha 952) era declarada mas nunca atribuída no scope do closure (a função apenas retornava `len(result.inserted_ids)` e o outer scope já computava `inserted = sum(results)`). O flake8 reportava `F824 nonlocal inserted is unused: name is never assigned in scope` e quebrava o CI. Linha removida — comportamento inalterado (o `inserted = 0` no outer scope mantém-se como guard para o path de docs vazios, e o `return inserted` final retorna `sum(results)`).
+
+### Notas
+- **Idempotência dupla**: a geração de pedidos é idempotente por `source="mandatory_checklist"` (não duplica se re-correr), e a notificação de conclusão é idempotente por `documents_complete_notified_at` (só dispara uma vez por processo).
+- **Herança de SMTP preservada**: o `check_and_notify_documents_complete` respeita o caminho canónico do PowerCell — SMTP do intermediário atribuído → SMTP da empresa → SMTP global do sistema. Se o intermediário não tiver config pessoal funcional, cai automaticamente para o `send_email(force_system=True)`.
+- **Async fire-and-forget**: ambos os gatilhos (geração de pedidos + verificação de conclusão) correm em `asyncio.create_task` para não bloquear a resposta ao cliente ou ao staff. Falhas são logadas mas não propagadas.
+- **Multi-empresa**: a checklist é lida por `company_id` (default = global). Processos criados numa empresa específica usam a checklist dessa empresa (se existir; senão fallback para global via `get_system_config`).

@@ -1114,3 +1114,54 @@ Stage Summary:
 - Usa nomes CURTOS de bancos (fix do bug de badges do v1).
 - CHANGELOG.md atualizado com entrada [2026-06-19] Pacote F.
 - Push para dev via Git Database API.
+
+---
+Task ID: 11 (Pacote G)
+Agent: Main Agent
+Task: Pacote G — Automação de Documentação Completa (Portal + Email Intermediário). Quando o cliente termina de submeter toda a documentação exigida, o sistema envia automaticamente um email de confirmação em nome do intermediário atribuído, com fallback para o SMTP da empresa. Adicionalmente: checklist de documentos obrigatórios gerida pelo CEO/Diretor; geração automática desses pedidos quando o processo entra em pre_registo.
+
+Work Log:
+- Lidos os ficheiros relevantes: `backend/services/user_email_config_service.py` (CRUD user_email_configs + dual-write embebido), `backend/services/email_config_resolver.py` (resolve_email_config + resolve_email_config_for_sync — já implementa herança user→company→system), `backend/services/email_service.py` (send_email com force_system + system_purpose), `backend/services/email_v2.py` (SMTPProvider com SMTP_SSL), `backend/routes/portal.py` (confirm_portal_upload em torno da linha 1282), `backend/routes/public.py` (criação de processo em pre_registo a partir da linha 290), `backend/routes/processes.py` (2 endpoints de criação: linhas 913 e 1168; o segundo já cria DEFAULT_PENDING_CATEGORIES com source="auto_default"), `backend/models/system_config.py` (SystemConfig + sub-configs), `backend/services/system_config.py` (get_system_config, save_system_config, update_config_section com secções extra), `backend/routes/system_config.py` (PATCH /{section} com EXTRA_SECTIONS allowlist), `backend/scripts/seed_massive_dev_data.py` (linha 952 — bug F824), `frontend/src/pages/SystemConfigPage.js` (estrutura master-detail com tabs dinâmicos + sections fixas: rgpd/maintenance/portal/integrations/system_emails/document_recipients), `frontend/src/services/api.js` (padrão de exports + system-config helpers).
+- Confirmado campo de intermediário no processo: `intermediario_id` (singular) + `assigned_mediador_id` / `assigned_mediador_ids` + `assigned_consultor_id` / `assigned_consultor_ids`. Helper `_gather_intermediary_ids` reúne todos por ordem de prioridade sem duplicados.
+
+Tarefa 1 — Definição de Documentos Obrigatórios (Backend + Frontend):
+- `backend/models/system_config.py`: adicionada classe `MandatoryDocumentsConfig(BaseModel)` com `enabled: bool = True` e `documents: List[Dict[str, Any]]` (default com 5 documentos típicos: BI/CC, IRS, Recibos Vencimento, Comprovativo Morada, Extrato Bancário). Adicionado campo `mandatory_documents: MandatoryDocumentsConfig = MandatoryDocumentsConfig()` ao `SystemConfig`.
+- `backend/services/system_config.py`: adicionado import de `MandatoryDocumentsConfig`. Adicionado `elif section == "mandatory_documents"` em `update_config_section` (faz merge dos dados filtrados e recria a config com `MandatoryDocumentsConfig(**current)`).
+- `backend/routes/system_config.py`: adicionado `"mandatory_documents"` ao `EXTRA_SECTIONS` no PATCH /{section} (linha 713) — permite que a rota aceite a secção como válida.
+- `frontend/src/pages/SystemConfigPage.js`: criada nova componente `MandatoryDocumentsSection` (entre PortalSettingsSection e SystemConfigPage) com Switch de ativar/desativar, form de adição (Input nome + Select categoria + botão Adicionar), lista de documentos atuais com Badge de categoria + botão Trash, botão Guardar que faz PATCH /api/system-config/mandatory_documents com {enabled, documents}. Categorias alinham com as do Portal (identificacao, irs, recibo_vencimento, comprovativo_morada, extrato_bancario, mapa_responsabilidades, caderneta_predial, certidao_teor, outros). Prevenção de duplicados case-insensitive. Adicionada a tab "Docs Obrigatórios" (ícone FileEdit) em todos os navs (desktop sidebar, mobile dropdown, mobile chips) + bloco de render `{activeTab === "mandatory_documents" && <MandatoryDocumentsSection token={token} />}` + cláusula de exclusão no render do ConfigSection genérico.
+- `frontend/src/services/api.js`: adicionados helpers `getMandatoryDocuments(companyId)` e `updateMandatoryDocuments(data, companyId)` (este último usa `api.patch("/system-config/mandatory_documents", ...)`).
+
+Tarefa 2 — Verificação de Conclusão no Portal:
+- Criado `backend/services/portal_documents_notify.py` (novo ficheiro, ~280 linhas) com a função `check_and_notify_documents_complete(process_id, company_id)` (código previamente aprovado pelo utilizador). Lógica: 1) Busca processo; se já tem `documents_complete_notified_at` → não faz nada. 2) Conta documentos com status ∈ {REQUESTED, PENDING, requested, pending}; se > 0 → não faz nada. 3) Resolve SMTP do intermediário via `resolve_email_config_for_sync` (herança user→company→system). 4a) Se config pessoal funcional (has_password + smtp_server + encrypted_password) → envio direto via SMTP_SSL numa thread. 4b) Fallback para `send_email(force_system=True, system_purpose="DOCUMENTS")`. 5) Marca flag de idempotência + `log_history(action="DOCUMENTS_COMPLETE_EMAIL_SENT", new_value="Email automático de confirmação de documentação enviado via Portal")`.
+- Funções auxiliares: `_gather_intermediary_ids(process)` reúne IDs por prioridade sem duplicados; `_send_via_smtp(...)` envio SMTP_SSL em thread pool; `_build_documents_complete_html(client_name)` template HTML bonito (cabeçalho teal, caixa de highlight verde, assinatura PowerCell).
+- `backend/routes/portal.py` (`confirm_portal_upload`): adicionado bloco Pacote G após o gatilho de Onboarding existente. Agenda `asyncio.create_task(check_and_notify_documents_complete(process_id, company_id))`. Falhas não quebram o upload (try/except + log warning).
+
+Tarefa 3 — Geração Automática de Pedidos na Criação de Processo:
+- Adicionada função `generate_mandatory_document_requests(process_id, company_id, requested_by, requested_by_name)` no mesmo ficheiro `portal_documents_notify.py`. Idempotente por `source="mandatory_checklist"` (não duplica). Gera um documento REQUESTED por item da checklist com `custom_label=name`, `notes="Documento obrigatório: {name}"`, `category` do item, `source="mandatory_checklist"`, `requested_by` e `requested_by_name` passados.
+- `backend/routes/public.py`: adicionado `import asyncio` no topo. Após `db.processes.insert_one(process_doc)` + `db.clients.update_one(... push process_ids ...)`, é agendada `generate_mandatory_document_requests` em background com `requested_by="public_form"`, `requested_by_name="Formulário Público"`. Falhas não quebram o registo (try/except + log warning).
+- `backend/routes/processes.py` (endpoint `POST /processes`, linha ~913): após `log_history(process_id, user, "Criou processo")`, é agendada `generate_mandatory_document_requests` em background com `requested_by=user["id"]`, `requested_by_name=user["name"]`.
+- `backend/routes/processes.py` (endpoint `POST /processes/create-client`, linha ~1224): após o bloco `DEFAULT_PENDING_CATEGORIES` (que cria pedidos com `source="auto_default"`), é agendada a mesma função. Idempotente por `source` — não duplica com os auto_default.
+
+Bug Fix — Flake8 F824 em `backend/scripts/seed_massive_dev_data.py`:
+- Identificado que na inner function `_insert_one_batch(batch)` (linha 951-954) a declaração `nonlocal inserted` (linha 952) era redundante: a função apenas retornava `len(result.inserted_ids)` e nunca atribuía a `inserted`. O outer scope já computava `inserted = sum(results)` na linha 957. O flake8 reportava `F824 nonlocal inserted is unused: name is never assigned in scope` e quebrava o CI (`Run flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics`).
+- Removida a linha `nonlocal inserted` da inner function. Comportamento inalterado: `inserted = 0` no outer scope mantém-se como inicialização para o path de docs vazios, e o `return inserted` final retorna `sum(results)` (linha 957).
+- Validado com `flake8 . --count --select=E9,F63,F7,F82 --show-source --statistics` → 0 erros em todo o backend.
+
+Stage Summary:
+- Pacote G implementado por completo (3 tarefas + 1 bug fix).
+- Ficheiros criados:
+  - `backend/services/portal_documents_notify.py` (novo — ~280 linhas, 2 funções principais + 3 helpers)
+- Ficheiros modificados:
+  - `backend/models/system_config.py` (nova classe MandatoryDocumentsConfig + campo em SystemConfig)
+  - `backend/services/system_config.py` (import + elif section=="mandatory_documents")
+  - `backend/routes/system_config.py` (EXTRA_SECTIONS += "mandatory_documents")
+  - `backend/routes/portal.py` (gatilho check_and_notify em confirm_portal_upload)
+  - `backend/routes/public.py` (import asyncio + gatilho generate_mandatory_document_requests após insert_one)
+  - `backend/routes/processes.py` (gatilho generate_mandatory_document_requests em 2 endpoints de criação)
+  - `backend/scripts/seed_massive_dev_data.py` (removida linha `nonlocal inserted` — fix F824)
+  - `frontend/src/pages/SystemConfigPage.js` (nova MandatoryDocumentsSection + tab em 3 navs + render block)
+  - `frontend/src/services/api.js` (2 helpers: getMandatoryDocuments + updateMandatoryDocuments)
+  - `CHANGELOG.md` (entrada [2026-06-19] Pacote G)
+  - `worklog.md` (esta entrada)
+- Validação: flake8 E9,F63,F7,F82 → 0 erros em todo o backend.
+- Próximo passo: commit + push para branch dev via Git Database API (push_pacote_g.py).

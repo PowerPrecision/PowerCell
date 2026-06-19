@@ -949,7 +949,6 @@ async def batch_insert(db, collection_name: str, docs: list, batch_size: int) ->
     inserted = 0
 
     async def _insert_one_batch(batch):
-        nonlocal inserted
         result = await collection.insert_many(batch, ordered=False)
         return len(result.inserted_ids)
 
