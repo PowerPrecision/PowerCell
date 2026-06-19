@@ -3,6 +3,21 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-19] — Hotfix: Cliente Desaparece quando Processo Fica Terminal (404 no Detalhe)
+
+### Corrigido
+- **Cliente desaparece da lista "Os Meus Clientes" quando o único processo fica terminal** (`bug` — **CRÍTICO**): O endpoint `GET /api/processes/my-clients` filtrava hard-coded `is_active≠False` E `status∉INACTIVE_STATUSES` (concluídos/desistências). Quando o ÚNICO processo de um cliente ficava terminal, o cliente desaparecia da lista — **mesmo com o toggle "Mostrar Concluídos" ativo no frontend**, porque o backend nunca chegava a retornar esses processos. O toggle do frontend (`showInactive`) filtrava client-side uma lista que já não continha os terminais, pelo que não tinha efeito.
+  - **Backend** (`backend/routes/processes.py`, `get_my_clients`): Adicionado parâmetro `show_inactive: bool = Query(False)`. Quando `True`, os filtros de `is_active` e `status` são relaxados (mantém `is_deleted≠True`) para que os processos terminais também sejam retornados. Aplicado a todos os roles (CONSULTOR, INTERMEDIARIO, ADMIN/CEO/DIRETOR/ADMINISTRATIVO).
+  - **Frontend** (`frontend/src/pages/MyClientsPage.js`): `fetchData()` agora passa `{ show_inactive: showInactive ? "true" : "false" }` ao `getMyClients()`. O `useEffect` agora depende de `showInactive` (re-busca quando o toggle muda). O filtro client-side por `TERMINAL_STATUSES` mantém-se para o caso `showInactive=false` (dupla garantia).
+
+- **Erro 404 ao editar cliente sintético (sem documento em `db.clients`)** (`bug` — **CRÍTICO**): Quando o `client_id` passado era na verdade o ID de um processo (cliente virtual/sintético sem documento na colecção `clients`), o `GET /clients/{id}` tinha fallback e construía uma resposta sintética — MAS o `PUT /clients/{id}` (`update_client`) NÃO tinha fallback: fazia `find_one` em `db.clients` e levantava 404 se o documento não existisse. Isto impedia o utilizador de editar email/telefone na ficha de um cliente sintético (mesmo que a página de detalhe abrisse correctamente via GET).
+  - **Backend** (`backend/routes/clients.py`, `update_client`): Se o cliente não existir em `db.clients`, procura um processo cujo `id` ou `client_id` corresponda. Se encontrado, **materializa um documento de cliente real** a partir dos dados do processo (nome, email, telefone, NIF, personal_data, process_ids) e insere-o em `db.clients` (com encriptação RGPD). Se o `client_id` do processo diferir do ID passado, actualiza o processo para apontar para o novo client_id. Depois prossegue com o update normal. Isto transforma o cliente sintético num cliente real na primeira edição — edições subsequentes funcionam normalmente.
+  - O `effective_client_id` (usado no `update_one`) passa a ser `client.get("id") or client_id` para garantir que o update atinge o doc correcto.
+
+### Notas
+- O `GET /clients/{client_id}` (página de detalhe) JÁ tinha fallback robusto (constrói cliente sintético a partir de processo) — não precisou de alteração. A correção focou-se no `PUT` (edição) e na lista `my-clients`.
+- A sincronização com `my-processes` mantém-se: por defeito (`show_inactive=False`), `my-clients` retorna apenas processos activos (igual a `my-processes`). Só quando o utilizador activa "Mostrar Concluídos" é que os terminais aparecem.
+
 ## [2026-06-19] — Pacote F: Script de Mock Data V2 (Preenchimento Profundo e Portal)
 
 ### Adicionado

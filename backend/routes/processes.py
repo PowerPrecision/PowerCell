@@ -2133,35 +2133,46 @@ async def get_my_clients(
     request: Request,
     page: int = Query(1, ge=1, description="Número da página"),
     size: int = Query(50, ge=1, le=100, description="Itens por página"),
+    show_inactive: bool = Query(False, description="Incluir processos terminais (concluídos/desistências). "
+                                "Quando True, o cliente cujo único processo ficou terminal continua visível na lista."),
     user: dict = Depends(require_roles([
-    UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
+    UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
     """
     Obter lista de clientes atribuídos ao utilizador atual.
-    
+
     OTIMIZAÇÕES APLICADAS:
     - MongoDB Projection: Apenas campos necessários
     - Paginação: Não carrega todos os clientes de uma vez
     - Desencriptação seletiva: Só client_phone e client_nif
-    
+
     Retorna uma lista com:
     - Nome do cliente
     - Fase do processo
     - Ações pendentes (tarefas, documentos a atualizar)
-    
+
     Permissões:
     - Consultor: Apenas os seus clientes (assigned_consultor_ids ou assigned_consultor_id)
     - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_ids ou criados por eles)
     - Admin/CEO: Todos os clientes (para supervisão)
-    
+
     Suporta múltiplos consultores e intermediários por processo.
+
+    BUG FIX (client disappears when process is terminal):
+    Antes, a query filtrava is_active≠False E status∉INACTIVE_STATUSES — quando
+    o ÚNICO processo de um cliente ficava terminal, o cliente desaparecia da
+    lista mesmo com o toggle "Mostrar Concluídos" ativo no frontend, porque o
+    backend nunca chegava a retorná-lo. Agora, quando show_inactive=True, esses
+    filtros são relaxados para que os processos terminais também sejam
+    retornados (o frontend continua a filtrar por status terminal via
+    TERMINAL_STATUSES quando o toggle está off).
     """
     user_id = user["id"]
     user_email = user.get("email", "")
     role = get_effective_role(request, user)
-    
+
     # Construir query baseada no papel do utilizador
     #
     # SINCRONIZAÇÃO COM "OS Meus Processos":
@@ -2169,32 +2180,35 @@ async def get_my_clients(
     # my-processes (assigned_consultor_ids + is_active + status), para que
     # os clientes listados correspondam aos processos visíveis.
     # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
+    #
+    # Quando show_inactive=True, relaxamos os filtros de is_active e status
+    # para que os clientes cujos processos ficaram terminais continuem visíveis.
     if role == UserRole.CONSULTOR:
-        query = {
-            "$and": [
-                {"$or": [
-                    {"assigned_consultor_ids": user_id},
-                    {"assigned_consultor_id": user_id}
-                ]},
-                # Mesmo filtro de activos que my-processes (view_mode="active_only")
-                {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
-                {"is_deleted": {"$ne": True}}
-            ]
-        }
+        and_clauses = [
+            {"$or": [
+                {"assigned_consultor_ids": user_id},
+                {"assigned_consultor_id": user_id}
+            ]},
+            {"is_deleted": {"$ne": True}}
+        ]
+        if not show_inactive:
+            # Mesmo filtro de activos que my-processes (view_mode="active_only")
+            and_clauses.append({"is_active": {"$ne": False}})
+            and_clauses.append({"status": {"$nin": INACTIVE_STATUSES}})
+        query = {"$and": and_clauses}
     elif role == UserRole.INTERMEDIARIO:
-        query = {
-            "$and": [
-                {"$or": [
-                    {"assigned_mediador_ids": user_id},
-                    {"assigned_mediador_id": user_id},
-                    {"created_by": user_email}
-                ]},
-                {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
-                {"is_deleted": {"$ne": True}}
-            ]
-        }
+        and_clauses = [
+            {"$or": [
+                {"assigned_mediador_ids": user_id},
+                {"assigned_mediador_id": user_id},
+                {"created_by": user_email}
+            ]},
+            {"is_deleted": {"$ne": True}}
+        ]
+        if not show_inactive:
+            and_clauses.append({"is_active": {"$ne": False}})
+            and_clauses.append({"status": {"$nin": INACTIVE_STATUSES}})
+        query = {"$and": and_clauses}
     elif role == UserRole.INDEXACAO:
         query = {
             "$or": [
@@ -2203,7 +2217,14 @@ async def get_my_clients(
             ]
         }
     else:
-        query = {}
+        # Admin/CEO/Diretor/Administrativo
+        if show_inactive:
+            query = {"is_deleted": {"$ne": True}}
+        else:
+            query = {
+                "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+                "is_active": {"$ne": False}
+            }
     
     # Calcular offset
     skip = (page - 1) * size

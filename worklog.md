@@ -1165,3 +1165,84 @@ Stage Summary:
   - `worklog.md` (esta entrada)
 - Validação: flake8 E9,F63,F7,F82 → 0 erros em todo o backend.
 - Próximo passo: commit + push para branch dev via Git Database API (push_pacote_g.py).
+
+---
+Task ID: 11 (Pacote G — Push & CI)
+Agent: Main Agent
+Task: Push Pacote G para branch dev via Git Database API + verificação CI.
+
+Work Log:
+- Verificados todos os ficheiros no disco: portal_documents_notify.py existe, hooks em portal.py/public.py/processes.py presentes, MandatoryDocumentsSection em SystemConfigPage.js, helpers em api.js, secção mandatory_documents em system_config.py (model+service+route).
+- Syntax check AST em todos os .py do backend → 0 erros.
+- Executado push_pacote_g.py: 12 blobs → 1 tree → 1 commit → ref update.
+- Commit SHA: 6207eff0c8a5c21aa668585cbceade53a2d47e78
+- URL: https://github.com/PowerPrecision/PowerCell/commit/6207eff0c8a5c21aa668585cbceade53a2d47e78
+
+Stage Summary:
+- Push para dev bem-sucedido.
+- CI GitHub Actions (todos os checks):
+  * Backend CI — Fast: completed/success (inclui flake8 E9,F63,F7,F82 → 0 erros — confirma fix F824)
+  * Backend CI — Full: completed/success (testes completos)
+  * Frontend CI: completed/success
+  * Vercel Preview Comments: completed/success
+  * Notify on Failure: completed/skipped (nada a notificar)
+- Pacote G COMPLETO e em produção (Render auto-deploy a partir de dev).
+
+---
+Task ID: 12 (Hotfix — Cliente Desaparece quando Processo Fica Terminal)
+Agent: Main Agent
+Task: Corrigir bug on-hold: cliente desaparece quando um processo é terminal (404 no detalhe do cliente).
+
+Work Log:
+- Verificado o worklog: Pacotes D, E, F, G já concluídos e pushed para dev. Apenas este bug on-hold restava.
+- Lidos os ficheiros relevantes:
+  - `backend/routes/clients.py` (GET /clients/{id} linha 1213 — tem fallback robusto que constrói cliente sintético a partir de processo; PUT /clients/{id} linha 1434 — NÃO tem fallback, 404 se cliente não está em db.clients; DELETE /clients/{id} linha 1951 — soft delete com $unset legacy removido)
+  - `backend/routes/processes.py` (GET /my-clients linha 2131 — filtra hard-coded is_active≠False E status∉INACTIVE_STATUSES)
+  - `frontend/src/pages/MyClientsPage.js` (toggle showInactive lê URL param show_inactive, mas fetchData() não o passava ao backend; useEffect tinha deps vazias [])
+  - `frontend/src/pages/ClientDetailPage.js` (usa client.id para navegação e updateClient(id, ...))
+  - `frontend/src/services/api.js` (getMyClients já aceita params)
+  - `backend/services/process_service.py` (PROCESS_MY_CLIENTS_PROJECTION inclui client_id)
+  - `backend/routes/my_clients.py` (endpoint legacy /my-clients separado — também filtra INACTIVE_STATUSES)
+
+Root Cause Analysis:
+1. **Cliente desaparece da lista**: O endpoint `/processes/my-clients` (usado pelo MyClientsPage) filtra hard-coded `is_active≠False` E `status∉INACTIVE_STATUSES`. Quando o ÚNICO processo de um cliente fica terminal (concluído/desistência), o cliente desaparece da lista — mesmo com o toggle "Mostrar Concluídos" ativo, porque o backend nunca retorna os terminais e o filtro client-side não tem efeito sobre uma lista vazia.
+2. **404 ao editar cliente sintético**: O GET /clients/{id} tem fallback (constrói cliente sintético a partir de processo), MAS o PUT /clients/{id} (update_client) NÃO tem fallback — faz find_one em db.clients e 404 se não existe. Isto impede editar email/telefone na ficha de um cliente virtual/sintético.
+
+Fix 1 — Backend `/processes/my-clients` aceita `show_inactive`:
+- Adicionado parâmetro `show_inactive: bool = Query(False)` ao endpoint.
+- Quando `True`, os filtros `is_active≠False` e `status∉INACTIVE_STATUSES` são removidos da query (mantém `is_deleted≠True`). Aplicado a CONSULTOR, INTERMEDIARIO, e ADMIN/CEO/DIRETOR/ADMINISTRATIVO.
+- INDEXACAO mantém query original (não filtra por status — vê tudo).
+
+Fix 2 — Frontend MyClientsPage passa `show_inactive`:
+- `fetchData()` agora chama `getMyClients({ show_inactive: showInactive ? "true" : "false" })`.
+- `useEffect` agora tem `[showInactive]` como dependência (re-busca quando o toggle muda).
+- Filtro client-side por TERMINAL_STATUSES mantido para dupla garantia quando showInactive=false.
+
+Fix 3 — Backend `update_client` materializa cliente sintético:
+- Se `db.clients.find_one({"id": client_id})` retorna None, procura processo por `id` ou `client_id`.
+- Se encontrado, cria documento de cliente real em db.clients a partir dos dados do processo:
+  - id = proc.client_id ou client_id
+  - nome = proc.client_name
+  - contacto = {email: proc.client_email, telefone: proc.client_phone}
+  - dados_pessoais = proc.personal_data
+  - nif = proc.personal_data.nif
+  - process_ids = [proc.id]
+  - fonte = "materialized_from_process"
+- Encripta dados sensíveis (RGPD) antes de inserir.
+- Se proc.client_id ≠ new_client_id, actualiza processo para apontar para o novo client_id.
+- `effective_client_id = client.get("id") or client_id` usado no update_one final.
+- Isto transforma cliente sintético em real na primeira edição — edições subsequentes funcionam normalmente.
+
+Validação:
+- `ast.parse` OK em routes/clients.py e routes/processes.py.
+- `bunx esbuild` OK em MyClientsPage.js.
+- CHANGELOG.md actualizado com entrada [2026-06-19] Hotfix.
+- Próximo passo: push para dev via Git Database API.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/routes/processes.py` (show_inactive param em get_my_clients + query condicional)
+  - `backend/routes/clients.py` (fallback materialize em update_client + effective_client_id)
+  - `frontend/src/pages/MyClientsPage.js` (passar show_inactive ao backend + useEffect dep)
+- CHANGELOG.md actualizado.
+- Bug on-hold RESOLVIDO.

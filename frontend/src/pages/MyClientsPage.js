@@ -98,7 +98,8 @@ const MyClientsPage = () => {
   useEffect(() => {
     fetchData();
     checkExportPermission();
-  }, []);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showInactive]);
 
   const checkExportPermission = async () => {
     try {
@@ -117,8 +118,12 @@ const MyClientsPage = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
+      // Passar show_inactive ao backend para que os processos terminais
+      // (concluídos/desistências) também sejam retornados quando o toggle
+      // "Mostrar Concluídos" está ativo. Sem isto, o cliente cujo único
+      // processo ficou terminal desaparece da lista mesmo com o toggle on.
       const [clientsRes, statusesRes] = await Promise.all([
-        getMyClients(),
+        getMyClients({ show_inactive: showInactive ? "true" : "false" }),
         getWorkflowStatuses()
       ]);
       

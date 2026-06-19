@@ -1437,11 +1437,72 @@ async def update_client(
     client_data: ClientUpdate,
     user: dict = Depends(get_current_user)
 ):
-    """Actualizar dados de um cliente."""
+    """Actualizar dados de um cliente.
+
+    BUG FIX (404 on client detail when process is terminal):
+    Quando o ``client_id`` passado é na verdade o ID de um processo (cliente
+    virtual/sintético sem documento na colecção ``clients``), o GET
+    /clients/{id} tem fallback e constrói uma resposta sintética. MAS o PUT
+    (este endpoint) NÃO tinha fallback — fazia ``find_one`` em ``db.clients``
+    e levantava 404 se o documento não existisse. Isto impedia o utilizador
+    de editar email/telefone na ficha de um cliente sintético.
+
+    Agora, se o cliente não existir em ``db.clients``, procuramos um processo
+    cujo ``id`` ou ``client_id`` corresponda. Se encontrado, materializamos
+    um documento de cliente real a partir dos dados do processo (nome, email,
+    telefone, NIF, personal_data) e criamo-lo em ``db.clients``. Depois
+    prosseguimos com o update normal. Isto transforma o cliente sintético
+    num cliente real na primeira edição, e edições subsequentes funcionam
+    normalmente.
+    """
     client = await db.clients.find_one({"id": client_id})
-    
+
     if not client:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        # Fallback: procurar processo por id ou client_id
+        proc = await db.processes.find_one(
+            {"$or": [{"id": client_id}, {"client_id": client_id}]},
+            {"_id": 0}
+        )
+        if not proc:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+        logger.warning(
+            f"[PUT /clients/{client_id}] Documento de cliente não encontrado — "
+            f"a materializar cliente real a partir do processo {proc.get('id')} "
+            f"(client_name={proc.get('client_name')!r})."
+        )
+        # Materializar cliente real a partir dos dados do processo
+        personal = proc.get("personal_data") or {}
+        now_iso = datetime.now(timezone.utc).isoformat()
+        new_client_id = proc.get("client_id") or client_id
+        # Garantir que o client_id do processo aponta para o novo doc
+        materialized = {
+            "id": new_client_id,
+            "nome": proc.get("client_name") or "Sem nome",
+            "contacto": {
+                "email": proc.get("client_email"),
+                "telefone": proc.get("client_phone"),
+            },
+            "dados_pessoais": personal,
+            "nif": personal.get("nif"),
+            "process_ids": [proc.get("id")] if proc.get("id") else [],
+            "is_active": proc.get("is_active", True),
+            "fonte": "materialized_from_process",
+            "created_at": proc.get("created_at") or now_iso,
+            "updated_at": now_iso,
+        }
+        # Encriptar dados sensíveis antes de inserir
+        materialized = encrypt_client_data(materialized)
+        await db.clients.insert_one(dict(materialized))
+        # Se o client_id do processo era diferente do que passámos, garantir
+        # que o processo aponta para o novo client_id
+        if proc.get("client_id") != new_client_id:
+            await db.processes.update_one(
+                {"id": proc["id"]},
+                {"$set": {"client_id": new_client_id, "updated_at": now_iso}}
+            )
+        # Retornar o cliente desencriptado para o fluxo normal continuar
+        client = decrypt_client_data(dict(materialized))
     
     # Verificar permissão de edição
     user_role = user.get("role", "")
@@ -1524,8 +1585,11 @@ async def update_client(
     # são guardados encriptados, mesmo em actualizações
     update_dict = encrypt_client_data(update_dict)
 
+    # Usar client["id"] (pode diferir de client_id se o cliente foi
+    # materializado a partir de um processo cujo client_id era diferente)
+    effective_client_id = client.get("id") or client_id
     await db.clients.update_one(
-        {"id": client_id},
+        {"id": effective_client_id},
         {"$set": update_dict}
     )
     
