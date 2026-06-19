@@ -980,6 +980,7 @@ async def list_clients(
                     "nif": proc.get("personal_data", {}).get("nif"),
                     "process_ids": [],
                     "active_processes_count": 0,
+                    "active_processes": [],  # [{ref, status, status_label, status_color}] — processos ativos
                     "processes": [],  # Lista de processos com fase
                     "created_at": proc.get("created_at"),  # For sorting by date
                     "updated_at": proc.get("updated_at"),  # Last update date
@@ -1026,6 +1027,15 @@ async def list_clients(
             
             if proc.get("is_active", True) and proc.get("status") not in ["desistencias", "concluidos", "concluido", "arquivado", "arquivo", "perdido", "eliminado", "eliminados"]:
                 clients_map[key]["active_processes_count"] += 1
+                # Mini-objeto por processo ativo para a coluna "Fase" do frontend
+                # renderizar badges [PROC-001: Triagem] — um cliente pode ter
+                # vários processos ativos em fases diferentes.
+                clients_map[key]["active_processes"].append({
+                    "ref": proc.get("process_number") or (proc.get("id") or "")[:8],
+                    "status": proc.get("status"),
+                    "status_label": status_info.get("label", proc.get("status")),
+                    "status_color": status_info.get("color", "#6B7280"),
+                })
         
         # Determinar is_active de cada cliente com base nos seus processos
         # Um cliente é "Inativo" se TODOS os seus processos tiverem is_active: False
@@ -1146,6 +1156,7 @@ async def list_clients(
                 "nif": proc.get("personal_data", {}).get("nif"),
                 "process_ids": [],
                 "active_processes_count": 0,
+                "active_processes": [],  # [{ref, status, status_label, status_color}] — processos ativos
                 "created_at": proc.get("created_at"),
                 "prioridade": proc_priority,
             }
@@ -1167,6 +1178,14 @@ async def list_clients(
         
         if proc.get("status") not in ["arquivado", "perdido", "concluido"]:
             clients_map[key]["active_processes_count"] += 1
+            # Mini-objeto por processo ativo para a coluna "Fase" do frontend.
+            _si = status_map.get(proc.get("status"), {})
+            clients_map[key]["active_processes"].append({
+                "ref": proc.get("process_number") or (proc.get("id") or "")[:8],
+                "status": proc.get("status"),
+                "status_label": _si.get("label", proc.get("status")),
+                "status_color": _si.get("color", "#6B7280"),
+            })
     
     clients = list(clients_map.values())
     

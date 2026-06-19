@@ -1019,3 +1019,56 @@ Stage Summary:
   - CHANGELOG.md (entrada nova [2026-06-19] Pacote D)
   - worklog.md (esta entrada)
 - Próximo passo: commit + push para branch `dev` via Git Database API.
+
+---
+Task ID: 9 (Pacote E)
+Agent: Main Agent
+Task: Pacote E — Refinamentos UX (Pesquisa, Dropdowns e Lógica de Múltiplos Processos) na branch dev.
+
+Work Log:
+- Lidos os ficheiros relevantes: ProcessDetails.js (toolbar do Portal do Cliente + cartão Credenciais + helpers isCardEmpty/shouldCardBeCollapsed/CardHeaderWithEdit), ClientsPage.js (barra de pesquisa + coluna Fase em vista cartão e tabela), ProcessesPage.js (pesquisa), backend/routes/clients.py (list_clients — 2 code paths: show_all e não-show_all), backend/routes/processes.py (GET / — search), CHANGELOG.md (formato), worklog.md (entrada anterior Pacote D).
+
+Tarefa 1 — Botão "Ver como Cliente" dentro de DropdownMenu do "Portal do Cliente" (ProcessDetails.js):
+- Adicionado import de DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuLabel, DropdownMenuSeparator, DropdownMenuTrigger de "../components/ui/dropdown-menu" (ao lado do import de Popover, que se mantém — é usado noutros sítios).
+- Substituído o bloco `<Popover>` "Portal do Cliente" + botão separado "Ver como Cliente" por um único `<DropdownMenu>`. Trigger = botão "Portal do Cliente" teal com ExternalLink + ChevronDown. Conteúdo do menu: DropdownMenuLabel "Portal do Cliente" + descrição, DropdownMenuItem "Copiar Link" (gera magic link + safeCopyToClipboard), DropdownMenuItem "Enviar por Email" (sendMagicLinkEmail), DropdownMenuSeparator, DropdownMenuItem "Ver como Cliente" (amber — impersonateClient + window.open novo separador). Handlers mantêm a extração de error.response.data.detail em 404 (interceptor global silencioso em 404).
+
+Tarefa 2 — Cartão "Credenciais" colapsa quando vazio (ProcessDetails.js):
+- Adicionados casos `financial_credenciais` e `financial_credenciais_2` à função `isCardEmpty`: verificam portal_financas_utilizador, portal_financas_senha, seg_social_utilizador, seg_social_senha (em financialData ou titular2Data conforme o proponente).
+- Adicionado prop `collapsible` ao CardHeaderWithEdit de ambos os cartões de Credenciais.
+- Envolvido o corpo (`<p>` + grid de inputs) de cada cartão em `{!shouldCardBeCollapsed('...') && (<>...</>)}` — o cabeçalho (com toggle de colapsar) mantém-se sempre visível para o utilizador poder expandir. Mesma lógica de isCollapsed + editingCardId dos cartões Financeiros.
+
+Tarefa 3 — Pesquisa na Lista de Clientes só dispara ao submeter (ClientsPage.js):
+- Adicionado estado local `searchInput` (inicializado de searchTerm) + useEffect que sincroniza searchInput quando searchTerm (URL param) muda.
+- Substituído o `<div>` com o `<Input>` (onChange → setSearchTerm) por um `<form onSubmit={...}>` que contém o input (ligado a searchInput, onChange → setSearchInput) + um botão "Pesquisar" (ícone Search, type="submit"). A query só é commitada ao URL (setSearchTerm(searchInput)) ao submeter (Enter ou clique). Filtros Select continuam a atualizar o URL imediatamente.
+
+Tarefa 4a — Backend GET /clients devolve array active_processes (clients.py):
+- Path show_all: adicionado "active_processes": [] ao init do clients_map; no bloco de deteção de processo ativo (is_active + status not in terminal list), acrescentado append de mini-objeto {ref: process_number, status, status_label, status_color} (usa status_info já existente no loop).
+- Path não-show_all: adicionado "active_processes": [] ao init; no bloco de processo ativo, acrescentado append de mini-objeto (usa status_map.get(...) inline como _si, pois este path não tem status_info por iteração).
+- fase_principal e active_processes_count mantêm-se (retrocompatibilidade).
+
+Tarefa 4b — Frontend coluna Fase renderiza badges por processo ativo (ClientsPage.js):
+- Vista cartão: substituído o badge único de fase_principal por um flex-wrap de badges (um por active_processes[i]) no formato "{ref}: {status_label}" com a cor do estado. Fallback para fase_principal se active_processes vazio; null se não houver nada.
+- Vista tabela: mesma lógica — flex-wrap de badges com fallback para fase_principal (com indicação "(Inactivo)") e finalmente "-".
+
+Tarefa 4c — Pesquisa em Processos faz match em client_name (processes.py):
+- GET /api/processes: substituído create_accent_insensitive_regex por build_multiword_search_filter(search, "client_name") (multiword + sem acentos, mais robusto) no $or. Adicionado também {"process_number": simple_regex} ao $or. Assim, ao pesquisar "Manuel" aparecem todos os processos desse cliente.
+
+Validação:
+- Edits confirmados via output do tool (estrutura JSX balanceada, indentação Python correta, retrocompatibilidade preservada).
+- Documentação atualizada: CHANGELOG.md (entrada nova [2026-06-19] Pacote E) + esta entrada do worklog.
+- Commit + push para branch dev via Git Database API (blobs → tree → commit → ref) com push_pacote_e.py.
+
+Stage Summary:
+- Tarefa 1: "Portal do Cliente" é agora um DropdownMenu; "Ver como Cliente" é um item do menu (não um botão separado). UX mais limpa, agrupa todas as ações de portal num só sítio.
+- Tarefa 2: Cartão "Credenciais de Portais Oficiais" (1º e 2º proponente) colapsa automaticamente quando vazio e respeita o isolamento de edição (editingCardId), igual aos cartões Financeiros.
+- Tarefa 3: Pesquisa de Clientes só dispara ao clicar "Pesquisar" ou fazer Enter (form onSubmit). Acabou o disparo automático a cada tecla.
+- Tarefa 4a: GET /api/clients devolve active_processes: [{ref, status, status_label, status_color}] por cliente (ambos os code paths). fase_principal mantém-se como fallback.
+- Tarefa 4b: Coluna Fase (cartão + tabela) mostra um badge por processo ativo ([PROC-001: Triagem]) com fallback para fase_principal.
+- Tarefa 4c: Pesquisa em Processos usa build_multiword_search_filter em client_name + match em process_number. Pesquisar "Manuel" mostra todos os processos do Manuel.
+- Ficheiros modificados:
+  - frontend/src/pages/ProcessDetails.js (DropdownMenu Portal/Ver como Cliente + cartão Credenciais collapsible)
+  - frontend/src/pages/ClientsPage.js (form de pesquisa + badges active_processes)
+  - backend/routes/clients.py (active_processes array nos 2 paths)
+  - backend/routes/processes.py (search build_multiword_search_filter + process_number)
+  - CHANGELOG.md (entrada [2026-06-19] Pacote E)
+  - worklog.md (esta entrada)

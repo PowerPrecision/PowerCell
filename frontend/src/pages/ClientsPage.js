@@ -145,6 +145,14 @@ export default function ClientsPage() {
   const setAssignmentFilter = (v) => updateParam("assignment", v);
   const setIndexacaoFilter = (v) => updateParam("indexacao", v);
   const setShowDeleted = (v) => updateParam("show_deleted", v ? "true" : "");
+
+  // Search local state — o input só dispara a pesquisa ao submeter o formulário
+  // (Enter ou botão “Pesquisar”), evitando pesquisas automáticas a cada tecla
+  // (onChange) que sobrecarregam o backend e pisca a lista.
+  const [searchInput, setSearchInput] = useState(searchTerm);
+  useEffect(() => {
+    setSearchInput(searchTerm);
+  }, [searchTerm]);
   const setSortField = (v) => updateParam("sort", v);
   const setSortOrder = (v) => updateParam("order", v);
   
@@ -459,16 +467,34 @@ export default function ClientsPage() {
           <Card className="md:col-span-2">
             <CardContent className="pt-4">
               <div className="flex flex-wrap items-center gap-2">
-                <div className="relative w-full sm:flex-1 sm:min-w-[200px]">
-                  <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                  <Input
-                    placeholder="Pesquisar por nome, email ou NIF..."
-                    value={searchTerm}
-                    onChange={(e) => setSearchTerm(e.target.value)}
-                    className="pl-10"
-                    data-testid="search-clients-input"
-                  />
-                </div>
+                <form
+                  onSubmit={(e) => {
+                    e.preventDefault();
+                    setSearchTerm(searchInput);
+                  }}
+                  className="flex items-center gap-2 w-full sm:flex-1 sm:min-w-[200px]"
+                >
+                  <div className="relative flex-1">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground pointer-events-none" />
+                    <Input
+                      placeholder="Pesquisar por nome, email ou NIF..."
+                      value={searchInput}
+                      onChange={(e) => setSearchInput(e.target.value)}
+                      className="pl-10"
+                      data-testid="search-clients-input"
+                    />
+                  </div>
+                  <Button
+                    type="submit"
+                    size="sm"
+                    data-testid="search-clients-btn"
+                    className="h-9"
+                    title="Pesquisar"
+                  >
+                    <Search className="h-4 w-4 sm:mr-1" />
+                    <span className="hidden sm:inline">Pesquisar</span>
+                  </Button>
+                </form>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
                 <Select value={statusFilter} onValueChange={setStatusFilter}>
                   <SelectTrigger className="w-full sm:w-[150px]" data-testid="status-filter">
@@ -680,7 +706,23 @@ export default function ClientsPage() {
                             <Flame className="h-2.5 w-2.5" /> Alta
                           </Badge>
                         )}
-                        {client.fase_principal ? (
+                        {client.active_processes?.length > 0 ? (
+                          <div className="flex flex-wrap gap-1 justify-end">
+                            {client.active_processes.map((ap, i) => (
+                              <Badge
+                                key={i}
+                                className="text-[10px]"
+                                style={{
+                                  backgroundColor: ap.status_color || '#6B7280',
+                                  color: getContrastColor(ap.status_color),
+                                }}
+                                title={`${ap.ref} — ${ap.status_label}`}
+                              >
+                                {ap.ref}: {ap.status_label}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : client.fase_principal ? (
                           <Badge 
                             className="text-[10px]"
                             style={{ 
@@ -854,7 +896,23 @@ export default function ClientsPage() {
                         )}
                       </TableCell>
                       <TableCell>
-                        {client.fase_principal ? (
+                        {client.active_processes?.length > 0 ? (
+                          <div className="flex flex-wrap gap-1">
+                            {client.active_processes.map((ap, i) => (
+                              <Badge
+                                key={i}
+                                style={{
+                                  backgroundColor: ap.status_color || '#6B7280',
+                                  color: getContrastColor(ap.status_color),
+                                  fontSize: '11px'
+                                }}
+                                title={`${ap.ref} — ${ap.status_label}`}
+                              >
+                                {ap.ref}: {ap.status_label}
+                              </Badge>
+                            ))}
+                          </div>
+                        ) : client.fase_principal ? (
                           <div className="flex flex-col gap-1">
                             <Badge 
                               style={{ 

@@ -65,6 +65,14 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import { Separator } from "../components/ui/separator";
 import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../components/ui/dropdown-menu";
+import {
   Accordion,
   AccordionContent,
   AccordionItem,
@@ -1911,6 +1919,15 @@ const ProcessDetails = () => {
       case 'credit_dados':
         return !creditData?.requested_amount && !creditData?.bank_name &&
                !creditData?.loan_term_years && !creditData?.interest_rate;
+      case 'financial_credenciais':
+        // Credenciais de Portais Oficiais (1º proponente) — colapsa quando
+        // não há nenhum utilizador/senha preenchido em nenhum portal.
+        return !financialData?.portal_financas_utilizador && !financialData?.portal_financas_senha &&
+               !financialData?.seg_social_utilizador && !financialData?.seg_social_senha;
+      case 'financial_credenciais_2':
+        // Credenciais de Portais Oficiais (2º proponente) — mesma lógica.
+        return !titular2Data?.portal_financas_utilizador && !titular2Data?.portal_financas_senha &&
+               !titular2Data?.seg_social_utilizador && !titular2Data?.seg_social_senha;
       default:
         return false;
     }
@@ -2533,123 +2550,118 @@ const ProcessDetails = () => {
                   clientName={savedProcessRef.current?.client_name || process?.client_name}
                   clientEmail={savedProcessRef.current?.client_email || process?.client_email}
                 />
-                <Popover>
-                  <PopoverTrigger asChild>
+                {/* Portal do Cliente — DropdownMenu unificado.
+                    A ação principal abre as opções do portal (Copiar Link /
+                    Enviar por Email) e, na lista suspensa, o item
+                    👁️ Ver como Cliente abre o Portal do Cliente deste
+                    processo num novo separador (impersonate / suporte).
+                    O backend regista no audit_trail + history a mensagem
+                    "O utilizador X assumiu a identidade do cliente no processo Y". */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <Button
                       variant="outline"
                       size="sm"
                       className="text-teal-600 border-teal-200 hover:bg-teal-50 h-8 px-2 sm:px-3"
-                      title="Portal do Cliente - Magic Link"
+                      title="Portal do Cliente"
                     >
                       <ExternalLink className="h-3.5 w-3.5 sm:mr-1" />
                       <span className="hidden sm:inline">Portal do Cliente</span>
+                      <ChevronDown className="h-3.5 w-3.5 sm:ml-1" />
                     </Button>
-                  </PopoverTrigger>
-                  <PopoverContent className="w-56" align="start">
-                    <div className="space-y-1">
-                      <h4 className="font-medium text-sm">Portal do Cliente</h4>
-                      <p className="text-xs text-muted-foreground mb-2">Gerar link mágico de acesso ao portal.</p>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start gap-2 text-sm"
-                        onClick={async () => {
-                          try {
-                            const res = await generateMagicLink(id);
-                            const link = res.data?.magic_link || res.data?.link || res.data?.url;
-                            if (link) {
-                              await safeCopyToClipboard(link);
-                            } else {
-                              toast.error("Não foi possível gerar o link");
-                            }
-                          } catch (error) {
-                            // O interceptor global do api.js é silencioso para 404
-                            // (só faz console.warn). Para o utilizador ver a causa real
-                            // ("processo eliminado", "processo não encontrado", etc.),
-                            // extraímos o detail do backend e mostramos aqui.
-                            // Outros status (400/500/...) já são tratados pelo interceptor.
-                            if (error?.response?.status === 404) {
-                              toast.error(error?.response?.data?.detail || "Processo não encontrado");
-                            }
-                          }
-                        }}
-                      >
-                        <LinkIcon className="h-4 w-4" />
-                        Copiar Link
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="w-full justify-start gap-2 text-sm"
-                        onClick={async () => {
-                          try {
-                            await sendMagicLinkEmail(id);
-                            toast.success("Email enviado com o link do portal!");
-                          } catch (error) {
-                            // Mesma lógica do botão Copiar Link: o interceptor é
-                            // silencioso para 404, por isso mostramos o detail do
-                            // backend (ex.: "processo eliminado") aqui.
-                            if (error?.response?.status === 404) {
-                              toast.error(error?.response?.data?.detail || "Processo não encontrado");
-                            }
-                          }
-                        }}
-                      >
-                        <Mail className="h-4 w-4" />
-                        Enviar por Email
-                      </Button>
-                    </div>
-                  </PopoverContent>
-                </Popover>
-
-                {/* Ver como Cliente — impersonate do Portal do Cliente.
-                    Disponível para todo o staff interno (require_staff no backend).
-                    Abre o Portal do Cliente num novo separador, autenticado
-                    automaticamente, para o staff prestar suporte ao cliente.
-                    O backend regista no audit_trail + history com a mensagem
-                    "O utilizador X assumiu a identidade do cliente no processo Y". */}
-                <Button
-                  variant="outline"
-                  size="sm"
-                  className="text-amber-700 border-amber-300 hover:bg-amber-50 h-8 px-2 sm:px-3"
-                  title="Ver como Cliente — abre o Portal do Cliente deste processo num novo separador (suporte)"
-                  onClick={async () => {
-                    try {
-                      const res = await impersonateClient(id);
-                      const url = res?.data?.url;
-                      if (!url) {
-                        toast.error("Não foi possível gerar o link de impersonate");
-                        return;
-                      }
-                      // Abrir num novo separador. window.open devolve null
-                      // quando o browser bloqueia popups; nesse caso, avisamos
-                      // o utilizador e damos a opção de copiar o link.
-                      const win = window.open(url, "_blank", "noopener,noreferrer");
-                      if (!win) {
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="start" className="w-60">
+                    <DropdownMenuLabel>Portal do Cliente</DropdownMenuLabel>
+                    <p className="text-xs text-muted-foreground px-2 pb-1">
+                      Gerar link mágico de acesso ao portal.
+                    </p>
+                    <DropdownMenuItem
+                      className="gap-2 cursor-pointer"
+                      onClick={async () => {
                         try {
-                          await safeCopyToClipboard(url);
-                          toast.info(
-                            "Popup bloqueado pelo browser. Link copiado — cole num novo separador."
-                          );
-                        } catch {
-                          toast.error("Popup bloqueado pelo browser. Tente permitir popups para este site.");
+                          const res = await generateMagicLink(id);
+                          const link = res.data?.magic_link || res.data?.link || res.data?.url;
+                          if (link) {
+                            await safeCopyToClipboard(link);
+                          } else {
+                            toast.error("Não foi possível gerar o link");
+                          }
+                        } catch (error) {
+                          // O interceptor global do api.js é silencioso para 404
+                          // (só faz console.warn). Para o utilizador ver a causa
+                          // real ("processo eliminado", "processo não encontrado",
+                          // etc.), extraímos o detail do backend e mostramos aqui.
+                          // Outros status (400/500/...) já são tratados pelo interceptor.
+                          if (error?.response?.status === 404) {
+                            toast.error(error?.response?.data?.detail || "Processo não encontrado");
+                          }
                         }
-                      } else {
-                        toast.success("Portal do Cliente aberto num novo separador (modo Visualização)");
-                      }
-                    } catch (error) {
-                      // O interceptor global do api.js é silencioso em 404.
-                      // Extraímos o detail do backend para o utilizador ver a
-                      // causa real (ex.: "processo eliminado").
-                      if (error?.response?.status === 404) {
-                        toast.error(error?.response?.data?.detail || "Processo não encontrado");
-                      }
-                    }
-                  }}
-                >
-                  <Eye className="h-3.5 w-3.5 sm:mr-1" />
-                  <span className="hidden sm:inline">Ver como Cliente</span>
-                </Button>
+                      }}
+                    >
+                      <LinkIcon className="h-4 w-4" />
+                      Copiar Link
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      className="gap-2 cursor-pointer"
+                      onClick={async () => {
+                        try {
+                          await sendMagicLinkEmail(id);
+                          toast.success("Email enviado com o link do portal!");
+                        } catch (error) {
+                          // Mesma lógica do Copiar Link: o interceptor é
+                          // silencioso para 404, por isso mostramos o detail
+                          // do backend (ex.: "processo eliminado") aqui.
+                          if (error?.response?.status === 404) {
+                            toast.error(error?.response?.data?.detail || "Processo não encontrado");
+                          }
+                        }
+                      }}
+                    >
+                      <Mail className="h-4 w-4" />
+                      Enviar por Email
+                    </DropdownMenuItem>
+                    <DropdownMenuSeparator />
+                    <DropdownMenuItem
+                      className="gap-2 cursor-pointer text-amber-700 focus:text-amber-800"
+                      onClick={async () => {
+                        try {
+                          const res = await impersonateClient(id);
+                          const url = res?.data?.url;
+                          if (!url) {
+                            toast.error("Não foi possível gerar o link de impersonate");
+                            return;
+                          }
+                          // Abrir num novo separador. window.open devolve null
+                          // quando o browser bloqueia popups; nesse caso, avisamos
+                          // o utilizador e damos a opção de copiar o link.
+                          const win = window.open(url, "_blank", "noopener,noreferrer");
+                          if (!win) {
+                            try {
+                              await safeCopyToClipboard(url);
+                              toast.info(
+                                "Popup bloqueado pelo browser. Link copiado — cole num novo separador."
+                              );
+                            } catch {
+                              toast.error("Popup bloqueado pelo browser. Tente permitir popups para este site.");
+                            }
+                          } else {
+                            toast.success("Portal do Cliente aberto num novo separador (modo Visualização)");
+                          }
+                        } catch (error) {
+                          // O interceptor global do api.js é silencioso em 404.
+                          // Extraímos o detail do backend para o utilizador ver a
+                          // causa real (ex.: "processo eliminado").
+                          if (error?.response?.status === 404) {
+                            toast.error(error?.response?.data?.detail || "Processo não encontrado");
+                          }
+                        }
+                      }}
+                    >
+                      <Eye className="h-4 w-4" />
+                      Ver como Cliente
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
 
                 <DSTICalculator
                   trigger={
@@ -3710,7 +3722,9 @@ const ProcessDetails = () => {
                       {/* Credenciais de Portais Oficiais */}
                       <Card className={`border-l-4 border-l-orange-500 ${editingCardId !== 'financial_credenciais' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial_credenciais" icon={Database} canEdit={canEditFinancial} />
+                          <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial_credenciais" icon={Database} canEdit={canEditFinancial} collapsible />
+                          {!shouldCardBeCollapsed('financial_credenciais') && (
+                          <>
                           <p className="text-xs text-muted-foreground mb-3">
                             Preencha as credenciais de acesso aos portais oficiais para facilitar a gestão do processo.
                           </p>
@@ -3780,6 +3794,8 @@ const ProcessDetails = () => {
                               </div>
                             </div>
                           </div>
+                          </>
+                          )}
                         </CardContent>
                       </Card>
 
@@ -3788,9 +3804,11 @@ const ProcessDetails = () => {
                         <Card className={`border-l-4 border-l-orange-300 ${editingCardId !== 'financial_credenciais_2' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
                             <div className="flex items-center gap-2">
-                              <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial_credenciais_2" icon={Database} canEdit={canEditFinancial} />
+                              <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial_credenciais_2" icon={Database} canEdit={canEditFinancial} collapsible />
                               <Badge variant="outline" className="text-xs bg-orange-50 text-orange-600 border-orange-200">2º Proponente</Badge>
                             </div>
+                            {!shouldCardBeCollapsed('financial_credenciais_2') && (
+                            <>
                             <p className="text-xs text-muted-foreground mb-3">
                               Credenciais de acesso aos portais oficiais do segundo proponente/titular.
                             </p>
@@ -3840,6 +3858,8 @@ const ProcessDetails = () => {
                                 />
                               </div>
                             </div>
+                            </>
+                            )}
                           </CardContent>
                         </Card>
                       )}

@@ -1388,12 +1388,18 @@ async def get_processes(
         query["status"] = status
     
     if search:
-        name_regex = create_accent_insensitive_regex(search)
+        # Pesquisa textual: faz $match em client_name (multiword + sem
+        # acentos via build_multiword_search_filter), client_email e
+        # process_number. Assim, ao pesquisar "Manuel" aparecem TODOS os
+        # processos desse cliente, mesmo que tenha vários processos
+        # ativos em fases diferentes.
+        name_filter = build_multiword_search_filter(search, "client_name")
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
         search_condition = {
             "$or": [
-                {"client_name": name_regex},
-                {"client_email": simple_regex}
+                name_filter,
+                {"client_email": simple_regex},
+                {"process_number": simple_regex},
             ]
         }
         if query:
