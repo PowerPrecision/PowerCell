@@ -3,6 +3,27 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-18] — Pacote A: Script Massivo de Mock Data (100+ Clientes e Portal)
+
+### Adicionado
+- **Script de injeção de dados massivo para testar o CRM e o Portal do Cliente ao limite em DEV** (`feat`): `backend/scripts/seed_massive_dev_data.py`. Gera ~120 clientes principais + processos + 2ºs titulares + documentos/mensagens do Portal + tarefas + histórico, com dados portugueses realistas (Faker `pt_PT` + NIF válido com check digit).
+  - **Clientes (120+)**: perfil COMPLETO — NIF válido (9 dígitos, check digit correto), morada completa, data de nascimento, estado civil, dependentes, profissão, vínculo laboral, contactos (email/telefone primário e secundário), código de acesso ao Portal, dados financeiros completos (salário, outros rendimentos, IRS com taxa de retenção e escalão, despesas, capitais próprios, dependentes, outros créditos).
+  - **Processos (1 por cliente)**: dados do Imóvel simulado completos (valor, financiamento pretendido, tipologia, concelho, freguesia, área, certificado energético, datas CPCV/escritura) + dados de crédito completos (montante, prazo, taxa, spread, euribor, prestação mensal, banco). Atribuições a consultor/indexador/intermediário reais (ou dummies criados se não existirem).
+  - **2º Titular (~30%)**: em ~30% dos processos é criado um SEGUNDO cliente completo e associado via `second_client_id` + `titular2_data` (denormalizado) + `second_client_name`, com dados financeiros próprios.
+  - **Distribuição de estados** conforme percentagens pedidas: `pre_registo` 10%, `clientes_espera` 15%, `triagem` 15%, `intermediario` 30%, `aprovado` 10%, `concluido` 10%, `desistencia` 5%, `eliminado` (`is_deleted=True`) 5%. Os estados são upserted em `workflow_statuses` para garantirem visibilidade no Kanban (passível de desligar com `--no-ensure-statuses`).
+  - **Portal — Documentos**: 3-5 registos em `documents` por processo, mistura de `REQUESTED` (pedidos pelo consultor, `source=admin_request`) e `UPLOADED` (carregados pelo cliente, `source=client_portal`), com categorias válidas do Portal (`Cartao_Cidadao`, `IRS`, `Recibo_Vencimento`, etc.).
+  - **Portal — Mensagens**: 2-4 mensagens em `portal_messages` por processo simulando conversa consultor ↔ cliente (`sender_type=staff/client`, `read_by_client`/`read_by_staff`).
+  - **Tarefas**: 5-10 por processo, distribuídas entre completadas (passado), pendentes (futuro) e atrasadas (`is_overdue=True`), com `due_date`, `completed_at`, `days_until_due`.
+  - **Histórico/Atividades**: 4-6 registos em `history` (audit log: criação, mudanças de estado, validação de documentos, etc.) + 1-2 em `activities` (comentários) por processo, datas aleatórias nos últimos 60 dias (timeline coerente).
+  - **Execução segura**: usa `MONGO_URL`/`DB_NAME` do `backend/.env`; por defeito **adiciona** aos existentes (não limpa); `--clear` remove apenas dados deste script (`_seed_script=seed_massive_dev_data`); inserções em batches via `asyncio.gather` + `insert_many` (batch configurável com `--batch-size`, default 50) para não rebentar com a memória; todos os docs marcados com `_seed_data`/`_seed_script` para cleanup fácil.
+  - **Auto-detecção de empresa ativa**: `company_id`/`company_name` resolvido por ordem de prioridade — `user_company_roles` (is_default) → `user_company_roles` (mais comum) → `company_email_configs` → `users.company` (mais comum) → fallback "Power Real Estate". Override com `--company-id`/`--company-name`.
+  - **CLI flexível**: `--num-clients`, `--clear`, `--no-ensure-statuses`, `--company-id`, `--company-name`, `--batch-size`, `--skip-docs`, `--skip-messages`, `--skip-tasks`, `--skip-history`.
+
+### Notas
+- **Bug corrigido no gerador de NIF**: o `seed_realistic_data.py` (existente) gerava NIFs de **10 dígitos** (off-by-one: 1 + 8 aleatórios + 1 check = 10), que falham o `validate_nif` do `models/client.py` (exige 9). O novo script gera NIFs de **9 dígitos** corretos (1 + 7 aleatórios + 1 check), verificados contra o algoritmo oficial e contra o validador do modelo. Nota: o `seed_realistic_data.py` continua com o bug (não foi alterado neste commit) — os NIFs inválidos só causam problema se passarem por validação Pydantic; como o seed insere direto no MongoDB (schemaless), ficam armazenados como strings inválidas.
+- O script **não encripta** dados sensíveis (NIF/email em claro) — consistente com o `seed_realistic_data.py` existente. As funções `decrypt_client_data`/`decrypt_sensitive_data` do backend têm fallback para dados em claro, pelo que os clientes/processos seeded são lidos corretamente. Destinado a **DEV apenas**.
+- Os estados `triagem`, `intermediario`, `aprovado`, `desistencia` (pedidos pelo user) não são valores do `ProcessStatus` canónico (que tem `analise`, `credito_aprovado`, `desistencias`), mas o sistema suporta workflow statuses customizáveis via `workflow_statuses` — o script faz upsert destes para garantirem visibilidade no Kanban. Se preferir mapear para os canónicos, edite `STATUS_PLAN` no topo do script.
+
 ## [2026-06-18] — Hotfix: Cliente 404 ao Abrir Página + Desaparecimento da Lista de Ativos
 
 ### Corrigido

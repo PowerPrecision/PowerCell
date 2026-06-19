@@ -858,3 +858,27 @@ Stage Summary:
   - CHANGELOG.md (entrada nova)
   - worklog.md (esta entrada)
 - Próximo passo: commit + push para branch `dev` via Git Database API.
+
+---
+Task ID: 5
+Agent: Main Agent
+Task: Pacote A — Script Massivo de Mock Data (100+ Clientes e Portal) para testar o CRM e o Portal do Cliente ao limite em DEV
+
+Work Log:
+- Lido o worklog e contextos anteriores (Tasks 1-4: hotfixes de email/indexador, dropdown de estado, permissões de tarefas/chat, cliente 404).
+- Explorada a estrutura do backend PowerCell: modelos (client, process, enums, document, chat, task, activity, property, finance, user_company_role, workflow), database.py (motor + DB proxy), rotas (portal, documents, activities, companies, processes, clients).
+- Confirmados os nomes das coleções e estruturas exatas: `documents` (status REQUESTED/PENDING/UPLOADED/RECEIVED, source admin_request/client_portal), `portal_messages` (sender_type staff/client, read_by_client/read_by_staff), `activities` + `history` (audit log), `workflow_statuses` (kanban columns, campo `name` = process.status), `user_company_roles` + `company_email_configs` (multi-tenant).
+- Confirmado o campo do 2º titular: `second_client_id` no processo (+ `titular2_data` denormalizado + `second_client_name`), com dados financeiros no próprio documento do 2º cliente (`financial_data`/`dados_financeiros`).
+- Confirmado que os estados pedidos pelo user (triagem, intermediario, aprovado, desistencia) NÃO são canónicos do ProcessStatus enum, MAS existem como workflow statuses customizáveis (vistos em seed_database.py); o script faz upsert para garantir visibilidade no Kanban.
+- Escrito `backend/scripts/seed_massive_dev_data.py` (~770 linhas): 120 clientes + processos + 2ºs titulares (~30%) + documentos Portal (3-5: REQUESTED+UPLOADED) + mensagens Portal (2-4, conversa staff/client) + tarefas (5-10: completed/pending/overdue) + histórico/atividades (5 logs, últimos 60 dias), com asyncio.gather em batches.
+- Validada a sintaxe Python (`py_compile` OK) e a lógica pura: distribuição de estados soma sempre o total (testado para 50/100/120/200); gerador de NIF validado contra o algoritmo oficial e contra `models/client.py.validate_nif`.
+- Corrigido bug no gerador de NIF: `seed_realistic_data.py` (existente) gera NIFs de 10 dígitos (off-by-one). O novo script gera 9 dígitos corretos (1 + 7 aleatórios + 1 check digit).
+- Atualizado CHANGELOG.md (nova entrada no topo) e este worklog.
+
+Stage Summary:
+- Artefacto: `backend/scripts/seed_massive_dev_data.py` — script de seed massivo para DEV.
+- Gera: ~120 clientes principais + ~36 2ºs titulares + ~120 processos + ~480 documentos Portal + ~360 mensagens Portal + ~840 tarefas + ~720 registos de histórico + ~180 atividades.
+- Distribuição de estados exata conforme pedido: pre_registo 10%, clientes_espera 15%, triagem 15%, intermediario 30%, aprovado 10%, concluido 10%, desistencia 5%, eliminado (is_deleted=True) 5%.
+- Execução segura: adiciona aos existentes por defeito; `--clear` remove apenas dados deste script; batches via asyncio.gather; auto-deteta empresa ativa; cria utilizadores dummy se faltar consultor/indexador/intermediário.
+- Comando de execução: `python backend/scripts/seed_massive_dev_data.py` (ou `--num-clients 120 --clear`).
+- Próximo passo: commit + push para branch `dev` via Git Database API (commit em preparação).
