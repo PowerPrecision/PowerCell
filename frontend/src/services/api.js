@@ -441,6 +441,7 @@ export const createProcess = (data) => api.post("/processes", data);
 export const searchClients = (q, limit = 10) => api.get("/clients/search", { params: { q, limit } });
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
+export const deleteProcess = (id) => api.delete(`/processes/${id}`);
 export const assignProcess = (id, consultorId, mediadorId, indexacaoId) => 
   api.post(`/processes/${id}/assign`, null, {
     params: { consultor_id: consultorId, mediador_id: mediadorId, indexacao_id: indexacaoId }

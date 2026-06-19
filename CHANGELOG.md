@@ -3,6 +3,18 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-19] — Hotfix: Botão "Eliminar" nos detalhes do processo eliminava o cliente (e não fazia nada)
+
+### Corrigido
+- **Botão "Eliminar" na página de detalhes do processo eliminava o cliente em vez do processo** (`bug` — **CRÍTICO**): O botão "Eliminar" no cabeçalho de `ProcessDetails.js` (visível para Admin/CEO/Diretor/Administrativo) chamava `handleDeleteClient` → `deleteClient(clientId)` → `DELETE /api/clients/{clientId}`. Isto estava errado por dois motivos: (1) semanticamente, o botão está na página do **processo** e devia eliminar o **processo**, não o cliente; (2) quando o `clientId` era `null` (cliente sintético sem documento na coleção `clients`) ou apontava para um cliente com outros processos, a chamada falhava ou não produzia efeito visível — o toast "Cliente eliminado com sucesso" aparecia mas **nada acontecia** na realidade.
+  - **Frontend** (`frontend/src/pages/ProcessDetails.js`): Renomeado `handleDeleteClient` → `handleDeleteProcess`. Agora chama `deleteProcess(id)` → `DELETE /api/processes/{process_id}` (soft-delete do processo com cascade para documentos e tarefas). A mensagem de confirmação foi reescrita para deixar claro que **só o processo é eliminado** e o **cliente não é tocado** ("Esta ação é irreversível. O cliente NÃO será eliminado — apenas este processo, os seus documentos e tarefas associadas."). O `data-testid` passou de `delete-client-btn` para `delete-process-btn` e adicionou-se um `title` com tooltip explicativo. Após eliminar, navega para `/processos` (em vez de `/clientes`).
+  - **Frontend** (`frontend/src/services/api.js`): Adicionado `export const deleteProcess = (id) => api.delete(\`/processes/${id}\`)`. (O helper `deleteClient` mantém-se para a página de detalhe do cliente, onde faz sentido.)
+  - **Backend**: **Sem alterações** — o endpoint `DELETE /api/processes/{process_id}` já existia e faz soft-delete correto (marca `is_deleted=True`, `status="eliminado"`, `is_active=False`, faz cascade de `documents` e `tasks`, regista atividade `process_deleted`, e **explicitamente não toca no cliente** conforme comentário no código: "Do NOT touch the client document. Process deletion must be independent.").
+
+### Notas
+- Para eliminar um **cliente**, o utilizador deve usar a página de detalhe do cliente (`ClientDetailPage`), onde o botão de eliminar cliente faz sentido e funciona corretamente.
+- O bug existia desde que o botão foi adicionado; o toast enganador ("Cliente eliminado com sucesso") escondia o facto de a chamada estar a falhar silenciosamente ou a não produzir efeito.
+
 ## [2026-06-19] — Pacote I: Gestão de Documentos Obrigatórios (UI de Tags)
 
 ### Alterado

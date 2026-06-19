@@ -1325,3 +1325,39 @@ Stage Summary:
 - 2 ficheiros de docs actualizados: CHANGELOG.md, worklog.md.
 - Backend NÃO alterado (Pacote I é puramente UX; MandatoryDocumentsConfig + endpoint já existiam do Pacote G).
 - A checklist de documentos obrigatórios agora apresenta-se como tags compactas (Badge+X) em vez de lista vertical pesada — mais intuitivo para o CEO.
+
+---
+Task ID: 15
+Agent: Main Agent
+Task: Hotfix — Botão "Eliminar" nos detalhes do processo eliminava o cliente (e não fazia nada)
+
+Work Log:
+- Reportado pelo utilizador: botão "Eliminar" nos detalhes do processo mostra toast "Cliente eliminado" mas nada acontece; devia eliminar o processo, não o cliente.
+- Lido `frontend/src/pages/ProcessDetails.js`:
+  * Linha 1875: `handleDeleteClient` chamava `deleteClient(clientId)` → DELETE /clients/{clientId}.
+  * Linha 2734: botão "Eliminar" com onClick={handleDeleteClient}, data-testid="delete-client-btn".
+  * `clientId` (linha 296) pode ser null (cliente sintético sem doc em db.clients) → chamada falha ou 404 silencioso → toast enganador.
+- Confirmado backend `DELETE /api/processes/{process_id}` (routes/processes.py:3149) JÁ EXISTE e faz soft-delete correto:
+  * is_deleted=True, status="eliminado", is_active=False, deleted_at, deleted_by.
+  * Cascade: db.documents.update_many + db.tasks.update_many (soft-delete).
+  * Comentário explícito: "Do NOT touch the client document."
+  * Log: db.process_activities.insert_one type="process_deleted".
+- Confirmado que NÃO existia `deleteProcess` exportado em `frontend/src/services/api.js` (só deleteClient linha 650).
+- Corrigido `frontend/src/services/api.js`: adicionado `export const deleteProcess = (id) => api.delete(\`/processes/${id}\`)` (linha 444, após updateProcess). deleteClient mantido (usado em ClientDetailPage).
+- Corrigido `frontend/src/pages/ProcessDetails.js`:
+  * Import: `deleteClient` → `deleteProcess` (linha 97).
+  * Handler: `handleDeleteClient` → `handleDeleteProcess` (linha 1877). Agora chama `deleteProcess(id)` (id do processo, não clientId). Mensagem de confirmação reescrita PT-PT: "Tem a certeza que deseja eliminar o processo ... Esta ação é irreversível. O cliente NÃO será eliminado — apenas este processo, os seus documentos e tarefas associadas." Toast: "Processo eliminado com sucesso". navigate("/processos") (em vez de /clientes).
+  * Botão: onClick={handleDeleteProcess}, data-testid="delete-process-btn", title="Eliminar este processo (o cliente não é eliminado)".
+- Verificado: sem referências残留 a handleDeleteClient/deleteClient no ProcessDetails.js. Rota /processos existe em App.js:408.
+- Parse check: `cat ProcessDetails.js | bunx esbuild --loader=jsx` → PARSE_OK. `cat api.js | bunx esbuild --loader=jsx` → API_PARSE_OK.
+- Actualizado CHANGELOG.md com entrada [2026-06-19] Hotfix.
+- Criado `push_hotfix_delete_process.py` (3 ficheiros: ProcessDetails.js + api.js + CHANGELOG.md + worklog.md).
+- Executado push → commit em dev.
+
+Stage Summary:
+- 2 ficheiros de código modificados:
+  - `frontend/src/services/api.js` (+1 helper deleteProcess)
+  - `frontend/src/pages/ProcessDetails.js` (import + handler + botão)
+- 2 ficheiros de docs actualizados: CHANGELOG.md, worklog.md.
+- Backend NÃO alterado (DELETE /processes/{id} já existia e funcionava corretamente).
+- Bug RESOLVIDO: botão "Eliminar" nos detalhes do processo agora elimina o PROCESSO (soft-delete + cascade), não o cliente. Cliente só pode ser eliminado a partir da sua própria página de detalhe.

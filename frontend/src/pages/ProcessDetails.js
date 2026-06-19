@@ -94,7 +94,7 @@ import {
   getWorkflowStatuses,
   getClientS3Files,
   getS3DownloadUrl,
-  deleteClient,
+  deleteProcess,
   generateMagicLink,
   sendMagicLinkEmail,
   impersonateClient,
@@ -1871,22 +1871,27 @@ const ProcessDetails = () => {
   const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !['admin', 'ceo'].includes(userRole);
   const isViewMode = (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) || isProcessLocked;
 
-  // Função para eliminar o cliente/processo
-  const handleDeleteClient = async () => {
-    if (!clientId) {
-      toast.error("Não foi possível identificar o cliente associado a este processo.");
+  // Função para eliminar o PROCESSO (soft-delete). O cliente NÃO é tocado —
+  // para eliminar um cliente há-de usar-se a página de detalhe do cliente.
+  // O backend (DELETE /processes/{id}) faz cascade de documentos/tarefas.
+  const handleDeleteProcess = async () => {
+    if (!id) {
+      toast.error("Não foi possível identificar este processo.");
       return;
     }
-    if (!window.confirm(`Tem a certeza que deseja eliminar o cliente "${process?.client_name}"?\n\nEsta ação é irreversível.`)) {
+    if (!window.confirm(
+      `Tem a certeza que deseja eliminar o processo "${process?.ref || process?.process_ref || ""}" de ${process?.client_name || "cliente"}?\n\n` +
+      `Esta ação é irreversível. O cliente NÃO será eliminado — apenas este processo, os seus documentos e tarefas associadas.`
+    )) {
       return;
     }
-    
+
     try {
-      await deleteClient(clientId);
-      toast.success("Cliente eliminado com sucesso");
-      navigate("/clientes");
+      await deleteProcess(id);
+      toast.success("Processo eliminado com sucesso");
+      navigate("/processos");
     } catch (error) {
-      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar cliente"));
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar processo"));
     }
   };
 
@@ -2725,14 +2730,17 @@ const ProcessDetails = () => {
               </Select>
             )}
             
-            {/* Botão Eliminar Cliente - apenas para Admin/CEO/Diretor */}
+            {/* Botão Eliminar Processo - apenas para Admin/CEO/Diretor/Administrativo.
+                Elimina o PROCESSO (soft-delete + cascade docs/tarefas). O cliente
+                NÃO é tocado — para eliminar o cliente usar a página do cliente. */}
             {canDeleteClient && (
               <Button
                 variant="outline"
                 size="sm"
                 className="text-red-600 border-red-200 hover:bg-red-50 h-8 px-2 sm:px-3"
-                onClick={handleDeleteClient}
-                data-testid="delete-client-btn"
+                onClick={handleDeleteProcess}
+                data-testid="delete-process-btn"
+                title="Eliminar este processo (o cliente não é eliminado)"
               >
                 <Trash2 className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">Eliminar</span>
