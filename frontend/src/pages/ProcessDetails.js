@@ -89,6 +89,7 @@ import {
   deleteClient,
   generateMagicLink,
   sendMagicLinkEmail,
+  impersonateClient,
 } from "../services/api";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
@@ -2600,6 +2601,56 @@ const ProcessDetails = () => {
                     </div>
                   </PopoverContent>
                 </Popover>
+
+                {/* Ver como Cliente — impersonate do Portal do Cliente.
+                    Disponível para todo o staff interno (require_staff no backend).
+                    Abre o Portal do Cliente num novo separador, autenticado
+                    automaticamente, para o staff prestar suporte ao cliente.
+                    O backend regista no audit_trail + history com a mensagem
+                    "O utilizador X assumiu a identidade do cliente no processo Y". */}
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="text-amber-700 border-amber-300 hover:bg-amber-50 h-8 px-2 sm:px-3"
+                  title="Ver como Cliente — abre o Portal do Cliente deste processo num novo separador (suporte)"
+                  onClick={async () => {
+                    try {
+                      const res = await impersonateClient(id);
+                      const url = res?.data?.url;
+                      if (!url) {
+                        toast.error("Não foi possível gerar o link de impersonate");
+                        return;
+                      }
+                      // Abrir num novo separador. window.open devolve null
+                      // quando o browser bloqueia popups; nesse caso, avisamos
+                      // o utilizador e damos a opção de copiar o link.
+                      const win = window.open(url, "_blank", "noopener,noreferrer");
+                      if (!win) {
+                        try {
+                          await safeCopyToClipboard(url);
+                          toast.info(
+                            "Popup bloqueado pelo browser. Link copiado — cole num novo separador."
+                          );
+                        } catch {
+                          toast.error("Popup bloqueado pelo browser. Tente permitir popups para este site.");
+                        }
+                      } else {
+                        toast.success("Portal do Cliente aberto num novo separador (modo Visualização)");
+                      }
+                    } catch (error) {
+                      // O interceptor global do api.js é silencioso em 404.
+                      // Extraímos o detail do backend para o utilizador ver a
+                      // causa real (ex.: "processo eliminado").
+                      if (error?.response?.status === 404) {
+                        toast.error(error?.response?.data?.detail || "Processo não encontrado");
+                      }
+                    }
+                  }}
+                >
+                  <Eye className="h-3.5 w-3.5 sm:mr-1" />
+                  <span className="hidden sm:inline">Ver como Cliente</span>
+                </Button>
+
                 <DSTICalculator
                   trigger={
                     <Button

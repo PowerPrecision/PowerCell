@@ -742,6 +742,12 @@ export const getRGPDTemplateVersion = (versionId) => api.get(`/rgpd/admin/templa
 export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
 export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
 
+// ===== IMPERSONATE — Ver como Cliente (Portal do Cliente) =====
+// Gera um link do Portal do Cliente autenticado para um membro do staff
+// "ver como cliente" (suporte). O backend devolve {url, short_id, ...};
+// o frontend abre a `url` num novo separador via window.open().
+export const impersonateClient = (processId) => api.post(`/portal/impersonate/${processId}`);
+
 // ===== PORTAL DOCUMENT REQUESTS (Admin manages client doc requests) =====
 export const getPortalDocRequests = (processId) => api.get(`/documents/portal-requests/${processId}`);
 export const createPortalDocRequest = (processId, data) => api.post(`/documents/portal-requests/${processId}`, data);

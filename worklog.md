@@ -920,3 +920,48 @@ Stage Summary:
   - CHANGELOG.md (entrada nova [2026-06-19])
   - worklog.md (esta entrada)
 - Próximo passo: commit + push para branch `dev` via Git Database API.
+
+---
+Task ID: 8
+Agent: Main Agent
+Task: Pacote B — Funcionalidade "Impersonate / Ver como Cliente" do Portal do Cliente
+
+Work Log:
+- Lido o worklog (Tasks 1-7: hotfixes anteriores + script de seed massivo + hotfix do magic link 404).
+- Investigado o sistema existente de impersonation em `backend/routes/admin.py` (admin→staff impersonation com `is_impersonated` flag no JWT do staff). Confirmado que é DIFERENTE do pedido: o user quer impersonar o CLIENTE no Portal, não outro staff.
+- Investigado `backend/services/portal_security.py`: `create_client_magic_token(process_id)` gera um JWT com `role=client_portal, type=magic_link, sub=process_id, exp=90d`. O `get_current_client` aceita tipos `magic_link/verified_session/access_code_session` e recusa `is_deleted`. → Decisão: reusar `create_client_magic_token` (JWT idêntico ao Portal) para o frontend do portal aceitar sem alterações.
+- Investigado `backend/routes/portal.py`: o fluxo do magic link é `short_id → /portal/resolve/{short_id} → JWT → localStorage('portal_token') → Authorization: Bearer`. O frontend lê `window.location.pathname.split('/portal/')[1]` e, se não contiver '.', chama `/portal/resolve/{short_id}`. → Decisão: usar o mesmo formato `{FRONTEND_URL}/portal/{short_id}` para o impersonate, pelo que o portal abre sem alterações.
+- Investigado `backend/routes/processes.py` `_get_frontend_url` helper: usa Referer/Origin header → env var `FRONTEND_URL`. Replicado no novo ficheiro (não importado para evitar dependência cruzada).
+- Criado `backend/routes/portal_admin.py` (NOVO, ~190 linhas):
+  - Router `APIRouter(prefix="/portal", tags=["Portal Admin (Impersonation)"])`.
+  - `POST /impersonate/{process_id}` com `Depends(require_staff())` — acessível a todo o staff interno (consultor, intermediário, diretor, administrativo, indexação, admin, CEO).
+  - Lookup do processo **sem** filtro `is_deleted` (alinhado com `GET /processes/{id}` e com o hotfix anterior do magic link). 404 com mensagem acionável se eliminado.
+  - Gera JWT via `create_client_magic_token(process_id)` (idêntico ao Portal).
+  - Gera `short_id` (8 chars URL-safe, `secrets.token_urlsafe(6)[:8]`).
+  - Upsert em `db.portal_tokens` com chave composta `{"process_id": ..., "impersonated_by": user.id}` (cada staff tem o seu próprio short_id por processo — não colide com magic links "reais"). Documento inclui metadados `impersonated_by`, `impersonated_by_email`, `impersonated_by_name`, `impersonated_by_role`, `impersonated_at`, `token_type="staff_impersonate"`.
+  - Constrói URL `{FRONTEND_URL}/portal/{short_id}` via `_get_frontend_url`.
+  - Log de segurança em 3 sítios: (1) `logger.info` com a mensagem exacta pedida "O utilizador {email} assumiu a identidade do cliente no processo {process_id}", (2) `log_audit_event` com `metadata.impersonate=True` + `audit_reason="Suporte ao cliente (ver portal como cliente)"`, (3) `log_history` com action "Impersonate — {user.name} assumiu a identidade do cliente no Portal (suporte)".
+  - Devolve `{"url", "short_id", "process_id", "client_name", "client_email", "expires_in_days": 90, "impersonated_by", "impersonated_by_name"}`.
+- Registado o router em `backend/server.py`: `from routes.portal_admin import router as portal_admin_router` + `app.include_router(portal_admin_router, prefix="/api")`. Fica em `/api/portal/impersonate/{process_id}` (mesmo prefixo `/portal` do router público).
+- Adicionado `impersonateClient` em `frontend/src/services/api.js`: `api.post(\`/portal/impersonate/${processId}\`)` (junto ao `generateMagicLink`/`sendMagicLinkEmail`).
+- Adicionado botão "Ver como Cliente" em `frontend/src/pages/ProcessDetails.js` (linha ~2605, entre o Popover do Portal do Cliente e a Calculadora DSTI):
+  - Import de `impersonateClient` adicionado à lista de imports do api.js.
+  - Variante `outline`, ícone `Eye` (lucide-react, já importado), classe amber (`text-amber-700 border-amber-300 hover:bg-amber-50`) para distinguir dos botões teal (Portal do Cliente) e azul (DSTI).
+  - `onClick`: chama `impersonateClient(id)`; em sucesso, `window.open(res.data.url, '_blank', 'noopener,noreferrer')`. Se `window.open` devolver null (popup bloqueado), copia o link para o clipboard e mostra toast informativo. Em 404, mostra `error.response.data.detail` (o interceptor global é silencioso em 404).
+  - `title` acessível: "Ver como Cliente — abre o Portal do Cliente deste processo num novo separador (suporte)".
+- Validada a sintaxe: `py_compile` OK em `portal_admin.py` e `server.py`; `bunx esbuild --loader:.js=jsx` OK em `ProcessDetails.js`; `bunx esbuild --loader:.js=js` OK em `api.js`.
+- Atualizada documentação: CHANGELOG.md (entrada nova [2026-06-19] Pacote B) + esta entrada do worklog.
+
+Stage Summary:
+- O CEO e os consultores podem agora abrir o Portal do Cliente exato de qualquer processo num novo separador, autenticado automaticamente, para prestar suporte. O fluxo é um clique no botão "Ver como Cliente" (ícone 👁️, amber) nos Detalhes do Processo.
+- Backend: novo ficheiro `backend/routes/portal_admin.py` com `POST /api/portal/impersonate/{process_id}`. Reusa o JWT do Portal (`create_client_magic_token`) para o frontend do portal aceitar sem alterações. Metadados `impersonated_by_*` + `token_type="staff_impersonate"` no documento `portal_tokens` permitem distinguir impersonates de magic links "reais" em auditoria.
+- Logs de segurança em 3 sítios: logger INFO, audit_trail (com metadata.impersonate=True), history do processo. Mensagem exacta: "O utilizador {email} assumiu a identidade do cliente no processo {process_id}".
+- Frontend: botão "Ver como Cliente" em ProcessDetails.js, entre o Popover do Portal do Cliente e a Calculadora DSTI. `window.open(url, '_blank', 'noopener,noreferrer')` em sucesso; fallback de clipboard se popup bloqueado; toast de erro com detail do backend em 404.
+- Ficheiros criados/modificados:
+  - backend/routes/portal_admin.py (NOVO — endpoint de impersonate + router)
+  - backend/server.py (registo do router portal_admin_router)
+  - frontend/src/services/api.js (export impersonateClient)
+  - frontend/src/pages/ProcessDetails.js (import + botão "Ver como Cliente" com onClick)
+  - CHANGELOG.md (entrada nova [2026-06-19] Pacote B)
+  - worklog.md (esta entrada)
+- Próximo passo: commit + push para branch `dev` via Git Database API.

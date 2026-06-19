@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-19] — Pacote B: Funcionalidade "Ver como Cliente" (Impersonation do Portal do Cliente)
+
+### Adicionado
+- **Endpoint de impersonation do Portal do Cliente** (`feat` — **SUPORTE**): `POST /api/portal/impersonate/{process_id}` em novo ficheiro `backend/routes/portal_admin.py` (router registado em `backend/server.py`). Permite a qualquer membro do staff interno (`require_staff()` — consultor, intermediário, diretor, administrativo, indexação, admin, CEO) gerar um URL do Portal do Cliente autenticado para "ver como cliente" e prestar suporte. O endpoint:
+  - Faz lookup do processo **sem** filtro `is_deleted` (alinhado com `GET /processes/{id}`) e devolve **404 com mensagem acionável** se o processo estiver eliminado: *"Este processo foi eliminado. Restaure-o antes de usar Ver como Cliente."*.
+  - Gera um JWT `magic_link` **idêntico** ao do Portal do Cliente (via `create_client_magic_token`), pelo que o frontend do portal aceita-o sem alterações. A diferenciação entre um magic link "real" e um impersonate é feita pelos metadados no documento `portal_tokens`: `impersonated_by`, `impersonated_by_email`, `impersonated_by_name`, `impersonated_by_role`, `impersonated_at`, `token_type="staff_impersonate"`.
+  - Gera `short_id` (8 chars URL-safe, igual ao magic link) e faz upsert em `portal_tokens` (chave composta `process_id + impersonated_by` para cada staff ter o seu próprio short_id por processo).
+  - Constrói URL `{FRONTEND_URL}/portal/{short_id}` (mesmo formato do magic link — o frontend abre sem alterações). Resolve `FRONTEND_URL` por Referer/Origin header → env var `FRONTEND_URL`.
+  - Regista **log de segurança** no `audit_trail` (com `metadata.impersonate=True`) + `history` do processo, com a mensagem exacta pedida: *"O utilizador {email} assumiu a identidade do cliente no processo {process_id}"*. Log também no logger do backend (INFO).
+  - Devolve `{"url": "...", "short_id": "...", "process_id": "...", "client_name": "...", "client_email": "...", "expires_in_days": 90, "impersonated_by": "...", "impersonated_by_name": "..."}`.
+- **Botão "Ver como Cliente" nos Detalhes do Processo** (`feat` — **UX**): novo botão `outline` com ícone `Eye` (lucide-react) e classe amber (cor de "atenção/suporte"), colocado junto aos botões principais (entre "Portal do Cliente" e "DSTI"). Ao clicar: chama `POST /api/portal/impersonate/{id}`; em sucesso, abre `res.data.url` num novo separador via `window.open(url, '_blank', "noopener,noreferrer")` e mostra toast de sucesso. Se o browser bloquear o popup, copia o link para o clipboard e mostra toast informativo. Em 404 (processo eliminado), mostra o `detail` do backend num toast (o interceptor global é silencioso em 404). `frontend/src/pages/ProcessDetails.js`.
+- **Função `impersonateClient` no cliente API** (`feat`): `export const impersonateClient = (processId) => api.post(\`/portal/impersonate/${processId}\`);` em `frontend/src/services/api.js`.
+
+### Notas
+- **Segurança**: o token gerado é um JWT `magic_link` normal (role=`client_portal`, type=`magic_link`), pelo que o portal aceita-o sem alterações. A diferenciação para auditoria é feita no documento `portal_tokens` (campo `token_type="staff_impersonate"` + `impersonated_by_*`) e no `audit_trail` (`metadata.impersonate=True`). O portal continua a recusar acessos a processos eliminados (filtragem em `get_current_client`).
+- **URL format**: `{FRONTEND_URL}/portal/{short_id}` — o mesmo que o magic link normal. O frontend do portal lê `window.location.pathname.split('/portal/')[1]` e, se não contiver `.` (não é JWT), chama `/portal/resolve/{short_id}` para obter o JWT. Como o impersonate usa o mesmo formato, abre sem alterações.
+- **Multi-tenant**: o upsert usa chave composta `process_id + impersonated_by`, pelo que cada staff tem o seu próprio `short_id` por processo (não colide com magic links "reais" nem com impersonates de outros staff). Isto permite auditar quem abriu o portal de quê.
+- **Disponibilidade**: acessível a todo o staff interno (`require_staff()`). Não restringe por atribuição de processo (qualquer consultor pode ver qualquer portal para suporte) — alinhado com o comportamento do `GET /processes/{id}` que também não restringe. Se for necessário restringir no futuro, basta adicionar uma verificação `can_view_process` no handler.
+
 ## [2026-06-19] — Hotfix: Erro 404 ao Enviar/Gerar Magic Link em Processo Eliminado
 
 ### Corrigido
