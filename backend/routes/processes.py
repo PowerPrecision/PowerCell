@@ -3504,7 +3504,16 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_history(process_id, user, "Alterou estado", "status", process["status"], data.status)
             await log_audit_event(process_id, user, "Alterou estado", field="status", old_value=process["status"], new_value=data.status, request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["status"] = data.status
-            
+
+            # ── Sincronizar is_active com o novo estado ──────────────────
+            # Antes, só o endpoint de move (kanban) atualizava o is_active.
+            # Mudar o estado via dropdown (PUT) deixava is_active desactualizado
+            # — um processo em "desistencias" continuava com is_active=True,
+            # causando inconsistência nos filtros da lista de clientes activos.
+            # Agora, alinhamos com a mesma regra do move: terminais → False.
+            inactive_statuses_for_update = ["desistencias", "concluidos", "concluido", "arquivo", "arquivado", "perdido", "eliminado", "eliminados"]
+            update_data["is_active"] = data.status not in inactive_statuses_for_update
+
             # Send email notification (com verificação de preferências)
             if process.get("client_email"):
                 await send_notification_with_preference_check(

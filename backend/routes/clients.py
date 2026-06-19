@@ -1024,7 +1024,7 @@ async def list_clients(
             if new_weight > current_weight:
                 clients_map[key]["prioridade"] = proc_priority
             
-            if proc.get("is_active", True) and proc.get("status") not in ["desistencias", "concluidos", "arquivado", "perdido", "concluido"]:
+            if proc.get("is_active", True) and proc.get("status") not in ["desistencias", "concluidos", "concluido", "arquivado", "arquivo", "perdido", "eliminado", "eliminados"]:
                 clients_map[key]["active_processes_count"] += 1
         
         # Determinar is_active de cada cliente com base nos seus processos
@@ -1196,30 +1196,90 @@ async def get_client(
     client_id: str,
     user: dict = Depends(get_current_user)
 ):
-    """Obter detalhes de um cliente."""
+    """Obter detalhes de um cliente.
+
+    Resolve o cliente pela colecão ``clients``. Se o documento não existir
+    (ex.: client_id foi removido do processo pelo DELETE /clients, ou o ID
+    passado é na verdade o ID de um processo cujo ``client_id`` está vazio),
+    faz fallback: procura processos cujo ``client_id`` == ``client_id`` OU cujo
+    ``id`` == ``client_id`` e constrói uma resposta de cliente sintética a
+    partir dos dados do processo. Isto evita o erro 404 quando o utilizador
+    abre a página de um cliente cujo documento foi órfão (referência perdida).
+    """
     client = await db.clients.find_one({"id": client_id}, {"_id": 0})
-    
+
+    # ── FALLBACK: cliente não existe na colecão clients ──────────────
+    # Pode acontecer quando:
+    #   1. O DELETE /clients/{id} fez unset do client_id dos processos
+    #      (legacy) e a lista devolveu o id do processo como id do cliente.
+    #   2. Dados legacy onde o processo não tem documento de cliente.
+    # Em qualquer caso, construímos uma resposta de cliente a partir do
+    # processo para que a página de detalhe funcione (não 404).
     if not client:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+        # Procurar processo por id (caso o client_id passado seja um process id)
+        # ou por client_id (caso o documento do cliente tenha sido removido mas
+        # o processo ainda guarde a referência).
+        proc = await db.processes.find_one(
+            {"$or": [{"id": client_id}, {"client_id": client_id}]},
+            {"_id": 0}
+        )
+        if not proc:
+            raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+        logger.warning(
+            f"[GET /clients/{client_id}] Documento de cliente não encontrado — "
+            f"a construir resposta sintética a partir do processo {proc.get('id')} "
+            f"(client_name={proc.get('client_name')!r})."
+        )
+        # Construir cliente sintético a partir do processo
+        personal = proc.get("personal_data") or {}
+        client = {
+            "id": proc.get("client_id") or proc.get("id"),
+            "nome": proc.get("client_name"),
+            "contacto": {
+                "email": proc.get("client_email"),
+                "telefone": proc.get("client_phone"),
+            },
+            "dados_pessoais": personal,
+            "nif": personal.get("nif"),
+            "process_ids": [proc.get("id")] if proc.get("id") else [],
+            "is_active": proc.get("is_active", True),
+            "fonte": "synthetic_from_process",
+            "created_at": proc.get("created_at"),
+            "updated_at": proc.get("updated_at"),
+            "_synthetic": True,  # flag para o frontend saber que veio de fallback
+        }
     
     # Carregar detalhes dos processos (como titular principal E como 2º titular)
     process_ids_as_main = client.get("process_ids") or []
-    
+
     # Procurar processos onde este cliente é 2º titular (second_client_id)
     processes_as_second = await db.processes.find(
         {"second_client_id": client_id},
         {"_id": 0, "id": 1}
     ).to_list(length=50)
     process_ids_as_second = [p["id"] for p in processes_as_second]
-    
+
+    # No caminho sintético (cliente construído a partir de um processo), o
+    # process_ids pode não incluir TODOS os processos do cliente. Procurar
+    # também processos cujo client_id aponte para este cliente.
+    if client.get("_synthetic"):
+        extra_procs = await db.processes.find(
+            {"client_id": client_id},
+            {"_id": 0, "id": 1}
+        ).to_list(length=50)
+        process_ids_as_main = list(dict.fromkeys(
+            process_ids_as_main + [p["id"] for p in extra_procs]
+        ))
+
     # Combinar IDs (sem duplicados)
     all_process_ids = list(dict.fromkeys(process_ids_as_main + process_ids_as_second))
-    
+
     processes = []
     if all_process_ids:
         processes = await db.processes.find(
             {"id": {"$in": all_process_ids}},
-            {"_id": 0, "id": 1, "process_number": 1, "status": 1, "process_type": 1, 
+            {"_id": 0, "id": 1, "process_number": 1, "status": 1, "process_type": 1,
              "prioridade": 1, "created_at": 1, "updated_at": 1, "is_active": 1,
              "client_id": 1, "second_client_id": 1, "client_name": 1}
         ).to_list(length=50)
@@ -1971,17 +2031,26 @@ async def delete_client(
             "deleted_by": user["id"]
         }}
     )
-    
-    # Remove client reference from processes but do NOT delete the processes
-    # Process deletion is now independent — use DELETE /api/processes/{process_id} instead
+
+    # NOTA: NÃO fazer unset do client_id nos processos.
+    # Antes, o DELETE /clients/{id} removia a referência client_id de todos os
+    # processos associados ($unset). Isto criava processos órfãos: a lista de
+    # clientes (construída a partir de processos) passava a devolver o id do
+    # processo como id do cliente (fallback proc.client_id or proc.id), e o
+    # GET /clients/{id} devolvia 404. Agora mantemos a referência — o cliente
+    # está soft-deleted (is_deleted=True) mas os processos continuam ligados a
+    # ele. O GET /clients/{id} não filtra is_deleted, pelo que a página abre.
+    # Para desvincular um processo específico, usar DELETE /clients/{id}/unlink-process/{process_id}.
     cascade_count = 0
     if client.get("process_ids"):
+        # Apenas marcar updated_at nos processos (sem remover client_id)
         await db.processes.update_many(
             {"id": {"$in": client["process_ids"]}},
-            {"$unset": {"client_id": ""}, "$set": {"updated_at": now}}
+            {"$set": {"updated_at": now}}
         )
-    
-    logger.info(f"Cliente {client_id} movido para lixo por {user.get('email')} (referência removida de processos)")
+        cascade_count = len(client["process_ids"])
+
+    logger.info(f"Cliente {client_id} movido para lixo por {user.get('email')} ({cascade_count} processos mantêm a referência client_id)")
     
     return {
         "success": True, 

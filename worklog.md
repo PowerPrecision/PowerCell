@@ -827,3 +827,34 @@ Stage Summary:
   - worklog.md (esta entrada)
 - Propagação: automática via sync_permissions_with_role_defaults no /auth/me (sem script de migração).
 - Próximo passo: commit + push para branch `dev` via Git Database API.
+
+---
+Task ID: 6
+Agent: Main Agent
+Task: Hotfix — Cliente 404 ao abrir página + desaparecimento da lista de ativos após marcar processo como desistência
+
+Work Log:
+- User reportou: cliente com 2 processos, marcou um como desistência → cliente desapareceu da lista de ativos (mas tem processo ativo) + erro 404 ao abrir a página do cliente (GET /api/clients/{id}).
+- Análise do GET /clients/{id} (backend/routes/clients.py linha 1194): faz `db.clients.find_one({"id": client_id})` sem filtro de is_deleted → 404 só se o documento NÃO existir na coleção clients.
+- Análise da lista de clientes (GET /clients, linha 781): construída a partir de PROCESSOS (não da coleção clients). O `id` devolvido é `proc.client_id or proc.id` (linha 973) — quando client_id está vazio, devolve o ID DO PROCESSO como id do cliente. Daí o 404: GET /clients/{process_id} não encontra nada na coleção clients.
+- Identificada a CAUSA RAIZ do client_id vazio: DELETE /clients/{id} (linha 1979-1982) fazia `$unset: {"client_id": ""}` em TODOS os processos associados ao cliente — removendo a referência. Isto órfão os processos: a lista passa a devolver o id do processo, e o GET falha.
+- Identificado bug secundário: PUT /processes/{id} (linha 3503) atualizava `status` mas NÃO `is_active`. Só o endpoint de move (kanban, linha 2396) atualizava is_active. Mudar status para "desistencias" via dropdown deixava is_active=True (desatualizado), inconsistente com a contagem de processos ativos (linha 1027: `is_active AND status not in terminal`).
+- Identificado bug terciário: a lista de terminais na contagem (linha 1027) não incluía "eliminado"/"eliminados" nem "arquivo" (só "arquivado").
+- Fix 1 (GET /clients/{id} robusto, clients.py): adicionado fallback — se o documento do cliente não existir, procura processos por `id` ou `client_id` e constrói resposta sintética de cliente a partir dos dados do processo (marcada `_synthetic: true`). No caminho sintético, procura também outros processos com o mesmo client_id para listar todos os processos. Isto resolve o 404 imediatamente, mesmo para dados legacy.
+- Fix 2 (DELETE /clients/{id}, clients.py): removido o `$unset: {"client_id": ""}` em cascata. Agora o DELETE mantém a referência client_id nos processos (só atualiza updated_at). O cliente fica soft-deleted (is_deleted=True) mas os processos continuam ligados. GET /clients/{id} não filtra is_deleted → a página abre. O endpoint unlink-process (linha 1535) continua a fazer unset intencional para desvincular UM processo específico.
+- Fix 3 (PUT /processes/{id}, processes.py): quando o status muda, sincroniza is_active com o novo estado. Terminais (desistencias, concluidos, concluido, arquivo, arquivado, perdido, eliminado, eliminados) → is_active=False; restantes → is_active=True. Alinha o dropdown com o kanban move.
+- Fix 4 (active_processes_count, clients.py linha 1027): alinhada a lista de terminais com todos os canónicos e legacy: ["desistencias", "concluidos", "concluido", "arquivado", "arquivo", "perdido", "eliminado", "eliminados"].
+- Validada sintaxe Python: py_compile OK nos 2 ficheiros.
+- Atualizada documentação: CHANGELOG.md (entrada nova) + esta entrada no worklog.md.
+
+Stage Summary:
+- O 404 ao abrir a página do cliente deixa de ocorrer (fallback para dados do processo se o documento do cliente não existir).
+- A causa raiz (DELETE /clients/{id} a fazer unset do client_id em cascata) é eliminada — os processos mantêm a referência ao cliente soft-deleted.
+- O is_active do processo fica consistente entre kanban move e dropdown (PUT), garantindo que a contagem de processos ativos (e a lista de clientes ativos) é correta.
+- A contagem de processos ativos exclui todos os status terminais (incluindo eliminado e arquivo).
+- Ficheiros modificados:
+  - backend/routes/clients.py (GET /clients/{id} com fallback sintético; DELETE /clients/{id} sem unset em cascata; active_processes_count com terminais alinhados)
+  - backend/routes/processes.py (PUT /processes/{id} sincroniza is_active com o novo status)
+  - CHANGELOG.md (entrada nova)
+  - worklog.md (esta entrada)
+- Próximo passo: commit + push para branch `dev` via Git Database API.
