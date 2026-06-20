@@ -138,8 +138,11 @@ const WebmailPage = () => {
   const navigate = useNavigate();
 
   // ── Multi-Tenant: active company_id from auth context ──────────
-  // The backend reads company_id from X-Active-Company header or JWT.
+  // The backend reads company_id from X-Company-Id header (the same
+  // header injected by the api.js interceptor on every request).
   // We pass it explicitly to avoid cross-tenant data leaks.
+  // NOTE: must be X-Company-Id (NOT X-Active-Company) — the latter is
+  // not in CORS_ALLOW_HEADERS, causing preflight 400 -> net::ERR_FAILED.
   const activeCompanyId = user?.active_company_id || user?.company_id || "";
 
   // ── Loading guard: prevent premature "not configured" toast ────
@@ -459,7 +462,7 @@ const WebmailPage = () => {
         {
           headers: {
             Authorization: `Bearer ${token}`,
-            ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+            ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
           },
         }
       );
@@ -603,7 +606,7 @@ const WebmailPage = () => {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
-            ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+            ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
           },
         }
       );
@@ -631,7 +634,7 @@ const WebmailPage = () => {
                 method: "POST",
                 headers: {
                   Authorization: `Bearer ${token}`,
-                  ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+                  ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
                 },
               }
             );
