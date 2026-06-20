@@ -823,3 +823,38 @@ Stage Summary:
 - Backend NAO alterado.
 - Bug RESOLVIDO: o webmail agora envia o header correto (X-Company-Id) que esta na lista CORS_ALLOW_HEADERS, pelo que o preflight OPTIONS passa com 200 e o pedido real nao e bloqueado pelo browser.
 - NOTA: o erro era intermitente — so ocorria quando activeCompanyId estava definido (empresa ativa selecionada). Sem empresa, o header nao era enviado e funcionava.
+
+---
+Task ID: 17
+Agent: Main Agent
+Task: Hotfix — Fontes Google render-blocking (ERR_CONNECTION_CLOSED no fonts.gstatic.com)
+
+Work Log:
+- Utilizador reportou em producao: erro net::ERR_CONNECTION_CLOSED ao carregar woff2 de fonts.gstatic.com.
+- Diagnostico: src/index.css linha 17 tinha @import url('https://fonts.googleapis.com/...'). @import em CSS e RENDER-BLOCKING — o browser bloqueia a parse/renderizacao do CSS ate o @import resolver ou falhar. Quando o CDN da Google e inacessivel (ad blockers, firewall, DNS), a pagina fica bloqueada ate timeout + erro na consola.
+- Corrigido frontend/src/index.css:
+  * Removido @import url(...) render-blocking do topo. Substituido por comentario explicativo.
+  * Melhorados fallbacks font-family em body, h1-h6, .font-mono, code:
+    - 'Inter', sans-serif -> 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif
+    - 'Manrope', sans-serif -> + mesmo stack de sistema
+    - 'JetBrains Mono', monospace -> + 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Liberation Mono'
+  Fontes de sistema nativas (San Francisco no macOS/iOS, Segoe UI no Windows, Roboto no Android) sao visualmente quase identicas a Inter/Manrope.
+- Corrigido frontend/index.html: adicionados 5 <link> no <head> com padrao NAO-bloqueante (web.dev):
+  1. preconnect fonts.googleapis.com
+  2. preconnect fonts.gstatic.com (crossorigin)
+  3. preload as=style
+  4. rel=stylesheet media=print onload=this.media='all' (truque Google: carrega em paralelo, nao bloqueia render)
+  5. noscript fallback
+- Verificado: tailwind.config.js nao define fontFamily (usa stack de sistema default do Tailwind). CSS parse OK via esbuild.
+- Backend NAO alterado.
+- Actualizado CHANGELOG.md com entrada [2026-06-20] Hotfix Fontes.
+- Criado push_hotfix_fonts.py (4 ficheiros: index.html + index.css + CHANGELOG.md + worklog.md).
+- Executado push -> commit em dev.
+
+Stage Summary:
+- 2 ficheiros de codigo modificados:
+  - frontend/index.html (+5 links nao-bloqueantes no head)
+  - frontend/src/index.css (-1 @import render-blocking, +fallbacks de sistema em 4 regras)
+- 2 ficheiros de docs actualizados: CHANGELOG.md, worklog.md.
+- Backend NAO alterado.
+- Bug RESOLVIDO: a pagina renderiza instantaneamente com fontes de sistema. Quando o CDN da Google responde, troca para Manrope/JetBrains/Inter sem quebra. Quando o CDN falha (ad blockers, firewall, DNS), a pagina funciona na mesma com fontes de sistema — sem ERR_CONNECTION_CLOSED bloqueante. O erro pode ainda aparecer na consola mas ja nao bloqueia a renderizacao.
