@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-20] — Hotfix: Fontes Google render-blocking (ERR_CONNECTION_CLOSED no fonts.gstatic.com)
+
+### Corrigido
+- **Erro `net::ERR_CONNECTION_CLOSED` no `fonts.gstatic.com` bloqueava a renderização** (`bug` — **UX/PRODUÇÃO**): O utilizador reportou erro na consola do browser ao carregar a aplicação em produção: `GET https://fonts.gstatic.com/s/jetbrainsmono/...woff2 net::ERR_CONNECTION_CLOSED`. Causa raiz: o `src/index.css` tinha um `@import url('https://fonts.googleapis.com/css2?...')` no topo — e **`@import` em CSS é render-blocking**. O browser bloqueia a parse e renderização do CSS até que o `@import` resolva ou falhe. Quando o CDN da Google (`fonts.gstatic.com`) está inacessível (ad blockers como uBlock Origin, firewall corporativa, ISP com bloqueio de domínios Google, problemas de DNS), a página inteira ficava bloqueada à espera do timeout, e o utilizador via a página lenta/em branco + o erro na consola.
+  - **Frontend** (`frontend/src/index.css`): Removido o `@import url(...)` render-blocking do topo do ficheiro. Substituído por um comentário explicativo que documentação que as fontes agora carregam via `<link>` não-bloqueante no HTML.
+  - **Frontend** (`frontend/index.html`): Adicionados 5 `<link>` no `<head>` com o padrão **não-bloqueante** recomendado pelo web.dev:
+    1. `<link rel="preconnect" href="https://fonts.googleapis.com">` — estabelece ligação TCP/TLS antecipadamente
+    2. `<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>` — idem para o CDN de ficheiros
+    3. `<link rel="preload" as="style" href="...">` — prioriza o descarregamento da stylesheet
+    4. `<link rel="stylesheet" href="..." media="print" onload="this.media='all'">` — **truque da Google/web.dev**: carrega a stylesheet em paralelo mas NÃO bloqueia a renderização (o browser aplica `media="print"` que é inerte, depois o `onload` troca para `media="all'` quando chega)
+    5. `<noscript><link rel="stylesheet" ...></noscript>` — fallback para utilizadores sem JavaScript
+  - **Frontend** (`frontend/src/index.css`): Melhorados os fallbacks de `font-family` em `body`, `h1-h6`, `.font-mono` e `code`. Antes: `'Inter', sans-serif` (fallback genérico). Agora: `'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif` — usa fontes de sistema nativas (San Francisco no macOS/iOS, Segoe UI no Windows, Roboto no Android/ChromeOS) que são visualmente quase idênticas a Inter/Manrope. Para monoespaçada: `'JetBrains Mono', 'SF Mono', Monaco, 'Cascadia Code', 'Roboto Mono', Consolas, 'Liberation Mono', monospace`.
+
+### Resultado
+- A página renderiza **instantaneamente** com fontes de sistema (FOUT — Flash of Unstyled Text mínimo, impercetível porque as fontes de sistema são quase idênticas).
+- Quando o CDN da Google responde (na maioria dos casos), o browser troca para Manrope/JetBrains Mono/Inter sem quebra de layout.
+- Quando o CDN está inacessível (ad blockers, firewall, DNS), a página **funciona na mesma** com fontes de sistema — sem `ERR_CONNECTION_CLOSED` bloqueante, sem página em branco, sem timeout.
+- O erro `net::ERR_CONNECTION_CLOSED` pode ainda aparecer na consola em ambientes restritos, mas **já não bloqueia a renderização** — é apenas um pedido em background que falhou silenciosamente.
+
 ## [2026-06-20] — Hotfix: Erro de CORS no Webmail (header X-Active-Company não permitido)
 
 ### Corrigido
