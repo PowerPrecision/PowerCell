@@ -2,7 +2,7 @@
  * SystemConfigPage — Página de configurações do sistema, exclusiva para Admin/CEO.
  *
  * PORQUÊ: O PowerCell tem múltiplas integrações externas (AWS S3, OpenAI, Gmail,
- * Trello, envio de emails) que precisam de configuração centralizada. Esta página
+ * envio de emails) que precisam de configuração centralizada. Esta página
  * permite ao administrador configurar credenciais, activar/desactivar funcionalidades
  * e executar tarefas de manutenção sem aceder directamente ao backend ou a variáveis
  * de ambiente. Inclui ferramentas de diagnóstico (reparação de índices, limpeza de logs)
@@ -59,7 +59,6 @@ import {
   Cloud,
   Mail,
   Sparkles,
-  Trello,
   Building,
   Building2,
   Save,
@@ -92,6 +91,7 @@ import {
   Zap,
   Pencil,
   MessageSquare,
+  X,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -101,7 +101,6 @@ const SECTION_ICONS = {
   storage: Cloud,
   email: Mail,
   ai: Sparkles,
-  trello: Trello,
   settings: Building,
   maintenance: Wrench,
   document_recipients: Building2,
@@ -420,7 +419,7 @@ const ConfigSection = ({ section, sectionKey, config, fields, onSave, onTest }) 
             Guardar
           </Button>
 
-          {["storage", "email", "ai", "trello"].includes(sectionKey) && (
+          {["storage", "email", "ai"].includes(sectionKey) && (
             <Button variant="outline" onClick={handleTest} disabled={testing}>
               {testing ? (
                 <Loader2 className="h-4 w-4 animate-spin mr-2" />
@@ -1742,6 +1741,220 @@ const PortalSettingsSection = ({ token }) => {
           Última atualização: {formatDateTime(settings.updated_at)}
         </p>
       )}
+    </div>
+  );
+};
+
+
+// =====================================================================
+// PACOTE G — SECÇÃO: Documentos Obrigatórios (mandatory_documents)
+// Permite ao CEO/Diretor gerir a checklist de documentos que são pedidos
+// automaticamente a cada novo processo (pre_registo ou criação interna).
+// =====================================================================
+const MandatoryDocumentsSection = ({ token }) => {
+  const [enabled, setEnabled] = useState(true);
+  const [documents, setDocuments] = useState([]);
+  const [newName, setNewName] = useState("");
+  const [newCategory, setNewCategory] = useState("outros");
+  const [loading, setLoading] = useState(true);
+  const [saving, setSaving] = useState(false);
+
+  const CATEGORIES = [
+    { value: "identificacao", label: "Identificação" },
+    { value: "irs", label: "IRS" },
+    { value: "recibo_vencimento", label: "Recibo de Vencimento" },
+    { value: "comprovativo_morada", label: "Comprovativo de Morada" },
+    { value: "extrato_bancario", label: "Extrato Bancário" },
+    { value: "mapa_responsabilidades", label: "Mapa de Responsabilidades" },
+    { value: "caderneta_predial", label: "Caderneta Predial" },
+    { value: "certidao_teor", label: "Certidão de Teor" },
+    { value: "outros", label: "Outros" },
+  ];
+
+  const fetchConfig = useCallback(async () => {
+    try {
+      const res = await fetch(`${API_URL}/api/system-config`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        const md = data.mandatory_documents || {};
+        setEnabled(md.enabled !== false);
+        setDocuments(Array.isArray(md.documents) ? md.documents : []);
+      } else {
+        toast.error("Erro ao carregar documentos obrigatórios");
+      }
+    } catch {
+      toast.error("Erro de ligação");
+    } finally {
+      setLoading(false);
+    }
+  }, [token]);
+
+  useEffect(() => {
+    fetchConfig();
+  }, [fetchConfig]);
+
+  const handleAdd = () => {
+    const name = newName.trim();
+    if (!name) {
+      toast.error("Indique um nome para o documento");
+      return;
+    }
+    // Evitar duplicados (case-insensitive)
+    if (documents.some((d) => (d.name || "").toLowerCase() === name.toLowerCase())) {
+      toast.error("Este documento já está na lista");
+      return;
+    }
+    setDocuments([...documents, { name, category: newCategory }]);
+    setNewName("");
+  };
+
+  const handleRemove = (idx) => {
+    setDocuments(documents.filter((_, i) => i !== idx));
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_URL}/api/system-config/mandatory_documents`, {
+        method: "PATCH",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({ enabled, documents }),
+      });
+      if (res.ok) {
+        toast.success("Checklist de documentos obrigatórios guardada");
+        fetchConfig();
+      } else {
+        const err = await res.json().catch(() => ({}));
+        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
+      }
+    } catch {
+      toast.error("Erro de ligação");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-12">
+        <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <FileEdit className="h-5 w-5 text-primary" />
+            Documentos Obrigatórios por Defeito
+          </CardTitle>
+          <CardDescription>
+            Lista gerida pelo CEO/Diretor. Quando um processo é criado (via formulário público
+            ou criação interna), estes pedidos são gerados automaticamente. Assim que o cliente
+            submeter todos, o sistema envia um email de confirmação em nome do intermediário.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex items-center justify-between rounded-lg border p-3">
+            <div>
+              <Label className="font-medium">Ativar checklist automática</Label>
+              <p className="text-xs text-muted-foreground mt-0.5">
+                Se inativo, novos processos não geram pedidos automáticos.
+              </p>
+            </div>
+            <Switch checked={enabled} onCheckedChange={setEnabled} />
+          </div>
+
+          <div className="rounded-lg border p-3 space-y-3">
+            <Label className="font-medium">Adicionar documento</Label>
+            <div className="flex flex-col sm:flex-row gap-2">
+              <Input
+                placeholder="Ex: Bilhete de Identidade / Cartão de Cidadão"
+                value={newName}
+                onChange={(e) => setNewName(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter") {
+                    e.preventDefault();
+                    handleAdd();
+                  }
+                }}
+                className="flex-1"
+              />
+              <Select value={newCategory} onValueChange={setNewCategory}>
+                <SelectTrigger className="w-full sm:w-56">
+                  <SelectValue placeholder="Categoria" />
+                </SelectTrigger>
+                <SelectContent>
+                  {CATEGORIES.map((c) => (
+                    <SelectItem key={c.value} value={c.value}>
+                      {c.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Button type="button" onClick={handleAdd} variant="secondary">
+                <Plus className="h-4 w-4 mr-1" /> Adicionar
+              </Button>
+            </div>
+          </div>
+
+          {/* PACOTE I — Lista de Etiquetas (Tags): badges com ícone X.
+              Layout flex-wrap para os badges fluírem em múltiplas linhas.
+              Cada badge mostra o nome do documento + categoria (se não for
+              "outros") + botão X para remover. */}
+          <div className="flex flex-wrap gap-2 min-h-[3rem] p-3 rounded-lg border bg-muted/30 items-center">
+            {documents.length === 0 ? (
+              <span className="text-sm text-muted-foreground italic">
+                Sem documentos na checklist. Adicione acima para começar.
+              </span>
+            ) : (
+              documents.map((doc, idx) => {
+                const cat = CATEGORIES.find((c) => c.value === doc.category);
+                const hasCat = doc.category && doc.category !== "outros";
+                return (
+                  <Badge
+                    key={`${doc.name}-${idx}`}
+                    variant="secondary"
+                    className="pl-3 pr-1 py-1 text-sm gap-1.5"
+                  >
+                    <span className="truncate max-w-[16rem]">{doc.name}</span>
+                    {hasCat && (
+                      <Badge variant="outline" className="px-1 py-0 text-[10px] font-normal">
+                        {cat?.label || doc.category}
+                      </Badge>
+                    )}
+                    <button
+                      type="button"
+                      onClick={() => handleRemove(idx)}
+                      className="ml-0.5 rounded-full hover:bg-destructive/20 hover:text-destructive p-0.5 transition-colors"
+                      aria-label={`Remover ${doc.name}`}
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  </Badge>
+                );
+              })
+            )}
+          </div>
+
+          <div className="flex items-center justify-between pt-2 border-t">
+            <p className="text-xs text-muted-foreground">
+              {documents.length} documento{documents.length !== 1 ? "s" : ""} na checklist
+            </p>
+            <Button onClick={handleSave} disabled={saving}>
+              {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
+              Guardar Checklist
+            </Button>
+          </div>
+        </CardContent>
+      </Card>
     </div>
   );
 };
@@ -3226,6 +3439,19 @@ const SystemConfigPage = ({ embedded = false }) => {
                       <span className="truncate">Portal</span>
                       {activeTab === "portal" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("mandatory_documents")}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                        activeTab === "mandatory_documents"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <FileEdit className={`h-4 w-4 shrink-0 ${activeTab === "mandatory_documents" ? "text-primary" : ""}`} />
+                      <span className="truncate">Docs Obrigatórios</span>
+                      {activeTab === "mandatory_documents" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                    </button>
                   </nav>
                 </CardContent>
               </Card>
@@ -3269,6 +3495,12 @@ const SystemConfigPage = ({ embedded = false }) => {
                       Portal
                     </span>
                   </SelectItem>
+                  <SelectItem value="mandatory_documents">
+                    <span className="flex items-center gap-2">
+                      <FileEdit className="h-4 w-4" />
+                      Docs Obrigatórios
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
               {/* Horizontal scrollable chips for quick access */}
@@ -3292,9 +3524,10 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {["rgpd", "maintenance", "portal"].map((key) => {
-                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : Wrench;
+                {["rgpd", "maintenance", "portal", "mandatory_documents"].map((key) => {
+                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : key === "mandatory_documents" ? FileEdit : Wrench;
                   const isActive = activeTab === key;
+                  const label = key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : key === "mandatory_documents" ? "Docs Obrigatórios" : "Manutenção";
                   return (
                     <button
                       key={key}
@@ -3307,7 +3540,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      {key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : "Manutenção"}
+                      {label}
                     </button>
                   );
                 })}
@@ -3321,7 +3554,8 @@ const SystemConfigPage = ({ embedded = false }) => {
             {activeTab === "integrations" && <IntegrationsConfigSection />}
             {activeTab === "system_emails" && <SystemEmailsSection token={token} />}
             {activeTab === "portal" && <PortalSettingsSection token={token} />}
-            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && (
+            {activeTab === "mandatory_documents" && <MandatoryDocumentsSection token={token} />}
+            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && activeTab !== "mandatory_documents" && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}

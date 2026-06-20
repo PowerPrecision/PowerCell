@@ -100,15 +100,6 @@ class AIConfig(BaseModel):
     max_tokens: int = 4000
 
 
-class TrelloConfig(BaseModel):
-    """Configuração do Trello"""
-    enabled: bool = False
-    api_key: Optional[str] = None
-    api_token: Optional[str] = None
-    board_id: Optional[str] = None
-    webhook_base_url: Optional[str] = None
-
-
 class ReportFrequency(str, Enum):
     """Frequência de envio do relatório de IA"""
     DAILY = "daily"
@@ -267,6 +258,28 @@ class SystemWebmailConfig(BaseModel):
     app_password: Optional[str] = None
 
 
+class MandatoryDocumentsConfig(BaseModel):
+    """Configuração da checklist de Documentos Obrigatórios (Pacote G).
+
+    Lista de documentos que são automaticamente pedidos ao cliente quando um
+    processo é criado (via formulário público → pre_registo, ou via endpoint
+    de automação). O CEO/Diretor gere esta lista no SystemConfigPage.
+
+    Quando todos os pedidos gerados a partir desta lista são satisfeitos
+    (status RECEIVED/UPLOADED/VALIDATED), o gatilho
+    `check_and_notify_documents_complete` envia um email automático ao
+    cliente em nome do intermediário atribuído.
+    """
+    enabled: bool = True
+    documents: List[Dict[str, Any]] = [
+        {"name": "Bilhete de Identidade / Cartão de Cidadão", "category": "identificacao"},
+        {"name": "Comprovativo de IRS do ano anterior", "category": "irs"},
+        {"name": "Últimos 3 recibos de vencimento", "category": "recibo_vencimento"},
+        {"name": "Comprovativo de Morada", "category": "comprovativo_morada"},
+        {"name": "Extrato bancário dos últimos 3 meses", "category": "extrato_bancario"},
+    ]
+
+
 class SystemConfig(BaseModel):
     """Configuração completa do sistema.
 
@@ -283,7 +296,6 @@ class SystemConfig(BaseModel):
     storage: StorageConfig = StorageConfig()
     email: EmailConfig = EmailConfig()
     ai: AIConfig = AIConfig()
-    trello: TrelloConfig = TrelloConfig()
     settings: SystemSettings = SystemSettings()
     credit_services: CreditServicesConfig = CreditServicesConfig()
     document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
@@ -292,6 +304,7 @@ class SystemConfig(BaseModel):
     audit_trail: AuditTrailConfig = AuditTrailConfig()
     system_smtp: SystemSMTPConfig = SystemSMTPConfig()
     system_webmail: SystemWebmailConfig = SystemWebmailConfig()
+    mandatory_documents: MandatoryDocumentsConfig = MandatoryDocumentsConfig()
     setup_completed: bool = False
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
@@ -299,7 +312,7 @@ class SystemConfig(BaseModel):
 
 class ConfigUpdateRequest(BaseModel):
     """Request para actualizar configuração"""
-    section: str  # "storage", "email", "ai", "trello", "settings"
+    section: str  # "storage", "email", "ai", "settings"
     data: Dict[str, Any]
 
 

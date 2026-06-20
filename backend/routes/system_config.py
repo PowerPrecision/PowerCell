@@ -383,37 +383,6 @@ CONFIG_FIELDS = {
             ),
         ]
     },
-    "trello": {
-        "title": "Integração Trello",
-        "description": "Sincronizar processos com um quadro Trello",
-        "fields": [
-            ConfigField(
-                key="enabled",
-                label="Activar Trello",
-                type="boolean",
-            ),
-            ConfigField(
-                key="api_key",
-                label="API Key",
-                type="text",
-                depends_on={"enabled": True},
-                help_text="Obter em https://trello.com/power-ups/admin"
-            ),
-            ConfigField(
-                key="api_token",
-                label="API Token",
-                type="password",
-                depends_on={"enabled": True},
-            ),
-            ConfigField(
-                key="board_id",
-                label="ID do Quadro",
-                type="text",
-                depends_on={"enabled": True},
-                help_text="ID do quadro Trello a sincronizar"
-            ),
-        ]
-    },
     "settings": {
         "title": "Definições Gerais",
         "description": "Personalizar a aparência e comportamento do sistema",
@@ -741,7 +710,7 @@ async def update_config(
     MULTI-EMPRESA: Use o parâmetro company_id para actualizar a config de uma empresa específica.
     """
     # Secções válidas: definidas em CONFIG_FIELDS + secções de integração
-    EXTRA_SECTIONS = {"system_smtp", "system_webmail"}
+    EXTRA_SECTIONS = {"system_smtp", "system_webmail", "mandatory_documents"}
     if section not in CONFIG_FIELDS and section not in EXTRA_SECTIONS:
         raise HTTPException(status_code=400, detail=f"Secção inválida: {section}")
     
@@ -993,24 +962,6 @@ async def test_service_connection(
         except Exception as e:
             return {"success": False, "message": f"Erro: {str(e)}"}
     
-    elif service == "trello":
-        trello = config.trello
-        if not trello.enabled:
-            return {"success": False, "message": "Trello não activado"}
-        
-        try:
-            import httpx
-            url = f"https://api.trello.com/1/boards/{trello.board_id}?key={trello.api_key}&token={trello.api_token}"
-            async with httpx.AsyncClient() as client:
-                response = await client.get(url)
-                if response.status_code == 200:
-                    board = response.json()
-                    return {"success": True, "message": f"Ligado ao quadro: {board.get('name')}"}
-                else:
-                    return {"success": False, "message": f"Erro: {response.status_code}"}
-        except Exception as e:
-            return {"success": False, "message": f"Erro: {str(e)}"}
-    
     elif service == "mongodb" or service == "database":
         # Testar ligação MongoDB
         try:
@@ -1114,7 +1065,7 @@ async def reset_cache(user: dict = Depends(require_roles([UserRole.ADMIN]))):
 
 @router.get("/reveal-secrets")
 async def reveal_secrets(
-    section: Optional[str] = Query(None, description="Secção a revelar (email, ai, storage, trello, credit_services)"),
+    section: Optional[str] = Query(None, description="Secção a revelar (email, ai, storage, credit_services)"),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """
@@ -1143,7 +1094,7 @@ async def reveal_secrets(
     else:
         # Revelar todos os campos sensíveis de todas as secções
         result = {}
-        for sec_name in ["storage", "email", "ai", "trello", "credit_services"]:
+        for sec_name in ["storage", "email", "ai", "credit_services"]:
             sec_data = config_dict.get(sec_name, {})
             sec_secrets = {k: v for k, v in sec_data.items() if k in sensitive_fields and v}
             if sec_secrets:

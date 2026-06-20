@@ -948,7 +948,7 @@ async def create_user(data: UserCreate, user: dict = Depends(require_roles([User
     - Envia email de boas-vindas com credenciais (não falha a criação
       se o email não for enviado).
     - Associa automaticamente processos do Trello cujo nome do membro
-      corresponda ao nome do utilizador criado.
+      corresponda ao nome do utilizador criado. (deprecated — Trello removed)
 
     **Parceiros** (ghost users):
     - Apenas requer nome. Email/password não são necessários porque
@@ -1145,40 +1145,7 @@ Equipa PowerCell
         logger.warning(f"Erro ao enviar email de boas-vindas: {e}")
         # Não falhar a criação do utilizador se o email falhar
     
-    # Associar automaticamente processos do Trello que têm este utilizador atribuído
-    # Verifica se o nome do utilizador corresponde a algum membro atribuído no Trello
-    name_lower = clean_name.lower()
-    name_parts = [p for p in name_lower.split() if len(p) >= 3]
-    
-    # Procurar processos com trello_members que corresponda ao nome
-    query = {"trello_members": {"$exists": True, "$ne": []}}
-    processes_to_update = await db.processes.find(query, {"_id": 0, "id": 1, "trello_members": 1}).to_list(1000)
-    
-    updated_count = 0
-    for proc in processes_to_update:
-        members = proc.get("trello_members", [])
-        # Verificar se o nome do utilizador está na lista de membros
-        for member in members:
-            member_lower = member.lower()
-            # Verificar se alguma parte do nome corresponde
-            if any(part in member_lower for part in name_parts):
-                # Determinar qual campo actualizar baseado no role
-                if data.role in [UserRole.CONSULTOR]:
-                    await db.processes.update_one(
-                        {"id": proc["id"]},
-                        {"$set": {"assigned_consultor_id": user_id}}
-                    )
-                    updated_count += 1
-                elif data.role == UserRole.INTERMEDIARIO:
-                    await db.processes.update_one(
-                        {"id": proc["id"]},
-                        {"$set": {"assigned_mediador_id": user_id}}
-                    )
-                    updated_count += 1
-                break  # Já encontrou match, passar ao próximo processo
-    
-    if updated_count > 0:
-        logger.info(f"Utilizador {data.name} criado e associado a {updated_count} processos automaticamente")
+    # Trello member auto-association removed (Trello integration deprecated)
     
     return UserResponse(
         id=user_id,
@@ -2950,7 +2917,8 @@ async def delete_client_registration(
     """
     Elimina um registo de cliente.
     
-    NOTA: Esta ação é irreversível e remove todos os dados do processo.
+    NOTA: Esta ação agora faz soft delete em vez de hard delete.
+    O processo é marcado como eliminado mas permanece na base de dados.
     """
     process = await db.processes.find_one({"id": process_id})
     
@@ -2963,21 +2931,18 @@ async def delete_client_registration(
         "process_id": process_id,
         "user_id": user["id"],
         "user_name": user.get("name", "Admin"),
-        "action": f"Registo eliminado: {process.get('client_name', 'N/A')} ({process.get('client_email', 'N/A')})",
+        "action": f"Registo eliminado (soft delete): {process.get('client_name', 'N/A')} ({process.get('client_email', 'N/A')})",
         "field": "registration_delete",
         "old_value": process.get("client_name"),
         "new_value": None,
         "created_at": datetime.now(timezone.utc).isoformat()
     })
     
-    # Eliminar processo
-    await db.processes.delete_one({"id": process_id})
-    
-    # Eliminar histórico associado
-    await db.history.delete_many({"process_id": process_id})
-    
-    # Eliminar RGPDs associados
-    await db.rgpd_requests.delete_many({"process_id": process_id})
+    # Soft delete: marcar processo como eliminado em vez de remover permanentemente
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": {"is_deleted": True, "status": "eliminado", "is_active": False, "deleted_at": datetime.now(timezone.utc), "deleted_by": user.get("id", "")}}
+    )
     
     return {
         "success": True,

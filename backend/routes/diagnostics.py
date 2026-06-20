@@ -198,18 +198,6 @@ async def check_ai_service() -> ServiceStatus:
     )
 
 
-async def check_trello_service() -> ServiceStatus:
-    """Verificar estado do serviço Trello (DEPRECIADO - sempre desativado)."""
-    # Trello foi removido como integração obrigatória
-    # Retornar como desativado intencionalmente
-    return ServiceStatus(
-        name="Integração Trello",
-        configured=True,
-        status="disabled",
-        message="Integração Trello desativada (não é necessária)",
-    )
-
-
 async def check_backup_service() -> ServiceStatus:
     """Verificar estado do serviço de backup."""
     # Verificar último backup
@@ -346,17 +334,6 @@ async def get_system_diagnostics(
         )
     
     try:
-        services["trello"] = await check_trello_service()
-    except Exception as e:
-        logger.error(f"Erro ao verificar Trello: {e}")
-        services["trello"] = ServiceStatus(
-            name="Integração Trello",
-            configured=False,
-            status="error",
-            message=f"Erro ao verificar: {str(e)}"
-        )
-    
-    try:
         services["backup"] = await check_backup_service()
     except Exception as e:
         logger.error(f"Erro ao verificar Backup: {e}")
@@ -420,7 +397,6 @@ async def get_service_diagnostics(
         "email": check_email_service,
         "storage": check_storage_service,
         "ai": check_ai_service,
-        "trello": check_trello_service,
         "backup": check_backup_service,
         "notifications": check_notifications_service
     }
@@ -449,11 +425,8 @@ async def get_service_diagnostics(
         ).sort("started_at", -1).limit(5).to_list(5)
         extra_info["recent_backups"] = backups
     
-    elif service_name == "trello":
-        # Info de mapeamentos
-        mappings_count = await db.trello_member_mappings.count_documents({}) if "trello_member_mappings" in await db.list_collection_names() else 0
-        extra_info["member_mappings"] = mappings_count
-    
+    # Trello integration removed (deprecated)
+
     return {
         "service": status.dict(),
         "extra": extra_info,
@@ -469,7 +442,7 @@ async def quick_system_check(
     Verificação rápida do sistema (para qualquer utilizador staff).
     
     Retorna apenas o resumo sem detalhes sensíveis.
-    Ignora serviços desativados intencionalmente (Trello).
+    Ignora serviços desativados intencionalmente.
     """
     services = {}
     
@@ -477,7 +450,7 @@ async def quick_system_check(
     services["email"] = (await check_email_service()).status
     services["storage"] = (await check_storage_service()).status
     services["ai"] = (await check_ai_service()).status
-    # Trello ignorado - não é mais necessário
+    # Todos os serviços activos verificados
     services["backup"] = (await check_backup_service()).status
     
     # Contagens básicas

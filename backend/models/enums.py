@@ -12,9 +12,12 @@ from typing import List
 
 class ProcessStatus(str, Enum):
     """
-    Status do processo no workflow de 15 fases.
+    Status do processo no workflow de 16 fases.
     Valores correspondem aos nomes das colunas do Kanban.
     """
+    # Fase 0: Pré-Registo (Portal — ainda não é lead qualificada)
+    PRE_REGISTO = "pre_registo"
+
     # Fase 1-3: Início
     CLIENTES_ESPERA = "clientes_espera"
     DOCUMENTACAO = "documentacao"
@@ -44,6 +47,7 @@ class ProcessStatus(str, Enum):
     def active_statuses(cls) -> List[str]:
         """Retorna status que representam processos activos."""
         return [
+            cls.PRE_REGISTO.value,
             cls.CLIENTES_ESPERA.value,
             cls.DOCUMENTACAO.value,
             cls.ANALISE.value,
@@ -56,6 +60,11 @@ class ProcessStatus(str, Enum):
             cls.ESCRITURA.value,
             cls.FILA_ESPERA.value,
         ]
+
+    @classmethod
+    def dashboard_statuses(cls) -> List[str]:
+        """Status que contam para Dashboards — exclui pré-registo (não é lead qualificada)."""
+        return [s for s in cls.active_statuses() if s != cls.PRE_REGISTO.value]
     
     @classmethod
     def completed_statuses(cls) -> List[str]:

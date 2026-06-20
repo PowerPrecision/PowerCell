@@ -307,7 +307,7 @@ async def update_process_document(
                 "new": value
             })
     
-    # Co-compradores e contrapartes (listas — substituição completa)
+    # 2º Titular / Fiador e contrapartes (listas — substituição completa)
     for list_field in ["co_buyers", "co_applicants", "vendedor", "mediador"]:
         value = getattr(data, list_field, None)
         if value is not None:
@@ -709,7 +709,7 @@ def encrypt_sensitive_data(data: dict) -> dict:
                 if field in result[section] and result[section][field]:
                     result[section][field] = encryption_service.encrypt(str(result[section][field]))
     
-    # Encriptar listas de co-compradores/co-proponentes
+    # Encriptar listas de 2º Titular / Fiador
     for list_field in ["co_buyers", "co_applicants"]:
         if list_field in result and isinstance(result[list_field], list):
             list_fields = ["nif", "documento_id", "phone", "telefone"]
@@ -774,7 +774,7 @@ def decrypt_sensitive_data(data: dict) -> dict:
                 if field in result[section] and result[section][field]:
                     result[section][field] = decrypt_field(result[section][field])
     
-    # Desencriptar listas de co-compradores/co-proponentes
+    # Desencriptar listas de 2º Titular / Fiador
     for list_field in ["co_buyers", "co_applicants"]:
         if list_field in result and isinstance(result[list_field], list):
             list_fields = ["nif", "documento_id", "phone", "telefone"]

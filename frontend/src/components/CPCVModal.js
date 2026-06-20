@@ -122,7 +122,7 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
     comprador_email: "",
     comprador_estado_civil: "",
     
-    // Co-comprador (se aplicável)
+    // 2º Titular / Fiador (se aplicável)
     co_comprador_nome: "",
     co_comprador_nif: "",
     co_comprador_morada: "",
@@ -192,7 +192,7 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
       comprador_email: process.client_email || personalData?.email || "",
       comprador_estado_civil: personalData?.estado_civil || "",
       
-      // Co-comprador (segundo titular)
+      // 2º Titular / Fiador
       co_comprador_nome: process.second_client_name || process.titular2_data?.nome || process.titular2_data?.name || "",
       co_comprador_nif: process.titular2_data?.nif || "",
       co_comprador_morada: process.titular2_data?.morada_fiscal || "",
@@ -289,7 +289,7 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
       '[COMPRADOR_EMAIL]': cpcvData.comprador_email || '___________',
       '[COMPRADOR_ESTADO_CIVIL]': cpcvData.comprador_estado_civil || '___________',
       
-      // Co-comprador
+      // 2º Titular / Fiador
       '[CO_COMPRADOR_NOME]': cpcvData.co_comprador_nome || '___________',
       '[CO_COMPRADOR_NIF]': cpcvData.co_comprador_nif || '___________',
       '[CO_COMPRADOR_MORADA]': cpcvData.co_comprador_morada || '___________',
@@ -763,12 +763,12 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
               </div>
             </Card>
 
-            {/* Co-comprador (se existir) */}
+            {/* 2º Titular / Fiador (se existir) */}
             {(cpcvData.co_comprador_nome || process.second_client_name) && (
               <Card className="p-4 border border-indigo-200 bg-indigo-50/50">
                 <h4 className="font-medium text-sm flex items-center gap-2 mb-4">
                   <Users className="h-4 w-4 text-indigo-600" />
-                  Co-comprador (2º Titular)
+                  2º Titular / Fiador
                 </h4>
                 <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
                   <div className="space-y-2 md:col-span-2">
@@ -776,7 +776,7 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
                     <Input 
                       value={cpcvData.co_comprador_nome} 
                       onChange={(e) => handleFieldChange('co_comprador_nome', e.target.value)}
-                      placeholder="Nome do co-comprador"
+                      placeholder="Nome do 2º Titular / Fiador"
                     />
                   </div>
                   <div className="space-y-2">
@@ -795,7 +795,7 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
                     <Input 
                       value={cpcvData.co_comprador_morada} 
                       onChange={(e) => handleFieldChange('co_comprador_morada', e.target.value)}
-                      placeholder="Morada do co-comprador"
+                      placeholder="Morada do 2º Titular / Fiador"
                     />
                   </div>
                   <div className="space-y-2">

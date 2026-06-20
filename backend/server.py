@@ -74,7 +74,6 @@ from routes.websocket import router as websocket_router
 from routes.push_notifications import router as push_notifications_router
 from routes.tasks import router as tasks_router
 from routes.emails import router as emails_router  # doc_router removido - rotas agora no router principal
-from routes.trello import router as trello_router
 from routes.ai_bulk import router as ai_bulk_router
 from routes.leads import router as leads_router
 from routes.match import router as match_router
@@ -110,6 +109,7 @@ from routes.finance import router as finance_router
 from routes.admin_migration import router as admin_migration_router
 from routes.task_logs import router as task_logs_router
 from routes.portal import router as portal_router
+from routes.portal_admin import router as portal_admin_router
 from routes.google_auth import router as google_auth_router
 from routes.shared_email import router as shared_email_router
 from routes.companies import router as companies_router
@@ -562,7 +562,6 @@ app.include_router(push_notifications_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
 # emails_doc_router removido — send-documentation e document-recipients agora no router principal (antes de /{email_id})
 app.include_router(emails_router, prefix="/api")
-app.include_router(trello_router, prefix="/api")
 app.include_router(ai_bulk_router, prefix="/api")
 app.include_router(leads_router, prefix="/api")
 app.include_router(match_router, prefix="/api")
@@ -598,6 +597,7 @@ app.include_router(finance_router, prefix="/api")
 app.include_router(admin_migration_router, prefix="/api")
 app.include_router(task_logs_router, prefix="/api")
 app.include_router(portal_router, prefix="/api")
+app.include_router(portal_admin_router, prefix="/api")
 app.include_router(google_auth_router, prefix="/api")
 app.include_router(shared_email_router, prefix="/api")
 app.include_router(companies_router, prefix="/api")
@@ -1000,13 +1000,7 @@ async def startup():
     except (IOError, OSError, ConnectionError, ImportError, TimeoutError):
         pass 
     
-    # Inicializar Trello com configurações da base de dados
-    try:
-        from services.trello import init_trello_from_config
-        await init_trello_from_config()
-        logger.info("✅ Serviço Trello verificado")
-    except (ImportError, ValueError, KeyError) as trello_err:
-        logger.debug(f"Trello não configurado: {trello_err}")
+    # Trello integration removed (deprecated)
     
     # Inicializar S3 a partir da config da base de dados
     try:

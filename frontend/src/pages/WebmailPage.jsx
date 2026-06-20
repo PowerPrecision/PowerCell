@@ -75,7 +75,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { format, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
-import { sanitizeEmailHtml } from "../utils/sanitize";
+import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import { safeFormat } from "../lib/utils";
@@ -136,6 +136,15 @@ const getAttachmentIcon = (filename) => {
 const WebmailPage = () => {
   const { token, user } = useAuth();
   const navigate = useNavigate();
+
+  // ── Multi-Tenant: active company_id from auth context ──────────
+  // The backend reads company_id from X-Active-Company header or JWT.
+  // We pass it explicitly to avoid cross-tenant data leaks.
+  const activeCompanyId = user?.active_company_id || user?.company_id || "";
+
+  // ── Loading guard: prevent premature "not configured" toast ────
+  const [isLoadingConfig, setIsLoadingConfig] = useState(true);
+  const isLoadingConfigRef = useRef(true);
 
   // Auto-select account based on user email domain
   const userDomain = (user?.email || "").split("@")[1]?.toLowerCase() || "";
@@ -230,6 +239,21 @@ const WebmailPage = () => {
   // Derived UI state
   const showTabs = hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo']);
   const showAccountSelector = showTabs && activeBox === 'personal';
+  // Perfis que podem usar contas globais (power/precision) para enviar email.
+  // Os restantes roles (consultor, intermediario, administrativo, indexacao)
+  // enviam obrigatoriamente pela conta pessoal (email_config) — o backend
+  // ignora a conta global e força "personal". Nestes casos o seletor de conta
+  // do composer não deve aparecer (o utilizador só tem uma conta útil).
+  const canUseGlobalAccounts = hasAnyRole(user, ['admin', 'ceo', 'diretor']);
+  // Assinatura resolvida para pré-visualização no composer.
+  // O /auth/me já devolve email_signature (mergeado: empresa ativa ou global)
+  // e active_company_signature (None se não definida na UCR da empresa ativa).
+  // Prioridade: active_company_signature (se != null) > email_signature.
+  // Nota: "" significa assinatura intencionalmente limpa → sem assinatura.
+  const resolvedSignature =
+    (user?.active_company_signature !== undefined && user?.active_company_signature !== null
+      ? user.active_company_signature
+      : user?.email_signature) || "";
   const pageSubtitle = !showTabs
     ? (hasRole(user, 'indexacao') ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
     : null;
@@ -425,11 +449,18 @@ const WebmailPage = () => {
       if (effectiveBox) {
         params.append("box", effectiveBox);
       }
+      // ── Multi-Tenant: incluir company_id nos params ────────────
+      if (activeCompanyId) {
+        params.append("company_id", activeCompanyId);
+      }
 
       const response = await fetch(
         `${API_URL}/api/emails/webmail?${params.toString()}`,
         {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+          },
         }
       );
 
@@ -444,6 +475,8 @@ const WebmailPage = () => {
       setEmails(data.emails || []);
       setTotalEmails(data.total || 0);
       setCurrentPage(data.page || 1);
+      setIsLoadingConfig(false);  // ← Config check passed — emails loaded
+      isLoadingConfigRef.current = false;
       setTotalPages(data.pages || 1);
       setUnreadCount(data.unread_count || 0);
     } catch (error) {
@@ -560,11 +593,18 @@ const WebmailPage = () => {
       if (account && !isGeneralSync) {
         params.append("account", account);
       }
+      // ── Multi-Tenant: incluir company_id nos params ────────────
+      if (activeCompanyId) {
+        params.append("company_id", activeCompanyId);
+      }
       const response = await fetch(
         `${syncEndpoint}?${params.toString()}`,
         {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+          },
         }
       );
       const data = await response.json().catch(() => ({}));
@@ -576,22 +616,29 @@ const WebmailPage = () => {
       }
 
       if (data.success === false) {
+        const wasInitialLoad = isLoadingConfigRef.current;  // capture before clearing
+        setIsLoadingConfig(false);  // ← Config definitively not available
+        isLoadingConfigRef.current = false;
         // If personal sync says "not configured" and user has admin privileges,
         // automatically fallback to global sync
         if (isPersonalSync && showTabs) {
           try {
             const fallbackParams = new URLSearchParams({ days: "7" });
+            if (activeCompanyId) fallbackParams.append("company_id", activeCompanyId);
             const fallbackResponse = await fetch(
               `${API_URL}/api/emails/webmail/sync?${fallbackParams.toString()}`,
               {
                 method: "POST",
-                headers: { Authorization: `Bearer ${token}` },
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  ...(activeCompanyId ? { "X-Active-Company": activeCompanyId } : {}),
+                },
               }
             );
             const fallbackData = await fallbackResponse.json().catch(() => ({}));
 
             if (fallbackData.success === false) {
-              toast.error(fallbackData.error || "Erro na sincronização global");
+              if (!wasInitialLoad) toast.error(fallbackData.error || "Erro na sincronização global");
               setSyncing(false);
               return;
             }
@@ -601,12 +648,12 @@ const WebmailPage = () => {
             pollJobStatus(fallbackData.job_id);
             return;
           } catch (fallbackError) {
-            toast.error(data.error || "Erro na sincronização");
+            if (!wasInitialLoad) toast.error(data.error || "Erro na sincronização");
             setSyncing(false);
             return;
           }
         }
-        toast.error(data.error || "Erro na sincronização");
+        if (!wasInitialLoad) toast.error(data.error || "Erro na sincronização");
         setSyncing(false);
         return;
       }
@@ -791,30 +838,53 @@ const WebmailPage = () => {
         bodyPayload.attachment_ids = uploadAttachments.map((a) => a.id);
       }
 
+      // Para perfis sem acesso a contas globais, o envio é sempre feito pela
+      // conta pessoal (o backend força "personal" de qualquer forma). Enviamos
+      // o valor correcto para que o pedido reflicta a realidade e não induza
+      // o backend em ramos de validação de contas globais.
+      const effectiveAccount = canUseGlobalAccounts ? composerData.account : "personal";
+
       const response = await fetch(
-        `${API_URL}/api/emails/send?account=${composerData.account}`,
+        `${API_URL}/api/emails/send?account=${effectiveAccount}`,
         {
           method: "POST",
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
+            // Enviar a empresa ativa para o backend resolver a assinatura
+            // correta (cada user pode ter uma assinatura por empresa — UCR).
+            ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
           },
           body: JSON.stringify(bodyPayload),
         }
       );
 
-      if (!response.ok) throw new Error("Erro ao enviar email");
+      if (!response.ok) {
+        // Preservar a mensagem útil do backend (ex.: 403 "Configuração de email
+        // pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail
+        // para configurar o seu email antes de enviar.").
+        let detail = "Erro ao enviar email";
+        try {
+          const errData = await response.json();
+          detail = errData.detail || errData.message || errData.error || detail;
+        } catch (_) {
+          /* resposta sem corpo JSON — manter mensagem genérica */
+        }
+        throw new Error(detail);
+      }
       toast.success("Email enviado com sucesso");
       setComposerOpen(false);
       setUploadAttachments([]);
       handleRefresh();
     } catch (error) {
       console.error("Erro ao enviar:", error);
-      toast.error("Erro ao enviar email");
+      // Mensagens de configuração (403) costumam ser longas e acionáveis —
+      // dar mais tempo de leitura para o utilizador saber o que fazer.
+      toast.error(error.message || "Erro ao enviar email", { duration: 8000 });
     } finally {
       setComposerSending(false);
     }
-  }, [composerData, token, handleRefresh, uploadAttachments, activeBox]);
+  }, [composerData, token, handleRefresh, uploadAttachments, activeBox, canUseGlobalAccounts]);
 
   // ============================================================
   // LINK TO PROCESS
@@ -1235,6 +1305,11 @@ const WebmailPage = () => {
   // ============================================================
   return (
     <DashboardLayout title="Email">
+      {isLoadingConfig ? (
+        <div className="flex items-center justify-center h-[calc(100vh-64px)]">
+          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+        </div>
+      ) : (
       <TooltipProvider delayDuration={300}>
         <div className="flex flex-col h-[calc(100vh-64px)] -mx-6 -mt-6">
         {/* ===== TOP BAR ===== */}
@@ -2195,24 +2270,38 @@ const WebmailPage = () => {
                 />
               </div>
 
-              {/* Account */}
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium w-12 shrink-0">Conta:</label>
-                <Select
-                  value={composerData.account}
-                  onValueChange={(v) =>
-                    setComposerData((d) => ({ ...d, account: v }))
-                  }
-                >
-                  <SelectTrigger className="flex-1">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="precision">Precision Crédito</SelectItem>
-                    <SelectItem value="power">Power Real Estate</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
+              {/* Account — só visível para perfis que podem usar contas globais
+                  (admin/CEO/diretor). Os restantes perfis enviam sempre pela sua
+                  conta pessoal (o backend força "personal"), pelo que o seletor
+                  não deve aparecer — o utilizador só tem uma conta útil. */}
+              {canUseGlobalAccounts ? (
+                <div className="flex items-center gap-2">
+                  <label className="text-sm font-medium w-12 shrink-0">Conta:</label>
+                  <Select
+                    value={composerData.account}
+                    onValueChange={(v) =>
+                      setComposerData((d) => ({ ...d, account: v }))
+                    }
+                  >
+                    <SelectTrigger className="flex-1">
+                      <SelectValue />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="precision">Precision Crédito</SelectItem>
+                      <SelectItem value="power">Power Real Estate</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              ) : (
+                <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                  <Mail className="h-3.5 w-3.5 shrink-0" />
+                  <span>
+                    {hasRole(user, 'indexacao')
+                      ? 'Envio pela conta partilhada de Indexação.'
+                      : 'Envio pela sua conta pessoal — configure em Perfil > Configuração de Webmail.'}
+                  </span>
+                </div>
+              )}
 
               {/* Drag & Drop upload zone */}
               <div
@@ -2295,6 +2384,27 @@ const WebmailPage = () => {
                   className="min-h-[200px] resize-y"
                   rows={12}
                 />
+                {/* Pré-visualização da assinatura que será anexada automaticamente
+                    pelo backend ao enviar. Cada user pode ter uma assinatura por
+                    empresa (UCR) — mostra a da empresa ativa ou a global. */}
+                {resolvedSignature && htmlToText(resolvedSignature).trim() ? (
+                  <div className="mt-2 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 p-3">
+                    <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-muted-foreground">
+                      <Mail className="h-3.5 w-3.5" />
+                      Assinatura (anexada automaticamente no envio)
+                    </div>
+                    <div
+                      className="text-xs text-muted-foreground/90 prose prose-sm max-w-none [&_a]:text-primary"
+                      dangerouslySetInnerHTML={{
+                        __html: sanitizeEmailHtml(resolvedSignature),
+                      }}
+                    />
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs text-muted-foreground/70">
+                    Sem assinatura configurada — pode definir a sua em Perfil &gt; Assinatura de Email.
+                  </p>
+                )}
               </div>
             </div>
 
@@ -2543,6 +2653,7 @@ const WebmailPage = () => {
         </Dialog>
         </div>
       </TooltipProvider>
+      )}
     </DashboardLayout>
   );
 };

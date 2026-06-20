@@ -11,7 +11,7 @@ Popula a BD de dev com dados altamente realistas e completos:
   - Tarefas e task_logs
   - Prazos (deadlines)
   - Comunicados (announcements)
-  - Co-proponentes quando aplicável
+  - 2º Titular / Fiador quando aplicável
   - Vendedor associado
 
 Uso:
@@ -381,7 +381,7 @@ def gerar_cliente_completo():
 
 
 # ──────────────────────────────────────────────────────────────────
-# CO-PROPONENTE
+# 2º TITULAR / FIADOR
 # ──────────────────────────────────────────────────────────────────
 
 def gerar_co_proponente():
@@ -551,7 +551,7 @@ def gerar_processo_completo(process_number, cliente, consultores, indexadores, i
         "valuation_notes": f"Avaliação realizada por perito credenciado pelo {banco_avaliacao}." if banco_avaliacao else None,
     }
 
-    # ── Co-proponente ────────────────────────────────────────────
+    # ── 2º Titular / Fiador ────────────────────────────────────────────
     compra_sozinho = random.choices([True, False], weights=[65, 35])[0]
     co_proponente = gerar_co_proponente() if not compra_sozinho else None
 

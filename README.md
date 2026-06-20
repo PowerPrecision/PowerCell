@@ -93,6 +93,9 @@ PowerCell/
 │   │   │   └── ThemeContext.js  # Light/Dark mode
 │   │   ├── services/
 │   │   │   └── api.js          # Axios + interceptors (429 retry)
+│   │   ├── utils/
+│   │   │   ├── roleUtils.js          # Helpers de roles/permissões
+│   │   │   └── workflowStatuses.js   # KNOWN_PROCESS_STATUSES + buildStatusOptions (baseline estático + fallback p/ dropdown de estado)
 │   │   └── layouts/
 │   │       └── DashboardLayout.js # Sidebar + header
 │   ├── vercel.json            # SPA rewrite + security headers
@@ -189,8 +192,10 @@ PowerCell/
 - **Sincronização automática**: Background job sincroniza emails via IMAP (30 dias)
 - **Sincronização manual**: Botão "Sincronizar" no WebmailPage para trigger imediato
 - **Múltiplas contas**: Suporte a Precision Crédito e Power Real Estate (IMAP separado)
+- **Seletor de conta no composer (role-based)**: O seletor "Conta:" (Precision/Power) só aparece para admin/CEO/diretor (`canUseGlobalAccounts`). Os restantes perfis (consultor, intermediário, administrativo, indexação) enviam obrigatoriamente pela conta pessoal (ou partilhada, no caso de Indexação) — o seletor é ocultado e o pedido usa `account=personal`. Erros de envio (ex.: 403 por falta de config pessoal) mostram a mensagem acionável do backend num toast alargado (8s).
 - **Pastas padrão e personalizadas**: 5 pastas padrão (Inbox, Sent, Starred, Drafts, Trash) + pastas personalizadas criadas pelo utilizador
 - **Per-user personal config**: Cada utilizador configura o seu IMAP/SMTP em Perfil > Config Webmail
+- **Assinatura por empresa (role-aware)**: Cada user pode ter uma assinatura diferente por empresa (`user_company_roles.signature`) e ainda uma global (`users.email_signature`). O `send_email` resolve a assinatura pela **empresa ativa** da sessão (header `X-Company-Id`). Prioridade: (1) UCR da empresa ativa → (2) assinatura global do user → (3) UCR da empresa default → (4) UCR de qualquer empresa → (5) assinatura do sistema. O composer do Webmail mostra uma pré-visualização da assinatura que será anexada no envio.
 - **Shared role accounts**: Indexação/Suporte usam conta partilhada global (Google OAuth ou IMAP)
 - **System SMTP (Bloco A)**: Emails transacionais do sistema (documentação, alertas) via SMTP global configurado pelo Admin
 - **Smart Threading**: Threading automático por In-Reply-To/References + tag `[Proc-{id}]` no assunto

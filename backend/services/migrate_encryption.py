@@ -94,7 +94,7 @@ async def migrate_processes_encryption(dry_run: bool = False, batch_size: int = 
                                     )
                                     needs_update = True
                 
-                # Verificar listas de co-compradores
+                # Verificar listas de 2º Titular / Fiador
                 for list_field in ["co_buyers", "co_applicants"]:
                     if list_field in process and isinstance(process[list_field], list):
                         fields_to_encrypt = SENSITIVE_FIELDS.get(list_field, [])

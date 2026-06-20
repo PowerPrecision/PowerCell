@@ -781,6 +781,50 @@ h1, .title-truncate {
 .dark .border-gray-300 { border-color: hsl(222 14% 28%) !important; }
 
 /* ============================================
+   READ-ONLY CARD FIELDS — Process Details
+   When a card is in read-only mode (not being edited),
+   disabled inputs/selects/textareas appear as plain text
+   instead of greyed-out inputs.
+   ============================================ */
+.read-only-card input:disabled,
+.read-only-card textarea:disabled,
+.read-only-card select:disabled {
+  opacity: 1 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  height: auto !important;
+  min-height: 1.5rem !important;
+  cursor: default !important;
+  color: hsl(var(--foreground)) !important;
+  pointer-events: none !important;
+  -webkit-text-fill-color: hsl(var(--foreground)) !important;
+}
+
+.read-only-card input[type="checkbox"]:disabled {
+  opacity: 0.5 !important;
+  width: 1rem !important;
+  height: 1rem !important;
+  min-height: 1rem !important;
+  border: 1px solid hsl(var(--border)) !important;
+  cursor: default !important;
+}
+
+.read-only-card [data-disabled="true"],
+.read-only-card button[data-disabled="true"] {
+  opacity: 1 !important;
+  border: none !important;
+  background: transparent !important;
+  box-shadow: none !important;
+  padding: 0 !important;
+  height: auto !important;
+  min-height: 1.5rem !important;
+  color: hsl(var(--foreground)) !important;
+  pointer-events: none !important;
+}
+
+/* ============================================
    PRINT STYLES — Recibo de Vencimento
    Ao imprimir (window.print()), esconde tudo
    excepto o conteúdo do modal de recibo.

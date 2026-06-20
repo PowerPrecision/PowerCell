@@ -180,5 +180,13 @@ async def list_actions(
             {"id": "send_email", "label": "Enviar email (template)", "config_fields": [
                 {"key": "template", "label": "Template do email", "type": "select_email_template"},
             ]},
+            # Pacote D — Criar tarefa automaticamente. Builder visual:
+            # "Criar tarefa: [Input: título], urgência: [Select], atribuída a [Select: role]"
+            {"id": "create_task", "label": "Criar tarefa", "config_fields": [
+                {"key": "title", "label": "Título da tarefa (usar {client_name}, {status})", "type": "text", "default": "Contactar {client_name}"},
+                {"key": "urgency", "label": "Urgência", "type": "select", "options": ["low", "medium", "high"], "default": "medium", "option_labels": {"low": "Baixa", "medium": "Média", "high": "Alta"}},
+                {"key": "assigned_role", "label": "Atribuída a (role)", "type": "select", "options": ["consultor", "intermediario", "mediador", "indexacao"], "option_labels": {"consultor": "Consultor", "intermediario": "Intermediário", "mediador": "Mediador", "indexacao": "Indexação"}},
+                {"key": "due_in_days", "label": "Prazo (dias, opcional)", "type": "number", "default": 7},
+            ]},
         ]
     }

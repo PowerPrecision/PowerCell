@@ -451,6 +451,7 @@ async def send_email(
     reply_to: Optional[str] = None,
     skip_proc_tag: bool = False,
     from_email: Optional[str] = None,
+    active_company_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -461,6 +462,11 @@ async def send_email(
             get_system_transporter() para obter SMTP específico antes do
             fallback padrão (contas globais). Zero downtime — fallback
             para contas existentes se config não encontrada.
+        active_company_id: ID da empresa ativa na sessão do utilizador
+            (lido do header X-Company-Id pelo endpoint). Quando fornecido,
+            a assinatura da UCR desta empresa tem prioridade sobre a
+            assinatura global do utilizador — cada user pode ter uma
+            assinatura diferente por empresa.
     do processo.
 
     Esta função é o ponto central de saída de emails do CRM. É utilizada por
@@ -645,19 +651,44 @@ async def send_email(
     # === RESOLVER ASSINATURA DE EMAIL ===
     # A assinatura é injetada no corpo ANTES da construção MIME para que
     # funcione tanto no caminho Resend como no SMTP directo.
-    # Prioridade: UCR da empresa > users.email_signature (global) > system_smtp.signature
+    #
+    # Cada user pode ter uma assinatura diferente por empresa (UCR) e ainda
+    # uma assinatura global (users.email_signature). A empresa ATIVA da sessão
+    # (passada via active_company_id pelo endpoint, lido do header X-Company-Id)
+    # tem prioridade máxima — é o contexto que o utilizador selecionou.
+    #
+    # Prioridade:
+    #   1. UCR da empresa ATIVA (active_company_id) — contexto da sessão
+    #   2. users.email_signature — assinatura global do utilizador
+    #   3. UCR da empresa default (users.company)
+    #   4. UCR de qualquer empresa
+    #   5. system_smtp.email_signature — assinatura do sistema
     resolved_signature = None
+    sig_source = "none"
     if account and account.name == "system_smtp":
         resolved_signature = system_email_signature
+        sig_source = "system"
     elif created_by:
         try:
             sender_user = await db.users.find_one(
                 {"id": created_by},
                 {"email_signature": 1, "company": 1, "_id": 0}
             )
-            # Prioridade 1: assinatura global do utilizador
-            resolved_signature = sender_user.get("email_signature") if sender_user else None
-            # Prioridade 2: UCR da empresa default
+            # Prioridade 1: UCR da empresa ATIVA (contexto da sessão)
+            if not resolved_signature and active_company_id and active_company_id != "default":
+                ucr_active = await db.user_company_roles.find_one(
+                    {"user_id": created_by, "company_id": active_company_id},
+                    {"signature": 1, "_id": 0}
+                )
+                if ucr_active and ucr_active.get("signature"):
+                    resolved_signature = ucr_active["signature"]
+                    sig_source = f"ucr_active({active_company_id})"
+            # Prioridade 2: assinatura global do utilizador
+            if not resolved_signature and sender_user:
+                resolved_signature = sender_user.get("email_signature")
+                if resolved_signature:
+                    sig_source = "user_global"
+            # Prioridade 3: UCR da empresa default
             if not resolved_signature and sender_user:
                 default_company = sender_user.get("company")
                 if default_company:
@@ -667,7 +698,8 @@ async def send_email(
                     )
                     if ucr and ucr.get("signature"):
                         resolved_signature = ucr["signature"]
-            # Prioridade 3: UCR de qualquer empresa
+                        sig_source = f"ucr_default({default_company})"
+            # Prioridade 4: UCR de qualquer empresa
             if not resolved_signature:
                 ucr_any = await db.user_company_roles.find_one(
                     {"user_id": created_by, "signature": {"$exists": True, "$ne": None, "$ne": ""}},
@@ -675,9 +707,11 @@ async def send_email(
                 )
                 if ucr_any and ucr_any.get("signature"):
                     resolved_signature = ucr_any["signature"]
-            # Fallback: assinatura do sistema
+                    sig_source = "ucr_any"
+            # Prioridade 5: assinatura do sistema (fallback)
             if not resolved_signature and system_email_signature:
                 resolved_signature = system_email_signature
+                sig_source = "system_fallback"
         except Exception:
             pass
 
@@ -689,7 +723,7 @@ async def send_email(
         sig_text = re.sub(r'<[^>]+>', '', resolved_signature).strip()
         if sig_text:
             body = f"{body}\n\n---\n{sig_text}"
-        logger.info(f"[Send Email] Assinatura injetada no corpo do email (source={'system' if account and account.name == 'system_smtp' else 'user'})")
+        logger.info(f"[Send Email] Assinatura injetada no corpo do email (source={sig_source}, active_company_id={active_company_id!r})")
 
     try:
         # === TAG MÁGICA: Injetar [Proc-{id}] no assunto ===

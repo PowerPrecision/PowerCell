@@ -4,22 +4,27 @@ ROTAS PÚBLICAS - CREDITOIMO
 ====================================================================
 Endpoints públicos (sem autenticação).
 
-FLUXO DE REGISTO (Triagem Manual):
+FLUXO DE REGISTO (Pacote D — Criação Automática + Email de Convite):
 1. Formulário público cria/atualiza ficha de cliente (Upsert por NIF/Email)
-2. Cliente fica com lead_status="new" → aparece na página de Registos
-3. Consultor/Admin faz triagem → clica "Criar Processo" → processo é criado
-4. lead_status muda para "converted" → cliente desaparece dos Registos
+2. Cria AUTOMATICAMENTE um processo em "pre_registo" (Pacote D)
+3. Gera magic link JWT + short_id e guarda em portal_tokens
+4. Envia email de convite para o Portal do Cliente via send_email(force_system=True)
+5. Cliente fica com lead_status="new" → aparece na página de Registos para triagem
+6. Consultor/Admin faz triagem → muda status, atribui consultor, etc.
 
 REGRAS DE NEGÓCIO:
-- NÃO se cria processo na submissão pública (triagem manual obrigatória)
+- A partir do Pacote D, o processo É criado na submissão pública (pre_registo)
+- O cliente recebe imediatamente o link do portal por email
+- O staff continua a fazer triagem (mudar status, atribuir, etc.)
 - Um cliente pode ter vários processos
-- O processo só existe após aprovação manual pelo staff
 
 SEGURANÇA: Rate limiting aplicado para prevenir abusos.
 ====================================================================
 """
+import os
 import re
 import uuid
+import asyncio
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Request, BackgroundTasks
@@ -265,15 +270,185 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             logger.warning(f"Não foi possível criar pasta S3 para cliente {client_id}: {e}")
     
     # =========================================
-    # NOTA: NÃO se cria processo nesta fase.
-    # O processo só é criado quando o staff aprova
-    # o registo na página de "Registos de Clientes".
-    # Isto garante triagem manual antes de criar
-    # documentos na coleção `processes`.
+    # PACOTE D — CRIAÇÃO AUTOMÁTICA DE PROCESSO + EMAIL DE CONVITE
     # =========================================
-    
+    # Anteriormente: NÃO se criava processo nesta fase (triagem manual
+    # obrigatória). A partir do Pacote D, o formulário público cria
+    # automaticamente um processo em "pre_registo" e envia o email de
+    # convite para o Portal do Cliente usando o email do sistema.
+    #
+    # Fluxo:
+    # 1. Criar processo com status="pre_registo", is_active=True
+    # 2. Gerar JWT magic_link (create_client_magic_token) + short_id
+    # 3. Guardar em portal_tokens (upsert por process_id)
+    # 4. Enviar email de convite via send_email(force_system=True)
+    #
+    # Nota: o staff continua a poder fazer triagem (mudar status,
+    # atribuir consultor, etc.) — o processo em pre_registo aparece
+    # no Kanban. O cliente recebe imediatamente o link do portal.
     # =========================================
-    # PÓS-REGISTO: Email, Notificações, Alertas
+    process_id = None
+    magic_link_sent = False
+    try:
+        from services.process_service import get_next_process_number
+        from services.portal_security import create_client_magic_token
+        from services.email_service import send_email
+
+        process_number = await get_next_process_number()
+        process_id = str(uuid.uuid4())
+        now_iso = datetime.now(timezone.utc).isoformat()
+
+        process_doc = {
+            "id": process_id,
+            "process_number": process_number,
+            "client_id": client_id,
+            "client_ids": [client_id],
+            "client_name": clean_name,
+            "client_email": clean_email,
+            "client_phone": clean_phone,
+            "process_type": process_type,
+            "type": process_type,
+            "status": "pre_registo",
+            "is_active": True,
+            "is_deleted": False,
+            "fonte": "public_form",
+            "has_property": has_property,
+            "created_at": now_iso,
+            "updated_at": now_iso,
+            "created_by": "public_form",
+        }
+        await db.processes.insert_one(process_doc)
+
+        # Atualizar client.process_ids
+        await db.clients.update_one(
+            {"id": client_id},
+            {"$push": {"process_ids": process_id}}
+        )
+        logger.info(
+            f"[PUBLIC FORM] Processo {process_id} (PROC-{process_number:04d}) "
+            f"criado em pre_registo para cliente {client_id}"
+        )
+
+        # ── Pacote G — Gerar pedidos de documentos obrigatórios ───────────
+        # Cria automaticamente os REQUESTED docs com base na checklist
+        # definida pelo CEO/Diretor no SystemConfig (secção mandatory_documents).
+        # Executa em background — não bloqueia a resposta ao cliente.
+        try:
+            from services.portal_documents_notify import generate_mandatory_document_requests
+            asyncio.create_task(
+                generate_mandatory_document_requests(
+                    process_id=process_id,
+                    company_id=process_doc.get("company") or process_doc.get("company_id"),
+                    requested_by="public_form",
+                    requested_by_name="Formulário Público",
+                )
+            )
+        except Exception as e_md:
+            logger.warning(
+                f"[PUBLIC FORM] Falha ao agendar geração de pedidos obrigatórios "
+                f"para processo {process_id}: {e_md}"
+            )
+
+        # Gerar magic link JWT + short_id
+        import secrets as _secrets
+        from datetime import datetime as _dt, timezone as _tz
+        token = create_client_magic_token(process_id)
+        short_id = _secrets.token_urlsafe(6)[:8]
+        await db.portal_tokens.update_one(
+            {"process_id": process_id},
+            {
+                "$set": {
+                    "short_id": short_id,
+                    "jwt_token": token,
+                    "process_id": process_id,
+                    "client_id": client_id,
+                    "created_by": "public_form",
+                    "source": "public_form_auto",
+                    "updated_at": _dt.now(_tz.utc),
+                },
+                "$setOnInsert": {
+                    "created_at": _dt.now(_tz.utc),
+                },
+            },
+            upsert=True,
+        )
+
+        # Construir URL do portal (Referer/Origin → env var FRONTEND_URL)
+        from urllib.parse import urlparse
+        frontend_url = ""
+        referer = request.headers.get("referer") or request.headers.get("origin")
+        if referer:
+            parsed = urlparse(referer)
+            if parsed.scheme and parsed.netloc:
+                frontend_url = f"{parsed.scheme}://{parsed.netloc}"
+        if not frontend_url:
+            frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+        magic_link = f"{frontend_url}/portal/{short_id}"
+
+        # Enviar email de convite para o Portal do Cliente usando o
+        # email do sistema (force_system=True, system_purpose="NOTIFICATIONS")
+        html_body = f"""
+        <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
+            <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
+                <h1 style="margin: 0; font-size: 20px;">Bem-vindo ao seu Portal do Cliente</h1>
+            </div>
+            <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
+                <p style="font-size: 16px; color: #1e293b;">Olá {clean_name},</p>
+                <p style="font-size: 14px; color: #475569;">
+                    Recebemos o seu registo através do formulário público. O seu processo de crédito habitação foi criado e está em fase de pré-registo.
+                </p>
+                <p style="font-size: 14px; color: #475569;">
+                    Aceda ao seu Portal do Cliente para acompanhar o seu processo, enviar documentos e comunicar com a sua equipa:
+                </p>
+                <div style="text-align: center; margin: 30px 0;">
+                    <a href="{magic_link}" style="display: inline-block; background: #0F766E; color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
+                        Aceder ao meu Portal
+                    </a>
+                </div>
+                <p style="font-size: 12px; color: #94a3b8; text-align: center;">
+                    Ou copie este link no seu navegador:<br>
+                    <span style="color: #64748b;">{magic_link}</span>
+                </p>
+                <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
+                    Este link é válido por 90 dias. Se precisar de ajuda, contacte-nos.
+                </p>
+            </div>
+        </div>
+        """
+        text_body = (
+            f"Olá {clean_name},\n\n"
+            f"Recebemos o seu registo através do formulário público. O seu processo "
+            f"de crédito habitação foi criado e está em fase de pré-registo.\n\n"
+            f"Aceda ao seu Portal do Cliente para acompanhar o seu processo:\n"
+            f"{magic_link}\n\n"
+            f"Este link é válido por 90 dias.\n\n"
+            f"Power Precision · Crédito Habitação"
+        )
+        await send_email(
+            account_name="power",
+            to_emails=[clean_email],
+            subject=f"Bem-vindo ao seu Portal do Cliente — {clean_name}",
+            body=text_body,
+            body_html=html_body,
+            process_id=process_id,
+            force_system=True,
+            system_purpose="NOTIFICATIONS",
+        )
+        magic_link_sent = True
+        logger.info(
+            f"[PUBLIC FORM] Email de convite do Portal enviado para {clean_email} "
+            f"(processo {process_id}, short_id {short_id})"
+        )
+    except Exception as e:
+        # Não falhar o registo se o email falhar — o processo fica criado
+        # e o staff pode reenviar o link manualmente a partir do CRM.
+        logger.warning(
+            f"[PUBLIC FORM] Falha ao criar processo/enviar email de convite "
+            f"para cliente {client_id}: {e}"
+        )
+
+    # =========================================
+    # PÓS-REGISTO: Email de Confirmação, Notificações, Alertas
     # =========================================
     
     # Obter o código de acesso ao portal do cliente (para incluir no email)
@@ -381,6 +556,8 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             "success": True,
             "message": "Registo criado com sucesso. A equipa entrará em contacto.",
             "client_id": client_id,
+            "process_id": process_id,  # Pacote D — processo criado em pre_registo
+            "magic_link_sent": magic_link_sent,  # Pacote D — email de convite enviado
             "lead_status": "new",  # Pendente de triagem
             "is_new_client": is_new_client,
             "has_property": has_property,

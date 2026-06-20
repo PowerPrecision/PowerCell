@@ -352,14 +352,6 @@ def get_redis_settings():
 
 
 # ====================================================================
-# TRELLO CONFIG (opcional - para integração futura)
-# ====================================================================
-TRELLO_API_KEY = os.environ.get('TRELLO_API_KEY', '')
-TRELLO_TOKEN = os.environ.get('TRELLO_TOKEN', '')
-TRELLO_BOARD_ID = os.environ.get('TRELLO_BOARD_ID', '')
-
-
-# ====================================================================
 # AI CONFIG - CONFIGURAÇÃO DE MODELOS DE IA
 # ====================================================================
 # Chaves de API para diferentes providers

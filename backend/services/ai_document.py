@@ -2258,7 +2258,7 @@ def build_update_data_from_extraction(
                     if applicant_data.get('rendimento_mensal'):
                         financial_update['rendimento_mensal'] = applicant_data['rendimento_mensal']
         
-        # Guardar array de co-proponentes se houver mais de 1
+        # Guardar array de 2º Titular / Fiador se houver mais de 1
         if len(co_applicants) > 1:
             update_data["co_applicants"] = co_applicants
             # Guardar rendimento agregado
@@ -2502,7 +2502,7 @@ def build_update_data_from_extraction(
                     if buyer_data.get('telefone'):
                         update_data['client_phone'] = buyer_data['telefone']
         
-        # Guardar array de co-compradores
+        # Guardar array de 2º Titular / Fiador
         if len(co_buyers) > 0:
             update_data["co_buyers"] = co_buyers
             if len(co_buyers) > 1:

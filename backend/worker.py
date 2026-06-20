@@ -7,7 +7,6 @@ Isto reduz significativamente o consumo de memória no arranque (idle).
 
 Módulos carregados APENAS quando necessário:
 - services.scraper (BeautifulSoup/Playwright -> Pesado)
-- services.trello (Cliente HTTP -> Médio)
 - services.email_service (SMTP/API -> Médio)
 - services.client_match (Pandas/Fuzzy -> MUITO PESADO)
 ====================================================================
@@ -41,7 +40,6 @@ except ImportError as e:
 # ====================================================================
 # NOTA: Os seguintes módulos NÃO são importados aqui (Lazy Loading):
 # - services.scraper (scrape_property_url)
-# - services.trello (trello_service)
 # - services.email_service (email_service)
 # - services.client_match (match_leads_to_clients)
 # - services.scheduled_tasks (ScheduledTasksService)
@@ -113,15 +111,6 @@ async def process_task(task: dict):
             content = payload.get("content")
             if to_email and subject and content:
                 result = await email_service.send_email(to_email, subject, content)
-        
-        # ============================================================
-        # SYNC TRELLO - Importa Trello service apenas quando necessário
-        # ============================================================
-        elif task_type == "sync_trello":
-            # LAZY IMPORT: Carrega o serviço Trello
-            from services.trello import trello_service
-            
-            result = await trello_service.sync_board()
         
         # ============================================================
         # TIPO DESCONHECIDO

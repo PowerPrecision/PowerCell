@@ -23,7 +23,6 @@ import {
   Mail,
   HardDrive,
   Brain,
-  Trello,
   Database,
   Bell,
   ChevronRight,
@@ -43,7 +42,6 @@ const serviceIcons = {
   email: Mail,
   storage: HardDrive,
   ai: Brain,
-  trello: Trello,
   backup: Database,
   notifications: Bell
 };

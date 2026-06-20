@@ -49,7 +49,6 @@ from services.alerts import (
     notify_cpcv_or_deed_document_check
 )
 from services.realtime_notifications import notify_process_status_change
-from services.trello import trello_service, status_to_trello_list, build_card_description
 from services.encryption import decrypt_client_data
 
 # Importar serviços refatorados
@@ -542,24 +541,6 @@ def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
     return {"$and": word_filters}
 
 
-async def sync_process_to_trello(process: dict):
-    """Sincronizar processo com o Trello (nome e descrição do card)."""
-    if not process.get("trello_card_id") or not trello_service.api_key:
-        return False
-    
-    try:
-        description = build_card_description(process)
-        await trello_service.update_card(
-            process["trello_card_id"],
-            name=process.get("client_name", "Sem nome"),
-            desc=description
-        )
-        logger.info(f"Card {process['trello_card_id']} atualizado no Trello: {process.get('client_name')}")
-        return True
-    except Exception as e:
-        logger.error(f"Erro ao sincronizar com Trello: {e}")
-        return False
-
 
 # ====================================================================
 # CONFIGURAÇÃO DO ROUTER
@@ -629,12 +610,23 @@ async def generate_magic_link(
     """
     import secrets
 
+    # Nota: não filtramos is_deleted aqui — queremos distinguir
+    # "processo inexistente" (404 genérico) de "processo eliminado"
+    # (404 com mensagem acionável). O consultor pode ver processos
+    # eliminados no CRM (GET /processes/{id} também não filtra), mas
+    # não deve gerar magic links para eles (o Portal do Cliente recusa
+    # acessos a processos eliminados — ver backend/routes/portal.py).
     process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"id": process_id},
         {"_id": 0}
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if process.get("is_deleted"):
+        raise HTTPException(
+            status_code=404,
+            detail="Este processo foi eliminado. Restaure-o para gerar o magic link."
+        )
 
     # Gerar magic link JWT
     token = create_client_magic_token(process_id)
@@ -696,12 +688,19 @@ async def send_magic_link_email(
     import secrets
     from services.email_service import send_email
 
+    # Mesma lógica do generate_magic_link: distinguir "não encontrado"
+    # de "eliminado", para o consultor receber uma mensagem acionável.
     process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"id": process_id},
         {"_id": 0}
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if process.get("is_deleted"):
+        raise HTTPException(
+            status_code=404,
+            detail="Este processo foi eliminado. Restaure-o para enviar o magic link por email."
+        )
 
     client_email = process.get("client_email", "")
     client_name = process.get("client_name", "Cliente")
@@ -928,6 +927,22 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     
     # Registar no histórico
     await log_history(process_id, user, "Criou processo")
+    
+    # === Pacote G — Gerar pedidos de documentos obrigatórios ===
+    # Cria automaticamente REQUESTED docs com base na checklist do SystemConfig
+    # (secção mandatory_documents). Executa em background.
+    try:
+        from services.portal_documents_notify import generate_mandatory_document_requests
+        asyncio.create_task(
+            generate_mandatory_document_requests(
+                process_id=process_id,
+                company_id=process_doc.get("company") or process_doc.get("company_id"),
+                requested_by=user.get("id"),
+                requested_by_name=user.get("name", "Staff"),
+            )
+        )
+    except Exception as md_err:
+        logger.warning(f"[PACOTE-G] Falha ao agendar mandatory docs para processo {process_id}: {md_err}")
     
     # === WEBSOCKET BROADCAST: Novo processo criado ===
     await broadcast_process_delta(
@@ -1212,6 +1227,21 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     except Exception as e:
         logger.warning(f"Erro ao criar documentos padrão para processo {process_id}: {e}")
     
+    # === Pacote G — Gerar pedidos da checklist de Documentos Obrigatórios ===
+    # Soma-se aos pedidos auto_default acima (idempotente por source).
+    try:
+        from services.portal_documents_notify import generate_mandatory_document_requests
+        asyncio.create_task(
+            generate_mandatory_document_requests(
+                process_id=process_id,
+                company_id=process_doc.get("company") or process_doc.get("company_id"),
+                requested_by=user["id"],
+                requested_by_name=user.get("name", "Staff"),
+            )
+        )
+    except Exception as md_err:
+        logger.warning(f"[PACOTE-G] Falha ao agendar mandatory docs para processo {process_id}: {md_err}")
+    
     # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     
@@ -1245,12 +1275,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         mediador_names=[user["name"]] if user["role"] == UserRole.INTERMEDIARIO else [],
         updated_at=now
     )
-    
-    # Sincronizar com Trello (criar cartão)
-    try:
-        await sync_process_to_trello(process_doc)
-    except Exception as e:
-        logger.warning(f"Erro ao sincronizar com Trello: {e}")
     
     # Desencriptar para a resposta
     response_doc = decrypt_sensitive_data(process_doc)
@@ -1395,12 +1419,18 @@ async def get_processes(
         query["status"] = status
     
     if search:
-        name_regex = create_accent_insensitive_regex(search)
+        # Pesquisa textual: faz $match em client_name (multiword + sem
+        # acentos via build_multiword_search_filter), client_email e
+        # process_number. Assim, ao pesquisar "Manuel" aparecem TODOS os
+        # processos desse cliente, mesmo que tenha vários processos
+        # ativos em fases diferentes.
+        name_filter = build_multiword_search_filter(search, "client_name")
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
         search_condition = {
             "$or": [
-                {"client_name": name_regex},
-                {"client_email": simple_regex}
+                name_filter,
+                {"client_email": simple_regex},
+                {"process_number": simple_regex},
             ]
         }
         if query:
@@ -2103,51 +2133,82 @@ async def get_my_clients(
     request: Request,
     page: int = Query(1, ge=1, description="Número da página"),
     size: int = Query(50, ge=1, le=100, description="Itens por página"),
+    show_inactive: bool = Query(False, description="Incluir processos terminais (concluídos/desistências). "
+                                "Quando True, o cliente cujo único processo ficou terminal continua visível na lista."),
     user: dict = Depends(require_roles([
-    UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
+    UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
     """
     Obter lista de clientes atribuídos ao utilizador atual.
-    
+
     OTIMIZAÇÕES APLICADAS:
     - MongoDB Projection: Apenas campos necessários
     - Paginação: Não carrega todos os clientes de uma vez
     - Desencriptação seletiva: Só client_phone e client_nif
-    
+
     Retorna uma lista com:
     - Nome do cliente
     - Fase do processo
     - Ações pendentes (tarefas, documentos a atualizar)
-    
+
     Permissões:
     - Consultor: Apenas os seus clientes (assigned_consultor_ids ou assigned_consultor_id)
     - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_ids ou criados por eles)
     - Admin/CEO: Todos os clientes (para supervisão)
-    
+
     Suporta múltiplos consultores e intermediários por processo.
+
+    BUG FIX (client disappears when process is terminal):
+    Antes, a query filtrava is_active≠False E status∉INACTIVE_STATUSES — quando
+    o ÚNICO processo de um cliente ficava terminal, o cliente desaparecia da
+    lista mesmo com o toggle "Mostrar Concluídos" ativo no frontend, porque o
+    backend nunca chegava a retorná-lo. Agora, quando show_inactive=True, esses
+    filtros são relaxados para que os processos terminais também sejam
+    retornados (o frontend continua a filtrar por status terminal via
+    TERMINAL_STATUSES quando o toggle está off).
     """
     user_id = user["id"]
     user_email = user.get("email", "")
     role = get_effective_role(request, user)
-    
+
     # Construir query baseada no papel do utilizador
+    #
+    # SINCRONIZAÇÃO COM "OS Meus Processos":
+    # A query de my-clients deve usar EXATAMENTE o mesmo critério base que
+    # my-processes (assigned_consultor_ids + is_active + status), para que
+    # os clientes listados correspondam aos processos visíveis.
+    # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
+    #
+    # Quando show_inactive=True, relaxamos os filtros de is_active e status
+    # para que os clientes cujos processos ficaram terminais continuem visíveis.
     if role == UserRole.CONSULTOR:
-        query = {
-            "$or": [
+        and_clauses = [
+            {"$or": [
                 {"assigned_consultor_ids": user_id},
                 {"assigned_consultor_id": user_id}
-            ]
-        }
+            ]},
+            {"is_deleted": {"$ne": True}}
+        ]
+        if not show_inactive:
+            # Mesmo filtro de activos que my-processes (view_mode="active_only")
+            and_clauses.append({"is_active": {"$ne": False}})
+            and_clauses.append({"status": {"$nin": INACTIVE_STATUSES}})
+        query = {"$and": and_clauses}
     elif role == UserRole.INTERMEDIARIO:
-        query = {
-            "$or": [
+        and_clauses = [
+            {"$or": [
                 {"assigned_mediador_ids": user_id},
                 {"assigned_mediador_id": user_id},
                 {"created_by": user_email}
-            ]
-        }
+            ]},
+            {"is_deleted": {"$ne": True}}
+        ]
+        if not show_inactive:
+            and_clauses.append({"is_active": {"$ne": False}})
+            and_clauses.append({"status": {"$nin": INACTIVE_STATUSES}})
+        query = {"$and": and_clauses}
     elif role == UserRole.INDEXACAO:
         query = {
             "$or": [
@@ -2156,7 +2217,14 @@ async def get_my_clients(
             ]
         }
     else:
-        query = {}
+        # Admin/CEO/Diretor/Administrativo
+        if show_inactive:
+            query = {"is_deleted": {"$ne": True}}
+        else:
+            query = {
+                "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+                "is_active": {"$ne": False}
+            }
     
     # Calcular offset
     skip = (page - 1) * size
@@ -2173,37 +2241,102 @@ async def get_my_clients(
         fields_to_decrypt=["client_phone", "client_nif"]
     )
     
+    # ── BUSCAR LEADS (clientes sem processo) criados pelo utilizador ──
+    # Leads são clientes na tabela 'clients' que NÃO têm processo associado
+    # e foram criados pelo utilizador actual. Estes devem aparecer em
+    # "Os Meus Clientes" juntamente com os clientes dos processos activos.
+    leads = []
+    if role in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
+        leads_query = {
+            "$and": [
+                {"created_by": user_id},
+                {"is_deleted": {"$ne": True}},
+                # Sem processo associado (Lead puro)
+                {"$or": [
+                    {"process_ids": {"$exists": False}},
+                    {"process_ids": []},
+                    {"process_ids": None}
+                ]},
+                # Apenas leads pendentes (não convertidos)
+                {"$or": [
+                    {"lead_status": {"$exists": False}},
+                    {"lead_status": "new"}
+                ]}
+            ]
+        }
+        leads_cursor = await db.clients.find(
+            leads_query,
+            {
+                "_id": 0, "id": 1, "nome": 1, "contacto": 1,
+                "created_at": 1, "updated_at": 1, "fonte": 1,
+                "assigned_to": 1, "lead_status": 1
+            }
+        ).to_list(500)
+        
+        # Desencriptar dados sensíveis dos leads
+        from services.encryption import decrypt_clients_list
+        leads_cursor = decrypt_clients_list(leads_cursor)
+        
+        # Converter leads para o mesmo formato dos clientes de processo
+        for lead in leads_cursor:
+            contacto = lead.get("contacto", {})
+            leads.append({
+                "id": lead.get("id"),
+                "client_id": lead.get("id"),
+                "process_number": None,
+                "client_name": lead.get("nome", "Sem nome"),
+                "client_email": contacto.get("email", ""),
+                "client_phone": contacto.get("telefone", ""),
+                "status": "lead",
+                "status_label": "Lead",
+                "status_color": "#8B5CF6",  # Roxo para distinguir leads
+                "process_type": "lead",
+                "consultor_name": "",
+                "pending_actions": [],
+                "pending_count": 0,
+                "created_at": lead.get("created_at"),
+                "updated_at": lead.get("updated_at"),
+                "deed_date": None,
+                "has_property": False,
+                "is_lead": True  # Flag para identificar leads no frontend
+            })
+    
     # Obter labels das fases do workflow ordenadas
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     status_map = {s["name"]: s for s in statuses}
     
     # Ordenar processos por fase (order do status) e depois por nome
     def get_sort_key(p):
-        """Gera chave de ordenação para processos.
+        """Gera chave de ordenação para processos e leads.
 
         Ordena primeiro pela ordem da fase no workflow (phase_order),
-        depois por nome do cliente em ordem alfabética. Isto garante
-        que processos na mesma fase apareçam ordenados por nome.
+        depois por nome do cliente em ordem alfabética. Leads ficam no
+        início (order=0) para destaque.
 
         Args:
-            p: Dicionário do processo.
+            p: Dicionário do processo ou lead.
 
         Returns:
             tuple: (phase_order, client_name_lower).
         """
+        if p.get("is_lead"):
+            return (0, p.get("client_name", "").lower())  # Leads no topo
         status_info = status_map.get(p.get("status"), {})
         phase_order = status_info.get("order", 999)
         client_name = p.get("client_name", "").lower()
         return (phase_order, client_name)
     
-    processes = sorted(processes, key=get_sort_key)
+    # Combinar processos + leads, ordenar e paginar
+    all_items = processes + leads
+    all_items = sorted(all_items, key=get_sort_key)
     
     # Total e paginação (após ordenação)
-    total = len(processes)
-    processes = processes[skip:skip + size]
+    total = len(all_items)
+    paginated_items = all_items[skip:skip + size]
     
     # Obter tarefas pendentes por processo (apenas IDs necessários)
-    process_ids = [p["id"] for p in processes]
+    # Leads não têm tarefas, pelo que apenas processos com id são pesquisados
+    process_ids = [p["id"] for p in paginated_items if not p.get("is_lead")]
     tasks = await db.tasks.find(
         {
             "process_id": {"$in": process_ids},
@@ -2221,7 +2354,7 @@ async def get_my_clients(
         tasks_by_process[pid].append(task)
     
     # Buscar nomes dos consultores
-    consultor_ids = list(set(p.get("assigned_consultor_id") for p in processes if p.get("assigned_consultor_id")))
+    consultor_ids = list(set(p.get("assigned_consultor_id") for p in paginated_items if p.get("assigned_consultor_id")))
     consultores = await db.users.find(
         {"id": {"$in": consultor_ids}},
         {"_id": 0, "id": 1, "name": 1}
@@ -2230,7 +2363,12 @@ async def get_my_clients(
     
     # Construir lista de clientes com informações enriquecidas
     clients_list = []
-    for p in processes:
+    for p in paginated_items:
+        # Leads já vêm formatados — adicionar directamente
+        if p.get("is_lead"):
+            clients_list.append(p)
+            continue
+        
         status_info = status_map.get(p.get("status"), {})
         pending_tasks = tasks_by_process.get(p["id"], [])
         
@@ -2293,7 +2431,8 @@ async def get_my_clients(
         "size": size,
         "pages": pages,
         "user_id": user_id,
-        "user_role": role
+        "user_role": role,
+        "leads_count": len(leads)
     }
 
 
@@ -2463,20 +2602,6 @@ async def move_process_kanban(
         new_status_label=status_label,
         changed_by=user
     )
-    
-    # === SINCRONIZAR COM TRELLO ===
-    if process.get("trello_card_id") and trello_service.api_key:
-        try:
-            trello_list_name = status_to_trello_list(new_status)
-            if trello_list_name:
-                # Encontrar a lista do Trello pelo nome
-                trello_list = await trello_service.get_list_by_name(trello_list_name)
-                if trello_list:
-                    await trello_service.move_card(process["trello_card_id"], trello_list["id"])
-                    logger.info(f"Card {process['trello_card_id']} movido para {trello_list_name} no Trello")
-        except Exception as e:
-            logger.error(f"Erro ao sincronizar com Trello: {e}")
-            # Não falhar a operação por erro no Trello
     
     # === GATILHO: Fila de espera ao mover para estado terminal ===
     # Se o processo foi atribuído a um indexador e moveu para concluídos/desistências,
@@ -2940,46 +3065,67 @@ async def mark_process_indexed(
         logger.warning(f"[INDEXACAO] Erro ao verificar fila de espera: {waitlist_err}")
 
     # ==================================================================
-    # AUTO-ATRIBUIÇÃO DE CONSULTOR/INTERMEDIÁRIO (FALLBACK)
+    # DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo → Pipeline)
     # ==================================================================
-    # Verifica o campo consultor_id / assigned_consultor_id.
-    # Se já tiver um ID (o consultor original), o processo segue para ele.
-    # Se for nulo ou vazio, o sistema invoca assign_to_least_busy_consultant()
-    # que procura o utilizador com role 'Intermediário' ou 'Consultor' com
-    # menos processos ativos e define esse ID como o novo consultor_id.
+    # Se o processo transitou de pre_registo, dispara a dupla
+    # auto-atribuição (consultor + intermediário em simultâneo).
+    # Caso contrário, usa a lógica de auto-atribuição de consultor apenas.
     consultant_result = None
-    try:
-        from services.process_assignment import assign_to_least_busy_consultant
+    is_pre_registo_transition = (current_status == "pre_registo")
 
-        existing_consultor = (
-            process.get("assigned_consultor_id")
-            or process.get("consultant_id")
-        )
-        if not existing_consultor:
-            logger.info(
-                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} sem consultor. "
-                f"A invocar auto-atribuição..."
+    if is_pre_registo_transition:
+        try:
+            from services.process_assignment import dual_auto_assign_on_pre_registo_transition
+            company_id = process.get("company_id")
+            dual_result = await dual_auto_assign_on_pre_registo_transition(
+                process_id=process_id,
+                company_id=company_id,
+                indexador_user_id=user.get("id"),
             )
-            success, data, msg = await assign_to_least_busy_consultant(process_id)
-            if success:
-                consultant_result = data
+            consultant_result = dual_result
+            logger.info(
+                f"[INDEXACAO-DUAL] Dupla auto-atribuição disparada (pre_registo → pipeline): "
+                f"consultor={dual_result.get('consultant_name', 'N/A')}, "
+                f"intermediario={dual_result.get('mediador_name', 'N/A')}"
+            )
+        except Exception as dual_err:
+            logger.warning(
+                f"[INDEXACAO-DUAL] Erro na dupla auto-atribuição: {dual_err}"
+            )
+    else:
+        # Lógica original: auto-atribuição de consultor apenas (fallback)
+        try:
+            from services.process_assignment import assign_to_least_busy_consultant
+
+            existing_consultor = (
+                process.get("assigned_consultor_id")
+                or process.get("consultant_id")
+            )
+            if not existing_consultor:
                 logger.info(
-                    f"[INDEXACAO-AUTOASSIGN] Auto-atribuição concluída: {msg}"
+                    f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} sem consultor. "
+                    f"A invocar auto-atribuição..."
                 )
+                success, data, msg = await assign_to_least_busy_consultant(process_id)
+                if success:
+                    consultant_result = data
+                    logger.info(
+                        f"[INDEXACAO-AUTOASSIGN] Auto-atribuição concluída: {msg}"
+                    )
+                else:
+                    logger.warning(
+                        f"[INDEXACAO-AUTOASSIGN] Falha na auto-atribuição: {msg}"
+                    )
             else:
-                logger.warning(
-                    f"[INDEXACAO-AUTOASSIGN] Falha na auto-atribuição: {msg}"
+                logger.info(
+                    f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} já tem consultor "
+                    f"({process.get('consultor_name') or existing_consultor}). "
+                    f"A manter atribuição existente."
                 )
-        else:
-            logger.info(
-                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} já tem consultor "
-                f"({process.get('consultor_name') or existing_consultor}). "
-                f"A manter atribuição existente."
+        except Exception as assign_err:
+            logger.warning(
+                f"[INDEXACAO-AUTOASSIGN] Erro na auto-atribuição de consultor: {assign_err}"
             )
-    except Exception as assign_err:
-        logger.warning(
-            f"[INDEXACAO-AUTOASSIGN] Erro na auto-atribuição de consultor: {assign_err}"
-        )
 
     return {
         "success": True,
@@ -2994,7 +3140,73 @@ async def mark_process_indexed(
         } if next_status and next_status != current_status else None,
         "indexer_cleared": process.get("assigned_indexacao_id") is not None,
         "consultant_auto_assigned": consultant_result,
+        # Dupla auto-atribuição (pre_registo → pipeline)
+        "dual_auto_assigned": is_pre_registo_transition,
+        "assignment": consultant_result if is_pre_registo_transition else None,
     }
+
+
+@router.delete("/{process_id}")
+async def delete_process(
+    process_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
+):
+    """Soft delete a process. Does NOT affect the client document."""
+    # Find the process
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    
+    now = datetime.now(timezone.utc)
+    
+    # Soft delete the process
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": {
+            "is_deleted": True,
+            "status": "eliminado",
+            "is_active": False,
+            "deleted_at": now,
+            "deleted_by": user.get("id", ""),
+            "updated_at": now,
+        }}
+    )
+    
+    # Cascade: soft-delete documents and tasks for this process
+    await db.documents.update_many(
+        {"process_id": process_id, "is_deleted": {"$ne": True}},
+        {"$set": {
+            "deleted": True,
+            "is_deleted": True,
+            "deleted_at": now,
+        }}
+    )
+    await db.tasks.update_many(
+        {"process_id": process_id, "is_deleted": {"$ne": True}},
+        {"$set": {
+            "deleted": True,
+            "is_deleted": True,
+            "deleted_at": now,
+        }}
+    )
+    
+    # IMPORTANT: Do NOT touch the client document. Process deletion must be independent.
+    
+    # Log activity
+    await db.process_activities.insert_one({
+        "id": str(uuid.uuid4()),
+        "process_id": process_id,
+        "type": "process_deleted",
+        "description": f"Processo eliminado (soft delete) por {user.get('name', 'Utilizador')}",
+        "created_at": now,
+        "user_id": user.get("id", ""),
+        "user_name": user.get("name", ""),
+    })
+    
+    return {"message": "Processo eliminado com sucesso", "id": process_id}
 
 
 @router.put("/{process_id}", response_model=ProcessResponse)
@@ -3368,7 +3580,16 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_history(process_id, user, "Alterou estado", "status", process["status"], data.status)
             await log_audit_event(process_id, user, "Alterou estado", field="status", old_value=process["status"], new_value=data.status, request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["status"] = data.status
-            
+
+            # ── Sincronizar is_active com o novo estado ──────────────────
+            # Antes, só o endpoint de move (kanban) atualizava o is_active.
+            # Mudar o estado via dropdown (PUT) deixava is_active desactualizado
+            # — um processo em "desistencias" continuava com is_active=True,
+            # causando inconsistência nos filtros da lista de clientes activos.
+            # Agora, alinhamos com a mesma regra do move: terminais → False.
+            inactive_statuses_for_update = ["desistencias", "concluidos", "concluido", "arquivo", "arquivado", "perdido", "eliminado", "eliminados"]
+            update_data["is_active"] = data.status not in inactive_statuses_for_update
+
             # Send email notification (com verificação de preferências)
             if process.get("client_email"):
                 await send_notification_with_preference_check(
@@ -3459,9 +3680,6 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     
     # ── FASE 2: Popular dados do cliente na resposta (retrocompatibilidade) ──
     updated = await populate_client_data(updated)
-    
-    # Sincronizar com Trello (nome e descrição do card)
-    await sync_process_to_trello(updated)
     
     try:
         return ProcessResponse(**updated)

@@ -4271,18 +4271,24 @@ async def create_portal_document_request(
             )
 
         # ── 6. Audit log (fire-and-forget) ──
+        # Pacote D — Indexador silencioso: NÃO regista no histórico se o
+        # utilizador for indexacao (atua de forma totalmente silenciosa
+        # no mural do processo). Os 3 sítios com db.history.insert_one
+        # direto em documents.py NÃO passam por log_history(), pelo que
+        # precisam da mesma barra de bloqueio explícita.
         try:
-            await db.history.insert_one({
-                "id": str(uuid.uuid4()),
-                "process_id": process_id,
-                "user_id": user_id,
-                "user_name": user_name,
-                "action": f"Documento solicitado via portal: {category}",
-                "field": "portal_document_requested",
-                "old_value": None,
-                "new_value": category,
-                "created_at": now,
-            })
+            if user and user.get("role") != "indexacao":
+                await db.history.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "process_id": process_id,
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "action": f"Documento solicitado via portal: {category}",
+                    "field": "portal_document_requested",
+                    "old_value": None,
+                    "new_value": category,
+                    "created_at": now,
+                })
         except Exception as hist_err:
             logging.getLogger(__name__).warning(f"Failed to write audit log: {hist_err}")
 
@@ -4355,23 +4361,26 @@ async def update_portal_document_request(
         )
 
         # Audit log (fire-and-forget)
+        # Pacote D — Indexador silencioso: NÃO regista no histórico se o
+        # utilizador for indexacao (mesma barra de bloqueio do log_history).
         try:
             status_labels = {
                 "REQUESTED": "Pendente",
                 "RECEIVED": "Recebido",
                 "UPLOADED": "Submetido pelo cliente",
             }
-            await db.history.insert_one({
-                "id": str(uuid.uuid4()),
-                "process_id": process_id,
-                "user_id": user_id,
-                "user_name": user_name,
-                "action": f"Status do documento alterado: {old_status} → {new_status}",
-                "field": "portal_document_status",
-                "old_value": old_status,
-                "new_value": new_status,
-                "created_at": now,
-            })
+            if user and user.get("role") != "indexacao":
+                await db.history.insert_one({
+                    "id": str(uuid.uuid4()),
+                    "process_id": process_id,
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "action": f"Status do documento alterado: {old_status} → {new_status}",
+                    "field": "portal_document_status",
+                    "old_value": old_status,
+                    "new_value": new_status,
+                    "created_at": now,
+                })
         except Exception as hist_err:
             logging.getLogger(__name__).warning(f"Failed to write audit log: {hist_err}")
 
@@ -4410,18 +4419,21 @@ async def delete_portal_document_request(
 
     await db.documents.delete_one({"id": document_id, "process_id": process_id})
 
+    # Pacote D — Indexador silencioso: NÃO regista no histórico se o
+    # utilizador for indexacao (mesma barra de bloqueio do log_history).
     now = datetime.now(timezone.utc).isoformat()
-    await db.history.insert_one({
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "user_id": user["id"],
-        "user_name": user.get("name", ""),
-        "action": f"Pedido de documento removido: {existing.get('category', '')}",
-        "field": "portal_document_deleted",
-        "old_value": existing.get("status"),
-        "new_value": None,
-        "created_at": now,
-    })
+    if user and user.get("role") != "indexacao":
+        await db.history.insert_one({
+            "id": str(uuid.uuid4()),
+            "process_id": process_id,
+            "user_id": user["id"],
+            "user_name": user.get("name", ""),
+            "action": f"Pedido de documento removido: {existing.get('category', '')}",
+            "field": "portal_document_deleted",
+            "old_value": existing.get("status"),
+            "new_value": None,
+            "created_at": now,
+        })
 
     return {"success": True, "message": "Pedido de documento removido"}
 
