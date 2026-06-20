@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-20] — Hotfix: Webmail "Configuração de email não ativa" para utilizadores com config multi-empresa
+
+### Corrigido
+- **Sincronização manual do Webmail falhava com "Erro na sincronização: Configuração de email não ativa" para utilizadores que configuraram o email via o fluxo Perfil > Configuração de Webmail** (`bug` — **CRÍTICO/PRODUÇÃO**): O utilizador reportou que, em produção, ao clicar em "Sincronizar" no Webmail aparecia o toast `Erro na sincronização: Configuração de email não ativa`, mesmo tendo a configuração de email pessoal ativa e funcional (envio de email funcionava). Diagnóstico revelou uma divergência entre o `resolve_email_config_for_sync` (canónico) e o `sync_user_emails` (legado):
+  - A rota `POST /api/emails/webmail/sync-user` (`backend/routes/emails.py`) usa o resolver canónico `resolve_email_config_for_sync` para validar que a config existe — e este funciona corretamente (suporta multi-empresa, nested `email_config`, e a coleção `user_email_configs`).
+  - Contudo, depois de validar, a rota inicia um job em background que chama `sync_user_emails(user_id)` passando **apenas** o `user_id`. O `sync_user_emails` (`backend/services/email_service.py`) **ignorava** o resolver e lia o `user.email_config` embebido **diretamente** (campo `is_configured` ao nível de topo).
+  - Ora, as configs guardadas via o fluxo Perfil > Configuração de Webmail (multi-empresa) ficam **aninhadas** em `user.email_config["company:<id>"]` (e na coleção canónica `user_email_configs`), **não** em formato flat ao nível de topo. Por isso, `config.get("is_configured")` devolvia `None` (porque as chaves de topo são `company:default`, `company:power`, etc.) e a função devolvia `{"success": False, "error": "Configuração de email não ativa"}` — exatamente o erro visto pelo utilizador.
+  - **Backend** (`backend/services/email_service.py`): Adicionado parâmetro opcional `resolved_config: Optional[Dict[str, Any]] = None` a `sync_user_emails`. Quando fornecido, a função usa **diretamente** essa config (já resolvida pelo resolver canónico) e **não** lê o `user.email_config` embebido. Quando `None`, mantém o comportamento legado (ler `user.email_config` flat) para não quebrar os callers existentes (`worker.py`, `scheduled_tasks.py`, `sync_all_emails`) que ainda operam sobre configs flat.
+  - **Backend** (`backend/routes/emails.py`): O handler `webmail_sync_user` agora passa o `resolved` (config já resolvida por `resolve_email_config_for_sync`) ao `sync_user_emails` via `sync_user_emails(user_id, resolved_config=resolved)`. Isto garante que a sync usa a **mesma** config que foi validada — independentemente de ser flat, nested, ou vinda da coleção `user_email_configs`.
+
+### Resultado
+- A sincronização manual do Webmail (botão "Sincronizar") passa a funcionar para todos os utilizadores, incluindo os que configuraram o email via o fluxo multi-empresa Perfil > Configuração de Webmail.
+- O erro `Erro na sincronização: Configuração de email não ativa` deixa de aparecer para utilizadores com config válida.
+- Backward-compatible: os callers existentes (`worker.py`, `scheduled_tasks.py`, `sync_all_emails`) continuam a funcionar sem alterações (não passam `resolved_config`, pelo que caem no caminho legado flat).
+
+### Notas
+- **Limitação conhecida NÃO resolvida neste hotfix** (escopo maior, follow-up): as queries do `worker.py` (linha 224) e `scheduled_tasks.py` (linha 1453) usam `{"email_config.is_configured": True}` que **não** encontra utilizadores com config nested/multi-empresa (só encontra flat). Isto afeta a **auto-sync** em background (não a sync manual). Para corrigir, estas queries teriam de ser alargadas para consultar também a coleção `user_email_configs`. Ficado para iteração separada por ser uma mudança mais ampla (envolve reescrever queries MongoDB + iterar resultados de duas fontes).
+- Este hotfix resolve o sintoma reportado pelo utilizador (sync manual). A auto-sync em background continuará a não funcionar para configs multi-empresa até o follow-up ser feito.
+
 ## [2026-06-20] — Hotfix: Fontes Google render-blocking (ERR_CONNECTION_CLOSED no fonts.gstatic.com)
 
 ### Corrigido

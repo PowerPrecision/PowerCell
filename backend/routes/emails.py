@@ -3215,7 +3215,11 @@ async def webmail_sync_user(
         try:
             from services.email_service import sync_user_emails
             await job_service.update_progress(job_id, 0, 1, "A sincronizar emails pessoais...")
-            result = await sync_user_emails(user_id)
+            # Passar o `resolved` (config já resolvida pelo resolver canónico) para
+            # que sync_user_emails NÃO volte a ler user.email_config embebido (que
+            # para configs multi-empresa é aninhado e fazia a sync falhar com
+            # "Configuração de email não ativa").
+            result = await sync_user_emails(user_id, resolved_config=resolved)
             if result.get("success") == False:
                 await job_service.fail_job(job_id, result.get("error", "Erro na sincronização"))
             else:

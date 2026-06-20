@@ -1519,7 +1519,12 @@ async def sync_webmail_emails(
     }
 
 
-async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) -> Dict[str, Any]:
+async def sync_user_emails(
+    user_id: str,
+    days: int = 30,
+    max_emails: int = 100,
+    resolved_config: Optional[Dict[str, Any]] = None,
+) -> Dict[str, Any]:
     """
     Sincronizar emails para um utilizador específico usando a sua configuração pessoal.
     
@@ -1527,6 +1532,11 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
         user_id: ID do utilizador
         days: Dias para sincronizar
         max_emails: Máximo de emails por pasta
+        resolved_config: Configuração já resolvida por ``resolve_email_config_for_sync``
+            (canónica — suporta multi-empresa, nested email_config e a coleção
+            ``user_email_configs``). Se fornecida, é usada diretamente e NÃO é lido
+            o ``user.email_config`` embebido. Se for ``None``, cai no legado (apenas
+            configs flat — não funciona para configs nested/multi-empresa).
     
     Returns:
         Dict com resultado da sincronização
@@ -1540,19 +1550,39 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
 
     from services.encryption import encryption_service
     
-    user = await db.users.find_one(
-        {"id": user_id},
-        {"_id": 0, "email": 1, "email_config": 1}
-    )
-    
-    user_login_email = (user.get("email") or "").lower().strip() if user else ""
-    
-    if not user or not user.get("email_config"):
-        return {"success": False, "error": "Utilizador sem configuração de email"}
-    
-    config = user["email_config"]
-    if not config.get("is_configured"):
-        return {"success": False, "error": "Configuração de email não ativa"}
+    # ==================================================================
+    # RESOLUÇÃO DA CONFIGURAÇÃO
+    # ==================================================================
+    # Caminho canónico (NOVO): resolved_config passado pelo caller (route
+    # /webmail/sync-user) já passou por resolve_email_config_for_sync, que
+    # trata multi-empresa, nested email_config e a coleção user_email_configs.
+    # Caminho legado (FALLBACK): lê user.email_config embebido (apenas flat).
+    # ------------------------------------------------------------------
+    # NOTA: O legado NÃO funciona para configs guardadas via o fluxo
+    # Perfil > Configuração de Webmail (multi-empresa), porque essas ficam
+    # aninhadas em user.email_config["company:<id>"] — o que fazia com que
+    # config.get("is_configured") devolvesse None e a sync falhasse com
+    # "Configuração de email não ativa". O caller deve passar resolved_config.
+    # ==================================================================
+    if resolved_config:
+        config = resolved_config
+        user_login_email = (config.get("email_address") or "").lower().strip()
+        if not config.get("encrypted_password"):
+            return {"success": False, "error": "Password não configurada"}
+    else:
+        user = await db.users.find_one(
+            {"id": user_id},
+            {"_id": 0, "email": 1, "email_config": 1}
+        )
+        
+        user_login_email = (user.get("email") or "").lower().strip() if user else ""
+        
+        if not user or not user.get("email_config"):
+            return {"success": False, "error": "Utilizador sem configuração de email"}
+        
+        config = user["email_config"]
+        if not config.get("is_configured"):
+            return {"success": False, "error": "Configuração de email não ativa"}
     
     encrypted_password = config.get("encrypted_password", "")
     if not encrypted_password:
@@ -1564,9 +1594,9 @@ async def sync_user_emails(user_id: str, days: int = 30, max_emails: int = 100) 
     # Criar EmailAccount temporária com as credenciais do utilizador
     account = EmailAccount(
         name=f"user_{user_id[:8]}",
-        imap_server=config.get("imap_server", ""),
+        imap_server=config.get("imap_server", "") or "",
         imap_port=int(config.get("imap_port", 993)),
-        smtp_server=config.get("smtp_server", ""),
+        smtp_server=config.get("smtp_server", "") or "",
         smtp_port=int(config.get("smtp_port", 465)),
         email=config.get("email_address", ""),
         password=password,

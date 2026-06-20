@@ -858,3 +858,37 @@ Stage Summary:
 - 2 ficheiros de docs actualizados: CHANGELOG.md, worklog.md.
 - Backend NAO alterado.
 - Bug RESOLVIDO: a pagina renderiza instantaneamente com fontes de sistema. Quando o CDN da Google responde, troca para Manrope/JetBrains/Inter sem quebra. Quando o CDN falha (ad blockers, firewall, DNS), a pagina funciona na mesma com fontes de sistema — sem ERR_CONNECTION_CLOSED bloqueante. O erro pode ainda aparecer na consola mas ja nao bloqueia a renderizacao.
+
+---
+Task ID: 18
+Agent: Main Agent
+Task: Hotfix — Webmail "Erro na sincronização: Configuração de email não ativa" em produção (configs multi-empresa)
+
+Work Log:
+- Utilizador reportou em produção: toast "Erro na sincronização: Configuração de email não ativa" ao clicar Sincronizar no Webmail. O envio de email funcionava, mas a sincronização (IMAP fetch) falhava.
+- Diagnóstico passo-a-passo:
+  1. Grep ao backend pela string exata "Configuração de email não ativa" → único hit: backend/services/email_service.py:1555, dentro de sync_user_emails.
+  2. Lido o fluxo completo: rota POST /api/emails/webmail/sync-user (emails.py:3126) chama resolve_email_config_for_sync (resolver canónico que suporta multi-empresa/nested/coleção user_email_configs) → se resolved is None devolve "Configuração de email não encontrada" (mensagem DIFERENTE da reportada). Caso contrário inicia job em background que chama sync_user_emails(user_id) — passando SÓ o user_id.
+  3. sync_user_emails (email_service.py:1522) lia user.email_config DIRETAMENTE (DB find_one em users com projection email_config), sem usar o resolver. Para configs multi-empresa (guardadas via Perfil > Configuração de Webmail), user.email_config é NESTED: {"company:default": {...}, "company:power": {...}} — não tem is_configured ao nível de topo. config.get("is_configured") devolvia None → return {"success": False, "error": "Configuração de email não ativa"} → job falhava → frontend (WebmailPage.jsx:569) mostra "Erro na sincronização: Configuração de email não ativa".
+  4. Confirmada a divergência: o resolver valida com config correta; sync_user_emails re-leria raw e falhava. Bug introduzido quando a arquitetura migrou para nested/multi-empresa (user_email_config_service.py documenta que user.email_config embebido é backward compat e a leitura preferencial é da coleção).
+  5. Verificados os outros callers de sync_user_emails: worker.py:233, scheduled_tasks.py:1463, email_service.py:2095 — todos usam args posicionais (user_id, days, max_emails). Adicionar param keyword opcional resolved_config é backward-compatible.
+- Corrigido backend/services/email_service.py:
+  * Assinatura de sync_user_emails: adicionado `resolved_config: Optional[Dict[str, Any]] = None`.
+  * Docstring atualizado a documentar o novo param e o comportamento legacy fallback.
+  * Bloco de resolução de config reescrito: se resolved_config fornecido, usa-o diretamente (sem ler user.email_config); else cai no caminho legado (ler user.email_config flat, com as verificações is_configured). Adicionado comentário explicativo grande a documentar o bug histórico.
+  * Adicionada guarda `if not config.get("encrypted_password")` no ramo resolved_config (parity com legado).
+  * imap_server/smtp_server agora com `or ""` fallback (resolved pode ter None em vez de string vazia quando a config vem de company/system sem servidor definido — previne TypeError no EmailAccount).
+- Corrigido backend/routes/emails.py:
+  * No handler webmail_sync_user, dentro de run_user_sync() closure, alterada a chamada de `sync_user_emails(user_id)` para `sync_user_emails(user_id, resolved_config=resolved)`. A closure captura a variável `resolved` do escopo envolvente (linha 3197). Adicionado comentário explicativo.
+- Verificada sintaxe: py_compile OK em ambos os ficheiros. flake8 com regras estritas do CI (--select=E9,F63,F7,F82) → exit 0, sem erros.
+- Verificada compatibilidade backward: os 3 callers existentes (worker, scheduled_tasks, sync_all_emails) não passam resolved_config, pelo que caem no ramo legado — sem alterações de comportamento para configs flat.
+- Atualizada documentação: entrada nova no CHANGELOG.md ([2026-06-20] Hotfix Webmail "Configuração de email não ativa") + esta entrada no worklog.md.
+
+Stage Summary:
+- 2 ficheiros de código modificados:
+  - backend/services/email_service.py (param resolved_config + bloco de resolução dual-path + comentários)
+  - backend/routes/emails.py (passar resolved_config=resolved ao sync_user_emails)
+- 2 ficheiros de docs atualizados: CHANGELOG.md, worklog.md
+- Bug RESOLVIDO: a sincronização manual do Webmail (POST /api/emails/webmail/sync-user) passa a usar a MESMA config que foi validada pelo resolver canónico, independentemente de ser flat, nested, ou vir da coleção user_email_configs.
+- Limitação conhecida NÃO resolvida (follow-up): worker.py:224 e scheduled_tasks.py:1453 usam query MongoDB {"email_config.is_configured": True} que não encontra users com config nested — afeta AUTO-SYNC em background (não a sync manual). Requer reescrever queries para consultar também user_email_configs collection.
+- Próximo passo: commit + push para branch dev via Git Database API.
