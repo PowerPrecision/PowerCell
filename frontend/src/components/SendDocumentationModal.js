@@ -319,17 +319,13 @@ const SendDocumentationModal = ({
       if (response.ok) {
         const newBranch = await response.json();
 
-        // Adicionar o novo balcão à lista de recipients e pré-selecioná-lo
-        setRecipients((prev) => [
-          ...prev,
-          {
-            id: newBranch.id,
-            name: newBranch.name,
-            email: newBranch.email,
-            is_custom: true,
-            active: true,
-          },
-        ]);
+        // FIX (Pacote K): re-buscar a lista canónica do backend em vez de
+        // anexar manualmente ao state local. Isto garante que todos os
+        // campos (company_id, created_by, ordering, metadata) vêm do
+        // backend e que o novo balcão aparece imediatamente na lista.
+        await loadData();
+
+        // Pré-selecionar o novo balcão nos destinatários selecionados
         setSelectedRecipients((prev) => [...prev, newBranch.email]);
 
         // Limpar formulário e fechar

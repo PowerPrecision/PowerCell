@@ -441,7 +441,6 @@ export const createProcess = (data) => api.post("/processes", data);
 export const searchClients = (q, limit = 10) => api.get("/clients/search", { params: { q, limit } });
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
-export const deleteProcess = (id) => api.delete(`/processes/${id}`);
 export const assignProcess = (id, consultorId, mediadorId, indexacaoId) => 
   api.post(`/processes/${id}/assign`, null, {
     params: { consultor_id: consultorId, mediador_id: mediadorId, indexacao_id: indexacaoId }
@@ -454,6 +453,10 @@ export const moveProcessKanban = (processId, newStatus) =>
 export const getMyClients = (params = {}) => api.get("/processes/my-clients", { params });
 export const markProcessIndexed = (processId) =>
   api.post(`/processes/${processId}/mark-indexed`);
+// FIX (Pacote K): adicionar deleteProcess e restoreProcess para suportar o
+// botão "Restaurar" na lista de processos eliminados.
+export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);
+export const restoreProcess = (processId) => api.post(`/processes/${processId}/restore`);
 
 // Visits
 export const getVisits = (processId) => api.get("/visits", { params: { process_id: processId } });
@@ -461,14 +464,6 @@ export const getVisits = (processId) => api.get("/visits", { params: { process_i
 // Excel Export Permission
 export const getExportPermission = (companyId = "default") =>
   api.get("/system-config/public/export-permission", { params: { company_id: companyId } });
-
-// ── Pacote G — Documentos Obrigatórios (mandatory_documents) ───────────
-// Lê/atualiza a checklist gerida pelo CEO/Diretor no SystemConfigPage.
-// section=mandatory_documents com {enabled: bool, documents: [{name, category}]}
-export const getMandatoryDocuments = (companyId = "default") =>
-  api.get("/system-config", { params: { company_id: companyId } });
-export const updateMandatoryDocuments = (data, companyId = "default") =>
-  api.patch("/system-config/mandatory_documents", data, { params: { company_id: companyId } });
 
 // Deadlines
 export const getDeadlines = (processId) => 
@@ -750,12 +745,6 @@ export const getRGPDTemplateVersion = (versionId) => api.get(`/rgpd/admin/templa
 // ===== MAGIC LINK (Client Portal) =====
 export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
 export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
-
-// ===== IMPERSONATE — Ver como Cliente (Portal do Cliente) =====
-// Gera um link do Portal do Cliente autenticado para um membro do staff
-// "ver como cliente" (suporte). O backend devolve {url, short_id, ...};
-// o frontend abre a `url` num novo separador via window.open().
-export const impersonateClient = (processId) => api.post(`/portal/impersonate/${processId}`);
 
 // ===== PORTAL DOCUMENT REQUESTS (Admin manages client doc requests) =====
 export const getPortalDocRequests = (processId) => api.get(`/documents/portal-requests/${processId}`);

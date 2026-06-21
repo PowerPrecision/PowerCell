@@ -95,6 +95,10 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
     titular2_data = process.get("titular2_data", {}) or {}
     financial_data = process.get("financial_data", {}) or {}
     real_estate_data = process.get("real_estate_data", {}) or {}
+    # credit_data: sub-estrutura do cartão "Dados de Crédito" (ProcessDetails.js).
+    # Contém requested_amount, loan_term_years, interest_rate, monthly_payment,
+    # bank_name, etc. — os campos que o QA reportou como estando a retornar "N/A".
+    credit_data = process.get("credit_data", {}) or {}
 
     # Helper para formatação segura
     def safe_val(value, default="N/A"):
@@ -262,16 +266,26 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
     valor_imovel = format_currency(valor_imovel_raw)
     
     # [VALOR_FINANCIAMENTO] — Montante pedido de financiamento
+    # FIX (Pacote K): adicionados paths do novo cartão "Dados de Crédito"
+    # (credit_data.requested_amount) e do campo valor_financiado (singular)
+    # usado no cartão "Situação Financeira" do ProcessDetails.js.
     valor_financiamento_raw = (
-        financial_data.get("credit_base_value")
+        credit_data.get("requested_amount")
+        or financial_data.get("credit_base_value")
         or financial_data.get("requested_amount")
         or financial_data.get("montante_pretendido")
         or financial_data.get("valor_financiamento")
+        or financial_data.get("valor_financiado")
     )
     valor_financiamento = format_currency(valor_financiamento_raw)
     
     # [CAPITAIS_PROPRIOS] — Capitais próprios (valor_imovel - valor_financiamento)
-    capitais_proprios_raw = financial_data.get("capitais_proprios")
+    # FIX (Pacote K): adicionado path capital_proprio (SINGULAR) — é o nome
+    # usado no cartão "Rendimentos" do ProcessDetails.js (linha 3490).
+    capitais_proprios_raw = (
+        financial_data.get("capitais_proprios")
+        or financial_data.get("capital_proprio")
+    )
     if capitais_proprios_raw is not None and capitais_proprios_raw != "":
         capitais_proprios = format_currency(capitais_proprios_raw)
     elif valor_imovel_raw and valor_financiamento_raw:
@@ -284,8 +298,11 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
         capitais_proprios = "N/A"
     
     # [PRAZO_FINANCIAMENTO] — Prazo em anos/meses
+    # FIX (Pacote K): adicionado path credit_data.loan_term_years — é o nome
+    # usado no cartão "Dados de Crédito" do ProcessDetails.js (linha 4743).
     prazo_raw = (
-        financial_data.get("prazo_financiamento")
+        credit_data.get("loan_term_years")
+        or financial_data.get("prazo_financiamento")
         or financial_data.get("loan_term")
         or financial_data.get("prazo")
         or financial_data.get("prazo_anos")

@@ -610,23 +610,12 @@ async def generate_magic_link(
     """
     import secrets
 
-    # Nota: não filtramos is_deleted aqui — queremos distinguir
-    # "processo inexistente" (404 genérico) de "processo eliminado"
-    # (404 com mensagem acionável). O consultor pode ver processos
-    # eliminados no CRM (GET /processes/{id} também não filtra), mas
-    # não deve gerar magic links para eles (o Portal do Cliente recusa
-    # acessos a processos eliminados — ver backend/routes/portal.py).
     process = await db.processes.find_one(
-        {"id": process_id},
+        {"id": process_id, "is_deleted": {"$ne": True}},
         {"_id": 0}
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    if process.get("is_deleted"):
-        raise HTTPException(
-            status_code=404,
-            detail="Este processo foi eliminado. Restaure-o para gerar o magic link."
-        )
 
     # Gerar magic link JWT
     token = create_client_magic_token(process_id)
@@ -688,19 +677,12 @@ async def send_magic_link_email(
     import secrets
     from services.email_service import send_email
 
-    # Mesma lógica do generate_magic_link: distinguir "não encontrado"
-    # de "eliminado", para o consultor receber uma mensagem acionável.
     process = await db.processes.find_one(
-        {"id": process_id},
+        {"id": process_id, "is_deleted": {"$ne": True}},
         {"_id": 0}
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    if process.get("is_deleted"):
-        raise HTTPException(
-            status_code=404,
-            detail="Este processo foi eliminado. Restaure-o para enviar o magic link por email."
-        )
 
     client_email = process.get("client_email", "")
     client_name = process.get("client_name", "Cliente")
@@ -927,22 +909,6 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     
     # Registar no histórico
     await log_history(process_id, user, "Criou processo")
-    
-    # === Pacote G — Gerar pedidos de documentos obrigatórios ===
-    # Cria automaticamente REQUESTED docs com base na checklist do SystemConfig
-    # (secção mandatory_documents). Executa em background.
-    try:
-        from services.portal_documents_notify import generate_mandatory_document_requests
-        asyncio.create_task(
-            generate_mandatory_document_requests(
-                process_id=process_id,
-                company_id=process_doc.get("company") or process_doc.get("company_id"),
-                requested_by=user.get("id"),
-                requested_by_name=user.get("name", "Staff"),
-            )
-        )
-    except Exception as md_err:
-        logger.warning(f"[PACOTE-G] Falha ao agendar mandatory docs para processo {process_id}: {md_err}")
     
     # === WEBSOCKET BROADCAST: Novo processo criado ===
     await broadcast_process_delta(
@@ -1227,21 +1193,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     except Exception as e:
         logger.warning(f"Erro ao criar documentos padrão para processo {process_id}: {e}")
     
-    # === Pacote G — Gerar pedidos da checklist de Documentos Obrigatórios ===
-    # Soma-se aos pedidos auto_default acima (idempotente por source).
-    try:
-        from services.portal_documents_notify import generate_mandatory_document_requests
-        asyncio.create_task(
-            generate_mandatory_document_requests(
-                process_id=process_id,
-                company_id=process_doc.get("company") or process_doc.get("company_id"),
-                requested_by=user["id"],
-                requested_by_name=user.get("name", "Staff"),
-            )
-        )
-    except Exception as md_err:
-        logger.warning(f"[PACOTE-G] Falha ao agendar mandatory docs para processo {process_id}: {md_err}")
-    
     # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     
@@ -1419,18 +1370,12 @@ async def get_processes(
         query["status"] = status
     
     if search:
-        # Pesquisa textual: faz $match em client_name (multiword + sem
-        # acentos via build_multiword_search_filter), client_email e
-        # process_number. Assim, ao pesquisar "Manuel" aparecem TODOS os
-        # processos desse cliente, mesmo que tenha vários processos
-        # ativos em fases diferentes.
-        name_filter = build_multiword_search_filter(search, "client_name")
+        name_regex = create_accent_insensitive_regex(search)
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
         search_condition = {
             "$or": [
-                name_filter,
-                {"client_email": simple_regex},
-                {"process_number": simple_regex},
+                {"client_name": name_regex},
+                {"client_email": simple_regex}
             ]
         }
         if query:
@@ -2133,46 +2078,35 @@ async def get_my_clients(
     request: Request,
     page: int = Query(1, ge=1, description="Número da página"),
     size: int = Query(50, ge=1, le=100, description="Itens por página"),
-    show_inactive: bool = Query(False, description="Incluir processos terminais (concluídos/desistências). "
-                                "Quando True, o cliente cujo único processo ficou terminal continua visível na lista."),
     user: dict = Depends(require_roles([
-    UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
+    UserRole.CONSULTOR, UserRole.INTERMEDIARIO, 
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
     """
     Obter lista de clientes atribuídos ao utilizador atual.
-
+    
     OTIMIZAÇÕES APLICADAS:
     - MongoDB Projection: Apenas campos necessários
     - Paginação: Não carrega todos os clientes de uma vez
     - Desencriptação seletiva: Só client_phone e client_nif
-
+    
     Retorna uma lista com:
     - Nome do cliente
     - Fase do processo
     - Ações pendentes (tarefas, documentos a atualizar)
-
+    
     Permissões:
     - Consultor: Apenas os seus clientes (assigned_consultor_ids ou assigned_consultor_id)
     - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_ids ou criados por eles)
     - Admin/CEO: Todos os clientes (para supervisão)
-
+    
     Suporta múltiplos consultores e intermediários por processo.
-
-    BUG FIX (client disappears when process is terminal):
-    Antes, a query filtrava is_active≠False E status∉INACTIVE_STATUSES — quando
-    o ÚNICO processo de um cliente ficava terminal, o cliente desaparecia da
-    lista mesmo com o toggle "Mostrar Concluídos" ativo no frontend, porque o
-    backend nunca chegava a retorná-lo. Agora, quando show_inactive=True, esses
-    filtros são relaxados para que os processos terminais também sejam
-    retornados (o frontend continua a filtrar por status terminal via
-    TERMINAL_STATUSES quando o toggle está off).
     """
     user_id = user["id"]
     user_email = user.get("email", "")
     role = get_effective_role(request, user)
-
+    
     # Construir query baseada no papel do utilizador
     #
     # SINCRONIZAÇÃO COM "OS Meus Processos":
@@ -2180,35 +2114,32 @@ async def get_my_clients(
     # my-processes (assigned_consultor_ids + is_active + status), para que
     # os clientes listados correspondam aos processos visíveis.
     # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
-    #
-    # Quando show_inactive=True, relaxamos os filtros de is_active e status
-    # para que os clientes cujos processos ficaram terminais continuem visíveis.
     if role == UserRole.CONSULTOR:
-        and_clauses = [
-            {"$or": [
-                {"assigned_consultor_ids": user_id},
-                {"assigned_consultor_id": user_id}
-            ]},
-            {"is_deleted": {"$ne": True}}
-        ]
-        if not show_inactive:
-            # Mesmo filtro de activos que my-processes (view_mode="active_only")
-            and_clauses.append({"is_active": {"$ne": False}})
-            and_clauses.append({"status": {"$nin": INACTIVE_STATUSES}})
-        query = {"$and": and_clauses}
+        query = {
+            "$and": [
+                {"$or": [
+                    {"assigned_consultor_ids": user_id},
+                    {"assigned_consultor_id": user_id}
+                ]},
+                # Mesmo filtro de activos que my-processes (view_mode="active_only")
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
+            ]
+        }
     elif role == UserRole.INTERMEDIARIO:
-        and_clauses = [
-            {"$or": [
-                {"assigned_mediador_ids": user_id},
-                {"assigned_mediador_id": user_id},
-                {"created_by": user_email}
-            ]},
-            {"is_deleted": {"$ne": True}}
-        ]
-        if not show_inactive:
-            and_clauses.append({"is_active": {"$ne": False}})
-            and_clauses.append({"status": {"$nin": INACTIVE_STATUSES}})
-        query = {"$and": and_clauses}
+        query = {
+            "$and": [
+                {"$or": [
+                    {"assigned_mediador_ids": user_id},
+                    {"assigned_mediador_id": user_id},
+                    {"created_by": user_email}
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}}
+            ]
+        }
     elif role == UserRole.INDEXACAO:
         query = {
             "$or": [
@@ -2217,14 +2148,7 @@ async def get_my_clients(
             ]
         }
     else:
-        # Admin/CEO/Diretor/Administrativo
-        if show_inactive:
-            query = {"is_deleted": {"$ne": True}}
-        else:
-            query = {
-                "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
-                "is_active": {"$ne": False}
-            }
+        query = {}
     
     # Calcular offset
     skip = (page - 1) * size
@@ -3163,12 +3087,15 @@ async def delete_process(
     now = datetime.now(timezone.utc)
     
     # Soft delete the process
+    # FIX (Pacote K): guardar previous_status para o endpoint de restore poder
+    # recuperar o status original em vez de forçar "clientes_espera".
     await db.processes.update_one(
         {"id": process_id},
         {"$set": {
             "is_deleted": True,
             "status": "eliminado",
             "is_active": False,
+            "previous_status": process.get("status"),  # para restore
             "deleted_at": now,
             "deleted_by": user.get("id", ""),
             "updated_at": now,
@@ -3580,16 +3507,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             await log_history(process_id, user, "Alterou estado", "status", process["status"], data.status)
             await log_audit_event(process_id, user, "Alterou estado", field="status", old_value=process["status"], new_value=data.status, request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["status"] = data.status
-
-            # ── Sincronizar is_active com o novo estado ──────────────────
-            # Antes, só o endpoint de move (kanban) atualizava o is_active.
-            # Mudar o estado via dropdown (PUT) deixava is_active desactualizado
-            # — um processo em "desistencias" continuava com is_active=True,
-            # causando inconsistência nos filtros da lista de clientes activos.
-            # Agora, alinhamos com a mesma regra do move: terminais → False.
-            inactive_statuses_for_update = ["desistencias", "concluidos", "concluido", "arquivo", "arquivado", "perdido", "eliminado", "eliminados"]
-            update_data["is_active"] = data.status not in inactive_statuses_for_update
-
+            
             # Send email notification (com verificação de preferências)
             if process.get("client_email"):
                 await send_notification_with_preference_check(

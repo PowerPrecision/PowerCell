@@ -10,6 +10,7 @@ Endpoints:
 - POST /documents/{id}/restore - Restaurar documento eliminado
 ====================================================================
 """
+import uuid
 import logging
 from datetime import datetime, timezone
 from fastapi import APIRouter, Depends, HTTPException
@@ -23,6 +24,11 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["Restore"])
 
 
+# Estados considerados terminais — um processo restaurado com um destes
+# status fica is_active=False; qualquer outro status fica is_active=True.
+_TERMINAL_STATUSES = ("concluido", "desistencia", "desistencias", "arquivo", "perdido")
+
+
 # ====================================================================
 # RESTAURAR PROCESSO
 # ====================================================================
@@ -34,98 +40,100 @@ async def restore_process(
 ):
     """
     Restaura um processo que foi eliminado (soft delete).
-    
-    Este endpoint suporta a funcionalidade de Undo no frontend.
-    O processo deve ter sido eliminado via soft delete (status = 'eliminado').
-    
+
+    Inverte o ``DELETE /api/processes/{process_id}``:
+      - Coloca ``is_deleted: False`` (o bug crítico que impedia o processo
+        de reaparecer nas queries com ``{"is_deleted": {"$ne": True}}``).
+      - Restaura o ``previous_status`` guardado no delete (ou fall-back
+        ``clientes_espera`` se não existir — processos eliminados antes
+        do Pacote K não têm previous_status).
+      - Recalcula ``is_active`` com base no status restaurado.
+      - Cascade: restaura documentos e tarefas do processo que foram
+        soft-deletados no mesmo delete.
+      - Regista atividade em ``process_activities`` (tipo ``process_restored``)
+        para simetria com o ``process_deleted`` do delete.
+
     Args:
-        process_id: ID do processo a restaurar
-        
+        process_id: ID do processo a restaurar.
+
     Returns:
-        O processo restaurado
+        Dict com success, message e o processo restaurado.
     """
-    # Verificar se o processo existe (pode estar "eliminado")
+    # Procurar o processo (inclui eliminados — NÃO filtrar is_deleted aqui)
     process = await db.processes.find_one({"id": process_id})
-    
+
     if not process:
-        # Verificar na coleção de lixo (se existir)
-        deleted_process = await db.deleted_processes.find_one({"id": process_id})
-        
-        if deleted_process:
-            # Restaurar da coleção de lixo
-            restored_process = deleted_process.copy()
-            restored_process["status"] = "clientes_espera"  # Ou o status original
-            restored_process["is_active"] = True
-            restored_process["restored_at"] = datetime.now(timezone.utc).isoformat()
-            restored_process["restored_by"] = user["id"]
-            
-            # Inserir de volta na coleção principal
-            await db.processes.insert_one(restored_process)
-            
-            # Remover da coleção de lixo
-            await db.deleted_processes.delete_one({"id": process_id})
-            
-            # Log
-            await db.history.insert_one({
-                "id": str(__import__('uuid').uuid4()),
-                "process_id": process_id,
-                "user_id": user["id"],
-                "user_name": user.get("name"),
-                "action": "Processo restaurado (undo)",
-                "created_at": datetime.now(timezone.utc).isoformat()
-            })
-            
-            # Remover _id para resposta
-            if "_id" in restored_process:
-                del restored_process["_id"]
-            
-            return {
-                "success": True,
-                "message": "Processo restaurado com sucesso",
-                "process": restored_process
-            }
-        
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    # Se o processo existe mas está marcado como eliminado
-    if process.get("status") == "eliminado" or not process.get("is_active", True):
-        # Restaurar
-        update_data = {
-            "status": "clientes_espera",  # Ou manter o status original
-            "is_active": True,
-            "restored_at": datetime.now(timezone.utc).isoformat(),
-            "restored_by": user["id"],
-            "updated_at": datetime.now(timezone.utc).isoformat()
-        }
-        
-        await db.processes.update_one(
-            {"id": process_id},
-            {"$set": update_data}
+
+    # Só restaurar se o processo está realmente eliminado
+    is_deleted = process.get("is_deleted", False)
+    status = process.get("status", "")
+    if not is_deleted and status != "eliminado":
+        raise HTTPException(
+            status_code=400,
+            detail="Processo não está eliminado — não precisa de restauração"
         )
-        
-        # Log
-        await db.history.insert_one({
-            "id": str(__import__('uuid').uuid4()),
-            "process_id": process_id,
-            "user_id": user["id"],
-            "user_name": user.get("name"),
-            "action": "Processo restaurado (undo)",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
-        
-        updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
-        
-        return {
-            "success": True,
-            "message": "Processo restaurado com sucesso",
-            "process": updated
-        }
-    
-    # Processo já está ativo
-    raise HTTPException(
-        status_code=400, 
-        detail="Processo já está ativo e não precisa de restauração"
+
+    now = datetime.now(timezone.utc)
+
+    # Restaurar o status anterior se guardado, senão usar clientes_espera
+    previous_status = process.get("previous_status") or "clientes_espera"
+    # Se o previous_status era "eliminado" (caso de double-delete), usar fallback
+    if previous_status == "eliminado":
+        previous_status = "clientes_espera"
+
+    restored_is_active = previous_status not in _TERMINAL_STATUSES
+
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": {
+            "is_deleted": False,
+            "status": previous_status,
+            "is_active": restored_is_active,
+            "restored_at": now,
+            "restored_by": user.get("id", ""),
+            "updated_at": now,
+        }}
     )
+
+    # Cascade: restaurar documentos e tarefas que foram soft-deletados
+    # juntamente com o processo (o delete faz cascade com is_deleted=True).
+    await db.documents.update_many(
+        {"process_id": process_id, "is_deleted": True},
+        {"$set": {
+            "deleted": False,
+            "is_deleted": False,
+            "deleted_at": None,
+        }}
+    )
+    await db.tasks.update_many(
+        {"process_id": process_id, "is_deleted": True},
+        {"$set": {
+            "deleted": False,
+            "is_deleted": False,
+            "deleted_at": None,
+        }}
+    )
+
+    # Log de atividade (simétrico ao process_deleted do delete endpoint)
+    await db.process_activities.insert_one({
+        "id": str(uuid.uuid4()),
+        "process_id": process_id,
+        "type": "process_restored",
+        "description": f"Processo restaurado por {user.get('name', 'Utilizador')}",
+        "created_at": now,
+        "user_id": user.get("id", ""),
+        "user_name": user.get("name", ""),
+    })
+
+    updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
+
+    return {
+        "success": True,
+        "message": "Processo restaurado com sucesso",
+        "process": updated
+    }
+
 
 
 # ====================================================================

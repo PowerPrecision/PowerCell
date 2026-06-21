@@ -22,10 +22,10 @@ import {
   Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
   ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
   User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
-  Flame, X, ClipboardCheck, CheckCircle2, Download
+  Flame, X, ClipboardCheck, CheckCircle2, Download, RotateCcw, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
-import { getProcesses, markProcessIndexed } from "../services/api";
+import { getProcesses, markProcessIndexed, restoreProcess } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 import { useAuth } from "../contexts/AuthContext";
@@ -85,11 +85,14 @@ const ProcessesPage = () => {
   // ================================================================
   // FILTRO DE ESTADO ATIVO
   // Por defeito, mostra apenas processos ativos (view_mode=active_only)
-  // Quando showCompleted=true, mostra todos incluindo arquivo (view_mode=all)
+  // "all" mostra todos incluindo arquivo (view_mode=all)
+  // "deleted" mostra apenas eliminados (view_mode=deleted) — com botão Restaurar
+  // FIX (Pacote K): adicionado modo "deleted" para mostrar processos eliminados
   // ================================================================
-  const [showCompleted, setShowCompleted] = useState(
-    searchParams.get("view_mode") === "all"  // Default: show only active (active_only)
+  const [viewMode, setViewMode] = useState(
+    searchParams.get("view_mode") || "active_only"
   );
+  const showCompleted = viewMode === "all";  // backward compat para lógica existente
   
   // Sort state
   const [sortField, setSortField] = useState(searchParams.get("sort") || "created_at");
@@ -293,7 +296,7 @@ const ProcessesPage = () => {
         page: pagination.page,
         size: pagination.size,
         search: searchTermRef.current || undefined,
-        view_mode: showCompleted ? "all" : "active_only",
+        view_mode: viewMode,
         sort_field: sortField,
         sort_order: sortOrder,
         ...(isGlobalView ? { show_all: true } : {}),
@@ -327,17 +330,40 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, showCompleted, sortField, sortOrder, location.pathname]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname]);
   
-  // Handler para toggle de processos concluídos
-  const handleToggleCompleted = (checked) => {
-    setShowCompleted(checked);
+  // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
+  const handleViewModeChange = (newMode) => {
+    setViewMode(newMode);
     setSearchParams(prev => {
-      if (checked) prev.set("view_mode", "all");
-      else prev.set("view_mode", "active_only");
+      if (newMode === "active_only") prev.delete("view_mode");
+      else prev.set("view_mode", newMode);
       prev.set("page", "1"); // Reset para página 1
       return prev;
     }, { replace: true });
+  };
+
+  // FIX (Pacote K): Handler para restaurar processo eliminado
+  const [restoringProcessIds, setRestoringProcessIds] = useState(new Set());
+  const handleRestoreProcess = async (e, processId) => {
+    e.stopPropagation();
+    setRestoringProcessIds(prev => new Set(prev).add(processId));
+    try {
+      await restoreProcess(processId);
+      toast.success("Processo restaurado com sucesso");
+      // Re-buscar a lista para remover o processo restaurado da vista "Eliminados"
+      // (o backend agora devolve is_deleted=False, pelo que não aparece em view_mode=deleted)
+      // Disparar re-fetch via mudança de state — usamos uma função que força o useEffect
+      setProcesses(prev => prev.filter(p => p.id !== processId));
+    } catch (error) {
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao restaurar processo"));
+    } finally {
+      setRestoringProcessIds(prev => {
+        const next = new Set(prev);
+        next.delete(processId);
+        return next;
+      });
+    }
   };
 
   // Debounced search — only updates URL param, main useEffect handles fetch
@@ -597,19 +623,24 @@ const ProcessesPage = () => {
                 ) : null}
               </div>
               
-              {/* Toggle para mostrar concluídos/desistências */}
+              {/* FIX (Pacote K): Filtro de vista — Select com 3 opções */}
               <div className="flex items-center gap-2 px-3 py-2 bg-muted/50 rounded-lg">
-                <Archive className="h-4 w-4 text-muted-foreground" />
-                <div className="flex items-center gap-2">
-                  <Switch
-                    id="show-completed"
-                    checked={showCompleted}
-                    onCheckedChange={handleToggleCompleted}
-                  />
-                  <Label htmlFor="show-completed" className="text-sm cursor-pointer">
-                    {showCompleted ? "Mostrando todos" : "Mostrar arquivo"}
-                  </Label>
-                </div>
+                <Filter className="h-4 w-4 text-muted-foreground" />
+                <Select value={viewMode} onValueChange={handleViewModeChange}>
+                  <SelectTrigger className="h-8 w-auto text-sm border-0 bg-transparent focus:ring-0">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="active_only">Processos Ativos</SelectItem>
+                    <SelectItem value="all">Todos (incl. arquivo)</SelectItem>
+                    <SelectItem value="deleted">
+                      <div className="flex items-center gap-2">
+                        <Trash2 className="h-4 w-4 text-red-400" />
+                        Eliminados
+                      </div>
+                    </SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
 
               {/* Filtro de Estado de Indexação */}
@@ -813,12 +844,35 @@ const ProcessesPage = () => {
                             )}
                           </TableCell>
                           <TableCell>
-                            <Badge variant="outline" className="capitalize">
-                              {process.status?.replace(/_/g, ' ')}
-                            </Badge>
+                            {process.is_deleted || process.status === "eliminado" ? (
+                              <Badge variant="destructive" className="gap-0.5">
+                                <Trash2 className="h-3 w-3" />
+                                Eliminado
+                              </Badge>
+                            ) : (
+                              <Badge variant="outline" className="capitalize">
+                                {process.status?.replace(/_/g, ' ')}
+                              </Badge>
+                            )}
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1">
+                              {/* FIX (Pacote K): botão Restaurar na vista de Eliminados */}
+                              {viewMode === "deleted" && (
+                                <Button
+                                  variant="ghost"
+                                  size="icon"
+                                  className="h-8 w-8 text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                                  onClick={(e) => handleRestoreProcess(e, process.id)}
+                                  disabled={restoringProcessIds.has(process.id)}
+                                  title="Restaurar processo"
+                                >
+                                  {restoringProcessIds.has(process.id)
+                                    ? <Loader2 className="h-4 w-4 animate-spin" />
+                                    : <RotateCcw className="h-4 w-4" />
+                                  }
+                                </Button>
+                              )}
                               {canMarkIndexed && !process.is_indexed && (
                                 <Button
                                   variant="ghost"
