@@ -746,6 +746,22 @@ export const getRGPDTemplateVersion = (versionId) => api.get(`/rgpd/admin/templa
 export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
 export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
 
+// ===== IMPERSONATE CLIENT (Ver como Cliente) =====
+// FIX (Pacote K): o ProcessDetails.js importa impersonateClient mas este export
+// não existia, causando erro de build no CI ("impersonateClient is not exported
+// by src/services/api.js"). Reutiliza o endpoint generate-magic-link (que já
+// filtra is_deleted e devolve 404 para processos eliminados) e mapeia a
+// resposta para incluir `url` — que é o campo que o handler em ProcessDetails.js
+// espera (res?.data?.url).
+export const impersonateClient = (processId) =>
+  api.post(`/processes/${processId}/generate-magic-link`).then((res) => ({
+    ...res,
+    data: {
+      ...res.data,
+      url: res.data?.magic_link || res.data?.link || res.data?.url,
+    },
+  }));
+
 // ===== PORTAL DOCUMENT REQUESTS (Admin manages client doc requests) =====
 export const getPortalDocRequests = (processId) => api.get(`/documents/portal-requests/${processId}`);
 export const createPortalDocRequest = (processId, data) => api.post(`/documents/portal-requests/${processId}`, data);
