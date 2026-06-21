@@ -218,28 +218,67 @@ async def scheduler_loop():
                 logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
                     from services.email_service import sync_user_emails
+                    from services.user_email_config_service import get_active_email_configs_for_sync
+                    from services.email_config_resolver import resolve_email_config_for_sync
 
-                    # 1. Sync de utilizadores pessoais (IMAP)
-                    configured_users = await db.users.find(
-                        {"email_config.is_configured": True},
-                        {"id": 1}
-                    ).to_list(50)
-                    if configured_users:
-                        for user_doc in configured_users:
-                            user_id = user_doc.get("id")
-                            if not user_id:
-                                continue
+                    # 1. Sync de caixas pessoais (multi-empresa)
+                    # ----------------------------------------------------------------
+                    # SUBSTITUI a query legacy db.users.find({"email_config.is_configured": True})
+                    # que só encontrava configs flat embebidas. Agora consultamos a coleção
+                    # canónica user_email_configs (uma config por par user+empresa), que
+                    # suporta a arquitetura multi-empresa e as configs guardadas via
+                    # Perfil > Configuração de Webmail.
+                    # ----------------------------------------------------------------
+                    active_configs = await get_active_email_configs_for_sync(limit=50)
+                    if active_configs:
+                        for cfg in active_configs:
+                            user_id = cfg["user_id"]
+                            company_id = cfg["company_id"]
+                            auth_method = cfg.get("auth_method", "imap_smtp")
                             try:
-                                result = await sync_user_emails(user_id, days=30, max_emails=50)
+                                # OAuth pessoal ainda não tem sync function própria
+                                # (só IMAP/SMTP via sync_user_emails). Saltar com log
+                                # debug — não é regressão (legacy também não suportava).
+                                if auth_method == "google_oauth":
+                                    logger.debug(
+                                        f"Webmail sync: user={user_id} company={company_id} "
+                                        f"usa Google OAuth — sync pessoal OAuth ainda não implementada (a saltar)"
+                                    )
+                                    continue
+
+                                # Resolver a config canónica para este par user+empresa
+                                # (passa a saber exatamente que credenciais usar)
+                                resolved = await resolve_email_config_for_sync(
+                                    user_id, active_company_id=company_id
+                                )
+                                if not resolved:
+                                    logger.debug(
+                                        f"Webmail sync: config não resolúvel para "
+                                        f"user={user_id} company={company_id} — a saltar"
+                                    )
+                                    continue
+
+                                result = await sync_user_emails(
+                                    user_id,
+                                    days=30,
+                                    max_emails=50,
+                                    resolved_config=resolved,
+                                )
                                 synced = result.get("total_synced", 0)
                                 if synced > 0:
-                                    logger.info(f"Webmail sync user {user_id}: {synced} novos emails")
-                                # Se houve policy violation, parar de iterar
+                                    logger.info(
+                                        f"Webmail sync user={user_id} company={company_id}: "
+                                        f"{synced} novos emails"
+                                    )
+                                # Se houve policy violation, parar de iterar contas
                                 if result.get("error") and any(kw in result["error"].lower() for kw in [
                                     "policy violation", "temporarily refused", "rate limit",
                                     "too many", "blocked", "connection limit", "abuse"
                                 ]):
-                                    logger.warning(f"Webmail sync: policy violation para {user_id} — a parar iteração")
+                                    logger.warning(
+                                        f"Webmail sync: policy violation para "
+                                        f"user={user_id} company={company_id} — a parar iteração"
+                                    )
                                     break
                             except Exception as user_err:
                                 err_str = str(user_err)
@@ -247,14 +286,23 @@ async def scheduler_loop():
                                     "policy violation", "temporarily refused", "rate limit",
                                     "too many", "blocked", "connection limit", "abuse"
                                 ]):
-                                    logger.warning(f"Webmail sync: policy violation para {user_id} — a parar iteração: {err_str[:200]}")
+                                    logger.warning(
+                                        f"Webmail sync: policy violation para "
+                                        f"user={user_id} company={company_id} — a parar iteração: {err_str[:200]}"
+                                    )
                                     break
-                                logger.warning(f"Erro ao sincronizar webmail do user {user_id}: {user_err}")
+                                logger.warning(
+                                    f"Erro ao sincronizar webmail do user={user_id} "
+                                    f"company={company_id}: {user_err}"
+                                )
                             # Delay entre contas para evitar ligações IMAP simultâneas (3s)
                             await asyncio.sleep(3)
-                        logger.info(f"Sincronização webmail pessoal concluída ({len(configured_users)} utilizadores)")
+                        logger.info(
+                            f"Sincronização webmail pessoal concluída "
+                            f"({len(active_configs)} configs multi-empresa)"
+                        )
                     else:
-                        logger.debug("Nenhum utilizador com email pessoal configurado")
+                        logger.debug("Nenhuma config de email pessoal ativa encontrada em user_email_configs")
 
                     # 2. Sync de caixas partilhadas via Gmail API (ex: indexacao)
                     from services.gmail_api_service import gmail_api_sync_to_db

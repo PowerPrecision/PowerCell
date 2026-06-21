@@ -3,6 +3,23 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-20] — Pacote J: Refatoração do Auto-Sync de Emails (Background Workers Multi-Empresa)
+
+### Corrigido
+- **Auto-sync de emails em background não sincronizava utilizadores com config multi-empresa** (`bug` — **TÉCNICO/PRODUÇÃO**): O `worker.py` (a cada 15 min) e o `scheduled_tasks.py` (a cada hora) usavam a query legacy `db.users.find({"email_config.is_configured": True})` que só encontrava configs **flat** embebidas em `user.email_config`. Como a arquitetura atual guarda as configs na coleção canónica `user_email_configs` (uma por par `user_id`+`company_id`) e aninhadas em `user.email_config["company:<id>"]`, a auto-sync **ignorava completamente** os utilizadores que configuraram o email via o fluxo Perfil > Configuração de Webmail. Apenas a sync **manual** (Pacote anterior) funcionava para esses utilizadores.
+  - **Backend** (`backend/services/user_email_config_service.py`): Adicionada nova função `get_active_email_configs_for_sync(limit=100)`. Consulta a coleção canónica `user_email_configs` com filtros: `is_configured: True` AND (tem `encrypted_password` IMAP/SMTP OU tem `google_refresh_token` Google OAuth). Faz uma segunda query batch em `users` para filtrar apenas utilizadores ativos (`is_active != False`). Devolve lista de `{user_id, company_id, email_address, auth_method, user_email}` — o iterador multi-empresa pedido pelo utilizador.
+  - **Backend** (`backend/worker.py`): Refatorado o bloco de auto-sync de webmail (linha ~216). Substituída a query legacy por `get_active_email_configs_for_sync(limit=50)`. O loop itera agora sobre pares `(user_id, company_id)`, chama `resolve_email_config_for_sync(user_id, active_company_id=company_id)` para obter a config canónica, e passa-a a `sync_user_emails(resolved_config=resolved)`. Tratamento de erros individual por config (try/except dentro do loop) mantido — falha numa conta não bloqueia as restantes. Detecção de policy violation IMAP mantida (parar iteração em rate limit). Sync de caixas partilhadas via Gmail API (`shared_role_email_configs`) **sem alterações**.
+  - **Backend** (`backend/services/scheduled_tasks.py`): Refatorado o bloco "2. Sincronizar caixas pessoais" (linha ~1449) com o mesmo padrão: `get_active_email_configs_for_sync` + loop por `(user_id, company_id)` + `resolve_email_config_for_sync` + `sync_user_emails(resolved_config=resolved)`. Tratamento de policy violation via `_is_policy_violation()` mantido.
+
+### Decisões técnicas
+- **OAuth pessoal ainda não suportado na auto-sync**: o `sync_user_emails` só trata IMAP/SMTP (desencripta `encrypted_password` e liga via `imaplib`). Para configs com `auth_method == "google_oauth"`, o worker regista log debug e salta — **não é regressão** (a query legacy também não suportava OAuth pessoal, porque `sync_user_emails` sempre falharia em `encryption_service.decrypt("")`). Implementar `gmail_api_sync_user_to_db(user_id, company_id)` fica para iteracao futura.
+- **Limite de 50 configs por ciclo** (worker e scheduled_tasks): mantém o mesmo teto do código anterior para evitar rajadas de ligações IMAP. Cada config tem 3s de delay entre si.
+- **Índice composto único** `(user_id, company_id)` em `user_email_configs` (já existente em `db_indexes.py`) garante performance da query.
+
+### Resultado
+- A auto-sync em background passa a funcionar para **todos** os utilizadores com config ativa, independentemente de ser flat (legacy), nested multi-empresa, ou guardada via Perfil > Configuração de Webmail.
+- Fecha a "limitação conhecida" documentada no hotfix anterior (commit `2f65050e`): a sync manual já funcionava, mas a auto-sync em background ainda usava a query legacy. Agora ambas usam a arquitetura canónica.
+
 ## [2026-06-20] — Hotfix: Webmail "Configuração de email não ativa" para utilizadores com config multi-empresa
 
 ### Corrigido
