@@ -1446,24 +1446,53 @@ class ScheduledTasksService:
             # Pausa entre sync global e sync pessoal (evitar rajadas de ligações IMAP)
             await asyncio.sleep(3)
             
-            # 2. Sincronizar caixas pessoais dos utilizadores com email_config ativa
+            # 2. Sincronizar caixas pessoais dos utilizadores com config ativa
+            # ----------------------------------------------------------------
+            # SUBSTITUI a query legacy db.users.find({"email_config.is_configured": True})
+            # que só encontrava configs flat embebidas. Agora consultamos a coleção
+            # canónica user_email_configs (uma config por par user+empresa) — suporta
+            # a arquitetura multi-empresa e as configs guardadas via Perfil >
+            # Configuração de Webmail.
+            # ----------------------------------------------------------------
             try:
-                users_with_email = await self.db.users.find(
-                    {
-                        "email_config.is_configured": True,
-                        "is_active": {"$ne": False},
-                    },
-                    {"_id": 0, "id": 1, "email": 1, "email_config": 1}
-                ).to_list(50)
-                
                 from services.email_service import sync_user_emails
+                from services.user_email_config_service import get_active_email_configs_for_sync
+                from services.email_config_resolver import resolve_email_config_for_sync
+
+                active_configs = await get_active_email_configs_for_sync(limit=50)
                 
-                for u in users_with_email:
+                for cfg in active_configs:
+                    uid = cfg["user_id"]
+                    company_id = cfg["company_id"]
+                    auth_method = cfg.get("auth_method", "imap_smtp")
+                    user_email_log = cfg.get("user_email") or cfg.get("email_address") or uid
                     try:
+                        # OAuth pessoal ainda não tem sync function própria
+                        # (só IMAP/SMTP via sync_user_emails). Saltar com log
+                        # debug — não é regressão (legacy também não suportava).
+                        if auth_method == "google_oauth":
+                            logger.debug(
+                                f"[Auto-Sync Email] Conta {user_email_log} usa Google OAuth — "
+                                f"sync pessoal OAuth ainda não implementada (a saltar)"
+                            )
+                            continue
+
+                        # Resolver a config canónica para este par user+empresa
+                        resolved = await resolve_email_config_for_sync(
+                            uid, active_company_id=company_id
+                        )
+                        if not resolved:
+                            logger.debug(
+                                f"[Auto-Sync Email] config não resolúvel para "
+                                f"user={uid} company={company_id} — a saltar"
+                            )
+                            continue
+
                         user_result = await sync_user_emails(
-                            user_id=u["id"],
+                            user_id=uid,
                             days=3,
-                            max_emails=50
+                            max_emails=50,
+                            resolved_config=resolved,
                         )
                         total_synced += user_result.get("total_synced", 0)
                         total_errors += user_result.get("total_errors", 0)
@@ -1471,25 +1500,30 @@ class ScheduledTasksService:
                         # Verificar se houve policy violation — parar de iterar contas
                         if user_result.get("error") and _is_policy_violation(user_result["error"]):
                             logger.warning(
-                                f"[Auto-Sync Email] Policy violation detectada para {u.get('email', '?')} "
-                                f"— a cancelar sync das restantes contas neste ciclo"
+                                f"[Auto-Sync Email] Policy violation detectada para {user_email_log} "
+                                f"(company={company_id}) — a cancelar sync das restantes contas neste ciclo"
                             )
                             total_errors += 1
                             break
                     except Exception as e:
                         error_str = str(e)
                         if _is_policy_violation(error_str):
-                            logger.warning(f"[Auto-Sync Email] Conta {u.get('email', '?')} bloqueada por rate limit — a parar iteração: {error_str[:200]}")
+                            logger.warning(
+                                f"[Auto-Sync Email] Conta {user_email_log} (company={company_id}) "
+                                f"bloqueada por rate limit — a parar iteração: {error_str[:200]}"
+                            )
                             break
-                        logger.debug(f"[Auto-Sync Email] Erro caixa pessoal {u.get('id', '?')}: {e}")
+                        logger.debug(
+                            f"[Auto-Sync Email] Erro caixa pessoal user={uid} company={company_id}: {e}"
+                        )
                         total_errors += 1
                     
                     # Delay entre contas para evitar ligações IMAP simultâneas (3s)
                     await asyncio.sleep(3)
                 
-                results["personal_accounts"] = len(users_with_email)
+                results["personal_accounts"] = len(active_configs)
             except Exception as e:
-                logger.error(f"[Auto-Sync Email] Erro ao buscar utilizadores com email: {e}")
+                logger.error(f"[Auto-Sync Email] Erro ao buscar configs ativas: {e}")
                 results["personal_accounts"] = {"error": str(e)}
             
             # Pausa antes de sync partilhado

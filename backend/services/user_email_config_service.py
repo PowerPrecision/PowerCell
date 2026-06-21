@@ -76,6 +76,79 @@ async def get_user_companies_with_config(user_id: str) -> List[str]:
     return [doc["company_id"] for doc in docs]
 
 
+async def get_active_email_configs_for_sync(
+    limit: int = 100,
+) -> List[Dict[str, Any]]:
+    """
+    Retorna todas as configs de email pessoais ativas para sincronização
+    automática em background (multi-empresa).
+
+    SUBSTITUI a query legacy ``db.users.find({"email_config.is_configured": True})``
+    que só funcionava para configs flat embebidas em ``user.email_config``. Esta
+    função consulta a coleção canónica ``user_email_configs`` (uma config por
+    par user+empresa) e devolve apenas configs com credenciais válidas cujo
+    utilizador esteja ativo.
+
+    Filtros aplicados:
+      - ``is_configured: True`` — a flag de ativação da config
+      - Credenciais presentes: ``encrypted_password`` (IMAP/SMTP) OU
+        ``google_refresh_token`` (Google OAuth)
+      - Utilizador ativo (``users.is_active`` != False)
+
+    Returns:
+        Lista de dicts (um por par user+empresa ativo), cada um com:
+          - ``user_id``: ID do utilizador
+          - ``company_id``: ID/nome da empresa ativa
+          - ``email_address``: endereço de email configurado
+          - ``auth_method``: "imap_smtp" | "google_oauth" | "none"
+          - ``user_email``: email de login do utilizador (para logging)
+    """
+    # 1. Buscar configs ativas com credenciais (IMAP/SMTP OU Google OAuth)
+    cursor = db.user_email_configs.find(
+        {
+            "is_configured": True,
+            "$or": [
+                {"encrypted_password": {"$nin": ["", None], "$exists": True}},
+                {"google_refresh_token": {"$nin": ["", None], "$exists": True}},
+            ],
+        },
+        {
+            "_id": 0,
+            "user_id": 1,
+            "company_id": 1,
+            "email_address": 1,
+            "auth_method": 1,
+        }
+    )
+    configs = await cursor.to_list(limit)
+
+    if not configs:
+        return []
+
+    # 2. Filtrar utilizadores ativos (batch query — 1 round-trip)
+    user_ids = list({c["user_id"] for c in configs if c.get("user_id")})
+    active_cursor = db.users.find(
+        {"id": {"$in": user_ids}, "is_active": {"$ne": False}},
+        {"_id": 0, "id": 1, "email": 1}
+    )
+    active_users = {u["id"]: u for u in await active_cursor.to_list(len(user_ids))}
+
+    # 3. Combinar: só incluir configs cujo user está ativo
+    result = []
+    for c in configs:
+        uid = c.get("user_id")
+        if not uid or uid not in active_users:
+            continue
+        result.append({
+            "user_id": uid,
+            "company_id": c.get("company_id") or "default",
+            "email_address": c.get("email_address", ""),
+            "auth_method": c.get("auth_method", "imap_smtp"),
+            "user_email": active_users[uid].get("email", ""),
+        })
+    return result
+
+
 async def upsert_user_email_config(
     user_id: str,
     company_id: str,
