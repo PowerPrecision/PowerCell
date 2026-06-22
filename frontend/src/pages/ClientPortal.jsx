@@ -1856,6 +1856,59 @@ export default function ClientPortal() {
 
   // ── Login obrigatório ──
   const [isVerified, setIsVerified] = useState(false);
+  const [autoLoginAttempted, setAutoLoginAttempted] = useState(false);
+
+  // AUTO-LOGIN VIA TOKEN NA QUERY STRING (Pacote M, Fix #1)
+  // O endpoint /api/portal/impersonate/{id} (backend/routes/portal.py)
+  // devolve um URL com o JWT na query string (?token=...). Este useEffect
+  // intercepta esse parâmetro (e variantes ?magic_link=/?access_token=),
+  // guarda o token, limpa a URL e faz setIsVerified(true) para saltar
+  // o ecrã de login. Resolve o bug "Ver como Cliente" em que o utilizador
+  // ficava retido no login mesmo tendo clicado o magic link.
+  useEffect(() => {
+    if (autoLoginAttempted) return; // idempotente — só corre uma vez
+
+    const searchParams = new URLSearchParams(window.location.search);
+    const rawToken =
+      searchParams.get('token') || searchParams.get('magic_link') || searchParams.get('access_token');
+    if (!rawToken) return;
+
+    setAutoLoginAttempted(true);
+
+    (async () => {
+      try {
+        let jwtToken = rawToken;
+        // Se o token não tem '.' não é um JWT — pode ser um short_id (8 chars)
+        // que precisa de ser resolvido via /portal/resolve/{short_id}
+        if (!rawToken.includes('.')) {
+          const resolveRes = await fetch(`/api/portal/resolve/${rawToken}`);
+          if (!resolveRes.ok) throw new Error('resolve failed');
+          const resolveData = await resolveRes.json();
+          jwtToken = resolveData.token || resolveData.access_token || rawToken;
+        }
+        // Guardar o token em localStorage (lido pelo apiClient do Portal)
+        localStorage.setItem('portalToken', jwtToken);
+        localStorage.setItem('portal_token', jwtToken);
+        localStorage.setItem('portalAuthMethod', 'magic_link_impersonate');
+        localStorage.setItem('portal_verified', 'true');
+        localStorage.setItem('portalLastActivity', Date.now().toString());
+        sessionStorage.removeItem('portalAuthMethod');
+
+        // Limpar o token da URL (segurança — não fica no histórico do browser)
+        window.history.replaceState({}, document.title, window.location.pathname);
+
+        // Saltar o ecrã de login — o useEffect de data-fetch existente
+        // vai carregar /portal/status com o token guardado.
+        setIsVerified(true);
+      } catch (err) {
+        console.error('[ClientPortal] Auto-login falhou:', err);
+        localStorage.removeItem('portalToken');
+        localStorage.removeItem('portal_token');
+        localStorage.removeItem('portalAuthMethod');
+        setAutoLoginAttempted(true);
+      }
+    })();
+  }, [autoLoginAttempted]);
   const [clientId, setClientId] = useState(null);
 
   const rawToken = useRef(window.location.pathname.split('/portal/')[1]);

@@ -762,6 +762,12 @@ export const impersonateClient = (processId) =>
     },
   }));
 
+// Impersonate — "Ver como Cliente": devolve URL com ?token=JWT para auto-login no Portal
+// (Pacote M) Usa o endpoint dedicado /portal/impersonate/{id} que devolve o JWT na query
+// string, permitindo auto-login imediato no ClientPortal (sem passar pelo ecrã de login).
+export const impersonateClientPortal = (processId) =>
+  api.get(`/portal/impersonate/${processId}`);
+
 // ===== PORTAL DOCUMENT REQUESTS (Admin manages client doc requests) =====
 export const getPortalDocRequests = (processId) => api.get(`/documents/portal-requests/${processId}`);
 export const createPortalDocRequest = (processId, data) => api.post(`/documents/portal-requests/${processId}`, data);

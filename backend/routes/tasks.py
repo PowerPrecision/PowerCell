@@ -99,20 +99,42 @@ async def create_task(
     sanitized_title = sanitize_string(task_data.title, max_length=300) if task_data.title else task_data.title
     sanitized_description = sanitize_string(task_data.description, max_length=2000) if task_data.description else task_data.description
     
-    # Construir título com nome do processo se aplicável
+    # Construir título com referência do processo + nome do processo se aplicável
+    # REGRA DE NOMENCLATURA (Pacote M, Fix #2):
+    # Sempre que a tarefa estiver associada a um process_id, o título final
+    # gravado na BD deve incluir a referência do processo (process_ref, ex:
+    # "PROC-012") como prefixo, no formato:  [PROC-012] Título original
+    # Se o título original já contiver "[PROC-" (case-insensitive), ignora
+    # para evitar duplicação.
     title = sanitized_title or task_data.title
     process_name = None
-    
+
     if task_data.process_id:
         process = await db.processes.find_one(
             {"id": task_data.process_id},
-            {"_id": 0, "client_name": 1}
+            {"_id": 0, "client_name": 1, "process_ref": 1, "process_number": 1}
         )
         if process:
             process_name = process.get("client_name", "")
-            # Se o título não contém o nome do cliente, adicionar
-            if process_name and process_name not in title:
-                title = f"[{process_name}] {title}"
+            # ── Prefixar com a referência do processo ([PROC-012]) ──
+            # Preferir process_ref (formato canónico "PROC-012"); fazer fallback
+            # para process_number formatado; nunca gerar prefixo vazio.
+            process_ref = process.get("process_ref")
+            if not process_ref and process.get("process_number") is not None:
+                try:
+                    process_ref = f"PROC-{int(process['process_number']):04d}"
+                except (ValueError, TypeError):
+                    process_ref = None
+
+            if process_ref:
+                # Evitar duplicação: se o título já contém [PROC-..., saltar
+                # (comparação case-insensitive para cobrir [proc-012] digitado manualmente)
+                title_lower = (title or "").lower()
+                if "[proc-" not in title_lower:
+                    title = f"[{process_ref}] {title or ''}".rstrip()
+            # ── Manter comportamento legado: adicionar nome do cliente se ausente ──
+            if process_name and process_name not in (title or ""):
+                title = f"[{process_name}] {title or ''}".rstrip()
     
     task = {
         "id": task_id,
