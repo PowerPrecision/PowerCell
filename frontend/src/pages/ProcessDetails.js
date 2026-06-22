@@ -98,6 +98,7 @@ import {
   generateMagicLink,
   sendMagicLinkEmail,
   impersonateClient,
+  impersonateClientPortal,
 } from "../services/api";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
@@ -2630,7 +2631,7 @@ const ProcessDetails = () => {
                       className="gap-2 cursor-pointer text-amber-700 focus:text-amber-800"
                       onClick={async () => {
                         try {
-                          const res = await impersonateClient(id);
+                          const res = await impersonateClientPortal(id);
                           const url = res?.data?.url;
                           if (!url) {
                             toast.error("Não foi possível gerar o link de impersonate");

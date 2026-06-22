@@ -3,6 +3,62 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-22] — Pacote L: Proteção de Eliminação — Regra do 2º Titular
+
+### Corrigido
+- **Eliminar um cliente que fosse apenas 2º titular destruía processos que ainda tinham 1º titular ativo** (`bug` — **CRÍTICO/QA**): O endpoint `DELETE /api/clients/{id}` (`backend/routes/clients.py`, função `delete_client`) fazia cascata de soft-delete sem distinguir se o cliente era o titular principal (`process.client_id`) ou o 2º titular (`process.second_client_id`). Isto causava perda silenciosa de dados e bloqueava o trabalho do consultor responsável pelo processo.
+
+  **Regra de Proteção implementada — "Regra do 2º Titular"**:
+  1. **TITULAR PRINCIPAL** (`process.client_id == client_id`): soft-delete em cascata completo — processo + documentos + tarefas (`is_deleted=True`, `status='eliminado'`). O processo é destruído porque o 1º titular desaparece. Agora também guarda `previous_status` para o endpoint de restore poder recuperar o status original.
+  2. **APENAS 2º TITULAR** (`process.second_client_id == client_id` E `process.client_id != client_id`): **NÃO** elimina o processo. Apenas remove a associação (`$unset second_client_id + second_client_data`), mantendo o processo **ATIVO** para o 1º titular. Regista metadados de auditoria (`second_titular_unlinked_at`, `second_titular_unlinked_by`, `second_titular_unlinked_reason`) no documento do processo para rastreabilidade forense.
+
+  **Implementação** — A função `delete_client` foi dividida em 3 fases:
+  - **FASE 1** (nova): percorre `processes` onde `second_client_id == client_id` AND `client_id != client_id` AND `is_deleted != True` → desliga a associação e mantém o processo ativo. Conta os desligamentos em `second_titular_unlinks` e ids em `unlinked_process_ids`.
+  - **FASE 2** (melhorada): branch do processo por `id == client_id` — mantém o soft-delete + cascata docs/tasks, agora com `previous_status` guardado. Retorna os contadores de 2º titular desligado.
+  - **FASE 3** (corrigida): branch legada da coleção `clients` — substituído o `$unset client_id` (que deixava órfãos ativos) por cascata soft-delete REAL dos processos onde `client_id == client_id` (1º titular confirmado): processo + docs + tasks com `is_deleted=True`, `previous_status` guardado. Os 2º titular-only já foram tratados na FASE 1.
+
+  **Retorno da API enriquecido** — Ambas as branches retornam agora:
+  - `second_titular_unlinks` (int): número de processos onde o cliente foi desligado como 2º titular
+  - `unlinked_process_ids` (list): ids dos processos desligados
+  - `cascade_count` + `cascade_process_ids` (apenas FASE 3): processos eliminados em cascata como 1º titular
+
+  Isto permite ao frontend dar feedback claro: *"Cliente movido para o lixo. 2º titular desligado de N processo(s). M processo(s) eliminados em cascata."*
+
+### Notas
+- **Mapeamento de schema**: O prompt do utilizador referia `titular_2_id`, mas o campo real no código é `second_client_id` (com dados denormalizados em `second_client_data`), confirmado via `frontend/src/components/SecondTitularCard.jsx` e `backend/routes/processes.py:3462-3477`. A regra foi implementada sobre o campo real.
+- **Sem breaking changes**: O retorno da API é superconjunto do anterior (todos os campos antigos mantidos). Os callers existentes continuam a funcionar.
+- **Validação**: `py_compile` + `ast.parse` OK. Sintaxe Python válida.
+
+---
+
+## [2026-06-21] — Pacote M: Auto-Login do Portal (Impersonate) + Nomenclatura de Tarefas [PROC-XXX]
+
+### Corrigido
+- **"Ver como Cliente" abria o Portal mas o utilizador ficava retido no ecrã de Login** (`bug` — **UX/INTEGRAÇÃO**): O botão "Ver como Cliente" gerava um magic link via `POST /processes/{id}/generate-magic-link` que devolve um URL com short_id no PATH (`/portal/{short_id}`). O frontend do Portal resolvia o short_id mas só extraía o `client_id` — não fazia auto-login (comentário explícito no código: "não carregar dados — o login ainda é obrigatório"). Resultado: staff clicava "Ver como Cliente" e via o ecrã de login em vez da dashboard.
+
+  **Fix em 3 camadas**:
+  - **Backend** (`backend/routes/portal.py`): Novo endpoint `GET /portal/impersonate/{process_id}` (protegido por `require_staff`). Gera JWT via `create_client_magic_token`, devolve `{ magic_link: "{frontend_url}/portal?token={JWT}", token, process_id, client_id, client_name, client_email, expires_in_days }`. Filtra `is_deleted != True` (não permite impersonate de eliminados). Log de auditoria `[IMPERSONATE]`. Adicionados imports: `create_client_magic_token`, `PORTAL_TOKEN_VALIDITY_DAYS` de `services.portal_security`; `require_staff` de `services.auth`; `Request` do fastapi.
+  - **Frontend — API client** (`frontend/src/services/api.js`): Adicionado `export impersonateClientPortal(processId) → api.get('/portal/impersonate/${processId}')`.
+  - **Frontend — Staff UI** (`frontend/src/pages/ProcessDetails.js`): Adicionado botão **"Ver como Cliente"** (teal, default variant) no topo do Popover "Portal do Cliente" que chama `impersonateClientPortal(id)` e abre `res.data.magic_link` em nova aba (`window.open` com `noopener,noreferrer`). Botões "Copiar Link" e "Enviar por Email" mantidos por baixo.
+  - **Frontend — Portal UI** (`frontend/src/pages/ClientPortal.jsx`): Adicionado `useEffect` de auto-login que lê `URLSearchParams(window.location.search)` procurando `token` | `magic_link` | `access_token`. Se o token não contém `.` (short_id) → resolve via `/portal/resolve/{short_id}` primeiro; se é JWT → usa diretamente. Guarda token em `localStorage` (`portalToken` + `portal_token`), marca `portalAuthMethod='magic_link_impersonate'`, `portal_verified='true'`, `portalLastActivity`. Limpa o token da URL via `window.history.replaceState` (segurança — não fica no histórico do browser). `setIsVerified(true)` → saltar ecrã de login e ir direto para a dashboard. Idempotente via state `autoLoginAttempted`; tratamento de erro limpa tokens parciais e mostra login; `AbortController` com timeout 15s.
+
+- **Tarefas criadas não identificavam claramente o processo** (`bug` — **UX/NOMENCLATURA**): O endpoint `POST /api/tasks` (`backend/routes/tasks.py`, função `create_task`) só adicionava `[client_name]` como prefixo do título. Não incluía a referência do processo (`PROC-XXX`), pelo que nas listas de tarefas não era possível identificar a que processo diziam respeito.
+
+  **Fix Backend** (`backend/routes/tasks.py`):
+  - Estendida a projection do `db.processes.find_one` para incluir `process_ref` + `process_number`.
+  - Adicionada lógica: obter `process_ref` (preferir campo directo; fallback formatar `process_number` como `PROC-{N:04d}`; nunca gerar prefixo vazio).
+  - **Anti-duplicação**: se o título já contém `[proc-` (case-insensitive) → saltar a prefixação.
+  - Formatar `title = "[PROC-012] {title}"`.
+  - Comportamento legado preservado: se `process_name` (`client_name`) não estiver no título, adiciona `[client_name]` como segundo prefixo. Resultado final ex: `[PROC-012] [João Silva] Recolher documentos`.
+  - O título enriquecido é gravado no documento `task` — é o que aparece em todas as listas, notificações e audit trail.
+
+### Notas
+- **Validação**: `py_compile` + `ast.parse` OK nos 2 ficheiros backend. Sintaxe Python válida.
+- **Sem breaking changes**: O endpoint `POST /tasks` mantém o mesmo contrato (TaskResponse). O título é apenas enriquecido antes de ser gravado.
+- **Segurança**: O token de impersonate tem a mesma validade dos magic links (`PORTAL_TOKEN_VALIDITY_DAYS = 90 dias`). O `require_staff` garante que só staff autenticado pode gerar impersonate links.
+
+---
+
 ## [2026-06-20] — Pacote K: Bugfixes de QA (Balcões, Reatribuir, Cliente Ativo, Restore, Mapeamento, Área Pessoal)
 
 ### Corrigido

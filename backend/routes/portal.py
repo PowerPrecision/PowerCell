@@ -39,7 +39,7 @@ import asyncio
 from datetime import datetime, timezone, timedelta
 from typing import Optional
 from pydantic import BaseModel, field_validator, EmailStr
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
 from database import db
@@ -49,8 +49,10 @@ from services.portal_security import (
     create_verified_session_token,
     create_access_code_session_token,
     verify_client_credentials,
+    create_client_magic_token,
+    PORTAL_TOKEN_VALIDITY_DAYS,
 )
-from services.auth import get_current_user, require_roles
+from services.auth import get_current_user, require_roles, require_staff
 from services.s3_storage import s3_service
 from services.redis_cache import invalidate_stats_cache, get_redis
 from services.notification_service import send_notification_with_preference_check
@@ -505,8 +507,91 @@ async def resolve_portal_token(short_id: str):
     }
 
 
+# IMPERSONATE — "Ver como Cliente" (Pacote M, Fix #1)
+# ====================================================================
+# Permite que um staff (admin/ceo/diretor/consultor) gere um URL de
+# auto-login para o Portal do Cliente, contendo o JWT na query string
+# (?token=...). O frontend do Portal intercepta este parâmetro num
+# useEffect e faz login automático, sem mostrar o formulário de login.
+#
+# Diferença vs. /processes/{id}/generate-magic-link:
+#   - magic-link devolve um short_id no PATH (/portal/{short_id}) e
+#     obriga a um passo de resolução + login manual (fluxo seguro
+#     para envio por email ao cliente final).
+#   - impersonate devolve o JWT DIRETAMENTE na query string
+#     (?token=JWT) e destina-se a uso interno do staff que quer
+#     "ver como cliente" — auto-login imediato.
+# ====================================================================
+
+def _resolve_frontend_url(request) -> str:
+    """Obtém a URL base do frontend (Referer > FRONTEND_URL env)."""
+    referer = request.headers.get("referer") or request.headers.get("origin")
+    if referer:
+        from urllib.parse import urlparse
+        parsed = urlparse(referer)
+        if parsed.scheme and parsed.netloc:
+            return f"{parsed.scheme}://{parsed.netloc}"
+    frontend_url = os.environ.get("FRONTEND_URL")
+    if frontend_url:
+        return frontend_url.rstrip("/")
+    return ""
+
+
+@router.get("/impersonate/{process_id}")
+async def impersonate_client_portal(
+    process_id: str,
+    request: Request,
+    user: dict = Depends(require_staff()),
+):
+    """
+    Gera um URL de auto-login para o Portal do Cliente (uso interno do staff).
+
+    Devolve um URL com o JWT na query string (?token=...) que o frontend
+    do Portal intercepta e usa para autenticar automaticamente, saltando
+    o ecrã de login. Isto resolve o bug "Ver como Cliente" em que o
+    utilizador ficava retido no login.
+
+    Returns:
+    - magic_link: URL completa com ?token=JWT
+    - token: JWT completo (também útil para debug / chamadas diretas)
+    - process_id, client_id, client_name
+    - expires_in_days
+    """
+    # Procurar o processo (mesmo filtrando eliminados — não permitir impersonate de eliminado)
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    # Gerar JWT magic token (mesma função usada pelo generate-magic-link)
+    token = create_client_magic_token(process_id)
+
+    # Construir URL com o token na query string
+    frontend_url = _resolve_frontend_url(request)
+    from urllib.parse import urlencode
+    magic_link = f"{frontend_url}/portal?{urlencode({'token': token})}"
+
+    logger.info(
+        f"[IMPERSONATE] Staff {user.get('email')} gerou auto-login para "
+        f"processo {process_id} (cliente: {process.get('client_name', 'N/A')})"
+    )
+
+    return {
+        "magic_link": magic_link,
+        "token": token,
+        "process_id": process_id,
+        "client_id": process.get("client_id", ""),
+        "client_name": process.get("client_name", ""),
+        "client_email": process.get("client_email", ""),
+        "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
+    }
+
+
 # ====================================================================
 # AUTENTICAÇÃO DO PORTAL
+# ====================================================================
 # ====================================================================
 
 @router.post("/authenticate")

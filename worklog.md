@@ -997,3 +997,43 @@ Stage Summary:
 - 2 ficheiros de docs atualizados: CHANGELOG.md, worklog.md
 - Bug 2 (Reatribuir Cliente): sem alteração de código — confirmado que já estava correcto (só existe a nível do processo).
 - Próximo passo: commit + push para branch dev via Git Database API.
+
+---
+Task ID: 24
+Agent: Main Agent
+Task: Aplicar Pacote M em dev (Auto-Login Portal + Nomenclatura Tarefas) — estava apenas em main local (estrutura powercell/) e faltava em origin/dev
+
+Work Log:
+- Diagnóstico: ao verificar o estado do repo, descobri que o Pacote M (commits 02b9fd6, bac46b7 em main local) estava apenas em main local — que tem estrutura ERRADA (projeto Next.js em root + powercell/ como subdiretório). O origin/dev (HEAD a974e60) tinha apenas Pacote K + L, não M.
+- Confirmado via diffs: `git show main:powercell/backend/routes/portal.py` vs `git show dev:backend/routes/portal.py` — diff de 107 linhas corresponde EXATAMENTE ao Pacote M (imports + _resolve_frontend_url + endpoint impersonate_client_portal). Dev também tem Pacote G (portal_documents_notify) que main não tem — confirmado que não posso copiar ficheiro completo, preciso de aplicar apenas diffs do Pacote M.
+- Aplicados os 5 ficheiros do Pacote M em dev com patches cirúrgicos via Python (script atómico para evitar reversion do HEAD entre invocações bash):
+  1. backend/routes/portal.py:
+     * Adicionado Request ao import do fastapi
+     * Adicionado create_client_magic_token, PORTAL_TOKEN_VALIDITY_DAYS aos imports de portal_security
+     * Adicionado require_staff aos imports de services.auth
+     * Adicionado helper _resolve_frontend_url(request)
+     * Adicionado endpoint GET /portal/impersonate/{process_id} → impersonate_client_portal (devolve {magic_link, token, process_id, client_id, client_name, client_email, expires_in_days})
+  2. backend/routes/tasks.py:
+     * Substituída a lógica de nomenclatura legada pela versão Pacote M: projection agora inclui process_ref + process_number; gerado prefixo [PROC-012] (preferir process_ref; fallback formatar process_number como PROC-{N:04d}); anti-duplicação se título já contém [PROC- (case-insensitive); mantém comportamento legado [client_name] como segundo prefixo
+  3. frontend/src/services/api.js:
+     * Adicionado export impersonateClientPortal(processId) → api.get(/portal/impersonate/${processId})
+     * Mantido impersonateClient existente (Pacote K) para backward compat
+  4. frontend/src/pages/ProcessDetails.js:
+     * Adicionado impersonateClientPortal ao import
+     * Mudada a chamada do botão "Ver como Cliente" de impersonateClient(id) para impersonateClientPortal(id)
+  5. frontend/src/pages/ClientPortal.jsx:
+     * Adicionado useState(autoLoginAttempted)
+     * Adicionado useEffect AUTO-LOGIN VIA TOKEN que intercepta ?token=/?magic_link=/?access_token= na query string, resolve short_id via /portal/resolve se necessário, guarda JWT em localStorage, limpa URL via history.replaceState, setIsVerified(true) para saltar ecrã de login. Idempotente via autoLoginAttempted.
+- Validação: py_compile OK em portal.py + tasks.py. grep confirma todas as marcas (impersonate_client_portal, impersonateClientPortal, REGRA DE NOMENCLATURA, AUTO-LOGIN VIA TOKEN).
+- Commit + push a seguir para origin/dev.
+
+Stage Summary:
+- 5 ficheiros modificados em dev (estrutura correta, sem powercell/ prefix):
+  - backend/routes/portal.py (+endpoint /portal/impersonate/{id} + helper + imports)
+  - backend/routes/tasks.py (+nomenclatura [PROC-XXX] com anti-duplicação)
+  - frontend/src/services/api.js (+export impersonateClientPortal)
+  - frontend/src/pages/ProcessDetails.js (usa impersonateClientPortal)
+  - frontend/src/pages/ClientPortal.jsx (+useEffect auto-login)
+- Bug "Ver como Cliente" RESOLVIDO em dev: staff clica → backend devolve /portal?token=JWT → frontend intercepta ?token → setIsVerified(true) → dashboard sem login.
+- Bug nomenclatura RESOLVIDO em dev: tarefas com process_id ficam com título "[PROC-012] [Nome Cliente] Título".
+- main local (estrutura errada) deixado intacto — não deve ser pushed. Recomenda-se git reset --hard origin/main para alinhar main local com o remote no futuro.
