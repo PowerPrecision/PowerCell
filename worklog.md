@@ -937,3 +937,63 @@ Stage Summary:
 - Tratamento de erros individual por config preservado (falha numa conta não bloqueia as restantes); policy violation IMAP continua a parar a iteração (rate limit do servidor).
 - OAuth pessoal: skip com log debug (não é regressão; sync_user_emails só suporta IMAP/SMTP). Implementar gmail_api_sync_user_to_db fica para iteração futura.
 - Próximo passo: commit + push para branch dev via Git Database API.
+
+---
+Task ID: 20
+Agent: Main Agent
+Task: Pacote K — Bugfixes de QA (6 bugs: Balcões, Reatribuir, Cliente Ativo, Restore, Mapeamento, Área Pessoal)
+
+Work Log:
+- Lanzados 2 agentes Explore em paralelo (K-frontend-explore, K-backend-explore) para mapear todos os ficheiros/linhas dos 6 bugs. Recebidos relatórios detalhados com paths, line numbers e code snippets.
+- Bug 1 (Balcões): SendDocumentationModal.js handleCreateBranch (linha 291) fazia POST mas só anexava ao state local (setRecipients manual). Corrigido: chama loadData() para re-buscar lista canónica; mantém setSelectedRecipients para pré-selecionar o novo balcão.
+- Bug 2 (Reatribuir Cliente): Investigação completa (grep por "reatribui|reatribuir|atribuir.*consultor|trocar.*consultor" em todo o frontend). Confirmado: "Reatribuir Cliente" só existe em ProcessDetails.js (nível do processo) — state (355-361), handler (638-673), button (2411-2423), dialog (5706-5830). NÃO existe em nenhum cliente-global page (ClientsPage, ClientDetailPage, MyClientsPage, etc.). Sem alteração de código; comportamento já correcto. Documentado no CHANGELOG.
+- Bug 3a (Cliente Ativo backend): clients.py tinha 2 ramos com bugs:
+  * Branch A (show_all=True, linha 1027): `proc.get("is_active", True) and proc.get("status") not in ["desistencias", "concluidos", "arquivado", "perdido", "concluido"]` — typos "concluidos"/"arquivado", usava flag is_active desnormalizada.
+  * Branch B (show_all=False, linha 1168): `proc.get("status") not in ["arquivado", "perdido", "concluido"]` — faltava "desistencias", typo "arquivado".
+  * Corrigido ambos para: `not proc.get("is_deleted", False) and proc.get("status") not in INACTIVE_STATUSES` onde `INACTIVE_STATUSES = ("concluido", "desistencia", "desistencias", "eliminado")`.
+  * Adicionado `is_deleted: 1` às projections MongoDB (linhas 959 e 1144) para o cálculo poder filtrar eliminados.
+  * Corrigido também o `has_any_active` (linha 1050) que usava `p.get("is_active", True)` → agora usa a mesma lógica status + is_deleted.
+- Bug 3b (Ver como Cliente): Investigação (grep por "Ver como Cliente|ver como cliente|impersonate.*client"). Confirmado: NÃO existe botão "Ver como Cliente". O botão "Portal do Cliente" em ProcessDetails.js (linha 2535) já usa `generateMagicLink(id)` com o id do processo atual (correto). O bug real estava em ClientRegistrationsPage.js (linhas 537 e 896) que navegava para `processes[0].id` sem filtrar eliminados. Corrigido ambas as ocorrências para usar `processes.find(p => !p.is_deleted && p.status !== "eliminado") || processes[0]`.
+- Bug 4a (Restore endpoint): restore.py:30-128 existia mas estava quebrado:
+  1. NÃO fazia is_deleted: False (bug crítico — processo ficava invisível após "restore")
+  2. Sempre forçava status: "clientes_espera" (não preservava original)
+  3. Não cascade-restore documentos/tarefas
+  4. Dead code para db.deleted_processes (coleção inexistente)
+  5. Restaurava processos concluídos (is_active: False)
+  * Rewrite completo: unset is_deleted, restaura previous_status (guardado pelo delete), cascade-restore docs/tasks, log em process_activities (tipo process_restored), só restaura se is_deleted=True ou status="eliminado".
+  * Adicionado `previous_status: process.get("status")` ao delete endpoint em processes.py:3098 para o restore poder recuperar o status original.
+  * Adicionado `import uuid` no topo do restore.py (substitui __import__('uuid') inline).
+- Bug 4b (Restore button frontend):
+  * api.js: adicionado `export const deleteProcess` e `export const restoreProcess`.
+  * ProcessesPage.js: substituído Switch (showCompleted) por Select com 3 opções (active_only/all/deleted). State `viewMode` substitui `showCompleted`. Handler `handleViewModeChange` + `handleRestoreProcess`.
+  * Row rendering: adicionado botão "Restaurar" (RotateCcw icon, azul) quando viewMode==="deleted". Badge "Eliminado" (destructive, vermelho) quando process.is_deleted ou status==="eliminado".
+  * Imports: adicionado RotateCcw, Trash2; adicionado restoreProcess.
+- Bug 5 (Mapeamento balcões): emails.py _extract_email_variables (linhas 63-363):
+  * Adicionado `credit_data = process.get("credit_data", {}) or {}` após line 97.
+  * valor_financiamento_raw: adicionado `credit_data.get("requested_amount")` e `financial_data.get("valor_financiado")`.
+  * capitais_proprios_raw: adicionado `financial_data.get("capital_proprio")` (singular).
+  * prazo_raw: adicionado `credit_data.get("loan_term_years")`.
+  * Verificado que _build_professional_email_html (366-609) NÃO duplica estas variáveis (usa valor_aquisicao/montante_divida em vez de valor_financiamento/capitais_proprios) — sem fix necessário ali.
+- Bug 6 (Área Pessoal): ProfilePage.js:
+  * Import: `from "../hooks/use-toast"` → `from "sonner"`.
+  * 13 toast({title,description,variant}) convertidos para toast.success()/error()/warning().
+  * handleSaveSignature: toast.success("Assinatura guardada com sucesso", {description: "..."}).
+  * RichTextEditor: adicionado `key={sig-${effectiveCompanyId || "default"}}` para forçar remount ao mudar de empresa (ReactQuill não sincroniza visualmente sem key change).
+  * useEffect deps [user, effectiveCompanyId, effectiveRole] já estavam correctos — o problema era o ReactQuill não refrescar, resolvido com key.
+- Verificada sintaxe: py_compile OK nos 4 ficheiros backend; esbuild OK nos 5 ficheiros frontend; flake8 strict (--select=E9,F63,F7,F82) → exit 0.
+- Atualizada documentação: entrada nova no CHANGELOG.md ([2026-06-20] Pacote K) + esta entrada no worklog.md.
+
+Stage Summary:
+- 9 ficheiros modificados:
+  - frontend/src/components/SendDocumentationModal.js (Bug 1: loadData() após POST)
+  - frontend/src/pages/ProcessesPage.js (Bug 4b: Select filtro + botão Restaurar + badge Eliminado)
+  - frontend/src/pages/ProfilePage.js (Bug 6: sonner + toast.success + key prop)
+  - frontend/src/pages/ClientRegistrationsPage.js (Bug 3b: filtrar processos eliminados na navegação)
+  - frontend/src/services/api.js (Bug 4b: restoreProcess + deleteProcess)
+  - backend/routes/emails.py (Bug 5: credit_data paths no _extract_email_variables)
+  - backend/routes/clients.py (Bug 3a: cálculo cliente ativo + is_deleted projection)
+  - backend/routes/restore.py (Bug 4a: rewrite completo do restore_process)
+  - backend/routes/processes.py (Bug 4a: previous_status no delete endpoint)
+- 2 ficheiros de docs atualizados: CHANGELOG.md, worklog.md
+- Bug 2 (Reatribuir Cliente): sem alteração de código — confirmado que já estava correcto (só existe a nível do processo).
+- Próximo passo: commit + push para branch dev via Git Database API.

@@ -534,7 +534,15 @@ const ClientRegistrationsPage = () => {
                         <Button
                           variant="default"
                           size="sm"
-                          onClick={() => navigate(`/process/${client.processes[0].id}`)}
+                          // FIX (Pacote K): navegar para o primeiro processo ATIVO
+                          // (não eliminado) em vez de processes[0], que pode ser
+                          // um processo antigo eliminado.
+                          onClick={() => {
+                            const activeProc = client.processes.find(
+                              (p) => !p.is_deleted && p.status !== "eliminado"
+                            ) || client.processes[0];
+                            navigate(`/process/${activeProc.id}`);
+                          }}
                           title="Ver processo"
                           className="h-8"
                         >
@@ -893,7 +901,12 @@ const ClientRegistrationsPage = () => {
               <Button
                 onClick={() => {
                   setDetailsDialog({ open: false, client: null });
-                  navigate(`/process/${detailsDialog.client.processes[0].id}`);
+                  // FIX (Pacote K): navegar para o primeiro processo ATIVO
+                  const procs = detailsDialog.client.processes;
+                  const activeProc = procs.find(
+                    (p) => !p.is_deleted && p.status !== "eliminado"
+                  ) || procs[0];
+                  navigate(`/process/${activeProc.id}`);
                 }}
               >
                 <Eye className="h-4 w-4 mr-2" />

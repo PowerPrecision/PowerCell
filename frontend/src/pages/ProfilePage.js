@@ -44,7 +44,7 @@ import {
   AlertDialogHeader,
   AlertDialogTitle,
 } from "../components/ui/alert-dialog";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole } from "../utils/roleUtils";
 import { useNavigate } from "react-router-dom";
@@ -267,14 +267,9 @@ const ProfilePage = () => {
 
       // Verificar avisos do backend
       if (response.data.warnings?.length > 0) {
-        toast({
-          variant: "destructive",
-          title: "Aviso",
-          description: response.data.warnings.join("; "),
-        });
+        toast.warning(response.data.warnings.join("; "));
       } else {
-        toast({
-          title: "Dados profissionais guardados",
+        toast.success("Dados profissionais guardados", {
           description: user?.active_company_name
             ? `Dados profissionais guardados para ${user.active_company_name}`
             : "Os seus dados profissionais foram atualizados com sucesso.",
@@ -291,9 +286,7 @@ const ProfilePage = () => {
       setSavedCompanyFields(true);
       setTimeout(() => setSavedCompanyFields(false), 2000);
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao guardar",
+      toast.error("Erro ao guardar", {
         description: extractErrorMessage(error.response?.data?.detail, "Não foi possível guardar os dados profissionais."),
       });
     } finally {
@@ -312,14 +305,10 @@ const ProfilePage = () => {
 
       // Verificar avisos do backend
       if (response.data.warnings?.length > 0) {
-        toast({
-          variant: "destructive",
-          title: "Aviso",
-          description: response.data.warnings.join("; "),
-        });
+        toast.warning(response.data.warnings.join("; "));
       } else {
-        toast({
-          title: "Assinatura guardada",
+        // FIX (Pacote K): toast.success explicito (QA pediu esta mensagem exata)
+        toast.success("Assinatura guardada com sucesso", {
           description: "A sua assinatura de email foi atualizada para esta empresa.",
         });
       }
@@ -330,9 +319,7 @@ const ProfilePage = () => {
       // ler dados antigos do user antes do refreshUser completar.
       if (refreshUser) await refreshUser();
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao guardar",
+      toast.error("Erro ao guardar", {
         description: extractErrorMessage(error.response?.data?.detail, "Não foi possível guardar a assinatura."),
       });
     } finally {
@@ -357,11 +344,7 @@ const ProfilePage = () => {
   // Alterar password
   const handleChangePassword = async () => {
     if (passwordData.new_password !== passwordData.confirm_password) {
-      toast({
-        variant: "destructive",
-        title: "Erro",
-        description: "As passwords não coincidem.",
-      });
+      toast.error("As passwords não coincidem.");
       return;
     }
 
@@ -371,8 +354,7 @@ const ProfilePage = () => {
         current_password: passwordData.current_password,
         new_password: passwordData.new_password,
       });
-      toast({
-        title: "Password alterada",
+      toast.success("Password alterada", {
         description: "A sua password foi alterada com sucesso.",
       });
       setPasswordDialog(false);
@@ -383,9 +365,7 @@ const ProfilePage = () => {
       });
       setPasswordStrength(null);
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao alterar password",
+      toast.error("Erro ao alterar password", {
         description: extractErrorMessage(error.response?.data?.detail, "Não foi possível alterar a password."),
       });
     } finally {
@@ -400,17 +380,12 @@ const ProfilePage = () => {
     setRevokingSession(true);
     try {
       await api.delete(`/auth/sessions/${sessionToRevoke.id}`);
-      toast({
-        title: "Sessão terminada",
+      toast.success("Sessão terminada", {
         description: "A sessão foi terminada com sucesso.",
       });
       loadSessions();
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Erro",
-        description: "Não foi possível terminar a sessão.",
-      });
+      toast.error("Não foi possível terminar a sessão.");
     } finally {
       setRevokingSession(false);
       setSessionToRevoke(null);
@@ -422,17 +397,12 @@ const ProfilePage = () => {
     setRevokingSession(true);
     try {
       await api.post("/auth/logout", {});
-      toast({
-        title: "Sessões terminadas",
+      toast.success("Sessões terminadas", {
         description: "Todas as outras sessões foram terminadas.",
       });
       loadSessions();
     } catch (error) {
-      toast({
-        variant: "destructive",
-        title: "Erro",
-        description: "Não foi possível terminar as sessões.",
-      });
+      toast.error("Não foi possível terminar as sessões.");
     } finally {
       setRevokingSession(false);
     }
@@ -651,6 +621,7 @@ const ProfilePage = () => {
           </CardHeader>
           <CardContent className="space-y-4">
             <RichTextEditor
+              key={`sig-${effectiveCompanyId || "default"}`}
               value={emailSignature}
               onChange={setEmailSignature}
               placeholder="Escreva ou cole a sua assinatura de email aqui..."
