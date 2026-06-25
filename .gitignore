@@ -59,3 +59,14 @@ credentials.json
 *.key
 .credentials
 .repo-config
+
+# Python bytecode cache (não deve ser committed)
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+
+# PowerCell working dirs
+/powercell/__pycache__/
+/powercell/**/__pycache__/
+/powercell/dev.log

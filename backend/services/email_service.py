@@ -2105,52 +2105,160 @@ async def sync_all_user_emails(days: int = 30) -> Dict[str, Any]:
     if env != 'production' and not sync_enabled:
         return {"success": False, "error": "Sincronização de email desactivada neste ambiente. Defina EMAIL_SYNC_ENABLED=true ou ENVIRONMENT=production.", "accounts": {}}
 
-    # Query: utilizadores com email_config.is_configured == True
-    # Excluir roles com email partilhado (indexacao, suporte) — esses usam sync_shared_role_emails
-    from services.role_query import deep_role_nin_filter
-    nin_filter = deep_role_nin_filter(["indexacao", "suporte"])
-    users_with_config = await db.users.find(
-        {"$and": [{"email_config.is_configured": True}] + nin_filter["$and"]},
-        {"_id": 0, "id": 1}
-    ).to_list(200)
-    
-    if not users_with_config:
-        return {"success": True, "message": "Nenhum utilizador com email configurado", "users_synced": 0}
-    
-    # Também sync roles partilhados
+    # ════════════════════════════════════════════════════════════════════
+    # SUBSTITUI a query legacy db.users.find({"email_config.is_configured": True})
+    # ════════════════════════════════════════════════════════════════════
+    # A query legacy só encontrava configs flat embebidas em ``user.email_config``
+    # (campo ``is_configured`` ao nível de topo). As configs guardadas via o fluxo
+    # Perfil > Configuração de Webmail (arquitetura multi-empresa) ficam ANINHADAS
+    # em ``user.email_config["company:<id>"]`` e na coleção canónica
+    # ``user_email_configs`` — pelo que a query legacy nunca as encontrava.
+    #
+    # Agora usamos ``get_active_email_configs_for_sync`` que consulta a coleção
+    # canónica (uma config por par user+empresa) e devolve apenas configs com
+    # credenciais válidas cujo utilizador está ativo. Para cada config, resolvemos
+    # a config canónica via ``resolve_email_config_for_sync`` e passamo-la a
+    # ``sync_user_emails`` via ``resolved_config=`` (mesmo padrão do worker.py
+    # e scheduled_tasks.py — Pacote J).
+    #
+    # Roles partilhados (indexacao, suporte) continuam a ser sincronizados via
+    # ``sync_shared_role_emails`` (não usam configs pessoais).
+    # ════════════════════════════════════════════════════════════════════
+    from services.user_email_config_service import get_active_email_configs_for_sync
+    from services.email_config_resolver import resolve_email_config_for_sync
+
+    active_configs = await get_active_email_configs_for_sync(limit=200)
+
+    if not active_configs:
+        # Sem configs pessoais — mas ainda pode haver roles partilhados a sincronizar
+        shared_roles = await db.users.distinct("role", {"role": {"$in": ["indexacao", "suporte"]}})
+        if not shared_roles:
+            return {"success": True, "message": "Nenhum utilizador com email configurado", "users_synced": 0}
+        # Só sincronizar roles partilhados
+        shared_tasks = [sync_shared_role_emails(role, days=days) for role in shared_roles]
+        shared_results = await asyncio.gather(*shared_tasks, return_exceptions=True)
+        total_synced = 0
+        total_errors = 0
+        for r in shared_results:
+            if isinstance(r, Exception):
+                total_errors += 1
+            else:
+                total_synced += r.get("total_synced", 0)
+                total_errors += r.get("total_errors", 0)
+        return {
+            "success": total_errors == 0,
+            "users_synced": 0,
+            "shared_roles_synced": len(shared_roles),
+            "total_synced": total_synced,
+            "total_errors": total_errors,
+        }
+
+    # Pré-resolver todas as configs canónicas (uma por par user+empresa).
+    # Cada config gera UMA task de sync_user_emails — se um user tem configs
+    # em 2 empresas, gera 2 tasks (uma por empresa), como o worker.py já faz.
+    sync_jobs: list[dict] = []  # [{"user_id", "company_id", "resolved"}, ...]
+    skipped_oauth = 0
+    skipped_unresolved = 0
+    for cfg in active_configs:
+        user_id = cfg["user_id"]
+        company_id = cfg.get("company_id") or "default"
+        auth_method = cfg.get("auth_method", "imap_smtp")
+
+        # OAuth pessoal ainda não tem sync function própria (só IMAP/SMTP via
+        # sync_user_emails). Saltar com log debug — não é regressão (legacy
+        # também não suportava). Mantém paridade com worker.py.
+        if auth_method == "google_oauth":
+            logger.debug(
+                f"[All User Sync] user={user_id} company={company_id} usa Google OAuth — "
+                f"sync pessoal OAuth ainda não implementada (a saltar)"
+            )
+            skipped_oauth += 1
+            continue
+
+        try:
+            resolved = await resolve_email_config_for_sync(
+                user_id, active_company_id=company_id
+            )
+        except Exception as resolve_err:
+            logger.warning(
+                f"[All User Sync] erro ao resolver config user={user_id} "
+                f"company={company_id}: {resolve_err}"
+            )
+            skipped_unresolved += 1
+            continue
+
+        if not resolved:
+            logger.debug(
+                f"[All User Sync] config não resolúvel para user={user_id} "
+                f"company={company_id} — a saltar"
+            )
+            skipped_unresolved += 1
+            continue
+
+        sync_jobs.append({"user_id": user_id, "company_id": company_id, "resolved": resolved})
+
+    if skipped_oauth or skipped_unresolved:
+        logger.info(
+            f"[All User Sync] {skipped_oauth} config(s) OAuth saltada(s), "
+            f"{skipped_unresolved} config(s) não resolvida(s)"
+        )
+
+    # Também sync roles partilhados (indexacao, suporte) — usam caixa partilhada
     shared_roles = await db.users.distinct("role", {"role": {"$in": ["indexacao", "suporte"]}})
-    
-    # Criar tasks para cada utilizador pessoal
+
+    # Criar tasks para cada par user+empresa (pessoal) + cada role partilhado
     tasks = [
-        sync_user_emails(user["id"], days=days)
-        for user in users_with_config
+        sync_user_emails(
+            job["user_id"],
+            days=days,
+            resolved_config=job["resolved"],
+        )
+        for job in sync_jobs
     ]
-    
-    # Adicionar tasks para roles partilhados
     for role in shared_roles:
         tasks.append(sync_shared_role_emails(role, days=days))
-    
+
     # Executar concorrentemente
     results = await asyncio.gather(*tasks, return_exceptions=True)
-    
+
     total_synced = 0
     total_errors = 0
     user_results = {}
-    
-    for i, result in enumerate(results):
-        user_id = users_with_config[i]["id"]
+
+    # Mapear os primeiros len(sync_jobs) resultados às configs pessoais
+    for i, job in enumerate(sync_jobs):
+        result = results[i]
+        # Chave composta user_id|company_id para distinguir configs do mesmo user
+        key = f"{job['user_id']}|{job['company_id']}"
         if isinstance(result, Exception):
-            logger.error(f"[All User Sync] User {user_id}: {result}")
-            user_results[user_id] = {"error": str(result)}
+            logger.error(f"[All User Sync] {key}: {result}")
+            user_results[key] = {"error": str(result)}
             total_errors += 1
         else:
-            user_results[user_id] = result
+            user_results[key] = result
             total_synced += result.get("total_synced", 0)
             total_errors += result.get("total_errors", 0)
-    
+
+    # Resultados dos roles partilhados (depois das configs pessoais)
+    shared_synced = 0
+    for j, role in enumerate(shared_roles):
+        result = results[len(sync_jobs) + j]
+        if isinstance(result, Exception):
+            logger.error(f"[All User Sync] shared role={role}: {result}")
+            user_results[f"shared:{role}"] = {"error": str(result)}
+            total_errors += 1
+        else:
+            user_results[f"shared:{role}"] = result
+            shared_synced += result.get("total_synced", 0)
+            total_errors += result.get("total_errors", 0)
+    total_synced += shared_synced
+
     return {
         "success": total_errors == 0,
-        "users_synced": len(users_with_config),
+        "users_synced": len(sync_jobs),
+        "shared_roles_synced": len(shared_roles),
+        "skipped_oauth": skipped_oauth,
+        "skipped_unresolved": skipped_unresolved,
         "total_synced": total_synced,
         "total_errors": total_errors,
         "users": user_results,

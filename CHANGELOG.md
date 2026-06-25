@@ -3,6 +3,48 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-23] — Limpeza técnica: .pyc committed + última query legacy email_config.is_configured
+
+### Corrigido
+- **Auto-sync de emails em background não sincronizava utilizadores com config multi-empresa** (`bug` — **CRÍTICO/PRODUÇÃO**): A função `sync_all_user_emails` (`backend/services/email_service.py:2093`) — usada pela sync global de todos os utilizadores — ainda usava a query legacy `db.users.find({"email_config.is_configured": True})` que só encontrava configs flat embebidas em `user.email_config` (campo `is_configured` ao nível de topo). As configs guardadas via o fluxo Perfil > Configuração de Webmail (arquitetura multi-empresa) ficam ANINHADAS em `user.email_config["company:<id>"]` e na coleção canónica `user_email_configs` — pelo que a query legacy nunca as encontrava. Isto era a "limitação conhecida" documentada no hotfix de 2026-06-20 (commit `2f65050`) e no Pacote J (`b7ce96f`), que já tinham corrigido `worker.py` e `scheduled_tasks.py` mas deixado `email_service.py` por corrigir.
+
+  **Fix** — Substituída a query legacy por `get_active_email_configs_for_sync(limit=200)` (de `user_email_config_service.py`), que consulta a coleção canónica `user_email_configs` (uma config por par user+empresa, com credenciais válidas, user ativo). Para cada config devolvida:
+  1. Resolve a config canónica via `resolve_email_config_for_sync(user_id, active_company_id=company_id)`
+  2. Chama `sync_user_emails(user_id, days=days, resolved_config=resolved)` — o mesmo padrão usado pelo `worker.py` e `scheduled_tasks.py` (Pacote J)
+
+  **Tratamento de edge cases**:
+  - Google OAuth pessoal: skip com log debug (legacy também não suportava — paridade com `worker.py`)
+  - Config não resolúvel: skip com log debug + contador `skipped_unresolved`
+  - Sem configs pessoais mas com roles partilhados: sync só roles partilhados (indexacao, suporte)
+  - Roles partilhados: mantidos via `sync_shared_role_emails` (caixa partilhada, não usa configs pessoais)
+
+  **Retorno enriquecido** (superconjunto backward-compatible do retorno anterior):
+  - `users_synced` (int): número de configs pessoais sincronizadas
+  - `shared_roles_synced` (int): número de roles partilhados sincronizados
+  - `skipped_oauth` (int): configs Google OAuth saltadas
+  - `skipped_unresolved` (int): configs não resolúveis
+  - `total_synced`, `total_errors` (mantidos)
+  - `users` (dict): chave composta `user_id|company_id` para distinguir configs do mesmo user em empresas diferentes
+
+  Isto fecha a última pendência técnica do Pacote J — agora **todas** as 3 funções de auto-sync (`worker.py`, `scheduled_tasks.py`, `email_service.py`) usam a coleção canónica `user_email_configs` e suportam configs multi-empresa nested. Zero queries `email_config.is_configured` ativas no backend (apenas 4 comentários "SUBSTITUI a query legacy" para documentação).
+
+### Limpeza
+- **Removidos 3 ficheiros `.pyc` committed acidentalmente no Pacote M** (`chore`): Os ficheiros `powercell/backend/routes/__pycache__/{clients,portal,tasks}.cpython-312.pyc` foram commitados por engano no commit `d245b80` (Pacote M). Removidos do index via `git rm --cached` (mantidos no disco localmente) e adicionado ao `.gitignore`:
+  - `__pycache__/`
+  - `*.py[cod]` (cobre `.pyc`, `.pyo`, `.pyd`)
+  - `*$py.class` (Jython)
+  - `*.so` (extensões C compiladas)
+  - `/powercell/**/__pycache__/` (específico do subdiretório powercell/)
+
+  Isto previne que builds Python voltem a poluir o repo no futuro.
+
+### Notas
+- **Sem breaking changes**: o retorno da função é superconjunto do anterior (todos os campos antigos mantidos). Os callers existentes continuam a funcionar.
+- **Validação**: `py_compile` + `ast.parse` OK. Sintaxe Python válida.
+- **Dev server**: confirmado saudável (HTTP 200) durante toda a sessão.
+
+---
+
 ## [2026-06-22] — Pacote L: Proteção de Eliminação — Regra do 2º Titular
 
 ### Corrigido

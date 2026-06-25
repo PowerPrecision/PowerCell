@@ -1037,3 +1037,37 @@ Stage Summary:
 - Bug "Ver como Cliente" RESOLVIDO em dev: staff clica → backend devolve /portal?token=JWT → frontend intercepta ?token → setIsVerified(true) → dashboard sem login.
 - Bug nomenclatura RESOLVIDO em dev: tarefas com process_id ficam com título "[PROC-012] [Nome Cliente] Título".
 - main local (estrutura errada) deixado intacto — não deve ser pushed. Recomenda-se git reset --hard origin/main para alinhar main local com o remote no futuro.
+
+---
+Task ID: 25
+Agent: Main Agent
+Task: Limpeza técnica — remover .pyc committed + corrigir última query legacy email_config.is_configured em email_service.py
+
+Work Log:
+- Contexto: ambiente foi resetado (git re-init). Reconfigurado remote origin (https://github.com/PowerPrecision/PowerCell.git), feito fetch, recriadas branches dev (tracking origin/dev, d245b80) e main (reset hard para origin/main, 8996233). Confirmado que PR #527 já promoveu dev→main no GitHub.
+- Tarefa 1 (Quick win): removidos 3 ficheiros .pyc committed acidentalmente no Pacote M:
+  * powercell/backend/routes/__pycache__/clients.cpython-312.pyc
+  * powercell/backend/routes/__pycache__/portal.cpython-312.pyc
+  * powercell/backend/routes/__pycache__/tasks.cpython-312.pyc
+  Via `git rm --cached` (mantém no disco, remove do index). Adicionado ao .gitignore: __pycache__/, *.py[cod], *$py.class, *.so, /powercell/**/__pycache__/. Commit 326968d.
+- Tarefa 2 (Fix real): corrigida a ÚLTIMA query legacy ativa em email_service.py:2113 (função sync_all_user_emails). As outras 3 ocorrências (worker.py:226, scheduled_tasks.py:1451, user_email_config_service.py:86) já eram apenas comentários "SUBSTITUI a query legacy" do Pacote J.
+  * Antes: db.users.find({"$and": [{"email_config.is_configured": True}] + nin_filter["$and"]}) — só encontrava configs flat embebidas em user.email_config, falhava para configs multi-empresa nested.
+  * Agora: get_active_email_configs_for_sync(limit=200) consulta a coleção canónica user_email_configs (uma config por par user+empresa, com credenciais válidas, user ativo). Para cada config: resolve_email_config_for_sync(user_id, active_company_id=company_id) + sync_user_emails(user_id, days=days, resolved_config=resolved). Mesmo padrão do worker.py e scheduled_tasks.py (Pacote J).
+  * Tratamento de edge cases:
+    - Google OAuth pessoal: skip com log debug (legacy também não suportava — paridade com worker.py)
+    - Config não resolúvel: skip com log debug + contador skipped_unresolved
+    - Sem configs pessoais mas com roles partilhados: sync só roles partilhados
+    - Roles partilhados (indexacao, suporte): mantidos via sync_shared_role_emails
+  * Retorno enriquecido (superconjunto backward-compatible): users_synced, shared_roles_synced, skipped_oauth, skipped_unresolved, total_synced, total_errors, users (chave composta user_id|company_id para distinguir configs do mesmo user em empresas diferentes).
+  * Validação: py_compile OK, ast.parse OK. Zero queries email_config.is_configured ativas no backend (apenas 4 comentários "SUBSTITUI a query legacy").
+- Dev server confirmado saudável (HTTP 200 na porta 3000) durante toda a sessão.
+- Pendência: push do commit 326968d (.pyc) + novo commit (email_service.py) para origin/dev — requer token GitHub (o repositório é público para fetch mas precisa auth para push).
+
+Stage Summary:
+- 2 commits locais prontos para push em dev:
+  * 326968d chore: remover .pyc committed + adicionar __pycache__/ ao .gitignore
+  * (a criar) fix(email): substituir última query legacy email_config.is_configured em sync_all_user_emails
+- 1 ficheiro de código modificado: backend/services/email_service.py (+137/-29 linhas)
+- 1 ficheiro de config modificado: .gitignore (+11 regras Python)
+- "Limitação conhecida" do worklog Task 18 RESOLVIDA — auto-sync em background agora suporta configs multi-empresa nested, paridade total com a sync manual (hotfix 2f65050) e com o worker (Pacote J).
+- Próximo passo: commit email_service.py + push de ambos os commits para origin/dev (requer token GitHub).
