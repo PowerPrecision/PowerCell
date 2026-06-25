@@ -46,7 +46,7 @@ import {
 import DynamicFormField from "../components/DynamicFormField";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical, Play, ClipboardList, ShieldCheck, Shield } from "lucide-react";
+import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical, Play, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";
@@ -335,11 +335,6 @@ export default function PublicClientForm({ previewMode = false }) {
   const [submitted, setSubmitted] = useState(false);
   const [blockedMessage, setBlockedMessage] = useState(null);
 
-  // ── Autenticação.gov: dados verificados pelo Estado ──
-  const [govVerifiedFields, setGovVerifiedFields] = useState({}); // { name: true, nif: true, ... }
-  const [govDataLoaded, setGovDataLoaded] = useState(false);
-  const [govAuthLoading, setGovAuthLoading] = useState(false);
-  
   // Estado para erros de validação por campo
   const [fieldErrors, setFieldErrors] = useState({});
   
@@ -564,81 +559,6 @@ export default function PublicClientForm({ previewMode = false }) {
   // (avoids stale closure issues in the useCallback chain)
   const formDataRef = useRef(formData);
   formDataRef.current = formData;
-
-  // ── Autenticação.gov: Parse gov_token da URL e auto-preencher ──
-  useEffect(() => {
-    const params = new URLSearchParams(window.location.search);
-    const govToken = params.get("gov_token");
-
-    if (govToken && !govDataLoaded) {
-      (async () => {
-        try {
-          // Verificar o token via backend
-          const response = await axios.get(
-            `${API_URL}/gov-auth/verify-token?gov_token=${encodeURIComponent(govToken)}`
-          );
-
-          if (response.data?.valid && response.data?.gov_data) {
-            const govData = response.data.gov_data;
-
-            // Mapeamento: campos da AMA → campos do formulário
-            const fieldMapping = {
-              nome: "name",
-              nif: "nif",
-              data_nascimento: "birth_date",
-              morada: "morada_fiscal",
-              codigo_postal: "codigo_postal",
-              sexo: "sexo",
-              nacionalidade: "nacionalidade",
-              documento_id: "documento_id",
-            };
-
-            const updates = {};
-            const verified = {};
-
-            for (const [govKey, formKey] of Object.entries(fieldMapping)) {
-              if (govData[govKey]) {
-                updates[formKey] = govData[govKey];
-                verified[formKey] = true;
-              }
-            }
-
-            // Atualizar formData com dados verificados
-            setFormData(prev => ({ ...prev, ...updates }));
-            setGovVerifiedFields(verified);
-            setGovDataLoaded(true);
-
-            // Limpar o gov_token da URL (segurança + evitar re-processamento)
-            const cleanUrl = new URL(window.location);
-            cleanUrl.searchParams.delete("gov_token");
-            window.history.replaceState({}, "", cleanUrl);
-
-            toast.success("Dados verificados pela Autenticação.gov preenchidos automaticamente!", {
-              description: "Os campos com escudo verde são oficiais e não podem ser alterados.",
-              duration: 6000,
-            });
-          } else {
-            toast.error("Token da Autenticação.gov inválido ou expirado.", {
-              description: "Pode preencher os dados manualmente.",
-            });
-          }
-        } catch (err) {
-          console.error("[GOV_AUTH] Erro ao verificar token:", err);
-          toast.error("Erro ao verificar dados da Autenticação.gov.", {
-            description: "Pode preencher os dados manualmente.",
-          });
-        }
-      })();
-    }
-  }, [govDataLoaded]); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // ── Autenticação.gov: Redirecionar para login AMA ──
-  const handleGovAuthLogin = useCallback(() => {
-    setGovAuthLoading(true);
-    const currentUrl = window.location.origin + window.location.pathname;
-    const loginUrl = `${API_URL}/gov-auth/login?redirect=${encodeURIComponent(currentUrl)}`;
-    window.location.href = loginUrl;
-  }, []);
 
   // Carregar campos personalizados do backend (useState already declared above)
   const [stepConfig, setStepConfig] = useState({});
@@ -1224,7 +1144,7 @@ export default function PublicClientForm({ previewMode = false }) {
     titular2_estado_civil: "Regime de bens do casamento.",
     compra_tipo: "Se comprar com outra pessoa (cônjuge, familiar, etc.), selecione \"Com outra pessoa\" para preencher os dados do 2º titular no próximo passo.",
     access_portal_financas: "Indique a que portais oficiais tem acesso. As credenciais serão solicitadas posteriormente se necessário.",
-    chave_movel_digital: "A CMD facilita a assinatura digital de documentos. Pode ativar em autenticacao.gov.pt",
+    chave_movel_digital: "A Chave Móvel Digital facilita a assinatura digital de documentos.",
     renda_habitacao_atual: "Se vive em casa própria ou com familiares, deixe em branco ou coloque 0.",
     precisa_vender_casa: "Se precisa vender para ter capital de entrada ou liquidar crédito existente.",
     efetivo: "Se tem contrato de trabalho sem termo (efetivo) ou está em período experimental.",
@@ -1288,28 +1208,18 @@ export default function PublicClientForm({ previewMode = false }) {
 
     // ── NIF pattern fields (digit-only, maxLength=9) ──────────────────────
     if (NIF_PATTERN_FIELDS.has(key)) {
-      const isGovVerified = govVerifiedFields[key] === true;
       return (
         <div className={cn("space-y-2 relative", cls)} key={key} style={style}>
-          {isGovVerified && (
-            <div className="absolute -top-2 right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700">
-              <ShieldCheck className="h-3 w-3 text-green-600 dark:text-green-400" />
-              <span className="text-[10px] font-semibold text-green-700 dark:text-green-300">Verificado</span>
-            </div>
-          )}
           <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
           <Input
             id={key} name={key} type="text"
             value={value || ""}
-            onChange={isGovVerified ? undefined : (e) => updateField(key, e.target.value.replace(/\D/g, ""))}
+            onChange={(e) => updateField(key, e.target.value.replace(/\D/g, ""))}
             placeholder="123456789" maxLength={9}
-            className={cn(errCls, isGovVerified && "bg-green-50 dark:bg-green-900/10 border-green-300 dark:border-green-700 cursor-not-allowed")}
-            disabled={isGovVerified}
-            readOnly={isGovVerified}
+            className={errCls}
           />
           {error && <FieldError>{error}</FieldError>}
-          {isGovVerified && <FieldHint>Dado verificado pela Autenticação.gov — não editável</FieldHint>}
-          {!isGovVerified && hint && <FieldHint>{hint}</FieldHint>}
+          {hint && <FieldHint>{hint}</FieldHint>}
         </div>
       );
     }
@@ -1319,28 +1229,18 @@ export default function PublicClientForm({ previewMode = false }) {
       const maxDate = key === "birth_date"
         ? new Date(Date.now() - 18 * 365.25 * 24 * 60 * 60 * 1000).toISOString().split('T')[0]
         : undefined;
-      const isGovVerified = govVerifiedFields[key] === true;
       return (
         <div className={cn("space-y-2 relative", cls)} key={key} style={style}>
-          {isGovVerified && (
-            <div className="absolute -top-2 right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700">
-              <ShieldCheck className="h-3 w-3 text-green-600 dark:text-green-400" />
-              <span className="text-[10px] font-semibold text-green-700 dark:text-green-300">Verificado</span>
-            </div>
-          )}
           <RequiredLabel htmlFor={key} required={required}>{label}</RequiredLabel>
           <Input
             id={key} name={key} type="date"
             lang="pt"
             value={value || ""}
-            onChange={isGovVerified ? undefined : (e) => updateField(key, e.target.value)}
+            onChange={(e) => updateField(key, e.target.value)}
             max={maxDate}
-            className={cn(errCls, isGovVerified && "bg-green-50 dark:bg-green-900/10 border-green-300 dark:border-green-700 cursor-not-allowed")}
-            disabled={isGovVerified}
-            readOnly={isGovVerified}
+            className={errCls}
           />
           {error && <FieldError>{error}</FieldError>}
-          {isGovVerified && <FieldHint>Dado verificado pela Autenticação.gov — não editável</FieldHint>}
         </div>
       );
     }
@@ -1841,31 +1741,23 @@ export default function PublicClientForm({ previewMode = false }) {
     // This handles text, email, tel, number, date, select, checkbox, radio, textarea
     // for all fields NOT matched above (including sexo, profissao, codigo_postal,
     // titular2_* fields, and any custom fields from the admin config)
-    const isGovVerified = govVerifiedFields[key] === true;
 
     return (
-      <div style={style} key={key} className={cn(cls, isGovVerified && "relative")}>
-        {isGovVerified && (
-          <div className="absolute -top-2 right-2 z-10 flex items-center gap-1 px-2 py-0.5 rounded-full bg-green-100 dark:bg-green-900/30 border border-green-300 dark:border-green-700">
-            <ShieldCheck className="h-3 w-3 text-green-600 dark:text-green-400" />
-            <span className="text-[10px] font-semibold text-green-700 dark:text-green-300">Verificado</span>
-          </div>
-        )}
+      <div style={style} key={key} className={cls || undefined}>
         <DynamicFormField
           field={{
             ...field,
-            label: isGovVerified ? `${label} ` : label,
-            hint: isGovVerified ? "Dado verificado pela Autenticação.gov — não editável" : hint,
+            label: label,
+            hint: hint,
           }}
           value={value}
-          onChange={isGovVerified ? () => {} : updateField}
+          onChange={updateField}
           error={error}
-          disabled={isGovVerified}
           className={cls || undefined}
         />
       </div>
     );
-  }, [formData, fieldErrors, updateField, setFormData, toggleCaracteristica, toggleBanco, updateBancoValor, toggleContasAbertas, toggleBancoSimulacoes, checkDependsOn, allFieldsConfig, govVerifiedFields]);
+  }, [formData, fieldErrors, updateField, setFormData, toggleCaracteristica, toggleBanco, updateBancoValor, toggleContasAbertas, toggleBancoSimulacoes, checkDependsOn, allFieldsConfig]);
 
   // Validação de NIF português
   const validateNIF = (nif) => {
@@ -1977,7 +1869,6 @@ export default function PublicClientForm({ previewMode = false }) {
         email: formData.email,
         phone: formData.phone,
         process_type: "ambos",
-        gov_verified_fields: Object.keys(govVerifiedFields).filter(k => govVerifiedFields[k]),
         personal_data: {
           nif: formData.nif,
           niss: formData.niss,
@@ -2159,35 +2050,6 @@ export default function PublicClientForm({ previewMode = false }) {
           <h2 className="text-xl font-semibold mb-2 text-foreground">Dados Pessoais - Titular</h2>
           <p className="text-muted-foreground">Informações do titular principal</p>
         </div>
-
-        {/* ── Botão Autenticação.gov (Chave Móvel Digital) ── */}
-        {!govDataLoaded ? (
-          <button
-            type="button"
-            onClick={handleGovAuthLogin}
-            disabled={govAuthLoading}
-            className="w-full flex items-center justify-center gap-3 px-6 py-4 rounded-xl border-2 border-[#003399] bg-[#003399] hover:bg-[#002266] text-white font-semibold text-base transition-all duration-200 shadow-md hover:shadow-lg active:scale-[0.98] disabled:opacity-60 disabled:cursor-not-allowed group"
-          >
-            <Shield className="h-6 w-6 flex-shrink-0 group-hover:scale-110 transition-transform" />
-            <span className="flex flex-col items-start">
-              <span className="leading-tight">Preencher automaticamente com Autenticação.gov</span>
-              <span className="text-[11px] font-normal text-blue-200 leading-tight mt-0.5">
-                Chave Móvel Digital — dados verificados pelo Estado
-              </span>
-            </span>
-            {govAuthLoading && <Loader2 className="h-5 w-5 animate-spin ml-2" />}
-          </button>
-        ) : (
-          <div className="flex items-center gap-2 px-4 py-3 rounded-xl bg-green-50 dark:bg-green-900/20 border border-green-200 dark:border-green-800">
-            <ShieldCheck className="h-5 w-5 text-green-600 dark:text-green-400 flex-shrink-0" />
-            <span className="text-sm font-medium text-green-700 dark:text-green-300">
-              Dados verificados pela Autenticação.gov
-            </span>
-            <span className="text-xs text-green-600 dark:text-green-400 ml-1">
-              — campos com <ShieldCheck className="inline h-3 w-3" /> não podem ser alterados
-            </span>
-          </div>
-        )}
 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {stepFields.map(field => renderDynamicField(field))}

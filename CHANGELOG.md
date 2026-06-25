@@ -3,6 +3,28 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-25] — Pacote Q: Limpeza Visual de UI (Remover Gov.pt e Reatribuir)
+
+### Removido
+- **Botão "Preencher automaticamente com Autenticação.gov" (Chave Móvel Digital)**: Removido completamente do formulário público (`PublicClientForm.js`):
+  - Removido botão de login Gov.pt (botão azul com escudo)
+  - Removido banner "Dados verificados pela Autenticação.gov" (estado pós-verificação)
+  - Removido `useEffect` de parse do `gov_token` da URL e auto-preenchimento
+  - Removido `handleGovAuthLogin` (redirecionamento para login AMA)
+  - Removidos estados: `govVerifiedFields`, `govDataLoaded`, `govAuthLoading`
+  - Removidos badges "Verificado" (ShieldCheck) nos campos NIF, data de nascimento e campos genéricos
+  - Removida lógica de campos bloqueados (disabled/readOnly) por verificação Gov
+  - Removido `gov_verified_fields` do payload de submissão
+  - Removidos imports `Shield` e `ShieldCheck` do lucide-react
+  - Hint do campo `chave_movel_digital` atualizado (removida referência a autenticacao.gov.pt)
+
+- **Botão "Reatribuir Cliente" e Dialog**: Removido completamente do `ProcessDetails.js`:
+  - Removido botão "Reatribuir Cliente" (âmbar, ícone Link2) do header de ações
+  - Removido Dialog completo de pesquisa e seleção de novo cliente (~130 linhas)
+  - Removidos 6 estados: `showReassignDialog`, `reassignSearch`, `reassignResults`, `reassignLoading`, `reassignSaving`, `reassignSelected`
+  - Removidas funções: `handleReassignSearch`, `handleReassignClient` + debounce useEffect
+  - **Justificação**: Na arquitetura 1 Cliente → N Processos, reatribuir o cliente globalmente é perigoso. O botão "Atribuições" (existente) já cobre as necessidades de gestão por processo.
+
 ## [2026-06-25] — Pacote P: Sincronização do Nome do Cliente (Edição Global e Cascata)
 
 ### Adicionado

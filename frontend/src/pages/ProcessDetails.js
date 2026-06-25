@@ -362,13 +362,6 @@ const ProcessDetails = () => {
   const [savingAssignment, setSavingAssignment] = useState(false);
   const [loadingUsers, setLoadingUsers] = useState(false);
   
-  // Estado para reatribuição de cliente
-  const [showReassignDialog, setShowReassignDialog] = useState(false);
-  const [reassignSearch, setReassignSearch] = useState("");
-  const [reassignResults, setReassignResults] = useState([]);
-  const [reassignLoading, setReassignLoading] = useState(false);
-  const [reassignSaving, setReassignSaving] = useState(false);
-  const [reassignSelected, setReassignSelected] = useState(null);
   
   // Contador para forçar refresh dos documentos
   const [documentsRefreshKey, setDocumentsRefreshKey] = useState(0);
@@ -603,82 +596,6 @@ const ProcessDetails = () => {
       toast.error("Erro ao guardar atribuições");
     } finally {
       setSavingAssignment(false);
-    }
-  };
-
-  // Pesquisar clientes para reatribuição
-  const handleReassignSearch = useCallback(async (query) => {
-    setReassignSearch(query);
-    setReassignSelected(null);
-    if (!query || query.length < 2) {
-      setReassignResults([]);
-      return;
-    }
-    setReassignLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/clients/search?q=${encodeURIComponent(query)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setReassignResults(data.results || []);
-      } else {
-        setReassignResults([]);
-      }
-    } catch (error) {
-      console.error("Erro ao pesquisar clientes:", error);
-      setReassignResults([]);
-    } finally {
-      setReassignLoading(false);
-    }
-  }, [token]);
-
-  // Debounce para pesquisa de reatribuição
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (reassignSearch.length >= 2) {
-        handleReassignSearch(reassignSearch);
-      } else {
-        setReassignResults([]);
-      }
-    }, 400);
-    return () => clearTimeout(timeout);
-  }, [reassignSearch, handleReassignSearch]);
-
-  // Reatribuir cliente ao processo
-  const handleReassignClient = async () => {
-    if (!reassignSelected) return;
-    setReassignSaving(true);
-    try {
-      const response = await fetch(`${API_URL}/api/processes/${id}`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          client_id: reassignSelected.id,
-          client_name: reassignSelected.nome,
-          client_email: reassignSelected.email || "",
-          client_phone: reassignSelected.telefone || "",
-        }),
-      });
-      if (response.ok) {
-        toast.success("Cliente reatribuído com sucesso");
-        setShowReassignDialog(false);
-        setReassignSearch("");
-        setReassignResults([]);
-        setReassignSelected(null);
-        fetchData();
-      } else {
-        const errorData = await response.json();
-        toast.error(extractErrorMessage(errorData.detail, "Erro ao reatribuir cliente"));
-      }
-    } catch (error) {
-      console.error("Erro ao reatribuir cliente:", error);
-      toast.error("Erro ao reatribuir cliente");
-    } finally {
-      setReassignSaving(false);
     }
   };
 
@@ -2430,19 +2347,6 @@ const ProcessDetails = () => {
               >
                 <Users className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">Atribuições</span>
-              </Button>
-            )}
-            {/* Botão Reatribuir Cliente */}
-            {userRole !== "cliente" && hasAnyRole(user, ["admin", "ceo", "diretor"]) && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-amber-600 border-amber-200 hover:bg-amber-50 h-8 px-2 sm:px-3"
-                onClick={() => { setShowReassignDialog(true); setReassignSearch(""); setReassignResults([]); setReassignSelected(null); }}
-                data-testid="reassign-client-btn"
-              >
-                <Link2 className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="hidden sm:inline">Reatribuir Cliente</span>
               </Button>
             )}
             
@@ -5789,136 +5693,6 @@ const ProcessDetails = () => {
                 </>
               ) : (
                 "Guardar"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-
-      {/* Dialog para Reatribuir Cliente */}
-      <Dialog open={showReassignDialog} onOpenChange={setShowReassignDialog}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Link2 className="h-5 w-5 text-amber-600" />
-              Reatribuir Cliente
-            </DialogTitle>
-            <DialogDescription>
-              Pesquise e seleccione um novo cliente para associar a este processo.
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="space-y-4 py-4">
-            {/* Cliente actual */}
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <p className="text-xs text-muted-foreground mb-1">Cliente actual</p>
-              <p className="font-medium">{safeString(clientData?.nome || process?.client_name || personalData?.nome_completo) || 'Cliente'}</p>
-              {process?.client_email && (
-                <p className="text-sm text-muted-foreground">{safeString(process.client_email)}</p>
-              )}
-            </div>
-
-            {/* Campo de pesquisa */}
-            <div className="space-y-2">
-              <Label className="text-sm font-medium">Pesquisar cliente</Label>
-              <div className="relative">
-                <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-                <Input
-                  placeholder="Nome, email ou NIF..."
-                  value={reassignSearch}
-                  onChange={(e) => setReassignSearch(e.target.value)}
-                  className="pl-10"
-                  data-testid="reassign-search-input"
-                />
-              </div>
-            </div>
-
-            {/* Resultados da pesquisa */}
-            {reassignLoading && (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin text-amber-600" />
-                <span className="ml-2 text-sm text-muted-foreground">A pesquisar...</span>
-              </div>
-            )}
-
-            {!reassignLoading && reassignResults.length > 0 && (
-              <div className="border rounded-lg max-h-48 overflow-y-auto">
-                {reassignResults.map((client) => (
-                  <button
-                    key={client.id}
-                    className={`w-full text-left p-3 hover:bg-amber-50 transition-colors border-b last:border-b-0 ${reassignSelected?.id === client.id ? "bg-amber-50 border-l-[3px] border-l-amber-500" : ""}`}
-                    onClick={() => setReassignSelected(client)}
-                    data-testid={`reassign-client-option-${client.id}`}
-                  >
-                    <div className="font-medium text-sm">{safeString(client.nome)}</div>
-                    <div className="flex items-center gap-3 text-xs text-muted-foreground mt-0.5">
-                      {client.email && (
-                        <span className="flex items-center gap-1">
-                          <Mail className="h-3 w-3" />
-                          {safeString(client.email)}
-                        </span>
-                      )}
-                      {client.telefone && (
-                        <span className="flex items-center gap-1">
-                          <Phone className="h-3 w-3" />
-                          {safeString(client.telefone)}
-                        </span>
-                      )}
-                      {client.nif && (
-                        <span className="font-mono">{safeString(client.nif)}</span>
-                      )}
-                    </div>
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {!reassignLoading && reassignSearch.length >= 2 && reassignResults.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-4">
-                Nenhum cliente encontrado para &quot;{reassignSearch}&quot;
-              </p>
-            )}
-
-            {/* Cliente seleccionado */}
-            {reassignSelected && (
-              <div className="p-3 border border-amber-300 bg-amber-50 rounded-lg">
-                <p className="text-xs text-amber-700 mb-1">Novo cliente seleccionado</p>
-                <p className="font-medium">{safeString(reassignSelected.nome)}</p>
-                {(reassignSelected.email || reassignSelected.telefone) && (
-                  <p className="text-sm text-muted-foreground">
-                    {safeString(reassignSelected.email || reassignSelected.telefone)}
-                  </p>
-                )}
-              </div>
-            )}
-
-            {/* Aviso */}
-            {reassignSelected && (
-              <div className="flex items-start gap-2 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
-                <AlertTriangle className="h-4 w-4 text-yellow-600 mt-0.5 shrink-0" />
-                <p className="text-sm text-yellow-800">
-                  Tem a certeza? Esta ação irá alterar o cliente associado a este processo.
-                </p>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowReassignDialog(false)}>
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleReassignClient}
-              disabled={!reassignSelected || reassignSaving}
-              className="bg-amber-600 hover:bg-amber-700"
-            >
-              {reassignSaving ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  A reatribuir...
-                </>
-              ) : (
-                "Reatribuir"
               )}
             </Button>
           </DialogFooter>
