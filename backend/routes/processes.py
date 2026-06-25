@@ -3279,6 +3279,28 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             {"$set": client_updates}
         )
         logger.info(f"Dados pessoais do cliente {client_id} atualizados via PUT processo: {list(client_updates.keys())}")
+
+        # ── SINCRONIZAÇÃO INVERSA: Se o nome do cliente mudou, propagar para todos os processos ──
+        # Quando o utilizador edita o nome dentro do processo, atualizamos o cliente
+        # e precisamos de propagar o novo nome para os restantes processos desse cliente.
+        updated_client_name = client_updates.get("nome")
+        if updated_client_name:
+            # Obter todos os process_ids do cliente
+            updated_client = await db.clients.find_one({"id": client_id}, {"process_ids": 1})
+            all_process_ids = updated_client.get("process_ids", []) if updated_client else []
+            # Filtrar o processo atual para não fazer update desnecessário
+            other_process_ids = [pid for pid in all_process_ids if pid != process_id]
+            if other_process_ids:
+                cascade_sync = {
+                    "client_name": updated_client_name,
+                    "personal_data.nome": updated_client_name,
+                    "personal_data.name": updated_client_name,
+                }
+                await db.processes.update_many(
+                    {"id": {"$in": other_process_ids}},
+                    {"$set": cascade_sync}
+                )
+                logger.info(f"Sincronização inversa: nome '{updated_client_name}' propagado para {len(other_process_ids)} processos do cliente {client_id}")
     
     # ── REATRIBUIÇÃO DE CLIENTE: Se o body inclui client_id diferente do actual ──
     new_client_id = raw_body.get("client_id")

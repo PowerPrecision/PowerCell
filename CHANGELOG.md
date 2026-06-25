@@ -3,6 +3,27 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-25] — Pacote P: Sincronização do Nome do Cliente (Edição Global e Cascata)
+
+### Adicionado
+- **Botão "Editar Cliente" na Ficha do Cliente** (Frontend): Botão com ícone de lápis no cabeçalho da `ClientDetailPage` que abre um Modal para editar os dados base da entidade global: Nome, NIF, Email e Telefone. O Modal só envia campos alterados (diff) e atualiza o estado local instantaneamente.
+
+### Corrigido
+- **Efeito cascata ao editar cliente** (`PUT /api/clients/{id}`): Antes, alterar o nome do cliente NÃO atualizava o `client_name` nos processos associados, criando dessincronização. Agora, o endpoint propaga automaticamente:
+  - `nome` → `client_name`, `personal_data.nome`, `personal_data.name` em todos os processos via `update_many`
+  - `dados_pessoais` (NIF, morada, estado civil, profissão, etc.) → `personal_data.*` correspondente nos processos
+  - `contacto.telefone` → `client_phone`, `personal_data.telefone`, `personal_data.phone` nos processos
+  - Blind indexes (`nif_hash`, `email_hash`) são regenerados quando NIF/email mudam
+
+- **Sincronização inversa ao editar pelo Processo** (`PUT /api/processes/{id}`): Quando o utilizador edita o nome do cliente dentro do cartão de dados pessoais do processo, o sistema agora:
+  1. Atualiza o documento do cliente na coleção `clients` (comportamento existente)
+  2. **NOVO**: Propaga o novo nome para todos os **restantes processos** do mesmo cliente via `update_many` (cascade sync)
+
+### Segurança
+- Sanitização de inputs mantida (nome, NIF, email, telefone)
+- Encriptação Fernet preservada em ambos os caminhos de atualização
+- Logs detalhados de sincronização para auditoria
+
 ## [2026-06-25] — Pacote O: Mural de Atualizações (Gerado por IA)
 
 ### Adicionado

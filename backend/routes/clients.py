@@ -1479,27 +1479,66 @@ async def update_client(
         {"$set": update_dict}
     )
     
-    # === SYNC TO LINKED PROCESSES: Propagate email/phone changes ===
-    if sanitized_contacto:
-        process_ids = client.get("process_ids", [])
+    # === SYNC TO LINKED PROCESSES: Propagate name, email, phone, dados_pessoais ===
+    process_ids = client.get("process_ids", [])
+    if process_ids:
         process_sync = {}
-        new_email = sanitized_contacto.get("email")
-        new_phone = sanitized_contacto.get("telefone")
-        
-        if new_email:
-            process_sync["client_email"] = new_email
-            process_sync["personal_data.email"] = new_email
-            from services.encryption import generate_email_hash
-            process_sync["personal_data.email_hash"] = generate_email_hash(new_email)
-        if new_phone:
-            process_sync["client_phone"] = new_phone
-        
-        if process_sync and process_ids:
+
+        # 1. Sincronizar NOME do cliente → client_name em todos os processos
+        if sanitized_nome:
+            process_sync["client_name"] = sanitized_nome
+            process_sync["personal_data.nome"] = sanitized_nome
+            process_sync["personal_data.name"] = sanitized_nome
+
+        # 2. Sincronizar EMAIL do cliente
+        if sanitized_contacto:
+            new_email = sanitized_contacto.get("email")
+            new_phone = sanitized_contacto.get("telefone")
+
+            if new_email:
+                process_sync["client_email"] = new_email
+                process_sync["personal_data.email"] = new_email
+                from services.encryption import generate_email_hash
+                process_sync["personal_data.email_hash"] = generate_email_hash(new_email)
+            if new_phone:
+                process_sync["client_phone"] = new_phone
+                process_sync["personal_data.telefone"] = new_phone
+                process_sync["personal_data.phone"] = new_phone
+
+        # 3. Sincronizar DADOS PESSOAIS (NIF, morada, etc.) para personal_data dos processos
+        if sanitized_dados_pessoais:
+            dados_sync_map = {
+                "nif": "personal_data.nif",
+                "documento_id": "personal_data.documento_id",
+                "data_nascimento": "personal_data.data_nascimento",
+                "birth_date": "personal_data.data_nascimento",
+                "morada_fiscal": "personal_data.morada_fiscal",
+                "estado_civil": "personal_data.estado_civil",
+                "profissao": "personal_data.profissao",
+                "nacionalidade": "personal_data.nacionalidade",
+                "naturalidade": "personal_data.naturalidade",
+                "sexo": "personal_data.sexo",
+                "nome_pai": "personal_data.nome_pai",
+                "nome_mae": "personal_data.nome_mae",
+                "data_validade_cc": "personal_data.data_validade_cc",
+            }
+            # Adicionar NIF hash se NIF foi alterado
+            if "nif" in sanitized_dados_pessoais and sanitized_dados_pessoais["nif"]:
+                from services.encryption import generate_nif_hash
+                nif_hash = generate_nif_hash(sanitized_dados_pessoais["nif"])
+                if nif_hash:
+                    process_sync["personal_data.nif_hash"] = nif_hash
+
+            for src_key, dst_key in dados_sync_map.items():
+                if src_key in sanitized_dados_pessoais and sanitized_dados_pessoais[src_key] is not None:
+                    process_sync[dst_key] = sanitized_dados_pessoais[src_key]
+
+        if process_sync:
             await db.processes.update_many(
                 {"id": {"$in": process_ids}},
                 {"$set": process_sync}
             )
-            logger.info(f"Sincronizados dados de contacto para {len(process_ids)} processos do cliente {client_id}")
+            logger.info(f"Sincronizados dados para {len(process_ids)} processos do cliente {client_id}: {list(process_sync.keys())}")
     
     logger.info(f"Cliente {client_id} actualizado por {user.get('email')}")
     

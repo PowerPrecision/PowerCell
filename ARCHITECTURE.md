@@ -563,6 +563,27 @@ erDiagram
 | `ClientFinancialData` existia | ❌ Removido — financeiros estão em `Process.financial_data` |
 | `personal_data` no Processo era fonte de verdade | ⚠️ Agora é SNAPSHOT (denormalizado) — fonte de verdade é `clients.dados_pessoais` |
 
+### Sincronização Bidirecional (Pacote P)
+
+Para garantir a integridade do SNAPSHOT denormalizado, o sistema implementa sincronização bidirecional:
+
+```mermaid
+graph LR
+    Client["Coleção clients<br/>(Fonte de Verdade)"] -->|"PUT /clients/{id}<br/>update_many"| Process["Coleção processes<br/>(SNAPSHOT)"]
+    Process -->|"PUT /processes/{id}<br/>cascade sync"| Client
+```
+
+**Cliente → Processos (PUT /clients/{id})**: Quando o cliente é editado, o endpoint propaga automaticamente:
+- `nome` → `client_name`, `personal_data.nome`, `personal_data.name` (update_many em todos os process_ids)
+- `contacto.email/telefone` → `client_email/client_phone` + `personal_data.*`
+- `dados_pessoais.*` → `personal_data.*` correspondente (NIF, morada, estado civil, etc.)
+- Blind indexes (`nif_hash`, `email_hash`) são regenerados quando necessário
+
+**Processo → Cliente → Restantes Processos (PUT /processes/{id})**: Quando o nome é editado dentro do processo:
+1. `extract_client_updates_from_body()` extrai campos pessoais do body
+2. Atualiza o documento do cliente na coleção `clients`
+3. **Cascade sync**: Propaga o novo nome para todos os restantes processos do mesmo cliente
+
 ### Script de Migração
 
 O script `backend/scripts/migrate_clients_to_processes.py` executa a migração segura:
