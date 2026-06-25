@@ -955,5 +955,9 @@ export const dryRunProcessMigration = () => api.post("/admin/process-migration/d
 export const runProcessMigration = () => api.post("/admin/process-migration/run");
 export const rollbackProcessMigration = () => api.post("/admin/process-migration/rollback");
 
+// ===== SYSTEM CHANGELOG (Mural de Atualizações gerado por IA) =====
+export const getSystemChangelogs = (limit = 5) => api.get("/system/changelog", { params: { limit } });
+export const generateChangelogAI = (data = {}) => api.post("/system/changelog/generate-ai", data);
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;

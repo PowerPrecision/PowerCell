@@ -3,6 +3,39 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-25] — Pacote O: Mural de Atualizações (Gerado por IA)
+
+### Adicionado
+- **Mural de Atualizações gerado por IA** — Sistema completo de notas de lançamento automáticas:
+  - **Backend**: Nova coleção `system_changelogs` (MongoDB) para guardar notas de atualização geradas por IA
+  - **Endpoint público `GET /api/system/changelog`**: Qualquer utilizador autenticado pode consultar as últimas atualizações
+  - **Endpoint admin `POST /api/system/changelog/generate-ai`**: Gera notas de atualização por IA (restrito a admin/CEO). Suporta 3 fontes de dados:
+    - `git`: Histórico de commits (padrão, com fallback para CHANGELOG.md)
+    - `changelog_file`: Ficheiro CHANGELOG.md
+    - `worklog`: Ficheiro worklog.md
+  - **Serviço `changelog_service.py`**: Lógica de negócio com integração OpenAI GPT-4o-mini, retry com exponential backoff, sanitização anti-prompt-injection, e truncagem de contexto
+  - **Modelos Pydantic `changelog.py`**: `ChangelogEntry`, `ChangelogResponse`, `ChangelogGenerateRequest`, `ChangelogGenerateResponse`
+  - **Rota `routes/changelog.py`**: 2 endpoints com autenticação e autorização por role
+  - **Registo no `server.py`**: Router registado com prefixo `/api`
+
+- **Frontend — Card "📢 Novidades do CRM" na Dashboard**: Card visual com gradiente que mostra a última atualização gerada por IA. Oculta-se automaticamente se não houver dados. Renderiza Markdown de forma segura (DOMPurify + conversor próprio).
+
+- **Frontend — Tab "Atualizações" nas Definições do Sistema**: Secção dedicada para admins com:
+  - Seletor de fonte de dados (Git / CHANGELOG.md / worklog.md)
+  - Botão "✨ Gerar Notas de Atualização (IA)" com loading state
+  - Lista de todos os changelogs publicados com badges de versão e data
+  - Estado vazio amigável com ícone e instrução
+
+- **Conversor de Markdown para HTML** (`markdownToHtml`): Função utilitária sem dependências externas que converte Markdown básico em HTML seguro (headers, bold, italic, bullets, line breaks). Output sempre sanitizado por DOMPurify.
+
+- **Funções API no `api.js`**: `getSystemChangelogs()` e `generateChangelogAI()` para comunicação frontend↔backend
+
+### Segurança
+- Sanitização de input anti-prompt-injection no `changelog_service.py`
+- Truncagem de texto fonte para máximo 8000 caracteres (limite de contexto)
+- Renderização HTML sempre via DOMPurify (`sanitizeHtml`)
+- Endpoint de geração restrito a roles admin/CEO
+
 ## [2026-06-23] — Limpeza técnica: .pyc committed + última query legacy email_config.is_configured
 
 ### Corrigido

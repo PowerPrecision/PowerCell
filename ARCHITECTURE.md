@@ -58,6 +58,7 @@ graph TB
             SyncDBR["/admin/sync-database<br/>(Prod→Dev Restore)"]
             AnnotationsR["/annotations<br/>(Anotações em PDFs)"]
             SystemConfigR["/system-config<br/>(RGPD, DSTI, Emails)"]
+            ChangelogR["/system/changelog<br/>(Mural Atualizações IA)"]
             OtherR["+30 rotas adicionais"]
         end
 
@@ -77,6 +78,7 @@ graph TB
             AIConfidence["Confidence Scorer<br/>(Score por campo)"]
             OrganizerSvc["Document Organizer<br/>(Categorização automática)"]
             EmailB2BSvc["EmailB2BService<br/>(Enviar p/ Balcões)"]
+            ChangelogSvc["ChangelogService<br/>(Gerar notas IA)"]
             AnnotationSvc["AnnotationService<br/>(5 tipos de anotação)"]
             StorageFactory["StorageService<br/>(Factory: Local/S3/OneDrive)"]
             SystemSMTPSvc["SystemSMTPConfig<br/>(Bloco A - Email Transacional)"]
@@ -453,6 +455,15 @@ erDiagram
         object confidence_thresholds
         int total_calls
         datetime last_execution
+    }
+
+    SYSTEM_CHANGELOGS {
+        string id PK
+        string version
+        string content_markdown
+        datetime published_at
+        string generated_by
+        string source_summary
     }
 
     PROCESSES ||--o{ DOCUMENTS : "tem"

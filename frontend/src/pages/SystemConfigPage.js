@@ -54,6 +54,8 @@ import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { getSystemChangelogs, generateChangelogAI } from "../services/api";
+import { sanitizeHtml } from "../utils/sanitize";
 import {
   Settings,
   Cloud,
@@ -92,6 +94,7 @@ import {
   Pencil,
   MessageSquare,
   X,
+  Megaphone,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -3452,6 +3455,19 @@ const SystemConfigPage = ({ embedded = false }) => {
                       <span className="truncate">Docs Obrigatórios</span>
                       {activeTab === "mandatory_documents" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                     </button>
+                    <button
+                      type="button"
+                      onClick={() => setActiveTab("changelog")}
+                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
+                        activeTab === "changelog"
+                          ? "bg-primary/10 text-primary font-medium"
+                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
+                      }`}
+                    >
+                      <Megaphone className={`h-4 w-4 shrink-0 ${activeTab === "changelog" ? "text-primary" : ""}`} />
+                      <span className="truncate">Atualizações</span>
+                      {activeTab === "changelog" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
+                    </button>
                   </nav>
                 </CardContent>
               </Card>
@@ -3501,6 +3517,12 @@ const SystemConfigPage = ({ embedded = false }) => {
                       Docs Obrigatórios
                     </span>
                   </SelectItem>
+                  <SelectItem value="changelog">
+                    <span className="flex items-center gap-2">
+                      <Megaphone className="h-4 w-4" />
+                      Atualizações
+                    </span>
+                  </SelectItem>
                 </SelectContent>
               </Select>
               {/* Horizontal scrollable chips for quick access */}
@@ -3524,10 +3546,10 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {["rgpd", "maintenance", "portal", "mandatory_documents"].map((key) => {
-                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : key === "mandatory_documents" ? FileEdit : Wrench;
+                {["rgpd", "maintenance", "portal", "mandatory_documents", "changelog"].map((key) => {
+                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : key === "mandatory_documents" ? FileEdit : key === "changelog" ? Megaphone : Wrench;
                   const isActive = activeTab === key;
-                  const label = key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : key === "mandatory_documents" ? "Docs Obrigatórios" : "Manutenção";
+                  const label = key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : key === "mandatory_documents" ? "Docs Obrigatórios" : key === "changelog" ? "Atualizações" : "Manutenção";
                   return (
                     <button
                       key={key}
@@ -3555,7 +3577,7 @@ const SystemConfigPage = ({ embedded = false }) => {
             {activeTab === "system_emails" && <SystemEmailsSection token={token} />}
             {activeTab === "portal" && <PortalSettingsSection token={token} />}
             {activeTab === "mandatory_documents" && <MandatoryDocumentsSection token={token} />}
-            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && activeTab !== "mandatory_documents" && (
+            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && activeTab !== "mandatory_documents" && activeTab !== "changelog" && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}
@@ -3567,6 +3589,7 @@ const SystemConfigPage = ({ embedded = false }) => {
             )}
             {activeTab === "rgpd" && <RGPDTab />}
             {activeTab === "maintenance" && <MaintenanceSection />}
+            {activeTab === "changelog" && <ChangelogSection token={token} />}
           </main>
         </div>
       </div>
@@ -3875,3 +3898,168 @@ export default SystemConfigPage;
 
 // Named exports para uso no SystemAdminPanel (tab Comunicações)
 export { IntegrationsConfigSection, SystemEmailsSection };
+
+
+// ═══════════════════════════════════════════════════════════════
+// ChangelogSection — Mural de Atualizações gerado por IA
+// ═══════════════════════════════════════════════════════════════
+
+/**
+ * Conversor simples de Markdown para HTML (sem dependências externas).
+ * O output é posteriormente sanitizado por DOMPurify antes de ser renderizado.
+ */
+function markdownToHtml(md) {
+  if (!md || typeof md !== 'string') return '';
+  let html = md
+    .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 class="text-base font-bold mt-4 mb-2">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+    .replace(/^[\-\*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+    .replace(/\n\n/g, '</p><p class="mb-2">')
+    .replace(/\n/g, '<br/>');
+  html = `<p class="mb-2">${html}</p>`;
+  html = html.replace(/<p class="mb-2"><\/p>/g, '');
+  return html;
+}
+
+const ChangelogSection = ({ token }) => {
+  const [changelogs, setChangelogs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [generating, setGenerating] = useState(false);
+  const [sourceType, setSourceType] = useState("git");
+
+  const fetchChangelogs = useCallback(async () => {
+    try {
+      const res = await getSystemChangelogs(10);
+      setChangelogs(res.data || []);
+    } catch (err) {
+      console.error("Erro ao carregar changelogs:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchChangelogs(); }, [fetchChangelogs]);
+
+  const handleGenerate = async () => {
+    setGenerating(true);
+    try {
+      const res = await generateChangelogAI({ source_type: sourceType });
+      toast.success("Notas de atualização geradas com sucesso!");
+      // Adicionar o novo changelog ao início da lista
+      if (res.data?.changelog) {
+        setChangelogs(prev => [res.data.changelog, ...prev]);
+      } else {
+        fetchChangelogs(); // Refresh da lista
+      }
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Erro ao gerar notas de atualização"));
+    } finally {
+      setGenerating(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      <div>
+        <h3 className="text-lg font-semibold">📢 Mural de Atualizações (IA)</h3>
+        <p className="text-sm text-muted-foreground mt-1">
+          Gere notas de lançamento amigáveis a partir de logs técnicos. A IA transforma o trabalho da equipa em anúncios claros para todos os utilizadores.
+        </p>
+      </div>
+
+      {/* ── Gerar novo changelog ── */}
+      <Card className="border-primary/20">
+        <CardHeader className="pb-3">
+          <CardTitle className="text-base flex items-center gap-2">
+            <Sparkles className="h-5 w-5 text-primary" />
+            Gerar Notas de Atualização
+          </CardTitle>
+          <CardDescription className="text-xs">
+            A IA analisa os commits/changes recentes e redige um anúncio de lançamento amigável
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <div className="flex flex-col sm:flex-row gap-3">
+            <div className="flex-1">
+              <Label className="text-xs mb-1.5 block">Fonte de dados</Label>
+              <Select value={sourceType} onValueChange={setSourceType}>
+                <SelectTrigger className="w-full">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="git">Commits Git (recomendado)</SelectItem>
+                  <SelectItem value="changelog_file">Ficheiro CHANGELOG.md</SelectItem>
+                  <SelectItem value="worklog">Ficheiro worklog.md</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex items-end">
+              <Button onClick={handleGenerate} disabled={generating} className="gap-2">
+                {generating ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A gerar...
+                  </>
+                ) : (
+                  <>
+                    ✨ Gerar Notas de Atualização (IA)
+                  </>
+                )}
+              </Button>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* ── Lista de changelogs ── */}
+      {loading ? (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </div>
+      ) : changelogs.length === 0 ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Megaphone className="h-10 w-10 text-muted-foreground/40 mx-auto mb-3" />
+            <p className="text-muted-foreground">Nenhuma atualização publicada ainda.</p>
+            <p className="text-xs text-muted-foreground mt-1">Clique no botão acima para gerar a primeira nota de atualização com IA.</p>
+          </CardContent>
+        </Card>
+      ) : (
+        <div className="space-y-4">
+          {changelogs.map((entry) => (
+            <Card key={entry.id} className="overflow-hidden">
+              <CardHeader className="pb-3">
+                <div className="flex items-center justify-between">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Badge variant="outline" className="text-xs px-2 py-0.5">
+                      v{safeString(entry.version)}
+                    </Badge>
+                    {entry.generated_by === "ai" && (
+                      <Badge className="text-[10px] bg-primary/10 text-primary border-primary/20" variant="outline">
+                        ✨ IA
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <span className="text-xs text-muted-foreground">
+                    {formatDateTime(entry.published_at)}
+                  </span>
+                </div>
+              </CardHeader>
+              <CardContent className="pt-0">
+                <div
+                  className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed changelog-content"
+                  dangerouslySetInnerHTML={{
+                    __html: sanitizeHtml(markdownToHtml(entry.content_markdown))
+                  }}
+                />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+};
