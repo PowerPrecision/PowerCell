@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-25] — Pacote R: Motor de Pesquisa vs Filtros (Fix Crítico)
+
+### Corrigido
+- **Pesquisa ignora filtros (Bug Crítico)**: A pesquisa de texto sobrepunha-se aos filtros (status, role, etc.) porque a query era construída com `$or` no nível raiz, que se chocava com outros `$or`. Refatoração completa para usar **`$and`** em todos os filtros — agora a lógica é: `(pesquisa) AND (filtros de role) AND (filtros de status) AND (is_deleted != true)`. Nenhum filtro é anulado por outro.
+
+- **Filtro 'Eliminados' (Soft-Delete Bypass)**: Antes, `status=eliminados` ou `view_mode=deleted` não funcionavam porque `is_deleted: {$ne: True}` era sempre aplicado primeiro, bloqueando os resultados. Agora, quando o utilizador pede `status=eliminados` ou `view_mode=deleted`, o filtro inverte-se para `is_deleted: True`, mostrando apenas os registos eliminados.
+
+- **Expansão dos campos de pesquisa de texto**: A pesquisa só cobria `client_name` e `client_email`. Agora cobre 5 campos com regex case-insensitive:
+  - `client_name` (accent-insensitive)
+  - `client_email`
+  - `client_nif`
+  - `client_phone`
+  - `process_number` (ref, ex: PROC-001)
+
+### Técnico
+- Refatorados 2 endpoints: `GET /api/processes` e `GET /api/processes/paginated`
+- Arquitectura: lista `and_conditions = []` → cada filtro adiciona uma condição → montagem final com `$and`
+- Otimização: se há apenas 1 condição, não envolve em `$and` desnecessário
+
 ## [2026-06-25] — Pacote Q: Limpeza Visual de UI (Remover Gov.pt e Reatribuir)
 
 ### Removido
