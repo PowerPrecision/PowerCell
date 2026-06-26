@@ -127,6 +127,7 @@ class CreditData(BaseModel):
     interest_rate: Optional[float] = None
     monthly_payment: Optional[float] = None
     bank_name: Optional[str] = None
+    bank_branch: Optional[str] = None
     bank_approval_date: Optional[str] = None
     bank_approval_notes: Optional[str] = None
     

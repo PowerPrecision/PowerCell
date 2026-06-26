@@ -87,6 +87,7 @@ const WebmailPage = React.lazy(() => import("./pages/WebmailPage"));
 const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
 const TemplatesPage = React.lazy(() => import("./pages/TemplatesPage"));
 const FilesExplorerPage = React.lazy(() => import("./pages/FilesExplorerPage"));
+const BranchPerformancePage = React.lazy(() => import("./pages/BranchPerformancePage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -376,6 +377,18 @@ function App() {
             }
           />
           
+          {/* Branch Performance (Pacote S) - Staff com STATS_VIEW */}
+          <Route
+            path="/performance-balcoes"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <RouteBoundary name="Performance de Balcões">
+                  <BranchPerformancePage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+
           {/* Finance Dashboard - All Staff */}
           <Route
             path="/financeiro"

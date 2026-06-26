@@ -822,6 +822,25 @@ Componentes com suporte `embedded`:
 - `DiagnosticsPage` — Diagnósticos do sistema
 - `ProcessMigrationTab` — Migração Fase 1 (Separação Cliente ↔ Processo)
 
+### Dashboard de Performance de Balcões e Bancos (Pacote S)
+
+**Endpoint**: `GET /api/stats/branches`
+**Rota Frontend**: `/performance-balcoes` (sidebar: Gestão e Operações)
+**Acesso**: Staff com capability `STATS_VIEW`
+
+Utiliza MongoDB Aggregation Pipeline na coleção `processes` para calcular métricas por balcão bancário:
+
+| Métrica | Cálculo |
+|---------|---------|
+| `total_processes` | Total de processos associados ao balcão |
+| `active_processes` | Processos em fases ativas do workflow |
+| `approval_rate` (%) | Processos que atingiram `credito_aprovado` ou fase posterior / total |
+| `avg_closing_time_days` | Tempo médio (created_at → updated_at) para processos concluídos/arquivados |
+| `total_volume` (€) | Soma de `credit_data.requested_amount` |
+
+**Top Cards**: Banco Mais Rápido, Balcão com Maior Volume, Taxa de Aprovação Global.
+**Cache**: Redis com TTL de 1 hora. Pipeline com `allowDiskUse=True`.
+
 ---
 
 ## Segurança

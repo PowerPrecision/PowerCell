@@ -1071,3 +1071,22 @@ Stage Summary:
 - 1 ficheiro de config modificado: .gitignore (+11 regras Python)
 - "Limitação conhecida" do worklog Task 18 RESOLVIDA — auto-sync em background agora suporta configs multi-empresa nested, paridade total com a sync manual (hotfix 2f65050) e com o worker (Pacote J).
 - Próximo passo: commit email_service.py + push de ambos os commits para origin/dev (requer token GitHub).
+
+---
+Task ID: Pacote S
+Agent: Main Agent
+Task: Super Dashboard de Balcões e Bancos — completar integração (rota + sidebar)
+
+Work Log:
+- Verificação do estado existente: o endpoint `GET /api/stats/branches` já estava implementado em `backend/routes/stats.py` (linhas 476-669) com MongoDB Aggregation Pipeline completo
+- Verificação: a página `BranchPerformancePage.js` já estava implementada com Top Cards (Banco Mais Rápido, Balcão com Maior Volume, Taxa de Aprovação Global) e DataTable com ordenação interativa
+- Verificação: a importação lazy de `BranchPerformancePage` já existia em `App.js` (linha 90)
+- CORREÇÃO 1 — Rota em falta no `App.js`: adicionada rota `/performance-balcoes` com `ProtectedRoute` (STAFF_ROLES) e `RouteBoundary`
+- CORREÇÃO 2 — Link em falta na sidebar: adicionado item "Performance de Balcões" (ícone Building2) no grupo "Gestão e Operações" do `DashboardLayout.js`
+- CORREÇÃO 3 — `gestaoRoutes` atualizado para incluir `/performance-balcoes` (ativação correta do grupo na sidebar)
+- Documentação `ARCHITECTURE.md`: adicionada secção "Dashboard de Performance de Balcões e Bancos (Pacote S)" com tabela de métricas e detalhes de cache
+
+Stage Summary:
+- 3 ficheiros modificados: `frontend/src/App.js` (+10 linhas), `frontend/src/layouts/DashboardLayout.js` (+6 linhas), `ARCHITECTURE.md` (+18 linhas)
+- Funcionalidade completa: endpoint backend + página frontend + rota + sidebar + documentação
+- Acesso: Staff com capability `STATS_VIEW` via rota `/performance-balcoes`
