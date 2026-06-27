@@ -959,5 +959,20 @@ export const rollbackProcessMigration = () => api.post("/admin/process-migration
 export const getSystemChangelogs = (limit = 5) => api.get("/system/changelog", { params: { limit } });
 export const generateChangelogAI = (data = {}) => api.post("/system/changelog/generate-ai", data);
 
+// ===== COMPANIES CRUD (Multi-Tenant — Gestão de Empresas) =====
+export const getCompanies = (search) =>
+  api.get("/admin/companies", { params: search ? { search } : {} });
+export const getCompany = (id) => api.get(`/admin/companies/${id}`);
+export const createCompany = (data) => api.post("/admin/companies", data);
+export const updateCompany = (id, data) => api.put(`/admin/companies/${id}`, data);
+export const deleteCompany = (id) => api.delete(`/admin/companies/${id}`);
+export const uploadCompanyLogo = (id, file) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api.post(`/admin/companies/${id}/logo`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+  });
+};
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;

@@ -8,7 +8,7 @@
  *
  * DECISÕES ARQUITECTURAIS:
  * - Tabs organizadas em categorias visuais:
- *   1. GESTÃO (amber/gold): Utilizadores, Permissões, Configurações, Automações —
+ *   1. GESTÃO (amber/gold): Utilizadores, Permissões, Configurações, Automações, Empresas —
  *      visíveis para admin e CEO.
  *   2. CUSTOMIZAÇÃO (emerald/green): Estados de Workflow, Formulários, Templates, Perfis —
  *      visíveis para admin e CEO.
@@ -53,7 +53,9 @@ import {
   // Técnico
   Shield, AlertTriangle, Database, Brain, Activity, ArrowRightLeft,
   // Finanças
-  Landmark
+  Landmark,
+  // Gestão de Empresas
+  Building2
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { hasRole } from "../utils/roleUtils";
@@ -88,6 +90,7 @@ import AIConfigPage from "./AIConfigPage";
 import BackgroundJobsPage from "./BackgroundJobsPage";
 import ProcessMigrationTab from "../components/admin/ProcessMigrationTab";
 import FinanceTab from "../components/admin/FinanceTab";
+import CompaniesManagementPage from "./CompaniesManagementPage";
 
 const SystemAdminPanel = () => {
   const navigate = useNavigate();
@@ -163,6 +166,15 @@ const SystemAdminPanel = () => {
                 <Zap className="h-4 w-4 shrink-0" />
                 <span className="hidden sm:inline">Automações</span>
                 <span className="sm:hidden">Auto</span>
+              </TabsTrigger>
+              <TabsTrigger
+                value="empresas"
+                className="gap-1.5 text-xs sm:text-sm whitespace-nowrap flex-shrink-0 px-2 sm:px-3 text-amber-600 dark:text-amber-400"
+                data-testid="tab-empresas"
+              >
+                <Building2 className="h-4 w-4 shrink-0" />
+                <span className="hidden sm:inline">Empresas</span>
+                <span className="sm:hidden">Emp</span>
               </TabsTrigger>
 
               {/* Separador visual */}
@@ -255,6 +267,11 @@ const SystemAdminPanel = () => {
           {/* Automações — AutomationPage em modo embedded */}
           <TabsContent value="automation" className="mt-6">
             <AutomationPage embedded={true} />
+          </TabsContent>
+
+          {/* Empresas — CompaniesManagementPage em modo embedded */}
+          <TabsContent value="empresas" className="mt-6">
+            <CompaniesManagementPage embedded={true} />
           </TabsContent>
 
           {/* ================================================================ */}

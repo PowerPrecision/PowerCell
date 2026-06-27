@@ -1107,3 +1107,25 @@ Stage Summary:
 - 1 ficheiro modificado no backend: `backend/routes/portal.py` (bloqueio 400 quando sem email)
 - Tarefa 2 (Apelido Interno): já estava implementada — nenhuma alteração necessária
 - Frontend: sem alterações (já exibia a mensagem de erro do backend)
+
+---
+Task ID: Pacote V
+Agent: Main Agent + subagent
+Task: Ecrã de Gestão de Empresas (Multi-Tenant)
+
+Work Log:
+- Exploração do código existente: não existia CRUD genérico de empresas, apenas company_email_configs e user_company_roles
+- Criação do modelo `backend/models/company.py`: CompanyCreate, CompanyUpdate, CompanyResponse, CompanyListResponse
+- Criação das rotas CRUD `backend/routes/companies_crud.py`: 6 endpoints (list, available, get, create, update, delete) + upload de logo
+- Upload de logo usa `s3_service.s3_client.put_object()` (padrão do admin_storage.py)
+- Delete bloqueia se existem utilizadores associados; Update faz cascade de rename em `users.company`
+- Registo da nova rota em `backend/server.py` (import + include_router)
+- Adição de 6 API calls em `frontend/src/services/api.js`
+- Criação de `frontend/src/pages/CompaniesManagementPage.jsx` (lista + formulário com 3 secções)
+- Integração no `SystemAdminPanel.jsx`: nova tab "Empresas" no grupo GESTÃO (amber), entre Automações e Finanças
+- Documentação `ARCHITECTURE.md`: adicionada secção "Gestão de Empresas — Multi-Tenant (Pacote V)"
+
+Stage Summary:
+- 3 ficheiros criados: `backend/models/company.py`, `backend/routes/companies_crud.py`, `frontend/src/pages/CompaniesManagementPage.jsx`
+- 4 ficheiros modificados: `backend/server.py`, `frontend/src/services/api.js`, `frontend/src/pages/SystemAdminPanel.jsx`, `ARCHITECTURE.md`
+- Acesso: Admin/CEO via tab "Empresas" no Painel de Administração

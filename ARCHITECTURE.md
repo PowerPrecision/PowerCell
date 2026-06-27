@@ -857,6 +857,28 @@ Anteriormente gerava o link na mesma, mas o Portal do Cliente poderia ter funcio
 **Modelo**: `ProcessUpdate.apelido` (string, max 120 chars) e `ProcessResponse.apelido` — já existiam no `backend/models/process.py`.
 **Frontend**: Componente `InlineApelido` em `ProcessDetails.js` — edição rápida no cabeçalho do processo com ícone de lápis, visível apenas para staff (não para clientes). Guarda via `PUT /api/processes/{id}` com `{ apelido: "valor" }`.
 
+### Gestão de Empresas — Multi-Tenant (Pacote V)
+
+**Novo backend CRUD** para a entidade "Empresa" (não existia anteriormente — as empresas eram derivadas implicitamente da coleção `system_config`).
+
+**Coleção MongoDB**: `companies` | **Modelo**: `backend/models/company.py`
+
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/admin/companies` | GET | Lista empresas (com `?search=` por nome/NIF) |
+| `/admin/companies/available` | GET | Lista id+name para dropdowns |
+| `/admin/companies/{id}` | GET | Detalhe de uma empresa |
+| `/admin/companies` | POST | Criar empresa |
+| `/admin/companies/{id}` | PUT | Atualizar empresa (cascade: renomeia `user.company` se o nome mudar) |
+| `/admin/companies/{id}` | DELETE | Eliminar empresa (bloqueia se tem utilizadores associados) |
+| `/admin/companies/{id}/logo` | POST | Upload de logótipo para S3 (max 2MB, PNG/JPEG/GIF/WebP/SVG) |
+
+**Campos**: name, nif, address, phone, email, website, logo_url, email_sync_enabled, total_users (computado).
+
+**Frontend**: Tab "Empresas" no SystemAdminPanel (grupo GESTÃO, amber). Página `CompaniesManagementPage.jsx` com painel esquerdo (lista + pesquisa) e painel direito (formulário de edição com 3 secções: Dados Base, Branding/Logo, Motor de E-mail com toggle).
+
+**Acesso**: Admin e CEO (via `require_admin()`).
+
 ---
 
 ## Segurança

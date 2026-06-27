@@ -113,6 +113,7 @@ from routes.portal_admin import router as portal_admin_router
 from routes.google_auth import router as google_auth_router
 from routes.shared_email import router as shared_email_router
 from routes.companies import router as companies_router
+from routes.companies_crud import router as companies_crud_router
 from routes.user_company_roles import router as user_company_roles_router
 from routes.portal_settings import router as portal_settings_router
 from routes.ai_analysis import router as ai_analysis_router
@@ -602,6 +603,7 @@ app.include_router(portal_admin_router, prefix="/api")
 app.include_router(google_auth_router, prefix="/api")
 app.include_router(shared_email_router, prefix="/api")
 app.include_router(companies_router, prefix="/api")
+app.include_router(companies_crud_router, prefix="/api")
 app.include_router(user_company_roles_router, prefix="/api")
 app.include_router(portal_settings_router, prefix="/api")
 app.include_router(ai_analysis_router, prefix="/api")
