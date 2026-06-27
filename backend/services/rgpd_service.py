@@ -299,6 +299,9 @@ async def sign_rgpd(
     # Adicionar data da assinatura
     now = datetime.now(timezone.utc)
     consent_data["data_assinatura"] = now.strftime("%d/%m/%Y às %H:%M")
+    # [Pacote X] Guardar IP do cliente para auditoria e PDF
+    client_ip = consent_data.get("client_ip", "unknown")
+    consent_data["client_ip"] = client_ip
     
     # Actualizar pedido
     await db[RGPD_REQUESTS_COLLECTION].update_one(
@@ -343,6 +346,7 @@ async def sign_rgpd(
     )
     
     # Enviar email ao consultor
+    # [Pacote X] Incluir PDFs como anexo no email de notificação ao staff
     user_email = request.get("created_by_email")
     user_name = request.get("created_by_name", "")
     client_name = consent_data.get("nome", request.get("client_name", ""))
@@ -353,7 +357,10 @@ async def sign_rgpd(
             user_name=user_name,
             client_name=client_name,
             consent_data=consent_data,
-            process_id=request["process_id"]
+            process_id=request["process_id"],
+            rgpd_pdf_bytes=rgpd_pdf_bytes,
+            minuta_pdf_bytes=minuta_pdf_bytes,
+            client_ip=client_ip,
         )
     
     # Enviar email ao cliente com 2 PDFs em anexo
@@ -503,10 +510,17 @@ async def send_rgpd_signed_email(
     user_name: str,
     client_name: str,
     consent_data: dict,
-    process_id: str
+    process_id: str,
+    rgpd_pdf_bytes: bytes = None,
+    minuta_pdf_bytes: bytes = None,
+    client_ip: str = "unknown",
 ) -> bool:
     """
     Envia email com o RGPD assinado para o utilizador.
+    
+    [Pacote X] Agora inclui os PDFs (RGPD + Minuta) como anexos,
+    permitindo ao staff aceder imediatamente aos documentos sem
+    necessidade de os ir buscar ao processo.
     
     Args:
         to_email: Email do utilizador
@@ -514,12 +528,31 @@ async def send_rgpd_signed_email(
         client_name: Nome do cliente
         consent_data: Dados do consentimento
         process_id: ID do processo
+        rgpd_pdf_bytes: PDF do RGPD assinado (bytes)
+        minuta_pdf_bytes: PDF da Minuta assinada (bytes)
+        client_ip: IP do cliente no momento da assinatura
     
     Returns:
         True se enviado com sucesso
     """
     # Formatar tipo de documento para exibição legível
     tipo_documento_label = get_tipo_documento_label(consent_data.get('tipo_documento'))
+    
+    # [Pacote X] Construir anexos com os PDFs gerados
+    attachments = []
+    safe_name = client_name.replace(' ', '_')
+    if rgpd_pdf_bytes:
+        attachments.append({
+            "filename": f"RGPD_{safe_name}.pdf",
+            "content_bytes": rgpd_pdf_bytes,
+            "content_type": "application/pdf"
+        })
+    if minuta_pdf_bytes:
+        attachments.append({
+            "filename": f"Minuta_Exclusividade_{safe_name}.pdf",
+            "content_bytes": minuta_pdf_bytes,
+            "content_type": "application/pdf"
+        })
     
     subject = f"RGPD Assinado - {client_name}"
     
@@ -559,6 +592,7 @@ Sistema CRM
         <p><strong>Número do Documento:</strong> {consent_data.get('numero_documento', 'N/A')}</p>
         <p><strong>Morada:</strong> {consent_data.get('morada', 'N/A')}</p>
         <p><strong>Data da Assinatura:</strong> {consent_data.get('data_assinatura', 'N/A')}</p>
+        <p><strong>IP do Cliente:</strong> {client_ip}</p>
     </div>
     
     <p>O processo foi atualizado com esta informação.</p>
@@ -577,6 +611,7 @@ Sistema CRM
             subject=subject,
             body=body_text,
             body_html=body_html,
+            attachments=attachments if attachments else None,
             force_system=True,
             system_purpose="RGPD"
         )
@@ -594,7 +629,12 @@ Sistema CRM
 # ====================================================================
 
 async def _upload_pdf_to_s3(process_id: str, client_name: str, pdf_bytes: bytes, filename: str, category: str):
-    """Upload PDF bytes to S3 and register in documents collection."""
+    """Upload PDF bytes to S3 and register in documents collection.
+    
+    [Pacote X] Agora cria também uma entrada na coleção 'documents' associada
+    ao process_id, para que o documento apareça na secção de documentos do
+    processo no frontend.
+    """
     import asyncio
     from services.s3_storage import s3_service
     
@@ -618,6 +658,38 @@ async def _upload_pdf_to_s3(process_id: str, client_name: str, pdf_bytes: bytes,
     
     if s3_path:
         logger.info(f"PDF guardado nos docs: {s3_path}")
+        
+        # [Pacote X] Criar entrada na coleção documents para o processo
+        try:
+            now_iso = datetime.now(timezone.utc).isoformat()
+            # Determinar client_id a partir do processo
+            process = await db.processes.find_one(
+                {"id": process_id},
+                {"_id": 0, "client_id": 1}
+            )
+            doc_entry = {
+                "id": str(uuid.uuid4()),
+                "process_id": process_id,
+                "client_id": process.get("client_id") if process else None,
+                "category": category.lower() if category else "rgpd",
+                "filename": s3_path,
+                "original_filename": filename,
+                "status": "VALIDATED",
+                "file_url": s3_path,
+                "file_size": len(pdf_bytes),
+                "content_type": "application/pdf",
+                "uploaded_at": now_iso,
+                "created_at": now_iso,
+                "updated_at": now_iso,
+                "requested_by": "system",
+                "requested_by_name": "Sistema (RGPD)",
+                "source": "rgpd_sign",
+                "notes": f"Documento gerado automaticamente aquando da assinatura do RGPD: {filename}",
+            }
+            await db.documents.insert_one(doc_entry)
+            logger.info(f"[RGPD] Entrada criada em documents para {process_id}: {filename}")
+        except Exception as e:
+            logger.error(f"[RGPD] Erro ao criar entrada em documents: {e}", exc_info=True)
     else:
         logger.error("Falha ao fazer upload do PDF para S3")
 
@@ -920,9 +992,10 @@ def _build_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
     c.line(margin_left, y, page_width - margin_right, y)
     y -= line_height + 4
     
-    # Date and location
+    # Date, location and IP
     data_assinatura = consent_data.get("data_assinatura", "")
     loc = consent_data.get("localidade", "")
+    client_ip = consent_data.get("client_ip", "")
     if loc and data_assinatura:
         # Format: "Lisboa, 24/04/2026"
         date_only = data_assinatura.split(" ")[0] if " " in data_assinatura else data_assinatura
@@ -931,7 +1004,16 @@ def _build_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
             c.drawString(margin_left, y, f"{loc}, {date_only}")
         except Exception:
             pass
-        y -= line_height + 10
+        y -= line_height
+    # [Pacote X] Incluir IP do cliente no PDF para auditoria
+    if client_ip and client_ip != "unknown":
+        c.setFont("Helvetica", font_size - 1)
+        try:
+            c.drawString(margin_left, y, f"Endereco IP: {client_ip}")
+        except Exception:
+            pass
+        y -= line_height
+    y += 4  # Compensar o espaço extra adicionado
     
     # Signature label
     c.setFont("Helvetica-Bold", font_size)

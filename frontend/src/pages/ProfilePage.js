@@ -157,8 +157,32 @@ const ProfilePage = () => {
   // ContextSwitcher faz switchActiveCompany(), o AuthContext atualiza o
   // user object mas os estados locais NÃO são automaticamente repostos.
   // Este useEffect é ESSENCIAL para forçar a reidratação do formulário.
+  //
+  // PACOTE W — Fix Stale State (QA Bug):
+  // Problema: switchActiveCompany() faz setActiveCompanyId() ANTES do
+  // await api.get("/auth/me"), provocando um render intermédio onde
+  // effectiveCompanyId=já mudou mas user=ainda tem dados da empresa anterior.
+  // Sem guarda, o useEffect rehidrata os campos com dados STALE (flash visual).
+  // Solução: verificar se user.active_company_id está em sincronia com
+  // effectiveCompanyId antes de rehidratar. Se não estão sincronizados,
+  // o user ainda não foi atualizado — saltamos este ciclo e esperamos
+  // pelo próximo render (quando setUser() completar).
+  //
+  // NOTA: loadEmailConfigInfo() foi REMOVIDO deste useEffect. A carga
+  // da config de email é feita EXCLUSIVAMENTE pelo useEffect dedicado
+  // (linha ~252) que depende de [emailCompanyId, effectiveCompanyId, effectiveRole],
+  // evitando chamadas duplicadas e closures stale de emailCompanyId.
   useEffect(() => {
     if (user) {
+      // ── Guarda de sincronia: prevenir reidratação com dados stale ──
+      // Quando switchActiveCompany() é chamado, há um render intermédio onde
+      // effectiveCompanyId já mudou mas user.active_company_id ainda reflete
+      // a empresa anterior. Esta guarda evita o flash de dados errados.
+      const userCompanyContext = user.active_company_id || user.company;
+      if (effectiveCompanyId && userCompanyContext && userCompanyContext !== effectiveCompanyId) {
+        return; // User data é stale para esta empresa — aguardar refreshUser
+      }
+
       // Display name: active_company_display_name > global name
       setDisplayName(user.active_company_display_name ?? user.name ?? "");
       // Phone: active_company_professional_phone > global phone
@@ -168,10 +192,6 @@ const ProfilePage = () => {
       // Email signature
       setEmailSignature(user.active_company_signature ?? user.email_signature ?? "");
       setLoading(false);
-
-      // FIX: Forçar recarga da config de email quando o user object muda
-      // (ex: após switchActiveCompany que faz refreshUser)
-      loadEmailConfigInfo();
     }
   }, [user, effectiveCompanyId, effectiveRole]);
 
