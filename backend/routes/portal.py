@@ -565,6 +565,33 @@ async def impersonate_client_portal(
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
+    # Tentar obter email do processo ou do cliente associado
+    client_email = process.get("client_email", "")
+    client_name = process.get("client_name", "")
+    client_id = process.get("client_id", "")
+
+    if not client_email and client_id:
+        client_doc = await db.clients.find_one(
+            {"id": client_id, "is_deleted": {"$ne": True}},
+            {"email": 1, "nome": 1, "_id": 0}
+        )
+        if client_doc:
+            client_email = client_doc.get("email", "")
+            if not client_name:
+                client_name = client_doc.get("nome", "")
+
+    # Sem email — devolver 400 amigável em vez de gerar link que
+    # poderá ter funcionalidades limitadas no portal.
+    if not client_email:
+        logger.warning(
+            f"[IMPERSONATE] Processo {process_id} sem email associado "
+            f"(client_id: {client_id or 'N/A'}). Bloqueado — 400 retornado."
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Para usar esta função, o cliente precisa de ter um e-mail configurado."
+        )
+
     # Gerar JWT magic token (mesma função usada pelo generate-magic-link)
     token = create_client_magic_token(process_id)
 
@@ -575,16 +602,16 @@ async def impersonate_client_portal(
 
     logger.info(
         f"[IMPERSONATE] Staff {user.get('email')} gerou auto-login para "
-        f"processo {process_id} (cliente: {process.get('client_name', 'N/A')})"
+        f"processo {process_id} (cliente: {client_name or 'N/A'})"
     )
 
     return {
         "magic_link": magic_link,
         "token": token,
         "process_id": process_id,
-        "client_id": process.get("client_id", ""),
-        "client_name": process.get("client_name", ""),
-        "client_email": process.get("client_email", ""),
+        "client_id": client_id,
+        "client_name": client_name,
+        "client_email": client_email,
         "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
     }
 

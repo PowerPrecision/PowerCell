@@ -841,6 +841,22 @@ Utiliza MongoDB Aggregation Pipeline na coleção `processes` para calcular mét
 **Top Cards**: Banco Mais Rápido, Balcão com Maior Volume, Taxa de Aprovação Global.
 **Cache**: Redis com TTL de 1 hora. Pipeline com `allowDiskUse=True`.
 
+### Fix "Ver como Cliente" sem E-mail + Apelido Interno (Pacote T)
+
+#### Tarefa 1 — Impersonate com validação de e-mail
+
+**Endpoint**: `GET /api/portal/impersonate/{process_id}`
+**Alteração**: Quando o processo não tem e-mail associado (nem no processo nem no cliente ligado), o endpoint devolve agora **HTTP 400** com a mensagem amigável:
+
+> "Para usar esta função, o cliente precisa de ter um e-mail configurado."
+
+Anteriormente gerava o link na mesma, mas o Portal do Cliente poderia ter funcionalidades limitadas sem e-mail. O frontend (`ProcessDetails.js`) já exibe o `detail` do erro via `toast.error()`, pelo que a mensagem chega ao utilizador sem alterações no frontend.
+
+#### Tarefa 2 — Campo "Apelido Interno / Título"
+
+**Modelo**: `ProcessUpdate.apelido` (string, max 120 chars) e `ProcessResponse.apelido` — já existiam no `backend/models/process.py`.
+**Frontend**: Componente `InlineApelido` em `ProcessDetails.js` — edição rápida no cabeçalho do processo com ícone de lápis, visível apenas para staff (não para clientes). Guarda via `PUT /api/processes/{id}` com `{ apelido: "valor" }`.
+
 ---
 
 ## Segurança

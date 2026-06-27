@@ -1090,3 +1090,20 @@ Stage Summary:
 - 3 ficheiros modificados: `frontend/src/App.js` (+10 linhas), `frontend/src/layouts/DashboardLayout.js` (+6 linhas), `ARCHITECTURE.md` (+18 linhas)
 - Funcionalidade completa: endpoint backend + página frontend + rota + sidebar + documentação
 - Acesso: Staff com capability `STATS_VIEW` via rota `/performance-balcoes`
+
+---
+Task ID: Pacote T
+Agent: Main Agent
+Task: Fix "Ver como Cliente" sem e-mail + Apelido Interno do Processo
+
+Work Log:
+- Verificação do endpoint `/api/portal/impersonate/{process_id}` em `backend/routes/portal.py`
+- Descoberta: o campo `apelido` já existia no modelo (`ProcessUpdate.apelido`, `ProcessResponse.apelido`) e no frontend (componente `InlineApelido` em `ProcessDetails.js`) — Tarefa 2 já implementada
+- ALTERAÇÃO — Tarefa 1: substituído o comportamento de "gerar link na mesma com aviso no log" por HTTP 400 com mensagem amigável quando não há e-mail
+- O frontend (`ProcessDetails.js` linha 2659-2661) já tratava `error.response.data.detail` via `toast.error()`, sem necessidade de alteração
+- Documentação `ARCHITECTURE.md`: adicionada secção "Fix Ver como Cliente sem E-mail + Apelido Interno (Pacote T)"
+
+Stage Summary:
+- 1 ficheiro modificado no backend: `backend/routes/portal.py` (bloqueio 400 quando sem email)
+- Tarefa 2 (Apelido Interno): já estava implementada — nenhuma alteração necessária
+- Frontend: sem alterações (já exibia a mensagem de erro do backend)
