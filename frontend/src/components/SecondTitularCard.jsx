@@ -11,7 +11,7 @@
 import { useState, useRef, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useQueryClient } from "@tanstack/react-query";
-import { searchClients, updateProcess } from "../services/api";
+import { searchClients, updateProcess, createClient } from "../services/api";
 import { queryKeys } from "../lib/queryClient";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent } from "./ui/card";
@@ -35,6 +35,11 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
   const [linking, setLinking] = useState(false);
   const containerRef = useRef(null);
   const debounceRef = useRef(null);
+
+  // ── Criação inline de novo cliente ──
+  const [showNewClientForm, setShowNewClientForm] = useState(false);
+  const [newClient, setNewClient] = useState({ nome: "", email: "", telefone: "", nif: "" });
+  const [creating, setCreating] = useState(false);
 
   const secondClientData = processData?.second_client_data;
   const secondClientId = processData?.second_client_id;
@@ -101,6 +106,48 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
       toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao ligar 2º titular"));
     } finally {
       setLinking(false);
+    }
+  };
+
+  // Criar novo cliente e ligar automaticamente como 2º titular
+  const handleCreateAndLink = async () => {
+    if (!newClient.nome.trim()) return;
+    setCreating(true);
+    try {
+      // 1. Criar o cliente na BD
+      const res = await createClient({
+        nome: newClient.nome.trim(),
+        email: newClient.email.trim() || undefined,
+        telefone: newClient.telefone.trim() || undefined,
+        nif: newClient.nif.trim() || undefined,
+        fonte: "staff_created",
+      });
+      const newClientId = res.data?.id || res.data?.client?.id;
+      if (!newClientId) {
+        toast.error("Erro ao criar cliente: resposta sem ID");
+        return;
+      }
+
+      // 2. Ligar automaticamente como 2º titular do processo
+      await updateProcess(processData.id, {
+        second_client_id: newClientId,
+      });
+      toast.success(`${newClient.nome.trim()} criado(a) e ligado(a) como 2º Titular`);
+
+      // 3. Limpar estado e atualizar
+      setShowNewClientForm(false);
+      setIsSearching(false);
+      setQuery("");
+      setResults([]);
+      setNewClient({ nome: "", email: "", telefone: "", nif: "" });
+      queryClient.invalidateQueries({ queryKey: queryKeys.processes.detail(processData.id) });
+      if (onUpdate) onUpdate();
+    } catch (err) {
+      console.error("Erro ao criar e ligar 2º titular:", err);
+      const detail = err.response?.data?.detail;
+      toast.error(extractErrorMessage(detail, "Erro ao criar cliente"));
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -318,11 +365,114 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
               </div>
             )}
 
-            {/* Sem resultados */}
-            {query.length >= 2 && !loading && results.length === 0 && (
-              <p className="text-sm text-muted-foreground text-center py-2">
-                Nenhum cliente encontrado. Crie o cliente primeiro na página de Clientes.
-              </p>
+            {/* Sem resultados → oferecer criação inline */}
+            {query.length >= 2 && !loading && results.length === 0 && !showNewClientForm && (
+              <div className="text-center py-2">
+                <p className="text-sm text-muted-foreground mb-2">
+                  Nenhum cliente encontrado.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="text-xs"
+                  onClick={() => setShowNewClientForm(true)}
+                >
+                  <UserPlus className="h-3.5 w-3.5 mr-1.5 text-cyan-500" />
+                  Criar Novo Cliente
+                </Button>
+              </div>
+            )}
+
+            {/* Formulário inline para criar novo cliente */}
+            {showNewClientForm && (
+              <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
+                <p className="text-sm font-medium flex items-center gap-2">
+                  <UserPlus className="h-4 w-4 text-cyan-500" />
+                  Criar Novo Cliente
+                </p>
+                <Input
+                  placeholder="Nome completo *"
+                  value={newClient.nome}
+                  onChange={(e) => setNewClient({ ...newClient, nome: e.target.value })}
+                  autoFocus
+                  disabled={creating}
+                />
+                <div className="grid grid-cols-3 gap-2">
+                  <Input
+                    placeholder="NIF"
+                    value={newClient.nif}
+                    onChange={(e) => {
+                      const v = e.target.value.replace(/[^\d]/g, "").slice(0, 9);
+                      setNewClient({ ...newClient, nif: v });
+                    }}
+                    disabled={creating}
+                  />
+                  <Input
+                    placeholder="Email"
+                    type="email"
+                    value={newClient.email}
+                    onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
+                    disabled={creating}
+                  />
+                  <Input
+                    placeholder="Telefone"
+                    value={newClient.telefone}
+                    onChange={(e) => setNewClient({ ...newClient, telefone: e.target.value })}
+                    disabled={creating}
+                  />
+                </div>
+                <div className="flex gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    className="flex-1 text-xs"
+                    onClick={handleCreateAndLink}
+                    disabled={!newClient.nome.trim() || creating}
+                  >
+                    {creating ? (
+                      <>
+                        <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
+                        A criar e ligar...
+                      </>
+                    ) : (
+                      <>
+                        <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+                        Criar e Ligar como 2º Titular
+                      </>
+                    )}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="text-xs"
+                    onClick={() => {
+                      setShowNewClientForm(false);
+                      setNewClient({ nome: "", email: "", telefone: "", nif: "" });
+                    }}
+                    disabled={creating}
+                  >
+                    Cancelar
+                  </Button>
+                </div>
+              </div>
+            )}
+
+            {/* Botão criar novo cliente (visível mesmo com resultados) */}
+            {results.length > 0 && !showNewClientForm && (
+              <div className="border-t pt-2">
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="w-full text-xs text-primary hover:underline"
+                  onClick={() => setShowNewClientForm(true)}
+                >
+                  <UserPlus className="h-3.5 w-3.5 mr-1.5" />
+                  Criar Novo Cliente
+                </Button>
+              </div>
             )}
           </div>
         )}
