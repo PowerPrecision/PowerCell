@@ -1339,3 +1339,21 @@ Work Log:
 Stage Summary:
 - 3 ficheiros: frontend/src/pages/CompaniesManagementPage.jsx, frontend/src/components/ProcessStickyHeader.js, frontend/src/pages/ProcessDetails.js.
 - Resultado: empresas não crasham com resposta paginada; dropdown de Simulações fecha correctamente após clique e abre o modal da calculadora.
+
+
+---
+Task ID: Pacote AG (AI Provider Changelog)
+Agent: Main Agent (Code Assistant)
+Task: Refatorar changelog_service para usar credenciais da BD (multi-provider)
+
+Work Log:
+- Problema: changelog_service.py acedia diretamente a EMERGENT_LLM_KEY (env var) e fazia call isolado à OpenAI, quebrando a regra multi-provider do sistema.
+- Análise: estudado o padrão central — SystemConfig tem AIConfig {provider, api_key, model, max_tokens} guardado na coleção system_config; services/system_config.py tem get_system_config(); admin_ai.py permite configurar via /api/admin/ai-config.
+- Criado helper get_ai_client_and_model() que: (1) lê system_config.ai da BD (provider, api_key, model); (2) se provider for Emergent, usa base_url emergent; (3) fallback para env vars OPENAI_API_KEY > EMERGENT_LLM_KEY; (4) devolve (client, model) ou (None, default_model).
+- Refatorado generate_changelog_ai: removido guard `if not EMERGENT_LLM_KEY` no início; o novo guard está no passo 4 e chama get_ai_client_and_model(); o call_ai() usa o cliente e modelo dinâmicos em vez de get_openai_client() + AI_MODEL fixos.
+- Atualizado routes/changelog.py: mensagem de erro "Nenhuma credencial de IA configurada" agora refere o painel de administração (Configurações → IA) em vez de só EMERGENT_LLM_KEY.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 2 ficheiros: backend/services/changelog_service.py, backend/routes/changelog.py.
+- Resultado: geração de changelog por IA usa credenciais da BD (configuradas pelo Admin) com fallback para env vars; respeita a regra multi-provider do sistema.
