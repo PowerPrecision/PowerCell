@@ -299,6 +299,9 @@ const ProcessDetails = () => {
   // Guardar os dados originais do processo (da BD) para componentes
   // que precisam dos valores guardados (ex: email para notificações)
   const savedProcessRef = useRef(null);
+  // Refs para os triggers das calculadoras (desacopladas do Dropdown — Pacote AF)
+  const dstiRef = useRef(null);
+  const riskRef = useRef(null);
   const [deadlines, setDeadlines] = useState([]);
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
@@ -2604,7 +2607,12 @@ const ProcessDetails = () => {
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                {/* Simulações agrupadas num Dropdown (Pacote AC) */}
+                {/* Simulações agrupadas num Dropdown (Pacote AC)
+                    CORREÇÃO (Pacote AF): desacopladas do Dropdown para evitar
+                    que o menu fique preso aberto. As calculadoras ficam fora
+                    (div hidden) com refs aos botões de trigger; os itens do
+                    menu chamam ref.current?.click() para abrir o modal,
+                    permitindo ao Radix fechar o menu naturalmente. */}
                 <DropdownMenu>
                   <DropdownMenuTrigger asChild>
                     <Button
@@ -2619,61 +2627,49 @@ const ProcessDetails = () => {
                     </Button>
                   </DropdownMenuTrigger>
                   <DropdownMenuContent align="end" className="w-52">
-                    {/* onSelect preventDefault: o DialogTrigger interno das
-                        calculadoras precisa de receber o click para abrir o
-                        modal. Sem isto, o Radix fecha o menu antes do click
-                        chegar ao trigger. */}
                     <DropdownMenuItem
-                      onSelect={(e) => e.preventDefault()}
-                      className="cursor-pointer p-0"
+                      className="cursor-pointer gap-2 text-blue-600"
+                      onSelect={() => dstiRef.current?.click()}
                     >
-                      <DSTICalculator
-                        trigger={
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-blue-600 hover:bg-blue-50 rounded"
-                            title="Calculadora DSTI - Taxa de Esforço"
-                          >
-                            <Calculator className="h-4 w-4" />
-                            Calculadora DSTI
-                          </button>
-                        }
-                        clientData={{
-                          rendimento_bruto: financialData?.rendimento_bruto,
-                          rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                          salario_liquido: financialData?.salario_liquido,
-                          renda_habitacao_atual: financialData?.renda_habitacao_atual,
-                          rendimento_co_titular: financialData?.rendimento_co_titular,
-                        }}
-                      />
+                      <Calculator className="h-4 w-4" />
+                      Calculadora DSTI
                     </DropdownMenuItem>
                     <DropdownMenuItem
-                      onSelect={(e) => e.preventDefault()}
-                      className="cursor-pointer p-0"
+                      className="cursor-pointer gap-2 text-purple-600"
+                      onSelect={() => riskRef.current?.click()}
                     >
-                      <RiskCalculator
-                        trigger={
-                          <button
-                            type="button"
-                            className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-purple-600 hover:bg-purple-50 rounded"
-                            title="Calculadora de Risco de Crédito"
-                          >
-                            <TrendingUp className="h-4 w-4" />
-                            Calculadora de Risco
-                          </button>
-                        }
-                        clientData={{
-                          rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                          valor_imovel: realEstateData?.valor_imovel || realEstateData?.valor,
-                          valor_entrada: financialData?.valor_entrada || financialData?.capital_proprio,
-                          capital_proprio: financialData?.capital_proprio,
-                          idade: personalData?.idade,
-                          data_nascimento: personalData?.data_nascimento || personalData?.birth_date,
-                        }}
-                      />
+                      <TrendingUp className="h-4 w-4" />
+                      Calculadora de Risco
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
+
+                {/* Calculadoras desacopladas — invisíveis mas funcionais.
+                    Os botões reais de trigger estão aqui (hidden) e são
+                    clicados programaticamente pelos itens do Dropdown. */}
+                <div className="hidden" aria-hidden="true">
+                  <DSTICalculator
+                    trigger={<button ref={dstiRef} type="button" title="Calculadora DSTI" />}
+                    clientData={{
+                      rendimento_bruto: financialData?.rendimento_bruto,
+                      rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
+                      salario_liquido: financialData?.salario_liquido,
+                      renda_habitacao_atual: financialData?.renda_habitacao_atual,
+                      rendimento_co_titular: financialData?.rendimento_co_titular,
+                    }}
+                  />
+                  <RiskCalculator
+                    trigger={<button ref={riskRef} type="button" title="Calculadora de Risco" />}
+                    clientData={{
+                      rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
+                      valor_imovel: realEstateData?.valor_imovel || realEstateData?.valor,
+                      valor_entrada: financialData?.valor_entrada || financialData?.capital_proprio,
+                      capital_proprio: financialData?.capital_proprio,
+                      idade: personalData?.idade,
+                      data_nascimento: personalData?.data_nascimento || personalData?.birth_date,
+                    }}
+                  />
+                </div>
               </>
             )}
             
