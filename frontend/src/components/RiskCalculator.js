@@ -192,6 +192,10 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
   const [prazoAnos, setPrazoAnos] = useState("30");
   const [taxaAnual, setTaxaAnual] = useState("3.5");
   const [tipoTaxa, setTipoTaxa] = useState("fixa");
+  // Pacote AC: spread Euribor para taxa variável (padrão 1.0%)
+  const [spreadEuribor, setSpreadEuribor] = useState("1.0");
+  const [euriborAuto, setEuriborAuto] = useState(null); // taxa Euribor 12M do endpoint
+  const [euriborLoading, setEuriborLoading] = useState(false);
   const [rendimentoMensal, setRendimentoMensal] = useState("");
   const [idadeProponente, setIdadeProponente] = useState("");
 
@@ -201,12 +205,13 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
   // Pré-preencher com dados do cliente
   useEffect(() => {
     if (clientData && open) {
-      if (clientData.valor_imovel) {
-        setValorImovel(clientData.valor_imovel.toString());
+      if (clientData.valor_imovel != null) {
+        setValorImovel(String(clientData.valor_imovel));
       }
-      if (clientData.valor_entrada || clientData.capital_proprio) {
-        setValorEntrada((clientData.valor_entrada || clientData.capital_proprio).toString());
-      }
+      // CORREÇÃO (Pacote AC): usar ?? em vez de || para aceitar 0.
+      // Se não existir no processo, assume 0 (não 1 como antes).
+      const entrada = clientData.valor_entrada ?? clientData.capital_proprio ?? 0;
+      setValorEntrada(String(entrada));
       if (clientData.rendimento_mensal || clientData.salario_liquido) {
         setRendimentoMensal((clientData.rendimento_mensal || clientData.salario_liquido).toString());
       }
@@ -221,6 +226,52 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
       }
     }
   }, [clientData, open]);
+
+  // Pacote AC: quando Tipo de Taxa = Variável, buscar Euribor automática
+  // e preencher a taxaAnual = euribor + spread.
+  useEffect(() => {
+    if (tipoTaxa !== "variavel" || !open) return;
+    let cancelled = false;
+    // Se já temos a Euribor em cache, recalcular imediatamente
+    if (euriborAuto != null) {
+      const novaTaxa = (Number(euriborAuto) + Number(spreadEuribor)).toFixed(2);
+      setTaxaAnual(novaTaxa);
+      return;
+    }
+    setEuriborLoading(true);
+    fetch("/api/public/euribor")
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const eur = Number(data.euribor_12m);
+        if (!isNaN(eur)) {
+          setEuriborAuto(eur);
+          const novaTaxa = (eur + Number(spreadEuribor)).toFixed(2);
+          setTaxaAnual(novaTaxa);
+        }
+      })
+      .catch((err) => console.warn("[RiskCalculator] Erro ao buscar Euribor:", err))
+      .finally(() => { if (!cancelled) setEuriborLoading(false); });
+    return () => { cancelled = true; };
+  }, [tipoTaxa, open, spreadEuribor, euriborAuto]);
+
+  // Pacote AC: recalcular instantaneamente quando tipoTaxa ou spread muda.
+  // Antes, mudar o Tipo de Taxa não atualizava o resultado.
+  const handleTipoTaxaChange = (novoTipo) => {
+    setTipoTaxa(novoTipo);
+    // Se voltar a Fixa, restaurar taxa 3.5 por defeito (se não foi editada manualmente)
+    if (novoTipo === "fixa" && euriborAuto != null) {
+      setTaxaAnual("3.5");
+    }
+  };
+
+  const handleSpreadChange = (novoSpread) => {
+    setSpreadEuribor(novoSpread);
+    if (euriborAuto != null && tipoTaxa === "variavel") {
+      const novaTaxa = (Number(euriborAuto) + Number(novoSpread)).toFixed(2);
+      setTaxaAnual(novaTaxa);
+    }
+  };
 
   // Calcular financiamento
   const calcular = () => {
@@ -450,17 +501,40 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
               </div>
               <div>
                 <Label className="text-xs">Tipo de Taxa</Label>
-                <Select value={tipoTaxa} onValueChange={setTipoTaxa}>
+                <Select value={tipoTaxa} onValueChange={handleTipoTaxaChange}>
                   <SelectTrigger className="h-9">
                     <SelectValue />
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="fixa">Taxa Fixa</SelectItem>
-                    <SelectItem value="variavel">Taxa Variável</SelectItem>
+                    <SelectItem value="variavel">Taxa Variável (Euribor + Spread)</SelectItem>
                     <SelectItem value="mista">Taxa Mista</SelectItem>
                   </SelectContent>
                 </Select>
               </div>
+              {/* Pacote AC: campo de Spread visível apenas para Taxa Variável */}
+              {tipoTaxa === "variavel" && (
+                <div>
+                  <Label className="text-xs">
+                    Spread sobre Euribor (%)
+                    {euriborLoading && <span className="ml-2 text-[10px] text-muted-foreground">A carregar Euribor...</span>}
+                    {euriborAuto != null && !euriborLoading && (
+                      <span className="ml-2 text-[10px] text-emerald-600">
+                        Euribor 12M: {Number(euriborAuto).toFixed(3)}%
+                      </span>
+                    )}
+                  </Label>
+                  <Input
+                    type="number"
+                    step="0.1"
+                    value={spreadEuribor}
+                    onChange={(e) => handleSpreadChange(e.target.value)}
+                    placeholder="Ex: 1.0"
+                    className="h-9"
+                    disabled={euriborLoading}
+                  />
+                </div>
+              )}
             </div>
           </div>
 

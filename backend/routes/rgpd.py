@@ -230,7 +230,8 @@ async def validate_rgpd_token(token: str):
 @router.post("/sign/{token}")
 async def sign_rgpd_form(
     token: str,
-    consent_data: RGPDConsentData
+    consent_data: RGPDConsentData,
+    request: Request,
 ):
     """
     Assina digitalmente o consentimento RGPD usando um token temporário.
@@ -254,7 +255,12 @@ async def sign_rgpd_form(
     Raises:
         HTTPException: 400 se token inválido, expirado ou erro na assinatura.
     """
-    result = await sign_rgpd(token, consent_data.model_dump())
+    # [Pacote X] Capturar IP do cliente para registo no PDF e auditoria
+    client_ip = request.client.host if request.client else "unknown"
+    consent_data_dict = consent_data.model_dump()
+    consent_data_dict["client_ip"] = client_ip
+
+    result = await sign_rgpd(token, consent_data_dict)
     
     if not result.get("success"):
         raise HTTPException(status_code=400, detail=result.get("error", "Erro ao assinar RGPD"))

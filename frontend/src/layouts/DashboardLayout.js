@@ -170,7 +170,7 @@ const DashboardLayout = ({ children, title }) => {
     // Rotas do grupo Dashboard Executivo (admin/CEO only)
     const dashboardExecutivoRoutes = ["/admin/desempenho"];
     // Rotas do grupo Gestão e Operações
-    const gestaoRoutes = ["/estatisticas", "/rascunhos"];
+    const gestaoRoutes = ["/estatisticas", "/performance-balcoes", "/rascunhos"];
     // Verificar se /rascunhos está acessível por capability
     const hasDraftAccess = hasPermission(user, "DRAFT_VIEW");
     
@@ -356,6 +356,11 @@ const DashboardLayout = ({ children, title }) => {
         label: "Análise e Estatísticas",
         icon: BarChart3,
         href: "/estatisticas",
+      },
+      {
+        label: "Performance de Balcões",
+        icon: Building2,
+        href: "/performance-balcoes",
       },
       {
         label: "Documentos Pendentes",

@@ -127,6 +127,7 @@ class CreditData(BaseModel):
     interest_rate: Optional[float] = None
     monthly_payment: Optional[float] = None
     bank_name: Optional[str] = None
+    bank_branch: Optional[str] = None
     bank_approval_date: Optional[str] = None
     bank_approval_notes: Optional[str] = None
     
@@ -134,6 +135,38 @@ class CreditData(BaseModel):
     valuation_date: Optional[str] = None           
     valuation_bank: Optional[str] = None           
     valuation_notes: Optional[str] = None          
+
+    # ── Compliance & Perfil de Risco (Pacote AC) ──
+    # Campos para gestão de compliance regulamentar (Banco de Portugal)
+    # e perfil de risco do proponente. Editáveis no cartão "Compliance &
+    # Perfil de Risco" da tab Crédito nos Detalhes do Processo.
+    admission_year: Optional[int] = Field(None, description="Ano de admissão no emprego atual")
+    is_ppe: Optional[bool] = Field(None, description="Pessoa Politicamente Exposta (PPE)")
+    is_fpe: Optional[bool] = Field(None, description="Pessoa Fiscalmente Exposta (FPE) — incumprimento fiscal")
+    credit_incidents: Optional[str] = Field(None, description="Incidentes de crédito (texto livre)")
+
+    @field_validator('admission_year', mode='before')
+    @classmethod
+    def coerce_admission_year(cls, v):
+        if v is None or v == '': return None
+        if isinstance(v, int): return v
+        if isinstance(v, float): return int(v)
+        if isinstance(v, str):
+            try: return int(float(v))
+            except (ValueError, TypeError): return None
+        return v
+
+    @field_validator('is_ppe', 'is_fpe', mode='before')
+    @classmethod
+    def coerce_compliance_bool_fields(cls, v):
+        if v is None or v == '': return None
+        if isinstance(v, bool): return v
+        if isinstance(v, str):
+            if v.lower() in ('true', '1', 'yes', 'sim'): return True
+            if v.lower() in ('false', '0', 'no', 'nao', 'não'): return False
+            return None
+        if isinstance(v, (int, float)): return bool(v)
+        return None
 
     @field_validator('requested_amount', 'interest_rate', 'monthly_payment',
                      'valuation_value', mode='before')

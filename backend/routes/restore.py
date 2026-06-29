@@ -90,9 +90,9 @@ async def restore_process(
             "is_deleted": False,
             "status": previous_status,
             "is_active": restored_is_active,
-            "restored_at": now,
+            "restored_at": now.isoformat(),
             "restored_by": user.get("id", ""),
-            "updated_at": now,
+            "updated_at": now.isoformat(),
         }}
     )
 
@@ -121,7 +121,7 @@ async def restore_process(
         "process_id": process_id,
         "type": "process_restored",
         "description": f"Processo restaurado por {user.get('name', 'Utilizador')}",
-        "created_at": now,
+        "created_at": now.isoformat(),
         "user_id": user.get("id", ""),
         "user_name": user.get("name", ""),
     })

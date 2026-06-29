@@ -1290,21 +1290,40 @@ async def get_processes(
         }
     """
     role = get_effective_role(request, user)
-    query = {}
+    
+    # ====================================================================
+    # CONSTRUÇÃO ROBUSTA DA QUERY MONGODB
+    # Regra: TODOS os filtros são combinados com $and — nunca se anulam
+    # Estrutura: { $and: [filtro_is_deleted, filtro_role, filtro_status, filtro_search] }
+    # ====================================================================
+    and_conditions = []
     
     # ====================================================================
     # FILTRO DE INTEGRIDADE: is_deleted
-    # Processos eliminados NUNCA aparecem nas listagens normais
+    # Regra base: is_deleted != True (sempre, a menos que explicitamente pedido)
+    # EXCEÇÃO: status="eliminados" ou view_mode="deleted" → inverter lógica
     # ====================================================================
     is_admin = role in [UserRole.ADMIN, UserRole.CEO]
-    if not is_admin:
-        query["is_deleted"] = {"$ne": True}
+    is_deleted_filter = None
+    
+    # Verificar se o utilizador quer VER eliminados
+    wants_deleted = (status == "eliminados" or view_mode == "deleted")
+    
+    if wants_deleted and is_admin:
+        # Admin quer ver eliminados → mostrar APENAS os eliminados
+        is_deleted_filter = {"is_deleted": True}
+    elif wants_deleted:
+        # Non-admin quer ver eliminados → mostrar eliminados do seu escopo
+        is_deleted_filter = {"is_deleted": True}
     else:
-        # Admins também não vêem eliminados por defeito (a menos que view_mode='deleted')
-        if view_mode != "deleted":
-            query["is_deleted"] = {"$ne": True}
-
-    # Construir query baseada no papel
+        # Comportamento normal: excluir eliminados
+        is_deleted_filter = {"is_deleted": {"$ne": True}}
+    
+    and_conditions.append(is_deleted_filter)
+    
+    # ====================================================================
+    # FILTRO DE ROLE (quem pode ver quê)
+    # ====================================================================
     # Se show_all=True (visão global), ignorar filtro por utilizador
     if show_all:
         pass  # Visão global absoluta — todos os processos para todos os roles
@@ -1333,55 +1352,78 @@ async def get_processes(
                 role_conditions = []  # Reset — estes cargos não precisam de $or
                 break
         if role_conditions:
-            query["$or"] = role_conditions
+            and_conditions.append({"$or": role_conditions})
     elif role == UserRole.CLIENTE:
-        query["client_id"] = user["id"]
+        and_conditions.append({"client_id": user["id"]})
     elif role == UserRole.INDEXACAO:
-        query["$or"] = [
+        and_conditions.append({"$or": [
             {"assigned_indexacao_id": user["id"]},
             {"created_by": user.get("email", "")}
-        ]
+        ]})
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         pass  # Vêem todos
     elif role == UserRole.CONSULTOR:
-        query["$or"] = [
+        and_conditions.append({"$or": [
             {"assigned_consultor_ids": user["id"]},
             {"assigned_consultor_id": user["id"]}
-        ]
+        ]})
     elif role == UserRole.INTERMEDIARIO:
-        query["$or"] = [
+        and_conditions.append({"$or": [
             {"assigned_mediador_ids": user["id"]},
             {"assigned_mediador_id": user["id"]}
-        ]
+        ]})
 
     # ====================================================================
     # FILTRO DE ESTADO ATIVO (view_mode)
     # ====================================================================
-    if view_mode == "active_only":
+    # Se o utilizador pediu status="eliminados", NÃO aplicar filtro de view_mode
+    if status == "eliminados":
+        # Já tratado pelo is_deleted_filter acima
+        pass
+    elif view_mode == "active_only":
         # DEFAULT: Apenas processos em curso
-        query["status"] = {"$nin": INACTIVE_STATUSES}
+        and_conditions.append({"status": {"$nin": INACTIVE_STATUSES}})
     elif view_mode == "historical":
         # Apenas processos arquivados (concluídos e desistências)
-        query["status"] = {"$in": ARCHIVED_STATUSES}
+        and_conditions.append({"status": {"$in": ARCHIVED_STATUSES}})
     # view_mode == 'all': Não aplica filtro de status (mostra tudo exceto eliminados)
-
-    # Adicionar filtro de status explícito (sobrepõe-se ao view_mode)
-    if status:
-        query["status"] = status
     
+    # Adicionar filtro de status explícito (sobrepõe-se ao view_mode, exceto "eliminados")
+    if status and status != "eliminados":
+        and_conditions.append({"status": status})
+    
+    # ====================================================================
+    # PESQUISA DE TEXTO (expandida)
+    # Campos: client_name, client_email, client_nif, client_phone, process_number (ref)
+    # Sempre combinada com $and — NUNCA anula os filtros
+    # ====================================================================
     if search:
         name_regex = create_accent_insensitive_regex(search)
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
-        search_condition = {
-            "$or": [
-                {"client_name": name_regex},
-                {"client_email": simple_regex}
-            ]
-        }
-        if query:
-            query = {"$and": [query, search_condition]}
-        else:
-            query = search_condition
+        
+        search_or_conditions = [
+            {"client_name": name_regex},
+            {"client_email": simple_regex},
+            {"client_nif": simple_regex},
+            {"client_phone": simple_regex},
+            {"process_number": simple_regex},
+        ]
+        
+        # Pesquisar também no campo "ref" (alias para process_number)
+        # e em personal_data aninhado (para NIF/telefone que podem estar encriptados)
+        search_condition = {"$or": search_or_conditions}
+        and_conditions.append(search_condition)
+    
+    # ====================================================================
+    # MONTAR QUERY FINAL COM $and
+    # Se há apenas 1 condição, não precisa de $and (otimização)
+    # ====================================================================
+    if len(and_conditions) == 1:
+        query = and_conditions[0]
+    elif len(and_conditions) > 1:
+        query = {"$and": and_conditions}
+    else:
+        query = {}
 
     # Calcular offset
     skip = (page - 1) * size
@@ -1568,54 +1610,66 @@ async def get_processes_paginated(
     from services.cursor_pagination import CursorPaginator
 
     role = user["role"]
-    query = {}
+    
+    # ====================================================================
+    # CONSTRUÇÃO ROBUSTA DA QUERY MONGODB (igual ao GET /processes)
+    # Regra: TODOS os filtros são combinados com $and — nunca se anulam
+    # ====================================================================
+    and_conditions = []
     
     # ====================================================================
     # FILTRO DE INTEGRIDADE: is_deleted
     # ====================================================================
     is_admin = role in [UserRole.ADMIN, UserRole.CEO]
-    if not is_admin:
-        query["is_deleted"] = {"$ne": True}
+    wants_deleted = (status == "eliminados" or view_mode == "deleted")
+    
+    if wants_deleted:
+        is_deleted_filter = {"is_deleted": True}
     else:
-        if view_mode != "deleted":
-            query["is_deleted"] = {"$ne": True}
+        is_deleted_filter = {"is_deleted": {"$ne": True}}
+    
+    and_conditions.append(is_deleted_filter)
 
     # Construir query baseada no papel
     if role == UserRole.CLIENTE:
-        query["client_id"] = user["id"]
+        and_conditions.append({"client_id": user["id"]})
     elif role == UserRole.INDEXACAO:
-        query["$or"] = [
+        and_conditions.append({"$or": [
             {"assigned_indexacao_id": user["id"]},
             {"created_by": user.get("email", "")}
-        ]
+        ]})
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         pass
     elif role == UserRole.CONSULTOR:
-        query["$or"] = [
+        and_conditions.append({"$or": [
             {"assigned_consultor_ids": user["id"]},
             {"assigned_consultor_id": user["id"]}
-        ]
+        ]})
     elif role == UserRole.INTERMEDIARIO:
-        query["$or"] = [
+        and_conditions.append({"$or": [
             {"assigned_mediador_ids": user["id"]},
             {"assigned_mediador_id": user["id"]}
-        ]
+        ]})
 
     # ====================================================================
     # FILTRO DE ESTADO ATIVO (view_mode)
     # ====================================================================
-    if view_mode == "active_only":
-        query["status"] = {"$nin": INACTIVE_STATUSES}
+    if status == "eliminados":
+        pass  # Já tratado pelo is_deleted_filter
+    elif view_mode == "active_only":
+        and_conditions.append({"status": {"$nin": INACTIVE_STATUSES}})
     elif view_mode == "historical":
-        query["status"] = {"$in": ARCHIVED_STATUSES}
+        and_conditions.append({"status": {"$in": ARCHIVED_STATUSES}})
 
-    # Adicionar filtros opcionais
-    if status:
-        query["status"] = status
+    # Adicionar filtros opcionais de status (exceto "eliminados")
+    if status and status != "eliminados":
+        and_conditions.append({"status": status})
     
+    # ====================================================================
+    # PESQUISA DE TEXTO (expandida — mesmo campos que GET /processes)
+    # Campos: client_name, client_email, client_nif, client_phone, process_number
+    # ====================================================================
     if search:
-        # Suporte multi-word + accent-insensitive (mesma lógica da pesquisa de clientes)
-        # Exemplo: 'vera teixeira' encontra 'Vera Lucia Da Costa Teixeira'
         name_filter = build_multiword_search_filter(search, "client_name")
         simple_regex = {"$regex": re.escape(search), "$options": "i"}
         
@@ -1626,13 +1680,20 @@ async def get_processes_paginated(
         elif name_filter:
             search_or_conditions.append(name_filter)
         search_or_conditions.append({"client_email": simple_regex})
+        search_or_conditions.append({"client_nif": simple_regex})
+        search_or_conditions.append({"client_phone": simple_regex})
+        search_or_conditions.append({"process_number": simple_regex})
         
         search_condition = {"$or": search_or_conditions}
-        
-        if "$and" not in query:
-            query = {"$and": [query, search_condition]} if query else search_condition
-        else:
-            query["$and"].append(search_condition)
+        and_conditions.append(search_condition)
+    
+    # Montar query final
+    if len(and_conditions) == 1:
+        query = and_conditions[0]
+    elif len(and_conditions) > 1:
+        query = {"$and": and_conditions}
+    else:
+        query = {}
     
     # Converter sort_order para int
     order = -1 if sort_order.lower() == "desc" else 1
@@ -3279,6 +3340,28 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             {"$set": client_updates}
         )
         logger.info(f"Dados pessoais do cliente {client_id} atualizados via PUT processo: {list(client_updates.keys())}")
+
+        # ── SINCRONIZAÇÃO INVERSA: Se o nome do cliente mudou, propagar para todos os processos ──
+        # Quando o utilizador edita o nome dentro do processo, atualizamos o cliente
+        # e precisamos de propagar o novo nome para os restantes processos desse cliente.
+        updated_client_name = client_updates.get("nome")
+        if updated_client_name:
+            # Obter todos os process_ids do cliente
+            updated_client = await db.clients.find_one({"id": client_id}, {"process_ids": 1})
+            all_process_ids = updated_client.get("process_ids", []) if updated_client else []
+            # Filtrar o processo atual para não fazer update desnecessário
+            other_process_ids = [pid for pid in all_process_ids if pid != process_id]
+            if other_process_ids:
+                cascade_sync = {
+                    "client_name": updated_client_name,
+                    "personal_data.nome": updated_client_name,
+                    "personal_data.name": updated_client_name,
+                }
+                await db.processes.update_many(
+                    {"id": {"$in": other_process_ids}},
+                    {"$set": cascade_sync}
+                )
+                logger.info(f"Sincronização inversa: nome '{updated_client_name}' propagado para {len(other_process_ids)} processos do cliente {client_id}")
     
     # ── REATRIBUIÇÃO DE CLIENTE: Se o body inclui client_id diferente do actual ──
     new_client_id = raw_body.get("client_id")

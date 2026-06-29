@@ -21,7 +21,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs"
 import {
   Users, Eye, Plus, AlertTriangle, Building2, Mail,
   TrendingUp, CheckCircle, XCircle, FileX, ClipboardList, Rss, Calendar,
-  MessageSquare, Inbox, ArrowRight
+  MessageSquare, Inbox, ArrowRight, Megaphone
 } from "lucide-react";
 import {
   StatCard,
@@ -40,9 +40,39 @@ import {
 } from "../components/dashboard/DashboardShared";
 import TasksPanel from "../components/TasksPanel";
 import TeamMural from "../components/TeamMural";
-import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed } from "../services/api";
+import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystemChangelogs } from "../services/api";
 import { safeString } from "../utils/safeString";
 import { safeDateStr } from "../lib/utils";
+import { sanitizeHtml } from "../utils/sanitize";
+
+/**
+ * Conversor simples de Markdown para HTML (sem dependências externas).
+ * Suporta: headers (##), bold, italic, bullets, emojis, line breaks.
+ * O output é posteriormente sanitizado por DOMPurify antes de ser renderizado.
+ */
+function markdownToHtml(md) {
+  if (!md || typeof md !== 'string') return '';
+  let html = md
+    // Headers ## → <h2>
+    .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
+    .replace(/^## (.+)$/gm, '<h2 class="text-base font-bold mt-4 mb-2">$1</h2>')
+    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
+    // Bold **text** → <strong>
+    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
+    // Italic *text* → <em> (avoid matching **)
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
+    // Bullet list items: - or * at line start → <li>
+    .replace(/^[\-\*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+    // Line breaks: double newline → paragraph break
+    .replace(/\n\n/g, '</p><p class="mb-2">')
+    // Single newline → <br>
+    .replace(/\n/g, '<br/>');
+  // Wrap in paragraph
+  html = `<p class="mb-2">${html}</p>`;
+  // Clean up empty paragraphs
+  html = html.replace(/<p class="mb-2"><\/p>/g, '');
+  return html;
+}
 
 const roleLabels = {
   admin: "Administrador",
@@ -64,6 +94,8 @@ const ConsultorDashboard = () => {
   const [deadlines, setDeadlines] = useState([]);
   // Communications feed (portal messages + emails)
   const [commsFeed, setCommsFeed] = useState({ portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 });
+  // System changelog (Novidades do CRM)
+  const [changelog, setChangelog] = useState(null);
 
   // Dashboard data hook
   const {
@@ -109,6 +141,16 @@ const ConsultorDashboard = () => {
 
     getCommunicationsFeed()
       .then(res => setCommsFeed(res.data || { portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 }))
+      .catch(() => {});
+
+    // Fetch system changelog (Novidades do CRM)
+    getSystemChangelogs(1)
+      .then(res => {
+        const data = res.data;
+        if (Array.isArray(data) && data.length > 0) {
+          setChangelog(data[0]);
+        }
+      })
       .catch(() => {});
   }, []);
 
@@ -367,6 +409,34 @@ const ConsultorDashboard = () => {
               </CardContent>
             </Card>
           </div>
+        )}
+
+        {/* ── Novidades do CRM (Changelog gerado por IA) ── */}
+        {changelog && changelog.content_markdown && (
+          <Card className="border-primary/20 bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5 shadow-sm">
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base flex items-center gap-2">
+                <Megaphone className="h-5 w-5 shrink-0 text-primary" />
+                Novidades do CRM
+                {changelog.version && (
+                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                    {safeString(changelog.version)}
+                  </Badge>
+                )}
+              </CardTitle>
+              <CardDescription className="text-xs">
+                {changelog.published_at && formatDate(changelog.published_at)}
+              </CardDescription>
+            </CardHeader>
+            <CardContent className="pt-0">
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed changelog-content"
+                dangerouslySetInnerHTML={{
+                  __html: sanitizeHtml(markdownToHtml(changelog.content_markdown))
+                }}
+              />
+            </CardContent>
+          </Card>
         )}
 
         {/* ── Two-column Widget Grid: Tasks + Mural ── */}

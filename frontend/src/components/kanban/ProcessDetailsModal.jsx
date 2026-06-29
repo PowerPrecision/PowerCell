@@ -49,6 +49,7 @@ import { safeString } from '../../utils/safeString';
 import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits } from '../../services/api';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
+import { hasAnyRole } from '../../utils/roleUtils';
 import { safeDateStr, formatDate, formatDateTime } from '../../lib/utils';
 
 // ── Helpers ────────────────────────────────────────────────────────
@@ -76,8 +77,10 @@ const ProcessDetailsModal = memo(({
   const [clientLoading, setClientLoading] = useState(false);
   const [activeTab, setActiveTab] = useState('client');
 
-  // ── Estado de Visitas ──────────────────────────────────────────
+  // ── Role-Based Access: só indexacao/admin podem marcar conclusão ──
   const { user, effectiveRole } = useAuth();
+  const INDEX_ROLES = ['indexacao', 'admin'];
+  const canMarkIndexed = INDEX_ROLES.includes(effectiveRole?.toLowerCase()) || hasAnyRole(user, INDEX_ROLES);
   const [visits, setVisits] = useState([]);
   const [visitsLoading, setVisitsLoading] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
@@ -614,8 +617,8 @@ const ProcessDetailsModal = memo(({
                 )}
               </div>
 
-              {/* Botão Marcar Trabalho Concluído — para role indexacao E admin */}
-              {(effectiveRole?.toLowerCase() === 'indexacao' || user?.role?.toLowerCase() === 'indexacao' || effectiveRole?.toLowerCase() === 'admin' || user?.role?.toLowerCase() === 'admin') && !process.is_indexed && (
+              {/* Botão Marcar Trabalho Concluído — restrito a Indexadores e Admins */}
+              {canMarkIndexed && !process.is_indexed && (
                 <div className="mt-2">
                   <Button
                     onClick={async () => {

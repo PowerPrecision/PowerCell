@@ -58,6 +58,7 @@ graph TB
             SyncDBR["/admin/sync-database<br/>(Prod→Dev Restore)"]
             AnnotationsR["/annotations<br/>(Anotações em PDFs)"]
             SystemConfigR["/system-config<br/>(RGPD, DSTI, Emails)"]
+            ChangelogR["/system/changelog<br/>(Mural Atualizações IA)"]
             OtherR["+30 rotas adicionais"]
         end
 
@@ -77,6 +78,7 @@ graph TB
             AIConfidence["Confidence Scorer<br/>(Score por campo)"]
             OrganizerSvc["Document Organizer<br/>(Categorização automática)"]
             EmailB2BSvc["EmailB2BService<br/>(Enviar p/ Balcões)"]
+            ChangelogSvc["ChangelogService<br/>(Gerar notas IA)"]
             AnnotationSvc["AnnotationService<br/>(5 tipos de anotação)"]
             StorageFactory["StorageService<br/>(Factory: Local/S3/OneDrive)"]
             SystemSMTPSvc["SystemSMTPConfig<br/>(Bloco A - Email Transacional)"]
@@ -455,6 +457,15 @@ erDiagram
         datetime last_execution
     }
 
+    SYSTEM_CHANGELOGS {
+        string id PK
+        string version
+        string content_markdown
+        datetime published_at
+        string generated_by
+        string source_summary
+    }
+
     PROCESSES ||--o{ DOCUMENTS : "tem"
     PROCESSES ||--o{ TASKS : "tem"
     PROCESSES ||--o{ ACTIVITIES : "tem"
@@ -551,6 +562,27 @@ erDiagram
 | Processo sem campos de negócio raiz | ✅ Adicionados: `property_value`, `loan_value`, `bank_assigned`, `honorarios`, `comissao_banco` |
 | `ClientFinancialData` existia | ❌ Removido — financeiros estão em `Process.financial_data` |
 | `personal_data` no Processo era fonte de verdade | ⚠️ Agora é SNAPSHOT (denormalizado) — fonte de verdade é `clients.dados_pessoais` |
+
+### Sincronização Bidirecional (Pacote P)
+
+Para garantir a integridade do SNAPSHOT denormalizado, o sistema implementa sincronização bidirecional:
+
+```mermaid
+graph LR
+    Client["Coleção clients<br/>(Fonte de Verdade)"] -->|"PUT /clients/{id}<br/>update_many"| Process["Coleção processes<br/>(SNAPSHOT)"]
+    Process -->|"PUT /processes/{id}<br/>cascade sync"| Client
+```
+
+**Cliente → Processos (PUT /clients/{id})**: Quando o cliente é editado, o endpoint propaga automaticamente:
+- `nome` → `client_name`, `personal_data.nome`, `personal_data.name` (update_many em todos os process_ids)
+- `contacto.email/telefone` → `client_email/client_phone` + `personal_data.*`
+- `dados_pessoais.*` → `personal_data.*` correspondente (NIF, morada, estado civil, etc.)
+- Blind indexes (`nif_hash`, `email_hash`) são regenerados quando necessário
+
+**Processo → Cliente → Restantes Processos (PUT /processes/{id})**: Quando o nome é editado dentro do processo:
+1. `extract_client_updates_from_body()` extrai campos pessoais do body
+2. Atualiza o documento do cliente na coleção `clients`
+3. **Cascade sync**: Propaga o novo nome para todos os restantes processos do mesmo cliente
 
 ### Script de Migração
 
@@ -789,6 +821,63 @@ Componentes com suporte `embedded`:
 - `UnifiedLogsPage` — Logs unificados
 - `DiagnosticsPage` — Diagnósticos do sistema
 - `ProcessMigrationTab` — Migração Fase 1 (Separação Cliente ↔ Processo)
+
+### Dashboard de Performance de Balcões e Bancos (Pacote S)
+
+**Endpoint**: `GET /api/stats/branches`
+**Rota Frontend**: `/performance-balcoes` (sidebar: Gestão e Operações)
+**Acesso**: Staff com capability `STATS_VIEW`
+
+Utiliza MongoDB Aggregation Pipeline na coleção `processes` para calcular métricas por balcão bancário:
+
+| Métrica | Cálculo |
+|---------|---------|
+| `total_processes` | Total de processos associados ao balcão |
+| `active_processes` | Processos em fases ativas do workflow |
+| `approval_rate` (%) | Processos que atingiram `credito_aprovado` ou fase posterior / total |
+| `avg_closing_time_days` | Tempo médio (created_at → updated_at) para processos concluídos/arquivados |
+| `total_volume` (€) | Soma de `credit_data.requested_amount` |
+
+**Top Cards**: Banco Mais Rápido, Balcão com Maior Volume, Taxa de Aprovação Global.
+**Cache**: Redis com TTL de 1 hora. Pipeline com `allowDiskUse=True`.
+
+### Fix "Ver como Cliente" sem E-mail + Apelido Interno (Pacote T)
+
+#### Tarefa 1 — Impersonate com validação de e-mail
+
+**Endpoint**: `GET /api/portal/impersonate/{process_id}`
+**Alteração**: Quando o processo não tem e-mail associado (nem no processo nem no cliente ligado), o endpoint devolve agora **HTTP 400** com a mensagem amigável:
+
+> "Para usar esta função, o cliente precisa de ter um e-mail configurado."
+
+Anteriormente gerava o link na mesma, mas o Portal do Cliente poderia ter funcionalidades limitadas sem e-mail. O frontend (`ProcessDetails.js`) já exibe o `detail` do erro via `toast.error()`, pelo que a mensagem chega ao utilizador sem alterações no frontend.
+
+#### Tarefa 2 — Campo "Apelido Interno / Título"
+
+**Modelo**: `ProcessUpdate.apelido` (string, max 120 chars) e `ProcessResponse.apelido` — já existiam no `backend/models/process.py`.
+**Frontend**: Componente `InlineApelido` em `ProcessDetails.js` — edição rápida no cabeçalho do processo com ícone de lápis, visível apenas para staff (não para clientes). Guarda via `PUT /api/processes/{id}` com `{ apelido: "valor" }`.
+
+### Gestão de Empresas — Multi-Tenant (Pacote V)
+
+**Novo backend CRUD** para a entidade "Empresa" (não existia anteriormente — as empresas eram derivadas implicitamente da coleção `system_config`).
+
+**Coleção MongoDB**: `companies` | **Modelo**: `backend/models/company.py`
+
+| Endpoint | Método | Descrição |
+|----------|--------|-----------|
+| `/admin/companies` | GET | Lista empresas (com `?search=` por nome/NIF) |
+| `/admin/companies/available` | GET | Lista id+name para dropdowns |
+| `/admin/companies/{id}` | GET | Detalhe de uma empresa |
+| `/admin/companies` | POST | Criar empresa |
+| `/admin/companies/{id}` | PUT | Atualizar empresa (cascade: renomeia `user.company` se o nome mudar) |
+| `/admin/companies/{id}` | DELETE | Eliminar empresa (bloqueia se tem utilizadores associados) |
+| `/admin/companies/{id}/logo` | POST | Upload de logótipo para S3 (max 2MB, PNG/JPEG/GIF/WebP/SVG) |
+
+**Campos**: name, nif, address, phone, email, website, logo_url, email_sync_enabled, total_users (computado).
+
+**Frontend**: Tab "Empresas" no SystemAdminPanel (grupo GESTÃO, amber). Página `CompaniesManagementPage.jsx` com painel esquerdo (lista + pesquisa) e painel direito (formulário de edição com 3 secções: Dados Base, Branding/Logo, Motor de E-mail com toggle).
+
+**Acesso**: Admin e CEO (via `require_admin()`).
 
 ---
 

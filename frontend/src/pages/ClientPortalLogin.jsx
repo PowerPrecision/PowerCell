@@ -10,7 +10,7 @@
  * entre reloads (dentro do prazo de 15 min de inatividade).
  * A última actividade é registada em localStorage (portalLastActivity).
  */
-import React, { useState, useCallback } from 'react';
+import React, { useState, useCallback, useEffect } from 'react';
 import { toast } from 'sonner';
 import {
   Shield,
@@ -19,6 +19,7 @@ import {
   Mail,
   KeyRound,
   LogIn,
+  Lock,
 } from 'lucide-react';
 
 const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
@@ -70,6 +71,33 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
   const [accessCode, setAccessCode] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
+  // ── Lockout state (countdown quando a conta está bloqueada por 429) ──
+  const [lockoutSeconds, setLockoutSeconds] = useState(0);
+
+  // ── Countdown do lockout — decrementa a cada segundo até 0 ──
+  useEffect(() => {
+    if (lockoutSeconds <= 0) return;
+    const timer = setInterval(() => {
+      setLockoutSeconds((prev) => {
+        if (prev <= 1) {
+          clearInterval(timer);
+          // Limpar erro quando o lockout expira
+          setError(null);
+          return 0;
+        }
+        return prev - 1;
+      });
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [lockoutSeconds]);
+
+  // ── Helper: formatar segundos como "Xm Ys" ──
+  const formatCountdown = useCallback((totalSeconds) => {
+    const m = Math.floor(totalSeconds / 60);
+    const s = totalSeconds % 60;
+    if (m > 0) return `${m}m ${s.toString().padStart(2, '0')}s`;
+    return `${s}s`;
+  }, []);
 
   // ── Formatar código de acesso enquanto o utilizador digita ──
   const handleAccessCodeChange = useCallback((raw) => {
@@ -147,8 +175,24 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
           onLoginSuccess(data.token);
         }
       } else if (res.status === 429) {
-        // Rate limited — muitas tentativas falhadas
-        setError(typeof data.detail === 'string' ? data.detail : 'Muitas tentativas falhadas. Tente novamente mais tarde.');
+        // Rate limited / lockout — muitas tentativas falhadas.
+        // O backend devolve detail como objecto com retry_after (segundos)
+        // ou como string (rate limit global do middleware).
+        let message = 'Muitas tentativas falhadas. Tente novamente mais tarde.';
+        let retryAfter = 0;
+        if (data.detail && typeof data.detail === 'object') {
+          message = data.detail.message || data.detail.error || message;
+          retryAfter = data.detail.retry_after || 0;
+        } else if (typeof data.detail === 'string') {
+          message = data.detail;
+          // Tentar extrair minutos da mensagem (ex: "...em 9 minutos")
+          const minMatch = data.detail.match(/(\d+)\s*min/i);
+          if (minMatch) retryAfter = parseInt(minMatch[1], 10) * 60;
+        }
+        setError(message);
+        if (retryAfter > 0) {
+          setLockoutSeconds(retryAfter);
+        }
       } else if (res.status === 401) {
         // Credenciais inválidas
         setError(typeof data.detail === 'string' ? data.detail : 'Credenciais inválidas. Verifique o seu email e código.');
@@ -164,7 +208,8 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
 
   // Código limpo para habilitar botão
   const cleanCode = accessCode.replace(/[^A-Za-z0-9]/g, '');
-  const canSubmit = email.trim().includes('@') && cleanCode.length === 6 && !loading;
+  const isLockedOut = lockoutSeconds > 0;
+  const canSubmit = email.trim().includes('@') && cleanCode.length === 6 && !loading && !isLockedOut;
 
   return (
     <ClientOnly>
@@ -248,10 +293,23 @@ export default function ClientPortalLogin({ onLoginSuccess }) {
               </div>
 
               {/* Error */}
-              {error && (
+              {error && !isLockedOut && (
                 <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">
                   <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
                   <span>{error}</span>
+                </div>
+              )}
+
+              {/* Lockout countdown — destaque especial para bloqueio temporário */}
+              {error && isLockedOut && (
+                <div className="flex items-start gap-2 text-xs text-amber-700 bg-amber-50 rounded-xl px-4 py-3 border border-amber-300">
+                  <Lock className="w-4 h-4 mt-0.5 flex-shrink-0" />
+                  <div className="flex flex-col gap-1">
+                    <span className="font-medium">{error}</span>
+                    <span className="font-mono text-sm font-bold text-amber-800">
+                      Aguarde {formatCountdown(lockoutSeconds)} para tentar novamente
+                    </span>
+                  </div>
                 </div>
               )}
 

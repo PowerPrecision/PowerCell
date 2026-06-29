@@ -3,6 +3,156 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] — Pacote AC: UX de Simulações e Compliance
+
+### Adicionado
+- **Dropdown de Simulações**: Os botões "DSTI" e "Risco" do cabeçalho do processo foram agrupados num único `DropdownMenu` do shadcn chamado "Simulações ▾" (ícone `Sparkles`). Aplicado em ambos os cabeçalhos: `ProcessStickyHeader.js` (sticky) e `ProcessDetails.js` (header principal). Cada item do menu usa `onSelect={(e) => e.preventDefault()}` para permitir que o `DialogTrigger` interno das calculadoras receba o click e abra o modal.
+
+- **Euribor Automática (Backend)**: Novo endpoint `GET /api/public/euribor` que devolve as taxas Euribor reais (1M, 3M, 6M, 12M) com cache diário (24h) em memória. Novo serviço `services/euribor_service.py` com 3 níveis de fallback: (1) cache fresco < 24h, (2) API externa `euribor-rates.eu`, (3) cache antigo mesmo expirado, (4) valores de fallback hardcoded. Lock anti-concorrência para evitar múltiplas buscas simultâneas. A resposta inclui `is_fallback` (bool) e `source` ("cache"|"api"|"cache_stale"|"fallback").
+
+- **Euribor Automática (Simulador CH)**: O `SimulatorCH.jsx` (Portal do Cliente) ganhou um seletor "Tipo de Taxa" (Fixa/Variável). Quando "Taxa Variável" é selecionada, o componente faz `fetch('/api/public/euribor')`, preenche automaticamente a Euribor 12M e calcula `TAN = Euribor + Spread`. O utilizador pode ajustar o spread (default 1.0%). Indicador visual mostra a Euribor carregada e badge "(estimada)" se for fallback.
+
+- **Euribor na Calculadora de Risco**: O `RiskCalculator.js` também consome a Euribor automática quando "Taxa Variável" é selecionada, com campo de spread ajustável e indicação visual da Euribor 12M carregada.
+
+- **Campos de Compliance no Modelo de Processo**: Adicionados 4 campos ao `CreditData` (`backend/models/process.py`): `admission_year` (int — Ano de admissão no emprego), `is_ppe` (bool — Pessoa Politicamente Exposta), `is_fpe` (bool — Pessoa Fiscalmente Exposta), `credit_incidents` (str — incidentes de crédito em texto livre). Validadores Pydantic para coerção de tipos (int/bool/str). Como o `CreditData` tem `extra="allow"` e o `ProcessUpdate` já aceita `credit_data`, os campos são persistidos automaticamente via `PUT /processes/{id}`.
+
+- **Cartão "Compliance & Perfil de Risco"**: Novo cartão na tab "Crédito" dos Detalhes do Processo (`ProcessDetails.js`), minimizado por defeito (`collapsedCards` inicial `{ credit_compliance: true }`). Segue o padrão existente (`CardHeaderWithEdit` + `collapsible` + `read-only-card`). Inclui: Ano de Admissão (input number), PPE (Switch), FPE (Switch), Incidentes de Crédito (Textarea). Aviso visual automático (rose) quando PPE ou FPE estão ativos, com mensagem contextualizada sobre compliance KYC/AML.
+
+### Corrigido
+- **RiskCalculator — Tipo de Taxa não atualizava cálculos**: O `onValueChange` do seletor "Tipo de Taxa" chamava apenas `setTipoTaxa` sem recalcular, e a função `calcular()` não lia `tipoTaxa`. Agora o `handleTipoTaxaChange` atualiza o state E, quando "Variável" é selecionada, dispara um `useEffect` que busca a Euribor e preenche `taxaAnual = euribor + spread` instantaneamente.
+
+- **RiskCalculator — Fallback do campo Entrada**: O `valorEntrada` usava `||` que é falsy para `0`, e o `if (clientData.valor_entrada || clientData.capital_proprio)` não preenchia quando ambos eram 0. Corrigido para `??` com default explícito `0`: `clientData.valor_entrada ?? clientData.capital_proprio ?? 0`. Agora lê corretamente o valor dos detalhes do processo e assume 0 (não 1) quando não existe.
+
+### Técnico
+- **Backend** (`backend/models/process.py`): 4 campos + 2 validadores adicionados ao `CreditData`.
+- **Backend** (`backend/services/euribor_service.py`): novo ficheiro (165 linhas) com `get_euribor_rates()` async + cache módulo-level + lock.
+- **Backend** (`backend/routes/public.py`): novo endpoint `GET /public/euribor` (montado em `/api/public/euribor`).
+- **Frontend** (`frontend/src/components/ProcessStickyHeader.js`): import `DropdownMenu` + `Sparkles`; 2 botões → 1 dropdown.
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): import `Switch`; 2 botões → 1 dropdown; `collapsedCards` inicial com `credit_compliance: true`; caso `credit_compliance` em `isCardEmpty`; novo cartão Compliance (80 linhas).
+- **Frontend** (`frontend/src/components/RiskCalculator.js`): estados `spreadEuribor`/`euriborAuto`/`euriborLoading`; `useEffect` Euribor; `handleTipoTaxaChange`/`handleSpreadChange`; fallback `??` no `valorEntrada`; campo Spread condicional na UI.
+- **Frontend** (`frontend/src/components/portal/SimulatorCH.jsx`): import `useEffect` + `TrendingUp`; estados `tipoTaxa`/`euribor12m`/`spread`; `useEffect` Euribor; seletor Fixa/Variável + painel Euribor+Spread na UI.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild` ✓ em todos os ficheiros JSX.
+
+## [2026-06-29] — Pacote AB: Fix F821 no upload de logótipo de empresa
+
+### Corrigido
+- **F821 undefined name 'file_key' (CI blocker)**: O endpoint `POST /admin/companies/{id}/logo` em `backend/routes/companies_crud.py` (linha 246) referenciava a variável `file_key` que nunca existia — a variável correta chama-se `s3_key`. Este erro era detetado pelo `flake8 --select=E9,F63,F7,F82` e **falhava o CI** (exit code 1). Em runtime, qualquer upload de logótipo de empresa teria gerado um `NameError` (500 Internal Server Error).
+
+- **Logótipo de empresa não era exibido no frontend**: Para além de corrigir o `NameError`, o campo `logo_url` passou a guardar a **chave S3** (ex.: `companies/{id}/logo_image.png`) na BD. Adicionado o helper `_resolve_logo_url()` que gera um **URL pré-assinado fresco** (validade 7 dias) em tempo de leitura, aplicado nos endpoints `GET /admin/companies` (list) e `GET /admin/companies/{id}`. Isto garante que o frontend recebe sempre um link válido e não expirado para `<img src>`, e suporta tanto chaves S3 como URLs absolutos (configurados manualmente via API).
+
+### Técnico
+- **Backend** (`backend/routes/companies_crud.py`): corrigido `logo_url = file_key` → `logo_s3_key = s3_key`; novo helper `_resolve_logo_url(logo_value)` com 3 ramos (None → None, URL http(s) → as-is, chave S3 → pre-signed URL 7 dias); aplicado em `list_companies` e `get_company`; resposta do upload devolve `{logo_url, logo_s3_key}`.
+- **Validação**: `py_compile` ✓; `flake8 . --count --select=E9,F63,F7,F82` → **0 erros** (exit 0) em todo o backend.
+
+## [2026-06-29] — Pacote AA: Correção de Erros 401 e 429 no Portal do Cliente
+
+### Corrigido
+- **Erros 401 em cascata no Portal do Cliente (Bug Crítico)**: Quando um cliente acedia a `/portal` com um token expirado em `localStorage`, o `ClientPortal.jsx` disparava **5 pedidos simultâneos** (`/portal/status`, `/portal/messages`, `/portal/recommendations`, `/portal/messages/unread`, `/portal/visits`) que todos devolviam 401. Os `useEffect` de `messages`, `recommendations` e `visits` não verificavam `isVerified` — corriam no mount independentemente do estado de autenticação. Adicionado guard `if (!isVerified) return;` aos 3 `useEffect` e às suas dependências. O polling de mensagens (15s) agora também para quando a sessão expira, em vez de continuar a gerar 401s.
+
+- **429 Too Many Requests no login do Portal**: O limite de tentativas de login era demasiado agressivo — **5 tentativas** com lockout de **15 minutos**. Para um código de acesso de 6 caracteres alfanuméricos digitado manualmente, 5 tentativas é insuficiente para utilizadores legítimos. Aumentado para **8 tentativas** com lockout de **10 minutos** (mantém proteção brute-force razoável). A resposta 429 agora inclui `retry_after` (segundos) e `retry_after_minutes` no body, permitindo ao frontend fazer countdown.
+
+- **UX do lockout no login**: O `ClientPortalLogin.jsx` agora mostra um **countdown visual** (formato `Xm Ys`) quando a conta está bloqueada, desabilita o botão de submit durante o lockout e limpa automaticamente o erro quando o tempo expira. Antes, o utilizador via uma mensagem genérica e continuava a tentar, prolongando o lockout. O `detail` da resposta 429 é tratado tanto como objeto (lockout interno do portal) como string (rate limit global do middleware).
+
+### Técnico
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): 3 `useEffect` ganharam guard `isVerified` + dependência `isVerified` adicionada; comentários explicativos adicionados.
+- **Frontend** (`frontend/src/pages/ClientPortalLogin.jsx`): novo estado `lockoutSeconds` + `useEffect` de countdown + ícone `Lock` importado; `canSubmit` agora inclui `!isLockedOut`; bloco de erro distinto (âmbar) para lockout vs erro normal (vermelho).
+- **Backend** (`backend/routes/portal.py`): `MAX_LOGIN_ATTEMPTS` 5→8, `LOGIN_LOCKOUT_MINUTES` 15→10; as 2 respostas 429 (lockout ativo + novo lockout) devolvem `detail` como objeto estruturado com `message`, `retry_after`, `retry_after_minutes` + header `Retry-After`.
+
+## [2026-06-25] — Pacote R: Motor de Pesquisa vs Filtros (Fix Crítico)
+
+### Corrigido
+- **Pesquisa ignora filtros (Bug Crítico)**: A pesquisa de texto sobrepunha-se aos filtros (status, role, etc.) porque a query era construída com `$or` no nível raiz, que se chocava com outros `$or`. Refatoração completa para usar **`$and`** em todos os filtros — agora a lógica é: `(pesquisa) AND (filtros de role) AND (filtros de status) AND (is_deleted != true)`. Nenhum filtro é anulado por outro.
+
+- **Filtro 'Eliminados' (Soft-Delete Bypass)**: Antes, `status=eliminados` ou `view_mode=deleted` não funcionavam porque `is_deleted: {$ne: True}` era sempre aplicado primeiro, bloqueando os resultados. Agora, quando o utilizador pede `status=eliminados` ou `view_mode=deleted`, o filtro inverte-se para `is_deleted: True`, mostrando apenas os registos eliminados.
+
+- **Expansão dos campos de pesquisa de texto**: A pesquisa só cobria `client_name` e `client_email`. Agora cobre 5 campos com regex case-insensitive:
+  - `client_name` (accent-insensitive)
+  - `client_email`
+  - `client_nif`
+  - `client_phone`
+  - `process_number` (ref, ex: PROC-001)
+
+### Técnico
+- Refatorados 2 endpoints: `GET /api/processes` e `GET /api/processes/paginated`
+- Arquitectura: lista `and_conditions = []` → cada filtro adiciona uma condição → montagem final com `$and`
+- Otimização: se há apenas 1 condição, não envolve em `$and` desnecessário
+
+## [2026-06-25] — Pacote Q: Limpeza Visual de UI (Remover Gov.pt e Reatribuir)
+
+### Removido
+- **Botão "Preencher automaticamente com Autenticação.gov" (Chave Móvel Digital)**: Removido completamente do formulário público (`PublicClientForm.js`):
+  - Removido botão de login Gov.pt (botão azul com escudo)
+  - Removido banner "Dados verificados pela Autenticação.gov" (estado pós-verificação)
+  - Removido `useEffect` de parse do `gov_token` da URL e auto-preenchimento
+  - Removido `handleGovAuthLogin` (redirecionamento para login AMA)
+  - Removidos estados: `govVerifiedFields`, `govDataLoaded`, `govAuthLoading`
+  - Removidos badges "Verificado" (ShieldCheck) nos campos NIF, data de nascimento e campos genéricos
+  - Removida lógica de campos bloqueados (disabled/readOnly) por verificação Gov
+  - Removido `gov_verified_fields` do payload de submissão
+  - Removidos imports `Shield` e `ShieldCheck` do lucide-react
+  - Hint do campo `chave_movel_digital` atualizado (removida referência a autenticacao.gov.pt)
+
+- **Botão "Reatribuir Cliente" e Dialog**: Removido completamente do `ProcessDetails.js`:
+  - Removido botão "Reatribuir Cliente" (âmbar, ícone Link2) do header de ações
+  - Removido Dialog completo de pesquisa e seleção de novo cliente (~130 linhas)
+  - Removidos 6 estados: `showReassignDialog`, `reassignSearch`, `reassignResults`, `reassignLoading`, `reassignSaving`, `reassignSelected`
+  - Removidas funções: `handleReassignSearch`, `handleReassignClient` + debounce useEffect
+  - **Justificação**: Na arquitetura 1 Cliente → N Processos, reatribuir o cliente globalmente é perigoso. O botão "Atribuições" (existente) já cobre as necessidades de gestão por processo.
+
+## [2026-06-25] — Pacote P: Sincronização do Nome do Cliente (Edição Global e Cascata)
+
+### Adicionado
+- **Botão "Editar Cliente" na Ficha do Cliente** (Frontend): Botão com ícone de lápis no cabeçalho da `ClientDetailPage` que abre um Modal para editar os dados base da entidade global: Nome, NIF, Email e Telefone. O Modal só envia campos alterados (diff) e atualiza o estado local instantaneamente.
+
+### Corrigido
+- **Efeito cascata ao editar cliente** (`PUT /api/clients/{id}`): Antes, alterar o nome do cliente NÃO atualizava o `client_name` nos processos associados, criando dessincronização. Agora, o endpoint propaga automaticamente:
+  - `nome` → `client_name`, `personal_data.nome`, `personal_data.name` em todos os processos via `update_many`
+  - `dados_pessoais` (NIF, morada, estado civil, profissão, etc.) → `personal_data.*` correspondente nos processos
+  - `contacto.telefone` → `client_phone`, `personal_data.telefone`, `personal_data.phone` nos processos
+  - Blind indexes (`nif_hash`, `email_hash`) são regenerados quando NIF/email mudam
+
+- **Sincronização inversa ao editar pelo Processo** (`PUT /api/processes/{id}`): Quando o utilizador edita o nome do cliente dentro do cartão de dados pessoais do processo, o sistema agora:
+  1. Atualiza o documento do cliente na coleção `clients` (comportamento existente)
+  2. **NOVO**: Propaga o novo nome para todos os **restantes processos** do mesmo cliente via `update_many` (cascade sync)
+
+### Segurança
+- Sanitização de inputs mantida (nome, NIF, email, telefone)
+- Encriptação Fernet preservada em ambos os caminhos de atualização
+- Logs detalhados de sincronização para auditoria
+
+## [2026-06-25] — Pacote O: Mural de Atualizações (Gerado por IA)
+
+### Adicionado
+- **Mural de Atualizações gerado por IA** — Sistema completo de notas de lançamento automáticas:
+  - **Backend**: Nova coleção `system_changelogs` (MongoDB) para guardar notas de atualização geradas por IA
+  - **Endpoint público `GET /api/system/changelog`**: Qualquer utilizador autenticado pode consultar as últimas atualizações
+  - **Endpoint admin `POST /api/system/changelog/generate-ai`**: Gera notas de atualização por IA (restrito a admin/CEO). Suporta 3 fontes de dados:
+    - `git`: Histórico de commits (padrão, com fallback para CHANGELOG.md)
+    - `changelog_file`: Ficheiro CHANGELOG.md
+    - `worklog`: Ficheiro worklog.md
+  - **Serviço `changelog_service.py`**: Lógica de negócio com integração OpenAI GPT-4o-mini, retry com exponential backoff, sanitização anti-prompt-injection, e truncagem de contexto
+  - **Modelos Pydantic `changelog.py`**: `ChangelogEntry`, `ChangelogResponse`, `ChangelogGenerateRequest`, `ChangelogGenerateResponse`
+  - **Rota `routes/changelog.py`**: 2 endpoints com autenticação e autorização por role
+  - **Registo no `server.py`**: Router registado com prefixo `/api`
+
+- **Frontend — Card "📢 Novidades do CRM" na Dashboard**: Card visual com gradiente que mostra a última atualização gerada por IA. Oculta-se automaticamente se não houver dados. Renderiza Markdown de forma segura (DOMPurify + conversor próprio).
+
+- **Frontend — Tab "Atualizações" nas Definições do Sistema**: Secção dedicada para admins com:
+  - Seletor de fonte de dados (Git / CHANGELOG.md / worklog.md)
+  - Botão "✨ Gerar Notas de Atualização (IA)" com loading state
+  - Lista de todos os changelogs publicados com badges de versão e data
+  - Estado vazio amigável com ícone e instrução
+
+- **Conversor de Markdown para HTML** (`markdownToHtml`): Função utilitária sem dependências externas que converte Markdown básico em HTML seguro (headers, bold, italic, bullets, line breaks). Output sempre sanitizado por DOMPurify.
+
+- **Funções API no `api.js`**: `getSystemChangelogs()` e `generateChangelogAI()` para comunicação frontend↔backend
+
+### Segurança
+- Sanitização de input anti-prompt-injection no `changelog_service.py`
+- Truncagem de texto fonte para máximo 8000 caracteres (limite de contexto)
+- Renderização HTML sempre via DOMPurify (`sanitizeHtml`)
+- Endpoint de geração restrito a roles admin/CEO
+
 ## [2026-06-23] — Limpeza técnica: .pyc committed + última query legacy email_config.is_configured
 
 ### Corrigido

@@ -671,3 +671,33 @@ async def get_public_form_config(request: Request):
         "step_config": merged_step_config,
         "step_labels": step_labels
     })
+
+
+# ====================================================================
+# EURIBOR — Taxas reais com cache diário (Pacote AC)
+# ====================================================================
+@router.get("/euribor")
+async def get_euribor_rates_endpoint():
+    """
+    Devolve as taxas Euribor reais (1M, 3M, 6M, 12M) com cache diário.
+
+    Usado pelo Simulador de Crédito Habitação (SimulatorCH) para preencher
+    automaticamente a taxa quando o utilizador seleciona "Taxa Variável".
+
+    Cache: 24h em memória (services/euribor_service.py).
+    Fallback: se a API externa falhar, devolve últimos valores conhecidos
+    ou estimativas (is_fallback=True).
+
+    Resposta:
+    {
+        "euribor_1m": 3.65, "euribor_3m": 3.60,
+        "euribor_6m": 3.55, "euribor_12m": 3.50,
+        "fetched_at": "2026-06-29T10:00:00+00:00",
+        "is_fallback": false,
+        "source": "cache" | "api" | "cache_stale" | "fallback"
+    }
+    """
+    from services.euribor_service import get_euribor_rates
+
+    rates = await get_euribor_rates()
+    return JSONResponse(status_code=200, content=rates)

@@ -69,13 +69,23 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Perfis: `/configuracoes-perfis`
 - Gestão formulário: `/gestao-formulario`
 
-## Issues Conhecidos e Bugs (2026-07-15 — ATUALIZADO)
+## Issues Conhecidos e Bugs (2026-06-29 — ATUALIZADO)
 
 ### Bugs Corrigidos ✅
 1. **✅ Explorador de Ficheiros não mostra ficheiros** (corrigido 2026-07-15): O `S3Service` lia apenas variáveis de ambiente na inicialização. Adicionado `reconfigure()` + `sync_s3_from_db_config()` no startup e sincronização em tempo real quando config é guardada via UI.
 2. **✅ Rota /definicoes incorreta para "Definições Gerais"** (corrigido 2026-07-15): Banner do Explorador de Ficheiros agora navega corretamente: admins → `/configuracoes`, não-admins → mensagem "Contacte um administrador".
 3. **✅ React Minified Error #31** (corrigido 2026-07-15): Adicionados 16+ `safeString()` wrappers em `ProcessDetails.js` e `ProcessDetailsModal.jsx` para evitar renderização de objetos `{value, label}` como React children.
 4. **✅ 500 Internal Server Error em POST /api/documents/portal-requests/{processId}** (corrigido 2026-07-15): Adicionada validação de process_id vazio (400) e logging detalhado para debugging.
+5. **✅ Erros 401 em cascata no Portal do Cliente** (corrigido 2026-06-29, Pacote AA): Os `useEffect` de `messages`, `recommendations` e `visits` no `ClientPortal.jsx` disparavam no mount sem verificar `isVerified`, gerando 5×401 quando o token estava expirado. Adicionado guard `isVerified` aos 3 `useEffect` + paragem do polling de mensagens quando a sessão expira.
+6. **✅ 429 Too Many Requests no login do Portal** (corrigido 2026-06-29, Pacote AA): Limite de login demasiado agressivo (5 tentativas / 15 min lockout). Ajustado para 8 tentativas / 10 min. Resposta 429 agora inclui `retry_after` (segundos) no body. Frontend mostra countdown visual e desabilita o botão durante o lockout.
+7. **✅ F821 undefined name 'file_key' no upload de logótipo** (corrigido 2026-06-29, Pacote AB): `backend/routes/companies_crud.py` linha 246 referenciava `file_key` (variável inexistente) em vez de `s3_key`. Falhava o CI (`flake8 --select=E9,F63,F7,F82`) e geraria `NameError` em runtime. Adicionado helper `_resolve_logo_url()` que gera URL pré-assinado S3 (7 dias) em tempo de leitura nos endpoints GET.
+
+### Funcionalidades do Pacote AC (2026-06-29)
+- **Dropdown "Simulações"**: Botões DSTI + Risco agrupados num `DropdownMenu` no cabeçalho do processo (sticky + principal).
+- **Euribor Automática**: Endpoint `GET /api/public/euribor` (cache 24h) + integração no `SimulatorCH` (Portal do Cliente) e `RiskCalculator` (CRM). Seletor Fixa/Variável + spread ajustável.
+- **Campos de Compliance**: `admission_year`, `is_ppe`, `is_fpe`, `credit_incidents` no modelo `CreditData`.
+- **Cartão "Compliance & Perfil de Risco"**: Novo cartão minimizado por defeito na tab Crédito dos Detalhes do Processo, com aviso visual automático para PPE/FPE.
+- **Fix RiskCalculator**: `tipoTaxa` agora atualiza cálculos instantaneamente; fallback do campo Entrada corrigido (0 em vez de 1, lê do processo).
 
 ### Funcionalidades Completadas ✅
 1. **✅ Filtro de documentos já solicitados** (já implementado): O `PortalDocumentRequests.js` filtra automaticamente categorias já solicitadas da lista de seleção (linhas 128-139, `availableCategories`).

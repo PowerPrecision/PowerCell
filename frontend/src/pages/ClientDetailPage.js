@@ -19,6 +19,8 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
 import { Input } from "../components/ui/input";
+import { Label } from "../components/ui/label";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import {
   ArrowLeft,
   User,
@@ -245,6 +247,68 @@ export default function ClientDetailPage() {
   const [clientDocs, setClientDocs] = useState([]);
   const [docsLoading, setDocsLoading] = useState(false);
   const [savingField, setSavingField] = useState(null);
+  const [editModalOpen, setEditModalOpen] = useState(false);
+  const [editForm, setEditForm] = useState({ nome: "", nif: "", email: "", telefone: "" });
+  const [editSaving, setEditSaving] = useState(false);
+
+  // Abrir modal de edição com dados atuais do cliente
+  const openEditModal = () => {
+    const contato = client?.contacto || {};
+    const dadosPessoais = client?.dados_pessoais || {};
+    setEditForm({
+      nome: client?.nome || "",
+      nif: dadosPessoais.nif || "",
+      email: contato.email || "",
+      telefone: contato.telefone || "",
+    });
+    setEditModalOpen(true);
+  };
+
+  // Guardar edição do cliente via modal
+  const handleEditSave = async () => {
+    setEditSaving(true);
+    try {
+      const payload = {};
+      if (editForm.nome && editForm.nome !== client?.nome) {
+        payload.nome = editForm.nome;
+      }
+      const currentContato = client?.contacto || {};
+      const currentDadosPessoais = client?.dados_pessoais || {};
+      const contatoChanged = editForm.email !== currentContato.email || editForm.telefone !== currentContato.telefone;
+      if (contatoChanged) {
+        payload.contacto = {
+          ...currentContato,
+          email: editForm.email || currentContato.email,
+          telefone: editForm.telefone || currentContato.telefone,
+        };
+      }
+      const nifChanged = editForm.nif !== currentDadosPessoais.nif;
+      if (nifChanged) {
+        payload.dados_pessoais = {
+          ...currentDadosPessoais,
+          nif: editForm.nif,
+        };
+      }
+
+      // Só fazer update se houver alterações
+      if (Object.keys(payload).length > 0) {
+        await updateClient(id, payload);
+        // Atualizar estado local
+        setClient((prev) => ({
+          ...prev,
+          ...(payload.nome && { nome: payload.nome }),
+          ...(payload.contacto && { contacto: payload.contacto }),
+          ...(payload.dados_pessoais && { dados_pessoais: payload.dados_pessoais }),
+        }));
+        toast.success("Dados do cliente atualizados com sucesso");
+      }
+      setEditModalOpen(false);
+    } catch (err) {
+      toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao atualizar dados do cliente"));
+    } finally {
+      setEditSaving(false);
+    }
+  };
 
   const fetchClientData = useCallback(async () => {
     if (!id) return;
@@ -358,15 +422,26 @@ export default function ClientDetailPage() {
             <ArrowLeft className="h-4 w-4" />
             Voltar
           </Button>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={fetchClientData}
-            className="gap-2 text-muted-foreground hover:text-foreground transition-colors duration-200"
-          >
-            <RefreshCw className="h-4 w-4" />
-            Atualizar
-          </Button>
+          <div className="flex items-center gap-2">
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={openEditModal}
+              className="gap-2 transition-colors duration-200"
+            >
+              <Pencil className="h-4 w-4" />
+              Editar Cliente
+            </Button>
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={fetchClientData}
+              className="gap-2 text-muted-foreground hover:text-foreground transition-colors duration-200"
+            >
+              <RefreshCw className="h-4 w-4" />
+              Atualizar
+            </Button>
+          </div>
         </div>
 
         {/* Main 2-column grid */}
@@ -735,6 +810,83 @@ export default function ClientDetailPage() {
             </div>
           </div>
         </div>
+
+        {/* ── Modal: Editar Cliente ── */}
+        <Dialog open={editModalOpen} onOpenChange={setEditModalOpen}>
+          <DialogContent className="sm:max-w-md">
+            <DialogHeader>
+              <DialogTitle className="flex items-center gap-2">
+                <Pencil className="h-5 w-5 text-primary" />
+                Editar Dados do Cliente
+              </DialogTitle>
+              <DialogDescription>
+                Edite os dados base do cliente. As alterações serão sincronizadas automaticamente com todos os processos associados.
+              </DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-2">
+              <div className="space-y-2">
+                <Label htmlFor="edit-nome">Nome Completo</Label>
+                <Input
+                  id="edit-nome"
+                  value={editForm.nome}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, nome: e.target.value }))}
+                  placeholder="Nome do cliente"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-nif">NIF</Label>
+                <Input
+                  id="edit-nif"
+                  value={editForm.nif}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, nif: e.target.value }))}
+                  placeholder="123456789"
+                  maxLength={9}
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-email">Email</Label>
+                <Input
+                  id="edit-email"
+                  type="email"
+                  value={editForm.email}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
+                  placeholder="email@exemplo.pt"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="edit-telefone">Telefone</Label>
+                <Input
+                  id="edit-telefone"
+                  value={editForm.telefone}
+                  onChange={(e) => setEditForm((prev) => ({ ...prev, telefone: e.target.value }))}
+                  placeholder="912345678"
+                />
+              </div>
+            </div>
+            <DialogFooter className="gap-2">
+              <Button
+                variant="outline"
+                onClick={() => setEditModalOpen(false)}
+                disabled={editSaving}
+              >
+                Cancelar
+              </Button>
+              <Button onClick={handleEditSave} disabled={editSaving}>
+                {editSaving ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin mr-1" />
+                    A guardar...
+                  </>
+                ) : (
+                  <>
+                    <Check className="h-4 w-4 mr-1" />
+                    Guardar
+                  </>
+                )}
+              </Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     </DashboardLayout>
   );

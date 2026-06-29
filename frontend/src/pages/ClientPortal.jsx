@@ -2179,7 +2179,11 @@ export default function ClientPortal() {
   }, [newMessage, fetchMessages]);
 
   // Fetch messages on mount and poll every 15s
+  // CORREÇÃO: Só buscar mensagens quando isVerified === true.
+  // Antes, este useEffect disparava no mount mesmo sem sessão verificada,
+  // gerando 401s quando existia um token expirado em localStorage.
   useEffect(() => {
+    if (!isVerified) return;
     fetchMessages();
     fetchUnreadCount();
     const interval = setInterval(() => {
@@ -2187,7 +2191,7 @@ export default function ClientPortal() {
       fetchUnreadCount();
     }, 15000);
     return () => clearInterval(interval);
-  }, [fetchMessages, fetchUnreadCount]);
+  }, [isVerified, fetchMessages, fetchUnreadCount]);
 
   // ── Fetch recommended properties ──
   const fetchRecommendations = useCallback(async () => {
@@ -2208,9 +2212,11 @@ export default function ClientPortal() {
     }
   }, []);
 
+  // CORREÇÃO: Só buscar recomendações quando isVerified === true.
   useEffect(() => {
+    if (!isVerified) return;
     fetchRecommendations();
-  }, [fetchRecommendations]);
+  }, [isVerified, fetchRecommendations]);
 
   // ── Fetch visits ──
   const fetchVisits = useCallback(async () => {
@@ -2231,9 +2237,11 @@ export default function ClientPortal() {
     }
   }, []);
 
+  // CORREÇÃO: Só buscar visitas quando isVerified === true.
   useEffect(() => {
+    if (!isVerified) return;
     fetchVisits();
-  }, [fetchVisits]);
+  }, [isVerified, fetchVisits]);
 
   // ── Welcome message (from API, already rendered with variables) ──
   // MUST be before early returns (Rules of Hooks)

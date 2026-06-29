@@ -1071,3 +1071,130 @@ Stage Summary:
 - 1 ficheiro de config modificado: .gitignore (+11 regras Python)
 - "Limitação conhecida" do worklog Task 18 RESOLVIDA — auto-sync em background agora suporta configs multi-empresa nested, paridade total com a sync manual (hotfix 2f65050) e com o worker (Pacote J).
 - Próximo passo: commit email_service.py + push de ambos os commits para origin/dev (requer token GitHub).
+
+---
+Task ID: Pacote S
+Agent: Main Agent
+Task: Super Dashboard de Balcões e Bancos — completar integração (rota + sidebar)
+
+Work Log:
+- Verificação do estado existente: o endpoint `GET /api/stats/branches` já estava implementado em `backend/routes/stats.py` (linhas 476-669) com MongoDB Aggregation Pipeline completo
+- Verificação: a página `BranchPerformancePage.js` já estava implementada com Top Cards (Banco Mais Rápido, Balcão com Maior Volume, Taxa de Aprovação Global) e DataTable com ordenação interativa
+- Verificação: a importação lazy de `BranchPerformancePage` já existia em `App.js` (linha 90)
+- CORREÇÃO 1 — Rota em falta no `App.js`: adicionada rota `/performance-balcoes` com `ProtectedRoute` (STAFF_ROLES) e `RouteBoundary`
+- CORREÇÃO 2 — Link em falta na sidebar: adicionado item "Performance de Balcões" (ícone Building2) no grupo "Gestão e Operações" do `DashboardLayout.js`
+- CORREÇÃO 3 — `gestaoRoutes` atualizado para incluir `/performance-balcoes` (ativação correta do grupo na sidebar)
+- Documentação `ARCHITECTURE.md`: adicionada secção "Dashboard de Performance de Balcões e Bancos (Pacote S)" com tabela de métricas e detalhes de cache
+
+Stage Summary:
+- 3 ficheiros modificados: `frontend/src/App.js` (+10 linhas), `frontend/src/layouts/DashboardLayout.js` (+6 linhas), `ARCHITECTURE.md` (+18 linhas)
+- Funcionalidade completa: endpoint backend + página frontend + rota + sidebar + documentação
+- Acesso: Staff com capability `STATS_VIEW` via rota `/performance-balcoes`
+
+---
+Task ID: Pacote T
+Agent: Main Agent
+Task: Fix "Ver como Cliente" sem e-mail + Apelido Interno do Processo
+
+Work Log:
+- Verificação do endpoint `/api/portal/impersonate/{process_id}` em `backend/routes/portal.py`
+- Descoberta: o campo `apelido` já existia no modelo (`ProcessUpdate.apelido`, `ProcessResponse.apelido`) e no frontend (componente `InlineApelido` em `ProcessDetails.js`) — Tarefa 2 já implementada
+- ALTERAÇÃO — Tarefa 1: substituído o comportamento de "gerar link na mesma com aviso no log" por HTTP 400 com mensagem amigável quando não há e-mail
+- O frontend (`ProcessDetails.js` linha 2659-2661) já tratava `error.response.data.detail` via `toast.error()`, sem necessidade de alteração
+- Documentação `ARCHITECTURE.md`: adicionada secção "Fix Ver como Cliente sem E-mail + Apelido Interno (Pacote T)"
+
+Stage Summary:
+- 1 ficheiro modificado no backend: `backend/routes/portal.py` (bloqueio 400 quando sem email)
+- Tarefa 2 (Apelido Interno): já estava implementada — nenhuma alteração necessária
+- Frontend: sem alterações (já exibia a mensagem de erro do backend)
+
+---
+Task ID: Pacote V
+Agent: Main Agent + subagent
+Task: Ecrã de Gestão de Empresas (Multi-Tenant)
+
+Work Log:
+- Exploração do código existente: não existia CRUD genérico de empresas, apenas company_email_configs e user_company_roles
+- Criação do modelo `backend/models/company.py`: CompanyCreate, CompanyUpdate, CompanyResponse, CompanyListResponse
+- Criação das rotas CRUD `backend/routes/companies_crud.py`: 6 endpoints (list, available, get, create, update, delete) + upload de logo
+- Upload de logo usa `s3_service.s3_client.put_object()` (padrão do admin_storage.py)
+- Delete bloqueia se existem utilizadores associados; Update faz cascade de rename em `users.company`
+- Registo da nova rota em `backend/server.py` (import + include_router)
+- Adição de 6 API calls em `frontend/src/services/api.js`
+- Criação de `frontend/src/pages/CompaniesManagementPage.jsx` (lista + formulário com 3 secções)
+- Integração no `SystemAdminPanel.jsx`: nova tab "Empresas" no grupo GESTÃO (amber), entre Automações e Finanças
+- Documentação `ARCHITECTURE.md`: adicionada secção "Gestão de Empresas — Multi-Tenant (Pacote V)"
+
+Stage Summary:
+- 3 ficheiros criados: `backend/models/company.py`, `backend/routes/companies_crud.py`, `frontend/src/pages/CompaniesManagementPage.jsx`
+- 4 ficheiros modificados: `backend/server.py`, `frontend/src/services/api.js`, `frontend/src/pages/SystemAdminPanel.jsx`, `ARCHITECTURE.md`
+- Acesso: Admin/CEO via tab "Empresas" no Painel de Administração
+
+
+---
+Task ID: Pacote AA
+Agent: Main Agent (Code Assistant)
+Task: Correção de Erros 401 e 429 no Portal do Cliente
+
+Work Log:
+- Análise do erro reportado pelo utilizador: 5×401 (`/portal/status`, `/portal/messages`, `/portal/recommendations`, `/portal/messages/unread`, `/portal/visits`) + 1×429 (`/portal/auth/login`) na consola do browser em produção (powercell.onrender.com).
+- Lidos os ficheiros relevantes: `frontend/src/pages/ClientPortal.jsx` (2898 linhas), `frontend/src/pages/ClientPortalLogin.jsx` (294 linhas), `backend/routes/portal.py` (3685 linhas), `backend/middleware/user_rate_limit.py`, `backend/middleware/rate_limit.py`, `backend/server.py` (middleware + exception handler).
+- Identificada causa raiz dos 401: os `useEffect` de `fetchMessages`/`fetchUnreadCount` (linha 2182), `fetchRecommendations` (linha 2211) e `fetchVisits` (linha 2234) no `ClientPortal.jsx` disparavam no mount sem verificar `isVerified`. Quando o cliente tinha um token expirado em `localStorage`, os 5 endpoints corriam em paralelo e todos devolviam 401 (1 do useEffect de validação de token + 4 destes).
+- Identificada causa raiz do 429: `MAX_LOGIN_ATTEMPTS = 5` com `LOGIN_LOCKOUT_MINUTES = 15` no `portal.py` era demasiado agressivo para um código de acesso de 6 caracteres alfanuméricos digitado manualmente. O frontend não mostrava tempo restante nem desabilitava o botão, levando o utilizador a continuar a tentar.
+- Aplicadas 3 correções:
+  1. `ClientPortal.jsx`: guard `if (!isVerified) return;` + dependência `isVerified` nos 3 `useEffect` de fetch; o polling de mensagens (setInterval 15s) agora para quando `isVerified` passa a false (cleanup do interval).
+  2. `portal.py`: `MAX_LOGIN_ATTEMPTS` 5→8, `LOGIN_LOCKOUT_MINUTES` 15→10; as 2 respostas 429 (lockout ativo + novo lockout) devolvem `detail` como objeto estruturado `{error, message, retry_after, retry_after_minutes}` + header `Retry-After`.
+  3. `ClientPortalLogin.jsx`: novo estado `lockoutSeconds` + `useEffect` de countdown (decrementa a cada segundo); `canSubmit` inclui `!isLockedOut`; bloco de erro distinto (âmbar com ícone Lock + countdown `Xm Ys`) para lockout vs erro normal (vermelho); handler 429 trata `detail` como objeto OU string (compatibilidade com rate limit global do middleware que devolve string).
+- Validada sintaxe: `py_compile` no `portal.py` ✓; `esbuild --loader:.jsx=jsx` no `ClientPortal.jsx` e `ClientPortalLogin.jsx` ✓.
+- Atualizada documentação: `CHANGELOG.md` (entrada Pacote AA), `memory/PRD.md` (bugs #5 e #6), este worklog.
+
+Stage Summary:
+- 3 ficheiros modificados: `frontend/src/pages/ClientPortal.jsx`, `frontend/src/pages/ClientPortalLogin.jsx`, `backend/routes/portal.py`.
+- 3 ficheiros de documentação atualizados: `CHANGELOG.md`, `memory/PRD.md`, `worklog.md`.
+- Resultado: clientes com token expirado deixam de ver 5×401 na consola; login tolera 8 tentativas (em vez de 5) com lockout mais curto (10 min em vez de 15); utilizador vê countdown claro durante o lockout e o botão fica desabilitado até poder tentar novamente.
+
+
+---
+Task ID: Pacote AB
+Agent: Main Agent (Code Assistant)
+Task: Fix F821 (CI blocker) no upload de logótipo de empresa
+
+Work Log:
+- Erro reportado pelo CI: `flake8 . --count --select=E9,F63,F7,F82` falhava com `F821 undefined name 'file_key'` em `backend/routes/companies_crud.py:246`.
+- Lido o ficheiro `companies_crud.py` (258 linhas): o endpoint `POST /admin/companies/{company_id}/logo` fazia `s3_key = f"companies/{company_id}/logo_..."` (linha 238), fazia `put_object` no S3, e depois `logo_url = file_key` (linha 246) — `file_key` nunca foi definido; a variável correta é `s3_key`.
+- Confirmado impacto: para além de falhar o CI, em runtime qualquer upload de logótipo geraria `NameError: name 'file_key' is not defined` → 500 Internal Server Error.
+- Verificado consumo no frontend (`CompaniesManagementPage.jsx` linhas 311-316, 446-449): `company.logo_url` é usado diretamente como `<img src={...}>`, logo precisa de ser um URL carregável (não apenas uma chave S3).
+- Verificado o serviço S3 (`s3_storage.py`): método `get_presigned_url(object_name, expiration=3600)` gera URL temporário.
+- Implementada solução robusta (não apenas rename da variável):
+  1. Corrigido `logo_url = file_key` → `logo_s3_key = s3_key` (guarda a chave S3 na BD).
+  2. Criado helper `_resolve_logo_url(logo_value)` com 3 ramos: None→None; URL http(s)→as-is (retrocompatibilidade com logos configurados via API); chave S3→URL pré-assinado de 7 dias (604800s, máximo para credenciais de longa duração).
+  3. Aplicado o helper nos endpoints `GET /admin/companies` (list) e `GET /admin/companies/{id}` (get) — o URL é gerado em tempo de leitura, nunca guardado na BD, pelo que nunca expira.
+  4. Resposta do upload devolve `{logo_url, logo_s3_key}` para o frontend mostrar de imediato.
+- Validação: `py_compile routes/companies_crud.py` ✓; `flake8 . --count --select=E9,F63,F7,F82` em todo o backend → **0 erros, exit 0**.
+- Atualizada documentação: `CHANGELOG.md` (Pacote AB), `memory/PRD.md` (bug #7), este worklog.
+
+Stage Summary:
+- 1 ficheiro de código modificado: `backend/routes/companies_crud.py` (F821 corrigido + helper _resolve_logo_url + aplicação em 2 endpoints GET).
+- 3 ficheiros de documentação atualizados: `CHANGELOG.md`, `memory/PRD.md`, `worklog.md`.
+- Resultado: CI passa (0 erros flake8); upload de logótipo de empresa funciona em runtime; frontend recebe URL pré-assinado fresco que nunca expira na BD.
+
+
+---
+Task ID: Pacote AC
+Agent: Main Agent (Code Assistant)
+Task: UX de Simulações e Novos Campos de Compliance
+
+Work Log:
+- Lançados 2 agentes Explore em paralelo (AC-1: ProcessDetails mapper, AC-2: Calculators mapper) + mapeamento manual do backend (AC-3 falhou por rate limit, feito manualmente).
+- Lidos ficheiros: ProcessDetails.js (5854 linhas), ProcessStickyHeader.js (309 linhas), RiskCalculator.js (703 linhas), SimulatorCH.jsx (282 linhas), models/process.py (255 linhas), routes/public.py (673 linhas), services/redis_cache.py, server.py.
+- Tarefa 1 (Dropdown Simulações): substituídos os 2 botões DSTI+Risco por um `DropdownMenu` "Simulações ▾" (ícone Sparkles) em ProcessStickyHeader.js (sticky) e ProcessDetails.js (header principal). Cada `DropdownMenuItem` usa `onSelect={(e) => e.preventDefault()}` para o DialogTrigger interno das calculadoras receber o click. Import de DropdownMenu adicionado ao ProcessStickyHeader (ProcessDetails já tinha).
+- Tarefa 2 (Fix RiskCalculator): (a) fallback `valorEntrada` corrigido de `||` para `??` com default 0 (lê do processo, assume 0 não 1); (b) `handleTipoTaxaChange` substitui `setTipoTaxa` direto — agora quando "Variável" é selecionada, um `useEffect` busca `/api/public/euribor` e preenche `taxaAnual = euribor + spread` instantaneamente; (c) campo de Spread visível apenas para Taxa Variável, com indicação visual da Euribor 12M carregada.
+- Tarefa 3 (Euribor Automática): (a) backend: novo `services/euribor_service.py` (165 linhas) com cache módulo-level 24h + lock anti-concorrência + 4 níveis de fallback (cache→API externa→cache antigo→fallback hardcoded); novo endpoint `GET /public/euribor` em routes/public.py; (b) frontend SimulatorCH: import `useEffect`, estados `tipoTaxa`/`euribor12m`/`spread`, seletor Fixa/Variável, painel Euribor+Spread com badge "(estimada)" se fallback.
+- Tarefa 4 (Cartão Compliance): (a) backend: 4 campos adicionados ao `CreditData` em models/process.py (`admission_year` int, `is_ppe` bool, `is_fpe` bool, `credit_incidents` str) + validadores Pydantic de coerção; (b) frontend: `collapsedCards` inicial `{ credit_compliance: true }` (minimizado por defeito), caso `credit_compliance` em `isCardEmpty`, novo cartão na tab credit (80 linhas) com Ano de Admissão (Input), PPE (Switch), FPE (Switch), Incidentes (Textarea) + aviso visual rose automático quando PPE/FPE ativos. Import de `Switch` adicionado.
+- Validação: `py_compile` ✓ em 3 ficheiros Python; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild` ✓ em 4 ficheiros JSX.
+- Atualizada documentação: CHANGELOG.md (Pacote AC), memory/PRD.md (secção Pacote AC), este worklog.
+
+Stage Summary:
+- 7 ficheiros modificados: backend/models/process.py, backend/services/euribor_service.py (novo), backend/routes/public.py, frontend/src/components/ProcessStickyHeader.js, frontend/src/pages/ProcessDetails.js, frontend/src/components/RiskCalculator.js, frontend/src/components/portal/SimulatorCH.jsx.
+- 3 ficheiros de documentação atualizados: CHANGELOG.md, memory/PRD.md, worklog.md.
+- Resultado: cabeçalho mais limpo (1 dropdown em vez de 2 botões); RiskCalculator reativo ao Tipo de Taxa; Euribor automática com cache diário em 2 sítios (Simulador CH + RiskCalculator); 4 campos de compliance persistidos em credit_data; cartão Compliance minimizado por defeito com aviso KYC/AML para PPE/FPE.
