@@ -3928,7 +3928,10 @@ const ChangelogSection = ({ token }) => {
   const [changelogs, setChangelogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
-  const [sourceType, setSourceType] = useState("git");
+  // CORREÇÃO (Pacote AE-fix): default 'worklog' em vez de 'git' porque
+  // no Render a pasta .git não está disponível no container de deploy.
+  // worklog.md é um ficheiro físico que está sempre presente.
+  const [sourceType, setSourceType] = useState("worklog");
 
   const fetchChangelogs = useCallback(async () => {
     try {
@@ -3990,9 +3993,9 @@ const ChangelogSection = ({ token }) => {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="git">Commits Git (recomendado)</SelectItem>
+                  <SelectItem value="worklog">Ficheiro worklog.md (recomendado)</SelectItem>
                   <SelectItem value="changelog_file">Ficheiro CHANGELOG.md</SelectItem>
-                  <SelectItem value="worklog">Ficheiro worklog.md</SelectItem>
+                  <SelectItem value="git">Commits Git (pode falhar no Render)</SelectItem>
                 </SelectContent>
               </Select>
             </div>

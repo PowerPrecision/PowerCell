@@ -1305,3 +1305,20 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: backend/routes/changelog.py.
 - Resultado: utilizador vê mensagem clara a indicar causa (chave IA / fonte Git indisponível no Render) e solução.
+
+
+---
+Task ID: Pacote AE-fix (Changelog Render)
+Agent: Main Agent (Code Assistant)
+Task: Fallback automático + default worklog para geração de Changelog IA no Render
+
+Work Log:
+- Problema: POST /api/system/changelog/generate-ai devolvia 400 "Não foi possível obter dados da fonte git" no Render porque .git não está no container de deploy.
+- Backend (services/changelog_service.py): refactor do bloco de recolha de fonte com fallback em cadeia — git → worklog → changelog_file (e vice-versa para cada fonte). Se a fonte primária falhar, tenta automaticamente a secundária. logger.info regista cada fallback. Mensagem de erro final lista todas as fontes tentadas.
+- Backend (models/changelog.py): default de source_type mudado de "git" para "worklog" (ficheiro físico sempre presente no Render).
+- Frontend (SystemConfigPage.js): default do state sourceType mudado de "git" para "worklog"; seletor reordenado (worklog recomendado primeiro, git último com label "pode falhar no Render").
+- Validação: py_compile ✓; flake8 0 erros; esbuild ✓.
+
+Stage Summary:
+- 3 ficheiros: backend/services/changelog_service.py, backend/models/changelog.py, frontend/src/pages/SystemConfigPage.js.
+- Resultado: geração de changelog por IA funciona no Render mesmo sem .git, usando worklog.md por defeito com fallback automático.

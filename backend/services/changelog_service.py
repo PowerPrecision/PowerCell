@@ -183,23 +183,55 @@ async def generate_changelog_ai(
     if not EMERGENT_LLM_KEY:
         raise ValueError("Chave API OpenAI não configurada (EMERGENT_LLM_KEY)")
 
-    # 1. Recolher dados da fonte
+    # 1. Recolher dados da fonte com fallback automático em cadeia
+    # CORREÇÃO (Pacote AE-fix): no Render, a pasta .git não está disponível no
+    # container de deploy, pelo que read_git_log() devolve "". O fallback agora
+    # percorre uma cadeia: git → worklog → changelog_file, parando no primeiro
+    # que devolver conteúdo. Isto garante que a geração por IA funciona mesmo
+    # quando o git não está disponível.
     source_text = ""
+    effective_source = source_type
+
     if source_type == "git":
         source_text = read_git_log(max_source_lines)
-        if not source_text:
-            # Fallback para changelog file
-            source_text = read_changelog_file(max_source_lines)
-            source_type = "changelog_file (fallback)"
+        if source_text:
+            effective_source = "git"
+        else:
+            # Fallback 1: worklog.md (mais fiável no Render — ficheiro físico)
+            logger.info("[CHANGELOG] git log indisponível, a tentar worklog.md (fallback)")
+            source_text = read_worklog_file(max_source_lines)
+            if source_text:
+                effective_source = "worklog (fallback de git)"
+            else:
+                # Fallback 2: CHANGELOG.md
+                logger.info("[CHANGELOG] worklog.md vazio, a tentar CHANGELOG.md (fallback)")
+                source_text = read_changelog_file(max_source_lines)
+                if source_text:
+                    effective_source = "changelog_file (fallback de git)"
     elif source_type == "changelog_file":
         source_text = read_changelog_file(max_source_lines)
+        if not source_text:
+            # Fallback para worklog se CHANGELOG.md estiver vazio
+            logger.info("[CHANGELOG] CHANGELOG.md vazio, a tentar worklog.md (fallback)")
+            source_text = read_worklog_file(max_source_lines)
+            if source_text:
+                effective_source = "worklog (fallback de changelog_file)"
     elif source_type == "worklog":
         source_text = read_worklog_file(max_source_lines)
+        if not source_text:
+            # Fallback para CHANGELOG.md se worklog estiver vazio
+            logger.info("[CHANGELOG] worklog.md vazio, a tentar CHANGELOG.md (fallback)")
+            source_text = read_changelog_file(max_source_lines)
+            if source_text:
+                effective_source = "changelog_file (fallback de worklog)"
     else:
         raise ValueError(f"Fonte não suportada: {source_type}. Use 'git', 'changelog_file' ou 'worklog'")
 
     if not source_text:
-        raise ValueError(f"Não foi possível obter dados da fonte '{source_type}'. Verifique se o ficheiro existe ou se há commits.")
+        raise ValueError(
+            f"Não foi possível obter dados de nenhuma fonte (tentado: git, worklog, changelog_file). "
+            f"Verifique se os ficheiros worklog.md ou CHANGELOG.md existem na raiz do projeto."
+        )
 
     # 2. Sanitizar texto fonte
     source_text = sanitize_source_text(source_text)
