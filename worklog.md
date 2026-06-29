@@ -1177,3 +1177,24 @@ Stage Summary:
 - 1 ficheiro de código modificado: `backend/routes/companies_crud.py` (F821 corrigido + helper _resolve_logo_url + aplicação em 2 endpoints GET).
 - 3 ficheiros de documentação atualizados: `CHANGELOG.md`, `memory/PRD.md`, `worklog.md`.
 - Resultado: CI passa (0 erros flake8); upload de logótipo de empresa funciona em runtime; frontend recebe URL pré-assinado fresco que nunca expira na BD.
+
+
+---
+Task ID: Pacote AC
+Agent: Main Agent (Code Assistant)
+Task: UX de Simulações e Novos Campos de Compliance
+
+Work Log:
+- Lançados 2 agentes Explore em paralelo (AC-1: ProcessDetails mapper, AC-2: Calculators mapper) + mapeamento manual do backend (AC-3 falhou por rate limit, feito manualmente).
+- Lidos ficheiros: ProcessDetails.js (5854 linhas), ProcessStickyHeader.js (309 linhas), RiskCalculator.js (703 linhas), SimulatorCH.jsx (282 linhas), models/process.py (255 linhas), routes/public.py (673 linhas), services/redis_cache.py, server.py.
+- Tarefa 1 (Dropdown Simulações): substituídos os 2 botões DSTI+Risco por um `DropdownMenu` "Simulações ▾" (ícone Sparkles) em ProcessStickyHeader.js (sticky) e ProcessDetails.js (header principal). Cada `DropdownMenuItem` usa `onSelect={(e) => e.preventDefault()}` para o DialogTrigger interno das calculadoras receber o click. Import de DropdownMenu adicionado ao ProcessStickyHeader (ProcessDetails já tinha).
+- Tarefa 2 (Fix RiskCalculator): (a) fallback `valorEntrada` corrigido de `||` para `??` com default 0 (lê do processo, assume 0 não 1); (b) `handleTipoTaxaChange` substitui `setTipoTaxa` direto — agora quando "Variável" é selecionada, um `useEffect` busca `/api/public/euribor` e preenche `taxaAnual = euribor + spread` instantaneamente; (c) campo de Spread visível apenas para Taxa Variável, com indicação visual da Euribor 12M carregada.
+- Tarefa 3 (Euribor Automática): (a) backend: novo `services/euribor_service.py` (165 linhas) com cache módulo-level 24h + lock anti-concorrência + 4 níveis de fallback (cache→API externa→cache antigo→fallback hardcoded); novo endpoint `GET /public/euribor` em routes/public.py; (b) frontend SimulatorCH: import `useEffect`, estados `tipoTaxa`/`euribor12m`/`spread`, seletor Fixa/Variável, painel Euribor+Spread com badge "(estimada)" se fallback.
+- Tarefa 4 (Cartão Compliance): (a) backend: 4 campos adicionados ao `CreditData` em models/process.py (`admission_year` int, `is_ppe` bool, `is_fpe` bool, `credit_incidents` str) + validadores Pydantic de coerção; (b) frontend: `collapsedCards` inicial `{ credit_compliance: true }` (minimizado por defeito), caso `credit_compliance` em `isCardEmpty`, novo cartão na tab credit (80 linhas) com Ano de Admissão (Input), PPE (Switch), FPE (Switch), Incidentes (Textarea) + aviso visual rose automático quando PPE/FPE ativos. Import de `Switch` adicionado.
+- Validação: `py_compile` ✓ em 3 ficheiros Python; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild` ✓ em 4 ficheiros JSX.
+- Atualizada documentação: CHANGELOG.md (Pacote AC), memory/PRD.md (secção Pacote AC), este worklog.
+
+Stage Summary:
+- 7 ficheiros modificados: backend/models/process.py, backend/services/euribor_service.py (novo), backend/routes/public.py, frontend/src/components/ProcessStickyHeader.js, frontend/src/pages/ProcessDetails.js, frontend/src/components/RiskCalculator.js, frontend/src/components/portal/SimulatorCH.jsx.
+- 3 ficheiros de documentação atualizados: CHANGELOG.md, memory/PRD.md, worklog.md.
+- Resultado: cabeçalho mais limpo (1 dropdown em vez de 2 botões); RiskCalculator reativo ao Tipo de Taxa; Euribor automática com cache diário em 2 sítios (Simulador CH + RiskCalculator); 4 campos de compliance persistidos em credit_data; cartão Compliance minimizado por defeito com aviso KYC/AML para PPE/FPE.

@@ -23,7 +23,14 @@ import {
   ChevronUp,
   Building2,
   CreditCard,
+  Sparkles,
 } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuTrigger,
+  DropdownMenuContent,
+  DropdownMenuItem,
+} from "../components/ui/dropdown-menu";
 import DSTICalculator from "./DSTICalculator";
 import RiskCalculator from "./RiskCalculator";
 
@@ -169,37 +176,63 @@ const ProcessStickyHeader = ({
                 {safeLabel(statusInfo?.label) || process?.status}
               </Badge>
 
-              {/* Calculadoras - sempre visíveis */}
-              <div className="flex items-center gap-1">
-                <DSTICalculator
-                  trigger={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs gap-1"
-                      title="Calculadora DSTI"
-                    >
-                      <Calculator className="h-3 w-3" />
-                      <span className="hidden sm:inline">DSTI</span>
-                    </Button>
-                  }
-                  clientData={clientDataForCalculators}
-                />
-                <RiskCalculator
-                  trigger={
-                    <Button
-                      variant="ghost"
-                      size="sm"
-                      className="h-7 px-2 text-xs gap-1"
-                      title="Calculadora de Risco"
-                    >
-                      <TrendingUp className="h-3 w-3" />
-                      <span className="hidden sm:inline">Risco</span>
-                    </Button>
-                  }
-                  clientData={clientDataForCalculators}
-                />
-              </div>
+              {/* Calculadoras agrupadas num Dropdown "Simulações" (Pacote AC) */}
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    className="h-7 px-2 text-xs gap-1"
+                    title="Simulações"
+                  >
+                    <Sparkles className="h-3 w-3" />
+                    <span className="hidden sm:inline">Simulações</span>
+                    <ChevronDown className="h-3 w-3" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="end" className="w-48">
+                  {/* onSelect preventDefault: o DialogTrigger interno das
+                      calculadoras precisa de receber o click para abrir o
+                      modal. Sem isto, o Radix fecha o menu antes do click
+                      chegar ao trigger. */}
+                  <DropdownMenuItem
+                    onSelect={(e) => e.preventDefault()}
+                    className="cursor-pointer"
+                  >
+                    <DSTICalculator
+                      trigger={
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 w-full text-left text-sm"
+                          title="Calculadora DSTI - Taxa de Esforço"
+                        >
+                          <Calculator className="h-4 w-4 text-blue-600" />
+                          Calculadora DSTI
+                        </button>
+                      }
+                      clientData={clientDataForCalculators}
+                    />
+                  </DropdownMenuItem>
+                  <DropdownMenuItem
+                    onSelect={(e) => e.preventDefault()}
+                    className="cursor-pointer"
+                  >
+                    <RiskCalculator
+                      trigger={
+                        <button
+                          type="button"
+                          className="flex items-center gap-2 w-full text-left text-sm"
+                          title="Calculadora de Risco de Crédito"
+                        >
+                          <TrendingUp className="h-4 w-4 text-purple-600" />
+                          Calculadora de Risco
+                        </button>
+                      }
+                      clientData={clientDataForCalculators}
+                    />
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
 
               {/* Botão expandir/colapsar */}
               <Button

@@ -3,6 +3,36 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] — Pacote AC: UX de Simulações e Compliance
+
+### Adicionado
+- **Dropdown de Simulações**: Os botões "DSTI" e "Risco" do cabeçalho do processo foram agrupados num único `DropdownMenu` do shadcn chamado "Simulações ▾" (ícone `Sparkles`). Aplicado em ambos os cabeçalhos: `ProcessStickyHeader.js` (sticky) e `ProcessDetails.js` (header principal). Cada item do menu usa `onSelect={(e) => e.preventDefault()}` para permitir que o `DialogTrigger` interno das calculadoras receba o click e abra o modal.
+
+- **Euribor Automática (Backend)**: Novo endpoint `GET /api/public/euribor` que devolve as taxas Euribor reais (1M, 3M, 6M, 12M) com cache diário (24h) em memória. Novo serviço `services/euribor_service.py` com 3 níveis de fallback: (1) cache fresco < 24h, (2) API externa `euribor-rates.eu`, (3) cache antigo mesmo expirado, (4) valores de fallback hardcoded. Lock anti-concorrência para evitar múltiplas buscas simultâneas. A resposta inclui `is_fallback` (bool) e `source` ("cache"|"api"|"cache_stale"|"fallback").
+
+- **Euribor Automática (Simulador CH)**: O `SimulatorCH.jsx` (Portal do Cliente) ganhou um seletor "Tipo de Taxa" (Fixa/Variável). Quando "Taxa Variável" é selecionada, o componente faz `fetch('/api/public/euribor')`, preenche automaticamente a Euribor 12M e calcula `TAN = Euribor + Spread`. O utilizador pode ajustar o spread (default 1.0%). Indicador visual mostra a Euribor carregada e badge "(estimada)" se for fallback.
+
+- **Euribor na Calculadora de Risco**: O `RiskCalculator.js` também consome a Euribor automática quando "Taxa Variável" é selecionada, com campo de spread ajustável e indicação visual da Euribor 12M carregada.
+
+- **Campos de Compliance no Modelo de Processo**: Adicionados 4 campos ao `CreditData` (`backend/models/process.py`): `admission_year` (int — Ano de admissão no emprego), `is_ppe` (bool — Pessoa Politicamente Exposta), `is_fpe` (bool — Pessoa Fiscalmente Exposta), `credit_incidents` (str — incidentes de crédito em texto livre). Validadores Pydantic para coerção de tipos (int/bool/str). Como o `CreditData` tem `extra="allow"` e o `ProcessUpdate` já aceita `credit_data`, os campos são persistidos automaticamente via `PUT /processes/{id}`.
+
+- **Cartão "Compliance & Perfil de Risco"**: Novo cartão na tab "Crédito" dos Detalhes do Processo (`ProcessDetails.js`), minimizado por defeito (`collapsedCards` inicial `{ credit_compliance: true }`). Segue o padrão existente (`CardHeaderWithEdit` + `collapsible` + `read-only-card`). Inclui: Ano de Admissão (input number), PPE (Switch), FPE (Switch), Incidentes de Crédito (Textarea). Aviso visual automático (rose) quando PPE ou FPE estão ativos, com mensagem contextualizada sobre compliance KYC/AML.
+
+### Corrigido
+- **RiskCalculator — Tipo de Taxa não atualizava cálculos**: O `onValueChange` do seletor "Tipo de Taxa" chamava apenas `setTipoTaxa` sem recalcular, e a função `calcular()` não lia `tipoTaxa`. Agora o `handleTipoTaxaChange` atualiza o state E, quando "Variável" é selecionada, dispara um `useEffect` que busca a Euribor e preenche `taxaAnual = euribor + spread` instantaneamente.
+
+- **RiskCalculator — Fallback do campo Entrada**: O `valorEntrada` usava `||` que é falsy para `0`, e o `if (clientData.valor_entrada || clientData.capital_proprio)` não preenchia quando ambos eram 0. Corrigido para `??` com default explícito `0`: `clientData.valor_entrada ?? clientData.capital_proprio ?? 0`. Agora lê corretamente o valor dos detalhes do processo e assume 0 (não 1) quando não existe.
+
+### Técnico
+- **Backend** (`backend/models/process.py`): 4 campos + 2 validadores adicionados ao `CreditData`.
+- **Backend** (`backend/services/euribor_service.py`): novo ficheiro (165 linhas) com `get_euribor_rates()` async + cache módulo-level + lock.
+- **Backend** (`backend/routes/public.py`): novo endpoint `GET /public/euribor` (montado em `/api/public/euribor`).
+- **Frontend** (`frontend/src/components/ProcessStickyHeader.js`): import `DropdownMenu` + `Sparkles`; 2 botões → 1 dropdown.
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): import `Switch`; 2 botões → 1 dropdown; `collapsedCards` inicial com `credit_compliance: true`; caso `credit_compliance` em `isCardEmpty`; novo cartão Compliance (80 linhas).
+- **Frontend** (`frontend/src/components/RiskCalculator.js`): estados `spreadEuribor`/`euriborAuto`/`euriborLoading`; `useEffect` Euribor; `handleTipoTaxaChange`/`handleSpreadChange`; fallback `??` no `valorEntrada`; campo Spread condicional na UI.
+- **Frontend** (`frontend/src/components/portal/SimulatorCH.jsx`): import `useEffect` + `TrendingUp`; estados `tipoTaxa`/`euribor12m`/`spread`; `useEffect` Euribor; seletor Fixa/Variável + painel Euribor+Spread na UI.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild` ✓ em todos os ficheiros JSX.
+
 ## [2026-06-29] — Pacote AB: Fix F821 no upload de logótipo de empresa
 
 ### Corrigido

@@ -43,6 +43,7 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
+import { Switch } from "../components/ui/switch";
 import { Calendar } from "../components/ui/calendar";
 import { ScrollArea } from "../components/ui/scroll-area";
 import {
@@ -331,7 +332,8 @@ const ProcessDetails = () => {
   const [editingCreditField, setEditingCreditField] = useState(null); // 'creditos' | 'contas' | 'simulacoes' | null
   // Per-card editing states (default: read-only). Null = no card in edit mode.
   const [editingCardId, setEditingCardId] = useState(null); // unique card ID (e.g. 'personal_contactos', 'financial_rendimentos') or null
-  const [collapsedCards, setCollapsedCards] = useState({}); // { cardId: boolean } — empty cards auto-collapse
+  // Pacote AC: cartão Compliance minimizado por defeito (collapsedCards[cardId] = true)
+  const [collapsedCards, setCollapsedCards] = useState({ credit_compliance: true }); // { cardId: boolean } — empty cards auto-collapse
   const [showPortalSenha, setShowPortalSenha] = useState(false);
   const [showSegSocialSenha, setShowSegSocialSenha] = useState(false);
   const [realEstateData, setRealEstateData] = useState({});
@@ -1842,6 +1844,12 @@ const ProcessDetails = () => {
       case 'credit_dados':
         return !creditData?.requested_amount && !creditData?.bank_name &&
                !creditData?.loan_term_years && !creditData?.interest_rate;
+      case 'credit_compliance':
+        // Pacote AC: cartão Compliance & Perfil de Risco — colapsa quando vazio
+        return !creditData?.admission_year &&
+               creditData?.is_ppe == null &&
+               creditData?.is_fpe == null &&
+               !creditData?.credit_incidents;
       case 'financial_credenciais':
         // Credenciais de Portais Oficiais (1º proponente) — colapsa quando
         // não há nenhum utilizador/senha preenchido em nenhum portal.
@@ -2573,47 +2581,76 @@ const ProcessDetails = () => {
                   </DropdownMenuContent>
                 </DropdownMenu>
 
-                <DSTICalculator
-                  trigger={
+                {/* Simulações agrupadas num Dropdown (Pacote AC) */}
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
                     <Button
                       variant="outline"
                       size="sm"
-                      className="text-blue-600 border-blue-200 hover:bg-blue-50 h-8 px-2 sm:px-3"
-                      title="Calculadora DSTI - Taxa de Esforço"
+                      className="text-amber-700 border-amber-200 hover:bg-amber-50 h-8 px-2 sm:px-3"
+                      title="Simulações"
                     >
-                      <Calculator className="h-3.5 w-3.5 sm:mr-1" />
-                      <span className="hidden sm:inline">DSTI</span>
+                      <Sparkles className="h-3.5 w-3.5 sm:mr-1" />
+                      <span className="hidden sm:inline">Simulações</span>
+                      <ChevronDown className="h-3.5 w-3.5 sm:ml-1" />
                     </Button>
-                  }
-                  clientData={{
-                    rendimento_bruto: financialData?.rendimento_bruto,
-                    rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                    salario_liquido: financialData?.salario_liquido,
-                    renda_habitacao_atual: financialData?.renda_habitacao_atual,
-                    rendimento_co_titular: financialData?.rendimento_co_titular,
-                  }}
-                />
-                <RiskCalculator
-                  trigger={
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-purple-600 border-purple-200 hover:bg-purple-50 h-8 px-2 sm:px-3"
-                      title="Calculadora de Risco de Crédito"
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-52">
+                    {/* onSelect preventDefault: o DialogTrigger interno das
+                        calculadoras precisa de receber o click para abrir o
+                        modal. Sem isto, o Radix fecha o menu antes do click
+                        chegar ao trigger. */}
+                    <DropdownMenuItem
+                      onSelect={(e) => e.preventDefault()}
+                      className="cursor-pointer p-0"
                     >
-                      <TrendingUp className="h-3.5 w-3.5 sm:mr-1" />
-                      <span className="hidden sm:inline">Risco</span>
-                    </Button>
-                  }
-                  clientData={{
-                    rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                    valor_imovel: realEstateData?.valor_imovel || realEstateData?.valor,
-                    valor_entrada: financialData?.valor_entrada || financialData?.capital_proprio,
-                    capital_proprio: financialData?.capital_proprio,
-                    idade: personalData?.idade,
-                    data_nascimento: personalData?.data_nascimento || personalData?.birth_date,
-                  }}
-                />
+                      <DSTICalculator
+                        trigger={
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-blue-600 hover:bg-blue-50 rounded"
+                            title="Calculadora DSTI - Taxa de Esforço"
+                          >
+                            <Calculator className="h-4 w-4" />
+                            Calculadora DSTI
+                          </button>
+                        }
+                        clientData={{
+                          rendimento_bruto: financialData?.rendimento_bruto,
+                          rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
+                          salario_liquido: financialData?.salario_liquido,
+                          renda_habitacao_atual: financialData?.renda_habitacao_atual,
+                          rendimento_co_titular: financialData?.rendimento_co_titular,
+                        }}
+                      />
+                    </DropdownMenuItem>
+                    <DropdownMenuItem
+                      onSelect={(e) => e.preventDefault()}
+                      className="cursor-pointer p-0"
+                    >
+                      <RiskCalculator
+                        trigger={
+                          <button
+                            type="button"
+                            className="flex items-center gap-2 w-full px-2 py-1.5 text-left text-sm text-purple-600 hover:bg-purple-50 rounded"
+                            title="Calculadora de Risco de Crédito"
+                          >
+                            <TrendingUp className="h-4 w-4" />
+                            Calculadora de Risco
+                          </button>
+                        }
+                        clientData={{
+                          rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
+                          valor_imovel: realEstateData?.valor_imovel || realEstateData?.valor,
+                          valor_entrada: financialData?.valor_entrada || financialData?.capital_proprio,
+                          capital_proprio: financialData?.capital_proprio,
+                          idade: personalData?.idade,
+                          data_nascimento: personalData?.data_nascimento || personalData?.birth_date,
+                        }}
+                      />
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
               </>
             )}
             
@@ -4845,6 +4882,90 @@ const ProcessDetails = () => {
                                 Valor da avaliação ({safeNumber(creditData.valuation_value).toLocaleString('pt-PT')}€) é inferior ao valor do imóvel ({safeNumber(realEstateData.valor_imovel).toLocaleString('pt-PT')}€). Diferença de {safeNumber(Math.abs(realEstateData.valor_imovel - creditData.valuation_value)).toLocaleString('pt-PT')}€.
                               </p>
                             </div>
+                          )}
+                        </CardContent>
+                      </Card>
+
+                      {/* ====== Compliance & Perfil de Risco (Pacote AC) ====== */}
+                      {/* Cartão minimizado por defeito (collapsedCards inicial = { credit_compliance: true }).
+                          Campos: admission_year (Ano de admissão), is_ppe (PPE), is_fpe (FPE),
+                          credit_incidents (texto livre). Persistidos em credit_data via cleanCreditDataForSubmit. */}
+                      <Card className={`border-l-4 border-l-rose-500 ${editingCardId !== 'credit_compliance' ? 'read-only-card' : ''}`}>
+                        <CardContent className="pt-4">
+                          <CardHeaderWithEdit title="Compliance & Perfil de Risco" cardKey="credit_compliance" icon={Shield} canEdit={canEditCredit} collapsible />
+                          {!shouldCardBeCollapsed('credit_compliance') && (
+                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {/* Ano de Admissão */}
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Ano de Admissão (no emprego atual)</Label>
+                              <Input
+                                type="number"
+                                min="1950"
+                                max="2099"
+                                value={creditData.admission_year || ""}
+                                onChange={(e) => setCreditData({ ...creditData, admission_year: parseInt(e.target.value) || null })}
+                                disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
+                                className="h-9"
+                                placeholder="Ex: 2020"
+                              />
+                            </div>
+
+                            {/* PPE — Pessoa Politicamente Exposta */}
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Pessoa Politicamente Exposta (PPE)</Label>
+                              <div className="flex items-center gap-2 h-9">
+                                <Switch
+                                  checked={creditData.is_ppe === true}
+                                  onCheckedChange={(checked) => setCreditData({ ...creditData, is_ppe: checked })}
+                                  disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                  {creditData.is_ppe === true ? "Sim — sujeito a compliance reforçado" : "Não"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* FPE — Pessoa Fiscalmente Exposta */}
+                            <div className="space-y-1">
+                              <Label className="text-xs text-muted-foreground">Pessoa Fiscalmente Exposta (FPE)</Label>
+                              <div className="flex items-center gap-2 h-9">
+                                <Switch
+                                  checked={creditData.is_fpe === true}
+                                  onCheckedChange={(checked) => setCreditData({ ...creditData, is_fpe: checked })}
+                                  disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
+                                />
+                                <span className="text-xs text-muted-foreground">
+                                  {creditData.is_fpe === true ? "Sim — incumprimento fiscal registado" : "Não"}
+                                </span>
+                              </div>
+                            </div>
+
+                            {/* Incidentes de Crédito (texto livre) */}
+                            <div className="space-y-1 md:col-span-2">
+                              <Label className="text-xs text-muted-foreground">Incidentes de Crédito</Label>
+                              <Textarea
+                                value={creditData.credit_incidents || ""}
+                                onChange={(e) => setCreditData({ ...creditData, credit_incidents: e.target.value })}
+                                disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
+                                rows={3}
+                                placeholder="Registos de incidentes de crédito (ex.: contas encerradas, incumprimentos, execuções fiscais). Deixar vazio se não houver."
+                              />
+                            </div>
+
+                            {/* Aviso se PPE ou FPE ativos */}
+                            {(creditData.is_ppe === true || creditData.is_fpe === true) && (
+                              <div className="md:col-span-2 p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg flex items-start gap-2">
+                                <AlertTriangle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
+                                <p className="text-xs text-rose-700 dark:text-rose-300">
+                                  {creditData.is_ppe === true && creditData.is_fpe === true
+                                    ? "Cliente identificado como PPE e FPE. Sujeito a compliance regulamentar reforçado (Banco de Portugal). Verifique procedimentos KYC/AML aplicáveis."
+                                    : creditData.is_ppe === true
+                                    ? "Cliente identificado como Pessoa Politicamente Exposta (PPE). Sujeito a procedimentos KYC/AML reforçados."
+                                    : "Cliente identificado como Pessoa Fiscalmente Exposta (FPE). Verificar impacto na análise de risco de crédito."}
+                                </p>
+                              </div>
+                            )}
+                          </div>
                           )}
                         </CardContent>
                       </Card>

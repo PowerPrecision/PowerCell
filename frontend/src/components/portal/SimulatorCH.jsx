@@ -19,8 +19,8 @@
  * vinculativa. Os valores reais podem variar em função de seguros, comissões
  * e outras condições do financiamento.
  */
-import React, { useState, useMemo } from 'react';
-import { Calculator, TrendingDown, Info, Euro, Calendar, Percent } from 'lucide-react';
+import React, { useState, useMemo, useEffect } from 'react';
+import { Calculator, TrendingDown, Info, Euro, Calendar, Percent, TrendingUp } from 'lucide-react';
 
 // ====================================================================
 // CÁLCULO MATEMÁTICO — Sistema Francês de Amortização
@@ -87,6 +87,54 @@ export default function SimulatorCH() {
   const [montante, setMontante] = useState(200000);
   const [prazoAnos, setPrazoAnos] = useState(30);
   const [tan, setTan] = useState(3.5);
+  // Pacote AC: Taxa Variável com Euribor automática
+  const [tipoTaxa, setTipoTaxa] = useState('fixa'); // 'fixa' | 'variavel'
+  const [euribor12m, setEuribor12m] = useState(null);
+  const [euriborLoading, setEuriborLoading] = useState(false);
+  const [euriborIsFallback, setEuriborIsFallback] = useState(false);
+  const [spread, setSpread] = useState(1.0); // spread sobre Euribor (padrão 1.0%)
+
+  // Pacote AC: quando Taxa Variável é selecionada, buscar Euribor automática
+  // do endpoint público (com cache diário no backend) e preencher TAN = euribor + spread.
+  useEffect(() => {
+    if (tipoTaxa !== 'variavel') return;
+    let cancelled = false;
+    // Se já temos a Euribor, recalcular TAN imediatamente
+    if (euribor12m != null) {
+      setTan(Number((euribor12m + spread).toFixed(2)));
+      return;
+    }
+    setEuriborLoading(true);
+    fetch('/api/public/euribor')
+      .then((r) => r.json())
+      .then((data) => {
+        if (cancelled) return;
+        const eur = Number(data.euribor_12m);
+        if (!isNaN(eur)) {
+          setEuribor12m(eur);
+          setEuriborIsFallback(data.is_fallback === true);
+          setTan(Number((eur + spread).toFixed(2)));
+        }
+      })
+      .catch((err) => console.warn('[SimulatorCH] Erro ao buscar Euribor:', err))
+      .finally(() => { if (!cancelled) setEuriborLoading(false); });
+    return () => { cancelled = true; };
+  }, [tipoTaxa, euribor12m, spread]);
+
+  // Se o utilizador voltar a Taxa Fixa, restaurar TAN padrão
+  const handleTipoTaxaChange = (novoTipo) => {
+    setTipoTaxa(novoTipo);
+    if (novoTipo === 'fixa' && euribor12m != null) {
+      setTan(3.5);
+    }
+  };
+
+  const handleSpreadChange = (novoSpread) => {
+    setSpread(Number(novoSpread));
+    if (euribor12m != null) {
+      setTan(Number((euribor12m + Number(novoSpread)).toFixed(2)));
+    }
+  };
 
   // Cálculo reactivo — atualiza automaticamente quando os inputs mudam
   const resultado = useMemo(() => {
@@ -120,6 +168,77 @@ export default function SimulatorCH() {
 
         {/* ── Inputs ── */}
         <div className="space-y-6">
+          {/* Pacote AC: Seletor de Tipo de Taxa (Fixa / Variável) */}
+          <div>
+            <label className="text-sm font-medium text-gray-700 flex items-center gap-1.5 mb-2">
+              <TrendingUp className="w-4 h-4 text-indigo-500" />
+              Tipo de Taxa
+            </label>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={() => handleTipoTaxaChange('fixa')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  tipoTaxa === 'fixa'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Taxa Fixa
+              </button>
+              <button
+                type="button"
+                onClick={() => handleTipoTaxaChange('variavel')}
+                className={`px-3 py-2 rounded-lg text-sm font-medium transition-all ${
+                  tipoTaxa === 'variavel'
+                    ? 'bg-indigo-600 text-white shadow-md'
+                    : 'bg-gray-100 text-gray-600 hover:bg-gray-200'
+                }`}
+              >
+                Taxa Variável
+              </button>
+            </div>
+            {tipoTaxa === 'variavel' && (
+              <div className="mt-2 p-2.5 bg-indigo-50 border border-indigo-100 rounded-lg">
+                <div className="flex items-center justify-between text-xs">
+                  <span className="text-gray-600">Euribor 12M:</span>
+                  {euriborLoading ? (
+                    <span className="text-gray-400 italic">A carregar...</span>
+                  ) : euribor12m != null ? (
+                    <span className="font-mono font-bold text-indigo-700">
+                      {euribor12m.toFixed(3)}%
+                      {euriborIsFallback && <span className="ml-1 text-[9px] text-amber-600">(estimada)</span>}
+                    </span>
+                  ) : (
+                    <span className="text-gray-400 italic">Indisponível</span>
+                  )}
+                </div>
+                <div className="flex items-center justify-between text-xs mt-1.5">
+                  <span className="text-gray-600">Spread:</span>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      min="0"
+                      max="5"
+                      step="0.1"
+                      value={spread}
+                      onChange={(e) => handleSpreadChange(e.target.value)}
+                      className="w-16 px-1.5 py-0.5 text-right text-xs border border-gray-200 rounded font-mono"
+                      disabled={euriborLoading}
+                    />
+                    <span className="text-gray-500">%</span>
+                  </div>
+                </div>
+                {euribor12m != null && (
+                  <div className="flex items-center justify-between text-xs mt-1.5 pt-1.5 border-t border-indigo-100">
+                    <span className="text-gray-600 font-medium">TAN = Euribor + Spread:</span>
+                    <span className="font-mono font-bold text-indigo-800">{tan.toFixed(2)}%</span>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
           {/* Montante */}
           <div>
             <div className="flex items-center justify-between mb-2">
