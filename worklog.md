@@ -1373,3 +1373,22 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: backend/services/changelog_service.py.
 - Resultado: geração de changelog por IA encontra worklog.md/CHANGELOG.md na raiz do repo no Render, resolvendo o 400 "Não foi possível obter dados da fonte".
+
+
+---
+Task ID: Pacote AI (GitHub Fallback + Docker Fix)
+Agent: Main Agent (Code Assistant)
+Task: Resolver ficheiros não incluídos no Docker (worklog.md/CHANGELOG.md)
+
+Work Log:
+- Logs do Render confirmaram: _resolve_project_file tentou ['/app', '/', '/app'] e nenhum tinha worklog.md ou CHANGELOG.md.
+- Causa raiz: render.yaml tem dockerContext: ./backend — o Docker build só inclui a pasta backend/. Os ficheiros na raiz do repo (worklog.md, CHANGELOG.md) estão fora do build context e nunca são copiados para a imagem.
+- Correção dupla (imediata + estrutural):
+  1. GitHub raw URL fallback (imediato): nova função _fetch_from_github() usa httpx para buscar worklog.md/CHANGELOG.md de https://raw.githubusercontent.com/PowerPrecision/PowerCell/dev/{filename}. read_worklog_file/read_changelog_file agora são async: tentam ficheiro local primeiro, depois GitHub. Configurável via env vars GITHUB_REPO_OWNER/NAME/BRANCH. Funciona sem auth (repo público).
+  2. Docker fix (estrutural): render.yaml dockerContext mudado de ./backend para . (repo root) em ambos os serviços (backend + worker). Dockerfile e Dockerfile.worker atualizados: COPY backend/ /app/ + COPY worklog.md CHANGELOG.md /app/ em vez de COPY . .
+- generate_changelog_ai: todas as chamadas a read_worklog_file/read_changelog_file atualizadas para await (funções agora async).
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 4 ficheiros: backend/services/changelog_service.py, render.yaml, backend/Dockerfile, backend/Dockerfile.worker.
+- Resultado: geração de changelog por IA funciona no Render mesmo sem os ficheiros na imagem Docker (fallback GitHub); o próximo deploy incluirá os ficheiros na imagem graças ao dockerContext corrigido.

@@ -30,7 +30,7 @@ services:
     name: powercell
     runtime: docker
     dockerfilePath: ./backend/Dockerfile
-    dockerContext: ./backend
+    dockerContext: .         # PACOTE AI: repo root para incluir worklog.md/CHANGELOG.md
     plan: starter
     region: frankfurt
     branch: dev
@@ -189,7 +189,7 @@ services:
     name: powercell-worker
     runtime: docker
     dockerfilePath: ./backend/Dockerfile.worker
-    dockerContext: ./backend
+    dockerContext: .         # PACOTE AI: repo root para incluir worklog.md/CHANGELOG.md
     plan: starter
     region: frankfurt
     branch: dev
