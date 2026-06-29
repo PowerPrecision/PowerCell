@@ -1288,3 +1288,20 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: frontend/src/pages/ProcessDetails.js.
 - Resultado: o loop de 404 para quando o processo é eliminado ou o token expira; o polling respeita a existência de id/token.
+
+
+---
+Task ID: Pacote AG (Changelog 400)
+Agent: Main Agent (Code Assistant)
+Task: Fix 400 em /api/system/changelog/generate-ai
+
+Work Log:
+- Erro: POST /api/system/changelog/generate-ai devolvia 400 ao "Gerar Notas de Atualização".
+- Causa raiz: ValueError no serviço generate_changelog_ai em 3 casos: (1) EMERGENT_LLM_KEY não configurada; (2) fonte não suportada; (3) sem dados da fonte (git log falha no Render porque não há .git no container de deploy).
+- O backend devolvia str(e) como detail — mensagens técnicas pouco claras para o utilizador.
+- Correção: mapeamento de mensagens técnicas para mensagens amigáveis em routes/changelog.py: EMERGENT_LLM_KEY → "chave não configurada, contacte admin"; "Não foi possível obter dados" → sugere mudar para CHANGELOG.md ou worklog.md. Logger melhorado com warning+exception. Erro 500 agora inclui tipo+mensagem.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/changelog.py.
+- Resultado: utilizador vê mensagem clara a indicar causa (chave IA / fonte Git indisponível no Render) e solução.

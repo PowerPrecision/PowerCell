@@ -57,9 +57,23 @@ async def generate_changelog(
         )
         return result
     except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        error_msg = str(e)
+        logger.warning("[CHANGELOG] ValueError ao gerar: %s | source_type=%s | user=%s", error_msg, payload.source_type, user.get("email"))
+        # Mensagens mais amigáveis para os erros mais comuns
+        if "EMERGENT_LLM_KEY" in error_msg or "OpenAI" in error_msg:
+            friendly = "A chave da API da IA (EMERGENT_LLM_KEY) não está configurada no servidor. Contacte o administrador para configurar a integração com OpenAI."
+        elif "Não foi possível obter dados da fonte" in error_msg:
+            friendly = (f"Não foi possível obter dados da fonte '{payload.source_type}'. "
+                        "No Render, o histórico Git pode não estar disponível. "
+                        "Tente selecionar 'Ficheiro CHANGELOG.md' ou 'worklog.md' como fonte.")
+        elif "Fonte não suportada" in error_msg:
+            friendly = error_msg
+        else:
+            friendly = error_msg
+        raise HTTPException(status_code=400, detail=friendly)
     except RuntimeError as e:
+        logger.error("[CHANGELOG] RuntimeError ao gerar: %s", e)
         raise HTTPException(status_code=502, detail=str(e))
     except Exception as e:
-        logger.error("Erro inesperado ao gerar changelog: %s", e)
-        raise HTTPException(status_code=500, detail="Erro ao gerar notas de atualização")
+        logger.exception("[CHANGELOG] Erro inesperado ao gerar changelog: %s", e)
+        raise HTTPException(status_code=500, detail=f"Erro ao gerar notas de atualização: {type(e).__name__}: {e}")
