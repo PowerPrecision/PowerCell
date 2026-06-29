@@ -12,8 +12,12 @@ FUNCIONALIDADES:
    - Ficheiro worklog.md
 3. Guardar o resultado na coleção system_changelogs
 
-INTEGRAÇÃO IA:
-- Usa OpenAI GPT-4o-mini (via EMERGENT_LLM_KEY) com retry
+INTEGRAÇÃO IA (Pacote AG — multi-provider):
+- Lê as credenciais e o provider ativo da BD (system_config.ai),
+  configurados pelo Admin via /api/admin/ai-config.
+- Fallback gracioso para variáveis de ambiente (EMERGENT_LLM_KEY /
+  OPENAI_API_KEY) se a BD não tiver config.
+- Suporta providers OpenAI e Emergent (endpoint OpenAI-compatible).
 - Prompt de Gestor de Produto que transforma logs técnicos em anúncios amigáveis
 - Suporta sanitização de input para prevenir prompt injection
 
@@ -23,7 +27,7 @@ COLEÇÃO MONGODB: system_changelogs
 import os
 import subprocess
 import logging
-from typing import Optional, List, Dict, Any
+from typing import Optional, List, Dict, Any, Tuple
 from datetime import datetime, timezone
 
 from openai import AsyncOpenAI
@@ -39,19 +43,60 @@ from models.changelog import ChangelogEntry, ChangelogResponse
 
 logger = logging.getLogger(__name__)
 
-# ── Configuração IA ──
-EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
-AI_MODEL = "gpt-4o-mini"
-
-_openai_client: Optional[AsyncOpenAI] = None
+# ── Defaults (usados apenas se a BD não tiver configuração) ──
+_DEFAULT_AI_MODEL = "gpt-4o-mini"
 
 
-def get_openai_client() -> AsyncOpenAI:
-    """Obter ou criar cliente OpenAI assíncrono (lazy singleton)."""
-    global _openai_client
-    if _openai_client is None:
-        _openai_client = AsyncOpenAI(api_key=EMERGENT_LLM_KEY)
-    return _openai_client
+async def get_ai_client_and_model() -> Tuple[Optional[AsyncOpenAI], str]:
+    """
+    Obtém o cliente OpenAI e o modelo ativo a partir da configuração do sistema.
+
+    PACOTE AG — Multi-provider:
+    Lê as credenciais e o provider definidos pelo Admin na BD
+    (coleção system_config, secção "ai"). Se a BD não tiver config,
+    faz fallback para as variáveis de ambiente (EMERGENT_LLM_KEY /
+    OPENAI_API_KEY) — retrocompatibilidade.
+
+    Returns:
+        Tuple (client, model):
+        - client: AsyncOpenAI configurado, ou None se não houver credenciais.
+        - model: Nome do modelo a usar (ex: "gpt-4o-mini").
+    """
+    api_key = None
+    base_url = None
+    model = _DEFAULT_AI_MODEL
+
+    # 1. Tentar ler da BD (configuração do Admin)
+    try:
+        from services.system_config import get_system_config
+        config = await get_system_config()
+        ai_config = getattr(config, "ai", None)
+        if ai_config:
+            api_key = ai_config.api_key or None
+            model = ai_config.model or model
+            # Se o provider for Emergent, usar o endpoint compatível
+            provider_value = getattr(ai_config, "provider", None)
+            provider_str = provider_value.value if hasattr(provider_value, "value") else str(provider_value)
+            if provider_str and "emergent" in provider_str.lower():
+                base_url = os.environ.get("EMERGENT_BASE_URL", "https://api.emergent.ai/v1")
+    except Exception as e:
+        logger.warning("[CHANGELOG] Erro ao ler config de IA da BD, a usar fallback env: %s", e)
+
+    # 2. Fallback para env vars se a BD não tiver api_key
+    if not api_key:
+        api_key = os.environ.get("OPENAI_API_KEY") or os.environ.get("EMERGENT_LLM_KEY")
+        if api_key and api_key.startswith("sk-emerg"):
+            base_url = os.environ.get("EMERGENT_BASE_URL", "https://api.emergent.ai/v1")
+
+    if not api_key:
+        return None, model
+
+    # 3. Construir cliente
+    client_kwargs = {"api_key": api_key}
+    if base_url:
+        client_kwargs["base_url"] = base_url
+
+    return AsyncOpenAI(**client_kwargs), model
 
 
 # ── Prompt base para geração de changelog ──
@@ -180,8 +225,9 @@ async def generate_changelog_ai(
     Returns:
         Dict com o changelog criado e metadados
     """
-    if not EMERGENT_LLM_KEY:
-        raise ValueError("Chave API OpenAI não configurada (EMERGENT_LLM_KEY)")
+    # PACOTE AG: a validação de credenciais foi movida para o passo 4,
+    # onde get_ai_client_and_model() lê da BD (config do Admin) com
+    # fallback para env vars. Isto respeita a regra multi-provider.
 
     # 1. Recolher dados da fonte com fallback automático em cadeia
     # CORREÇÃO (Pacote AE-fix): no Render, a pasta .git não está disponível no
@@ -252,16 +298,25 @@ Transforma estes dados num anúncio de lançamento amigável para os utilizadore
     if custom_prompt_suffix:
         user_prompt += f"\n\nInstrução adicional: {sanitize_source_text(custom_prompt_suffix)}"
 
-    # 4. Chamar IA com retry
+    # 4. Obter cliente IA + modelo da configuração do sistema (Pacote AG)
+    #    Lê as credenciais da BD (configuradas pelo Admin) com fallback para env vars.
+    client, ai_model = await get_ai_client_and_model()
+    if client is None:
+        raise ValueError(
+            "Nenhuma credencial de IA configurada. Configure o provider e a API key "
+            "em /api/admin/ai-config (painel de administração) ou defina OPENAI_API_KEY / "
+            "EMERGENT_LLM_KEY nas variáveis de ambiente."
+        )
+
+    # 5. Chamar IA com retry
     @retry(
         stop=stop_after_attempt(3),
         wait=wait_exponential(multiplier=1, min=2, max=10),
         retry=retry_if_exception_type(Exception),
     )
     async def call_ai():
-        client = get_openai_client()
         response = await client.chat.completions.create(
-            model=AI_MODEL,
+            model=ai_model,
             messages=[
                 {"role": "system", "content": CHANGELOG_SYSTEM_PROMPT},
                 {"role": "user", "content": user_prompt},
@@ -277,18 +332,18 @@ Transforma estes dados num anúncio de lançamento amigável para os utilizadore
         logger.error("Erro ao chamar IA para gerar changelog: %s", e)
         raise RuntimeError(f"Erro ao gerar changelog com IA: {str(e)}")
 
-    # 5. Extrair resultado
+    # 6. Extrair resultado
     content_markdown = response.choices[0].message.content.strip()
     tokens_used = response.usage.total_tokens if response.usage else None
 
-    # 6. Gerar versão (data atual)
+    # 7. Gerar versão (data atual)
     now = datetime.now(timezone.utc)
     version = now.strftime("%Y-%m-%d")
 
-    # 7. Criar resumo da fonte (primeiras 200 chars)
+    # 8. Criar resumo da fonte (primeiras 200 chars)
     source_summary = source_text[:200] + "..." if len(source_text) > 200 else source_text
 
-    # 8. Guardar na coleção system_changelogs
+    # 9. Guardar na coleção system_changelogs
     doc = {
         "version": version,
         "content_markdown": content_markdown,

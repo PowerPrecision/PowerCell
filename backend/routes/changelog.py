@@ -60,8 +60,10 @@ async def generate_changelog(
         error_msg = str(e)
         logger.warning("[CHANGELOG] ValueError ao gerar: %s | source_type=%s | user=%s", error_msg, payload.source_type, user.get("email"))
         # Mensagens mais amigáveis para os erros mais comuns
-        if "EMERGENT_LLM_KEY" in error_msg or "OpenAI" in error_msg:
-            friendly = "A chave da API da IA (EMERGENT_LLM_KEY) não está configurada no servidor. Contacte o administrador para configurar a integração com OpenAI."
+        if "Nenhuma credencial de IA configurada" in error_msg:
+            friendly = ("Nenhuma credencial de IA configurada. Configure o provider e a API key "
+                        "no painel de administração (Configurações → IA) ou defina OPENAI_API_KEY / "
+                        "EMERGENT_LLM_KEY nas variáveis de ambiente do servidor.")
         elif "Não foi possível obter dados da fonte" in error_msg:
             friendly = (f"Não foi possível obter dados da fonte '{payload.source_type}'. "
                         "No Render, o histórico Git pode não estar disponível. "
