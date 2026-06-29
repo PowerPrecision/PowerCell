@@ -1322,3 +1322,20 @@ Work Log:
 Stage Summary:
 - 3 ficheiros: backend/services/changelog_service.py, backend/models/changelog.py, frontend/src/pages/SystemConfigPage.js.
 - Resultado: geração de changelog por IA funciona no Render mesmo sem .git, usando worklog.md por defeito com fallback automático.
+
+
+---
+Task ID: Pacote AF (Companies Crash + Dropdown Preso)
+Agent: Main Agent (Code Assistant)
+Task: Fix "t.find is not a function" + Dropdown Simulações preso
+
+Work Log:
+- Bug 1 (Companies crash): fetchCompanies em CompaniesManagementPage.jsx fazia setCompanies(res.data?.data ?? res.data ?? []) sem verificar se era array. Se o endpoint devolver { items: [...] } ou { companies: [...] }, o state fica objeto e .find()/.map() partem.
+  Correção: extração segura — let rawData = res.data?.data ?? res.data; if (!Array.isArray(rawData)) rawData = rawData?.items || rawData?.companies || rawData?.results || []; setCompanies(Array.isArray(rawData) ? rawData : []). Guard defensivo também em selectedCompany: (Array.isArray(companies) ? companies : []).find(...).
+- Bug 2 (Dropdown preso): DropdownMenuItem com onSelect={(e) => e.preventDefault()} + calculadoras acopladas dentro do menu. O Radix não fecha o menu porque o preventDefault bloqueia o comportamento default, e o DialogTrigger interno precisa do click.
+  Correção (desacoplamento): calculadoras movidas para fora do DropdownMenu numa <div className="hidden">. Cada calculadora tem um <button ref={dstiRef/riskRef}> como trigger. Os DropdownMenuItem usam onSelect={() => dstiRef.current?.click()} — o Radix fecha o menu naturalmente E o click programático abre o modal. Aplicado em ProcessStickyHeader.js e ProcessDetails.js.
+- Validação: esbuild ✓ nos 3 ficheiros.
+
+Stage Summary:
+- 3 ficheiros: frontend/src/pages/CompaniesManagementPage.jsx, frontend/src/components/ProcessStickyHeader.js, frontend/src/pages/ProcessDetails.js.
+- Resultado: empresas não crasham com resposta paginada; dropdown de Simulações fecha correctamente após clique e abre o modal da calculadora.

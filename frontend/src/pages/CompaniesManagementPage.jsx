@@ -75,7 +75,17 @@ const CompaniesManagementPage = ({ embedded = false }) => {
     setLoading(true);
     try {
       const res = await getCompanies(searchTerm || undefined);
-      setCompanies(res.data?.data ?? res.data ?? []);
+      // CORREÇÃO (Pacote AF): extração segura do array.
+      // O endpoint pode devolver: Array puro, { data: [...] }, { items: [...] },
+      // { companies: [...] }, ou { data: { companies: [...] } }.
+      // Sem isto, se vier um objeto paginado, o state fica um objeto e
+      // o .find()/.map() partem com "t.find is not a function".
+      let rawData = res.data?.data ?? res.data;
+      if (!Array.isArray(rawData)) {
+        // Tentar propriedades comuns de listas paginadas
+        rawData = rawData?.items || rawData?.companies || rawData?.results || [];
+      }
+      setCompanies(Array.isArray(rawData) ? rawData : []);
     } catch (err) {
       console.error("Erro ao carregar empresas:", err);
       toast.error("Erro ao carregar a lista de empresas.");
@@ -251,7 +261,9 @@ const CompaniesManagementPage = ({ embedded = false }) => {
   };
 
   // ── Selected company (derived) ─────────────────────────────────
-  const selectedCompany = companies.find((c) => c.id === selectedId);
+  // Guard defensivo: se companies não for array (edge case), usar [] para
+  // evitar "t.find is not a function".
+  const selectedCompany = (Array.isArray(companies) ? companies : []).find((c) => c.id === selectedId);
   const showRightPanel = isCreating || selectedId;
 
   // ── Render ─────────────────────────────────────────────────────

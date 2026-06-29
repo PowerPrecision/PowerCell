@@ -49,6 +49,9 @@ const ProcessStickyHeader = ({
   const [isSticky, setIsSticky] = useState(false);
   const [internalCollapsed, setInternalCollapsed] = useState(false);
   const headerRef = useRef(null);
+  // Refs para os triggers das calculadoras (desacopladas do Dropdown — Pacote AF)
+  const dstiRef = useRef(null);
+  const riskRef = useRef(null);
 
   // Usar estado interno se não for controlado externamente
   const collapsed = externalCollapsed !== undefined ? externalCollapsed : internalCollapsed;
@@ -176,7 +179,12 @@ const ProcessStickyHeader = ({
                 {safeLabel(statusInfo?.label) || process?.status}
               </Badge>
 
-              {/* Calculadoras agrupadas num Dropdown "Simulações" (Pacote AC) */}
+              {/* Calculadoras agrupadas num Dropdown "Simulações" (Pacote AC)
+                  CORREÇÃO (Pacote AF): desacopladas do Dropdown para evitar
+                  que o menu fique preso aberto. As calculadoras ficam fora
+                  (div hidden) com refs aos botões de trigger; os itens do
+                  menu chamam ref.current?.click() para abrir o modal,
+                  permitindo ao Radix fechar o menu naturalmente. */}
               <DropdownMenu>
                 <DropdownMenuTrigger asChild>
                   <Button
@@ -191,48 +199,40 @@ const ProcessStickyHeader = ({
                   </Button>
                 </DropdownMenuTrigger>
                 <DropdownMenuContent align="end" className="w-48">
-                  {/* onSelect preventDefault: o DialogTrigger interno das
-                      calculadoras precisa de receber o click para abrir o
-                      modal. Sem isto, o Radix fecha o menu antes do click
-                      chegar ao trigger. */}
                   <DropdownMenuItem
-                    onSelect={(e) => e.preventDefault()}
-                    className="cursor-pointer"
+                    className="cursor-pointer gap-2"
+                    onSelect={() => dstiRef.current?.click()}
                   >
-                    <DSTICalculator
-                      trigger={
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 w-full text-left text-sm"
-                          title="Calculadora DSTI - Taxa de Esforço"
-                        >
-                          <Calculator className="h-4 w-4 text-blue-600" />
-                          Calculadora DSTI
-                        </button>
-                      }
-                      clientData={clientDataForCalculators}
-                    />
+                    <Calculator className="h-4 w-4 text-blue-600" />
+                    Calculadora DSTI
                   </DropdownMenuItem>
                   <DropdownMenuItem
-                    onSelect={(e) => e.preventDefault()}
-                    className="cursor-pointer"
+                    className="cursor-pointer gap-2"
+                    onSelect={() => riskRef.current?.click()}
                   >
-                    <RiskCalculator
-                      trigger={
-                        <button
-                          type="button"
-                          className="flex items-center gap-2 w-full text-left text-sm"
-                          title="Calculadora de Risco de Crédito"
-                        >
-                          <TrendingUp className="h-4 w-4 text-purple-600" />
-                          Calculadora de Risco
-                        </button>
-                      }
-                      clientData={clientDataForCalculators}
-                    />
+                    <TrendingUp className="h-4 w-4 text-purple-600" />
+                    Calculadora de Risco
                   </DropdownMenuItem>
                 </DropdownMenuContent>
               </DropdownMenu>
+
+              {/* Calculadoras desacopladas — invisíveis mas funcionais.
+                  Os botões reais de trigger estão aqui (hidden) e são
+                  clicados programaticamente pelos itens do Dropdown. */}
+              <div className="hidden" aria-hidden="true">
+                <DSTICalculator
+                  trigger={
+                    <button ref={dstiRef} type="button" title="Calculadora DSTI" />
+                  }
+                  clientData={clientDataForCalculators}
+                />
+                <RiskCalculator
+                  trigger={
+                    <button ref={riskRef} type="button" title="Calculadora de Risco" />
+                  }
+                  clientData={clientDataForCalculators}
+                />
+              </div>
 
               {/* Botão expandir/colapsar */}
               <Button
