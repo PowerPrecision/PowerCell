@@ -1244,3 +1244,26 @@ Stage Summary:
 - 3 ficheiros de documentação atualizados.
 - Resultado: endpoint /kanban degrada graciosamente quando workflow_statuses tem campos em falta; se houver outro erro, o detail da resposta 500 contém a mensagem real em vez de erro genérico.
 - Nota: o erro WebSocket ERR_ADDRESS_UNREACHABLE reportado em simultâneo é problema de rede/infraestrutura do Render (não de código) — o frontend já tem fallback a polling via useWebSocket.js.
+
+
+---
+Task ID: Pacote AD-fix (Impersonate)
+Agent: Main Agent (Code Assistant)
+Task: Fix do Parsing do Link de Impersonate — Ver como Cliente
+
+Work Log:
+- QA reportou: backend devolve HTTP 200 em /api/portal/impersonate/{id} mas frontend mostra toast "Não foi possível gerar o link".
+- Lido o handler onClick do botão "Ver como Cliente" em ProcessDetails.js (linhas 2542-2580).
+- Lido o backend routes/portal_admin.py (linhas 213-223): confirma que devolve {url, short_id, process_id, client_name, ...} — a chave correta é "url".
+- Lido o interceptor do api.js (linha 177-179): o interceptor de sucesso é (response) => response — não transforma, pelo que res.data.url deveria funcionar.
+- Hipótese: em alguma versão/estado a estrutura pode variar (ex.: resposta sem .data, ou chave alternativa). O código original lia apenas res?.data?.url — se falhasse por qualquer motivo, caía no toast genérico.
+- Correções aplicadas:
+  1. Extração robusta: const data = res?.data || res || {}; const url = data.url || data.magic_link || data.portal_url || data.link || data.access_url;
+  2. Tratamento de erro robusto: const detail = error?.response?.data?.detail || error?.response?.data?.message || error?.message || "Erro ao gerar link de acesso."; toast.error(detail);
+  3. Removida a condição que só mostrava o erro em 404 — agora qualquer erro é mostrado ao utilizador.
+- Validação: esbuild ✓.
+- Documentação: CHANGELOG, PRD, worklog atualizados.
+
+Stage Summary:
+- 1 ficheiro: frontend/src/pages/ProcessDetails.js (handler do botão Ver como Cliente).
+- Resultado: extração do link tenta 5 chaves possíveis; erros mostram sempre a mensagem real do servidor.

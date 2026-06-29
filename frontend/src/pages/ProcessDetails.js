@@ -2544,9 +2544,17 @@ const ProcessDetails = () => {
                       onClick={async () => {
                         try {
                           const res = await impersonateClientPortal(id);
-                          const url = res?.data?.url;
+                          // CORREÇÃO (Pacote AD-fix): extração robusta do link.
+                          // O backend devolve { url, short_id, process_id, ... } mas
+                          // diferentes versões/estados podem usar chaves distintas.
+                          // Tentamos todas as chaves possíveis antes de falhar.
+                          const data = res?.data || res || {};
+                          const url = data.url || data.magic_link || data.portal_url || data.link || data.access_url;
                           if (!url) {
-                            toast.error("Não foi possível gerar o link de impersonate");
+                            toast.error(
+                              extractErrorMessage(data) ||
+                              "Não foi possível gerar o link de impersonate (resposta inválida do servidor)."
+                            );
                             return;
                           }
                           // Abrir num novo separador. window.open devolve null
@@ -2566,12 +2574,14 @@ const ProcessDetails = () => {
                             toast.success("Portal do Cliente aberto num novo separador (modo Visualização)");
                           }
                         } catch (error) {
-                          // O interceptor global do api.js é silencioso em 404.
-                          // Extraímos o detail do backend para o utilizador ver a
-                          // causa real (ex.: "processo eliminado").
-                          if (error?.response?.status === 404) {
-                            toast.error(error?.response?.data?.detail || "Processo não encontrado");
-                          }
+                          // Tratamento de erro robusto: extrair a mensagem do servidor.
+                          // O interceptor global do api.js é silencioso em alguns 4xx.
+                          const detail =
+                            error?.response?.data?.detail ||
+                            error?.response?.data?.message ||
+                            error?.message ||
+                            "Erro ao gerar link de acesso.";
+                          toast.error(detail);
                         }
                       }}
                     >
