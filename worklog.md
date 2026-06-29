@@ -1152,3 +1152,28 @@ Stage Summary:
 - 3 ficheiros modificados: `frontend/src/pages/ClientPortal.jsx`, `frontend/src/pages/ClientPortalLogin.jsx`, `backend/routes/portal.py`.
 - 3 ficheiros de documentação atualizados: `CHANGELOG.md`, `memory/PRD.md`, `worklog.md`.
 - Resultado: clientes com token expirado deixam de ver 5×401 na consola; login tolera 8 tentativas (em vez de 5) com lockout mais curto (10 min em vez de 15); utilizador vê countdown claro durante o lockout e o botão fica desabilitado até poder tentar novamente.
+
+
+---
+Task ID: Pacote AB
+Agent: Main Agent (Code Assistant)
+Task: Fix F821 (CI blocker) no upload de logótipo de empresa
+
+Work Log:
+- Erro reportado pelo CI: `flake8 . --count --select=E9,F63,F7,F82` falhava com `F821 undefined name 'file_key'` em `backend/routes/companies_crud.py:246`.
+- Lido o ficheiro `companies_crud.py` (258 linhas): o endpoint `POST /admin/companies/{company_id}/logo` fazia `s3_key = f"companies/{company_id}/logo_..."` (linha 238), fazia `put_object` no S3, e depois `logo_url = file_key` (linha 246) — `file_key` nunca foi definido; a variável correta é `s3_key`.
+- Confirmado impacto: para além de falhar o CI, em runtime qualquer upload de logótipo geraria `NameError: name 'file_key' is not defined` → 500 Internal Server Error.
+- Verificado consumo no frontend (`CompaniesManagementPage.jsx` linhas 311-316, 446-449): `company.logo_url` é usado diretamente como `<img src={...}>`, logo precisa de ser um URL carregável (não apenas uma chave S3).
+- Verificado o serviço S3 (`s3_storage.py`): método `get_presigned_url(object_name, expiration=3600)` gera URL temporário.
+- Implementada solução robusta (não apenas rename da variável):
+  1. Corrigido `logo_url = file_key` → `logo_s3_key = s3_key` (guarda a chave S3 na BD).
+  2. Criado helper `_resolve_logo_url(logo_value)` com 3 ramos: None→None; URL http(s)→as-is (retrocompatibilidade com logos configurados via API); chave S3→URL pré-assinado de 7 dias (604800s, máximo para credenciais de longa duração).
+  3. Aplicado o helper nos endpoints `GET /admin/companies` (list) e `GET /admin/companies/{id}` (get) — o URL é gerado em tempo de leitura, nunca guardado na BD, pelo que nunca expira.
+  4. Resposta do upload devolve `{logo_url, logo_s3_key}` para o frontend mostrar de imediato.
+- Validação: `py_compile routes/companies_crud.py` ✓; `flake8 . --count --select=E9,F63,F7,F82` em todo o backend → **0 erros, exit 0**.
+- Atualizada documentação: `CHANGELOG.md` (Pacote AB), `memory/PRD.md` (bug #7), este worklog.
+
+Stage Summary:
+- 1 ficheiro de código modificado: `backend/routes/companies_crud.py` (F821 corrigido + helper _resolve_logo_url + aplicação em 2 endpoints GET).
+- 3 ficheiros de documentação atualizados: `CHANGELOG.md`, `memory/PRD.md`, `worklog.md`.
+- Resultado: CI passa (0 erros flake8); upload de logótipo de empresa funciona em runtime; frontend recebe URL pré-assinado fresco que nunca expira na BD.

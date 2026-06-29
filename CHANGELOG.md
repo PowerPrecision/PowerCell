@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] — Pacote AB: Fix F821 no upload de logótipo de empresa
+
+### Corrigido
+- **F821 undefined name 'file_key' (CI blocker)**: O endpoint `POST /admin/companies/{id}/logo` em `backend/routes/companies_crud.py` (linha 246) referenciava a variável `file_key` que nunca existia — a variável correta chama-se `s3_key`. Este erro era detetado pelo `flake8 --select=E9,F63,F7,F82` e **falhava o CI** (exit code 1). Em runtime, qualquer upload de logótipo de empresa teria gerado um `NameError` (500 Internal Server Error).
+
+- **Logótipo de empresa não era exibido no frontend**: Para além de corrigir o `NameError`, o campo `logo_url` passou a guardar a **chave S3** (ex.: `companies/{id}/logo_image.png`) na BD. Adicionado o helper `_resolve_logo_url()` que gera um **URL pré-assinado fresco** (validade 7 dias) em tempo de leitura, aplicado nos endpoints `GET /admin/companies` (list) e `GET /admin/companies/{id}`. Isto garante que o frontend recebe sempre um link válido e não expirado para `<img src>`, e suporta tanto chaves S3 como URLs absolutos (configurados manualmente via API).
+
+### Técnico
+- **Backend** (`backend/routes/companies_crud.py`): corrigido `logo_url = file_key` → `logo_s3_key = s3_key`; novo helper `_resolve_logo_url(logo_value)` com 3 ramos (None → None, URL http(s) → as-is, chave S3 → pre-signed URL 7 dias); aplicado em `list_companies` e `get_company`; resposta do upload devolve `{logo_url, logo_s3_key}`.
+- **Validação**: `py_compile` ✓; `flake8 . --count --select=E9,F63,F7,F82` → **0 erros** (exit 0) em todo o backend.
+
 ## [2026-06-29] — Pacote AA: Correção de Erros 401 e 429 no Portal do Cliente
 
 ### Corrigido

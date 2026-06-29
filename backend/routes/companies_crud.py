@@ -35,6 +35,38 @@ router = APIRouter(
 )
 
 
+def _resolve_logo_url(logo_value) -> Optional[str]:
+    """
+    Resolve o campo ``logo_url`` para um URL carregável pelo browser.
+
+    O campo ``logo_url`` pode conter:
+    - ``None`` / vazio → devolve ``None``.
+    - Um URL absoluto (``http://`` / ``https://``) → devolve como está
+      (ex.: logótipos configurados manualmente via API).
+    - Uma chave S3 (ex.: ``companies/{id}/logo_image.png``) → gera um
+      URL pré-assinado com validade de 7 dias.
+
+    O URL pré-assinado é gerado em tempo de leitura (nunca guardado na BD)
+    para evitar que expire. O frontend recebe sempre um link fresco e válido.
+    """
+    if not logo_value or not isinstance(logo_value, str):
+        return None
+    if logo_value.startswith(("http://", "https://")):
+        return logo_value
+    # Tratar como chave S3 — gerar URL pré-assinado
+    try:
+        from services.s3_storage import s3_service
+        if s3_service.is_configured():
+            # 7 dias (604800s) — máximo para credenciais de longa duração
+            url = s3_service.get_presigned_url(logo_value, expiration=7 * 24 * 3600)
+            if url:
+                return url
+    except Exception as e:
+        logger.warning(f"[COMPANIES] Erro ao gerar pre-signed URL para logo '{logo_value}': {e}")
+    # Fallback: devolver a chave (o frontend mostra placeholder se falhar)
+    return None
+
+
 @router.get("", response_model=CompanyListResponse)
 async def list_companies(
     search: Optional[str] = Query(None, description="Pesquisa por nome ou NIF"),
@@ -61,6 +93,8 @@ async def list_companies(
             "company": c.get("name", "")
         })
         doc = {**c, "total_users": total_users}
+        # Resolver logo_url (chave S3 → URL pré-assinado fresco)
+        doc["logo_url"] = _resolve_logo_url(doc.get("logo_url"))
         result.append(CompanyResponse(**doc).model_dump())
 
     return CompanyListResponse(companies=result, total=len(result))
@@ -91,6 +125,8 @@ async def get_company(company_id: str):
         "company": company.get("name", "")
     })
     company["total_users"] = total_users
+    # Resolver logo_url (chave S3 → URL pré-assinado fresco)
+    company["logo_url"] = _resolve_logo_url(company.get("logo_url"))
     return CompanyResponse(**company)
 
 
@@ -243,16 +279,23 @@ async def upload_company_logo(
         ContentType=file.content_type,
     )
 
-    logo_url = file_key
+    # CORREÇÃO (F821): antes era `logo_url = file_key` (variável inexistente).
+    # Guarda-se a CHAVE S3 no campo logo_url da BD; o URL pré-assinado é
+    # gerado em tempo de leitura pelos endpoints GET (list/get) via
+    # _resolve_logo_url(). Isto evita que o link expire na BD.
+    logo_s3_key = s3_key
 
     # Atualizar a empresa
     await db.companies.update_one(
         {"id": company_id},
         {"$set": {
-            "logo_url": logo_url,
+            "logo_url": logo_s3_key,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }}
     )
 
-    logger.info(f"[COMPANIES] Logótipo atualizado: {company_id} → {logo_url}")
-    return {"logo_url": logo_url}
+    # Devolver um URL pré-assinado para o frontend mostrar de imediato
+    logo_url = _resolve_logo_url(logo_s3_key)
+
+    logger.info(f"[COMPANIES] Logótipo atualizado: {company_id} → {logo_s3_key}")
+    return {"logo_url": logo_url, "logo_s3_key": logo_s3_key}
