@@ -1288,3 +1288,37 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: frontend/src/pages/ProcessDetails.js.
 - Resultado: o loop de 404 para quando o processo é eliminado ou o token expira; o polling respeita a existência de id/token.
+
+
+---
+Task ID: Pacote AG (Changelog 400)
+Agent: Main Agent (Code Assistant)
+Task: Fix 400 em /api/system/changelog/generate-ai
+
+Work Log:
+- Erro: POST /api/system/changelog/generate-ai devolvia 400 ao "Gerar Notas de Atualização".
+- Causa raiz: ValueError no serviço generate_changelog_ai em 3 casos: (1) EMERGENT_LLM_KEY não configurada; (2) fonte não suportada; (3) sem dados da fonte (git log falha no Render porque não há .git no container de deploy).
+- O backend devolvia str(e) como detail — mensagens técnicas pouco claras para o utilizador.
+- Correção: mapeamento de mensagens técnicas para mensagens amigáveis em routes/changelog.py: EMERGENT_LLM_KEY → "chave não configurada, contacte admin"; "Não foi possível obter dados" → sugere mudar para CHANGELOG.md ou worklog.md. Logger melhorado com warning+exception. Erro 500 agora inclui tipo+mensagem.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/changelog.py.
+- Resultado: utilizador vê mensagem clara a indicar causa (chave IA / fonte Git indisponível no Render) e solução.
+
+
+---
+Task ID: Pacote AE-fix (Changelog Render)
+Agent: Main Agent (Code Assistant)
+Task: Fallback automático + default worklog para geração de Changelog IA no Render
+
+Work Log:
+- Problema: POST /api/system/changelog/generate-ai devolvia 400 "Não foi possível obter dados da fonte git" no Render porque .git não está no container de deploy.
+- Backend (services/changelog_service.py): refactor do bloco de recolha de fonte com fallback em cadeia — git → worklog → changelog_file (e vice-versa para cada fonte). Se a fonte primária falhar, tenta automaticamente a secundária. logger.info regista cada fallback. Mensagem de erro final lista todas as fontes tentadas.
+- Backend (models/changelog.py): default de source_type mudado de "git" para "worklog" (ficheiro físico sempre presente no Render).
+- Frontend (SystemConfigPage.js): default do state sourceType mudado de "git" para "worklog"; seletor reordenado (worklog recomendado primeiro, git último com label "pode falhar no Render").
+- Validação: py_compile ✓; flake8 0 erros; esbuild ✓.
+
+Stage Summary:
+- 3 ficheiros: backend/services/changelog_service.py, backend/models/changelog.py, frontend/src/pages/SystemConfigPage.js.
+- Resultado: geração de changelog por IA funciona no Render mesmo sem .git, usando worklog.md por defeito com fallback automático.

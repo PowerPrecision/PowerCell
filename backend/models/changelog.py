@@ -35,8 +35,13 @@ class ChangelogResponse(BaseModel):
 
 
 class ChangelogGenerateRequest(BaseModel):
-    """Pedido de geração de changelog por IA (opcionalmente com fonte personalizada)."""
-    source_type: str = Field(default="git", description="Fonte dos dados: 'git', 'changelog_file', 'worklog'")
+    """Pedido de geração de changelog por IA (opcionalmente com fonte personalizada).
+
+    CORREÇÃO (Pacote AE-fix): default mudado de 'git' para 'worklog' porque
+    no Render a pasta .git não está disponível no container de deploy.
+    'worklog' lê o ficheiro físico worklog.md que está sempre presente.
+    """
+    source_type: str = Field(default="worklog", description="Fonte dos dados: 'worklog', 'changelog_file', 'git' (git pode falhar no Render)")
     max_source_lines: int = Field(default=50, description="Número máximo de linhas a ler da fonte")
     custom_prompt_suffix: Optional[str] = Field(None, description="Sufixo opcional a adicionar ao prompt da IA")
 
