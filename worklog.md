@@ -1357,3 +1357,19 @@ Work Log:
 Stage Summary:
 - 2 ficheiros: backend/services/changelog_service.py, backend/routes/changelog.py.
 - Resultado: geração de changelog por IA usa credenciais da BD (configuradas pelo Admin) com fallback para env vars; respeita a regra multi-provider do sistema.
+
+
+---
+Task ID: Pacote AH (Directory Resolver)
+Agent: Main Agent (Code Assistant)
+Task: Resolver caminho de worklog.md/CHANGELOG.md no Render (/app)
+
+Work Log:
+- Causa raiz do 400 persistente: no Render, o Docker corre o backend em /app (pasta backend/), mas worklog.md e CHANGELOG.md estão na raiz do repo (um nível acima). As funções read_worklog_file/read_changelog_file usavam os.path.dirname(os.path.dirname(os.path.abspath(__file__))) que resolve para /app, não / (raiz do repo).
+- Criado helper _resolve_project_file(filename) que tenta 3 diretórios candidatos: (1) Path.cwd() (cwd atual); (2) repo_root = backend_dir.parent (raiz do repo); (3) backend_dir (fallback). Usa pathlib para resolução robusta. Loga onde encontrou ou quais diretórios tentou.
+- read_changelog_file() e read_worklog_file() agora usam _resolve_project_file() em vez de caminho fixo.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/services/changelog_service.py.
+- Resultado: geração de changelog por IA encontra worklog.md/CHANGELOG.md na raiz do repo no Render, resolvendo o 400 "Não foi possível obter dados da fonte".

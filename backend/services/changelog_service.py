@@ -133,6 +133,50 @@ def sanitize_source_text(text: str) -> str:
 
 # ── Fontes de dados ──
 
+def _resolve_project_file(filename: str) -> Optional[str]:
+    """
+    Resolve o caminho absoluto de um ficheiro na raiz do projeto.
+
+    PACOTE AH — Directory Resolver:
+    No Render, o Docker corre o backend em /app (pasta backend/), mas os
+    ficheiros worklog.md e CHANGELOG.md estão na raiz do repositório (um
+    nível acima). Esta função tenta vários diretórios candidatos:
+
+    1. Diretório pai do diretório atual (ex: /app/../worklog.md = /worklog.md)
+       — funciona quando o cwd é /app (backend/)
+    2. Diretório atual (ex: ./worklog.md) — funciona em dev local
+    3. Dois níveis acima de __file__ (ex: /app/services/../../worklog.md)
+       — resolve a raiz do repo a partir do ficheiro
+    4. Diretório pai de __file__ (ex: /app/../worklog.md)
+
+    Returns:
+        Caminho absoluto se encontrado, None caso contrário.
+    """
+    from pathlib import Path
+
+    this_file = Path(__file__).resolve()
+    backend_dir = this_file.parent.parent  # /app (pasta backend/)
+    repo_root = backend_dir.parent          # raiz do repositório
+
+    candidate_dirs = [
+        Path.cwd(),                   # cwd atual (ex: /app em produção, ou repo root em dev)
+        repo_root,                    # raiz do repo (um nível acima de backend/)
+        backend_dir,                  # pasta backend/ (fallback)
+    ]
+
+    for d in candidate_dirs:
+        candidate = d / filename
+        if candidate.exists() and candidate.is_file():
+            logger.info("[CHANGELOG] Ficheiro '%s' encontrado em %s", filename, candidate)
+            return str(candidate)
+
+    logger.warning(
+        "[CHANGELOG] Ficheiro '%s' não encontrado em nenhum dos diretórios: %s",
+        filename, [str(d) for d in candidate_dirs]
+    )
+    return None
+
+
 def read_git_log(max_lines: int = 50) -> str:
     """Ler os últimos commits do Git como fonte para o changelog."""
     try:
@@ -153,14 +197,15 @@ def read_git_log(max_lines: int = 50) -> str:
 
 
 def read_changelog_file(max_lines: int = 50) -> str:
-    """Ler as últimas linhas do ficheiro CHANGELOG.md."""
+    """Ler as últimas linhas do ficheiro CHANGELOG.md.
+
+    PACOTE AH: usa _resolve_project_file() para encontrar o ficheiro
+    na raiz do repositório (um nível acima de backend/), suportando
+    tanto dev local como deploy no Render (/app).
+    """
     try:
-        changelog_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "CHANGELOG.md"
-        )
-        if not os.path.exists(changelog_path):
-            logger.warning("CHANGELOG.md não encontrado em %s", changelog_path)
+        changelog_path = _resolve_project_file("CHANGELOG.md")
+        if not changelog_path:
             return ""
         with open(changelog_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
@@ -172,14 +217,15 @@ def read_changelog_file(max_lines: int = 50) -> str:
 
 
 def read_worklog_file(max_lines: int = 50) -> str:
-    """Ler as últimas linhas do ficheiro worklog.md."""
+    """Ler as últimas linhas do ficheiro worklog.md.
+
+    PACOTE AH: usa _resolve_project_file() para encontrar o ficheiro
+    na raiz do repositório (um nível acima de backend/), suportando
+    tanto dev local como deploy no Render (/app).
+    """
     try:
-        worklog_path = os.path.join(
-            os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
-            "worklog.md"
-        )
-        if not os.path.exists(worklog_path):
-            logger.warning("worklog.md não encontrado em %s", worklog_path)
+        worklog_path = _resolve_project_file("worklog.md")
+        if not worklog_path:
             return ""
         with open(worklog_path, "r", encoding="utf-8") as f:
             lines = f.readlines()
