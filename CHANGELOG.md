@@ -3,6 +3,15 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] — Pacote AE: Fix 500 no endpoint do Kanban
+
+### Corrigido
+- **500 Internal Server Error no `GET /api/processes/kanban` (Bug Crítico)**: O endpoint falhava com 500 quando um documento na coleção `workflow_statuses` tinha campos em falta (`label`, `color`, `order`, `id`, ou `name`). O código usava **bracket notation** (`status["label"]`) que lança `KeyError` se o campo não existir. Corrigido para usar `.get()` com defaults graciosos: `label` → `name.replace("_", " ").title()`, `color` → `#6B7280` (cinza), `order` → `0`, `id` → `name`. Adicionado try/except defensivo que loga o erro real (KeyError ou outro) com `logger.exception` e devolve `HTTPException(500)` com o detalhe da exceção, em vez de 500 genérico sem informação.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): linhas 2077-2135 — loop `for status in statuses` envolvido em try/except; 5 acessos `status["..."]` trocados por `status.get("...", default)`; 2 handlers de exceção (KeyError → mensagem de configuração; Exception → mensagem genérica com tipo do erro).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-06-29] — Pacote AD: Simulador Avançado (Taxa Mista, Seguros e Travas)
 
 ### Adicionado
