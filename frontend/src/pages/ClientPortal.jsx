@@ -2548,7 +2548,7 @@ export default function ClientPortal() {
 
             {/* ═══ Tab: Simulador de Crédito Habitação ═══ */}
             {activeTab === 'simulador' && (
-              <SimulatorCH />
+              <SimulatorCH clienteDataNascimento={data?.dados_pessoais?.data_nascimento || data?.client_data?.data_nascimento} />
             )}
 
             {/* ═══ Tab: As Minhas Visitas ═══ */}

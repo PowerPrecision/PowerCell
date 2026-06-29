@@ -3,6 +3,24 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] — Pacote AD: Simulador Avançado (Taxa Mista, Seguros e Travas)
+
+### Adicionado
+- **Modo Básico vs Avançado**: O `SimulatorCH.jsx` foi dividido em duas secções visuais. A simulação rápida (sempre visível) pede apenas Montante, Prazo e Tipo de Taxa. Os campos de Seguro de Vida, Seguro Multiriscos e Comissões Iniciais ficam ocultos num `Accordion` "⚙️ Opções Avançadas" do shadcn (minimizado por defeito).
+
+- **Valores por Defeito de TAEG (Fallbacks Invisíveis)**: Quando as opções avançadas não são tocadas, o simulador injeta fallbacks realistas para calcular a TAEG: Seguro de Vida = **15€/mês**, Multiriscos = **10€/mês**, Comissões = **0€**. Os valores são usados no cálculo mas só aparecem na UI se o cliente abrir o Accordion. Uma nota no Accordion explica os valores por defeito aplicados.
+
+- **Motor da Taxa Mista**: Novo tipo de taxa "Mista" (além de Fixa e Variável). Quando selecionada, mostram-se obrigatoriamente os campos "Prazo da Taxa Fixa (Anos)" e "Taxa Fixa Aplicável (%)". O motor matemático foi refactorado para 2 fases: (1) Fase Fixa — prestação constante com `taxaFixa` sobre o prazo total; (2) Amortização — cálculo do capital em dívida após `prazoTaxaFixa × 12` prestações via valor presente das prestações restantes; (3) Fase Variável — nova prestação com `tan` sobre o capital amortizado durante os anos restantes. O resultado mostra ambas as prestações (Fase 1 e Fase 2) e o capital em dívida no fim da fase fixa.
+
+- **TAEG por Bisseção**: Nova função `calcularTAEG()` que calcula a Taxa Anual de Encargos Efetiva por bisseção (100 iterações) — a taxa que iguala o montante líquido (após comissões) ao valor presente de todas as prestações + seguros. A TAEG é exibida em destaque junto à prestação mensal.
+
+- **Travas de Idade (Maturidade BP)**: O `SimulatorCH` agora aceita a prop `clienteDataNascimento` (passada pelo `ClientPortal` a partir de `data.dados_pessoais.data_nascimento`). A idade é calculada e o slider do Prazo é limitado dinamicamente: **≤ 30 anos → máx 40 anos**, **31-35 anos → máx 37 anos**, **> 35 anos → máx 35 anos**. Se o prazo atual exceder o novo máximo (ex.: cliente envelhece), é ajustado automaticamente. Badge visual mostra a idade e o limite aplicado.
+
+### Técnico
+- **Frontend** (`frontend/src/components/portal/SimulatorCH.jsx`): reescrita completa (~550 linhas). Novas funções: `prestacaoFrances()`, `capitalEmDivida()`, `calcularTAEG()` (bisseção), `calcularSimulacao()` (motor 2 fases), `calcularIdade()`, `prazoMaximoPorIdade()`. UI com 3 botões de Tipo de Taxa, painel Taxa Mista (violeta), Accordion de Opções Avançadas, e resultado com TAEG + decomposição (Montante/Total/Juros/Seguros+Comissões).
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): `<SimulatorCH />` passou a `<SimulatorCH clienteDataNascimento={data?.dados_pessoais?.data_nascimento || data?.client_data?.data_nascimento} />`.
+- **Validação**: `esbuild` ✓ em ambos os ficheiros.
+
 ## [2026-06-29] — Pacote AC: UX de Simulações e Compliance
 
 ### Adicionado

@@ -87,6 +87,13 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - **Cartão "Compliance & Perfil de Risco"**: Novo cartão minimizado por defeito na tab Crédito dos Detalhes do Processo, com aviso visual automático para PPE/FPE.
 - **Fix RiskCalculator**: `tipoTaxa` agora atualiza cálculos instantaneamente; fallback do campo Entrada corrigido (0 em vez de 1, lê do processo).
 
+### Funcionalidades do Pacote AD (2026-06-29)
+- **Simulador Avançado (SimulatorCH)**: Motor de nível bancário com 4 melhorias:
+  - **Modo Básico vs Avançado**: Simulação rápida (Montante/Prazo/TipoTaxa) sempre visível; Seguros e Comissões num `Accordion` "⚙️ Opções Avançadas" minimizado.
+  - **TAEG com fallbacks invisíveis**: Seguro Vida 15€/mês, Multiriscos 10€/mês, Comissões 0€ aplicados por defeito no cálculo da TAEG (só visíveis se o Accordion for aberto). TAEG calculada por bisseção (100 iterações).
+  - **Motor da Taxa Mista**: 2 fases — Fase 1 (taxa fixa, prestação constante) → amortização do capital (valor presente das prestações restantes) → Fase 2 (taxa variável sobre capital amortizado). Campos "Prazo da Taxa Fixa" e "Taxa Fixa Aplicável" obrigatórios.
+  - **Travas de Idade BP**: `SimulatorCH` recebe `clienteDataNascimento` do `ClientPortal`; slider do Prazo limitado dinamicamente (≤30→40, 31-35→37, >35→35 anos) com badge visual.
+
 ### Funcionalidades Completadas ✅
 1. **✅ Filtro de documentos já solicitados** (já implementado): O `PortalDocumentRequests.js` filtra automaticamente categorias já solicitadas da lista de seleção (linhas 128-139, `availableCategories`).
 2. **✅ Multi-seleção de tipos de documento** (já implementado): O `PortalDocumentRequests.js` permite selecionar múltiplas categorias com checkboxes e cria pedidos em batch (linhas 292-319, `newDoc.categories`).

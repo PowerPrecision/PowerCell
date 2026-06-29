@@ -1198,3 +1198,26 @@ Stage Summary:
 - 7 ficheiros modificados: backend/models/process.py, backend/services/euribor_service.py (novo), backend/routes/public.py, frontend/src/components/ProcessStickyHeader.js, frontend/src/pages/ProcessDetails.js, frontend/src/components/RiskCalculator.js, frontend/src/components/portal/SimulatorCH.jsx.
 - 3 ficheiros de documentação atualizados: CHANGELOG.md, memory/PRD.md, worklog.md.
 - Resultado: cabeçalho mais limpo (1 dropdown em vez de 2 botões); RiskCalculator reativo ao Tipo de Taxa; Euribor automática com cache diário em 2 sítios (Simulador CH + RiskCalculator); 4 campos de compliance persistidos em credit_data; cartão Compliance minimizado por defeito com aviso KYC/AML para PPE/FPE.
+
+
+---
+Task ID: Pacote AD
+Agent: Main Agent (Code Assistant)
+Task: Simulador Avançado — Taxa Mista, Seguros e Travas de Idade
+
+Work Log:
+- Lido o SimulatorCH.jsx atual (modificado no Pacote AC com Euribor) e o ClientPortal.jsx (linha 2551 onde <SimulatorCH /> é invocado sem props).
+- Confirmada existência do Accordion do shadcn (frontend/src/components/ui/accordion.jsx) — usa AccordionPrimitive.Root com type="single" collapsible.
+- Confirmada estrutura de dados do Portal: `data.dados_pessoais.data_nascimento` disponível no estado `data` (vindo de /portal/status).
+- Tarefa 1 (Modo Básico vs Avançado): reorganizada a UI — simulação rápida (Montante/Prazo/TipoTaxa/TAN) sempre visível; Seguro de Vida, Multiriscos e Comissões Iniciais movidos para um Accordion "⚙️ Opções Avançadas" minimizado por defeito.
+- Tarefa 2 (Fallbacks Invisíveis TAEG): estados seguroVida=15, seguroMultiriscos=10, comissoesIniciais=0 como defaults. Usados no cálculo da TAEG mas só visíveis se o Accordion for aberto. Nota explicativa dentro do Accordion. Nova função calcularTAEG() por bisseção (100 iterações, precisão 1e-7) que iguala montanteLiquido = VP(prestações + seguros).
+- Tarefa 3 (Motor Taxa Mista): novo tipo "mista" adicionado aos botões (Fixa/Variável/Mista). Campos "Prazo da Taxa Fixa (Anos)" + "Taxa Fixa Aplicável (%)" obrigatórios (painel violeta). Motor refactorado em calcularSimulacao(): (1) Fase 1 = prestacaoFrances(montante, taxaFixa, n) — prestação constante; (2) Amortização = capitalEmDivida(prestacao, taxaFixa, n, mesesFase1) via VP das prestações restantes; (3) Fase 2 = prestacaoFrances(capitalAmortizado, tan, mesesFase2). Resultado mostra ambas as prestações + capital em dívida no fim da fase fixa.
+- Tarefa 4 (Travas de Idade BP): SimulatorCH agora aceita prop `clienteDataNascimento`. ClientPortal passa `data?.dados_pessoais?.data_nascimento`. Funções calcularIdade() e prazoMaximoPorIdade() (≤30→40, 31-35→37, >35→35). Slider do Prazo tem `max={prazoMax}` dinâmico; useEffect ajusta prazoAnos se exceder o máximo. Badge visual mostra idade + limite.
+- Resultado enriquecido: TAEG em destaque (pill) junto à prestação; 4 cards de detalhes (Montante/Total/Juros/Seguros+Comissões); prestação Fase 2 destacada (violeta) quando Taxa Mista.
+- Validação: esbuild ✓ em SimulatorCH.jsx e ClientPortal.jsx. Removido import não usado (ChevronDown) — o Accordion do shadcn já injeta o seu.
+- Atualizada documentação: CHANGELOG.md (Pacote AD), memory/PRD.md (secção Pacote AD), este worklog.
+
+Stage Summary:
+- 2 ficheiros modificados: frontend/src/components/portal/SimulatorCH.jsx (reescrita completa ~550 linhas), frontend/src/pages/ClientPortal.jsx (passar prop clienteDataNascimento).
+- 3 ficheiros de documentação atualizados: CHANGELOG.md, memory/PRD.md, worklog.md.
+- Resultado: simulador de nível bancário com 3 tipos de taxa (Fixa/Variável/Mista), motor de 2 fases para mista, TAEG realista por bisseção com fallbacks invisíveis, e travas de idade BP no slider do prazo.
