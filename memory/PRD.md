@@ -69,13 +69,15 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - Perfis: `/configuracoes-perfis`
 - Gestão formulário: `/gestao-formulario`
 
-## Issues Conhecidos e Bugs (2026-07-15 — ATUALIZADO)
+## Issues Conhecidos e Bugs (2026-06-29 — ATUALIZADO)
 
 ### Bugs Corrigidos ✅
 1. **✅ Explorador de Ficheiros não mostra ficheiros** (corrigido 2026-07-15): O `S3Service` lia apenas variáveis de ambiente na inicialização. Adicionado `reconfigure()` + `sync_s3_from_db_config()` no startup e sincronização em tempo real quando config é guardada via UI.
 2. **✅ Rota /definicoes incorreta para "Definições Gerais"** (corrigido 2026-07-15): Banner do Explorador de Ficheiros agora navega corretamente: admins → `/configuracoes`, não-admins → mensagem "Contacte um administrador".
 3. **✅ React Minified Error #31** (corrigido 2026-07-15): Adicionados 16+ `safeString()` wrappers em `ProcessDetails.js` e `ProcessDetailsModal.jsx` para evitar renderização de objetos `{value, label}` como React children.
 4. **✅ 500 Internal Server Error em POST /api/documents/portal-requests/{processId}** (corrigido 2026-07-15): Adicionada validação de process_id vazio (400) e logging detalhado para debugging.
+5. **✅ Erros 401 em cascata no Portal do Cliente** (corrigido 2026-06-29, Pacote AA): Os `useEffect` de `messages`, `recommendations` e `visits` no `ClientPortal.jsx` disparavam no mount sem verificar `isVerified`, gerando 5×401 quando o token estava expirado. Adicionado guard `isVerified` aos 3 `useEffect` + paragem do polling de mensagens quando a sessão expira.
+6. **✅ 429 Too Many Requests no login do Portal** (corrigido 2026-06-29, Pacote AA): Limite de login demasiado agressivo (5 tentativas / 15 min lockout). Ajustado para 8 tentativas / 10 min. Resposta 429 agora inclui `retry_after` (segundos) no body. Frontend mostra countdown visual e desabilita o botão durante o lockout.
 
 ### Funcionalidades Completadas ✅
 1. **✅ Filtro de documentos já solicitados** (já implementado): O `PortalDocumentRequests.js` filtra automaticamente categorias já solicitadas da lista de seleção (linhas 128-139, `availableCategories`).

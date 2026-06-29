@@ -101,8 +101,13 @@ class PortalLoginRequest(BaseModel):
 # ====================================================================
 
 # Tentativas máximas de login por email (prevenção de brute-force)
-MAX_LOGIN_ATTEMPTS = 5
-LOGIN_LOCKOUT_MINUTES = 15
+# CORREÇÃO: Aumentado de 5 → 8 e lockout reduzido de 15 → 10 min.
+# 5 tentativas era demasiado agressivo para utilizadores legítimos que
+# digitam o código de acesso manualmente (6 caracteres alfanuméricos).
+# 8 tentativas mantém proteção brute-force razoável e 10 min de lockout
+# é menos punitivo para erros genuínos.
+MAX_LOGIN_ATTEMPTS = 8
+LOGIN_LOCKOUT_MINUTES = 10
 
 
 @router.post("/auth/login")
@@ -142,14 +147,23 @@ async def portal_login(data: PortalLoginRequest):
                     locked_until.replace('Z', '+00:00') if isinstance(locked_until, str) else locked_until
                 )
                 if datetime.now(timezone.utc) < locked_until_dt:
-                    remaining = int((locked_until_dt - datetime.now(timezone.utc)).total_seconds() / 60)
+                    remaining_seconds = int((locked_until_dt - datetime.now(timezone.utc)).total_seconds())
+                    remaining_minutes = max(1, remaining_seconds // 60)
                     logger.warning(
                         f"[PORTAL LOGIN] Conta bloqueada para email={email}. "
-                        f"Tenta novamente em {remaining} min."
+                        f"Tenta novamente em {remaining_minutes} min."
                     )
                     raise HTTPException(
                         status_code=429,
-                        detail=f"Muitas tentativas falhadas. Tente novamente em {remaining} minutos."
+                        detail={
+                            "error": "Conta temporariamente bloqueada",
+                            "message": f"Muitas tentativas falhadas. Tente novamente em {remaining_minutes} minutos.",
+                            "retry_after": remaining_seconds,
+                            "retry_after_minutes": remaining_minutes,
+                        },
+                        headers={
+                            "Retry-After": str(remaining_seconds),
+                        }
                     )
             except (ValueError, TypeError):
                 pass  # Data inválida, ignorar lockout
@@ -162,9 +176,18 @@ async def portal_login(data: PortalLoginRequest):
                 {"_id": lockout_key},
                 {"$set": {"locked_until": locked_until_str}}
             )
+            retry_after_seconds = LOGIN_LOCKOUT_MINUTES * 60
             raise HTTPException(
                 status_code=429,
-                detail=f"Muitas tentativas falhadas. Conta bloqueada por {LOGIN_LOCKOUT_MINUTES} minutos."
+                detail={
+                    "error": "Conta temporariamente bloqueada",
+                    "message": f"Muitas tentativas falhadas. Conta bloqueada por {LOGIN_LOCKOUT_MINUTES} minutos.",
+                    "retry_after": retry_after_seconds,
+                    "retry_after_minutes": LOGIN_LOCKOUT_MINUTES,
+                },
+                headers={
+                    "Retry-After": str(retry_after_seconds),
+                }
             )
 
     # ── 2. Pesquisar cliente pelo email ──

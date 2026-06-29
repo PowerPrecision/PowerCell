@@ -1129,3 +1129,26 @@ Stage Summary:
 - 3 ficheiros criados: `backend/models/company.py`, `backend/routes/companies_crud.py`, `frontend/src/pages/CompaniesManagementPage.jsx`
 - 4 ficheiros modificados: `backend/server.py`, `frontend/src/services/api.js`, `frontend/src/pages/SystemAdminPanel.jsx`, `ARCHITECTURE.md`
 - Acesso: Admin/CEO via tab "Empresas" no Painel de Administração
+
+
+---
+Task ID: Pacote AA
+Agent: Main Agent (Code Assistant)
+Task: Correção de Erros 401 e 429 no Portal do Cliente
+
+Work Log:
+- Análise do erro reportado pelo utilizador: 5×401 (`/portal/status`, `/portal/messages`, `/portal/recommendations`, `/portal/messages/unread`, `/portal/visits`) + 1×429 (`/portal/auth/login`) na consola do browser em produção (powercell.onrender.com).
+- Lidos os ficheiros relevantes: `frontend/src/pages/ClientPortal.jsx` (2898 linhas), `frontend/src/pages/ClientPortalLogin.jsx` (294 linhas), `backend/routes/portal.py` (3685 linhas), `backend/middleware/user_rate_limit.py`, `backend/middleware/rate_limit.py`, `backend/server.py` (middleware + exception handler).
+- Identificada causa raiz dos 401: os `useEffect` de `fetchMessages`/`fetchUnreadCount` (linha 2182), `fetchRecommendations` (linha 2211) e `fetchVisits` (linha 2234) no `ClientPortal.jsx` disparavam no mount sem verificar `isVerified`. Quando o cliente tinha um token expirado em `localStorage`, os 5 endpoints corriam em paralelo e todos devolviam 401 (1 do useEffect de validação de token + 4 destes).
+- Identificada causa raiz do 429: `MAX_LOGIN_ATTEMPTS = 5` com `LOGIN_LOCKOUT_MINUTES = 15` no `portal.py` era demasiado agressivo para um código de acesso de 6 caracteres alfanuméricos digitado manualmente. O frontend não mostrava tempo restante nem desabilitava o botão, levando o utilizador a continuar a tentar.
+- Aplicadas 3 correções:
+  1. `ClientPortal.jsx`: guard `if (!isVerified) return;` + dependência `isVerified` nos 3 `useEffect` de fetch; o polling de mensagens (setInterval 15s) agora para quando `isVerified` passa a false (cleanup do interval).
+  2. `portal.py`: `MAX_LOGIN_ATTEMPTS` 5→8, `LOGIN_LOCKOUT_MINUTES` 15→10; as 2 respostas 429 (lockout ativo + novo lockout) devolvem `detail` como objeto estruturado `{error, message, retry_after, retry_after_minutes}` + header `Retry-After`.
+  3. `ClientPortalLogin.jsx`: novo estado `lockoutSeconds` + `useEffect` de countdown (decrementa a cada segundo); `canSubmit` inclui `!isLockedOut`; bloco de erro distinto (âmbar com ícone Lock + countdown `Xm Ys`) para lockout vs erro normal (vermelho); handler 429 trata `detail` como objeto OU string (compatibilidade com rate limit global do middleware que devolve string).
+- Validada sintaxe: `py_compile` no `portal.py` ✓; `esbuild --loader:.jsx=jsx` no `ClientPortal.jsx` e `ClientPortalLogin.jsx` ✓.
+- Atualizada documentação: `CHANGELOG.md` (entrada Pacote AA), `memory/PRD.md` (bugs #5 e #6), este worklog.
+
+Stage Summary:
+- 3 ficheiros modificados: `frontend/src/pages/ClientPortal.jsx`, `frontend/src/pages/ClientPortalLogin.jsx`, `backend/routes/portal.py`.
+- 3 ficheiros de documentação atualizados: `CHANGELOG.md`, `memory/PRD.md`, `worklog.md`.
+- Resultado: clientes com token expirado deixam de ver 5×401 na consola; login tolera 8 tentativas (em vez de 5) com lockout mais curto (10 min em vez de 15); utilizador vê countdown claro durante o lockout e o botão fica desabilitado até poder tentar novamente.

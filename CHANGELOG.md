@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-06-29] — Pacote AA: Correção de Erros 401 e 429 no Portal do Cliente
+
+### Corrigido
+- **Erros 401 em cascata no Portal do Cliente (Bug Crítico)**: Quando um cliente acedia a `/portal` com um token expirado em `localStorage`, o `ClientPortal.jsx` disparava **5 pedidos simultâneos** (`/portal/status`, `/portal/messages`, `/portal/recommendations`, `/portal/messages/unread`, `/portal/visits`) que todos devolviam 401. Os `useEffect` de `messages`, `recommendations` e `visits` não verificavam `isVerified` — corriam no mount independentemente do estado de autenticação. Adicionado guard `if (!isVerified) return;` aos 3 `useEffect` e às suas dependências. O polling de mensagens (15s) agora também para quando a sessão expira, em vez de continuar a gerar 401s.
+
+- **429 Too Many Requests no login do Portal**: O limite de tentativas de login era demasiado agressivo — **5 tentativas** com lockout de **15 minutos**. Para um código de acesso de 6 caracteres alfanuméricos digitado manualmente, 5 tentativas é insuficiente para utilizadores legítimos. Aumentado para **8 tentativas** com lockout de **10 minutos** (mantém proteção brute-force razoável). A resposta 429 agora inclui `retry_after` (segundos) e `retry_after_minutes` no body, permitindo ao frontend fazer countdown.
+
+- **UX do lockout no login**: O `ClientPortalLogin.jsx` agora mostra um **countdown visual** (formato `Xm Ys`) quando a conta está bloqueada, desabilita o botão de submit durante o lockout e limpa automaticamente o erro quando o tempo expira. Antes, o utilizador via uma mensagem genérica e continuava a tentar, prolongando o lockout. O `detail` da resposta 429 é tratado tanto como objeto (lockout interno do portal) como string (rate limit global do middleware).
+
+### Técnico
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): 3 `useEffect` ganharam guard `isVerified` + dependência `isVerified` adicionada; comentários explicativos adicionados.
+- **Frontend** (`frontend/src/pages/ClientPortalLogin.jsx`): novo estado `lockoutSeconds` + `useEffect` de countdown + ícone `Lock` importado; `canSubmit` agora inclui `!isLockedOut`; bloco de erro distinto (âmbar) para lockout vs erro normal (vermelho).
+- **Backend** (`backend/routes/portal.py`): `MAX_LOGIN_ATTEMPTS` 5→8, `LOGIN_LOCKOUT_MINUTES` 15→10; as 2 respostas 429 (lockout ativo + novo lockout) devolvem `detail` como objeto estruturado com `message`, `retry_after`, `retry_after_minutes` + header `Retry-After`.
+
 ## [2026-06-25] — Pacote R: Motor de Pesquisa vs Filtros (Fix Crítico)
 
 ### Corrigido
