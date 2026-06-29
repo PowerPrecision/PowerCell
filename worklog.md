@@ -1221,3 +1221,26 @@ Stage Summary:
 - 2 ficheiros modificados: frontend/src/components/portal/SimulatorCH.jsx (reescrita completa ~550 linhas), frontend/src/pages/ClientPortal.jsx (passar prop clienteDataNascimento).
 - 3 ficheiros de documentação atualizados: CHANGELOG.md, memory/PRD.md, worklog.md.
 - Resultado: simulador de nível bancário com 3 tipos de taxa (Fixa/Variável/Mista), motor de 2 fases para mista, TAEG realista por bisseção com fallbacks invisíveis, e travas de idade BP no slider do prazo.
+
+
+---
+Task ID: Pacote AE
+Agent: Main Agent (Code Assistant)
+Task: Fix 500 Internal Server Error no endpoint do Kanban
+
+Work Log:
+- Erro reportado: GET /api/processes/kanban?view_mode=all&show_all=true&completed_days=30 devolvia 500 (6× seguidas — TanStack Query retries) em produção (powercell.onrender.com).
+- Lido o endpoint get_kanban_board em routes/processes.py (linhas 1734-2134) e o serviço process_kanban.py.
+- Identificada causa raiz: nas linhas 2117-2121 o código acedia aos campos dos workflow_statuses com bracket notation — status["id"], status["name"], status["label"], status["color"], status["order"]. Se QUALQUER documento em workflow_statuses tiver um campo em falta (ex.: estado criado antes destes campos existirem, ou estado legacy sem label/color), lança KeyError → 500.
+- Verificada função decrypt_processes_list (tem try/except interno, não lança). Verificadas constantes INACTIVE_STATUSES/ARCHIVED_STATUSES (definidas na linha 1241-1243). Agregações em portal_messages/documents não lançam em coleções vazias.
+- Aplicadas 2 correções:
+  1. Root cause fix: 5 acessos status["..."] trocados por status.get("...", default) com defaults graciosos: label → name.replace("_", " ").title(); color → "#6B7280"; order → 0; id → name.
+  2. try/except defensivo à volta do loop for status in statuses: KeyError → HTTPException(500, "Erro de configuração de estados do workflow: campo 'X' em falta"); Exception → HTTPException(500, "Erro ao carregar kanban: TypeError: ..."). Ambos logam com logger.error/exception para diagnóstico futuro.
+- Validação: py_compile ✓; flake8 --select=E9,F63,F7,F82 → 0 erros.
+- Atualizada documentação: CHANGELOG.md (Pacote AE), memory/PRD.md (Correções do Pacote AE), este worklog.
+
+Stage Summary:
+- 1 ficheiro de código modificado: backend/routes/processes.py (5 acessos .get() + try/except defensivo).
+- 3 ficheiros de documentação atualizados.
+- Resultado: endpoint /kanban degrada graciosamente quando workflow_statuses tem campos em falta; se houver outro erro, o detail da resposta 500 contém a mensagem real em vez de erro genérico.
+- Nota: o erro WebSocket ERR_ADDRESS_UNREACHABLE reportado em simultâneo é problema de rede/infraestrutura do Render (não de código) — o frontend já tem fallback a polling via useWebSocket.js.

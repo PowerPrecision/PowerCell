@@ -94,6 +94,9 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
   - **Motor da Taxa Mista**: 2 fases — Fase 1 (taxa fixa, prestação constante) → amortização do capital (valor presente das prestações restantes) → Fase 2 (taxa variável sobre capital amortizado). Campos "Prazo da Taxa Fixa" e "Taxa Fixa Aplicável" obrigatórios.
   - **Travas de Idade BP**: `SimulatorCH` recebe `clienteDataNascimento` do `ClientPortal`; slider do Prazo limitado dinamicamente (≤30→40, 31-35→37, >35→35 anos) com badge visual.
 
+### Correções do Pacote AE (2026-06-29)
+- **✅ 500 no endpoint do Kanban** (corrigido 2026-06-29, Pacote AE): `GET /api/processes/kanban` falhava com `KeyError` quando um documento em `workflow_statuses` tinha campos em falta (`label`/`color`/`order`/`id`/`name`). Corrigido com `.get()` + defaults graciosos + try/except defensivo que loga e devolve o erro real.
+
 ### Funcionalidades Completadas ✅
 1. **✅ Filtro de documentos já solicitados** (já implementado): O `PortalDocumentRequests.js` filtra automaticamente categorias já solicitadas da lista de seleção (linhas 128-139, `availableCategories`).
 2. **✅ Multi-seleção de tipos de documento** (já implementado): O `PortalDocumentRequests.js` permite selecionar múltiplas categorias com checkboxes e cria pedidos em batch (linhas 292-319, `newDoc.categories`).
