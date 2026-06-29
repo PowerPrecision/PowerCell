@@ -981,7 +981,7 @@ const ProcessDetails = () => {
   }, [id, token]);
 
   const fetchPortalUnreadCount = useCallback(async () => {
-    if (!id) return;
+    if (!id || !token) return;
     try {
       const response = await fetch(`${API_URL}/api/processes/${id}/portal-messages/unread`, {
         headers: { Authorization: `Bearer ${token}` },
@@ -990,12 +990,18 @@ const ProcessDetails = () => {
         const data = await response.json();
         setPortalUnreadCount(data.unread_count || 0);
       } else if (response.status === 404) {
-        // Endpoint não disponível nesta versão do backend — desativar polling
+        // 404 = processo não encontrado OU endpoint indisponível.
+        // Desativar polling para evitar loop de 404s (especialmente em
+        // processos eliminados onde o utilizador ainda está na página).
+        setPortalUnreadCount(0);
+        return 'ENDPOINT_NOT_AVAILABLE';
+      } else if (response.status === 401 || response.status === 403) {
+        // Token inválido/expirado — desativar polling silenciosamente
         setPortalUnreadCount(0);
         return 'ENDPOINT_NOT_AVAILABLE';
       }
     } catch (error) {
-      // Silent
+      // Silent — erro de rede, tentará novamente no próximo intervalo
     }
   }, [id, token]);
 
@@ -1034,10 +1040,13 @@ const ProcessDetails = () => {
   }, [activeTab, fetchPortalMessages, fetchPortalUnreadCount]);
 
   // Polling para unread count (a cada 30s)
-  // Desativa automaticamente se o endpoint não existir (404)
+  // Desativa automaticamente se o endpoint não existir (404) ou se o
+  // processo estiver eliminado/bloqueado. Só corre quando há token e id válidos.
   const portalUnreadAvailableRef = useRef(true);
   useEffect(() => {
-    if (!portalUnreadAvailableRef.current) return;
+    // Só iniciar polling se temos id, token, e o endpoint ainda está disponível
+    if (!id || !token || !portalUnreadAvailableRef.current) return;
+
     const interval = setInterval(async () => {
       if (!portalUnreadAvailableRef.current) {
         clearInterval(interval);
@@ -1049,13 +1058,17 @@ const ProcessDetails = () => {
         clearInterval(interval);
       }
     }, 30000);
+
+    // Fetch inicial imediato
     fetchPortalUnreadCount().then(result => {
       if (result === 'ENDPOINT_NOT_AVAILABLE') {
         portalUnreadAvailableRef.current = false;
+        clearInterval(interval);
       }
     });
+
     return () => clearInterval(interval);
-  }, [fetchPortalUnreadCount]);
+  }, [fetchPortalUnreadCount, id, token]);
 
   // ── WebSocket Room: juntar-se à room do processo para mensagens em tempo real ──
   useEffect(() => {

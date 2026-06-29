@@ -1267,3 +1267,24 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: frontend/src/pages/ProcessDetails.js (handler do botão Ver como Cliente).
 - Resultado: extração do link tenta 5 chaves possíveis; erros mostram sempre a mensagem real do servidor.
+
+
+---
+Task ID: Pacote AF (Portal Messages 404)
+Agent: Main Agent (Code Assistant)
+Task: Fix loop de 404 em /portal-messages/unread no ProcessDetails
+
+Work Log:
+- Erro reportado: GET /api/processes/{id}/portal-messages/unread 404 repetido (loop de polling) em produção.
+- Causa raiz: o backend (processes.py:4648-4649) devolve 404 quando o processo não existe OU está eliminado (is_deleted: true). O utilizador pode ainda estar na página de detalhes de um processo eliminado (read-only), pelo que o 404 é legítimo. O frontend já tinha lógica para desativar polling em 404 (portalUnreadAvailableRef), mas:
+  (a) não verificava se token existia antes do fetch;
+  (b) não tratava 401/403 (token expirado) que também devem desativar o polling;
+  (c) o useEffect do polling não tinha `id` e `token` nas dependências, pelo que não se reiniciava correctamente.
+- Correções aplicadas em ProcessDetails.js:
+  1. fetchPortalUnreadCount: adicionado guard `if (!id || !token) return`; adicionado tratamento de 401/403 → 'ENDPOINT_NOT_AVAILABLE' (desativa polling silenciosamente).
+  2. useEffect do polling: adicionado guard `if (!id || !token || !portalUnreadAvailableRef.current) return` no início; adicionado `id, token` às dependências; fetch inicial agora limpa o interval se retornar ENDPOINT_NOT_AVAILABLE.
+- Validação: esbuild ✓.
+
+Stage Summary:
+- 1 ficheiro: frontend/src/pages/ProcessDetails.js.
+- Resultado: o loop de 404 para quando o processo é eliminado ou o token expira; o polling respeita a existência de id/token.
