@@ -54,7 +54,7 @@ import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { getSystemChangelogs, generateChangelogAI } from "../services/api";
+import { getSystemChangelogs, generateChangelogAI, diagnoseChangelog } from "../services/api";
 import { sanitizeHtml } from "../utils/sanitize";
 import {
   Settings,
@@ -3953,7 +3953,7 @@ const ChangelogSection = ({ token }) => {
     setDiagnosing(true);
     setDiagnosticResult(null);
     try {
-      const res = await api.get("/system/changelog/diagnose");
+      const res = await diagnoseChangelog();
       setDiagnosticResult(res.data);
       if (res.data?.can_generate) {
         toast.success("Diagnóstico: tudo OK! Pode gerar notas de atualização.");

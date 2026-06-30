@@ -838,7 +838,7 @@ const WebmailPage = () => {
 
       // Include attachment_ids if any uploads
       if (uploadAttachments.length > 0) {
-        bodyPayload.attachment_ids = uploadAttachments.map((a) => a.id);
+        bodyPayload.attachment_ids = uploadAttachments.map((a) => a.id).filter(Boolean);
       }
 
       // Para perfis sem acesso a contas globais, o envio é sempre feito pela
@@ -1126,7 +1126,13 @@ const WebmailPage = () => {
         });
         if (res.ok) {
           const data = await res.json();
-          const uploaded = data.files || [data];
+          // PACOTE AO: extração correta da resposta do backend.
+          // O backend devolve { attachments: [...] } mas o código anterior
+          // usava data.files || [data] que resultava em objetos mal formatados.
+          const uploaded = data.attachments || data.files || [];
+          if (!data.attachments && !data.files && data.id) {
+            uploaded.push(data); // fallback de segurança
+          }
           setUploadAttachments((prev) => [...prev, ...uploaded]);
         } else {
           toast.error(`Erro ao carregar ${file.name}`);

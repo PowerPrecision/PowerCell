@@ -2714,7 +2714,7 @@ const ProcessDetails = () => {
         <ProcessAlerts processId={id} className="mb-2" />
 
         {/* Resumo do Processo */}
-        <ProcessSummaryCard 
+        <ProcessSummaryCard
           process={process}
           statusInfo={currentStatusInfo}
           consultorNames={safeStringArray(process.consultor_names)}
@@ -2723,99 +2723,91 @@ const ProcessDetails = () => {
           mediadorName={process.mediador_name || process.assigned_mediador_name}
         />
 
-        {/* Dados Adicionais do Processo */}
-        <Card>
-          <CardContent className="pt-4">
-            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-              <Database className="h-4 w-4 text-muted-foreground" />
-              Dados do Processo
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* NIF do Cliente */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">NIF do Cliente</Label>
-                <Input
-                  value={personalData?.nif || process?.client_nif || ""}
-                  onChange={(e) => {
-                    const val = e.target.value.replace(/\D/g, '').slice(0, 9);
-                    setPersonalData(prev => ({ ...prev, nif: val }));
+        {/* ═══════ PACOTE AQ: Atividade & Notas (topo do layout) ═══════
+            Fusão da Timeline + caixa de input de notas. Quando o utilizador
+            submete uma nota, é guardada como atividade (createActivity) e
+            aparece imediatamente no topo da lista. */}
+        <Card className="border-violet-200 dark:border-violet-900">
+          <CardHeader className="pb-2 py-3">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <MessageSquare className="h-4 w-4 text-violet-600" />
+              Atividade & Notas
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="pt-0 pb-3">
+            {/* ── Caixa de input de nota ── */}
+            {!isProcessLocked && (
+              <div className="flex gap-2 mb-3">
+                <Textarea
+                  placeholder="Adicionar nota / registo de atividade..."
+                  value={newComment}
+                  onChange={(e) => setNewComment(e.target.value)}
+                  className="flex-1 min-h-[50px] text-sm resize-none"
+                  data-testid="quick-note-input"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                      e.preventDefault();
+                      handleSendComment();
+                    }
                   }}
-                  disabled={!canEditPersonal}
-                  className="h-9"
-                  placeholder="9 dígitos"
                 />
+                <Button
+                  onClick={handleSendComment}
+                  disabled={sendingComment || !newComment.trim()}
+                  size="sm"
+                  data-testid="quick-note-submit"
+                  className="bg-violet-600 hover:bg-violet-700"
+                >
+                  {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                </Button>
               </div>
-              {/* Email Adicional Monitorizado */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Emails Adicionais Monitorizados</Label>
-                <Input
-                  value={(process?.monitored_emails || []).join(", ")}
-                  onChange={(e) => {
-                    const emails = e.target.value.split(",").map(s => s.trim()).filter(Boolean);
-                    setProcess(prev => ({ ...prev, monitored_emails: emails }));
-                  }}
-                  disabled={!canEditPersonal}
-                  className="h-9"
-                  placeholder="email1@exemplo.com, email2@exemplo.com"
-                />
-              </div>
-              {/* Vendedor */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Nome do Vendedor</Label>
-                <Input
-                  value={process?.vendedor?.nome || process?.vendedor?.name || ""}
-                  onChange={(e) => setProcess(prev => ({
-                    ...prev,
-                    vendedor: { ...(prev.vendedor || {}), nome: e.target.value, name: e.target.value }
-                  }))}
-                  disabled={!canEditPersonal}
-                  className="h-9"
-                  placeholder="Nome de quem vende"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Contacto do Vendedor</Label>
-                <Input
-                  value={process?.vendedor?.contacto || process?.vendedor?.telefone || ""}
-                  onChange={(e) => setProcess(prev => ({
-                    ...prev,
-                    vendedor: { ...(prev.vendedor || {}), contacto: e.target.value, telefone: e.target.value }
-                  }))}
-                  disabled={!canEditPersonal}
-                  className="h-9"
-                  placeholder="+351 000 000 000"
-                />
-              </div>
-              {/* Mediador Imobiliário */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Mediador Imobiliário</Label>
-                <Input
-                  value={process?.mediador?.name || ""}
-                  onChange={(e) => setProcess(prev => ({
-                    ...prev,
-                    mediador: { ...(prev.mediador || {}), name: e.target.value }
-                  }))}
-                  disabled={!canEditPersonal}
-                  className="h-9"
-                  placeholder="Nome da imobiliária/mediador"
-                />
-              </div>
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">AMI do Mediador</Label>
-                <Input
-                  value={process?.mediador?.ami || ""}
-                  onChange={(e) => setProcess(prev => ({
-                    ...prev,
-                    mediador: { ...(prev.mediador || {}), ami: e.target.value }
-                  }))}
-                  disabled={!canEditPersonal}
-                  className="h-9"
-                  placeholder="Número AMI"
-                />
-              </div>
+            )}
+
+            {/* ── Timeline visual (passos do workflow) ── */}
+            <div className="mb-3">
+              <ProcessTimeline
+                processId={id}
+                currentStatus={process.status}
+                history={process.status_history || activities.filter(a => a.type === 'status_change')}
+                workflowStatuses={workflowStatuses}
+              />
+            </div>
+
+            {/* ── Atividades recentes (notas + comentários) ── */}
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground mb-1">Registos recentes</p>
+              <ScrollArea className="h-[200px]">
+                <div className="space-y-1.5 pr-2">
+                  {activities.length === 0 ? (
+                    <p className="text-center text-muted-foreground py-2 text-xs">Sem registos. Adicione a primeira nota acima.</p>
+                  ) : (
+                    // PACOTE AQ: mostrar atividades por ordem inversa (mais recente no topo)
+                    [...activities].reverse().map((activity) => (
+                      <div key={activity.id} className="p-1.5 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
+                        <div className="flex items-start justify-between gap-1">
+                          <div className="flex-1 min-w-0">
+                            <span className="font-medium">{safeString(activity.user_name)}</span>
+                            <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{safeString(activity.comment)}</p>
+                            <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
+                          </div>
+                          {(activity.user_id === user.id || hasRole(user, "admin")) && (
+                            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
+                              <Trash2 className="h-3 w-3 text-destructive" />
+                            </Button>
+                          )}
+                        </div>
+                      </div>
+                    ))
+                  )}
+                </div>
+              </ScrollArea>
             </div>
           </CardContent>
         </Card>
+
+        {/* PACOTE AQ: Cartão "Dados Adicionais do Processo" removido/ocultado.
+            Os campos (NIF, emails monitorizados, vendedor, mediador) passam a
+            ser geridos nas respetivas tabs (Cliente / Imóvel). */}
 
         {/* Notas, Prioridade e Etiquetas (Fase 3) */}
         <Card>
@@ -2966,13 +2958,7 @@ const ProcessDetails = () => {
           </CardContent>
         </Card>
 
-        {/* Timeline do Processo */}
-        <ProcessTimeline 
-          processId={id}
-          currentStatus={process.status}
-          history={process.status_history || activities.filter(a => a.type === 'status_change')}
-          workflowStatuses={workflowStatuses}
-        />
+        {/* PACOTE AQ: Timeline movida para o cartão "Atividade & Notas" no topo. */}
 
         {/* TAREFA 2: Resolver conflitos de dados IA */}
         <DataConflictResolver
@@ -5392,62 +5378,8 @@ const ProcessDetails = () => {
 
           {/* Sidebar - Organizada com Accordions */}
           <div className="space-y-3">
-            {/* Activity Section - visível se NÃO for modo de visualização ou se tiver use_chat */}
-            {(!isViewMode || canUseChat) && (
-            <Card className="border-border">
-              <CardHeader className="pb-2 py-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4" />
-                  Atividade
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0 pb-3">
-                <div className="space-y-2">
-                  <div className="flex gap-2">
-                    <Textarea
-                      placeholder="Adicionar comentário..."
-                      value={newComment}
-                      onChange={(e) => setNewComment(e.target.value)}
-                      className="flex-1 min-h-[50px] text-sm resize-none"
-                      data-testid="new-comment-input"
-                    />
-                    <Button
-                      onClick={handleSendComment}
-                      disabled={sendingComment || !newComment.trim()}
-                      size="sm"
-                      data-testid="send-comment-btn"
-                    >
-                      {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                    </Button>
-                  </div>
-                  <ScrollArea className="h-[300px]">
-                    <div className="space-y-1.5 pr-2">
-                      {activities.length === 0 ? (
-                        <p className="text-center text-muted-foreground py-2 text-xs">Sem comentários</p>
-                      ) : (
-                        activities.map((activity) => (
-                          <div key={activity.id} className="p-1.5 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
-                            <div className="flex items-start justify-between gap-1">
-                              <div className="flex-1 min-w-0">
-                                <span className="font-medium">{safeString(activity.user_name)}</span>
-                                <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{safeString(activity.comment)}</p>
-                                <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
-                              </div>
-                              {(activity.user_id === user.id || hasRole(user, "admin")) && (
-                                <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
-                                  <Trash2 className="h-3 w-3 text-destructive" />
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-                        ))
-                      )}
-                    </div>
-                  </ScrollArea>
-                </div>
-              </CardContent>
-            </Card>
-            )}
+            {/* PACOTE AQ: Cartão "Atividade" movido para o topo do layout
+                (agora integrado no cartão "Atividade & Notas" com a Timeline). */}
 
             {/* Tarefas - visível se tem manage_tasks */}
             {canManageTasks && (

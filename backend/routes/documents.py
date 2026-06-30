@@ -4209,11 +4209,35 @@ async def create_portal_document_request(
             existing = None
 
         if existing:
-            cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
-            raise HTTPException(
-                status_code=409,
-                detail=f"Já existe um pedido de '{cat_info.get('label', category)}' pendente para este processo."
-            )
+            # PACOTE AN: Para categoria "Outros", permitir múltiplos pedidos
+            # desde que tenham custom_label diferente. Isto permite pedir
+            # vários "Outros Documentos" com descrições diferentes em simultâneo.
+            is_outros = category in ("Outros", "outro", "other", "outros")
+            if is_outros and data.custom_label:
+                # Verificar se já existe um "Outros" com o MESMO custom_label
+                existing_same_label = await db.documents.find_one({
+                    "process_id": process_id,
+                    "category": {"$in": [category, "Outros", "outro", "other", "outros"]},
+                    "custom_label": data.custom_label,
+                    "status": {"$in": [
+                        "REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED",
+                        "requested", "pending", "uploaded", "submitted", "received",
+                    ]},
+                })
+                if not existing_same_label:
+                    # Mesmo cat "Outros" mas custom_label diferente → permitir
+                    existing = None
+                else:
+                    raise HTTPException(
+                        status_code=409,
+                        detail=f"Já existe um pedido de '{data.custom_label}' pendente para este processo."
+                    )
+            else:
+                cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
+                raise HTTPException(
+                    status_code=409,
+                    detail=f"Já existe um pedido de '{cat_info.get('label', category)}' pendente para este processo."
+                )
 
         # ── 4. Build document record ──
         doc_id = str(uuid.uuid4())
