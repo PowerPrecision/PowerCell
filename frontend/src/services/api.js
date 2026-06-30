@@ -958,6 +958,7 @@ export const rollbackProcessMigration = () => api.post("/admin/process-migration
 // ===== SYSTEM CHANGELOG (Mural de Atualizações gerado por IA) =====
 export const getSystemChangelogs = (limit = 5) => api.get("/system/changelog", { params: { limit } });
 export const generateChangelogAI = (data = {}) => api.post("/system/changelog/generate-ai", data);
+export const diagnoseChangelog = () => api.get("/system/changelog/diagnose");
 
 // ===== COMPANIES CRUD (Multi-Tenant — Gestão de Empresas) =====
 export const getCompanies = (search) =>
