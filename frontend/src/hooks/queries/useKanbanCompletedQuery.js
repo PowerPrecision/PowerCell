@@ -67,7 +67,15 @@ const fetchKanbanCompletedData = async (token, filters) => {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch completed kanban data');
+    // PACOTE AE-2: extrair a mensagem de erro do backend para diagnóstico
+    let errorDetail = 'Failed to fetch completed kanban data';
+    try {
+      const errorData = await response.json();
+      errorDetail = errorData?.detail || errorData?.message || errorDetail;
+    } catch {
+      errorDetail = `${response.status} ${response.statusText}`;
+    }
+    throw new Error(errorDetail);
   }
 
   return response.json();
