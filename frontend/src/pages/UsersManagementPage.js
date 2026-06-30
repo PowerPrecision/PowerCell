@@ -62,6 +62,9 @@ const UsersManagementPage = ({ embedded = false }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [generatedPassword, setGeneratedPassword] = useState("");
   const [emailConfigDialog, setEmailConfigDialog] = useState({ open: false, user: null });
+  // PACOTE AS: multi-select para eliminação em lote
+  const [selectedUserIds, setSelectedUserIds] = useState(new Set());
+  const [bulkDeleting, setBulkDeleting] = useState(false);
 
   useEffect(() => {
     fetchUsers();
@@ -218,6 +221,62 @@ const UsersManagementPage = ({ embedded = false }) => {
         }
       },
     });
+  };
+
+  // PACOTE AS: Eliminação em lote (multi-select)
+  const handleToggleSelectUser = (userId) => {
+    setSelectedUserIds(prev => {
+      const next = new Set(prev);
+      if (next.has(userId)) next.delete(userId);
+      else next.add(userId);
+      return next;
+    });
+  };
+
+  const handleSelectAll = () => {
+    if (selectedUserIds.size === filteredUsers.length) {
+      setSelectedUserIds(new Set());
+    } else {
+      setSelectedUserIds(new Set(filteredUsers.map(u => u.id)));
+    }
+  };
+
+  const handleBulkDelete = async () => {
+    const ids = Array.from(selectedUserIds);
+    if (ids.length === 0) return;
+    const usersToDelete = users.filter(u => selectedUserIds.has(u.id));
+    const names = usersToDelete.map(u => u.name).join(', ');
+
+    // Confirmar antes de eliminar em lote (não usar undo — demasiado complexo)
+    const confirmed = window.confirm(
+      `Tem a certeza que pretende eliminar ${ids.length} utilizador(es)?\n\n${names}\n\nOs processos associados NÃO serão eliminados, mas ficarão sem consultor atribuído. Esta ação é irreversível.`
+    );
+    if (!confirmed) return;
+
+    setBulkDeleting(true);
+    let successCount = 0;
+    let errorCount = 0;
+
+    for (const userId of ids) {
+      try {
+        await deleteUser(userId);
+        successCount++;
+      } catch (error) {
+        errorCount++;
+        console.error(`Erro ao eliminar user ${userId}:`, error);
+      }
+    }
+
+    // Remover da lista os que foram eliminados com sucesso
+    setUsers(prev => prev.filter(u => !selectedUserIds.has(u.id)));
+    setSelectedUserIds(new Set());
+    setBulkDeleting(false);
+
+    if (errorCount === 0) {
+      toast.success(`${successCount} utilizador(es) eliminado(s) com sucesso.`);
+    } else {
+      toast.warning(`${successCount} eliminado(s), ${errorCount} com erro. Verifique se os utilizadores têm processos ativos.`);
+    }
   };
 
   const handleToggleUserStatus = async (userId, currentStatus) => {
@@ -602,10 +661,35 @@ const UsersManagementPage = ({ embedded = false }) => {
                 </div>
 
                 {/* O9 - Desktop: Table */}
+                {/* PACOTE AS: Barra de ações em lote (visível quando há seleção) */}
+                {selectedUserIds.size > 0 && (
+                  <div className="flex items-center justify-between gap-3 p-3 bg-amber-50 dark:bg-amber-950/20 border border-amber-200 dark:border-amber-800 rounded-lg">
+                    <span className="text-sm font-medium text-amber-700 dark:text-amber-400">
+                      {selectedUserIds.size} utilizador(es) selecionado(s)
+                    </span>
+                    <div className="flex gap-2">
+                      <Button variant="outline" size="sm" onClick={() => setSelectedUserIds(new Set())}>
+                        Cancelar
+                      </Button>
+                      <Button variant="destructive" size="sm" onClick={handleBulkDelete} disabled={bulkDeleting} className="gap-1.5">
+                        {bulkDeleting ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+                        Eliminar Selecionados
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
                 <div className="hidden md:block rounded-md border overflow-x-auto">
               <Table>
                 <TableHeader>
                   <TableRow>
+                    {/* PACOTE AS: Checkbox select-all */}
+                    <TableHead className="w-[40px]">
+                      <Checkbox
+                        checked={selectedUserIds.size > 0 && selectedUserIds.size === filteredUsers.length}
+                        onCheckedChange={handleSelectAll}
+                      />
+                    </TableHead>
                     <TableHead>Nome</TableHead>
                     <TableHead>Email</TableHead>
                     <TableHead>Empresa</TableHead>
@@ -618,7 +702,14 @@ const UsersManagementPage = ({ embedded = false }) => {
                 </TableHeader>
                 <TableBody>
                   {filteredUsers.map((user) => (
-                    <TableRow key={user.id}>
+                    <TableRow key={user.id} className={selectedUserIds.has(user.id) ? "bg-amber-50/50" : ""}>
+                        {/* PACOTE AS: Checkbox por linha */}
+                        <TableCell className="w-[40px]">
+                          <Checkbox
+                            checked={selectedUserIds.has(user.id)}
+                            onCheckedChange={() => handleToggleSelectUser(user.id)}
+                          />
+                        </TableCell>
                         <TableCell className="font-medium">{user.name}</TableCell>
                         <TableCell>{user.email}</TableCell>
                         <TableCell>

@@ -766,8 +766,15 @@ async def send_email(
 
     # Injetar assinatura no corpo do email (HTML + plain text)
     if resolved_signature:
+        # PACOTE AT: Sanitizar assinatura antes de concatenar — inline CSS
+        # para imagens (max-width, height:auto, object-fit) evita que cheguem
+        # gigantes aos clientes de email. Envolvê-la numa div com overflow
+        # controlado previne tabelas partidas.
+        safe_signature = resolved_signature.replace(
+            '<img ', '<img style="max-width: 100%; height: auto; object-fit: contain;" '
+        )
         if body_html:
-            body_html = f"{body_html}<br/><hr/>{resolved_signature}"
+            body_html = f'{body_html}<br/><hr/><div style="max-width: 100%; overflow-x: hidden;">{safe_signature}</div>'
         # Versão plain text: strip HTML da assinatura
         sig_text = re.sub(r'<[^>]+>', '', resolved_signature).strip()
         if sig_text:
