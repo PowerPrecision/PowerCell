@@ -1521,3 +1521,19 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: backend/routes/emails.py.
 - Resultado: consultores já não têm 403; emails saem pela conta pessoal correta com reply_to; assinaturas mantêm formatação em Outlook/Gmail.
+
+
+---
+Task ID: Pacote AL-fix (Email 422)
+Agent: Main Agent (Code Assistant)
+Task: Fix 422 no envio de email — body_payload defensivo
+
+Work Log:
+- Erro: POST /api/emails/send?account=personal devolvia 422 (Unprocessable Content).
+- Causa provável: body_html enviava "" (string vazia) que pode ser rejeitado por validação Pydantic em produção. cc_emails enviava [] (array vazio) que também pode causar issues.
+- Correção: bodyPayload agora usa null em vez de "" para campos opcionais vazios (body_html, cc_emails, process_id, from_box). Body usa || "" para garantir string. Isto alinha com Optional[str] = None do modelo Pydantic.
+- Validação: esbuild ✓.
+
+Stage Summary:
+- 1 ficheiro: frontend/src/pages/WebmailPage.jsx.
+- Resultado: payload do email envia null para campos vazios em vez de "" ou [], alinhando com o modelo Pydantic Optional.
