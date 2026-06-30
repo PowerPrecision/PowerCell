@@ -539,8 +539,11 @@ async def send_email(
         from services.encryption import encryption_service
         user = await db.users.find_one(
             {"id": created_by},
-            {"_id": 0, "email_config": 1}
+            {"_id": 0, "email_config": 1, "role": 1, "company": 1}
         )
+        user_role_val = user.get("role", "") if user else ""
+        logger.info(f"[Send Email] Procurando config pessoal para user={created_by}, role={user_role_val}, company_id={active_company_id}")
+
         if user and user.get("email_config", {}).get("is_configured"):
             cfg = user["email_config"]
             encrypted_password = cfg.get("encrypted_password", "")
@@ -561,19 +564,17 @@ async def send_email(
                     logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
 
         # PACOTE AL-fix: se a config legacy não existir, tentar o resolver
-        # canónico multi-empresa (user_email_configs). Isto resolve o erro
-        # 550 "From domain is not local" quando o utilizador tem config na
-        # nova coleção mas não na legacy user.email_config.
+        # canónico multi-empresa (user_email_configs).
         if not account:
             try:
                 from services.email_config_resolver import resolve_email_config_for_sync
-                # active_company_id é passado como argumento (Pacote AL)
                 resolved = await resolve_email_config_for_sync(
                     created_by,
-                    active_role=None,
+                    active_role=user_role_val,
                     active_company_id=active_company_id
                 )
                 if resolved:
+                    logger.info(f"[Send Email] Resolver retornou: source={resolved.get('config_source')}, email={resolved.get('email_address')}, has_password={resolved.get('has_password')}, smtp={resolved.get('smtp_server')}")
                     from services.encryption import encryption_service as _enc
                     enc_password = resolved.get("encrypted_password", "")
                     password = ""
@@ -582,18 +583,31 @@ async def send_email(
                             password = _enc.decrypt(enc_password)
                         except Exception as e:
                             logger.warning(f"[Send Email] Erro ao desencriptar password (resolver): {e}")
-                    account = EmailAccount(
-                        name="personal",
-                        imap_server=resolved.get("smtp_server", resolved.get("imap_server", "")),
-                        imap_port=int(resolved.get("smtp_port", resolved.get("imap_port", 465))),
-                        smtp_server=resolved.get("smtp_server", ""),
-                        smtp_port=int(resolved.get("smtp_port", 465)),
-                        email=resolved.get("email_address", ""),
-                        password=password,
-                    )
-                    logger.info(f"[Send Email] Conta pessoal (resolver) do utilizador {created_by}: {resolved.get('email_address', '')}")
+                    if resolved.get("email_address") and resolved.get("smtp_server"):
+                        account = EmailAccount(
+                            name="personal",
+                            imap_server=resolved.get("smtp_server", resolved.get("imap_server", "")),
+                            imap_port=int(resolved.get("smtp_port", resolved.get("imap_port", 465))),
+                            smtp_server=resolved.get("smtp_server", ""),
+                            smtp_port=int(resolved.get("smtp_port", 465)),
+                            email=resolved.get("email_address", ""),
+                            password=password,
+                        )
+                        logger.info(f"[Send Email] Conta pessoal (resolver) do utilizador {created_by}: {resolved.get('email_address', '')}")
+                    else:
+                        logger.warning(f"[Send Email] Resolver retornou config incompleta: email={resolved.get('email_address')}, smtp={resolved.get('smtp_server')}")
+                else:
+                    logger.warning(f"[Send Email] Resolver retornou None para user={created_by}, company={active_company_id}")
             except Exception as e:
                 logger.warning(f"[Send Email] Erro no resolver para conta pessoal: {e}")
+
+        # CRÍTICO: se account_name == "personal" mas não encontrou config,
+        # NÃO cair no fallback global. Devolver erro claro.
+        if not account:
+            return {
+                "success": False,
+                "error": f"Configuração de email pessoal não encontrada para o utilizador {created_by} (empresa={active_company_id}). Verifique o seu Perfil > Configuração de Webmail. Role={user_role_val}"
+            }
     
     if not account:
         # === force_system: tentar contas globais, depois system_smtp (Bloco A) ===
