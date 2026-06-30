@@ -1468,3 +1468,20 @@ Work Log:
 Stage Summary:
 - 1 ficheiro novo: backend/scripts/migrate_companies_central.py.
 - Resultado: script pronto para correr no Render (cd /app && python -m scripts.migrate_companies_central --dry-run primeiro para verificar, depois sem --dry-run para executar).
+
+
+---
+Task ID: Pacote AE-2 (Kanban Diagnostic)
+Agent: Main Agent (Code Assistant)
+Task: Endpoint de diagnóstico do kanban + extração de erro no frontend
+
+Work Log:
+- O 500 no /api/processes/kanban persiste em produção. O browser não mostra o response body, pelo que não sabemos a causa exata.
+- Adicionado endpoint GET /api/processes/kanban/diagnose (admin/staff): verifica workflow_statuses (campos obrigatórios), processes (contagem), users, portal_messages (agregação), documents (agregação), e a query do kanban isoladamente. Retorna relatório estruturado com can_load + blocking_issue + traceback em caso de erro.
+- Frontend useKanbanQuery.js e useKanbanCompletedQuery.js: fetcher agora extrai o detail do backend (errorData?.detail) em vez de lançar 'Failed to fetch kanban data' genérico. O erro real vai aparecer no query.error.message.
+- Adicionado retry: 2 e refetchOnWindowFocus condicional (não refetch em focus se houver erro) para evitar o loop de 500s em produção.
+- Validação: py_compile ✓; flake8 0 erros; esbuild ✓.
+
+Stage Summary:
+- 3 ficheiros: backend/routes/processes.py (endpoint diagnose), frontend/src/hooks/queries/useKanbanQuery.js (error extraction + retry), frontend/src/hooks/queries/useKanbanCompletedQuery.js (error extraction).
+- Resultado: após redeploy, o utilizador pode chamar GET /api/processes/kanban/diagnose para ver a causa exata do 500; o frontend mostra o erro real do backend em vez de mensagem genérica.

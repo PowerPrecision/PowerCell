@@ -54,7 +54,16 @@ const fetchKanbanData = async (token, filters) => {
   });
 
   if (!response.ok) {
-    throw new Error('Failed to fetch kanban data');
+    // PACOTE AE-2: extrair a mensagem de erro do backend para diagnóstico
+    let errorDetail = 'Failed to fetch kanban data';
+    try {
+      const errorData = await response.json();
+      errorDetail = errorData?.detail || errorData?.message || errorDetail;
+    } catch {
+      // Se não for JSON, usar o status text
+      errorDetail = `${response.status} ${response.statusText}`;
+    }
+    throw new Error(errorDetail);
   }
 
   return response.json();
@@ -108,10 +117,11 @@ export function useKanbanQuery(options = {}) {
     // staleTime de 1 minuto é ideal para Kanban
     // Dados são actualizados via WebSocket, não precisamos de refetch constante
     staleTime: 60 * 1000,
-    // Não refetch automaticamente quando a window ganha foco
-    // porque já temos WebSocket para updates em tempo real
-    // Mas mantemos refetchOnWindowFocus: true (default) para casos
-    // onde o WebSocket pode ter perdido eventos
+    // PACOTE AE-2: limitar retries para evitar loop de 500s em produção.
+    // Se o backend estiver com erro persistente, não adianta refetch infinito.
+    retry: 2,
+    // Não refetch automaticamente quando a window ganha foco se houver erro
+    refetchOnWindowFocus: (query) => !query.state.error,
   });
 
   return {
