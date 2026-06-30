@@ -836,16 +836,35 @@ async def send_email(
         # Use from_email override when provided (e.g. user's email for documentation)
         # Otherwise use account email (system default)
         effective_from_email = from_email or account.email
+
+        # PACOTE AL-fix: Proteção contra 550 "From domain is not local"
+        # Se o from_email tem um domínio diferente da conta SMTP, o servidor
+        # SMTP rejeita o envio. Nesse caso, usar account.email no header From
+        # (que é o domínio local do SMTP) e definir Reply-To para from_email.
+        if from_email and account.email and "@" in from_email and "@" in account.email:
+            from_domain = from_email.split("@")[-1].lower()
+            account_domain = account.email.split("@")[-1].lower()
+            if from_domain != account_domain:
+                logger.info(
+                    f"[Send Email] Domínio mismatch: from_email={from_email} (domínio={from_domain}) "
+                    f"vs account={account.email} (domínio={account_domain}). "
+                    f"A usar account.email no From e from_email no Reply-To."
+                )
+                effective_from_email = account.email
+                # Garantir que reply_to aponta para o email do utilizador
+                if not reply_to:
+                    reply_to = from_email
+
         # Use formatted From header for system_smtp when from_name is available
         if account.name == "system_smtp" and from_name:
             msg["From"] = f"{from_name} <{effective_from_email}>"
         else:
             msg["From"] = effective_from_email
         msg["To"] = ", ".join(to_emails)
-        
+
         if cc_emails:
             msg["Cc"] = ", ".join(cc_emails)
-        
+
         # === Reply-To: quando fornecido, as respostas vão para o utilizador ===
         if reply_to:
             msg["Reply-To"] = reply_to
