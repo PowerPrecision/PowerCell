@@ -3756,11 +3756,18 @@ async def send_email_endpoint(
     # empresa ativa. Isto garante que o email sai pela conta certa e que
     # o reply_to aponta para o email configurado.
     if account == "personal" and user_role != UserRole.INDEXACAO:
-        resolved = await resolve_email_config_for_sync(
-            current_user["id"],
-            active_role=user_role,
-            active_company_id=active_company_id
-        )
+        try:
+            resolved = await resolve_email_config_for_sync(
+                current_user["id"],
+                active_role=user_role,
+                active_company_id=active_company_id
+            )
+        except Exception as e:
+            logger.exception(f"[Send Email] Erro no resolver para user {current_user.get('email')}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao resolver configuração de email: {type(e).__name__}: {e}"
+            )
         if not resolved:
             raise HTTPException(
                 status_code=403,
@@ -3843,21 +3850,28 @@ async def send_email_endpoint(
     # from_email: remetente pessoal resolvido da config (não a conta geral).
     # reply_to: respostas vão para o email do utilizador, não para a conta geral.
 
-    result = await send_email(
-        account_name=account,
-        to_emails=to_emails,
-        subject=subject,
-        body=body,
-        body_html=body_html,
-        cc_emails=cc_emails,
-        process_id=payload.process_id,
-        created_by=current_user["id"],
-        attachments=email_attachments if email_attachments else None,
-        active_company_id=active_company_id,
-        from_email=from_email,
-        reply_to=from_email,
-    )
-    
+    try:
+        result = await send_email(
+            account_name=account,
+            to_emails=to_emails,
+            subject=subject,
+            body=body,
+            body_html=body_html,
+            cc_emails=cc_emails,
+            process_id=payload.process_id,
+            created_by=current_user["id"],
+            attachments=email_attachments if email_attachments else None,
+            active_company_id=active_company_id,
+            from_email=from_email,
+            reply_to=from_email,
+        )
+    except Exception as e:
+        logger.exception(f"[Send Email] Erro ao chamar send_email: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno ao enviar email: {type(e).__name__}: {e}"
+        )
+
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
 
