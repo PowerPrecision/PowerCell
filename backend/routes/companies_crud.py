@@ -114,12 +114,27 @@ async def list_available_companies():
 
 @router.get("/{company_id}", response_model=CompanyResponse)
 async def get_company(company_id: str):
-    """Obtém uma empresa pelo ID."""
+    """Obtém uma empresa pelo ID (ou por nome como fallback)."""
+    # Tentar por ID primeiro
     company = await db.companies.find_one(
         {"id": company_id}, {"_id": 0}
     )
+    # PACOTE AR: fallback — procurar por nome (algumas empresas migradas
+    # têm o nome como ID em vez de UUID)
+    if not company:
+        company = await db.companies.find_one(
+            {"name": company_id}, {"_id": 0}
+        )
     if not company:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    # Garantir campos obrigatórios para CompanyResponse
+    if not company.get("id"):
+        company["id"] = company.get("name", company_id)
+    if not company.get("name"):
+        company["name"] = company_id
+    company.setdefault("email_sync_enabled", False)
+    company.setdefault("total_users", 0)
 
     total_users = await db.users.count_documents({
         "company": company.get("name", "")
@@ -167,9 +182,14 @@ async def create_company(data: CompanyCreate):
 @router.put("/{company_id}", response_model=CompanyResponse)
 async def update_company(company_id: str, data: CompanyUpdate):
     """Atualiza os dados de uma empresa."""
+    # PACOTE AR: tentar por ID ou por nome (fallback para empresas migradas)
     existing = await db.companies.find_one({"id": company_id})
     if not existing:
+        existing = await db.companies.find_one({"name": company_id})
+    if not existing:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    # Usar o ID real do documento encontrado (pode ser diferente do company_id)
+    real_id = existing.get("id", company_id)
 
     # Se o nome mudou, verificar duplicado
     if data.name and data.name != existing.get("name"):
@@ -195,26 +215,37 @@ async def update_company(company_id: str, data: CompanyUpdate):
     update_fields["updated_at"] = datetime.now(timezone.utc).isoformat()
 
     await db.companies.update_one(
-        {"id": company_id},
+        {"id": real_id},
         {"$set": update_fields}
     )
 
-    updated = await db.companies.find_one({"id": company_id}, {"_id": 0})
+    updated = await db.companies.find_one({"id": real_id}, {"_id": 0})
+    if not updated:
+        updated = existing
+        updated.update(update_fields)
     total_users = await db.users.count_documents({
         "company": updated.get("name", "")
     })
     updated["total_users"] = total_users
+    if not updated.get("id"):
+        updated["id"] = real_id
+    if not updated.get("name"):
+        updated["name"] = company_id
 
-    logger.info(f"[COMPANIES] Empresa atualizada: {company_id}")
+    logger.info(f"[COMPANIES] Empresa atualizada: {real_id}")
     return CompanyResponse(**updated)
 
 
 @router.delete("/{company_id}")
 async def delete_company(company_id: str):
     """Remove uma empresa (soft — verifica se há utilizadores associados)."""
+    # PACOTE AR: tentar por ID ou por nome
     company = await db.companies.find_one({"id": company_id})
     if not company:
+        company = await db.companies.find_one({"name": company_id})
+    if not company:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    real_id = company.get("id", company_id)
 
     # Contar utilizadores
     total_users = await db.users.count_documents({
@@ -232,9 +263,9 @@ async def delete_company(company_id: str):
         "company_name": company.get("name", "")
     })
 
-    await db.companies.delete_one({"id": company_id})
+    await db.companies.delete_one({"id": real_id})
 
-    logger.info(f"[COMPANIES] Empresa eliminada: {company.get('name')} ({company_id})")
+    logger.info(f"[COMPANIES] Empresa eliminada: {company.get('name')} ({real_id})")
     return {"detail": "Empresa eliminada com sucesso", "affected_users": 0}
 
 
@@ -244,9 +275,13 @@ async def upload_company_logo(
     file: UploadFile = File(...),
 ):
     """Faz upload do logótipo da empresa para o S3."""
+    # PACOTE AR: tentar por ID ou por nome
     company = await db.companies.find_one({"id": company_id})
     if not company:
+        company = await db.companies.find_one({"name": company_id})
+    if not company:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
+    real_id = company.get("id", company_id)
 
     # Validar tipo de ficheiro
     allowed_types = {"image/png", "image/jpeg", "image/gif", "image/webp", "image/svg+xml"}
@@ -271,7 +306,7 @@ async def upload_company_logo(
     if not s3_service.is_configured():
         raise HTTPException(status_code=503, detail="S3 não configurado")
 
-    s3_key = f"companies/{company_id}/logo_{file.filename or 'image.png'}"
+    s3_key = f"companies/{real_id}/logo_{file.filename or 'image.png'}"
     s3_service.s3_client.put_object(
         Bucket=s3_service.bucket_name,
         Key=s3_key,
@@ -287,7 +322,7 @@ async def upload_company_logo(
 
     # Atualizar a empresa
     await db.companies.update_one(
-        {"id": company_id},
+        {"id": real_id},
         {"$set": {
             "logo_url": logo_s3_key,
             "updated_at": datetime.now(timezone.utc).isoformat(),
