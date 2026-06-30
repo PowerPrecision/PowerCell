@@ -975,5 +975,13 @@ export const uploadCompanyLogo = (id, file) => {
   });
 };
 
+// ===== COMPANY EMAIL CONFIG (IMAP/SMTP por empresa — Pacote AS) =====
+export const getCompanyEmailConfig = (companyName) =>
+  api.get(`/admin/company-email-configs/${encodeURIComponent(companyName)}`);
+export const upsertCompanyEmailConfig = (data) =>
+  api.post("/admin/company-email-configs", data);
+export const deleteCompanyEmailConfig = (companyName) =>
+  api.delete(`/admin/company-email-configs/${encodeURIComponent(companyName)}`);
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
