@@ -34,13 +34,13 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 WORKDIR /app
 
 # ── Instalar dependências Python ──
-COPY backend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Copiar código da aplicação ──
-# PACOTE AI: dockerContext é agora o repo root
-COPY backend/ /app/
-COPY worklog.md CHANGELOG.md /app/
+# NOTA: O Render Dashboard tem dockerContext: ./backend (não repo root).
+# worklog.md/CHANGELOG.md são obtidos via GitHub raw URL fallback.
+COPY . .
 
 # ── Permissões ──
 RUN chown -R pwuser:pwuser /app

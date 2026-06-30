@@ -1410,3 +1410,21 @@ Work Log:
 Stage Summary:
 - 3 ficheiros: .dockerignore (novo), backend/routes/changelog.py (endpoint diagnose), frontend/src/pages/SystemConfigPage.js (botão + painel diagnóstico).
 - Resultado: após redeploy, utilizador pode clicar "Diagnosticar" para ver exatamente qual é o problema (ficheiros vs credenciais IA) em vez de tentar adivinhar pelo erro 400.
+
+
+---
+Task ID: Pacote AI-3 (Revert Docker Context)
+Agent: Main Agent (Code Assistant)
+Task: Reverter Dockerfile para dockerContext ./backend (Render Dashboard)
+
+Work Log:
+- Build do Render falhou: "/backend/requirements.txt: not found" e "/worklog.md: not found".
+- Causa: o Render Dashboard tem dockerContext: ./backend configurado manualmente (não via render.yaml Blueprint). A mudança de dockerContext para . no render.yaml só afeta novos serviços criados via Blueprint, não serviços existentes.
+- Como não podemos mudar o dockerContext do serviço existente via código, reverti o Dockerfile e Dockerfile.worker para COPY . . (original) que funciona com dockerContext: ./backend.
+- render.yaml também revertido para dockerContext: ./backend (consistência).
+- Os ficheiros worklog.md e CHANGELOG.md continuam indisponíveis no container (estão fora do build context), MAS o changelog_service.py tem o fallback de GitHub raw URL (commit b2e7cc9) que os busca em runtime de https://raw.githubusercontent.com/PowerPrecision/PowerCell/dev/{filename}. Este fallback JÁ está testado e funciona (curl devolve 200; teste local confirmou).
+- O .dockerignore na raiz do repo mantém-se (não interfere com dockerContext: ./backend).
+
+Stage Summary:
+- 3 ficheiros: backend/Dockerfile (revert COPY . .), backend/Dockerfile.worker (revert), render.yaml (revert dockerContext).
+- Resultado: o build do Render vai funcionar novamente; o fallback GitHub (já no código) busca worklog.md/CHANGELOG.md em runtime.
