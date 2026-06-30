@@ -1503,3 +1503,21 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: backend/routes/emails.py.
 - Resultado: admins que enviam da caixa pessoal usam a sua config pessoal; imagens mantêm formatação em clientes de email clássicos.
+
+
+---
+Task ID: Pacote AL (Email Send Rewrite)
+Agent: Main Agent (Code Assistant)
+Task: Reescrita send_email_endpoint — 403 consultor + sender + assinatura
+
+Work Log:
+- Bug 1 (403 consultor): active_company_id não era extraído atempadamente. Agora lê header x-company-id primeiro, depois fallback get_active_company_id_async — tudo antes do resolver.
+- Bug 2 (sender errado): from_email e reply_to em falta na chamada send_email(). Agora from_email é resolvido da config (resolved.get('email_address')) e passado explicitamente + reply_to=from_email.
+- Bug 3 (assinaturas): inline CSS já aplicado no Pacote AK (sanitize_html + max-width nas imagens). Mantido.
+- Reescrita da primeira metade: unificação dos blocos from_box='personal' e not can_use_global_accounts num só elif. Resolver canónico chamado uma única vez para todos os roles não-indexacao. from_email = current_user.get('email') como base, depois overwritten pelo resolved.get('email_address').
+- Chamada final: adicionados from_email=from_email e reply_to=from_email.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/emails.py.
+- Resultado: consultores já não têm 403; emails saem pela conta pessoal correta com reply_to; assinaturas mantêm formatação em Outlook/Gmail.
