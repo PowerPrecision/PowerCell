@@ -1485,3 +1485,21 @@ Work Log:
 Stage Summary:
 - 3 ficheiros: backend/routes/processes.py (endpoint diagnose), frontend/src/hooks/queries/useKanbanQuery.js (error extraction + retry), frontend/src/hooks/queries/useKanbanCompletedQuery.js (error extraction).
 - Resultado: após redeploy, o utilizador pode chamar GET /api/processes/kanban/diagnose para ver a causa exata do 500; o frontend mostra o erro real do backend em vez de mensagem genérica.
+
+
+---
+Task ID: Pacote AK (Email Sender + HTML)
+Agent: Main Agent (Code Assistant)
+Task: Fix sender account (forçar personal) + inline styles para imagens
+
+Work Log:
+- Bug 1: emails enviados pela conta 'power' em vez da pessoal para admins/CEOs. Causa: from_box='personal' não tinha bloco próprio — caía no else implícito e account mantinha 'power' (default do query param).
+- Bug 2: imagens da assinatura desformatadas no destino. Causa: body_html passava direto sem sanitização nem inline styles.
+- Correções em send_email_endpoint (routes/emails.py):
+  1. Novo bloco elif from_box == 'personal' antes do general: resolve config via resolver canónico e força account='personal'. Aplica-se a todos os roles incluindo admin/CEO/diretor.
+  2. body_html agora sanitizado com sanitize_html(allow_email_html=True) + inline style 'max-width: 100%; height: auto;' injetado em todos os <img> para compatibilidade Gmail/Outlook.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/emails.py.
+- Resultado: admins que enviam da caixa pessoal usam a sua config pessoal; imagens mantêm formatação em clientes de email clássicos.

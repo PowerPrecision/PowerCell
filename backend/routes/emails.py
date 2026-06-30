@@ -3734,6 +3734,25 @@ async def send_email_endpoint(
                 )
             account = "personal"
 
+    # === PACOTE AK: from_box == "personal" — forçar conta pessoal ===
+    # Garante que QUALQUER utilizador (incluindo admin/CEO/diretor) usa a sua
+    # config pessoal quando envia a partir da sua caixa pessoal. Sem isto,
+    # o account default ('power') prevalece para admins.
+    elif from_box == "personal":
+        from services.email_config_resolver import resolve_email_config_for_sync
+        resolved = await resolve_email_config_for_sync(
+            current_user["id"],
+            active_role=user_role,
+            active_company_id=active_company_id
+        )
+        if not resolved:
+            raise HTTPException(
+                status_code=403,
+                detail="Configuração de email pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar."
+            )
+        account = "personal"
+        logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): forçado a conta pessoal (from_box=personal)")
+
     # === from_box == "general": use shared geral account ===
     elif from_box == "general":
         if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
@@ -3763,7 +3782,7 @@ async def send_email_endpoint(
             )
         account = "personal"
         logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): forçado a conta pessoal (empresa={active_company_id})")
-    
+
     # Sanitize inputs before sending and DB insert
     to_emails = [e for e in (sanitize_email(e) for e in payload.to_emails) if e]
     cc_emails = None
@@ -3771,7 +3790,13 @@ async def send_email_endpoint(
         cc_emails = [e for e in (sanitize_email(e) for e in payload.cc_emails) if e]
     subject = sanitize_string(payload.subject, max_length=300)
     body = sanitize_string(payload.body, max_length=10000)
+    # PACOTE AK: Sanitização e proteção do HTML — inline styles para imagens
+    # evitam desformatação em clientes de email clássicos (Gmail/Outlook)
     body_html = payload.body_html
+    if body_html:
+        body_html = sanitize_html(body_html, allow_email_html=True)
+        # Injetar max-width nas imagens para evitar desformatação em clientes de email
+        body_html = body_html.replace('<img ', '<img style="max-width: 100%; height: auto;" ')
 
     if not to_emails:
         raise HTTPException(status_code=400, detail="Pelo menos um email destinatário válido é necessário")
