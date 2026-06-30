@@ -238,7 +238,15 @@ async def update_company(company_id: str, data: CompanyUpdate):
 
 @router.delete("/{company_id}")
 async def delete_company(company_id: str):
-    """Remove uma empresa (soft — verifica se há utilizadores associados)."""
+    """Remove uma empresa e gere utilizadores associados.
+
+    COMPORTAMENTO MULTI-EMPRESA (Pacote AS):
+    - Users com APENAS esta empresa → BLOQUEAR (não podem ficar sem empresa)
+    - Users com OUTRAS empresas (UCR) → DESASSOCIAR esta empresa (remover
+      o UCR, limpar user_email_configs, manter as outras empresas)
+    - Se o user tem `company` (campo legacy) = nome da empresa eliminada,
+      e tem UCRs para outras empresas → mudar `company` para a primeira UCR
+    """
     # PACOTE AR: tentar por ID ou por nome
     company = await db.companies.find_one({"id": company_id})
     if not company:
@@ -246,27 +254,69 @@ async def delete_company(company_id: str):
     if not company:
         raise HTTPException(status_code=404, detail="Empresa não encontrada")
     real_id = company.get("id", company_id)
+    company_name = company.get("name", company_id)
 
-    # Contar utilizadores
-    total_users = await db.users.count_documents({
-        "company": company.get("name", "")
-    })
-    if total_users > 0:
+    # ── 1. Verificar utilizadores com APENAS esta empresa (bloquear) ──
+    # Users cujo campo `company` = nome da empresa E não têm UCRs para outras
+    users_with_this_company = await db.users.find(
+        {"company": company_name},
+        {"_id": 0, "id": 1, "name": 1, "email": 1}
+    ).to_list(1000)
+
+    blocked_users = []
+    reassigned_users = []
+
+    for u in users_with_this_company:
+        # Verificar se tem UCRs para OUTRAS empresas
+        other_ucrs = await db.user_company_roles.find({
+            "user_id": u["id"],
+            "company_id": {"$ne": real_id},
+        }).to_list(10)
+
+        if other_ucrs:
+            # Tem outras empresas → desassociar esta e mudar company default
+            first_other = other_ucrs[0]
+            new_company = first_other.get("company_name", first_other.get("company_id", "default"))
+            await db.users.update_one(
+                {"id": u["id"]},
+                {"$set": {"company": new_company}}
+            )
+            reassigned_users.append({"id": u["id"], "name": u.get("name", ""), "new_company": new_company})
+        else:
+            # Só tem esta empresa → bloquear
+            blocked_users.append({"id": u["id"], "name": u.get("name", ""), "email": u.get("email", "")})
+
+    if blocked_users:
+        names = ", ".join([f"{u['name']} ({u['email']})" for u in blocked_users[:5]])
+        suffix = f" e mais {len(blocked_users)-5}" if len(blocked_users) > 5 else ""
         raise HTTPException(
             status_code=400,
-            detail=f"Não é possível eliminar: existem {total_users} utilizadores "
-                   f"associados a esta empresa. Remova ou reassigne os utilizadores primeiro."
+            detail=f"Não é possível eliminar: {len(blocked_users)} utilizador(es) "
+                   f"têm apenas esta empresa: {names}{suffix}. "
+                   f"Atribua outra empresa a estes utilizadores primeiro."
         )
 
-    # Remover config de email da empresa
-    await db.company_email_configs.delete_one({
-        "company_name": company.get("name", "")
-    })
+    # ── 2. Desassociar UCRs desta empresa ──
+    deleted_ucrs = await db.user_company_roles.delete_many({"company_id": real_id})
 
+    # ── 3. Remover configs de email da empresa ──
+    await db.company_email_configs.delete_one({"company_name": company_name})
+    await db.user_email_configs.delete_many({"company_id": real_id})
+
+    # ── 4. Eliminar a empresa ──
     await db.companies.delete_one({"id": real_id})
 
-    logger.info(f"[COMPANIES] Empresa eliminada: {company.get('name')} ({real_id})")
-    return {"detail": "Empresa eliminada com sucesso", "affected_users": 0}
+    logger.info(
+        f"[COMPANIES] Empresa eliminada: {company_name} ({real_id}). "
+        f"UCRs removidos: {deleted_ucrs.deleted_count}. "
+        f"Users reatribuídos: {len(reassigned_users)}."
+    )
+    return {
+        "detail": "Empresa eliminada com sucesso",
+        "affected_users": len(reassigned_users),
+        "reassigned_users": reassigned_users,
+        "ucrs_removed": deleted_ucrs.deleted_count,
+    }
 
 
 @router.post("/{company_id}/logo")
