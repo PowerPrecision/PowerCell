@@ -3,8 +3,10 @@ Rotas para System Changelog (Mural de Atualizações gerado por IA)
 
 Endpoints:
 - GET  /api/system/changelog          → Obter últimos changelogs (público, qualquer utilizador autenticado)
+- GET  /api/system/changelog/diagnose → Diagnosticar problemas na geração (admin/ceo)
 - POST /api/system/changelog/generate-ai → Gerar changelog por IA (restrito a admin/ceo)
 """
+import os
 import logging
 from typing import List, Dict, Any
 from fastapi import APIRouter, HTTPException, Depends, Query
@@ -12,7 +14,11 @@ from fastapi import APIRouter, HTTPException, Depends, Query
 from services.auth import get_current_user, require_roles
 from models.auth import UserRole
 from models.changelog import ChangelogGenerateRequest, ChangelogGenerateResponse
-from services.changelog_service import get_changelogs, generate_changelog_ai
+from services.changelog_service import (
+    get_changelogs, generate_changelog_ai,
+    _resolve_project_file, read_worklog_file, read_changelog_file,
+    get_ai_client_and_model,
+)
 
 router = APIRouter(prefix="/system", tags=["System Changelog"])
 logger = logging.getLogger(__name__)
@@ -33,6 +39,106 @@ async def list_changelogs(
     except Exception as e:
         logger.error("Erro ao listar changelogs: %s", e)
         raise HTTPException(status_code=500, detail="Erro ao carregar atualizações")
+
+
+@router.get("/changelog/diagnose")
+async def diagnose_changelog_generation(
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
+):
+    """
+    Diagnosticar problemas na geração de changelog por IA.
+
+    Verifica:
+    1. Acessibilidade dos ficheiros (local + GitHub fallback)
+    2. Configuração de credenciais de IA (BD + env vars)
+    3. Capacidade de ler conteúdo de cada fonte
+
+    Retorna um relatório detalhado para diagnóstico.
+    """
+    report = {
+        "checks": {},
+        "can_generate": False,
+        "blocking_issue": None,
+    }
+
+    # ── 1. Verificar ficheiros de fonte ──
+    worklog_local = _resolve_project_file("worklog.md")
+    changelog_local = _resolve_project_file("CHANGELOG.md")
+
+    report["checks"]["files"] = {
+        "worklog_md_local_path": worklog_local,
+        "changelog_md_local_path": changelog_local,
+        "worklog_md_local_exists": worklog_local is not None,
+        "changelog_md_local_exists": changelog_local is not None,
+    }
+
+    # Testar leitura de worklog (async — inclui fallback GitHub)
+    try:
+        worklog_content = await read_worklog_file(10)
+        report["checks"]["files"]["worklog_md_readable"] = bool(worklog_content)
+        report["checks"]["files"]["worklog_md_sample"] = worklog_content[:100] if worklog_content else None
+    except Exception as e:
+        report["checks"]["files"]["worklog_md_readable"] = False
+        report["checks"]["files"]["worklog_md_error"] = str(e)
+
+    # Testar leitura de CHANGELOG (async — inclui fallback GitHub)
+    try:
+        changelog_content = await read_changelog_file(10)
+        report["checks"]["files"]["changelog_md_readable"] = bool(changelog_content)
+        report["checks"]["files"]["changelog_md_sample"] = changelog_content[:100] if changelog_content else None
+    except Exception as e:
+        report["checks"]["files"]["changelog_md_readable"] = False
+        report["checks"]["files"]["changelog_md_error"] = str(e)
+
+    # ── 2. Verificar credenciais de IA ──
+    try:
+        client, model = await get_ai_client_and_model()
+        report["checks"]["ai_credentials"] = {
+            "configured": client is not None,
+            "model": model,
+            "has_openai_env_key": bool(os.environ.get("OPENAI_API_KEY")),
+            "has_emergent_env_key": bool(os.environ.get("EMERGENT_LLM_KEY")),
+        }
+    except Exception as e:
+        report["checks"]["ai_credentials"] = {
+            "configured": False,
+            "error": str(e),
+        }
+
+    # ── 3. Verificar git ──
+    from services.changelog_service import read_git_log
+    try:
+        git_log = read_git_log(5)
+        report["checks"]["git"] = {
+            "available": bool(git_log),
+            "sample": git_log[:100] if git_log else None,
+        }
+    except Exception as e:
+        report["checks"]["git"] = {"available": False, "error": str(e)}
+
+    # ── 4. Determinar blockers ──
+    has_source = (
+        report["checks"]["files"].get("worklog_md_readable") or
+        report["checks"]["files"].get("changelog_md_readable") or
+        report["checks"]["git"].get("available")
+    )
+    has_credentials = report["checks"]["ai_credentials"].get("configured", False)
+
+    if not has_credentials:
+        report["blocking_issue"] = (
+            "Credenciais de IA não configuradas. Configure no painel de administração "
+            "(Configurações → IA) ou defina OPENAI_API_KEY / EMERGENT_LLM_KEY nas env vars."
+        )
+    elif not has_source:
+        report["blocking_issue"] = (
+            "Nenhuma fonte de dados disponível (worklog.md, CHANGELOG.md e git log todos vazios). "
+            "Verifique se o fallback do GitHub está a funcionar."
+        )
+    else:
+        report["can_generate"] = True
+        report["blocking_issue"] = None
+
+    return report
 
 
 @router.post("/changelog/generate-ai")

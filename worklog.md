@@ -1392,3 +1392,21 @@ Work Log:
 Stage Summary:
 - 4 ficheiros: backend/services/changelog_service.py, render.yaml, backend/Dockerfile, backend/Dockerfile.worker.
 - Resultado: geração de changelog por IA funciona no Render mesmo sem os ficheiros na imagem Docker (fallback GitHub); o próximo deploy incluirá os ficheiros na imagem graças ao dockerContext corrigido.
+
+
+---
+Task ID: Pacote AI-2 (Diagnóstico + Dockerignore)
+Agent: Main Agent (Code Assistant)
+Task: Endpoint de diagnóstico + .dockerignore para build context corrigido
+
+Work Log:
+- Logs do Render confirmaram que o Pacote AI (commit b2e7cc9) ainda não foi deployado — as mensagens de GitHub fallback não aparecem nos logs. O backend em produção ainda corre código antigo (Pacote AH).
+- Verificado que GitHub raw URL funciona: curl devolveu 200 para worklog.md e CHANGELOG.md. Testado _fetch_from_github() localmente — funciona corretamente (1394 linhas no worklog, 1355 no CHANGELOG).
+- Adicionado .dockerignore na raiz do repo (necessário porque dockerContext mudou de ./backend para .): exclui node_modules, __pycache__, testes, .git, etc. Mantém worklog.md e CHANGELOG.md (necessários para o changelog_service).
+- Criado endpoint GET /api/system/changelog/diagnose (admin/CEO): verifica ficheiros locais, GitHub fallback, credenciais de IA (BD + env vars), git log. Retorna relatório estruturado com can_generate + blocking_issue.
+- Adicionado botão "🔍 Diagnosticar" no SystemConfigPage.js junto ao botão de gerar. Mostra painel com: estado dos ficheiros (local path + legível), credenciais IA (configuradas + modelo + env keys), git log disponibilidade.
+- Validação: py_compile ✓; flake8 0 erros; esbuild ✓.
+
+Stage Summary:
+- 3 ficheiros: .dockerignore (novo), backend/routes/changelog.py (endpoint diagnose), frontend/src/pages/SystemConfigPage.js (botão + painel diagnóstico).
+- Resultado: após redeploy, utilizador pode clicar "Diagnosticar" para ver exatamente qual é o problema (ficheiros vs credenciais IA) em vez de tentar adivinhar pelo erro 400.
