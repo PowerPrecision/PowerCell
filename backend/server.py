@@ -198,14 +198,15 @@ async def add_security_headers(request, call_next):
     response.headers["Referrer-Policy"] = "strict-origin-when-cross-origin"
     
     # Content Security Policy - restritiva mas permitindo API funcionar
-    # Permite: self para scripts/styles, data: para imagens base64
+    # Permite: self para scripts/styles, data: para imagens base64,
+    # cid: para imagens inline de emails (Outlook/Exchange usam Content-ID)
     response.headers["Content-Security-Policy"] = (
         "default-src 'self'; "
         "script-src 'self' 'unsafe-inline'; "
         "style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: https:; "
+        "img-src 'self' data: https: cid: blob:; "
         "font-src 'self' data:; "
-        "connect-src 'self' https:; "
+        "connect-src 'self' https: wss:; "
         "frame-ancestors 'none';"
     )
     
