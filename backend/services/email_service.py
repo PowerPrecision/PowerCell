@@ -556,9 +556,44 @@ async def send_email(
                         email=cfg.get("email_address", ""),
                         password=password,
                     )
-                    logger.info(f"[Send Email] Conta pessoal do utilizador {created_by}: {cfg.get('email_address', '')}")
+                    logger.info(f"[Send Email] Conta pessoal (legacy) do utilizador {created_by}: {cfg.get('email_address', '')}")
                 except Exception as e:
                     logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
+
+        # PACOTE AL-fix: se a config legacy não existir, tentar o resolver
+        # canónico multi-empresa (user_email_configs). Isto resolve o erro
+        # 550 "From domain is not local" quando o utilizador tem config na
+        # nova coleção mas não na legacy user.email_config.
+        if not account:
+            try:
+                from services.email_config_resolver import resolve_email_config_for_sync
+                # active_company_id é passado como argumento (Pacote AL)
+                resolved = await resolve_email_config_for_sync(
+                    created_by,
+                    active_role=None,
+                    active_company_id=active_company_id
+                )
+                if resolved:
+                    from services.encryption import encryption_service as _enc
+                    enc_password = resolved.get("encrypted_password", "")
+                    password = ""
+                    if enc_password:
+                        try:
+                            password = _enc.decrypt(enc_password)
+                        except Exception as e:
+                            logger.warning(f"[Send Email] Erro ao desencriptar password (resolver): {e}")
+                    account = EmailAccount(
+                        name="personal",
+                        imap_server=resolved.get("smtp_server", resolved.get("imap_server", "")),
+                        imap_port=int(resolved.get("smtp_port", resolved.get("imap_port", 465))),
+                        smtp_server=resolved.get("smtp_server", ""),
+                        smtp_port=int(resolved.get("smtp_port", 465)),
+                        email=resolved.get("email_address", ""),
+                        password=password,
+                    )
+                    logger.info(f"[Send Email] Conta pessoal (resolver) do utilizador {created_by}: {resolved.get('email_address', '')}")
+            except Exception as e:
+                logger.warning(f"[Send Email] Erro no resolver para conta pessoal: {e}")
     
     if not account:
         # === force_system: tentar contas globais, depois system_smtp (Bloco A) ===
