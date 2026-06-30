@@ -3695,11 +3695,19 @@ async def send_email_endpoint(
     - general (from_box): CEO/admin/diretor podem enviar da caixa geral (shared_role=geral)
     """
     from models.auth import UserRole
-    
+
     user_role = current_user.get("role", "")
     can_use_global_accounts = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     from_box = payload.from_box
-    
+
+    # === EMPRESA ATIVA — resolvida no início (Pacote AJ) ===
+    # Necessária para o resolver canónico multi-empresa e para a assinatura.
+    try:
+        from services.auth import get_active_company_id_async
+        active_company_id = await get_active_company_id_async(request, current_user)
+    except Exception:
+        active_company_id = None
+
     # === indexacao role: auto-use shared email account ===
     if user_role == UserRole.INDEXACAO:
         shared_config = await db.shared_role_email_configs.find_one(
@@ -3712,19 +3720,20 @@ async def send_email_endpoint(
             account = "personal"  # The send_email service uses email_config for "personal"
             logger.info(f"[Send Email] indexacao user {current_user.get('email')}: using shared account {shared_email_addr}")
         else:
-            # Fallback: try personal config
-            user_id = current_user["id"]
-            user = await db.users.find_one(
-                {"id": user_id},
-                {"_id": 0, "email_config": 1}
+            # Fallback: try personal config via resolver canónico (Pacote AJ)
+            from services.email_config_resolver import resolve_email_config_for_sync
+            resolved = await resolve_email_config_for_sync(
+                current_user["id"],
+                active_role=user_role,
+                active_company_id=active_company_id
             )
-            if not user or not user.get("email_config", {}).get("is_configured"):
+            if not resolved:
                 raise HTTPException(
                     status_code=403,
                     detail="Configuração de email partilhada para indexacao não encontrada. Contacte o administrador."
                 )
             account = "personal"
-    
+
     # === from_box == "general": use shared geral account ===
     elif from_box == "general":
         if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
@@ -3735,24 +3744,25 @@ async def send_email_endpoint(
         # Use "power" (default) account for general box
         account = "power"
         logger.info(f"[Send Email] user {current_user.get('email')} ({user_role}): sending from geral box (account={account})")
-    
+
     # Para utilizadores não-admin sem box, forçar uso da conta pessoal
+    # PACOTE AJ: usa o resolver canónico multi-empresa em vez de aceder
+    # diretamente a user.get("email_config", {}).get("is_configured")
+    # (estrutura legacy plana que quebra a nova arquitetura user_email_configs).
     elif not can_use_global_accounts:
-        user_id = current_user["id"]
-        user = await db.users.find_one(
-            {"id": user_id},
-            {"_id": 0, "email_config": 1}
+        from services.email_config_resolver import resolve_email_config_for_sync
+        resolved = await resolve_email_config_for_sync(
+            current_user["id"],
+            active_role=user_role,
+            active_company_id=active_company_id
         )
-        
-        if not user or not user.get("email_config", {}).get("is_configured"):
+        if not resolved:
             raise HTTPException(
                 status_code=403,
                 detail="Configuração de email pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar."
             )
-        
-        # Forçar account = "personal" para utilizadores não-admin
         account = "personal"
-        logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): forçado a conta pessoal")
+        logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): forçado a conta pessoal (empresa={active_company_id})")
     
     # Sanitize inputs before sending and DB insert
     to_emails = [e for e in (sanitize_email(e) for e in payload.to_emails) if e]
@@ -3817,15 +3827,9 @@ async def send_email_endpoint(
             except Exception as e:
                 logger.error(f"Error downloading temp attachment {file_name}: {e}")
 
-    # === EMPRESA ATIVA — para resolver a assinatura correta ===
-    # Cada user pode ter uma assinatura diferente por empresa (UCR). Lemos a
-    # empresa ativa da sessão (header X-Company-Id) para que o send_email use
-    # a assinatura da empresa que o utilizador selecionou, e não a default.
-    try:
-        from services.auth import get_active_company_id_async
-        active_company_id = await get_active_company_id_async(request, current_user)
-    except Exception:
-        active_company_id = None
+    # === EMPRESA ATIVA — já resolvida no início da função (Pacote AJ) ===
+    # active_company_id é usado tanto para o resolver canónico multi-empresa
+    # (acima) como para a assinatura correta no send_email (abaixo).
 
     result = await send_email(
         account_name=account,

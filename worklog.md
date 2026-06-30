@@ -1428,3 +1428,43 @@ Work Log:
 Stage Summary:
 - 3 ficheiros: backend/Dockerfile (revert COPY . .), backend/Dockerfile.worker (revert), render.yaml (revert dockerContext).
 - Resultado: o build do Render vai funcionar novamente; o fallback GitHub (já no código) busca worklog.md/CHANGELOG.md em runtime.
+
+
+---
+Task ID: Pacote AJ (Email Multi-Company)
+Agent: Main Agent (Code Assistant)
+Task: Fix 403 no envio de email — usar resolver canónico multi-empresa
+
+Work Log:
+- Bug: POST /api/emails/send devolvia 403 "Configuração de email pessoal não encontrada" mesmo com email configurado.
+- Causa: send_email_endpoint acedia a user.get("email_config", {}).get("is_configured") — estrutura legacy plana que não existe na nova arquitetura multi-empresa (user_email_configs).
+- Correções em routes/emails.py send_email_endpoint:
+  1. active_company_id movido para o início (logo após can_use_global_accounts) — era resolvido no final.
+  2. Bloco elif not can_use_global_accounts: substituído por resolve_email_config_for_sync(current_user["id"], active_role=user_role, active_company_id=active_company_id) — resolver canónico que procura em user_email_configs.
+  3. Bloco indexacao fallback também atualizado para usar o resolver.
+  4. Removida a resolução duplicada de active_company_id no final da função.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/emails.py.
+- Resultado: envio de email funciona para utilizadores não-admin com config em user_email_configs (multi-empresa); active_company_id resolvido uma única vez no início.
+
+
+---
+Task ID: Pacote AK (Companies Migration)
+Agent: Main Agent (Code Assistant)
+Task: Script de migração para tabela central de empresas
+
+Work Log:
+- Criado backend/scripts/migrate_companies_central.py.
+- Scan de 4 coleções: user_company_roles (company_id+company_name), users (company string), company_email_configs (company_name), system_config (company_id+settings.company_name).
+- Coleta única com prioridade: user_company_roles > system_config > company_email_configs > users. Slugifica nomes sem ID estruturado.
+- Upsert seguro: preserva company_id original como `id` (CRÍTICO para não quebrar referências). Para empresas existentes, preenche campos em falta sem sobrescrever. Defaults: logo_url=None, email_sync_enabled=False, nif=None.
+- Fase de verificação: cruza user_company_roles com companies e reporta missing.
+- Flags: --dry-run (simular), --verbose (detalhes).
+- Confirmado que companies_crud.py já usa db.companies em todas as operações (find/insert_one/update_one/delete_one) — Single Source of Truth.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro novo: backend/scripts/migrate_companies_central.py.
+- Resultado: script pronto para correr no Render (cd /app && python -m scripts.migrate_companies_central --dry-run primeiro para verificar, depois sem --dry-run para executar).
