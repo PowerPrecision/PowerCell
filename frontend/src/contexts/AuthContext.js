@@ -195,16 +195,21 @@ export function AuthProvider({ children }) {
       
       // Initialize activeCompanyId only once
       if (!activeCompanyInitialized.current) {
-        const savedCompanyId = sessionStorage.getItem("activeCompanyId");
+        const savedCompanyId = localStorage.getItem("active_company_id")
+          || sessionStorage.getItem("activeCompanyId");
         const companies = userData.companies || [];
         if (companies.length > 0) {
           if (savedCompanyId && companies.some(c => c.company_id === savedCompanyId)) {
             setActiveCompanyId(savedCompanyId);
+            // PACOTE AR: garantir que localStorage tem o valor (persistência)
+            localStorage.setItem("active_company_id", savedCompanyId);
           } else {
             // Usar a empresa default (is_default=True) ou a primeira
             const defaultCompany = companies.find(c => c.is_default) || companies[0];
             const companyId = defaultCompany.company_id;
             setActiveCompanyId(companyId);
+            // PACOTE AR: guardar em localStorage (persiste entre sessões)
+            localStorage.setItem("active_company_id", companyId);
             sessionStorage.setItem("activeCompanyId", companyId);
             // Atualizar brand theme para a empresa ativa
             applyBrandTheme(defaultCompany.company_name || userData.company);
@@ -217,6 +222,8 @@ export function AuthProvider({ children }) {
           // active_company_id=None e não guarde a assinatura de email.
           const fallbackId = userData.company || "default";
           setActiveCompanyId(fallbackId);
+          // PACOTE AR: guardar em localStorage
+          localStorage.setItem("active_company_id", fallbackId);
           sessionStorage.setItem("activeCompanyId", fallbackId);
         }
         activeCompanyInitialized.current = true;
@@ -447,47 +454,31 @@ export function AuthProvider({ children }) {
   const switchActiveCompany = useCallback(async (companyId) => {
     if (!companyId) return;
 
-    setActiveCompanyId(companyId);
+    // PACOTE AR: guardar em localStorage (persiste entre sessões) E sessionStorage
+    // (retrocompatibilidade). O interceptor api.js lê de localStorage primeiro.
+    localStorage.setItem("active_company_id", companyId);
     sessionStorage.setItem("activeCompanyId", companyId);
+    setActiveCompanyId(companyId);
 
-    // Notificar o backend para atualizar a empresa ativa
-    try {
-      await api.post("/admin/user-company-roles/set-active-company", { company_id: companyId });
-    } catch (error) {
-      console.warn("[AuthContext] Erro ao definir empresa ativa no backend:", error);
-    }
-    
-    // Atualizar brand theme
+    // Atualizar brand theme antes do reload para feedback visual imediato
     const companies = user?.companies || [];
     const target = companies.find(c => c.company_id === companyId);
     if (target) {
       applyBrandTheme(target.company_name);
     }
 
-    // ── REATIVIDADE: Recarregar dados do utilizador após troca de empresa ──
-    // Isto garante que os campos específicos da empresa (assinatura, cargo,
-    // telefone profissional) sejam atualizados no estado do AuthContext,
-    // propagando automaticamente para todos os componentes consumidores
-    // (ProfilePage, EmailConfigForm, etc.)
+    // Notificar o backend para atualizar a empresa ativa (fire-and-forget
+    // — não esperamos a resposta antes do reload)
     try {
-      const response = await api.get("/auth/me");
-      setUser(response.data);
-
-      // Atualizar activeRole se a nova empresa tem role diferente
-      if (target && target.role && target.role !== activeRole) {
-        setActiveRole(target.role);
-        sessionStorage.setItem("activeRole", target.role);
-      }
+      await api.post("/admin/user-company-roles/set-active-company", { company_id: companyId });
     } catch (error) {
-      console.warn("[AuthContext] Erro ao recarregar dados após troca de empresa:", error);
+      console.warn("[AuthContext] Erro ao definir empresa ativa no backend:", error);
     }
 
-    // ── REATIVIDADE: Invalidar toda a cache do TanStack Query ──
-    // Quando o utilizador troca de empresa, os dados em cache pertencem
-    // à empresa anterior (ex: processos, emails, templates, kanban).
-    // Ao invalidar, forçamos todos os componentes a voltar a pedir dados
-    // ao backend com o novo header X-Company-Id (injetado pelo interceptor).
-    queryClient.invalidateQueries();
+    // PACOTE AR: Hard reload para limpar toda a cache (TanStack Query, estado
+    // de componentes, etc.) e evitar fugas de dados da empresa anterior na UI.
+    // É a forma mais segura num CRM multi-empresa.
+    window.location.reload();
   }, [user]);
 
   // Refresh user data from /auth/me (e.g. after email config save)
