@@ -1448,3 +1448,23 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: backend/routes/emails.py.
 - Resultado: envio de email funciona para utilizadores não-admin com config em user_email_configs (multi-empresa); active_company_id resolvido uma única vez no início.
+
+
+---
+Task ID: Pacote AK (Companies Migration)
+Agent: Main Agent (Code Assistant)
+Task: Script de migração para tabela central de empresas
+
+Work Log:
+- Criado backend/scripts/migrate_companies_central.py.
+- Scan de 4 coleções: user_company_roles (company_id+company_name), users (company string), company_email_configs (company_name), system_config (company_id+settings.company_name).
+- Coleta única com prioridade: user_company_roles > system_config > company_email_configs > users. Slugifica nomes sem ID estruturado.
+- Upsert seguro: preserva company_id original como `id` (CRÍTICO para não quebrar referências). Para empresas existentes, preenche campos em falta sem sobrescrever. Defaults: logo_url=None, email_sync_enabled=False, nif=None.
+- Fase de verificação: cruza user_company_roles com companies e reporta missing.
+- Flags: --dry-run (simular), --verbose (detalhes).
+- Confirmado que companies_crud.py já usa db.companies em todas as operações (find/insert_one/update_one/delete_one) — Single Source of Truth.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro novo: backend/scripts/migrate_companies_central.py.
+- Resultado: script pronto para correr no Render (cd /app && python -m scripts.migrate_companies_central --dry-run primeiro para verificar, depois sem --dry-run para executar).
