@@ -198,31 +198,34 @@ export function AuthProvider({ children }) {
         const savedCompanyId = localStorage.getItem("active_company_id")
           || sessionStorage.getItem("activeCompanyId");
         const companies = userData.companies || [];
+
+        // PACOTE AS: Garantir que temos o currentActiveRole para comparar
+        let currentActiveRole = activeRole || userData.role;
+        if (!activeRoleInitialized.current) {
+          currentActiveRole = sessionStorage.getItem("activeRole") || userData.role;
+        }
+
         if (companies.length > 0) {
           if (savedCompanyId && companies.some(c => c.company_id === savedCompanyId)) {
+            // Empresa guardada ainda é válida — manter
             setActiveCompanyId(savedCompanyId);
-            // PACOTE AR: garantir que localStorage tem o valor (persistência)
             localStorage.setItem("active_company_id", savedCompanyId);
           } else {
-            // Usar a empresa default (is_default=True) ou a primeira
-            const defaultCompany = companies.find(c => c.is_default) || companies[0];
-            const companyId = defaultCompany.company_id;
+            // PACOTE AS: Procurar empresa que corresponde ao role ativo.
+            // Se não encontrar, fallback para is_default ou primeira.
+            const matchingCompany = companies.find(c => c.role === currentActiveRole)
+              || companies.find(c => c.is_default)
+              || companies[0];
+            const companyId = matchingCompany.company_id;
             setActiveCompanyId(companyId);
-            // PACOTE AR: guardar em localStorage (persiste entre sessões)
             localStorage.setItem("active_company_id", companyId);
             sessionStorage.setItem("activeCompanyId", companyId);
-            // Atualizar brand theme para a empresa ativa
-            applyBrandTheme(defaultCompany.company_name || userData.company);
+            applyBrandTheme(matchingCompany.company_name || userData.company);
           }
         } else {
           // Sem empresas na tabela — usar campo company como fallback
-          // IMPORTANTE: Se não houver empresa nenhuma, usar "default" como
-          // sentinel. Isto garante que o header X-Company-Id é SEMPRE enviado
-          // pelo interceptor api.js, evitando que o backend receba
-          // active_company_id=None e não guarde a assinatura de email.
           const fallbackId = userData.company || "default";
           setActiveCompanyId(fallbackId);
-          // PACOTE AR: guardar em localStorage
           localStorage.setItem("active_company_id", fallbackId);
           sessionStorage.setItem("activeCompanyId", fallbackId);
         }
