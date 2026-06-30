@@ -1,0 +1,78 @@
+# ====================================================================
+# .DOCKERIGNORE — Repo root (Pacote AI)
+# ====================================================================
+# Como o dockerContext foi alterado de ./backend para . (repo root),
+# este ficheiro evita que ficheiros desnecessários sejam incluídos no
+# build context do Docker, acelerando o build e reduzindo o tamanho
+# da imagem.
+# ====================================================================
+
+# ── Node.js / Frontend ──
+frontend/node_modules/
+frontend/dist/
+frontend/.vercel/
+frontend/build/
+**/node_modules/
+
+# ── Python ──
+**/__pycache__/
+**/*.pyc
+**/*.pyo
+**/.pytest_cache/
+**/.mypy_cache/
+**/*.egg-info/
+
+# ── Git ──
+.git/
+.gitignore
+
+# ── Testes ──
+**/test-results/
+**/test_reports/
+**/test_reports/
+**/*.png
+**/test-*.png
+**/test_mobile.png
+
+# ── IDE / Editor ──
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# ── Docker ──
+Dockerfile
+Dockerfile.worker
+docker-compose*.yml
+
+# ── CI/CD ──
+.github/
+.gitlab-ci.yml
+
+# ── Documentação densa (não precisa no container) ──
+# NOTA: worklog.md e CHANGELOG.md NÃO são ignorados — são necessários
+# para o changelog_service.py gerar notas de atualização por IA.
+ARCHITECTURE.md
+memory/
+agent-ctx/
+download/
+examples/
+README.md
+
+# ── Dados de teste/backup ──
+backend/backup_test/
+backend/db/
+backend/upload/
+**/*.db
+**/*.sqlite
+
+# ── Secrets / env ──
+.env
+.env.*
+*.pem
+*.key
+
+# ── Logs ──
+*.log
+dev.log

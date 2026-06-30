@@ -133,24 +133,21 @@ def sanitize_source_text(text: str) -> str:
 
 # ── Fontes de dados ──
 
+# PACOTE AI: config do GitHub para fallback de ficheiros.
+# No Render, o Docker build context é ./backend, pelo que worklog.md e
+# CHANGELOG.md (na raiz do repo) não são incluídos na imagem. O fallback
+# busca-os via GitHub raw URL (repo é público para fetch).
+GITHUB_REPO_OWNER = os.environ.get("GITHUB_REPO_OWNER", "PowerPrecision")
+GITHUB_REPO_NAME = os.environ.get("GITHUB_REPO_NAME", "PowerCell")
+GITHUB_REPO_BRANCH = os.environ.get("GITHUB_REPO_BRANCH", "dev")
+
+
 def _resolve_project_file(filename: str) -> Optional[str]:
     """
     Resolve o caminho absoluto de um ficheiro na raiz do projeto.
 
-    PACOTE AH — Directory Resolver:
-    No Render, o Docker corre o backend em /app (pasta backend/), mas os
-    ficheiros worklog.md e CHANGELOG.md estão na raiz do repositório (um
-    nível acima). Esta função tenta vários diretórios candidatos:
-
-    1. Diretório pai do diretório atual (ex: /app/../worklog.md = /worklog.md)
-       — funciona quando o cwd é /app (backend/)
-    2. Diretório atual (ex: ./worklog.md) — funciona em dev local
-    3. Dois níveis acima de __file__ (ex: /app/services/../../worklog.md)
-       — resolve a raiz do repo a partir do ficheiro
-    4. Diretório pai de __file__ (ex: /app/../worklog.md)
-
-    Returns:
-        Caminho absoluto se encontrado, None caso contrário.
+    Tenta vários diretórios candidatos (cwd, repo_root, backend_dir).
+    Retorna o caminho se encontrado, None caso contrário.
     """
     from pathlib import Path
 
@@ -159,7 +156,7 @@ def _resolve_project_file(filename: str) -> Optional[str]:
     repo_root = backend_dir.parent          # raiz do repositório
 
     candidate_dirs = [
-        Path.cwd(),                   # cwd atual (ex: /app em produção, ou repo root em dev)
+        Path.cwd(),                   # cwd atual
         repo_root,                    # raiz do repo (um nível acima de backend/)
         backend_dir,                  # pasta backend/ (fallback)
     ]
@@ -167,14 +164,52 @@ def _resolve_project_file(filename: str) -> Optional[str]:
     for d in candidate_dirs:
         candidate = d / filename
         if candidate.exists() and candidate.is_file():
-            logger.info("[CHANGELOG] Ficheiro '%s' encontrado em %s", filename, candidate)
+            logger.info("[CHANGELOG] Ficheiro '%s' encontrado localmente em %s", filename, candidate)
             return str(candidate)
 
     logger.warning(
-        "[CHANGELOG] Ficheiro '%s' não encontrado em nenhum dos diretórios: %s",
+        "[CHANGELOG] Ficheiro '%s' não encontrado localmente em: %s",
         filename, [str(d) for d in candidate_dirs]
     )
     return None
+
+
+def _read_local_file_tail(filepath: str, max_lines: int) -> str:
+    """Lê as últimas N linhas de um ficheiro local."""
+    with open(filepath, "r", encoding="utf-8") as f:
+        lines = f.readlines()
+    return "".join(lines[-max_lines:]).strip()
+
+
+async def _fetch_from_github(filename: str, max_lines: int) -> str:
+    """
+    Busca um ficheiro do GitHub via raw URL (fallback para produção).
+
+    PACOTE AI: no Render, o Docker build context é ./backend, pelo que
+    os ficheiros na raiz do repo (worklog.md, CHANGELOG.md) não são
+    incluídos na imagem. Esta função busca-os directamente do GitHub
+    via raw.githubusercontent.com (repo público, sem auth necessária).
+
+    Returns:
+        Últimas max_lines linhas do ficheiro, ou "" se falhar.
+    """
+    import httpx
+
+    url = f"https://raw.githubusercontent.com/{GITHUB_REPO_OWNER}/{GITHUB_REPO_NAME}/{GITHUB_REPO_BRANCH}/{filename}"
+    try:
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            if resp.status_code != 200:
+                logger.warning("[CHANGELOG] GitHub raw devolveu %s para %s", resp.status_code, url)
+                return ""
+            text = resp.text
+            lines = text.splitlines()
+            tail = "\n".join(lines[-max_lines:])
+            logger.info("[CHANGELOG] Ficheiro '%s' obtido do GitHub (%d linhas)", filename, len(lines))
+            return tail.strip()
+    except Exception as e:
+        logger.warning("[CHANGELOG] Erro ao buscar '%s' do GitHub: %s", filename, e)
+        return ""
 
 
 def read_git_log(max_lines: int = 50) -> str:
@@ -196,40 +231,43 @@ def read_git_log(max_lines: int = 50) -> str:
         return ""
 
 
-def read_changelog_file(max_lines: int = 50) -> str:
+async def read_changelog_file(max_lines: int = 50) -> str:
     """Ler as últimas linhas do ficheiro CHANGELOG.md.
 
-    PACOTE AH: usa _resolve_project_file() para encontrar o ficheiro
-    na raiz do repositório (um nível acima de backend/), suportando
-    tanto dev local como deploy no Render (/app).
+    PACOTE AI: tenta ficheiro local primeiro (_resolve_project_file).
+    Se não encontrar (ex: no Render onde o build context é ./backend),
+    faz fallback para GitHub raw URL.
     """
     try:
+        # 1. Tentar ficheiro local
         changelog_path = _resolve_project_file("CHANGELOG.md")
-        if not changelog_path:
-            return ""
-        with open(changelog_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        # Pegar as últimas N linhas
-        return "".join(lines[-max_lines:]).strip()
+        if changelog_path:
+            return _read_local_file_tail(changelog_path, max_lines)
+
+        # 2. Fallback: GitHub raw URL
+        logger.info("[CHANGELOG] CHANGELOG.md não encontrado localmente, a tentar GitHub...")
+        return await _fetch_from_github("CHANGELOG.md", max_lines)
     except Exception as e:
         logger.warning("Não foi possível ler CHANGELOG.md: %s", e)
         return ""
 
 
-def read_worklog_file(max_lines: int = 50) -> str:
+async def read_worklog_file(max_lines: int = 50) -> str:
     """Ler as últimas linhas do ficheiro worklog.md.
 
-    PACOTE AH: usa _resolve_project_file() para encontrar o ficheiro
-    na raiz do repositório (um nível acima de backend/), suportando
-    tanto dev local como deploy no Render (/app).
+    PACOTE AI: tenta ficheiro local primeiro (_resolve_project_file).
+    Se não encontrar (ex: no Render onde o build context é ./backend),
+    faz fallback para GitHub raw URL.
     """
     try:
+        # 1. Tentar ficheiro local
         worklog_path = _resolve_project_file("worklog.md")
-        if not worklog_path:
-            return ""
-        with open(worklog_path, "r", encoding="utf-8") as f:
-            lines = f.readlines()
-        return "".join(lines[-max_lines:]).strip()
+        if worklog_path:
+            return _read_local_file_tail(worklog_path, max_lines)
+
+        # 2. Fallback: GitHub raw URL
+        logger.info("[CHANGELOG] worklog.md não encontrado localmente, a tentar GitHub...")
+        return await _fetch_from_github("worklog.md", max_lines)
     except Exception as e:
         logger.warning("Não foi possível ler worklog.md: %s", e)
         return ""
@@ -291,29 +329,29 @@ async def generate_changelog_ai(
         else:
             # Fallback 1: worklog.md (mais fiável no Render — ficheiro físico)
             logger.info("[CHANGELOG] git log indisponível, a tentar worklog.md (fallback)")
-            source_text = read_worklog_file(max_source_lines)
+            source_text = await read_worklog_file(max_source_lines)
             if source_text:
                 effective_source = "worklog (fallback de git)"
             else:
                 # Fallback 2: CHANGELOG.md
                 logger.info("[CHANGELOG] worklog.md vazio, a tentar CHANGELOG.md (fallback)")
-                source_text = read_changelog_file(max_source_lines)
+                source_text = await read_changelog_file(max_source_lines)
                 if source_text:
                     effective_source = "changelog_file (fallback de git)"
     elif source_type == "changelog_file":
-        source_text = read_changelog_file(max_source_lines)
+        source_text = await read_changelog_file(max_source_lines)
         if not source_text:
             # Fallback para worklog se CHANGELOG.md estiver vazio
             logger.info("[CHANGELOG] CHANGELOG.md vazio, a tentar worklog.md (fallback)")
-            source_text = read_worklog_file(max_source_lines)
+            source_text = await read_worklog_file(max_source_lines)
             if source_text:
                 effective_source = "worklog (fallback de changelog_file)"
     elif source_type == "worklog":
-        source_text = read_worklog_file(max_source_lines)
+        source_text = await read_worklog_file(max_source_lines)
         if not source_text:
             # Fallback para CHANGELOG.md se worklog estiver vazio
             logger.info("[CHANGELOG] worklog.md vazio, a tentar CHANGELOG.md (fallback)")
-            source_text = read_changelog_file(max_source_lines)
+            source_text = await read_changelog_file(max_source_lines)
             if source_text:
                 effective_source = "changelog_file (fallback de worklog)"
     else:

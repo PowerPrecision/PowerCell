@@ -49,11 +49,15 @@ WORKDIR /app
 # ── Instalar dependências Python ──
 # O pacote playwright em requirements.txt deve ser ==1.52.0 para
 # compatibilidade com o Chromium pré-instalado na imagem base.
-COPY requirements.txt .
+COPY backend/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Copiar código da aplicação ──
-COPY . .
+# PACOTE AI: dockerContext é agora o repo root (para incluir worklog.md
+# e CHANGELOG.md na raiz). Copia-se backend/ para /app/ e os ficheiros
+# da raiz para /app/ também (para o changelog_service os encontrar).
+COPY backend/ /app/
+COPY worklog.md CHANGELOG.md /app/
 
 # ── Permissões ──
 # A imagem Playwright já traz o utilizador pwuser (UID/GID 1000).
