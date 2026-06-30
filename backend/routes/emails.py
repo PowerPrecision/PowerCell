@@ -3346,8 +3346,8 @@ async def get_process_emails(
             for ce in client_emails:
                 escaped = re.escape(ce)
                 email_match_or.extend([
-                    {"from_email": {"$regex": escaped, "$options": "i"}},
-                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
+                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
                 ])
 
             # Só incluir se NÃO tiver process_id já (evitar duplicados)
@@ -3422,8 +3422,8 @@ async def get_email_stats(
             for ce in client_emails:
                 escaped = re.escape(ce)
                 email_match_or.extend([
-                    {"from_email": {"$regex": escaped, "$options": "i"}},
-                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
+                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
                 ])
             fallback_condition = {
                 "$and": [
