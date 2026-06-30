@@ -49,15 +49,16 @@ WORKDIR /app
 # ── Instalar dependências Python ──
 # O pacote playwright em requirements.txt deve ser ==1.52.0 para
 # compatibilidade com o Chromium pré-instalado na imagem base.
-COPY backend/requirements.txt .
+COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 
 # ── Copiar código da aplicação ──
-# PACOTE AI: dockerContext é agora o repo root (para incluir worklog.md
-# e CHANGELOG.md na raiz). Copia-se backend/ para /app/ e os ficheiros
-# da raiz para /app/ também (para o changelog_service os encontrar).
-COPY backend/ /app/
-COPY worklog.md CHANGELOG.md /app/
+# NOTA: O Render Dashboard tem dockerContext: ./backend (não repo root),
+# pelo que COPY . . copia o conteúdo de backend/ para /app/.
+# worklog.md e CHANGELOG.md estão na raiz do repo (fora do context) e
+# NÃO são incluídos na imagem. O changelog_service.py tem fallback
+# automático via GitHub raw URL para os buscar em runtime.
+COPY . .
 
 # ── Permissões ──
 # A imagem Playwright já traz o utilizador pwuser (UID/GID 1000).
