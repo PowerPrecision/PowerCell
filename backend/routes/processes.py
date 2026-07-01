@@ -2200,36 +2200,72 @@ async def get_kanban_board(
     kanban = []
     try:
         for status in statuses:
-            # CORREÇÃO (Pacote AE): usar .get() com defaults em vez de status["..."]
-            # Se um workflow_status tiver campos em falta (label, color, order),
-            # o bracket notation lança KeyError → 500. O .get() degrada graciosamente.
+            # PACOTE AV: .get() com defaults robustos contra KeyError/TypeError
+            if not isinstance(status, dict):
+                logger.warning(f"[KANBAN] workflow_status não é dict: {type(status)} — skip")
+                continue
             status_name = status.get("name") or ""
             status_processes = processes_by_status.get(status_name, [])
 
             # Enrich with user names and assignment info
             enriched_processes = []
             for p in status_processes:
+                if not isinstance(p, dict):
+                    continue
+
                 # === Múltiplos Consultores ===
                 consultor_ids = p.get("assigned_consultor_ids") or []
-                if p.get("assigned_consultor_id") and p["assigned_consultor_id"] not in consultor_ids:
-                    consultor_ids.append(p["assigned_consultor_id"])
-                consultor_names = [user_map.get(cid, {}).get("name", "") for cid in consultor_ids if user_map.get(cid)]
+                if not isinstance(consultor_ids, list):
+                    consultor_ids = []
+                primary_consultor = p.get("assigned_consultor_id")
+                if primary_consultor and primary_consultor not in consultor_ids:
+                    consultor_ids.append(primary_consultor)
+                consultor_names = [
+                    user_map.get(cid, {}).get("name", "")
+                    for cid in consultor_ids
+                    if cid and isinstance(cid, str) and user_map.get(cid)
+                ]
 
                 # === Múltiplos Mediadores ===
                 mediador_ids = p.get("assigned_mediador_ids") or []
-                if p.get("assigned_mediador_id") and p["assigned_mediador_id"] not in mediador_ids:
-                    mediador_ids.append(p["assigned_mediador_id"])
-                mediador_names = [user_map.get(mid, {}).get("name", "") for mid in mediador_ids if user_map.get(mid)]
+                if not isinstance(mediador_ids, list):
+                    mediador_ids = []
+                primary_mediador = p.get("assigned_mediador_id")
+                if primary_mediador and primary_mediador not in mediador_ids:
+                    mediador_ids.append(primary_mediador)
+                mediador_names = [
+                    user_map.get(mid, {}).get("name", "")
+                    for mid in mediador_ids
+                    if mid and isinstance(mid, str) and user_map.get(mid)
+                ]
 
-                # === Indexação (usar nome da BD com fallback para user_map) ===
-                indexacao_name = p.get("indexacao_name") or user_map.get(p.get("assigned_indexacao_id"), {}).get("name", "")
+                # === Indexação (safe navigation contra None keys) ===
+                idx_id = p.get("assigned_indexacao_id")
+                indexacao_name = p.get("indexacao_name") or ""
+                if not indexacao_name and idx_id and isinstance(idx_id, str):
+                    indexacao_name = user_map.get(idx_id, {}).get("name", "")
 
-                # === Parceiro (usar nome da BD com fallback para user_map) ===
-                parceiro_name = p.get("parceiro_name") or user_map.get(p.get("assigned_parceiro_id"), {}).get("name", "")
+                # === Parceiro (safe navigation contra None keys) ===
+                par_id = p.get("assigned_parceiro_id")
+                parceiro_name = p.get("parceiro_name") or ""
+                if not parceiro_name and par_id and isinstance(par_id, str):
+                    parceiro_name = user_map.get(par_id, {}).get("name", "")
 
                 # Verificar se o utilizador actual está atribuído
-                is_my_consultor = p.get("assigned_consultor_id") == user_id or user_id in (p.get("assigned_consultor_ids") or [])
-                is_my_mediador = p.get("assigned_mediador_id") == user_id or user_id in (p.get("assigned_mediador_ids") or [])
+                assigned_consultor_ids_list = p.get("assigned_consultor_ids") or []
+                if not isinstance(assigned_consultor_ids_list, list):
+                    assigned_consultor_ids_list = []
+                assigned_mediador_ids_list = p.get("assigned_mediador_ids") or []
+                if not isinstance(assigned_mediador_ids_list, list):
+                    assigned_mediador_ids_list = []
+                is_my_consultor = (
+                    p.get("assigned_consultor_id") == user_id
+                    or user_id in assigned_consultor_ids_list
+                )
+                is_my_mediador = (
+                    p.get("assigned_mediador_id") == user_id
+                    or user_id in assigned_mediador_ids_list
+                )
 
                 enriched_processes.append({
                     **p,
@@ -2253,6 +2289,9 @@ async def get_kanban_board(
     except KeyError as e:
         logger.error(f"[KANBAN] KeyError ao iterar workflow_statuses: {e}. Statuses: {statuses}")
         raise HTTPException(status_code=500, detail=f"Erro de configuração de estados do workflow: campo '{e.args[0]}' em falta. Verifique a configuração em /workflow-estados.")
+    except TypeError as e:
+        logger.exception(f"[KANBAN] TypeError ao construir kanban: {e}")
+        raise HTTPException(status_code=500, detail=f"Erro de tipo ao carregar kanban: {type(e).__name__}: {e}")
     except Exception as e:
         logger.exception(f"[KANBAN] Erro inesperado ao construir kanban: {e}")
         raise HTTPException(status_code=500, detail=f"Erro ao carregar kanban: {type(e).__name__}: {e}")
