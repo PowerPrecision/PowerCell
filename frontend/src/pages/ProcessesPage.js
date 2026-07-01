@@ -698,12 +698,8 @@ const ProcessesPage = () => {
                     <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("contacto")}>
                       <span className="flex items-center">Contacto <SortIcon field="contacto" /></span>
                     </TableHead>
-                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("property_location")}>
-                      <span className="flex items-center">Localização <SortIcon field="property_location" /></span>
-                    </TableHead>
-                    <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("property_value")}>
-                      <span className="flex items-center">Valor <SortIcon field="property_value" /></span>
-                    </TableHead>
+                    {/* PACOTE AP: removidas colunas Localização e Valor */}
+                    <TableHead className="min-w-[160px] max-w-[240px]">Notas do Consultor</TableHead>
                     <TableHead>Equipa</TableHead>
                     <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("priority")}>
                       <span className="flex items-center">Prioridade <SortIcon field="priority" /></span>
@@ -717,7 +713,7 @@ const ProcessesPage = () => {
                 <TableBody>
                   {sortedProcesses.length === 0 ? (
                     <TableRow>
-                      <TableCell colSpan={8} className="text-center py-8 text-muted-foreground">
+                      <TableCell colSpan={7} className="text-center py-8 text-muted-foreground">
                         {searchTerm ? `Nenhum processo encontrado com "${searchTerm}"` : "Nenhum processo encontrado"}
                       </TableCell>
                     </TableRow>
@@ -790,32 +786,27 @@ const ProcessesPage = () => {
                               )}
                             </div>
                           </TableCell>
-                          <TableCell>
-                            {process.property_location ? (
-                              <div className="flex items-center gap-1">
-                                <MapPin className="h-3 w-3 text-muted-foreground" />
-                                <span className="text-sm">{safeString(process.property_location)}</span>
-                              </div>
-                            ) : (
-                              "-"
-                            )}
-                          </TableCell>
-                          <TableCell>
-                            {process.property_value ? (
-                              <div className="text-sm">
-                                <div className="font-medium text-emerald-600 flex items-center gap-1">
-                                  <Euro className="h-3 w-3" />
-                                  {process.property_value.toLocaleString('pt-PT')}
-                                </div>
-                                {process.loan_amount && (
-                                  <div className="text-xs text-muted-foreground">
-                                    Financ: €{process.loan_amount.toLocaleString('pt-PT')}
-                                  </div>
-                                )}
-                              </div>
-                            ) : (
-                              "-"
-                            )}
+                          {/* PACOTE AP: Notas do Consultor */}
+                          <TableCell className="min-w-[160px] max-w-[240px]">
+                            {(() => {
+                              let noteText = '';
+                              if (typeof process.notes === 'string' && process.notes.trim()) {
+                                noteText = process.notes.trim();
+                              } else if (process.last_note && typeof process.last_note === 'string') {
+                                noteText = process.last_note.trim();
+                              } else if (process.last_activity?.content) {
+                                noteText = String(process.last_activity.content);
+                              } else if (Array.isArray(process.activities) && process.activities.length > 0) {
+                                const lastAct = process.activities[process.activities.length - 1];
+                                noteText = lastAct?.content || lastAct?.description || '';
+                              }
+                              if (!noteText) return <span className="text-xs text-muted-foreground">—</span>;
+                              return (
+                                <p className="text-xs text-muted-foreground line-clamp-2" title={noteText}>
+                                  {noteText.length > 60 ? noteText.substring(0, 60) + '…' : noteText}
+                                </p>
+                              );
+                            })()}
                           </TableCell>
                           <TableCell>
                             {teamMembers.length > 0 ? (
