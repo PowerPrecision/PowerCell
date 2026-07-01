@@ -3346,8 +3346,8 @@ async def get_process_emails(
             for ce in client_emails:
                 escaped = re.escape(ce)
                 email_match_or.extend([
-                    {"from_email": {"$regex": escaped, "$options": "i"}},
-                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
+                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
                 ])
 
             # Só incluir se NÃO tiver process_id já (evitar duplicados)
@@ -3422,8 +3422,8 @@ async def get_email_stats(
             for ce in client_emails:
                 escaped = re.escape(ce)
                 email_match_or.extend([
-                    {"from_email": {"$regex": escaped, "$options": "i"}},
-                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
+                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
                 ])
             fallback_condition = {
                 "$and": [
@@ -3695,11 +3695,24 @@ async def send_email_endpoint(
     - general (from_box): CEO/admin/diretor podem enviar da caixa geral (shared_role=geral)
     """
     from models.auth import UserRole
-    
+    from services.email_config_resolver import resolve_email_config_for_sync
+
+    # === PACOTE AL: Extração Imediata da Empresa e do Remetente Base ===
+    # 1. active_company_id: tentar header direto primeiro (mais rápido),
+    #    depois fallback para get_active_company_id_async.
+    active_company_id = request.headers.get("x-company-id")
+    if not active_company_id:
+        try:
+            from services.auth import get_active_company_id_async
+            active_company_id = await get_active_company_id_async(request, current_user)
+        except Exception:
+            active_company_id = None
+
     user_role = current_user.get("role", "")
     can_use_global_accounts = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     from_box = payload.from_box
-    
+    from_email = current_user.get("email")  # Remetente Base
+
     # === indexacao role: auto-use shared email account ===
     if user_role == UserRole.INDEXACAO:
         shared_config = await db.shared_role_email_configs.find_one(
@@ -3707,24 +3720,27 @@ async def send_email_endpoint(
             {"_id": 0, "email_address": 1, "email": 1},
         )
         if shared_config:
-            # Force account to use the shared email config name
             shared_email_addr = shared_config.get("email_address") or shared_config.get("email", "")
-            account = "personal"  # The send_email service uses email_config for "personal"
+            account = "personal"
             logger.info(f"[Send Email] indexacao user {current_user.get('email')}: using shared account {shared_email_addr}")
         else:
-            # Fallback: try personal config
-            user_id = current_user["id"]
-            user = await db.users.find_one(
-                {"id": user_id},
-                {"_id": 0, "email_config": 1}
+            resolved = await resolve_email_config_for_sync(
+                current_user["id"],
+                active_role=user_role,
+                active_company_id=active_company_id
             )
-            if not user or not user.get("email_config", {}).get("is_configured"):
+            if not resolved:
                 raise HTTPException(
                     status_code=403,
                     detail="Configuração de email partilhada para indexacao não encontrada. Contacte o administrador."
                 )
             account = "personal"
-    
+
+    # === PACOTE AL: Forçar conta pessoal e Resolver a Config ===
+    # from_box == "personal" OU utilizador não-admin → usar conta pessoal.
+    elif from_box == "personal" or not can_use_global_accounts:
+        account = "personal"
+
     # === from_box == "general": use shared geral account ===
     elif from_box == "general":
         if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
@@ -3732,28 +3748,34 @@ async def send_email_endpoint(
                 status_code=403,
                 detail="Apenas admin, CEO e diretor podem enviar emails a partir da caixa geral."
             )
-        # Use "power" (default) account for general box
         account = "power"
         logger.info(f"[Send Email] user {current_user.get('email')} ({user_role}): sending from geral box (account={account})")
-    
-    # Para utilizadores não-admin sem box, forçar uso da conta pessoal
-    elif not can_use_global_accounts:
-        user_id = current_user["id"]
-        user = await db.users.find_one(
-            {"id": user_id},
-            {"_id": 0, "email_config": 1}
-        )
-        
-        if not user or not user.get("email_config", {}).get("is_configured"):
+
+    # === PACOTE AL: Resolver config pessoal (exceto indexacao já tratado) ===
+    # Resolve o from_email correto a partir da config do utilizador para a
+    # empresa ativa. Isto garante que o email sai pela conta certa e que
+    # o reply_to aponta para o email configurado.
+    if account == "personal" and user_role != UserRole.INDEXACAO:
+        try:
+            resolved = await resolve_email_config_for_sync(
+                current_user["id"],
+                active_role=user_role,
+                active_company_id=active_company_id
+            )
+        except Exception as e:
+            logger.exception(f"[Send Email] Erro no resolver para user {current_user.get('email')}: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Erro ao resolver configuração de email: {type(e).__name__}: {e}"
+            )
+        if not resolved:
             raise HTTPException(
                 status_code=403,
-                detail="Configuração de email pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar."
+                detail="Configuração de email não encontrada para esta empresa. Vá ao seu Perfil > Configuração de Webmail para configurar o seu email antes de enviar."
             )
-        
-        # Forçar account = "personal" para utilizadores não-admin
-        account = "personal"
-        logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): forçado a conta pessoal")
-    
+        from_email = resolved.get("email_address") or from_email
+        logger.info(f"[Send Email] Utilizador {current_user.get('email')} ({user_role}): conta pessoal (from_email={from_email}, empresa={active_company_id})")
+
     # Sanitize inputs before sending and DB insert
     to_emails = [e for e in (sanitize_email(e) for e in payload.to_emails) if e]
     cc_emails = None
@@ -3761,7 +3783,13 @@ async def send_email_endpoint(
         cc_emails = [e for e in (sanitize_email(e) for e in payload.cc_emails) if e]
     subject = sanitize_string(payload.subject, max_length=300)
     body = sanitize_string(payload.body, max_length=10000)
+    # PACOTE AK: Sanitização e proteção do HTML — inline styles para imagens
+    # evitam desformatação em clientes de email clássicos (Gmail/Outlook)
     body_html = payload.body_html
+    if body_html:
+        body_html = sanitize_html(body_html, allow_email_html=True)
+        # Injetar max-width nas imagens para evitar desformatação em clientes de email
+        body_html = body_html.replace('<img ', '<img style="max-width: 100%; height: auto;" ')
 
     if not to_emails:
         raise HTTPException(status_code=400, detail="Pelo menos um email destinatário válido é necessário")
@@ -3817,29 +3845,33 @@ async def send_email_endpoint(
             except Exception as e:
                 logger.error(f"Error downloading temp attachment {file_name}: {e}")
 
-    # === EMPRESA ATIVA — para resolver a assinatura correta ===
-    # Cada user pode ter uma assinatura diferente por empresa (UCR). Lemos a
-    # empresa ativa da sessão (header X-Company-Id) para que o send_email use
-    # a assinatura da empresa que o utilizador selecionou, e não a default.
-    try:
-        from services.auth import get_active_company_id_async
-        active_company_id = await get_active_company_id_async(request, current_user)
-    except Exception:
-        active_company_id = None
+    # === EMPRESA ATIVA + from_email — já resolvidos no início (Pacote AL) ===
+    # active_company_id: para a assinatura correta da empresa ativa.
+    # from_email: remetente pessoal resolvido da config (não a conta geral).
+    # reply_to: respostas vão para o email do utilizador, não para a conta geral.
 
-    result = await send_email(
-        account_name=account,
-        to_emails=to_emails,
-        subject=subject,
-        body=body,
-        body_html=body_html,
-        cc_emails=cc_emails,
-        process_id=payload.process_id,
-        created_by=current_user["id"],
-        attachments=email_attachments if email_attachments else None,
-        active_company_id=active_company_id
-    )
-    
+    try:
+        result = await send_email(
+            account_name=account,
+            to_emails=to_emails,
+            subject=subject,
+            body=body,
+            body_html=body_html,
+            cc_emails=cc_emails,
+            process_id=payload.process_id,
+            created_by=current_user["id"],
+            attachments=email_attachments if email_attachments else None,
+            active_company_id=active_company_id,
+            from_email=from_email,
+            reply_to=from_email,
+        )
+    except Exception as e:
+        logger.exception(f"[Send Email] Erro ao chamar send_email: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno ao enviar email: {type(e).__name__}: {e}"
+        )
+
     if not result["success"]:
         raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
 
@@ -4077,14 +4109,17 @@ async def create_email_record(
 @router.get("/{email_id}", response_model=EmailResponse)
 async def get_email(
     email_id: str,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Obter detalhes de um email.
 
     SEGURANÇA: Não-admin só pode ver emails que lhe pertencem.
     Verifica created_by, synced_for_user ou shared_role.
+    Usa o effective_role (X-Active-Role) para determinar can_see_all.
     """
     from models.auth import UserRole
+    from services.auth import get_effective_role
 
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
 
@@ -4092,7 +4127,8 @@ async def get_email(
         raise HTTPException(status_code=404, detail="Email não encontrado")
 
     # === ISOLAMENTO DE DADOS ===
-    user_role = current_user.get("role", "")
+    # PACOTE AU: usar effective_role (X-Active-Role) em vez do role primário
+    user_role = get_effective_role(request, current_user)
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
 
     if not can_see_all:

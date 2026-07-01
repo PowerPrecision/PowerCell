@@ -1392,3 +1392,148 @@ Work Log:
 Stage Summary:
 - 4 ficheiros: backend/services/changelog_service.py, render.yaml, backend/Dockerfile, backend/Dockerfile.worker.
 - Resultado: geração de changelog por IA funciona no Render mesmo sem os ficheiros na imagem Docker (fallback GitHub); o próximo deploy incluirá os ficheiros na imagem graças ao dockerContext corrigido.
+
+
+---
+Task ID: Pacote AI-2 (Diagnóstico + Dockerignore)
+Agent: Main Agent (Code Assistant)
+Task: Endpoint de diagnóstico + .dockerignore para build context corrigido
+
+Work Log:
+- Logs do Render confirmaram que o Pacote AI (commit b2e7cc9) ainda não foi deployado — as mensagens de GitHub fallback não aparecem nos logs. O backend em produção ainda corre código antigo (Pacote AH).
+- Verificado que GitHub raw URL funciona: curl devolveu 200 para worklog.md e CHANGELOG.md. Testado _fetch_from_github() localmente — funciona corretamente (1394 linhas no worklog, 1355 no CHANGELOG).
+- Adicionado .dockerignore na raiz do repo (necessário porque dockerContext mudou de ./backend para .): exclui node_modules, __pycache__, testes, .git, etc. Mantém worklog.md e CHANGELOG.md (necessários para o changelog_service).
+- Criado endpoint GET /api/system/changelog/diagnose (admin/CEO): verifica ficheiros locais, GitHub fallback, credenciais de IA (BD + env vars), git log. Retorna relatório estruturado com can_generate + blocking_issue.
+- Adicionado botão "🔍 Diagnosticar" no SystemConfigPage.js junto ao botão de gerar. Mostra painel com: estado dos ficheiros (local path + legível), credenciais IA (configuradas + modelo + env keys), git log disponibilidade.
+- Validação: py_compile ✓; flake8 0 erros; esbuild ✓.
+
+Stage Summary:
+- 3 ficheiros: .dockerignore (novo), backend/routes/changelog.py (endpoint diagnose), frontend/src/pages/SystemConfigPage.js (botão + painel diagnóstico).
+- Resultado: após redeploy, utilizador pode clicar "Diagnosticar" para ver exatamente qual é o problema (ficheiros vs credenciais IA) em vez de tentar adivinhar pelo erro 400.
+
+
+---
+Task ID: Pacote AI-3 (Revert Docker Context)
+Agent: Main Agent (Code Assistant)
+Task: Reverter Dockerfile para dockerContext ./backend (Render Dashboard)
+
+Work Log:
+- Build do Render falhou: "/backend/requirements.txt: not found" e "/worklog.md: not found".
+- Causa: o Render Dashboard tem dockerContext: ./backend configurado manualmente (não via render.yaml Blueprint). A mudança de dockerContext para . no render.yaml só afeta novos serviços criados via Blueprint, não serviços existentes.
+- Como não podemos mudar o dockerContext do serviço existente via código, reverti o Dockerfile e Dockerfile.worker para COPY . . (original) que funciona com dockerContext: ./backend.
+- render.yaml também revertido para dockerContext: ./backend (consistência).
+- Os ficheiros worklog.md e CHANGELOG.md continuam indisponíveis no container (estão fora do build context), MAS o changelog_service.py tem o fallback de GitHub raw URL (commit b2e7cc9) que os busca em runtime de https://raw.githubusercontent.com/PowerPrecision/PowerCell/dev/{filename}. Este fallback JÁ está testado e funciona (curl devolve 200; teste local confirmou).
+- O .dockerignore na raiz do repo mantém-se (não interfere com dockerContext: ./backend).
+
+Stage Summary:
+- 3 ficheiros: backend/Dockerfile (revert COPY . .), backend/Dockerfile.worker (revert), render.yaml (revert dockerContext).
+- Resultado: o build do Render vai funcionar novamente; o fallback GitHub (já no código) busca worklog.md/CHANGELOG.md em runtime.
+
+
+---
+Task ID: Pacote AJ (Email Multi-Company)
+Agent: Main Agent (Code Assistant)
+Task: Fix 403 no envio de email — usar resolver canónico multi-empresa
+
+Work Log:
+- Bug: POST /api/emails/send devolvia 403 "Configuração de email pessoal não encontrada" mesmo com email configurado.
+- Causa: send_email_endpoint acedia a user.get("email_config", {}).get("is_configured") — estrutura legacy plana que não existe na nova arquitetura multi-empresa (user_email_configs).
+- Correções em routes/emails.py send_email_endpoint:
+  1. active_company_id movido para o início (logo após can_use_global_accounts) — era resolvido no final.
+  2. Bloco elif not can_use_global_accounts: substituído por resolve_email_config_for_sync(current_user["id"], active_role=user_role, active_company_id=active_company_id) — resolver canónico que procura em user_email_configs.
+  3. Bloco indexacao fallback também atualizado para usar o resolver.
+  4. Removida a resolução duplicada de active_company_id no final da função.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/emails.py.
+- Resultado: envio de email funciona para utilizadores não-admin com config em user_email_configs (multi-empresa); active_company_id resolvido uma única vez no início.
+
+
+---
+Task ID: Pacote AK (Companies Migration)
+Agent: Main Agent (Code Assistant)
+Task: Script de migração para tabela central de empresas
+
+Work Log:
+- Criado backend/scripts/migrate_companies_central.py.
+- Scan de 4 coleções: user_company_roles (company_id+company_name), users (company string), company_email_configs (company_name), system_config (company_id+settings.company_name).
+- Coleta única com prioridade: user_company_roles > system_config > company_email_configs > users. Slugifica nomes sem ID estruturado.
+- Upsert seguro: preserva company_id original como `id` (CRÍTICO para não quebrar referências). Para empresas existentes, preenche campos em falta sem sobrescrever. Defaults: logo_url=None, email_sync_enabled=False, nif=None.
+- Fase de verificação: cruza user_company_roles com companies e reporta missing.
+- Flags: --dry-run (simular), --verbose (detalhes).
+- Confirmado que companies_crud.py já usa db.companies em todas as operações (find/insert_one/update_one/delete_one) — Single Source of Truth.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro novo: backend/scripts/migrate_companies_central.py.
+- Resultado: script pronto para correr no Render (cd /app && python -m scripts.migrate_companies_central --dry-run primeiro para verificar, depois sem --dry-run para executar).
+
+
+---
+Task ID: Pacote AE-2 (Kanban Diagnostic)
+Agent: Main Agent (Code Assistant)
+Task: Endpoint de diagnóstico do kanban + extração de erro no frontend
+
+Work Log:
+- O 500 no /api/processes/kanban persiste em produção. O browser não mostra o response body, pelo que não sabemos a causa exata.
+- Adicionado endpoint GET /api/processes/kanban/diagnose (admin/staff): verifica workflow_statuses (campos obrigatórios), processes (contagem), users, portal_messages (agregação), documents (agregação), e a query do kanban isoladamente. Retorna relatório estruturado com can_load + blocking_issue + traceback em caso de erro.
+- Frontend useKanbanQuery.js e useKanbanCompletedQuery.js: fetcher agora extrai o detail do backend (errorData?.detail) em vez de lançar 'Failed to fetch kanban data' genérico. O erro real vai aparecer no query.error.message.
+- Adicionado retry: 2 e refetchOnWindowFocus condicional (não refetch em focus se houver erro) para evitar o loop de 500s em produção.
+- Validação: py_compile ✓; flake8 0 erros; esbuild ✓.
+
+Stage Summary:
+- 3 ficheiros: backend/routes/processes.py (endpoint diagnose), frontend/src/hooks/queries/useKanbanQuery.js (error extraction + retry), frontend/src/hooks/queries/useKanbanCompletedQuery.js (error extraction).
+- Resultado: após redeploy, o utilizador pode chamar GET /api/processes/kanban/diagnose para ver a causa exata do 500; o frontend mostra o erro real do backend em vez de mensagem genérica.
+
+
+---
+Task ID: Pacote AK (Email Sender + HTML)
+Agent: Main Agent (Code Assistant)
+Task: Fix sender account (forçar personal) + inline styles para imagens
+
+Work Log:
+- Bug 1: emails enviados pela conta 'power' em vez da pessoal para admins/CEOs. Causa: from_box='personal' não tinha bloco próprio — caía no else implícito e account mantinha 'power' (default do query param).
+- Bug 2: imagens da assinatura desformatadas no destino. Causa: body_html passava direto sem sanitização nem inline styles.
+- Correções em send_email_endpoint (routes/emails.py):
+  1. Novo bloco elif from_box == 'personal' antes do general: resolve config via resolver canónico e força account='personal'. Aplica-se a todos os roles incluindo admin/CEO/diretor.
+  2. body_html agora sanitizado com sanitize_html(allow_email_html=True) + inline style 'max-width: 100%; height: auto;' injetado em todos os <img> para compatibilidade Gmail/Outlook.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/emails.py.
+- Resultado: admins que enviam da caixa pessoal usam a sua config pessoal; imagens mantêm formatação em clientes de email clássicos.
+
+
+---
+Task ID: Pacote AL (Email Send Rewrite)
+Agent: Main Agent (Code Assistant)
+Task: Reescrita send_email_endpoint — 403 consultor + sender + assinatura
+
+Work Log:
+- Bug 1 (403 consultor): active_company_id não era extraído atempadamente. Agora lê header x-company-id primeiro, depois fallback get_active_company_id_async — tudo antes do resolver.
+- Bug 2 (sender errado): from_email e reply_to em falta na chamada send_email(). Agora from_email é resolvido da config (resolved.get('email_address')) e passado explicitamente + reply_to=from_email.
+- Bug 3 (assinaturas): inline CSS já aplicado no Pacote AK (sanitize_html + max-width nas imagens). Mantido.
+- Reescrita da primeira metade: unificação dos blocos from_box='personal' e not can_use_global_accounts num só elif. Resolver canónico chamado uma única vez para todos os roles não-indexacao. from_email = current_user.get('email') como base, depois overwritten pelo resolved.get('email_address').
+- Chamada final: adicionados from_email=from_email e reply_to=from_email.
+- Validação: py_compile ✓; flake8 0 erros.
+
+Stage Summary:
+- 1 ficheiro: backend/routes/emails.py.
+- Resultado: consultores já não têm 403; emails saem pela conta pessoal correta com reply_to; assinaturas mantêm formatação em Outlook/Gmail.
+
+
+---
+Task ID: Pacote AL-fix (Email 422)
+Agent: Main Agent (Code Assistant)
+Task: Fix 422 no envio de email — body_payload defensivo
+
+Work Log:
+- Erro: POST /api/emails/send?account=personal devolvia 422 (Unprocessable Content).
+- Causa provável: body_html enviava "" (string vazia) que pode ser rejeitado por validação Pydantic em produção. cc_emails enviava [] (array vazio) que também pode causar issues.
+- Correção: bodyPayload agora usa null em vez de "" para campos opcionais vazios (body_html, cc_emails, process_id, from_box). Body usa || "" para garantir string. Isto alinha com Optional[str] = None do modelo Pydantic.
+- Validação: esbuild ✓.
+
+Stage Summary:
+- 1 ficheiro: frontend/src/pages/WebmailPage.jsx.
+- Resultado: payload do email envia null para campos vazios em vez de "" ou [], alinhando com o modelo Pydantic Optional.

@@ -1731,6 +1731,129 @@ async def get_processes_paginated(
     }
 
 
+@router.get("/kanban/diagnose")
+async def diagnose_kanban(
+    user: dict = Depends(require_staff())
+):
+    """
+    Diagnosticar problemas no endpoint do Kanban.
+
+    Verifica cada componente que o endpoint /kanban usa:
+    1. workflow_statuses (campos obrigatórios: name, id, label, color, order)
+    2. processos (query base, projections)
+    3. users (user_map para nomes)
+    4. portal_messages (agregação unread)
+    5. documents (agregação new docs)
+
+    Retorna um relatório estruturado para diagnóstico.
+    """
+    import traceback
+    report = {"checks": {}, "can_load": False, "blocking_issue": None}
+
+    # ── 1. workflow_statuses ──
+    try:
+        statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+        report["checks"]["workflow_statuses"] = {
+            "count": len(statuses),
+            "items": [],
+        }
+        required_fields = ["name", "id", "label", "color", "order"]
+        for s in statuses:
+            missing = [f for f in required_fields if f not in s or s.get(f) is None]
+            report["checks"]["workflow_statuses"]["items"].append({
+                "name": s.get("name"),
+                "id": s.get("id"),
+                "has_all_fields": len(missing) == 0,
+                "missing_fields": missing,
+            })
+        if not statuses:
+            report["blocking_issue"] = "workflow_statuses está vazia — o kanban não tem colunas."
+    except Exception as e:
+        report["checks"]["workflow_statuses"] = {"error": str(e), "traceback": traceback.format_exc()}
+        report["blocking_issue"] = f"Erro ao ler workflow_statuses: {e}"
+
+    # ── 2. processes (contagem básica) ──
+    try:
+        total_processes = await db.processes.count_documents({"is_deleted": {"$ne": True}})
+        active_processes = await db.processes.count_documents({
+            "is_deleted": {"$ne": True},
+            "status": {"$nin": ["concluidos", "desistencias", "eliminados"]},
+        })
+        report["checks"]["processes"] = {
+            "total": total_processes,
+            "active": active_processes,
+        }
+    except Exception as e:
+        report["checks"]["processes"] = {"error": str(e)}
+        if not report["blocking_issue"]:
+            report["blocking_issue"] = f"Erro ao ler processes: {e}"
+
+    # ── 3. users ──
+    try:
+        total_users = await db.users.count_documents({})
+        report["checks"]["users"] = {"total": total_users}
+    except Exception as e:
+        report["checks"]["users"] = {"error": str(e)}
+
+    # ── 4. portal_messages (testar agregação) ──
+    try:
+        unread_pipeline = [
+            {"$match": {"sender_type": "client", "read_by_staff": False}},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]
+        unread_results = await db.portal_messages.aggregate(unread_pipeline).to_list(10)
+        report["checks"]["portal_messages"] = {
+            "aggregation_works": True,
+            "sample_count": len(unread_results),
+        }
+    except Exception as e:
+        report["checks"]["portal_messages"] = {"error": str(e)}
+
+    # ── 5. documents (testar agregação) ──
+    try:
+        new_docs_pipeline = [
+            {"$match": {"status": "uploaded"}},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]
+        new_docs_results = await db.documents.aggregate(new_docs_pipeline).to_list(10)
+        report["checks"]["documents"] = {
+            "aggregation_works": True,
+            "sample_count": len(new_docs_results),
+        }
+    except Exception as e:
+        report["checks"]["documents"] = {"error": str(e)}
+
+    # ── 6. Tentar executar a query do kanban isoladamente ──
+    try:
+        query = {"is_deleted": {"$ne": True}}
+        kanban_projection = {
+            "_id": 0, "id": 1, "status": 1, "client_name": 1,
+            "assigned_consultor_id": 1, "updated_at": 1,
+        }
+        sample = await db.processes.find(query, kanban_projection).to_list(5)
+        report["checks"]["kanban_query"] = {
+            "works": True,
+            "sample_count": len(sample),
+            "sample_statuses": [p.get("status") for p in sample],
+        }
+    except Exception as e:
+        report["checks"]["kanban_query"] = {"error": str(e), "traceback": traceback.format_exc()}
+        if not report["blocking_issue"]:
+            report["blocking_issue"] = f"Erro na query do kanban: {e}"
+
+    # ── Determinar can_load ──
+    ws_ok = report["checks"].get("workflow_statuses", {}).get("count", 0) > 0
+    proc_ok = "error" not in report["checks"].get("processes", {})
+    query_ok = report["checks"].get("kanban_query", {}).get("works", False)
+
+    if ws_ok and proc_ok and query_ok and not report["blocking_issue"]:
+        report["can_load"] = True
+    elif not report["blocking_issue"]:
+        report["blocking_issue"] = "Problema desconhecido — verifique os checks individuais."
+
+    return report
+
+
 @router.get("/kanban")
 async def get_kanban_board(
     consultor_id: Optional[str] = None,

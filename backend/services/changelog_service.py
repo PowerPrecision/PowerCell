@@ -428,15 +428,19 @@ Transforma estes dados num anúncio de lançamento amigável para os utilizadore
     source_summary = source_text[:200] + "..." if len(source_text) > 200 else source_text
 
     # 9. Guardar na coleção system_changelogs
+    now_iso = now.isoformat()
     doc = {
         "version": version,
         "content_markdown": content_markdown,
-        "published_at": now,
+        "published_at": now_iso,
         "generated_by": "ai",
         "source_summary": source_summary,
     }
     try:
         result = await db.system_changelogs.insert_one(doc)
+        # PACOTE AS: insert_one adiciona _id (ObjectId) ao doc in-place.
+        # Remover _id e usar id como string para evitar erro de serialização.
+        doc.pop("_id", None)
         doc["id"] = str(result.inserted_id)
         logger.info("Changelog gerado por IA e guardado: version=%s, id=%s", version, doc["id"])
     except Exception as e:

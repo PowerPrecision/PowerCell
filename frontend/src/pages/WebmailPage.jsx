@@ -829,16 +829,16 @@ const WebmailPage = () => {
       const bodyPayload = {
         to_emails: toList,
         subject: composerData.subject,
-        body: composerData.body,
-        body_html: "",
-        cc_emails: ccList,
-        process_id: composerData.process_id,
-        from_box: activeBox,
+        body: composerData.body || "",
+        body_html: composerData.body_html || null,
+        cc_emails: ccList.length > 0 ? ccList : null,
+        process_id: composerData.process_id || null,
+        from_box: activeBox || null,
       };
 
       // Include attachment_ids if any uploads
       if (uploadAttachments.length > 0) {
-        bodyPayload.attachment_ids = uploadAttachments.map((a) => a.id);
+        bodyPayload.attachment_ids = uploadAttachments.map((a) => a.id).filter(Boolean);
       }
 
       // Para perfis sem acesso a contas globais, o envio é sempre feito pela
@@ -1126,7 +1126,13 @@ const WebmailPage = () => {
         });
         if (res.ok) {
           const data = await res.json();
-          const uploaded = data.files || [data];
+          // PACOTE AO: extração correta da resposta do backend.
+          // O backend devolve { attachments: [...] } mas o código anterior
+          // usava data.files || [data] que resultava em objetos mal formatados.
+          const uploaded = data.attachments || data.files || [];
+          if (!data.attachments && !data.files && data.id) {
+            uploaded.push(data); // fallback de segurança
+          }
           setUploadAttachments((prev) => [...prev, ...uploaded]);
         } else {
           toast.error(`Erro ao carregar ${file.name}`);

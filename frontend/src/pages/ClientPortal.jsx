@@ -321,7 +321,11 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
       <div className="flex items-center gap-3">
         <span className="text-xl flex-shrink-0">{doc.icon}</span>
         <div className="flex-1 min-w-0">
-          <p className="text-sm font-medium text-gray-800">{doc.label}</p>
+          <p className="text-sm font-medium text-gray-800">
+            {/* PACOTE AN: Para "Outros", usar custom_name/description se existir.
+                O backend já envia o label correto, mas isto é um fallback defensivo. */}
+            {doc.label || doc.custom_name || doc.description || 'Documento'}
+          </p>
           {doc.notes && <p className="text-xs text-gray-400 truncate">{typeof doc.notes === 'string' ? doc.notes : JSON.stringify(doc.notes)}</p>}
         </div>
 

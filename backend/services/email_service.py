@@ -539,8 +539,11 @@ async def send_email(
         from services.encryption import encryption_service
         user = await db.users.find_one(
             {"id": created_by},
-            {"_id": 0, "email_config": 1}
+            {"_id": 0, "email_config": 1, "role": 1, "company": 1}
         )
+        user_role_val = user.get("role", "") if user else ""
+        logger.info(f"[Send Email] Procurando config pessoal para user={created_by}, role={user_role_val}, company_id={active_company_id}")
+
         if user and user.get("email_config", {}).get("is_configured"):
             cfg = user["email_config"]
             encrypted_password = cfg.get("encrypted_password", "")
@@ -556,9 +559,55 @@ async def send_email(
                         email=cfg.get("email_address", ""),
                         password=password,
                     )
-                    logger.info(f"[Send Email] Conta pessoal do utilizador {created_by}: {cfg.get('email_address', '')}")
+                    logger.info(f"[Send Email] Conta pessoal (legacy) do utilizador {created_by}: {cfg.get('email_address', '')}")
                 except Exception as e:
                     logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
+
+        # PACOTE AL-fix: se a config legacy não existir, tentar o resolver
+        # canónico multi-empresa (user_email_configs).
+        if not account:
+            try:
+                from services.email_config_resolver import resolve_email_config_for_sync
+                resolved = await resolve_email_config_for_sync(
+                    created_by,
+                    active_role=user_role_val,
+                    active_company_id=active_company_id
+                )
+                if resolved:
+                    logger.info(f"[Send Email] Resolver retornou: source={resolved.get('config_source')}, email={resolved.get('email_address')}, has_password={resolved.get('has_password')}, smtp={resolved.get('smtp_server')}")
+                    from services.encryption import encryption_service as _enc
+                    enc_password = resolved.get("encrypted_password", "")
+                    password = ""
+                    if enc_password:
+                        try:
+                            password = _enc.decrypt(enc_password)
+                        except Exception as e:
+                            logger.warning(f"[Send Email] Erro ao desencriptar password (resolver): {e}")
+                    if resolved.get("email_address") and resolved.get("smtp_server"):
+                        account = EmailAccount(
+                            name="personal",
+                            imap_server=resolved.get("smtp_server", resolved.get("imap_server", "")),
+                            imap_port=int(resolved.get("smtp_port", resolved.get("imap_port", 465))),
+                            smtp_server=resolved.get("smtp_server", ""),
+                            smtp_port=int(resolved.get("smtp_port", 465)),
+                            email=resolved.get("email_address", ""),
+                            password=password,
+                        )
+                        logger.info(f"[Send Email] Conta pessoal (resolver) do utilizador {created_by}: {resolved.get('email_address', '')}")
+                    else:
+                        logger.warning(f"[Send Email] Resolver retornou config incompleta: email={resolved.get('email_address')}, smtp={resolved.get('smtp_server')}")
+                else:
+                    logger.warning(f"[Send Email] Resolver retornou None para user={created_by}, company={active_company_id}")
+            except Exception as e:
+                logger.warning(f"[Send Email] Erro no resolver para conta pessoal: {e}")
+
+        # CRÍTICO: se account_name == "personal" mas não encontrou config,
+        # NÃO cair no fallback global. Devolver erro claro.
+        if not account:
+            return {
+                "success": False,
+                "error": f"Configuração de email pessoal não encontrada para o utilizador {created_by} (empresa={active_company_id}). Verifique o seu Perfil > Configuração de Webmail. Role={user_role_val}"
+            }
     
     if not account:
         # === force_system: tentar contas globais, depois system_smtp (Bloco A) ===
@@ -717,8 +766,15 @@ async def send_email(
 
     # Injetar assinatura no corpo do email (HTML + plain text)
     if resolved_signature:
+        # PACOTE AT: Sanitizar assinatura antes de concatenar — inline CSS
+        # para imagens (max-width, height:auto, object-fit) evita que cheguem
+        # gigantes aos clientes de email. Envolvê-la numa div com overflow
+        # controlado previne tabelas partidas.
+        safe_signature = resolved_signature.replace(
+            '<img ', '<img style="max-width: 100%; height: auto; object-fit: contain;" '
+        )
         if body_html:
-            body_html = f"{body_html}<br/><hr/>{resolved_signature}"
+            body_html = f'{body_html}<br/><hr/><div style="max-width: 100%; overflow-x: hidden;">{safe_signature}</div>'
         # Versão plain text: strip HTML da assinatura
         sig_text = re.sub(r'<[^>]+>', '', resolved_signature).strip()
         if sig_text:
@@ -801,16 +857,35 @@ async def send_email(
         # Use from_email override when provided (e.g. user's email for documentation)
         # Otherwise use account email (system default)
         effective_from_email = from_email or account.email
+
+        # PACOTE AL-fix: Proteção contra 550 "From domain is not local"
+        # Se o from_email tem um domínio diferente da conta SMTP, o servidor
+        # SMTP rejeita o envio. Nesse caso, usar account.email no header From
+        # (que é o domínio local do SMTP) e definir Reply-To para from_email.
+        if from_email and account.email and "@" in from_email and "@" in account.email:
+            from_domain = from_email.split("@")[-1].lower()
+            account_domain = account.email.split("@")[-1].lower()
+            if from_domain != account_domain:
+                logger.info(
+                    f"[Send Email] Domínio mismatch: from_email={from_email} (domínio={from_domain}) "
+                    f"vs account={account.email} (domínio={account_domain}). "
+                    f"A usar account.email no From e from_email no Reply-To."
+                )
+                effective_from_email = account.email
+                # Garantir que reply_to aponta para o email do utilizador
+                if not reply_to:
+                    reply_to = from_email
+
         # Use formatted From header for system_smtp when from_name is available
         if account.name == "system_smtp" and from_name:
             msg["From"] = f"{from_name} <{effective_from_email}>"
         else:
             msg["From"] = effective_from_email
         msg["To"] = ", ".join(to_emails)
-        
+
         if cc_emails:
             msg["Cc"] = ", ".join(cc_emails)
-        
+
         # === Reply-To: quando fornecido, as respostas vão para o utilizador ===
         if reply_to:
             msg["Reply-To"] = reply_to

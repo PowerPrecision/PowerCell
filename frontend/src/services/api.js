@@ -131,29 +131,31 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`;
     }
-    
+
     // Injetar X-Active-Role para Context Isolation
-    // Utilizadores com múltiplos cargos podem alternar o contexto ativo
-    // via ContextSwitcher, e o backend filtra dados accordingly
-    const activeRole = sessionStorage.getItem("activeRole");
+    const activeRole = sessionStorage.getItem("activeRole") || localStorage.getItem("activeRole");
     if (activeRole) {
       config.headers["X-Active-Role"] = activeRole;
     }
-    
-    // Injetar X-Company-Id para Contexto Multi-Empresa
-    // Utilizadores associados a múltiplas empresas podem alternar
-    // o contexto ativo via ContextSwitcher, e o backend resolve
-    // a configuração de email/dados em função da empresa selecionada
-    const activeCompanyId = sessionStorage.getItem("activeCompanyId");
+
+    // PACOTE AR: Injetar X-Company-Id para Contexto Multi-Empresa.
+    // Ler de localStorage (persiste entre sessões) com fallback para
+    // sessionStorage (retrocompatibilidade).
+    const activeCompanyId = localStorage.getItem("active_company_id")
+      || sessionStorage.getItem("activeCompanyId");
     if (activeCompanyId) {
       config.headers["X-Company-Id"] = activeCompanyId;
     }
-    
+
     // Log de debug (apenas em desenvolvimento)
     if (process.env.NODE_ENV === "development") {
-      console.debug(`[API] ${config.method?.toUpperCase()} ${config.url}`, config.headers["X-Active-Role"] ? `[${config.headers["X-Active-Role"]}]` : "");
+      console.debug(
+        `[API] ${config.method?.toUpperCase()} ${config.url}`,
+        config.headers["X-Active-Role"] ? `[role=${config.headers["X-Active-Role"]}]` : "",
+        config.headers["X-Company-Id"] ? `[company=${config.headers["X-Company-Id"]}]` : ""
+      );
     }
-    
+
     return config;
   },
   (error) => {
@@ -958,6 +960,7 @@ export const rollbackProcessMigration = () => api.post("/admin/process-migration
 // ===== SYSTEM CHANGELOG (Mural de Atualizações gerado por IA) =====
 export const getSystemChangelogs = (limit = 5) => api.get("/system/changelog", { params: { limit } });
 export const generateChangelogAI = (data = {}) => api.post("/system/changelog/generate-ai", data);
+export const diagnoseChangelog = () => api.get("/system/changelog/diagnose");
 
 // ===== COMPANIES CRUD (Multi-Tenant — Gestão de Empresas) =====
 export const getCompanies = (search) =>
@@ -973,6 +976,14 @@ export const uploadCompanyLogo = (id, file) => {
     headers: { "Content-Type": "multipart/form-data" },
   });
 };
+
+// ===== COMPANY EMAIL CONFIG (IMAP/SMTP por empresa — Pacote AS) =====
+export const getCompanyEmailConfig = (companyName) =>
+  api.get(`/admin/company-email-configs/${encodeURIComponent(companyName)}`);
+export const upsertCompanyEmailConfig = (data) =>
+  api.post("/admin/company-email-configs", data);
+export const deleteCompanyEmailConfig = (companyName) =>
+  api.delete(`/admin/company-email-configs/${encodeURIComponent(companyName)}`);
 
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;

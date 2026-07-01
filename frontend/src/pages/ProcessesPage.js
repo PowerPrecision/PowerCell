@@ -698,8 +698,8 @@ const ProcessesPage = () => {
                     <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("contacto")}>
                       <span className="flex items-center">Contacto <SortIcon field="contacto" /></span>
                     </TableHead>
-                    {/* PACOTE AP: removidas colunas Localização e Valor */}
-                    <TableHead className="min-w-[160px] max-w-[240px]">Notas do Consultor</TableHead>
+                    {/* PACOTE AP: removidas colunas Localização e Valor, adicionada Notas do Consultor */}
+                    <TableHead className="min-w-[180px] max-w-[280px]">Notas do Consultor</TableHead>
                     <TableHead>Equipa</TableHead>
                     <TableHead className="cursor-pointer hover:bg-muted select-none" onClick={() => toggleSort("priority")}>
                       <span className="flex items-center">Prioridade <SortIcon field="priority" /></span>
@@ -786,9 +786,11 @@ const ProcessesPage = () => {
                               )}
                             </div>
                           </TableCell>
-                          {/* PACOTE AP: Notas do Consultor */}
-                          <TableCell className="min-w-[160px] max-w-[240px]">
+                          {/* PACOTE AP: Notas do Consultor — extrai última nota/observação do processo */}
+                          <TableCell className="min-w-[180px] max-w-[280px]">
                             {(() => {
+                              // Tentar obter a última nota: process.notes (string),
+                              // process.last_activity (objeto), ou activities array
                               let noteText = '';
                               if (typeof process.notes === 'string' && process.notes.trim()) {
                                 noteText = process.notes.trim();
@@ -803,7 +805,7 @@ const ProcessesPage = () => {
                               if (!noteText) return <span className="text-xs text-muted-foreground">—</span>;
                               return (
                                 <p className="text-xs text-muted-foreground line-clamp-2" title={noteText}>
-                                  {noteText.length > 60 ? noteText.substring(0, 60) + '…' : noteText}
+                                  {noteText.length > 100 ? noteText.substring(0, 100) + '…' : noteText}
                                 </p>
                               );
                             })()}

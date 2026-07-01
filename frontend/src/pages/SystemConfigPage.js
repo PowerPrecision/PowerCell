@@ -54,7 +54,7 @@ import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { getSystemChangelogs, generateChangelogAI } from "../services/api";
+import { getSystemChangelogs, generateChangelogAI, diagnoseChangelog } from "../services/api";
 import { sanitizeHtml } from "../utils/sanitize";
 import {
   Settings,
@@ -3928,6 +3928,8 @@ const ChangelogSection = ({ token }) => {
   const [changelogs, setChangelogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);
+  const [diagnosing, setDiagnosing] = useState(false);
+  const [diagnosticResult, setDiagnosticResult] = useState(null);
   // CORREÇÃO (Pacote AE-fix): default 'worklog' em vez de 'git' porque
   // no Render a pasta .git não está disponível no container de deploy.
   // worklog.md é um ficheiro físico que está sempre presente.
@@ -3945,6 +3947,25 @@ const ChangelogSection = ({ token }) => {
   }, []);
 
   useEffect(() => { fetchChangelogs(); }, [fetchChangelogs]);
+
+  // ── Diagnóstico (Pacote AI): verifica ficheiros + credenciais IA ──
+  const handleDiagnose = async () => {
+    setDiagnosing(true);
+    setDiagnosticResult(null);
+    try {
+      const res = await diagnoseChangelog();
+      setDiagnosticResult(res.data);
+      if (res.data?.can_generate) {
+        toast.success("Diagnóstico: tudo OK! Pode gerar notas de atualização.");
+      } else {
+        toast.warning(res.data?.blocking_issue || "Problema detetado — veja o relatório abaixo.");
+      }
+    } catch (err) {
+      toast.error(extractErrorMessage(err, "Erro ao executar diagnóstico"));
+    } finally {
+      setDiagnosing(false);
+    }
+  };
 
   const handleGenerate = async () => {
     setGenerating(true);
@@ -3999,7 +4020,7 @@ const ChangelogSection = ({ token }) => {
                 </SelectContent>
               </Select>
             </div>
-            <div className="flex items-end">
+            <div className="flex items-end gap-2">
               <Button onClick={handleGenerate} disabled={generating} className="gap-2">
                 {generating ? (
                   <>
@@ -4012,8 +4033,64 @@ const ChangelogSection = ({ token }) => {
                   </>
                 )}
               </Button>
+              <Button variant="outline" onClick={handleDiagnose} disabled={diagnosing} className="gap-2" title="Diagnosticar problemas">
+                {diagnosing ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    A diagnosticar...
+                  </>
+                ) : (
+                  <>
+                    🔍 Diagnosticar
+                  </>
+                )}
+              </Button>
             </div>
           </div>
+
+          {/* ── Resultado do diagnóstico (Pacote AI) ── */}
+          {diagnosticResult && (
+            <div className={`mt-4 p-4 rounded-lg border ${diagnosticResult.can_generate ? "bg-emerald-50 border-emerald-200" : "bg-amber-50 border-amber-200"}`}>
+              <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                {diagnosticResult.can_generate ? "✅" : "⚠️"} Relatório de Diagnóstico
+              </h4>
+              {diagnosticResult.blocking_issue && (
+                <p className="text-xs text-amber-700 mb-3 font-medium">{diagnosticResult.blocking_issue}</p>
+              )}
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                {/* Ficheiros */}
+                <div className="bg-white/60 p-3 rounded">
+                  <p className="font-medium mb-1">Ficheiros de Fonte</p>
+                  <p>worklog.md local: {diagnosticResult.checks?.files?.worklog_md_local_exists ? "✅" : "❌"} {diagnosticResult.checks?.files?.worklog_md_local_path || "(não encontrado)"}</p>
+                  <p>worklog.md legível: {diagnosticResult.checks?.files?.worklog_md_readable ? "✅" : "❌"}</p>
+                  <p>CHANGELOG.md local: {diagnosticResult.checks?.files?.changelog_md_local_exists ? "✅" : "❌"} {diagnosticResult.checks?.files?.changelog_md_local_path || "(não encontrado)"}</p>
+                  <p>CHANGELOG.md legível: {diagnosticResult.checks?.files?.changelog_md_readable ? "✅" : "❌"}</p>
+                  {diagnosticResult.checks?.files?.worklog_md_sample && (
+                    <p className="text-muted-foreground mt-1 truncate">Sample: {diagnosticResult.checks.files.worklog_md_sample}</p>
+                  )}
+                </div>
+                {/* Credenciais IA */}
+                <div className="bg-white/60 p-3 rounded">
+                  <p className="font-medium mb-1">Credenciais de IA</p>
+                  <p>Configuradas: {diagnosticResult.checks?.ai_credentials?.configured ? "✅" : "❌"}</p>
+                  <p>Modelo: {diagnosticResult.checks?.ai_credentials?.model || "N/A"}</p>
+                  <p>OPENAI_API_KEY env: {diagnosticResult.checks?.ai_credentials?.has_openai_env_key ? "✅" : "❌"}</p>
+                  <p>EMERGENT_LLM_KEY env: {diagnosticResult.checks?.ai_credentials?.has_emergent_env_key ? "✅" : "❌"}</p>
+                  {diagnosticResult.checks?.ai_credentials?.error && (
+                    <p className="text-red-600 mt-1">Erro: {diagnosticResult.checks.ai_credentials.error}</p>
+                  )}
+                </div>
+                {/* Git */}
+                <div className="bg-white/60 p-3 rounded">
+                  <p className="font-medium mb-1">Git Log</p>
+                  <p>Disponível: {diagnosticResult.checks?.git?.available ? "✅" : "❌"}</p>
+                  {diagnosticResult.checks?.git?.sample && (
+                    <p className="text-muted-foreground mt-1 truncate">Sample: {diagnosticResult.checks.git.sample}</p>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
         </CardContent>
       </Card>
 

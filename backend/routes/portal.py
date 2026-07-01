@@ -1056,10 +1056,23 @@ async def get_portal_status(
             raw_notes = raw_notes.get("label", raw_notes.get("value", str(raw_notes)))
         notes_str = str(raw_notes) if raw_notes is not None else ""
 
+        # PACOTE AN: Para categoria "Outros", usar custom_label/description/custom_name
+        # se existir (permite vários "Outros Documentos" com nomes diferentes).
+        # Fallback para o label genérico "Outro Documento".
+        display_label = cat_info["label"]
+        if cat == "Outros" or cat.lower() in ("outro", "other", "outros"):
+            display_label = (
+                doc.get("custom_label")
+                or doc.get("custom_name")
+                or doc.get("description")
+                or doc.get("title")
+                or cat_info["label"]
+            )
+
         requested_docs.append({
             "id": doc.get("id"),
             "category": cat,
-            "label": cat_info["label"],
+            "label": display_label,
             "icon": cat_info["icon"],
             "notes": notes_str,
             "requested_at": doc.get("created_at", doc.get("uploaded_at", "")),
