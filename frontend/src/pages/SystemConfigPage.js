@@ -54,7 +54,7 @@ import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { getSystemChangelogs, generateChangelogAI, diagnoseChangelog } from "../services/api";
+import { getSystemChangelogs, generateChangelogAI, diagnoseChangelog, createAnnouncement } from "../services/api";
 import { sanitizeHtml } from "../utils/sanitize";
 import {
   Settings,
@@ -4135,6 +4135,28 @@ const ChangelogSection = ({ token }) => {
                     __html: sanitizeHtml(markdownToHtml(entry.content_markdown))
                   }}
                 />
+                {/* PACOTE AW: Botão Publicar no Mural da Equipa */}
+                <div className="mt-4 pt-3 border-t flex items-center justify-end">
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className="gap-1.5 text-primary border-primary/30 hover:bg-primary/5"
+                    onClick={async () => {
+                      try {
+                        await createAnnouncement({
+                          content: entry.content_markdown,
+                          title: `Notas de Atualização v${safeString(entry.version)}`,
+                        });
+                        toast.success("Nota publicada no mural da equipa!");
+                      } catch (err) {
+                        toast.error(extractErrorMessage(err, "Erro ao publicar no mural."));
+                      }
+                    }}
+                  >
+                    <Megaphone className="h-3.5 w-3.5" />
+                    Publicar no Mural da Equipa
+                  </Button>
+                </div>
               </CardContent>
             </Card>
           ))}
