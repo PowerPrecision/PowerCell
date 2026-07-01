@@ -3346,8 +3346,8 @@ async def get_process_emails(
             for ce in client_emails:
                 escaped = re.escape(ce)
                 email_match_or.extend([
-                    {"from_email": {"$regex": escaped, "$options": "i"}},
-                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
+                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
                 ])
 
             # Só incluir se NÃO tiver process_id já (evitar duplicados)
@@ -3422,8 +3422,8 @@ async def get_email_stats(
             for ce in client_emails:
                 escaped = re.escape(ce)
                 email_match_or.extend([
-                    {"from_email": {"$regex": escaped, "$options": "i"}},
-                    {"to_emails": {"$regex": escaped, "$options": "i"}},
+                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
+                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
                 ])
             fallback_condition = {
                 "$and": [
@@ -4109,14 +4109,17 @@ async def create_email_record(
 @router.get("/{email_id}", response_model=EmailResponse)
 async def get_email(
     email_id: str,
+    request: Request,
     current_user: dict = Depends(get_current_user)
 ):
     """Obter detalhes de um email.
 
     SEGURANÇA: Não-admin só pode ver emails que lhe pertencem.
     Verifica created_by, synced_for_user ou shared_role.
+    Usa o effective_role (X-Active-Role) para determinar can_see_all.
     """
     from models.auth import UserRole
+    from services.auth import get_effective_role
 
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
 
@@ -4124,7 +4127,8 @@ async def get_email(
         raise HTTPException(status_code=404, detail="Email não encontrado")
 
     # === ISOLAMENTO DE DADOS ===
-    user_role = current_user.get("role", "")
+    # PACOTE AU: usar effective_role (X-Active-Role) em vez do role primário
+    user_role = get_effective_role(request, current_user)
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
 
     if not can_see_all:
