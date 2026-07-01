@@ -2723,26 +2723,80 @@ const ProcessDetails = () => {
           mediadorName={process.mediador_name || process.assigned_mediador_name}
         />
 
-        {/* ═══════ PACOTE AQ: Atividade & Notas (topo do layout) ═══════
-            Fusão da Timeline + caixa de input de notas. Quando o utilizador
-            submete uma nota, é guardada como atividade (createActivity) e
-            aparece imediatamente no topo da lista. */}
-        <Card className="border-violet-200 dark:border-violet-900">
-          <CardHeader className="pb-2 py-3">
-            <CardTitle className="text-sm flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-violet-600" />
-              Atividade & Notas
-            </CardTitle>
-          </CardHeader>
-          <CardContent className="pt-0 pb-3">
-            {/* ── Caixa de input de nota ── */}
-            {!isProcessLocked && (
-              <div className="flex gap-2 mb-3">
+        {/* ═══════ PACOTE AQ V2: Meta-dados compactos (Prioridade + Etiquetas) ═══════ */}
+        <div className="flex flex-wrap items-center gap-3 px-1">
+          {/* Prioridade */}
+          <div className="flex items-center gap-2">
+            <Label className="text-xs text-muted-foreground">Prioridade</Label>
+            <Select
+              value={process?.prioridade || "media"}
+              onValueChange={(value) => {
+                setProcess(prev => ({ ...prev, prioridade: value }));
+                if (canEditPersonal && !isProcessLocked) handleSaveOrganization();
+              }}
+              disabled={!canEditPersonal || isProcessLocked}
+            >
+              <SelectTrigger className="h-8 w-28 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="baixa"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Baixa</span></SelectItem>
+                <SelectItem value="media"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Média</span></SelectItem>
+                <SelectItem value="alta"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-red-500" />Alta</span></SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {/* Etiquetas */}
+          <div className="flex items-center gap-1.5 flex-wrap">
+            <Label className="text-xs text-muted-foreground">Etiquetas</Label>
+            {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
+              <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
+                {safeString(label)}
+                {canEditPersonal && (
+                  <button
+                    onClick={() => setProcess(prev => ({ ...prev, labels: (prev.labels || []).filter((_, i) => i !== idx) }))}
+                    className="ml-0.5 hover:text-destructive"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                )}
+              </Badge>
+            ))}
+            {canEditPersonal && (
+              <Input
+                value={newLabel}
+                onChange={(e) => setNewLabel(e.target.value)}
+                onKeyDown={(e) => {
+                  if (e.key === "Enter" && newLabel.trim()) {
+                    e.preventDefault();
+                    setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
+                    setNewLabel("");
+                    if (!isProcessLocked) handleSaveOrganization();
+                  }
+                }}
+                className="h-7 w-28 text-xs"
+                placeholder="Nova etiqueta"
+              />
+            )}
+          </div>
+        </div>
+
+        {/* ═══════ PACOTE AQ V2: Cartão "Registar Atividade / Nota" (isolado) ═══════ */}
+        {!isProcessLocked && (
+          <Card className="border-violet-200 dark:border-violet-900">
+            <CardHeader className="pb-2 py-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <MessageSquare className="h-4 w-4 text-violet-600" />
+                Registar Atividade / Nota
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 pb-3">
+              <div className="flex gap-2">
                 <Textarea
-                  placeholder="Adicionar nota / registo de atividade..."
+                  placeholder="Escreva uma nota ou registo de atividade para este processo..."
                   value={newComment}
                   onChange={(e) => setNewComment(e.target.value)}
-                  className="flex-1 min-h-[50px] text-sm resize-none"
+                  className="flex-1 min-h-[60px] text-sm resize-none"
                   data-testid="quick-note-input"
                   onKeyDown={(e) => {
                     if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
@@ -2761,29 +2815,37 @@ const ProcessDetails = () => {
                   {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
                 </Button>
               </div>
-            )}
+              <p className="text-[10px] text-muted-foreground mt-1.5">Cmd/Ctrl+Enter para enviar rápido</p>
+            </CardContent>
+          </Card>
+        )}
 
-            {/* ── Timeline visual (passos do workflow) ── */}
-            <div className="mb-3">
-              <ProcessTimeline
-                processId={id}
-                currentStatus={process.status}
-                history={process.status_history || activities.filter(a => a.type === 'status_change')}
-                workflowStatuses={workflowStatuses}
-              />
-            </div>
+        {/* ═══════ PACOTE AQ V2: Timeline + Feed de Atividades (autónomo) ═══════ */}
+        <div className="space-y-3">
+          {/* Timeline visual (passos do workflow) */}
+          <ProcessTimeline
+            processId={id}
+            currentStatus={process.status}
+            history={process.status_history || activities.filter(a => a.type === 'status_change')}
+            workflowStatuses={workflowStatuses}
+          />
 
-            {/* ── Atividades recentes (notas + comentários) ── */}
-            <div className="space-y-1.5">
-              <p className="text-xs font-medium text-muted-foreground mb-1">Registos recentes</p>
-              <ScrollArea className="h-[200px]">
-                <div className="space-y-1.5 pr-2">
+          {/* Feed de atividades recentes */}
+          <Card>
+            <CardHeader className="pb-2 py-3">
+              <CardTitle className="text-sm flex items-center gap-2">
+                <Clock className="h-4 w-4 text-muted-foreground" />
+                Atividades Recentes
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="pt-0 pb-3">
+              <ScrollArea className="h-[300px]">
+                <div className="space-y-2 pr-2">
                   {activities.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-2 text-xs">Sem registos. Adicione a primeira nota acima.</p>
+                    <p className="text-center text-muted-foreground py-4 text-xs">Sem registos. Adicione a primeira nota acima.</p>
                   ) : (
-                    // PACOTE AQ: mostrar atividades por ordem inversa (mais recente no topo)
                     [...activities].reverse().map((activity) => (
-                      <div key={activity.id} className="p-1.5 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
+                      <div key={activity.id} className="p-2 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
                         <div className="flex items-start justify-between gap-1">
                           <div className="flex-1 min-w-0">
                             <span className="font-medium">{safeString(activity.user_name)}</span>
@@ -2801,164 +2863,13 @@ const ProcessDetails = () => {
                   )}
                 </div>
               </ScrollArea>
-            </div>
-          </CardContent>
-        </Card>
+            </CardContent>
+          </Card>
+        </div>
 
-        {/* PACOTE AQ: Cartão "Dados Adicionais do Processo" removido/ocultado.
-            Os campos (NIF, emails monitorizados, vendedor, mediador) passam a
-            ser geridos nas respetivas tabs (Cliente / Imóvel). */}
-
-        {/* Notas, Prioridade e Etiquetas (Fase 3) */}
-        <Card>
-          <CardContent className="pt-4">
-            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-              <MessageSquare className="h-4 w-4 text-muted-foreground" />
-              Organização do Processo
-            </h4>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              {/* Notas */}
-              <div className="space-y-1 sm:col-span-2">
-                <Label className="text-xs text-muted-foreground">Notas do Consultor</Label>
-                <Textarea
-                  value={process?.notes || ""}
-                  onChange={(e) => setProcess(prev => ({ ...prev, notes: e.target.value }))}
-                  disabled={!canEditPersonal}
-                  rows={3}
-                  placeholder="Observações gerais sobre o caso..."
-                />
-              </div>
-              {/* Prioridade */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Prioridade</Label>
-                <Select
-                  value={process?.prioridade || "media"}
-                  onValueChange={(value) => setProcess(prev => ({ ...prev, prioridade: value }))}
-                  disabled={!canEditPersonal}
-                >
-                  <SelectTrigger className="h-9">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="baixa">
-                      <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-green-500" />
-                        Baixa
-                      </span>
-                    </SelectItem>
-                    <SelectItem value="media">
-                      <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-amber-500" />
-                        Média
-                      </span>
-                    </SelectItem>
-                    <SelectItem value="alta">
-                      <span className="flex items-center gap-2">
-                        <span className="h-2 w-2 rounded-full bg-red-500" />
-                        Alta
-                      </span>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {/* Etiquetas */}
-              <div className="space-y-1">
-                <Label className="text-xs text-muted-foreground">Etiquetas</Label>
-                <div className="flex flex-wrap gap-1.5 mb-1.5 min-h-[36px] items-center">
-                  {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
-                    <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
-                      {safeString(label)}
-                      {canEditPersonal && (
-                        <button
-                          onClick={() => setProcess(prev => ({
-                            ...prev,
-                            labels: (prev.labels || []).filter((_, i) => i !== idx)
-                          }))}
-                          className="ml-0.5 hover:text-destructive"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      )}
-                    </Badge>
-                  ))}
-                  {canEditPersonal && (
-                    <div className="flex items-center gap-1">
-                      <Input
-                        value={newLabel}
-                        onChange={(e) => setNewLabel(e.target.value)}
-                        onKeyDown={(e) => {
-                          if (e.key === "Enter" && newLabel.trim()) {
-                            e.preventDefault();
-                            setProcess(prev => ({
-                              ...prev,
-                              labels: [...(prev.labels || []), newLabel.trim()]
-                            }));
-                            setNewLabel("");
-                          }
-                        }}
-                        className="h-7 w-28 text-xs"
-                        placeholder="Nova etiqueta"
-                      />
-                      <Popover>
-                        <PopoverTrigger asChild>
-                          <Button variant="ghost" size="sm" className="h-7 w-7 p-0 text-muted-foreground" title="Etiquetas predefinidas">
-                            <Plus className="h-3 w-3" />
-                          </Button>
-                        </PopoverTrigger>
-                        <PopoverContent className="w-48 p-2" align="start">
-                          <div className="space-y-1">
-                            <p className="text-xs font-medium text-muted-foreground px-1 mb-1">Predefinidas</p>
-                            {LABEL_PRESETS.filter(l => !(Array.isArray(process?.labels) ? process.labels : []).includes(l)).map((label) => (
-                              <button
-                                key={label}
-                                onClick={() => setProcess(prev => ({
-                                  ...prev,
-                                  labels: [...(prev.labels || []), label]
-                                }))}
-                                className="w-full text-left text-xs px-2 py-1.5 rounded hover:bg-muted transition-colors"
-                              >
-                                {label}
-                              </button>
-                            ))}
-                          </div>
-                        </PopoverContent>
-                      </Popover>
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-            {/* Indicador visual de prioridade */}
-            {process?.prioridade && process.prioridade !== "media" && (
-              <div className={`mt-3 p-2 rounded-lg text-xs font-medium ${
-                process.prioridade === "alta"
-                  ? "bg-red-50 dark:bg-red-900/20 text-red-700 dark:text-red-300 border border-red-200 dark:border-red-800"
-                  : "bg-green-50 dark:bg-green-900/20 text-green-700 dark:text-green-300 border border-green-200 dark:border-green-800"
-              }`}>
-                {process.prioridade === "alta" ? "⚠ Prioridade Alta — Ação requerida" : "✓ Prioridade Baixa — Sem urgência"}
-              </div>
-            )}
-            {/* Botão dedicado para guardar apenas a organização */}
-            {canEditPersonal && !isProcessLocked && (
-              <div className="mt-4 flex justify-end">
-                <Button
-                  onClick={handleSaveOrganization}
-                  disabled={savingOrg}
-                  size="sm"
-                  className="gap-1.5"
-                >
-                  {savingOrg ? (
-                    <><Loader2 className="h-3.5 w-3.5 animate-spin" />A guardar...</>
-                  ) : (
-                    <><Check className="h-3.5 w-3.5" />Guardar Organização</>
-                  )}
-                </Button>
-              </div>
-            )}
-          </CardContent>
-        </Card>
-
-        {/* PACOTE AQ: Timeline movida para o cartão "Atividade & Notas" no topo. */}
+        {/* PACOTE AQ V2: Cartão "Organização do Processo" removido.
+            Prioridade e Etiquetas movidas para a zona de meta-dados compacta no topo.
+            Notas do Consultor removidas (substituídas pelo cartão "Registar Atividade / Nota"). */}
 
         {/* TAREFA 2: Resolver conflitos de dados IA */}
         <DataConflictResolver
