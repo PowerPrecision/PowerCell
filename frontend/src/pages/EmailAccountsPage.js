@@ -1148,10 +1148,9 @@ const EmailAccountsPage = ({ embedded = false }) => {
             <SharedEmailCard />
           </div>
 
-          {/* Card 4: Configuração de Email por Empresa */}
-          <div className="xl:col-span-2">
-            <CompanyEmailCard />
-          </div>
+          {/* PACOTE BG: CompanyEmailCard removido — a configuração de email
+              por empresa passa a ser feita no detalhe de cada Empresa
+              (CompaniesManagementPage, Pacote BF). */}
         </div>
       </div>
   );

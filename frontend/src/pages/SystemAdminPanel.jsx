@@ -46,8 +46,6 @@ import {
   Palette, GitBranch, FileText, LayoutTemplate,
   // Comunicações
   MessageSquare, Mail, Bell,
-  // Emails de Sistema / Integrações (movidos para Comunicações)
-  MailCheck, Plug,
   // Compliance
   ShieldCheck, Scale, ClipboardList,
   // Técnico
@@ -85,28 +83,10 @@ const ProcessMigrationTab = lazy(() => import("../components/admin/ProcessMigrat
 const FinanceTab = lazy(() => import("../components/admin/FinanceTab"));
 const CompaniesManagementPage = lazy(() => import("./CompaniesManagementPage"));
 
-// PACOTE AZ/BD: Named exports de SystemConfigPage não podem ser extraídos de
-// lazy(). Usamos wrappers com useEffect para evitar TDZ no render.
-const SystemEmailsSectionWrapper = (props) => {
-  const [Component, setComponent] = useState(null);
-  useEffect(() => {
-    import("./SystemConfigPage").then(mod => {
-      if (mod.SystemEmailsSection) setComponent(() => mod.SystemEmailsSection);
-    }).catch(err => console.error("[SystemEmailsSectionWrapper] import error:", err));
-  }, []);
-  if (!Component) return <TabLoader />;
-  return <Component {...props} />;
-};
-const IntegrationsConfigSectionWrapper = (props) => {
-  const [Component, setComponent] = useState(null);
-  useEffect(() => {
-    import("./SystemConfigPage").then(mod => {
-      if (mod.IntegrationsConfigSection) setComponent(() => mod.IntegrationsConfigSection);
-    }).catch(err => console.error("[IntegrationsConfigSectionWrapper] import error:", err));
-  }, []);
-  if (!Component) return <TabLoader />;
-  return <Component {...props} />;
-};
+// PACOTE BG: SystemEmailsSectionWrapper e IntegrationsConfigSectionWrapper
+// removidos — as sub-tabs 'Emails de Sistema' e 'Integrações' foram
+// eliminadas. As configurações estão cobertas em EmailAccountsPage e
+// no detalhe de cada Empresa (Pacote BF).
 
 // Loader para Suspense
 const TabLoader = () => (
@@ -360,19 +340,10 @@ const SystemAdminPanel = () => {
                     <span className="sm:hidden">Notif</span>
                   </TabsTrigger>
 
-                  {/* Separador visual */}
-                  <div className="w-px h-6 bg-border mx-1 self-center" />
-
-                  <TabsTrigger value="system-emails" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <MailCheck className="h-4 w-4" />
-                    <span className="hidden sm:inline">Emails de Sistema</span>
-                    <span className="sm:hidden">SMTP</span>
-                  </TabsTrigger>
-                  <TabsTrigger value="integrations" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                    <Plug className="h-4 w-4" />
-                    <span className="hidden sm:inline">Integrações</span>
-                    <span className="sm:hidden">Integ</span>
-                  </TabsTrigger>
+                  {/* PACOTE BG: Sub-separadores 'Emails de Sistema' e 'Integrações'
+                      removidos — estas configurações estão cobertas no
+                      EmailAccountsPage (SystemSmtpCard, IndexationImapCard) e
+                      no detalhe de cada Empresa (Pacote BF). */}
                 </TabsList>
               </div>
               <TabsContent value="email-accounts" className="mt-4">
@@ -380,12 +351,6 @@ const SystemAdminPanel = () => {
               </TabsContent>
               <TabsContent value="notifications" className="mt-4">
                 <Suspense fallback={<TabLoader />}><NotificationSettingsPage embedded={true} /></Suspense>
-              </TabsContent>
-              <TabsContent value="system-emails" className="mt-4">
-                <SystemEmailsSectionWrapper token={localStorage.getItem("token")} />
-              </TabsContent>
-              <TabsContent value="integrations" className="mt-4">
-                <IntegrationsConfigSectionWrapper />
               </TabsContent>
             </Tabs>
           </TabsContent>
