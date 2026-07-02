@@ -3,6 +3,35 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BK: Exclusão do Estado pré_registo dos Dashboards
+
+### Adicionado
+- **Exclusão global do estado `pre_registo` dos quadros de trabalho**: Processos em `pre_registo` (cliente ainda a preencher no portal) NÃO aparecem no Kanban, nas listagens tabulares nem em "Os Meus Clientes" — só entram nos quadros de trabalho quando transitam para a primeira fase da pipeline (disparando a dupla auto-atribuição em `services/process_assignment.py`). Isto elimina o ruído gerado por processos que ainda não são leads qualificadas.
+
+- **Helper centralizado `_should_hide_pre_registo(role, status, search)`**: Nova função em `routes/processes.py` que encapsula as regras de exclusão:
+  - **Regra 3 (universal)**: `status=="pre_registo"` explícito → nunca excluir (qualquer role pode ver especificamente esse estado).
+  - **Regra 1 (admin/CEO/diretor/administrativo)**: excluem na vista normal, MAS vêem pré-registos quando pesquisam (`search` ativo) ou filtram por `status` explícito — mantendo a capacidade de os encontrar através de pesquisa direta.
+  - **Regra 2 (consultor/intermediário/indexação/cliente)**: sempre excluem nos quadros de trabalho (nunca veem pré-registos).
+
+- **Constantes `PRE_REGISTO_STATUS` e `PRE_REGISTO_BYPASS_ROLES`**: Centralizam o nome do estado e os roles com privilégios de bypass (admin, CEO, diretor, administrativo).
+
+### Aplicado
+- **`GET /processes/kanban`**: Exclusão incondicional (todos os roles) após o bloco `view_mode` — o Kanban é o quadro de trabalho principal e não tem parâmetro de pesquisa, pelo que os pré-registos não devem poluí-lo para ninguém. Admins que precisem inspeccionar pré-registos usam a listagem tabular com `search`.
+- **`GET /processes`** (listagem tabular): Exclusão condicional via `_should_hide_pre_registo` — consultores nunca veem; admin vê com `search` ou `status` explícito.
+- **`GET /processes/paginated`**: Mesma lógica que `GET /processes`.
+- **`GET /my-clients`** (processes.py): Exclusão incondicional após query por role (endpoint sem `search`).
+- **`GET /my-clients`** (my_clients.py): Constante local `PRE_REGISTO_STATUS` (evita dependência circular) + exclusão com guard especial para `{"_id": None}` (sem acesso).
+
+### Decisão de Arquitetura
+- **Kanban e my-clients sem bypass para admin**: Estes endpoints não têm parâmetro `search`, pelo que a exclusão se aplica a todos os roles. O bypass para admin faz-se através da **listagem tabular** (`GET /processes` com `search`), que é o único endpoint com pesquisa direta. Isto garante que os quadros de trabalho ficam limpos de ruído para toda a equipa, incluindo admins, que mantêm a capacidade de encontrar pré-registos quando precisam.
+- **Compatibilidade com `dashboard_statuses()`**: O `models/enums.py` já tinha `dashboard_statuses()` que exclui pré-registos (linha 65-67). As rotas agora alinham-se com esta definição, que já era usada em `routes/stats.py`.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): constante `PRE_REGISTO_STATUS` + `PRE_REGISTO_BYPASS_ROLES` + helper `_should_hide_pre_registo` (linhas 1259-1302); exclusão aplicada em 4 endpoints (kanban, /processes, /paginated, /my-clients).
+- **Backend** (`backend/routes/my_clients.py`): constante local `PRE_REGISTO_STATUS` (linha 31); exclusão com guard `{"_id": None}` no `GET /my-clients` (linhas 114-131).
+- **Padrão de injeção**: `{"status": {"$ne": PRE_REGISTO_STATUS}}` adicionado a `$and` (ou combinado com query existente), preservando todos os outros filtros. No `GET /processes` e `/paginated`, a condição é adicionada a `and_conditions` antes da montagem final, garantindo combinação correta com `$and`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; teste funcional do helper com 21 casos (consultor/intermediário/indexação/cliente sempre escondem; admin/CEO/diretor/administrativo escondem na vista normal mas vêem com search/status explícito; regra 3 universal do status=pre_registo) — TODOS PASSARAM.
+
 ## [2026-07-16] — Pacote BJ: Stealth Mode para o Histórico (Indexação Invisível)
 
 ### Adicionado

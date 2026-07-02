@@ -26,6 +26,10 @@ logger = logging.getLogger(__name__)
 # Mesmos status inactivos que processes.py
 INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
 
+# PACOTE BK — Estado pré_registo (cliente ainda a preencher no portal).
+# Não aparece nos quadros de trabalho da equipa para não gerar ruído.
+PRE_REGISTO_STATUS = "pre_registo"
+
 router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 
 
@@ -106,7 +110,26 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     else:
         # Outros roles não têm acesso
         query = {"_id": None}  # Query que não retorna nada
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+    # ====================================================================
+    # Consultores/intermediários/indexação nunca veem pré-registos nos seus
+    # clientes. Admin/CEO/diretor/administrativo também não os veem na vista
+    # normal (ruído desnecessário). Este endpoint não tem parâmetro search,
+    # pelo que o bypass para admin faz-se através da listagem tabular
+    # (GET /processes com search). Se a query for {"_id": None} (sem acesso),
+    # não há nada a excluir — preserva-se para clareza.
+    # ====================================================================
+    if query != {"_id": None}:
+        pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+        if "$and" in query:
+            query["$and"].append(pre_registo_filter)
+        elif query:
+            query = {"$and": [query, pre_registo_filter]}
+        else:
+            query = pre_registo_filter
+
     # Buscar processos
     processes = await db.processes.find(
         query,

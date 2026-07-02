@@ -1611,3 +1611,38 @@ Stage Summary:
   - `backend/services/history.py` (helper `_is_stealth_user` + early return em `log_history` e `log_data_changes`)
   - `backend/routes/activities.py` (import `_is_stealth_user` + guard 403 em `create_activity`)
 - Resultado: ações do departamento de Indexação NÃO poluem o histórico do cliente (stealth mode automático por role); qualquer utilizador pode ser silenciado individualmente via `track_history=False` (switch global); utilizadores normais mantêm `track_history=True` por defeito (quando a chave não existe). O audit_trail (compliance) mantém-se INTACTO e independente — rastreabilidade garantida.
+
+
+---
+Task ID: Pacote BK (Exclusão do pré_registo dos Dashboards)
+Agent: Main Agent (Code Assistant)
+Task: Excluir processos em pré_registo dos quadros de trabalho da equipa
+
+Work Log:
+- Análise do estado do `pre_registo` no sistema: já existe como `ProcessStatus.PRE_REGISTO` em `models/enums.py` (linha 19) e há um método `dashboard_statuses()` que já o exclui (linha 65-67). Mas as ROTAS de listagem não usavam esta exclusão — os pré-registos apareciam no Kanban, nas listagens tabulares e em "Os Meus Clientes".
+- Análise das 5 rotas afectadas:
+  1. `GET /processes/kanban` (processes.py ~linha 1998) — sem parâmetro search; query base por role + view_mode + filter_conditions.
+  2. `GET /processes` (processes.py ~linha 1305) — com search e status; usa and_conditions.
+  3. `GET /processes/paginated` (processes.py ~linha 1693) — com search e status; usa and_conditions.
+  4. `GET /my-clients` (processes.py ~linha 2484) — sem search; query por role.
+  5. `GET /my-clients` (my_clients.py linha 36) — sem search; query por role.
+- Estratégia: helper centralizado `_should_hide_pre_registo(role, status, search)` em processes.py. Regras:
+  * Regra 3 (universal): status=="pre_registo" explícito → nunca excluir (qualquer role).
+  * Regra 1 (admin/CEO/diretor/administrativo): excluem na vista normal, MAS vêem pré-registos quando pesquisam (search ativo) ou filtram por status explícito.
+  * Regra 2 (consultor/intermediário/indexação/cliente): sempre excluem nos quadros de trabalho.
+- Kanban e my-clients: sem parâmetro search → exclusão aplica-se a TODOS os roles (incl. admin). Bypass para admin faz-se através da listagem tabular (GET /processes com search), que é o único endpoint com pesquisa direta.
+- my_clients.py: como não importa de processes.py, adicionada constante local `PRE_REGISTO_STATUS` (evita dependência circular). Guard especial: se query for `{"_id": None}` (sem acesso), não aplica a exclusão (preserva clareza).
+- Implementação:
+  1. processes.py: constante `PRE_REGISTO_STATUS` + `PRE_REGISTO_BYPASS_ROLES` + helper `_should_hide_pre_registo` (perto de INACTIVE_STATUSES, linhas 1259-1302).
+  2. GET /processes: `and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})` antes da montagem final (linha 1484).
+  3. GET /paginated: mesmo padrão (linha 1797).
+  4. GET /kanban: exclusão incondicional (todos os roles) após bloco view_mode (linhas 2172-2192) — sem bypass porque Kanban não tem search.
+  5. GET /my-clients (processes.py): exclusão incondicional após query por role (linhas 2548-2563).
+  6. GET /my-clients (my_clients.py): constante local + exclusão com guard `{"_id": None}` (linhas 114-131).
+- Validação: `py_compile` ✓ em ambos; `flake8 --select=E9,F63,F7,F82` → 0 erros; teste funcional do helper com 21 casos (consultor/intermediário/indexação/cliente sempre escondem; admin/CEO/diretor/administrativo escondem na vista normal mas vêem com search/status explícito; regra 3 universal do status=pre_registo) — TODOS PASSARAM.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/processes.py` (constante + helper + 4 endpoints: kanban, /processes, /paginated, /my-clients)
+  - `backend/routes/my_clients.py` (constante local + 1 endpoint: /my-clients)
+- Resultado: processos em pré_registo (cliente ainda a preencher no portal) NÃO aparecem no Kanban nem em "Os Meus Clientes" para nenhum role. Nas listagens tabulares (GET /processes, GET /paginated), consultores/intermediários/indexação nunca os veem; admin/CEO/diretor/administrativo vêem-nos apenas quando pesquisam ativamente (search) ou filtram por status explícito (incl. pré_registo). Os processos só entram nos quadros de trabalho quando transitam de pré_registo para a primeira fase da pipeline, disparando a dupla auto-atribuição em `services/process_assignment.py` (função `dual_auto_assign_on_pre_registo_transition`).

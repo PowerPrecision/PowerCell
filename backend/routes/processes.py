@@ -1242,6 +1242,65 @@ INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
 # Status de processos arquivados (para histórico)
 ARCHIVED_STATUSES = ["concluidos", "desistencias"]
 
+# ====================================================================
+# PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+# ====================================================================
+# Processos em "pre_registo" (cliente ainda a preencher no portal) NÃO
+# devem aparecer nos quadros de trabalho da equipa (Kanban, listagens,
+# my-clients) para não gerar ruído. A exclusão aplica-se a TODOS os
+# roles, MAS admins/CEO/diretor/administrativo podem contorná-la:
+#   1. Pesquisando diretamente (parâmetro `search` ativo) — encontra
+#      processos em pré-registo pelo nome/email/NIF do cliente.
+#   2. Filtrando explicitamente por status="pre_registo".
+# Consultores, intermediários e indexação NUNCA veem pré-registos nos
+# quadros de trabalho (só os veem quando o processo transita para a
+# pipeline, disparando a dupla auto-atribuição — ver process_assignment).
+# ====================================================================
+PRE_REGISTO_STATUS = "pre_registo"
+# Roles com privilégios de gestão — podem contornar a exclusão do pré-registo
+PRE_REGISTO_BYPASS_ROLES = {
+    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
+}
+
+
+def _should_hide_pre_registo(role: str, status: Optional[str], search: Optional[str]) -> bool:
+    """
+    Determina se a exclusão do estado pré_registo deve aplicar-se à query.
+
+    Regras (PACOTE BK):
+    1. Admin/CEO/Diretor/Administrativo NÃO têm exclusão automática quando
+       estão a pesquisar (search ativo) ou a filtrar explicitamente por
+       status — podem encontrar pré-registos diretamente.
+    2. Consultores, intermediários e indexação têm SEMPRE a exclusão ativa
+       nos quadros de trabalho (nunca veem pré-registos).
+    3. Em todos os casos, se status=="pre_registo" for passado explicitamente,
+       a exclusão NÃO se aplica (o utilizador quer ver especificamente esse
+       estado).
+
+    Args:
+        role: Role do utilizador autenticado.
+        status: Filtro de status explícito do query string (None se não especificado).
+        search: Termo de pesquisa do query string (None ou "" se não especificado).
+
+    Returns:
+        True se a query deve excluir pré_registo; False caso contrário.
+    """
+    # Regra 3: filtro explícito por pré_registo → nunca excluir
+    if status == PRE_REGISTO_STATUS:
+        return False
+    # Regra 1: roles com bypass — excluem pré-registo SÓ quando não há
+    # pesquisa ativa nem filtro de status explícito (caso contrário, o
+    # admin está à procura de algo específico e deve ver tudo)
+    if role in PRE_REGISTO_BYPASS_ROLES:
+        # Se está a pesquisar ou a filtrar por um status específico (que
+        # não pré_registo, já tratado acima), o admin deve ver resultados
+        # de qualquer estado — inclusivé pré-registo.
+        if search or status:
+            return False
+        return True
+    # Regra 2: consultores, intermediários, indexação, cliente — sempre excluem
+    return True
+
 
 @router.get("")
 async def get_processes(
@@ -1413,7 +1472,18 @@ async def get_processes(
         # e em personal_data aninhado (para NIF/telefone que podem estar encriptados)
         search_condition = {"$or": search_or_conditions}
         and_conditions.append(search_condition)
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+    # ====================================================================
+    # Consultores/intermediários/indexação nunca veem pré-registos. Admins
+    # veem-nos apenas quando estão a pesquisar ativamente ou a filtrar por
+    # status explícito (incl. pré_registo). O helper _should_hide_pre_registo
+    # encapsula toda a lógica de bypass.
+    # ====================================================================
+    if _should_hide_pre_registo(role, status, search):
+        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+
     # ====================================================================
     # MONTAR QUERY FINAL COM $and
     # Se há apenas 1 condição, não precisa de $and (otimização)
@@ -1720,7 +1790,13 @@ async def get_processes_paginated(
         
         search_condition = {"$or": search_or_conditions}
         and_conditions.append(search_condition)
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+    # ====================================================================
+    if _should_hide_pre_registo(role, status, search):
+        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+
     # Montar query final
     if len(and_conditions) == 1:
         query = and_conditions[0]
@@ -2092,7 +2168,29 @@ async def get_kanban_board(
             else:
                 query = active_or_recent
         # Se completed_days == 0, sem limite de datas (mostra tudo)
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DO KANBAN
+    # ====================================================================
+    # O Kanban é o quadro de trabalho principal da equipa. Processos em
+    # pré-registo (cliente ainda a preencher no portal) não devem aparecer
+    # aqui para não gerar ruído — só entram no Kanban quando transitam
+    # para a primeira fase oficial da pipeline (disparando a dupla
+    # auto-atribuição em process_assignment.py).
+    #
+    # A exclusão aplica-se a TODOS os roles no Kanban (incl. admin/CEO),
+    # porque o Kanban não tem parâmetro de pesquisa direta. Os admins que
+    # precisem inspeccionar pré-registos devem usar a listagem tabular
+    # (GET /processes com search) ou o endpoint de diagnóstico.
+    # ====================================================================
+    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    if "$and" in query:
+        query["$and"].append(pre_registo_filter)
+    elif query:
+        query = {"$and": [query, pre_registo_filter]}
+    else:
+        query = pre_registo_filter
+
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     
@@ -2446,7 +2544,24 @@ async def get_my_clients(
         }
     else:
         query = {}
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+    # ====================================================================
+    # Consultores/intermediários/indexação nunca veem pré-registos nos seus
+    # clientes. Admin/CEO/diretor/administrativo também não os veem na vista
+    # normal de "Os Meus Clientes" (ruído desnecessário). Nota: este endpoint
+    # não tem parâmetro search, pelo que o bypass para admin faz-se através
+    # da listagem tabular (GET /processes com search) ou do Kanban diagnose.
+    # ====================================================================
+    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    if "$and" in query:
+        query["$and"].append(pre_registo_filter)
+    elif query:
+        query = {"$and": [query, pre_registo_filter]}
+    else:
+        query = pre_registo_filter
+
     # Calcular offset
     skip = (page - 1) * size
     
