@@ -35,7 +35,7 @@
  * // Acesso via layout protegido — visível para roles admin e CEO
  * // Tabs técnicas exclusivas do admin
  */
-import { useState } from "react";
+import { useState, lazy, Suspense } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
@@ -60,37 +60,56 @@ import {
 import { useNavigate } from "react-router-dom";
 import { hasRole } from "../utils/roleUtils";
 
-// Embedded pages — Gestão
+// Embedded pages — Gestão (eager: leves)
 import UsersManagementPage from "./UsersManagementPage";
-import SystemConfigPage from "./SystemConfigPage";
 import AutomationPage from "./AutomationPage";
 import PermissionsTab from "../components/admin/PermissionsTab";
 
-// Embedded pages — Customização
-import WorkflowStatusesPage from "./WorkflowStatusesPage";
-import FormManagementPage from "./FormManagementPage";
-import TemplatesPage from "./TemplatesPage";
+// PACOTE AZ: Lazy loading para páginas pesadas que causam TDZ
+// (Cannot access 'd' before initialization) devido a dependências
+// circulares indiretas no bundle do Vite.
+const SystemConfigPage = lazy(() => import("./SystemConfigPage"));
+const WorkflowStatusesPage = lazy(() => import("./WorkflowStatusesPage"));
+const FormManagementPage = lazy(() => import("./FormManagementPage"));
+const TemplatesPage = lazy(() => import("./TemplatesPage"));
+const EmailAccountsPage = lazy(() => import("./EmailAccountsPage"));
+const NotificationSettingsPage = lazy(() => import("./NotificationSettingsPage"));
+const RGPDAdminPage = lazy(() => import("./RGPDAdminPage"));
+const AuditTrailPage = lazy(() => import("./AuditTrailPage"));
+const BackupsPage = lazy(() => import("./BackupsPage"));
+const UnifiedLogsPage = lazy(() => import("./UnifiedLogsPage"));
+const DiagnosticsPage = lazy(() => import("./DiagnosticsPage"));
+const AIConfigPage = lazy(() => import("./AIConfigPage"));
+const BackgroundJobsPage = lazy(() => import("./BackgroundJobsPage"));
+const ProcessMigrationTab = lazy(() => import("../components/admin/ProcessMigrationTab"));
+const FinanceTab = lazy(() => import("../components/admin/FinanceTab"));
+const CompaniesManagementPage = lazy(() => import("./CompaniesManagementPage"));
 
+// PACOTE AZ: Named exports de SystemConfigPage não podem ser extraídos de
+// lazy(). Em vez disso, usamos um wrapper que importa dinamicamente.
+const SystemEmailsSectionWrapper = (props) => {
+  const [Component, setComponent] = useState(null);
+  if (!Component) {
+    import("./SystemConfigPage").then(mod => setComponent(() => mod.SystemEmailsSection));
+    return <TabLoader />;
+  }
+  return <Component {...props} />;
+};
+const IntegrationsConfigSectionWrapper = (props) => {
+  const [Component, setComponent] = useState(null);
+  if (!Component) {
+    import("./SystemConfigPage").then(mod => setComponent(() => mod.IntegrationsConfigSection));
+    return <TabLoader />;
+  }
+  return <Component {...props} />;
+};
 
-// Embedded pages — Comunicações
-import EmailAccountsPage from "./EmailAccountsPage";
-import NotificationSettingsPage from "./NotificationSettingsPage";
-// Secções movidas de SystemConfigPage para Comunicações
-import { SystemEmailsSection, IntegrationsConfigSection } from "./SystemConfigPage";
-
-// Embedded pages — Compliance
-import RGPDAdminPage from "./RGPDAdminPage";
-import AuditTrailPage from "./AuditTrailPage";
-
-// Embedded pages — Técnico (admin only)
-import BackupsPage from "./BackupsPage";
-import UnifiedLogsPage from "./UnifiedLogsPage";
-import DiagnosticsPage from "./DiagnosticsPage";
-import AIConfigPage from "./AIConfigPage";
-import BackgroundJobsPage from "./BackgroundJobsPage";
-import ProcessMigrationTab from "../components/admin/ProcessMigrationTab";
-import FinanceTab from "../components/admin/FinanceTab";
-import CompaniesManagementPage from "./CompaniesManagementPage";
+// Loader para Suspense
+const TabLoader = () => (
+  <div className="flex items-center justify-center py-12">
+    <div className="h-6 w-6 border-2 border-primary border-t-transparent rounded-full animate-spin" />
+  </div>
+);
 
 const SystemAdminPanel = () => {
   const navigate = useNavigate();
@@ -261,7 +280,7 @@ const SystemAdminPanel = () => {
 
           {/* Configurações Gerais — SystemConfigPage em modo embedded */}
           <TabsContent value="config" className="mt-6">
-            <SystemConfigPage embedded={true} />
+            <Suspense fallback={<TabLoader />}><SystemConfigPage embedded={true} /></Suspense>
           </TabsContent>
 
           {/* Automações — AutomationPage em modo embedded */}
@@ -271,14 +290,14 @@ const SystemAdminPanel = () => {
 
           {/* Empresas — CompaniesManagementPage em modo embedded */}
           <TabsContent value="empresas" className="mt-6">
-            <CompaniesManagementPage embedded={true} />
+            <Suspense fallback={<TabLoader />}><CompaniesManagementPage embedded={true} /></Suspense>
           </TabsContent>
 
           {/* ================================================================ */}
           {/* === TAB FINANÇAS — FinanceTab (amber/gold) === */}
           {/* ================================================================ */}
           <TabsContent value="financas" className="mt-6">
-            <FinanceTab />
+            <Suspense fallback={<TabLoader />}><FinanceTab /></Suspense>
           </TabsContent>
 
           {/* ================================================================ */}
@@ -307,13 +326,13 @@ const SystemAdminPanel = () => {
                 </TabsList>
               </div>
               <TabsContent value="workflow-statuses" className="mt-4">
-                <WorkflowStatusesPage embedded={true} />
+                <Suspense fallback={<TabLoader />}><WorkflowStatusesPage embedded={true} /></Suspense>
               </TabsContent>
               <TabsContent value="form-management" className="mt-4">
-                <FormManagementPage embedded={true} />
+                <Suspense fallback={<TabLoader />}><FormManagementPage embedded={true} /></Suspense>
               </TabsContent>
               <TabsContent value="templates" className="mt-4">
-                <TemplatesPage embedded={true} />
+                <Suspense fallback={<TabLoader />}><TemplatesPage embedded={true} /></Suspense>
               </TabsContent>
 
             </Tabs>
@@ -353,16 +372,16 @@ const SystemAdminPanel = () => {
                 </TabsList>
               </div>
               <TabsContent value="email-accounts" className="mt-4">
-                <EmailAccountsPage embedded={true} />
+                <Suspense fallback={<TabLoader />}><EmailAccountsPage embedded={true} /></Suspense>
               </TabsContent>
               <TabsContent value="notifications" className="mt-4">
-                <NotificationSettingsPage embedded={true} />
+                <Suspense fallback={<TabLoader />}><NotificationSettingsPage embedded={true} /></Suspense>
               </TabsContent>
               <TabsContent value="system-emails" className="mt-4">
-                <SystemEmailsSection token={localStorage.getItem("token")} />
+                <SystemEmailsSectionWrapper token={localStorage.getItem("token")} />
               </TabsContent>
               <TabsContent value="integrations" className="mt-4">
-                <IntegrationsConfigSection />
+                <IntegrationsConfigSectionWrapper />
               </TabsContent>
             </Tabs>
           </TabsContent>
@@ -385,10 +404,10 @@ const SystemAdminPanel = () => {
                 </TabsTrigger>
               </TabsList>
               <TabsContent value="rgpd" className="mt-4">
-                <RGPDAdminPage embedded={true} />
+                <Suspense fallback={<TabLoader />}><RGPDAdminPage embedded={true} /></Suspense>
               </TabsContent>
               <TabsContent value="audit" className="mt-4">
-                <AuditTrailPage embedded={true} />
+                <Suspense fallback={<TabLoader />}><AuditTrailPage embedded={true} /></Suspense>
               </TabsContent>
             </Tabs>
           </TabsContent>
@@ -431,7 +450,7 @@ const SystemAdminPanel = () => {
 
                 {/* Backups — BackupsPage em modo embedded */}
                 <TabsContent value="backups" className="mt-4">
-                  <BackupsPage embedded={true} />
+                  <Suspense fallback={<TabLoader />}><BackupsPage embedded={true} /></Suspense>
                 </TabsContent>
 
                 {/* Logs — Sub-tabs com UnifiedLogsPage e DiagnosticsPage */}
@@ -448,22 +467,22 @@ const SystemAdminPanel = () => {
                       </TabsTrigger>
                     </TabsList>
                     <TabsContent value="system-logs" className="mt-4">
-                      <UnifiedLogsPage embedded={true} />
+                      <Suspense fallback={<TabLoader />}><UnifiedLogsPage embedded={true} /></Suspense>
                     </TabsContent>
                     <TabsContent value="diagnostics" className="mt-4">
-                      <DiagnosticsPage embedded={true} />
+                      <Suspense fallback={<TabLoader />}><DiagnosticsPage embedded={true} /></Suspense>
                     </TabsContent>
                   </Tabs>
                 </TabsContent>
 
                 {/* Inteligência Artificial — AIConfigPage em modo embedded */}
                 <TabsContent value="ai-config" className="mt-4">
-                  <AIConfigPage embedded={true} />
+                  <Suspense fallback={<TabLoader />}><AIConfigPage embedded={true} /></Suspense>
                 </TabsContent>
 
                 {/* Processos BG — BackgroundJobsPage em modo embedded */}
                 <TabsContent value="bg-jobs" className="mt-4">
-                  <BackgroundJobsPage embedded={true} />
+                  <Suspense fallback={<TabLoader />}><BackgroundJobsPage embedded={true} /></Suspense>
                 </TabsContent>
 
                 {/* Migração Fase 1 — Separação Cliente ↔ Processo */}

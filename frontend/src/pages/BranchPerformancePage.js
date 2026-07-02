@@ -204,9 +204,10 @@ export default function BranchPerformancePage() {
   }
 
   return (
-    <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto">
+    <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto overflow-visible">
       {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+      {/* PACOTE BA: overflow-visible + z-index para Selects/Dropdowns */}
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 relative z-30 overflow-visible">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Building2 className="h-6 w-6 text-primary" />
