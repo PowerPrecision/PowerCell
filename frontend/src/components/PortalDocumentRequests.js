@@ -102,7 +102,7 @@ const STATUS_CONFIG = {
   pending: { label: "Pendente", color: "bg-amber-100 text-amber-800 border-amber-200", icon: Clock },
 };
 
-export default function PortalDocumentRequests({ processId }) {
+export default function PortalDocumentRequests({ processId, onDocumentsChange }) {
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null); // track which action is loading
@@ -163,6 +163,8 @@ export default function PortalDocumentRequests({ processId }) {
       setNewDoc({ categories: [], notes: "", custom_label: "" });
       setShowAddDialog(false);
       fetchDocuments();
+      // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
+      if (onDocumentsChange) onDocumentsChange();
     } catch (err) {
       toast.error(extractErrorMessage(err.response?.data?.detail, "Erro ao solicitar documento"));
     } finally {
@@ -176,6 +178,8 @@ export default function PortalDocumentRequests({ processId }) {
       await updatePortalDocRequest(processId, docId, { status: "RECEIVED" });
       toast.success("Documento marcado como recebido!");
       fetchDocuments();
+      // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
+      if (onDocumentsChange) onDocumentsChange();
     } catch (err) {
       toast.error("Erro ao atualizar estado");
     } finally {
@@ -189,6 +193,8 @@ export default function PortalDocumentRequests({ processId }) {
       await updatePortalDocRequest(processId, docId, { status: "REQUESTED" });
       toast.success("Pedido reativado com sucesso!");
       fetchDocuments();
+      // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
+      if (onDocumentsChange) onDocumentsChange();
     } catch (err) {
       toast.error("Erro ao atualizar estado");
     } finally {
@@ -203,6 +209,8 @@ export default function PortalDocumentRequests({ processId }) {
       await deletePortalDocRequest(processId, docId);
       toast.success("Pedido removido");
       fetchDocuments();
+      // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
+      if (onDocumentsChange) onDocumentsChange();
     } catch (err) {
       toast.error("Erro ao remover pedido");
     } finally {

@@ -113,11 +113,15 @@ export const safeDate = (dateString) => {
 
 /**
  * Formata uma data para exibição (dd/MM/yyyy) — seguro em Safari/iOS.
+ * PACOTE BV (Fix 3): usa safeParseISO em vez de safeDate para lidar corretamente
+ * com strings ISO 8601 com 'T' (ex: 2025-01-15T14:30:00+00:00). Antes,
+ * safeDateStr convertia dashes→slashes mas mantinha o 'T', produzindo
+ * '2025/01/15T14:30:00+00:00' que é Invalid Date em V8/SpiderMonkey.
  */
 export const formatDate = (dateString) => {
   if (!dateString) return "-";
   try {
-    const d = safeDate(dateString);
+    const d = safeParseISO(dateString);
     if (!d) return "-";
     return new Intl.DateTimeFormat("pt-PT", {
       day: "2-digit",
@@ -131,11 +135,15 @@ export const formatDate = (dateString) => {
 
 /**
  * Formata uma data+hora para exibição (dd/MM/yyyy HH:mm) — seguro em Safari/iOS.
+ * PACOTE BV (Fix 3): usa safeParseISO em vez de safeDate para lidar corretamente
+ * com strings ISO 8601 com 'T' (ex: 2025-01-15T14:30:00+00:00). Antes,
+ * safeDateStr convertia dashes→slashes mas mantinha o 'T', produzindo
+ * '2025/01/15T14:30:00+00:00' que é Invalid Date — todas as datas apareciam '-'.
  */
 export const formatDateTime = (dateString) => {
   if (!dateString) return "-";
   try {
-    const d = safeDate(dateString);
+    const d = safeParseISO(dateString);
     if (!d) return "-";
     return new Intl.DateTimeFormat("pt-PT", {
       day: "2-digit",

@@ -409,7 +409,12 @@ const AutomationPage = ({ embedded = false }) => {
                       <SelectValue placeholder="Selecionar fase do workflow…" />
                     </SelectTrigger>
                     <SelectContent>
-                      {workflowStatuses.map((s, i) => {
+                      {/* PACOTE BU — Filtrar para mostrar APENAS workflows ativos
+                          (status.is_active !== false). Estados inativos (concluídos,
+                          desistências) não devem aparecer como gatilho de automação. */}
+                      {workflowStatuses
+                        .filter(s => s.is_active !== false)
+                        .map((s, i) => {
                         const val = s.name || s.id || s;
                         const label = s.label || s.name || s;
                         return <SelectItem key={s.id || i} value={val}>{label}</SelectItem>;

@@ -3,6 +3,117 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BY: The Ultimate QA Seed Script
+
+### Adicionado
+- **Script de seeding definitivo para QA** (`backend/scripts/seed_qa_ultimate.py`, 870 linhas): Gera 18 processos (configurável) com dados 100% realistas e todos os campos preenchidos, cobrindo as 5 regras de negócio:
+  1. **4 processos em pré-registo**: Cliente minimalista (apenas nome/email/telefone), `dados_pessoais` vazio, `registration_completed=False`, `lead_status="new"`.
+  2. **Diversidade de titulares**: ~25% dos processos ativos são casais com `titular2_data` exaustivo (nome, nif, email, telefone, rendimentos, profissão) e `co_buyers` array preenchido.
+  3. **Dados 100% preenchidos**: 8+ processos ativos (em `documentacao`, `analise`, `pre_aprovacao`, `credito_aprovado`, `cpcv`, `escritura`) com `personal_data`, `financial_data` (salário bruto/líquido, despesas, capital próprio, tipo_contrato), `real_estate_data` (morada, valor, tipologia, CPCV, link idealista), e `credit_data` (montante, prazo, spread, euribor, prestação mensal calculada por fórmula de amortização francesa).
+  4. **Histórico e notas**: 2-4 atividades/notas por processo ativo (10 notas realistas) + 1 entrada de histórico (status change).
+  5. **Atribuições mistas**: Processos atribuídos a consultores, intermediários e indexadores aleatoriamente.
+
+### Funcionalidades do script
+- **CLI**: `--clear` (limpeza seletiva de seeds anteriores via `_seed_script`), `--num-processes` (customizar quantidade), `--dry-run` (simulação sem escrever).
+- **Workflow statuses**: Garante os 16 estados canónicos do `ProcessStatus` (alinhados com o enum, não com os 7 antigos do `seed_massive_dev_data.py`).
+- **Utilizadores dummy**: Cria 2 utilizadores por role (consultor, indexacao, intermediario) se não existirem.
+- **NIF válido**: Gera NIFs portugueses com dígito de controlo validado.
+- **Faker pt_PT**: Nomes, empresas, moradas e datas realistas em português.
+
+### Uso
+```bash
+cd backend
+python scripts/seed_qa_ultimate.py                    # seed com defaults (18 processos)
+python scripts/seed_qa_ultimate.py --clear            # limpar dados seed anteriores
+python scripts/seed_qa_ultimate.py --num-processes 25 # customizar quantidade
+python scripts/seed_qa_ultimate.py --dry-run          # simular sem escrever
+```
+
+### Técnico
+- **Backend** (`backend/scripts/seed_qa_ultimate.py`): 870 linhas; bootstrap com Motor async + dotenv + Faker('pt_PT'); catálogos estáticos (nomes, profissões, bancos, concelhos); 10 geradores de dados (cliente, personal_data, financial_data, real_estate_data, credit_data, titular2_data, co_buyer, atividade, historico); `ensure_workflow_statuses` (16 estados); `resolve_users` (cria dummies); `clear_seed_data` (limpeza seletiva); `run_seed` (orquestração).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote BX: Resize Pipeline Funnel
+
+### Alterado
+- **Funil do Pipeline mais compacto no AdminDashboard**: O gráfico de funil (`SafeChartContainer`) foi reduzido de `h-[280px]` para `h-[224px]` (h-56). Padding do `CardHeader` (`pb-2`) e `CardContent` (`pb-3`) também reduzido. `CardDescription` com `text-xs`. Margens internas do `BarChart` ajustadas (`top: 5, bottom: 5`). Poupança total: ~56px de altura vertical.
+
+- **Gráficos do StatisticsPage mais compactos**: Os 5 gráficos (`SafeChartContainer` com `h-[300px]`) foram reduzidos para `h-[260px]` (h-64). Aplicado a: funil de leads, funil de vendas, e 3 gráficos de status. Poupança: 40px por gráfico × 5 = 200px total.
+
+### Classes Tailwind ajustadas
+| Ficheiro | Elemento | Antes | Depois |
+|----------|----------|-------|--------|
+| `AdminDashboard.js` | `SafeChartContainer` | `h-[280px]` | `h-[224px]` |
+| `AdminDashboard.js` | Empty state div | `h-[280px]` | `h-[224px]` |
+| `AdminDashboard.js` | `CardHeader` | (default) | `pb-2` |
+| `AdminDashboard.js` | `CardDescription` | (default) | `text-xs` |
+| `AdminDashboard.js` | `CardContent` | (default) | `pb-3` |
+| `AdminDashboard.js` | `BarChart` margin | `{ left: 20, right: 20 }` | `{ left: 20, right: 20, top: 5, bottom: 5 }` |
+| `StatisticsPage.js` | 5× `SafeChartContainer` | `h-[300px]` | `h-[260px]` |
+
+### Técnico
+- **Frontend** (`frontend/src/pages/AdminDashboard.js`): Funil do Pipeline (linhas 368-405).
+- **Frontend** (`frontend/src/pages/StatisticsPage.js`): 5 gráficos com `h-[300px]` → `h-[260px]` (substituição global).
+- **Validação**: `esbuild --loader=jsx` → 0 erros nos 2 ficheiros.
+
+## [2026-07-16] — Pacote BV: Fix Checklists, RGPD empty state, Backups Date
+
+### Corrigido
+- **Checklist de Documentos não refletia alterações**: Quando o utilizador guardava/marcava/removia documentos nos pedidos do portal, a notificação de sucesso aparecia mas os documentos não ficavam refletidos na checklist/painel de documentos. Causa: `PortalDocumentRequests` fazia `fetchDocuments()` (state local) mas não notificava o `UnifiedDocumentsPanel` (componente irmão) para refrescar. Corrigido: adicionado prop `onDocumentsChange` ao `PortalDocumentRequests`, chamado após cada mutação bem-sucedida. No `ProcessDetails.js`, passado `onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}` — incrementa a key e força o `UnifiedDocumentsPanel` a remontar e refazer fetch.
+
+- **RGPD página vazia (BUG CRÍTICO)**: A página de Compliance > RGPD estava sempre vazia para todos os utilizadores. Causa raiz: `const accessDenied = <AccessRestricted .../>; if (accessDenied) {...}` — `accessDenied` é um elemento JSX (objeto React), que é **sempre truthy**. A página retornava **sempre** `<AccessRestricted/>` e nunca mostrava o conteúdo. Para admin/ceo/administrativo, `AccessRestricted` retorna `null` → página vazia. Corrigido: substituído por `if (!hasAnyRole(user, RGPD_ALLOWED_ROLES))` (boolean real). Roles alinhados com `ProtectedRoute` do App.js: `["admin", "ceo", "administrativo"]` (antes era `["admin", "staff"]` — "staff" não é um role do sistema).
+
+- **Backups datas não formatavam (apareciam '-')**: As datas em `BackupsPage.js` apareciam como `-` em vez de `dd/MM/yyyy HH:mm`. Causa raiz: `formatDateTime` e `formatDate` em `lib/utils.js` usavam `safeDate` → `safeDateStr` que convertia dashes→slashes mas mantinha o `T` do ISO 8601. Para input `"2025-01-15T14:30:00+00:00"`, produzia `"2025/01/15T14:30:00+00:00"` que é `Invalid Date` em V8/SpiderMonkey → `formatDateTime` retornava `"-"`. Corrigido: `formatDateTime` e `formatDate` agora usam `safeParseISO` (que tenta `parseISO` do date-fns primeiro — lida corretamente com ISO 8601 com `T`). Correção é **global** — afecta todas as páginas que usam `formatDateTime`/`formatDate`, não só BackupsPage.
+
+### Técnico
+- **Frontend** (`frontend/src/components/PortalDocumentRequests.js`): prop `onDocumentsChange` (linha 105); 4 chamadas `if (onDocumentsChange) onDocumentsChange()` após mutações (linhas 167, 182, 197, 213).
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): `onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}` (linhas 5025-5028).
+- **Frontend** (`frontend/src/pages/RGPDAdminPage.js`): substituição do bug `if (accessDenied)` por `if (!hasAnyRole(user, RGPD_ALLOWED_ROLES))` (linhas 1254-1266).
+- **Frontend** (`frontend/src/lib/utils.js`): `formatDate` e `formatDateTime` usam `safeParseISO` em vez de `safeDate` (linhas 114-158).
+- **Validação**: `esbuild --loader=jsx` → 0 erros nos 4 ficheiros.
+
+## [2026-07-16] — Pacote BU: UI Cleanup (Menus, Emails, Automations)
+
+### Alterado
+- **Menus temporariamente ocultos**: Os links de navegação para Minutas, Imóveis, Visitas e Gestão Financeira foram comentados na sidebar do `DashboardLayout.js`. As rotas continuam acessíveis via URL directa — apenas os links na sidebar estão ocultos. Aplicado em 3 grupos: `meuNegocioGroup`, `comunicacoesGroup`, e `consultorNegocioItems`.
+
+- **Select de fases filtra workflows ativos**: No `AutomationPage.js`, o Select do bloco SE (gatilho de automação) agora filtra com `.filter(s => s.is_active !== false)` para mostrar apenas fases ativas. Estados inativos (concluídos, desistências — com `is_active: false` configurado via Pacote BS) não aparecem como gatilho. Usa `!== false` para retrocompatibilidade (estados sem a flag continuam a aparecer).
+
+### UI Emails do Sistema (`SystemConfigPage.js`)
+- **Google OAuth — Switch toggle**: Adicionado `<Switch>` no CardHeader de cada cartão de "Contas Partilhadas por Departamento". O Switch reflete o estado do Google OAuth: ligado = conectado, desligado = desconectado. `onCheckedChange`: ligar → `handleGoogleAuth(role)` (inicia OAuth); desligar → `handleDisconnect(role)`. Card com `opacity-75` quando não conectado. `data-testid` para testes.
+
+- **IMAP Recepção — tamanho reduzido**: Bloco C enxutado: `CardHeader pb-4→pb-3`, `CardContent space-y-4→space-y-3`, `gap-4→gap-3`, `space-y-2→space-y-1`. Removida `CardDescription`, wrapper decorativo do ícone, `<p>` da App Password, e `pt-2` do botão. Título encurtado.
+
+- **SMTP Transacional — editável com Lápis**: Novo estado `smtpEditMode` (false por defeito). Botão Lápis (`<Pencil>`) no CardHeader alterna o modo de edição. 3 inputs (Resend API Key, From Email, From Name) e botão Guardar têm `disabled={!smtpEditMode}`. Os dados continuam a ser carregados da BD — apenas a edição está bloqueada por defeito. Ícone `Pencil` já estava importado.
+
+### Técnico
+- **Frontend** (`frontend/src/layouts/DashboardLayout.js`): 4 itens comentados em 3 grupos (linhas 283-286, 324-325, 415-418).
+- **Frontend** (`frontend/src/pages/AutomationPage.js`): `.filter(s => s.is_active !== false)` no Select de fases (linha 416).
+- **Frontend** (`frontend/src/pages/SystemConfigPage.js`): estado `smtpEditMode` (linha 475); Pencil button (linhas 638-647); inputs `disabled={!smtpEditMode}` (linhas 662, 669, 676); Save `disabled` (linha 722); IMAP reduzido (linhas 845-890); Google OAuth Switch (linhas 1074-1098).
+- **Validação**: `esbuild --loader=jsx` → 0 erros nos 3 ficheiros.
+
+## [2026-07-16] — Pacote BT: Fix Process List (Badges, Active Filter, Real Notes)
+
+### Corrigido
+- **Bolinhas de Notificação não apareciam**: As badges `has_unread_messages` (azul) e `has_new_documents` (verde) não estavam a renderizar na tabela de processos. Causa: as flags podiam chegar como `undefined` (em vez de `false`) quando o backend não as injetava, causando comportamento inesperado na verificação. Corrigido com coerção booleana explícita `Boolean()` no componente `NotificationDots`.
+
+- **Filtro Inativos não funcionava**: Os processos inativos apareciam mesmo com o filtro 'Ativos' ligado. Causa: `fetchData` passava sempre `view_mode='all'` em vez de `'active_only'`. Corrigido com `view_mode` dinâmico conforme o `filterType`: `'active_only'` para filtros de processos em curso; `'historical'` para `concluded`/`dropped`. O backend já respeita `view_mode=active_only` (exclui `INACTIVE_STATUSES`).
+
+- **Notas não liam dados corretos**: A coluna de notas lia `process.notes` (campo direto do processo), não a última nota real do histórico/atividades. Corrigido: o backend agora projeta a última atividade/comentário da coleção `activities` para o campo `latest_note` (batch enrichment com aggregation `$match + $sort + $group`); o frontend lê `latest_note` com fallback para `process.notes`.
+
+### Backend (`backend/routes/processes.py`)
+- **`GET /processes`**: Adicionado batch enrichment `latest_note` (linhas 1733-1770). Após paginação, aggregation na coleção `activities` busca o comentário mais recente de cada processo (`$match` por `process_id` + `comment` não vazio; `$sort` por `created_at` descendente; `$group` com `$first`). Injeta `latest_note`, `latest_note_at`, `latest_note_by` em cada processo.
+
+### Frontend (`frontend/src/pages/FilteredProcessList.js`)
+- **`NotificationDots`**: Coerção booleana explícita `Boolean(hasUnreadMessages)` / `Boolean(hasNewDocuments)` — `undefined`/`null`/`0`/`""` são tratados como `false` de forma determinística.
+- **`fetchData`**: `view_mode` dinâmico — `HISTORICAL_FILTERS = ["concluded", "dropped"]` → `'historical'`; todos os outros filtros → `'active_only'`. Antes era sempre `'all'`.
+- **Coluna "Notas do Consultor"**: Lê `process.latest_note || process.notes || ""` (IIFE para lógica limpa). Fallback para `process.notes` mantém retrocompatibilidade.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): batch enrichment `latest_note` no `GET /processes` (linhas 1733-1770).
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): `NotificationDots` com `Boolean()` (linhas 38-41); `fetchData` com `view_mode` dinâmico (linhas 158-165); coluna notas lê `latest_note` (linhas 518-534).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BS: Workflow Status Rules UI (Frontend)
 
 ### Adicionado
