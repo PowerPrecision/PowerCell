@@ -3,6 +3,39 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CA: Persist Table Filters in URL Params
+
+### Corrigido
+- **Filtros perdidos ao navegar para detalhes e Voltar**: Quando o utilizador entrava nos detalhes de um processo e clicava em "Voltar", perdia todos os filtros e a página atual. Corrigido: o estado de filtragem e paginação foi migrado de `useState` para `useSearchParams` (URL params), permitindo que a navegação Back/Forward do browser restaure exatamente a vista pretendida.
+
+### Frontend (`frontend/src/pages/FilteredProcessList.js`)
+- **`searchTerm`**: Migrado de `useState("")` para `searchParams.get("search") || ""` (lido do URL).
+- **`handleSearchChange(value)`**: Novo handler que usa `setSearchParams` para escrever/remover `search` no URL em tempo real (`replace: true` para não poluir o histórico).
+- **Input de pesquisa**: `onChange` agora usa `handleSearchChange` em vez de `setSearchTerm`.
+- **`setSearchParams`**: Obtido de `useSearchParams()` (antes era apenas `[searchParams]`, agora `[searchParams, setSearchParams]`).
+
+### Frontend (`frontend/src/pages/ProcessesPage.js`)
+- **`indexStatusFilter`**: Migrado de `useState` para `searchParams.get("index_status") || (default do role)`. Default: `'pending'` para indexacao, `'all'` para os restantes.
+- **`setIndexStatusFilter`**: Reescrito como `useCallback` que usa `setSearchParams` para escrever/remover `index_status` no URL (`replace: true`).
+- **Já estava no URL** (confirmado, sem alteração): `page`, `size`, `view_mode`, `sort`, `order`, `search`.
+
+### Estados persistidos no URL
+
+| Filtro | FilteredProcessList | ProcessesPage |
+|--------|-------------------|---------------|
+| `search` | ✅ **NOVO** (Pacote CA) | ✅ Já existia |
+| `filter` | ✅ Já existia | N/A |
+| `view_mode` | ✅ Derivado do `filter` (Pacote BT) | ✅ Já existia |
+| `page` | N/A (size: 100 fixo) | ✅ Já existia |
+| `size` | N/A | ✅ Já existia |
+| `sort` / `order` | N/A | ✅ Já existia |
+| `index_status` | N/A | ✅ **NOVO** (Pacote CA) |
+
+### Técnico
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): `searchTerm` do URL (linha 154); `handleSearchChange` (linhas 157-166); `setSearchParams` (linha 146); `onChange` do input (linha 373).
+- **Frontend** (`frontend/src/pages/ProcessesPage.js`): `indexStatusFilter` do URL (linhas 103-117); `setIndexStatusFilter` como `useCallback` (linhas 108-117).
+- **Validação**: `esbuild --loader=jsx` → 0 erros nos 2 ficheiros.
+
 ## [2026-07-16] — Pacote BZ: Fix Local Filtering causing Uneven Pagination
 
 ### Corrigido

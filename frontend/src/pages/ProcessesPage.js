@@ -100,10 +100,21 @@ const ProcessesPage = () => {
   const [sortedProcesses, setSortedProcesses] = useState([]);
   const [showCreateProcess, setShowCreateProcess] = useState(false);
 
-  // Filtro de estado de indexação — 'pending' por omissão para role indexacao
-  const [indexStatusFilter, setIndexStatusFilter] = useState(
-    user?.role?.toLowerCase() === 'indexacao' ? 'pending' : 'all'
-  );
+  // PACOTE CA — indexStatusFilter persistido no URL para restauração na navegação Back/Forward.
+  // Default: 'pending' para role indexacao, 'all' para os restantes.
+  // Lido do URL se existir; caso contrário usa o default do role.
+  const indexStatusFilter = searchParams.get("index_status") ||
+    (user?.role?.toLowerCase() === 'indexacao' ? 'pending' : 'all');
+  const setIndexStatusFilter = useCallback((value) => {
+    setSearchParams(prev => {
+      if (value && value !== 'all') {
+        prev.set("index_status", value);
+      } else {
+        prev.delete("index_status");
+      }
+      return prev;
+    }, { replace: true });
+  }, [setSearchParams]);
   // Estado para tracking de mark-indexed em cada processo
   const [markingProcessIds, setMarkingProcessIds] = useState(new Set());
   const [exporting, setExporting] = useState(false);

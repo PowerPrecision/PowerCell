@@ -2083,3 +2083,39 @@ Stage Summary:
   - `frontend/src/pages/FilteredProcessList.js` (search e status passados como query params; .filter() locais removidos; useEffect depende de searchTerm)
   - `frontend/src/pages/ProcessesPage.js` (is_indexed passado como query param; .filter() local de indexStatusFilter removido; fetchProcesses depende de indexStatusFilter)
 - Resultado: TODOS os filtros ativos no ecrã (status, search, view_mode, is_indexed) são agora passados como Query Parameters reais ao Backend. As .filter() locais que causavam tamanhos de página irregulares foram removidas. O Backend faz a filtragem globalmente e devolve apenas os processos que correspondem aos critérios, garantindo paginação uniforme. A única filtragem local remanescente é a de pending_deadlines (cruzamento com deadlines) que não tem equivalente no backend — é uma exceção legítima e documentada.
+
+
+---
+Task ID: Pacote CA (Persist Table Filters in URL Params)
+Agent: Main Agent (Code Assistant)
+Task: Migrar estado local de filtros/paginação para URL params (restauração Back/Forward)
+
+Work Log:
+- Análise de FilteredProcessList.js e ProcessesPage.js:
+  - FilteredProcessList: searchTerm era useState("") (linha 153) — perdia-se ao navegar para detalhes do processo e clicar Voltar. filterType já vinha do URL (searchParams.get("filter")).
+  - ProcessesPage: JÁ usava useSearchParams extensivamente para page, size, view_mode, sort, order, search (linhas 78-117). Apenas indexStatusFilter era useState (linha 104) — não persistia no URL.
+- Fix FilteredProcessList.js:
+  1. searchTerm migrado de useState("") para searchParams.get("search") || "" (lido do URL).
+  2. Criado handler handleSearchChange(value) que usa setSearchParams para escrever/search no URL em tempo real (replace: true para não poluir o histórico). Se value for vazio, remove o param do URL.
+  3. Input de pesquisa agora usa onChange={(e) => handleSearchChange(e.target.value)} em vez de setSearchTerm.
+  4. setSearchParams obtido de useSearchParams() (antes era apenas [searchParams], agora é [searchParams, setSearchParams]).
+  5. useEffect que chama fetchData continua a depender de [filterType, searchTerm] — agora searchTerm vem do URL, pelo que mudanças no URL (incluindo Back/Forward do browser) disparam o fetch automaticamente.
+- Fix ProcessesPage.js:
+  1. indexStatusFilter migrado de useState para searchParams.get("index_status") || (default do role). Default: 'pending' para indexacao, 'all' para os restantes.
+  2. setIndexStatusFilter reescrito como useCallback que usa setSearchParams para escrever index_status no URL (replace: true). Se value for 'all', remove o param.
+  3. Select do filtro de estado de indexação (linha 649) continua a usar onValueChange={setIndexStatusFilter} — agora atualiza o URL em vez de state local.
+  4. Como fetchProcesses já depende de indexStatusFilter (adicionado no Pacote BZ), mudanças no URL disparam o fetch automaticamente.
+- Estados que JÁ estavam no URL (ProcessesPage.js — confirmado, sem alteração):
+  - page: searchParams.get("page") || "1" (linha 79)
+  - size: searchParams.get("size") || "20" (linha 80)
+  - view_mode: searchParams.get("view_mode") || "active_only" (linha 93)
+  - sort: searchParams.get("sort") || "created_at" (linha 98)
+  - order: searchParams.get("order") || "desc" (linha 99)
+  - search: searchParams.get("search") || "" (linha 117)
+- Validação: `esbuild --loader=jsx` → 0 erros nos 2 ficheiros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `frontend/src/pages/FilteredProcessList.js` (searchTerm migrado de useState para useSearchParams; handleSearchChange handler; setSearchParams obtido)
+  - `frontend/src/pages/ProcessesPage.js` (indexStatusFilter migrado de useState para useSearchParams; setIndexStatusFilter como useCallback que atualiza URL)
+- Resultado: TODOS os filtros ativos no ecrã (search, filter, view_mode, page, size, sort, order, index_status) são agora persistidos no URL via useSearchParams. Quando o utilizador entra nos detalhes de um processo e clica em "Voltar", o browser restaura exatamente a vista pretendida — filtros, pesquisa, página atual, e ordem de classificação. A navegação Back/Forward do browser funciona corretamente porque os estados são lidos do URL no init do componente.

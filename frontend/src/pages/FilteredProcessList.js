@@ -143,21 +143,40 @@ const filterConfig = {
 
 const FilteredProcessList = () => {
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const filterType = searchParams.get("filter") || "active";
-  
+
+  // PACOTE CA — Persist Table Filters in URL Params
+  // searchTerm lido do URL (default ""). Quando o utilizador pesquisa,
+  // o valor é escrito no URL em tempo real via setSearchParams. Assim,
+  // ao navegar para os detalhes de um processo e clicar em "Voltar",
+  // o browser restaura exatamente a vista pretendida (filtros + pesquisa).
+  const searchTerm = searchParams.get("search") || "";
+
+  // Handler para atualizar a pesquisa no URL
+  const handleSearchChange = (value) => {
+    setSearchParams(prev => {
+      if (value) {
+        prev.set("search", value);
+      } else {
+        prev.delete("search");
+      }
+      return prev;
+    }, { replace: true });
+  };
+
   const [loading, setLoading] = useState(true);
   const [processes, setProcesses] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
-  const [searchTerm, setSearchTerm] = useState("");
 
   const config = filterConfig[filterType] || filterConfig.active;
   const IconComponent = config.icon;
 
   useEffect(() => {
     fetchData();
-    // PACOTE BZ: fetchData agora depende de searchTerm (passa search à API)
+    // PACOTE BZ: fetchData depende de searchTerm (passa search à API)
+    // PACOTE CA: searchTerm agora vem do URL — navegação Back/Forward restaura a vista
   }, [filterType, searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = async () => {
@@ -351,7 +370,7 @@ const FilteredProcessList = () => {
             placeholder="Pesquisar por nome, email ou telefone..."
             className="pl-10"
             value={searchTerm}
-            onChange={(e) => setSearchTerm(e.target.value)}
+            onChange={(e) => handleSearchChange(e.target.value)}
           />
         </div>
 
