@@ -2051,3 +2051,35 @@ Work Log:
 Stage Summary:
 - 1 ficheiro criado: `backend/scripts/seed_qa_ultimate.py` (870 linhas).
 - Resultado: script de seeding definitivo para QA que gera 18 processos (configurável via --num-processes) com dados 100% realistas. Cobre todas as 5 regras: pré-registo minimalista, diversidade de titulares (solteiros + casais), dados 100% preenchidos em 8+ processos ativos (com financial_data completo para DSTI), 2+ atividades por processo, e atribuição mista. Suporta --clear (limpeza seletiva), --dry-run (simulação), e --num-processes (customização). Workflow_statuses alinhados com o enum canónico (16 estados). Utilizadores dummy criados automaticamente se não existirem.
+
+
+---
+Task ID: Pacote BZ (Fix Local Filtering causing Uneven Pagination)
+Agent: Main Agent (Code Assistant)
+Task: Remover filtragem local que causava tamanhos de página irregulares
+
+Work Log:
+- Análise de FilteredProcessList.js e ProcessesPage.js:
+  - FilteredProcessList: fetchData não passava 'search' à API; getFilteredProcesses() fazia .filter() local com config.filter (filtragem por status/indexacao), searchTerm (filtragem por nome/email/telefone), e ordenação local.
+  - ProcessesPage: fetchProcesses já passava search, view_mode, page, size, sort_field, sort_order, show_all corretamente. MAS o useEffect de sorting (linhas 408-425) filtrava localmente por indexStatusFilter (.filter(p => p.is_indexed) ou .filter(p => !p.is_indexed)), reduzindo o tamanho da página de forma invisível para o utilizador.
+- Fix FilteredProcessList.js:
+  1. fetchData agora passa search (>= 2 chars) e status (mapeado do filterType: concluded→concluidos, dropped→desistencias, waiting→clientes_espera) como query params.
+  2. useEffect que chama fetchData agora depende de searchTerm (para que a pesquisa dispare um novo fetch à API em vez de filtrar localmente).
+  3. getFilteredProcesses: removidas as .filter() locais de config.filter e searchTerm. Apenas mantém:
+     - Filtragem de pending_deadlines (cruzamento com deadlines — não há endpoint de backend para isto, filtragem local legítima).
+     - Ordenação por prioridade alta no topo (apresentação, não filtragem — não afeta o tamanho da página).
+- Fix ProcessesPage.js:
+  1. fetchProcesses agora passa is_indexed como query param (indexStatusFilter='completed' → is_indexed=true; 'pending' → is_indexed=false; 'all' → não envia).
+  2. fetchProcesses dependency array atualizado para incluir indexStatusFilter.
+  3. useEffect de sorting: removido o .filter() local de indexStatusFilter. Agora apenas ordena (não filtra). O backend filtra via is_indexed query param.
+- Fix Backend (routes/processes.py):
+  1. Adicionado parâmetro is_indexed: Optional[bool] = Query(None) ao endpoint GET /processes.
+  2. Adicionada condição ao and_conditions: se is_indexed=True, filtra {is_indexed: True}; se is_indexed=False, filtra processos pendentes ($or: [{is_indexed: {$ne: True}}, {is_indexed: {$exists: False}}] — inclui null/undefined para processos antigos sem o campo).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros nos 2 ficheiros frontend.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/routes/processes.py` (novo parâmetro is_indexed no GET /processes + condição no and_conditions)
+  - `frontend/src/pages/FilteredProcessList.js` (search e status passados como query params; .filter() locais removidos; useEffect depende de searchTerm)
+  - `frontend/src/pages/ProcessesPage.js` (is_indexed passado como query param; .filter() local de indexStatusFilter removido; fetchProcesses depende de indexStatusFilter)
+- Resultado: TODOS os filtros ativos no ecrã (status, search, view_mode, is_indexed) são agora passados como Query Parameters reais ao Backend. As .filter() locais que causavam tamanhos de página irregulares foram removidas. O Backend faz a filtragem globalmente e devolve apenas os processos que correspondem aos critérios, garantindo paginação uniforme. A única filtragem local remanescente é a de pending_deadlines (cruzamento com deadlines) que não tem equivalente no backend — é uma exceção legítima e documentada.

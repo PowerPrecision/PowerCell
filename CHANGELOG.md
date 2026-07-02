@@ -3,6 +3,30 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BZ: Fix Local Filtering causing Uneven Pagination
+
+### Corrigido
+- **Tamanhos de página irregulares ao usar filtros**: A tabela de processos apresentava tamanhos de página irregulares porque o Frontend fazia paginação cega e filtrava os resultados localmente com `.filter()`. Corrigido: TODOS os filtros ativos no ecrã (status, search, view_mode, is_indexed) são agora passados como Query Parameters reais ao Backend, que faz a filtragem globalmente e devolve apenas os processos correspondentes.
+
+### Backend (`backend/routes/processes.py`)
+- **`GET /processes`**: Novo parâmetro `is_indexed: Optional[bool] = Query(None)`. Quando `true`, filtra `{is_indexed: True}`; quando `false`, filtra processos pendentes (`$or: [{is_indexed: {$ne: True}}, {is_indexed: {$exists: False}}]` — inclui null/undefined para processos antigos sem o campo).
+
+### Frontend (`frontend/src/pages/FilteredProcessList.js`)
+- **`fetchData`**: Agora passa `search` (>= 2 chars) e `status` (mapeado do `filterType`: `concluded`→`concluidos`, `dropped`→`desistencias`, `waiting`→`clientes_espera`) como query params.
+- **`useEffect`**: Agora depende de `searchTerm` (para que a pesquisa dispare um novo fetch à API em vez de filtrar localmente).
+- **`getFilteredProcesses`**: Removidas as `.filter()` locais de `config.filter` e `searchTerm`. Apenas mantém filtragem de `pending_deadlines` (cruzamento com deadlines — exceção legítima, não há endpoint de backend) e ordenação por prioridade (apresentação, não afeta tamanho da página).
+
+### Frontend (`frontend/src/pages/ProcessesPage.js`)
+- **`fetchProcesses`**: Agora passa `is_indexed` como query param (`indexStatusFilter='completed'` → `is_indexed=true`; `'pending'` → `is_indexed=false`; `'all'` → não envia).
+- **`fetchProcesses` dependency**: Adicionado `indexStatusFilter` ao array de dependências.
+- **`useEffect` de sorting**: Removido o `.filter()` local de `indexStatusFilter`. Agora apenas ordena (não filtra). O backend filtra via `is_indexed` query param.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): parâmetro `is_indexed` (linha 1382); condição no `and_conditions` (linhas 1524-1534).
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): `search` e `status` como query params (linhas 172-188); `useEffect` depende de `searchTerm` (linha 161); `.filter()` locais removidos (linhas 203-225).
+- **Frontend** (`frontend/src/pages/ProcessesPage.js`): `is_indexed` como query param (linhas 303-306); dependency array (linha 337); `.filter()` local removido (linhas 412-424).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BY: The Ultimate QA Seed Script
 
 ### Adicionado

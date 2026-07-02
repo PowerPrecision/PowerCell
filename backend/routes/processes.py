@@ -1377,6 +1377,9 @@ async def get_processes(
     sort_field: Optional[str] = Query(None, description="Campo de ordenação: client_name, status, created_at, updated_at, priority, property_value, property_location"),
     sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
     show_all: Optional[bool] = Query(False, description="Visão global: ignorar filtro de utilizador e mostrar todos os processos"),
+    # PACOTE BZ: filtro de estado de indexação passado como query param
+    # (antes era filtrado localmente no frontend, causando tamanhos de página irregulares)
+    is_indexed: Optional[bool] = Query(None, description="PACOTE BZ — Filtrar por estado de indexação: true=indexados, false=pendentes"),
     user: dict = Depends(get_current_user)
 ):
     """
@@ -1517,7 +1520,19 @@ async def get_processes(
     # Adicionar filtro de status explícito (sobrepõe-se ao view_mode, exceto "eliminados")
     if status and status != "eliminados":
         and_conditions.append({"status": status})
-    
+
+    # PACOTE BZ — Filtro de estado de indexação passado como query param
+    # (antes era filtrado localmente no frontend, causando tamanhos de página irregulares)
+    if is_indexed is not None:
+        if is_indexed is True:
+            and_conditions.append({"is_indexed": True})
+        else:
+            # false = pendentes (is_indexed != True, incluindo null/undefined)
+            and_conditions.append({"$or": [
+                {"is_indexed": {"$ne": True}},
+                {"is_indexed": {"$exists": False}},
+            ]})
+
     # ====================================================================
     # PESQUISA DE TEXTO (expandida)
     # Campos: client_name, client_email, client_nif, client_phone, process_number (ref)

@@ -157,22 +157,36 @@ const FilteredProcessList = () => {
 
   useEffect(() => {
     fetchData();
-  }, [filterType]);
+    // PACOTE BZ: fetchData agora depende de searchTerm (passa search à API)
+  }, [filterType, searchTerm]); // eslint-disable-line react-hooks/exhaustive-deps
 
   const fetchData = async () => {
     try {
       setLoading(true);
       // PACOTE BT (Fix 2): view_mode dinâmico conforme o filterType.
-      // - 'active', 'indexacao', 'no_indexacao', 'waiting', 'waiting_long', 'pending_deadlines'
-      //   → view_mode='active_only' (exclui concluídos/desistências/eliminados)
-      // - 'concluded', 'dropped' → view_mode='historical' (apenas arquivados)
-      // Antes era sempre 'all', o que fazia aparecer processos inativos mesmo com
-      // o filtro 'Ativos' ligado.
+      // PACOTE BZ (Fix): TODOS os filtros passados como Query Params ao Backend.
+      // Antes, a API era chamada sem 'search' e a filtragem era feita localmente
+      // com .filter(), causando tamanhos de página irregulares.
       const HISTORICAL_FILTERS = ["concluded", "dropped"];
       const viewMode = HISTORICAL_FILTERS.includes(filterType) ? "historical" : "active_only";
 
+      // PACOTE BZ: passar search como query param (>= 2 chars) para o backend filtrar
+      const searchParam = searchTerm.length >= 2 ? searchTerm : undefined;
+
+      // PACOTE BZ: mapear filterType para status param quando aplicável
+      let statusParam = undefined;
+      if (filterType === "concluded") statusParam = "concluidos";
+      else if (filterType === "dropped") statusParam = "desistencias";
+      else if (filterType === "waiting") statusParam = "clientes_espera";
+
       const [processesRes, statusesRes, deadlinesRes] = await Promise.all([
-        getProcesses({ view_mode: viewMode, show_all: true, size: 100 }),
+        getProcesses({
+          view_mode: viewMode,
+          show_all: true,
+          size: 100,
+          search: searchParam,
+          ...(statusParam ? { status: statusParam } : {}),
+        }),
         getWorkflowStatuses(),
         getCalendarDeadlines()
       ]);
@@ -187,11 +201,16 @@ const FilteredProcessList = () => {
     }
   };
 
-  // Filtrar processos
+  // PACOTE BZ: Filtragem delegada ao Backend. Apenas ordenação local (apresentação).
+  // Removidas as .filter() locais (config.filter, searchTerm) que causavam
+  // tamanhos de página irregulares — o backend já filtra via query params.
+  // Exceção: pending_deadlines precisa de cruzar com deadlines (não há endpoint
+  // de filtro por prazo no backend), pelo que mantém filtragem local desse subset.
   const getFilteredProcesses = () => {
     let filtered = processes;
 
-    // Filtro especial para prazos pendentes
+    // Filtro especial para prazos pendentes (cruzamento com deadlines — não há
+    // endpoint de backend para isto, pelo que é filtragem local legítima)
     if (filterType === "pending_deadlines") {
       const today = new Date();
       today.setHours(0, 0, 0, 0);
@@ -202,21 +221,11 @@ const FilteredProcessList = () => {
       });
       const processIds = [...new Set(upcomingDeadlines.map(d => d.process_id))];
       filtered = processes.filter(p => processIds.includes(p.id));
-    } else if (config.filter) {
-      filtered = processes.filter(config.filter);
     }
+    // PACOTE BZ: REMOVIDAS as .filter() locais de config.filter e searchTerm.
+    // O backend agora filtra por status e search via query params.
 
-    // Filtro de pesquisa
-    if (searchTerm.length >= 2) {
-      const term = searchTerm.toLowerCase();
-      filtered = filtered.filter(p =>
-        p.client_name?.toLowerCase().includes(term) ||
-        p.client_email?.toLowerCase().includes(term) ||
-        p.client_phone?.includes(term)
-      );
-    }
-
-    // Ordenação: prioridade alta + tags urgentes SEMPRE no topo
+    // Ordenação: prioridade alta + tags urgentes SEMPRE no topo (apresentação)
     const hasUrgentTag = (p) => {
       const tags = p.tags || p.labels || [];
       if (!Array.isArray(tags) || tags.length === 0) return false;
@@ -233,7 +242,7 @@ const FilteredProcessList = () => {
       if (hasUrgentTag(p)) return 3;
       return 0;
     };
-    filtered.sort((a, b) => priorityWeight(b) - priorityWeight(a));
+    filtered = [...filtered].sort((a, b) => priorityWeight(b) - priorityWeight(a));
 
     return filtered;
   };

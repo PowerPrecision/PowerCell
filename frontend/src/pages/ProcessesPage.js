@@ -300,6 +300,10 @@ const ProcessesPage = () => {
         sort_field: sortField,
         sort_order: sortOrder,
         ...(isGlobalView ? { show_all: true } : {}),
+        // PACOTE BZ: passar indexStatusFilter como query param is_indexed ao backend
+        // (antes era filtrado localmente com .filter(), causando tamanhos de página irregulares)
+        ...(indexStatusFilter === 'completed' ? { is_indexed: true } :
+           indexStatusFilter === 'pending' ? { is_indexed: false } : {}),
       });
       
       // Ignorar resposta se o pedido foi cancelado (dependency mudou entretanto)
@@ -330,7 +334,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter]);
   
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
   const handleViewModeChange = (newMode) => {
@@ -405,24 +409,19 @@ const ProcessesPage = () => {
     return 0;
   }, [hasUrgentTag]);
 
-  // Filtro de indexação + Sorting
+  // PACOTE BZ: Sorting apenas (filtragem de indexStatusFilter delegada ao backend via is_indexed query param)
   useEffect(() => {
-    // Aplicar filtro de estado de indexação
-    let filtered = [...processes];
-    if (indexStatusFilter === 'completed') {
-      filtered = filtered.filter(p => p.is_indexed);
-    } else if (indexStatusFilter === 'pending') {
-      filtered = filtered.filter(p => !p.is_indexed);
-    }
     // Sorting: prioridade alta + tags urgentes SEMPRE no topo, depois pelo campo seleccionado
-    const sorted = filtered.sort((a, b) => {
+    // PACOTE BZ: Removido o .filter() local de indexStatusFilter — o backend
+    // agora filtra via is_indexed query param, evitando tamanhos de página irregulares.
+    const sorted = [...processes].sort((a, b) => {
       const pa = getPriorityWeight(a);
       const pb = getPriorityWeight(b);
       if (pa !== pb) return pb - pa;
       return 0;
     });
     setSortedProcesses(sorted);
-  }, [processes, getPriorityWeight, indexStatusFilter]);
+  }, [processes, getPriorityWeight]);
 
   // Re-fetch when filters, sort, view mode, role filter, or search term changes
   useEffect(() => {
