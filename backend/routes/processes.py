@@ -1115,6 +1115,42 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         "updated_at": now,
         "source": "staff_created"
     }
+
+    # ============================================================
+    # PACOTE BP — 2º TITULAR (second_client_id) NA CRIAÇÃO
+    # ============================================================
+    # Se o processo for criado com um 2º titular (cliente existente),
+    # injetamos second_client_id/second_client_name no process_doc e
+    # adicionamos o client_id do 2º titular ao array client_ids (para
+    # que as queries de listagem que usam {"client_ids": cliente_id}
+    # apanhem processos em que ele é 1º OU 2º titular).
+    #
+    # Após a inserção, atualizamos o array process_ids do 2º titular
+    # com $addToSet — sem isto, o 2º titular não aparece nas listagens
+    # globais ("Os Meus Clientes" / "Processos") que confiam em
+    # client.process_ids.
+    # ============================================================
+    second_client_id_for_process = None
+    if data.second_client_id:
+        second_client_id_clean = data.second_client_id.strip()
+        if second_client_id_clean and second_client_id_clean != client_id:
+            second_client = await db.clients.find_one({"id": second_client_id_clean})
+            if second_client:
+                second_client_id_for_process = second_client_id_clean
+                process_doc["second_client_id"] = second_client_id_clean
+                process_doc["second_client_name"] = second_client.get("nome", "")
+                # Adicionar ao array client_ids (para queries de listagem)
+                if second_client_id_clean not in process_doc["client_ids"]:
+                    process_doc["client_ids"].append(second_client_id_clean)
+                logger.info(
+                    f"[CREATE-PROCESS] 2º titular associado na criação: "
+                    f"{second_client_id_clean} ({second_client.get('nome', '')})"
+                )
+            else:
+                logger.warning(
+                    f"[CREATE-PROCESS] second_client_id {second_client_id_clean} "
+                    f"não encontrado — a ignorar 2º titular na criação."
+                )
     
     # Atribuir automaticamente ao criador baseado no seu papel
     # REGRA: consultor_id = quem cria o processo (consultor)
@@ -1208,6 +1244,34 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
                 }
             }
         )
+
+    # ============================================================
+    # PACOTE BP — Atualizar process_ids do 2º TITULAR
+    # ============================================================
+    # Injeta o process_id no array process_ids do cliente que é 2º
+    # titular. Sem isto, o 2º titular não aparece nas listagens globais
+    # ("Os Meus Clientes" / "Processos") que confiam em client.process_ids.
+    # O lead_status NÃO é alterado (o 2º titular pode continuar a ser um
+    # lead pendente se não tiver processo próprio como 1º titular).
+    # ============================================================
+    if second_client_id_for_process:
+        try:
+            await db.clients.update_one(
+                {"id": second_client_id_for_process},
+                {
+                    "$addToSet": {"process_ids": process_id},
+                    "$set": {"updated_at": now}
+                }
+            )
+            logger.info(
+                f"[CREATE-PROCESS] process_ids do 2º titular "
+                f"{second_client_id_for_process} atualizado com processo {process_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[CREATE-PROCESS] Erro ao atualizar process_ids do 2º titular "
+                f"{second_client_id_for_process}: {e}"
+            )
     
     # Registar no histórico
     await log_history(process_id, user, f"Criou processo para cliente {client_name}")
@@ -1241,6 +1305,65 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
 INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
 # Status de processos arquivados (para histórico)
 ARCHIVED_STATUSES = ["concluidos", "desistencias"]
+
+# ====================================================================
+# PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+# ====================================================================
+# Processos em "pre_registo" (cliente ainda a preencher no portal) NÃO
+# devem aparecer nos quadros de trabalho da equipa (Kanban, listagens,
+# my-clients) para não gerar ruído. A exclusão aplica-se a TODOS os
+# roles, MAS admins/CEO/diretor/administrativo podem contorná-la:
+#   1. Pesquisando diretamente (parâmetro `search` ativo) — encontra
+#      processos em pré-registo pelo nome/email/NIF do cliente.
+#   2. Filtrando explicitamente por status="pre_registo".
+# Consultores, intermediários e indexação NUNCA veem pré-registos nos
+# quadros de trabalho (só os veem quando o processo transita para a
+# pipeline, disparando a dupla auto-atribuição — ver process_assignment).
+# ====================================================================
+PRE_REGISTO_STATUS = "pre_registo"
+# Roles com privilégios de gestão — podem contornar a exclusão do pré-registo
+PRE_REGISTO_BYPASS_ROLES = {
+    UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
+}
+
+
+def _should_hide_pre_registo(role: str, status: Optional[str], search: Optional[str]) -> bool:
+    """
+    Determina se a exclusão do estado pré_registo deve aplicar-se à query.
+
+    Regras (PACOTE BK):
+    1. Admin/CEO/Diretor/Administrativo NÃO têm exclusão automática quando
+       estão a pesquisar (search ativo) ou a filtrar explicitamente por
+       status — podem encontrar pré-registos diretamente.
+    2. Consultores, intermediários e indexação têm SEMPRE a exclusão ativa
+       nos quadros de trabalho (nunca veem pré-registos).
+    3. Em todos os casos, se status=="pre_registo" for passado explicitamente,
+       a exclusão NÃO se aplica (o utilizador quer ver especificamente esse
+       estado).
+
+    Args:
+        role: Role do utilizador autenticado.
+        status: Filtro de status explícito do query string (None se não especificado).
+        search: Termo de pesquisa do query string (None ou "" se não especificado).
+
+    Returns:
+        True se a query deve excluir pré_registo; False caso contrário.
+    """
+    # Regra 3: filtro explícito por pré_registo → nunca excluir
+    if status == PRE_REGISTO_STATUS:
+        return False
+    # Regra 1: roles com bypass — excluem pré-registo SÓ quando não há
+    # pesquisa ativa nem filtro de status explícito (caso contrário, o
+    # admin está à procura de algo específico e deve ver tudo)
+    if role in PRE_REGISTO_BYPASS_ROLES:
+        # Se está a pesquisar ou a filtrar por um status específico (que
+        # não pré_registo, já tratado acima), o admin deve ver resultados
+        # de qualquer estado — inclusivé pré-registo.
+        if search or status:
+            return False
+        return True
+    # Regra 2: consultores, intermediários, indexação, cliente — sempre excluem
+    return True
 
 
 @router.get("")
@@ -1356,9 +1479,12 @@ async def get_processes(
     elif role == UserRole.CLIENTE:
         and_conditions.append({"client_id": user["id"]})
     elif role == UserRole.INDEXACAO:
+        # PACOTE BQ — indexacao vê globalmente (across all consultors/mediadores)
+        # mas scoped a: atribuídos a si OU criados por si OU na fila de espera.
         and_conditions.append({"$or": [
             {"assigned_indexacao_id": user["id"]},
-            {"created_by": user.get("email", "")}
+            {"created_by": user.get("email", "")},
+            {"status": "fila_espera"},
         ]})
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         pass  # Vêem todos
@@ -1413,7 +1539,18 @@ async def get_processes(
         # e em personal_data aninhado (para NIF/telefone que podem estar encriptados)
         search_condition = {"$or": search_or_conditions}
         and_conditions.append(search_condition)
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+    # ====================================================================
+    # Consultores/intermediários/indexação nunca veem pré-registos. Admins
+    # veem-nos apenas quando estão a pesquisar ativamente ou a filtrar por
+    # status explícito (incl. pré_registo). O helper _should_hide_pre_registo
+    # encapsula toda a lógica de bypass.
+    # ====================================================================
+    if _should_hide_pre_registo(role, status, search):
+        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+
     # ====================================================================
     # MONTAR QUERY FINAL COM $and
     # Se há apenas 1 condição, não precisa de $and (otimização)
@@ -1558,7 +1695,41 @@ async def get_processes(
     # Total e paginação (após ordenação)
     total = len(processes)
     processes = processes[skip:skip + size]
-    
+
+    # ====================================================================
+    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
+    # Pistas visuais silenciosas (bolinhas) para interações do cliente no portal.
+    # Mesma lógica do Kanban (linhas 2122-2155), aplicada APÓS paginação para
+    # só buscar flags dos processos visíveis na página atual (eficiência).
+    # ====================================================================
+    if processes:
+        _bi_process_ids = [p["id"] for p in processes if p.get("id")]
+
+        # 1) Mensagens não lidas do cliente (portal_messages)
+        _bi_unread = await db.portal_messages.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "sender_type": "client",
+                "read_by_staff": False
+            }},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+
+        # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
+        _bi_new_docs = await db.documents.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "status": "uploaded"
+            }},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
+
+        for p in processes:
+            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
+            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
     
@@ -1634,9 +1805,11 @@ async def get_processes_paginated(
     if role == UserRole.CLIENTE:
         and_conditions.append({"client_id": user["id"]})
     elif role == UserRole.INDEXACAO:
+        # PACOTE BQ — indexacao vê globalmente mas scoped a: atribuídos + criados + fila_espera
         and_conditions.append({"$or": [
             {"assigned_indexacao_id": user["id"]},
-            {"created_by": user.get("email", "")}
+            {"created_by": user.get("email", "")},
+            {"status": "fila_espera"},
         ]})
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         pass
@@ -1686,7 +1859,13 @@ async def get_processes_paginated(
         
         search_condition = {"$or": search_or_conditions}
         and_conditions.append(search_condition)
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+    # ====================================================================
+    if _should_hide_pre_registo(role, status, search):
+        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+
     # Montar query final
     if len(and_conditions) == 1:
         query = and_conditions[0]
@@ -1721,7 +1900,38 @@ async def get_processes_paginated(
         result["items"], 
         fields_to_decrypt=["client_phone", "client_nif"]
     )
-    
+
+    # ====================================================================
+    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
+    # Mesma lógica do Kanban e do GET /processes. A paginação cursor já foi
+    # aplicada, pelo que só enriquecemos os itens da página atual.
+    # ====================================================================
+    if result["items"]:
+        _bi_process_ids = [p["id"] for p in result["items"] if p.get("id")]
+
+        _bi_unread = await db.portal_messages.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "sender_type": "client",
+                "read_by_staff": False
+            }},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+
+        _bi_new_docs = await db.documents.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "status": "uploaded"
+            }},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
+
+        for p in result["items"]:
+            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
+            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
     return {
         "processes": result["items"],
         "next_cursor": result["next_cursor"],
@@ -1890,7 +2100,26 @@ async def get_kanban_board(
     
     # Filter by role (base visibility) - suporte a múltiplos
     # Se show_all=True (visão global), ignorar filtro por utilizador
-    if not show_all:
+    #
+    # PACOTE BQ — ACESSO GLOBAL PARA A ROLE DE INDEXAÇÃO:
+    # A role indexacao tem permissão para ver processos globalmente no Kanban
+    # (across all consultors/mediadores, como se fosse admin), MAS o âmbito é
+    # restrito aos processos relevantes para o seu trabalho:
+    #   (a) Processos que lhes estão atribuídos (assigned_indexacao_id == user_id)
+    #   (b) Processos na fila de espera para indexação (status == "fila_espera")
+    # Este scope aplica-se SEMPRE (independentemente de show_all) porque é o
+    # âmbito natural de trabalho da Indexação. Sem isto, indexacao via literalmente
+    # todos os processos do sistema (incluindo os não relevantes para indexação).
+    if role == UserRole.INDEXACAO:
+        query["$or"] = [
+            {"assigned_indexacao_id": user_id},
+            {"status": "fila_espera"},
+        ]
+        logger.info(
+            f"[KANBAN-BQ] Indexacao {user_id} — vista scoped global: "
+            f"atribuídos a si OU em fila_espera"
+        )
+    elif not show_all:
         if role == UserRole.CONSULTOR:
             query["$or"] = [
                 {"assigned_consultor_ids": user_id},
@@ -1901,7 +2130,7 @@ async def get_kanban_board(
                 {"assigned_mediador_ids": user_id},
                 {"assigned_mediador_id": user_id}
             ]
-        # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
+        # Admin, CEO, Administrativo, Diretor see all (no base filter)
 
     # Apply additional filters for ALL staff roles
     # Consultor/Mediador filters within their assigned processes; others filter globally
@@ -2027,7 +2256,29 @@ async def get_kanban_board(
             else:
                 query = active_or_recent
         # Se completed_days == 0, sem limite de datas (mostra tudo)
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DO KANBAN
+    # ====================================================================
+    # O Kanban é o quadro de trabalho principal da equipa. Processos em
+    # pré-registo (cliente ainda a preencher no portal) não devem aparecer
+    # aqui para não gerar ruído — só entram no Kanban quando transitam
+    # para a primeira fase oficial da pipeline (disparando a dupla
+    # auto-atribuição em process_assignment.py).
+    #
+    # A exclusão aplica-se a TODOS os roles no Kanban (incl. admin/CEO),
+    # porque o Kanban não tem parâmetro de pesquisa direta. Os admins que
+    # precisem inspeccionar pré-registos devem usar a listagem tabular
+    # (GET /processes com search) ou o endpoint de diagnóstico.
+    # ====================================================================
+    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    if "$and" in query:
+        query["$and"].append(pre_registo_filter)
+    elif query:
+        query = {"$and": [query, pre_registo_filter]}
+    else:
+        query = pre_registo_filter
+
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     
@@ -2381,7 +2632,24 @@ async def get_my_clients(
         }
     else:
         query = {}
-    
+
+    # ====================================================================
+    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
+    # ====================================================================
+    # Consultores/intermediários/indexação nunca veem pré-registos nos seus
+    # clientes. Admin/CEO/diretor/administrativo também não os veem na vista
+    # normal de "Os Meus Clientes" (ruído desnecessário). Nota: este endpoint
+    # não tem parâmetro search, pelo que o bypass para admin faz-se através
+    # da listagem tabular (GET /processes com search) ou do Kanban diagnose.
+    # ====================================================================
+    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    if "$and" in query:
+        query["$and"].append(pre_registo_filter)
+    elif query:
+        query = {"$and": [query, pre_registo_filter]}
+    else:
+        query = pre_registo_filter
+
     # Calcular offset
     skip = (page - 1) * size
     
@@ -2516,12 +2784,43 @@ async def get_my_clients(
         {"_id": 0, "id": 1, "name": 1}
     ).to_list(100)
     consultor_map = {c["id"]: c["name"] for c in consultores}
-    
+
+    # ====================================================================
+    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
+    # Pistas visuais silenciosas para a tabela de "Os Meus Clientes".
+    # Só busca flags dos processos paginados (não dos leads).
+    # ====================================================================
+    _bi_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
+    _bi_unread_map = {}
+    _bi_new_docs_map = {}
+    if _bi_process_ids:
+        _bi_unread = await db.portal_messages.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "sender_type": "client",
+                "read_by_staff": False
+            }},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+
+        _bi_new_docs = await db.documents.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "status": "uploaded"
+            }},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
+
     # Construir lista de clientes com informações enriquecidas
     clients_list = []
     for p in paginated_items:
         # Leads já vêm formatados — adicionar directamente
         if p.get("is_lead"):
+            # Leads não têm mensagens/documentos do portal
+            p["has_unread_messages"] = False
+            p["has_new_documents"] = False
             clients_list.append(p)
             continue
         
@@ -2574,7 +2873,9 @@ async def get_my_clients(
             "created_at": p.get("created_at"),
             "updated_at": p.get("updated_at"),
             "deed_date": p.get("deed_date"),
-            "has_property": bool(p.get("property_id"))
+            "has_property": bool(p.get("property_id")),
+            "has_unread_messages": _bi_unread_map.get(p.get("id"), False),
+            "has_new_documents": _bi_new_docs_map.get(p.get("id"), False)
         })
     
     # Calcular total de páginas
@@ -2618,18 +2919,63 @@ async def move_process_kanban(
     status_exists = await db.workflow_statuses.find_one({"name": new_status})
     if not status_exists:
         raise HTTPException(status_code=400, detail="Estado inválido")
-    
+
     old_status = process.get("status", "")
     alerts_generated = []
-    
-    # Determinar se o processo deve estar ativo ou inativo
-    # Processos em Desistências ou Concluídos são marcados como inativos
-    inactive_statuses = ["desistencias", "concluidos"]
-    is_active = new_status not in inactive_statuses
-    
-    # Update process
+
+    # ==================================================================
+    # PACOTE BR — DYNAMIC WORKFLOW PURPOSE FLAGS
+    # ==================================================================
+    # Em vez de hardcoded status strings, lemos as flags de comportamento
+    # configuradas na coleção workflow_statuses. Isto dá flexibilidade total
+    # ao negócio: o admin pode configurar quais estados disparam cada
+    # automação sem alterar código.
+    #
+    # FALLBACK RETROCOMPATÍVEL: se a flag não existir no documento (instalações
+    # existentes que ainda não migraram), usamos o comportamento hardcoded
+    # atual para não quebrar nada. À medida que o admin configura as flags
+    # no WorkflowEditor, o fallback deixa de ser usado.
+    # ==================================================================
+    # trigger_finance: cria snapshot financeiro (era: new_status == "concluidos")
+    trigger_finance = status_exists.get("trigger_finance")
+    if trigger_finance is None:
+        trigger_finance = (new_status == "concluidos")
+
+    # trigger_countdown: inicia countdown de 90 dias (era: new_status == "fase_bancaria")
+    trigger_countdown = status_exists.get("trigger_countdown")
+    if trigger_countdown is None:
+        trigger_countdown = (new_status == "fase_bancaria")
+
+    # trigger_property_check: verifica docs do imóvel + alerta CPCV/Escritura
+    # (era: new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"])
+    trigger_property_check = status_exists.get("trigger_property_check")
+    if trigger_property_check is None:
+        trigger_property_check = new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]
+
+    # trigger_deed_reminder: cria lembrete 15 dias antes da escritura
+    # (era: new_status == "escritura_agendada")
+    trigger_deed_reminder = status_exists.get("trigger_deed_reminder")
+    if trigger_deed_reminder is None:
+        trigger_deed_reminder = (new_status == "escritura_agendada")
+
+    # is_active: determina se o processo fica ativo ou inativo
+    # (era: new_status not in ["desistencias", "concluidos"])
+    is_active = status_exists.get("is_active")
+    if is_active is None:
+        is_active = new_status not in ["desistencias", "concluidos"]
+
+    logger.info(
+        f"[KANBAN-MOVE-BR] Processo {process_id} → '{new_status}'. "
+        f"Flags dinâmicas: trigger_finance={trigger_finance}, "
+        f"trigger_countdown={trigger_countdown}, "
+        f"trigger_property_check={trigger_property_check}, "
+        f"trigger_deed_reminder={trigger_deed_reminder}, "
+        f"is_active={is_active}"
+    )
+
+    # Update process — is_active dinâmico (sem lista fixa inactive_statuses)
     move_update_data = {
-        "status": new_status, 
+        "status": new_status,
         "is_active": is_active,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -2672,8 +3018,8 @@ async def move_process_kanban(
     # Exclude the user who made the move to avoid duplicate updates
     await manager.broadcast(moved_message, exclude_user=str(user.get("id", "")))
     
-    # === SNAPSHOT FINANCEIRO: Criar ProcessFinance ao mover para Concluídos ===
-    if new_status == "concluidos":
+    # === SNAPSHOT FINANCEIRO: trigger_finance dinâmico (era: new_status == "concluidos") ===
+    if trigger_finance:
         try:
             await _create_finance_snapshot(process, user)
         except Exception as snap_err:
@@ -2682,11 +3028,13 @@ async def move_process_kanban(
             _log.getLogger(__name__).warning(
                 f"Falha ao criar snapshot financeiro para processo {process_id}: {snap_err}"
             )
-    
-    # === ALERTAS AUTOMÁTICOS BASEADOS NA MUDANÇA DE ESTADO ===
-    
-    # 1. Ao mover para CH Aprovado - Verificar documentos do imóvel
-    if new_status in ["ch_aprovado", "fase_escritura"]:
+
+    # === ALERTAS AUTOMÁTICOS BASEADOS NAS FLAGS DINÂMICAS (PACOTE BR) ===
+
+    # 1. trigger_property_check — Verificar documentos do imóvel + alerta CPCV/Escritura
+    # (era: new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"])
+    if trigger_property_check:
+        # 1a. Verificação de docs do imóvel (era: new_status in ["ch_aprovado", "fase_escritura"])
         property_check = await check_property_documents(process)
         if property_check.get("active"):
             alerts_generated.append({
@@ -2694,17 +3042,17 @@ async def move_process_kanban(
                 "message": property_check.get("message"),
                 "details": property_check.get("details")
             })
-    
-    # 1.1 Alerta de verificação de documentos para CPCV/Escritura
-    if new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]:
+
+        # 1b. Alerta de verificação de documentos para CPCV/Escritura
         await notify_cpcv_or_deed_document_check(process, new_status)
         alerts_generated.append({
             "type": "document_verification_alert",
             "message": "Alerta enviado aos envolvidos para verificação de documentos"
         })
-    
-    # 2. Ao mover para pré-aprovação - Iniciar countdown de 90 dias
-    if new_status == "fase_bancaria" and old_status != "fase_bancaria":
+
+    # 2. trigger_countdown — Iniciar countdown de 90 dias
+    # (era: new_status == "fase_bancaria" and old_status != "fase_bancaria")
+    if trigger_countdown and old_status != new_status:
         # Guardar data de aprovação se ainda não existir
         if not process.get("credit_data", {}).get("bank_approval_date"):
             bank_approval_data = {"credit_data.bank_approval_date": datetime.now().strftime("%Y-%m-%d")}
@@ -2720,9 +3068,10 @@ async def move_process_kanban(
             "type": "countdown_started",
             "message": "Countdown de 90 dias iniciado para pré-aprovação"
         })
-    
-    # 3. Ao mover para escritura agendada - Criar lembrete 15 dias antes
-    if new_status == "escritura_agendada":
+
+    # 3. trigger_deed_reminder — Criar lembrete 15 dias antes da escritura
+    # (era: new_status == "escritura_agendada")
+    if trigger_deed_reminder:
         if deed_date:
             deadline_id = await create_deed_reminder(process, deed_date, user)
             if deadline_id:
@@ -2759,10 +3108,12 @@ async def move_process_kanban(
         changed_by=user
     )
     
-    # === GATILHO: Fila de espera ao mover para estado terminal ===
-    # Se o processo foi atribuído a um indexador e moveu para concluídos/desistências,
+    # === GATILHO: Fila de espera ao mover para estado inativo (PACOTE BR) ===
+    # Se o processo foi atribuído a um indexador e moveu para um estado inativo
+    # (is_active == False, definido dinamicamente pela flag do workflow_status),
     # o indexador libertou um slot — verificar se há processos na fila_espera.
-    if new_status in ["concluidos", "desistencias"]:
+    # (era: new_status in ["concluidos", "desistencias"])
+    if not is_active:
         try:
             from services.process_assignment import check_waitlist_for_indexer
             import asyncio as _asyncio
@@ -2770,8 +3121,9 @@ async def move_process_kanban(
             if assigned_indexer_id:
                 _asyncio.create_task(check_waitlist_for_indexer(assigned_indexer_id))
                 logger.info(
-                    f"[KANBAN-MOVE] Gatilho de fila de espera disparado para "
-                    f"indexador {assigned_indexer_id} (processo {process_id} → {new_status})"
+                    f"[KANBAN-MOVE-BR] Gatilho de fila de espera disparado para "
+                    f"indexador {assigned_indexer_id} (processo {process_id} → {new_status}, "
+                    f"is_active=False dinâmico)"
                 )
         except Exception as waitlist_err:
             logger.warning(f"[KANBAN-MOVE] Erro ao verificar fila de espera: {waitlist_err}")
@@ -3066,6 +3418,15 @@ async def mark_process_indexed(
         "assigned_indexacao_id": None,   # Limpar — trabalho de indexação concluído
         "indexacao_name": None,          # Limpar nome do indexador
         "updated_at": now,
+        # PACOTE BM — Bloqueio do Perfil do Cliente após Indexação.
+        # Assinala que os dados foram validados e congelados pela Indexação.
+        # O Portal do Cliente lê esta flag (GET /portal/me) e desativa todos
+        # os campos de input do perfil + mostra um Alert a informar que os
+        # dados estão bloqueados para análise da equipa de crédito.
+        "is_data_confirmed": True,
+        "data_confirmed_at": now,
+        "data_confirmed_by": user.get("id"),
+        "data_confirmed_by_name": user.get("name", ""),
     }
 
     # Se conseguimos calcular o próximo estado, adicioná-lo ao update
@@ -3094,6 +3455,15 @@ async def mark_process_indexed(
             user=user,
             action="INDEXACAO_CONCLUIDA",
             field="is_indexed",
+            old_value="false",
+            new_value="true"
+        )
+        # PACOTE BM — Registar também o congelamento dos dados do cliente
+        await log_history(
+            process_id,
+            user=user,
+            action="DADOS_CONFIRMADOS_INDEXACAO",
+            field="is_data_confirmed",
             old_value="false",
             new_value="true"
         )
@@ -3299,6 +3669,9 @@ async def mark_process_indexed(
         # Dupla auto-atribuição (pre_registo → pipeline)
         "dual_auto_assigned": is_pre_registo_transition,
         "assignment": consultant_result if is_pre_registo_transition else None,
+        # PACOTE BM — Dados do cliente confirmados/congelados pela Indexação.
+        # O Portal do Cliente lê esta flag via GET /portal/me e bloqueia a edição.
+        "is_data_confirmed": True,
     }
 
 
@@ -3716,6 +4089,12 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
 
         # Campos adicionais do CPCV
         # ── second_client_id (2º titular ligado a cliente existente) ──
+        # PACOTE BP — Sincronização do process_ids e client_ids:
+        # Quando se adiciona/remove o 2º titular, atualizamos o array
+        # process_ids do cliente 2º titular ($addToSet/$pull) E o array
+        # client_ids do processo. Sem isto, o 2º titular não aparece nas
+        # listagens globais que confiam em client.process_ids ou em
+        # {"client_ids": cliente_id}.
         if data.second_client_id is not None:
             new_second_id = data.second_client_id.strip() if data.second_client_id else None
             # Validar que o cliente existe (se foi fornecido um ID)
@@ -3727,12 +4106,68 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 if new_second_id == process.get("client_id"):
                     raise HTTPException(status_code=400, detail="O 2º titular não pode ser o mesmo cliente que o titular principal")
             update_data["second_client_id"] = new_second_id
+
+            # ── Determinar o 2º titular ANTIGO (para sincronização) ──
+            old_second_id = process.get("second_client_id")
+
             # Se removeu o 2º titular, limpar dados associados
             if not new_second_id:
                 update_data["second_client_name"] = None
                 # Não limpar titular2_data — pode ter dados preenchidos manualmente
             else:
                 update_data["second_client_name"] = second_client.get("nome", "")
+
+            # ── PACOTE BP: Sincronizar client_ids do processo ──
+            # Adicionar o novo 2º titular ao array client_ids do processo
+            # e remover o antigo (se diferente). Isto garante que queries
+            # {"client_ids": cliente_id} apanham processos em que o cliente
+            # é 1º OU 2º titular.
+            current_client_ids = list(process.get("client_ids") or [])
+            # Se há 2º titular antigo E é diferente do novo, remover do client_ids
+            if old_second_id and old_second_id != new_second_id:
+                current_client_ids = [cid for cid in current_client_ids if cid != old_second_id]
+            # Se há novo 2º titular, adicionar ao client_ids (se ainda não está)
+            if new_second_id and new_second_id not in current_client_ids:
+                current_client_ids.append(new_second_id)
+            update_data["client_ids"] = current_client_ids
+
+            # ── PACOTE BP: Sincronizar process_ids do 2º titular ──
+            # Adicionar o process_id ao array process_ids do NOVO 2º titular
+            # e remover do 2º titular ANTIGO (se diferente).
+            now_iso_sync = datetime.now(timezone.utc).isoformat()
+            if old_second_id and old_second_id != new_second_id:
+                # Remover process_id do 2º titular antigo
+                try:
+                    await db.clients.update_one(
+                        {"id": old_second_id},
+                        {
+                            "$pull": {"process_ids": process_id},
+                            "$set": {"updated_at": now_iso_sync}
+                        }
+                    )
+                    logger.info(
+                        f"[PACOTE-BP] Processo {process_id} removido do process_ids "
+                        f"do 2º titular antigo {old_second_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PACOTE-BP] Erro ao remover process_ids do 2º titular antigo: {e}")
+
+            if new_second_id:
+                # Adicionar process_id ao novo 2º titular
+                try:
+                    await db.clients.update_one(
+                        {"id": new_second_id},
+                        {
+                            "$addToSet": {"process_ids": process_id},
+                            "$set": {"updated_at": now_iso_sync}
+                        }
+                    )
+                    logger.info(
+                        f"[PACOTE-BP] Processo {process_id} adicionado ao process_ids "
+                        f"do 2º titular {new_second_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PACOTE-BP] Erro ao adicionar process_ids ao 2º titular: {e}")
 
         if data.co_buyers is not None:
             update_data["co_buyers"] = data.co_buyers
@@ -4696,7 +5131,15 @@ async def remove_client_from_process(
         "co_buyers": co_buyers if co_buyers else None,
         "updated_at": now
     }
-    
+
+    # PACOTE BP — Se o cliente removido era o second_client_id (2º titular
+    # ligado via backend), limpar também second_client_id e second_client_name
+    # para manter consistência. Sem isto, o processo ficava com second_client_id
+    # apontando para um cliente que já não está associado.
+    if process.get("second_client_id") == client_id:
+        update_data["second_client_id"] = None
+        update_data["second_client_name"] = None
+
     # Actualizar titular2_data se necessário
     if co_buyers:
         update_data["titular2_data"] = {

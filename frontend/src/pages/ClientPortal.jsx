@@ -53,6 +53,7 @@ import {
   Lock,
   Download,
   Calculator,
+  ShieldCheck,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -1409,7 +1410,12 @@ function ProfilePanel() {
     }
   };
 
-  const isLocked = profile?.has_process === true;
+  // PACOTE BM — Bloqueio do Perfil após Indexação.
+  // isLocked: verdadeiro quando o cliente tem processo (bloqueio pré-indexação)
+  // OU quando a Indexação confirmou/congelou os dados (is_data_confirmed=true).
+  // Em ambos os casos, todos os campos de input ficam desativados.
+  const isDataConfirmed = profile?.is_data_confirmed === true;
+  const isLocked = profile?.has_process === true || isDataConfirmed;
 
   if (loading) {
     return (
@@ -1468,8 +1474,35 @@ function ProfilePanel() {
 
   return (
     <div className="space-y-5">
-      {/* ── Banner de bloqueio condicional ── */}
-      {isLocked && (
+      {/* ── PACOTE BM — Alert de dados confirmados/congelados pela Indexação ── */}
+      {/* Tem prioridade sobre o banner "Processo em Análise": quando os dados
+          foram confirmados pela Indexação, mostramos este Alert específico com
+          a mensagem exata pedida. Os campos já estão disabled via isLocked. */}
+      {isDataConfirmed && (
+        <div
+          className="bg-amber-50 border border-amber-300 rounded-2xl p-5 sm:p-6"
+          data-testid="data-confirmed-alert"
+          role="alert"
+        >
+          <div className="flex items-start gap-3">
+            <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center flex-shrink-0">
+              <ShieldCheck className="w-5 h-5 text-amber-600" />
+            </div>
+            <div className="flex-1">
+              <h3 className="text-sm font-bold text-amber-800">Dados Bloqueados para Análise</h3>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito.
+              </p>
+              <p className="text-xs text-amber-600 mt-1">
+                Se precisar de corrigir algum dado, contacte o seu consultor através do chat.
+              </p>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Banner de bloqueio condicional (pré-indexação: has_process sem is_data_confirmed) ── */}
+      {isLocked && !isDataConfirmed && (
         <div className="bg-blue-50 border border-blue-200 rounded-2xl p-5 sm:p-6">
           <div className="flex items-start gap-3">
             <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center flex-shrink-0">

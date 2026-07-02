@@ -63,6 +63,8 @@ import {
   CreditCard,
   Building,
   Clock,
+  FileInput,
+  ClipboardList,
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
@@ -174,6 +176,8 @@ const ClientRegistrationsPage = () => {
       if (search) params.append("search", search);
       if (hasProcessFilter !== "all") params.append("has_process", hasProcessFilter);
       if (assignedToMe || isIndexacao) params.append("assigned_to_me", "true");
+      // PACOTE BN — Sala de Triagem: inclui leads + pre_registo + processos sem indexador
+      params.append("triage_mode", "true");
       params.append("sort_field", sortField);
       params.append("sort_order", sortOrder);
       params.append("limit", "100");
@@ -496,7 +500,39 @@ const ClientRegistrationsPage = () => {
                     </div>
                     
                     <div className="col-span-2">
-                      {client.has_process ? (
+                      {/* PACOTE BN — Badges de Sala de Triagem */}
+                      {/* Prioridade: pre_registo > ready_for_indexing > Tem/Sem Processo */}
+                      {client.triage_status === "pre_registo" ? (
+                        <div className="flex flex-col gap-1">
+                          <Badge
+                            className="bg-amber-100 text-amber-800 border border-amber-300 dark:bg-amber-900/30 dark:text-amber-300 dark:border-amber-700 text-xs px-2 py-1"
+                            data-testid={`triage-badge-pre-registo-${client.id}`}
+                          >
+                            <FileInput className="h-3 w-3 mr-1" />
+                            Pré-Registo (A preencher Portal)
+                          </Badge>
+                          {client.processes?.length > 0 && (
+                            <span className="text-xs text-muted-foreground font-mono">
+                              #{safeString(client.processes[0].process_number)}
+                            </span>
+                          )}
+                        </div>
+                      ) : client.triage_status === "ready_for_indexing" ? (
+                        <div className="flex flex-col gap-1">
+                          <Badge
+                            className="bg-blue-600 text-white text-xs px-2 py-1"
+                            data-testid={`triage-badge-ready-${client.id}`}
+                          >
+                            <ClipboardList className="h-3 w-3 mr-1" />
+                            Pronto para Indexação (Na fila de espera)
+                          </Badge>
+                          {client.processes?.length > 0 && (
+                            <span className="text-xs text-muted-foreground font-mono">
+                              #{safeString(client.processes[0].process_number)}
+                            </span>
+                          )}
+                        </div>
+                      ) : client.has_process ? (
                         <div className="flex flex-col gap-1">
                           <Badge className="bg-green-600 text-white text-xs px-2 py-1">
                             <CheckCircle className="h-3 w-3 mr-1" />

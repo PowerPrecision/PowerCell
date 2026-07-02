@@ -11,9 +11,10 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { ScrollArea } from "../components/ui/scroll-area";
-import { 
-  ArrowLeft, Search, Eye, Loader2, Users, CheckCircle, 
-  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame
+import {
+  ArrowLeft, Search, Eye, Loader2, Users, CheckCircle,
+  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame,
+  MessageSquare
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
@@ -23,6 +24,41 @@ import { safeDateStr, safeFormat } from "../lib/utils";
 import { safeString } from "../utils/safeString";
 
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
+
+/**
+ * PACOTE BI: Bolinhas de notificação silenciosas (indicadores visuais).
+ * Mesmo padrão visual do Kanban (KanbanCard.jsx): azul = mensagens não lidas,
+ * verde = novos documentos do portal. Renderiza apenas se houver sinal positivo.
+ */
+const NotificationDots = ({ hasUnreadMessages, hasNewDocuments }) => {
+  if (!hasUnreadMessages && !hasNewDocuments) return null;
+  return (
+    <span className="inline-flex items-center gap-1 ml-1.5 align-middle" data-testid="notification-dots">
+      {hasUnreadMessages && (
+        <span
+          className="relative flex h-2.5 w-2.5"
+          title="Mensagens não lidas do cliente"
+          role="img"
+          aria-label="Mensagens não lidas"
+        >
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+        </span>
+      )}
+      {hasNewDocuments && (
+        <span
+          className="relative flex h-2.5 w-2.5"
+          title="Novos documentos do cliente"
+          role="img"
+          aria-label="Novos documentos"
+        >
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+        </span>
+      )}
+    </span>
+  );
+};
 
 const filterConfig = {
   active: {
@@ -396,6 +432,11 @@ const FilteredProcessList = () => {
                                 <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
                                   {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
                                   {safeString(process.client_name)}
+                                  {/* PACOTE BI: bolinhas de notificação junto ao nome */}
+                                  <NotificationDots
+                                    hasUnreadMessages={process.has_unread_messages}
+                                    hasNewDocuments={process.has_new_documents}
+                                  />
                                 </p>
                                 {prio.isAlta && (
                                   <Badge className="bg-red-500 text-white border-red-600 text-[10px] px-1.5 py-0 h-4 gap-0.5 shadow-sm shadow-red-300/50">

@@ -71,7 +71,7 @@ import {
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
-import { hasRole } from "../utils/roleUtils";
+import { hasRole, hasAnyRole } from "../utils/roleUtils";
 import {
   FileText,
   Upload,
@@ -149,6 +149,19 @@ const CATEGORIES = [
   { id: "Index", label: "Index", icon: FileText, color: "teal" },
   { id: "Outros", label: "Outros", icon: FolderOpen, color: "gray" },
 ];
+
+// ====================================================================
+// PACOTE BL — CATEGORIA INDEX FORÇADA E PRIVADA (BLOQUEIO DE SEGURANÇA)
+// ====================================================================
+// A categoria "Index" é a "pasta cofre" onde vão parar todos os
+// documentos enviados diretamente pelo cliente através do Portal.
+// Esta categoria é tratada EXCLUSIVAMENTE pela equipa de Indexação
+// (e gestão: admin/CEO/diretor). Os restantes roles (consultor,
+// intermediário, administrativo, etc.) NÃO a veem no painel de
+// documentos — o filtro abaixo remove-a da UI para esses roles.
+// ====================================================================
+const INDEX_CATEGORY_ID = "Index";
+const INDEX_CATEGORY_ALLOWED_ROLES = ["admin", "ceo", "diretor", "indexacao"];
 
 // Ícone baseado na extensão do ficheiro
 const FileIcon = ({ filename }) => {
@@ -264,9 +277,31 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   
   // Verificar se o utilizador pode mapear S3 (apenas admin)
   const canMapS3 = hasRole(user, "admin");
-  
+
   // Verificar se o utilizador é de indexacao (precisa de NIF da empresa)
   const isIndexacao = hasRole(user, "indexacao");
+
+  // PACOTE BL — Bloqueio de segurança: categoria "Index" (pasta cofre)
+  // Apenas admin/CEO/diretor/indexacao vêem documentos da categoria "Index".
+  // Os restantes roles (consultor, intermediário, administrativo, etc.) não
+  // veem estes documentos na UI — são filtrados em getAllFiles(),
+  // getFilteredCategoryFiles() e na lista de categorias da sidebar.
+  const canSeeIndexCategory = hasAnyRole(user, INDEX_CATEGORY_ALLOWED_ROLES);
+
+  // PACOTE BL — Lista de categorias visíveis na sidebar (exclui "Index" para
+  // roles não autorizados). Usada em todos os CATEGORIES.map da UI.
+  const visibleCategories = canSeeIndexCategory
+    ? CATEGORIES
+    : CATEGORIES.filter(cat => cat.id !== INDEX_CATEGORY_ID);
+
+  // PACOTE BL — Guard: se selectedCategory for "Index" e o utilizador não
+  // tem permissão (ex: impersonate terminou, mudança de role), volta para
+  // "all" (todos). Evita mostrar um TabsContent vazio sem explicação.
+  useEffect(() => {
+    if (selectedCategory === INDEX_CATEGORY_ID && !canSeeIndexCategory) {
+      setSelectedCategory(null);
+    }
+  }, [selectedCategory, canSeeIndexCategory]);
   
   // Função para ordenar ficheiros
   const sortFiles = (filesList) => {
@@ -978,14 +1013,23 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
   // Contar ficheiros por categoria
   const getCategoryCount = (categoryId) => {
+    // PACOTE BL: ocultar contagem da categoria "Index" para roles não autorizados
+    if (categoryId === INDEX_CATEGORY_ID && !canSeeIndexCategory) {
+      return 0;
+    }
     return files[categoryId]?.length || 0;
   };
 
   // Obter todos os ficheiros (todas as categorias)
   const getAllFiles = () => {
     const allFiles = [];
-    Object.values(files).forEach(categoryFiles => {
+    Object.entries(files).forEach(([categoryKey, categoryFiles]) => {
       if (Array.isArray(categoryFiles)) {
+        // PACOTE BL: excluir ficheiros da categoria "Index" (pasta cofre)
+        // para utilizadores sem permissão (não admin/CEO/diretor/indexacao).
+        if (categoryKey === INDEX_CATEGORY_ID && !canSeeIndexCategory) {
+          return; // skip esta categoria
+        }
         allFiles.push(...categoryFiles);
       }
     });
@@ -996,7 +1040,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const filterFilesBySearch = (fileList) => {
     if (!searchQuery.trim()) return fileList;
     const query = searchQuery.toLowerCase();
-    return fileList.filter(file => 
+    return fileList.filter(file =>
       file.name.toLowerCase().includes(query) ||
       file.category?.toLowerCase().includes(query)
     );
@@ -1004,9 +1048,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
   // Ficheiros filtrados (todos ou por categoria)
   const filteredFiles = sortFiles(filterFilesBySearch(getAllFiles()));
-  
+
   // Ficheiros filtrados por categoria específica
   const getFilteredCategoryFiles = (categoryId) => {
+    // PACOTE BL: bloquear acesso à categoria "Index" para roles não autorizados.
+    // Mesmo que o selectedCategory seja "Index" por algum motivo (ex: URL
+    // manipulada, state legacy), retornamos array vazio.
+    if (categoryId === INDEX_CATEGORY_ID && !canSeeIndexCategory) {
+      return [];
+    }
     return sortFiles(filterFilesBySearch(files[categoryId] || []));
   };
 
@@ -2076,7 +2126,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   </button>
                   
                   {/* Pastas por Categoria - apenas ícones */}
-                  {CATEGORIES.map((cat) => {
+                  {visibleCategories.map((cat) => {
                     const Icon = cat.icon;
                     const count = getCategoryCount(cat.id);
                     const colorMap = {
@@ -2545,7 +2595,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                     </Badge>
                   )}
                 </TabsTrigger>
-                {CATEGORIES.map((cat) => {
+                {visibleCategories.map((cat) => {
                   const Icon = cat.icon;
                   const count = getCategoryCount(cat.id);
                   const isDropTarget = dropTarget === cat.id;
@@ -2683,7 +2733,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 )}
               </TabsContent>
 
-              {CATEGORIES.map((cat) => (
+              {visibleCategories.map((cat) => (
                 <TabsContent key={cat.id} value={cat.id} className="mt-3">
                   {getFilteredCategoryFiles(cat.id).length > 0 ? (
                     <div className="overflow-x-auto pb-2 -mx-2 px-2">

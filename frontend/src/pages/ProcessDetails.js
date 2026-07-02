@@ -173,7 +173,7 @@ import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { safeDateStr, safeParseISO, safeFormat } from "../lib/utils";
+import { safeDateStr, safeParseISO, safeFormat, safeDate } from "../lib/utils";
 
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -2854,7 +2854,19 @@ const ProcessDetails = () => {
                   {activities.length === 0 ? (
                     <p className="text-center text-muted-foreground py-4 text-xs">Sem registos. Adicione a primeira nota à esquerda.</p>
                   ) : (
-                    [...activities].reverse().map((activity) => (
+                    /* PACOTE BH: Ordenação descendente por data (mais recentes primeiro).
+                       Antes usava-se apenas .reverse() que inverte a ordem do array tal como
+                       vem do backend — frágil e incorreto se a ordem de origem mudar.
+                       Agora ordena-se por created_at (fallback timestamp) de forma descendente,
+                       com tratamento defensivo de datas inválidas (items sem data vão para o fim). */
+                    [...activities].sort((a, b) => {
+                      const dateA = safeDate(a.created_at || a.timestamp);
+                      const dateB = safeDate(b.created_at || b.timestamp);
+                      if (!dateA && !dateB) return 0;
+                      if (!dateA) return 1;  // items sem data ficam no fim
+                      if (!dateB) return -1;
+                      return dateB - dateA;  // descendente — mais recentes primeiro
+                    }).map((activity) => (
                       <div key={activity.id} className="p-2 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
                         <div className="flex items-start justify-between gap-1">
                           <div className="flex-1 min-w-0">

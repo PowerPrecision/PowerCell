@@ -757,13 +757,19 @@ async def get_client_profile(
     # Determinar se o cliente tem processo associado (para bloqueio de edição)
     process_ids = client.get("process_ids", [])
     has_process = False
+    # PACOTE BM — is_data_confirmed: verdadeiro quando a Indexação terminou e
+    # validou os dados (campo definido em mark-indexed). O Portal lê esta flag
+    # para bloquear a edição do perfil com mensagem específica.
+    is_data_confirmed = False
     if process_ids:
-        # Verificar se existe pelo menos um processo activo
+        # Verificar se existe pelo menos um processo activo E trazer is_data_confirmed
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1}
+            {"_id": 0, "id": 1, "is_data_confirmed": 1}
         )
         has_process = active_process is not None
+        if active_process and active_process.get("is_data_confirmed") is True:
+            is_data_confirmed = True
 
     # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
     dados_pessoais = client.get("dados_pessoais", {}) or {}
@@ -788,6 +794,9 @@ async def get_client_profile(
         "contacto": clean_contacto,
         "dados_pessoais": clean_dados_pessoais,
         "has_process": has_process,
+        # PACOTE BM — flag de dados confirmados/congelados pela Indexação.
+        # Quando true, o Portal bloqueia todos os campos de input do perfil.
+        "is_data_confirmed": is_data_confirmed,
     }
 
 
@@ -836,11 +845,20 @@ async def update_client_profile(
     process_ids = client.get("process_ids", [])
     if process_ids:
         # Verificar se existe pelo menos um processo activo (não eliminado)
+        # e trazer is_data_confirmed para mensagem de bloqueio específica.
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1}
+            {"_id": 0, "id": 1, "is_data_confirmed": 1}
         )
         if active_process:
+            # PACOTE BM — Mensagem específica quando os dados foram confirmados
+            # pela Indexação (is_data_confirmed=True). Caso contrário, mantém a
+            # mensagem original de "processo em análise".
+            if active_process.get("is_data_confirmed") is True:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito."
+                )
             raise HTTPException(
                 status_code=403,
                 detail="Dados trancados. Processo já em análise."
@@ -1384,12 +1402,32 @@ async def generate_portal_upload_url(
     content_type = data.get("content_type", "application/octet-stream")
     category = data.get("category", "Outros")
 
+    # ====================================================================
+    # PACOTE BL — CATEGORIA INDEX FORÇADA (PASTA COFRE)
+    # ====================================================================
+    # Override da categoria: todos os uploads do cliente vão para a pasta
+    # cofre "Index", independentemente da categoria enviada pelo frontend.
+    # Isto garante que o file_key no S3 também fica na pasta "Index",
+    # consistente com o confirm-upload (que força a mesma categoria no
+    # registo da BD).
+    # ====================================================================
+    if category != "Index":
+        logger.info(
+            f"[PORTAL-PACOTE-BL] generate_upload_url: categoria original "
+            f"'{category}' forçada para 'Index' (pasta cofre). "
+            f"Ficheiro: {filename}, processo: {process_id}"
+        )
+    category = "Index"
+
     if not filename:
         raise HTTPException(status_code=400, detail="Nome do ficheiro é obrigatório")
 
     # Bloquear categorias internas no portal do cliente
-    if category in PORTAL_HIDDEN_CATEGORIES:
-        raise HTTPException(status_code=403, detail="Categoria de documento não disponível no portal")
+    # (Nota: "Index" está em PORTAL_HIDDEN_CATEGORIES, mas é EXATAMENTE a
+    # categoria que queremos forçar aqui — o bloqueio abaixo foi desativado
+    # para permitir o upload do cliente para a pasta cofre.)
+    # if category in PORTAL_HIDDEN_CATEGORIES:
+    #     raise HTTPException(status_code=403, detail="Categoria de documento não disponível no portal")
 
     # Normalizar nome
     safe_filename = filename.replace(" ", "_").replace("/", "-").replace("\\", "-")
@@ -1459,6 +1497,36 @@ async def confirm_portal_upload(
     content_type = data.get("content_type", "application/octet-stream")
     document_id = data.get("document_id")  # ID do doc REQUESTED a satisfazer
     custom_label = data.get("custom_label")  # Custom label for "Outros" category
+
+    # ====================================================================
+    # PACOTE BL — CATEGORIA INDEX FORÇADA E PRIVADA (PASTA COFRE)
+    # ====================================================================
+    # Todos os documentos enviados DIRETAMENTE pelo cliente através do
+    # Portal recebem automaticamente category="Index" (pasta cofre),
+    # ignorando qualquer categoria que venha do frontend do portal. Esta
+    # categoria é tratada exclusivamente pela equipa de Indexação — os
+    # outros roles não a veem no painel de documentos (filtro aplicado
+    # no frontend UnifiedDocumentsPanel/S3FileManager).
+    #
+    # A categoria original (enviada pelo frontend) é preservada no log
+    # para auditoria, mas o documento fica SEMPRE com category="Index".
+    # Isto garante que o cliente não consiga classificar documentos em
+    # categorias visíveis para consultores/mediadores, mantendo os docs
+    # do cliente numa "pasta cofre" até a Indexação os classificar.
+    #
+    # NOTA: A triagem automática com IA (bloco abaixo) fica desativada
+    # para uploads do cliente, porque a categoria já está definida ("Index").
+    # A triagem IA só faria sentido se a categoria fosse "Outros"/"Auto",
+    # o que já não acontece após este override.
+    # ====================================================================
+    original_category_from_client = category
+    category = "Index"
+    if original_category_from_client and original_category_from_client != "Index":
+        logger.info(
+            f"[PORTAL-PACOTE-BL] Upload do cliente com categoria original "
+            f"'{original_category_from_client}' forçada para 'Index' (pasta cofre). "
+            f"Ficheiro: {original_filename}, processo: {process_id}"
+        )
 
     # ====================================================================
     # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
@@ -1728,6 +1796,13 @@ async def _trigger_onboarding_check(client_id: str):
     Se o cliente tiver todos os documentos obrigatórios, um Process
     é criado automaticamente e os documentos são ancorados.
 
+    PACOTE BO — Auto-Avanço e Auto-Atribuição:
+    Após a verificação de onboarding, se o processo estiver em pre_registo
+    e tiver todos os documentos obrigatórios, o sistema avança automaticamente
+    para o estado seguinte e invoca assign_to_indexer para o processo cair
+    na mesa do Indexador com menos carga. O avanço é silencioso (stealth mode)
+    para não gerar ruído no histórico do cliente.
+
     Esta função é fire-and-forget — erros são logados mas não propagados.
     """
     try:
@@ -1740,14 +1815,220 @@ async def _trigger_onboarding_check(client_id: str):
                 f"cliente {client_id}: processo #{result.get('process_number')} "
                 f"({result.get('anchored_docs', 0)} docs ancorados)"
             )
+            # PACOTE BO — Auto-avanço do processo recém-criado (está em pre_registo)
+            process_id = result.get("process_id")
+            if process_id:
+                await _auto_advance_from_pre_registo(process_id, client_id)
         else:
             missing = result.get("missing", [])
             if missing:
                 logger.info(
                     f"[ONBOARDING] Cliente {client_id} ainda precisa de: {missing}"
                 )
+            # PACOTE BO — Verificar se o cliente tem um processo EXISTENTE em
+            # pre_registo com todos os docs obrigatórios (Flow 1: processo criado
+            # pelo formulário público, docs ancorados diretamente ao processo).
+            # O check_onboarding_completion só procura docs órfãos (sem process_id),
+            # pelo que não detecta este caso. Precisamos de uma verificação separada.
+            await _check_and_advance_existing_pre_registo(client_id)
     except Exception as e:
         logger.error(f"[ONBOARDING] Erro na verificação de onboarding para {client_id}: {e}")
+
+
+async def _check_and_advance_existing_pre_registo(client_id: str):
+    """
+    PACOTE BO — Verifica se o cliente tem um processo EXISTENTE em pre_registo
+    com todos os documentos obrigatórios já submetidos (ancorados ao processo).
+
+    Isto cobre o Flow 1: processo criado pelo formulário público (routes/public.py)
+    em pre_registo, onde os docs são ancorados diretamente ao processo via
+    confirm-upload. O check_onboarding_completion não detecta este caso porque
+    só procura docs órfãos (sem process_id).
+
+    Se o processo tiver todos os docs obrigatórios, avança automaticamente.
+    """
+    try:
+        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "process_ids": 1})
+        if not client:
+            return
+        process_ids = client.get("process_ids", [])
+        if not process_ids:
+            return
+
+        # Procurar processo em pre_registo (não eliminado)
+        process = await db.processes.find_one(
+            {"id": {"$in": process_ids}, "status": "pre_registo", "is_deleted": {"$ne": True}},
+            {"_id": 0, "id": 1, "status": 1}
+        )
+        if not process:
+            return  # Não há processo em pre_registo
+
+        # Verificar se tem todos os documentos obrigatórios
+        if await _has_all_required_documents(process["id"], client_id):
+            await _auto_advance_from_pre_registo(process["id"], client_id)
+        else:
+            logger.debug(
+                f"[PACOTE-BO] Processo {process['id']} em pre_registo mas ainda "
+                f"faltam documentos obrigatórios. Cliente {client_id}."
+            )
+    except Exception as e:
+        logger.warning(f"[PACOTE-BO] Erro em _check_and_advance_existing_pre_registo: {e}")
+
+
+async def _has_all_required_documents(process_id: str, client_id: str) -> bool:
+    """
+    Verifica se o processo tem todos os documentos obrigatórios submetidos.
+
+    Reutiliza a lógica de validação do onboarding_service (DOCUMENT_REQUIREMENT_MAP
+    e REQUIREMENTS_BY_CONTRACT_TYPE) mas procura documentos ancorados AO PROCESSO
+    (com process_id definido), em vez de docs órfãos.
+    """
+    from services.onboarding_service import (
+        DOCUMENT_REQUIREMENT_MAP,
+        REQUIREMENTS_BY_CONTRACT_TYPE,
+        CONTRACT_TYPE_NORMALIZE,
+        _detect_contract_type,
+    )
+
+    # Buscar documentos do processo (submetidos pelo cliente via portal)
+    docs = await db.documents.find(
+        {
+            "process_id": process_id,
+            "status": {"$in": ["RECEIVED", "UPLOADED", "SUBMITTED", "received", "uploaded", "submitted"]},
+        },
+        {"_id": 0, "category": 1, "ai_extracted_data": 1, "extracted_data": 1, "id": 1}
+    ).to_list(100)
+
+    # Recolher categorias submetidas
+    uploaded_categories = set()
+    for doc in docs:
+        cat = doc.get("category", "")
+        if isinstance(cat, dict):
+            cat = cat.get("value", cat.get("label", ""))
+        cat_str = str(cat).strip()
+        if cat_str:
+            uploaded_categories.add(cat_str)
+
+    # Determinar tipo de contrato para saber os requisitos
+    client = await db.clients.find_one({"id": client_id})
+    contract_type = await _detect_contract_type(client_id, client or {}, docs)
+    normalized = (
+        CONTRACT_TYPE_NORMALIZE.get(contract_type.lower().strip(), contract_type.lower().strip())
+        if contract_type else "default"
+    )
+    required_groups = REQUIREMENTS_BY_CONTRACT_TYPE.get(normalized, REQUIREMENTS_BY_CONTRACT_TYPE["default"])
+
+    # Verificar cada grupo obrigatório
+    for group_name in required_groups:
+        acceptable_cats = DOCUMENT_REQUIREMENT_MAP.get(group_name, [])
+        is_satisfied = any(
+            acc_cat in uploaded_categories
+            or acc_cat.lower() in {c.lower() for c in uploaded_categories}
+            for acc_cat in acceptable_cats
+        )
+        if not is_satisfied:
+            return False
+    return True
+
+
+async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
+    """
+    PACOTE BO — Auto-avanço do pre_registo para o estado seguinte + assign_to_indexer.
+
+    1. Verifica que o processo está em pre_registo.
+    2. Avança para o próximo estado da pipeline (salto dinâmico, como mark-indexed).
+    3. Invoca assign_to_indexer(process_id) para o processo cair na mesa do
+       Indexador com menos carga.
+    4. O avanço é SILENCIOSO (stealth mode) — usa um system user com
+       track_history=False para não gerar ruído no histórico do cliente.
+       O assign_to_indexer gera os seus próprios logs de sistema (indexer
+       assignment), que são ações de sistema legítimas, não do cliente.
+    """
+    from services.process_assignment import assign_to_indexer
+    from services.history import log_history
+
+    # ── 1. Verificar que o processo está em pre_registo ──
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0, "status": 1, "client_name": 1})
+    if not process:
+        logger.warning(f"[PACOTE-BO] Processo {process_id} não encontrado para auto-avanço.")
+        return
+
+    current_status = process.get("status")
+    if current_status != "pre_registo":
+        logger.debug(
+            f"[PACOTE-BO] Processo {process_id} não está em pre_registo "
+            f"(status={current_status}). Auto-avanço cancelado."
+        )
+        return
+
+    # ── 2. Calcular próximo estado da pipeline (salto dinâmico) ──
+    all_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
+    status_pipeline = [s["name"] for s in all_statuses]
+
+    next_status = None
+    if current_status in status_pipeline:
+        current_idx = status_pipeline.index(current_status)
+        if current_idx < len(status_pipeline) - 1:
+            next_status = status_pipeline[current_idx + 1]
+
+    if not next_status:
+        logger.warning(
+            f"[PACOTE-BO] Não há estado seguinte após 'pre_registo' na pipeline. "
+            f"Processo {process_id} não avançado."
+        )
+        return
+
+    # ── 3. Avançar status (STEALTH — track_history=False para não gerar ruído) ──
+    now = datetime.now(timezone.utc).isoformat()
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": {"status": next_status, "updated_at": now}}
+    )
+
+    # Log silencioso: o system user tem track_history=False, pelo que o
+    # _is_stealth_user (Pacote BJ) retorna True e log_history retorna imediatamente
+    # sem escrever na coleção history. Isto garante que o auto-avanço não
+    # gera ruído no histórico do cliente.
+    stealth_system_user = {
+        "id": "system",
+        "name": "Sistema (Auto-avanço Portal)",
+        "role": "system",
+        "track_history": False,  # PACOTE BJ — silencia o log
+    }
+    try:
+        await log_history(
+            process_id=process_id,
+            user=stealth_system_user,
+            action=f"Auto-avanço: pre_registo → {next_status} (documentos obrigatórios submetidos pelo cliente)",
+            field="status",
+            old_value="pre_registo",
+            new_value=next_status,
+        )
+    except Exception as e:
+        logger.warning(f"[PACOTE-BO] Erro ao registar histórico (stealth): {e}")
+
+    client_name = process.get("client_name", "Cliente")
+    logger.info(
+        f"[PACOTE-BO] Processo {process_id} ({client_name}) avançado de "
+        f"pre_registo → {next_status}. A invocar assign_to_indexer..."
+    )
+
+    # ── 4. Invocar assign_to_indexer ──
+    # assign_to_indexer atribui o processo ao indexador com menor carga e
+    # altera o status para fase_documental (ou fila_espera se todos no limite).
+    # Os logs internos do assign_to_indexer usam system_user role="admin" —
+    # são ações de sistema legítimas (atribuição de indexador), não do cliente.
+    try:
+        success, data, msg = await assign_to_indexer(process_id)
+        logger.info(
+            f"[PACOTE-BO] assign_to_indexer para processo {process_id}: "
+            f"success={success}, data={data}, msg={msg}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"[PACOTE-BO] Erro em assign_to_indexer para processo {process_id}: {e}. "
+            f"O processo ficou em {next_status} mas sem indexador atribuído."
+        )
 
 
 async def _create_document_record(

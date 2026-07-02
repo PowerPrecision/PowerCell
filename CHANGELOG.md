@@ -3,6 +3,330 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BS: Workflow Status Rules UI (Frontend)
+
+### Adicionado
+- **Secção "Automações e Gatilhos do Sistema" no WorkflowEditor**: O admin pode agora configurar visualmente as flags de comportamento de cada fase do workflow, completando o circuito iniciado no Pacote BR (dynamic flags no backend). 4 Switches controlam: `is_active`, `trigger_finance`, `trigger_countdown`, `trigger_deed_reminder`.
+
+### Backend (necessário para persistir as flags)
+- **`models/workflow.py`**: Adicionadas 5 flags `Optional[bool] = None` aos modelos `WorkflowStatusCreate`, `WorkflowStatusUpdate`, `WorkflowStatusResponse`: `is_active`, `trigger_finance`, `trigger_countdown`, `trigger_property_check`, `trigger_deed_reminder`. `None` = não configurado (fallback ativo no `move_process_kanban` do Pacote BR).
+- **`routes/admin.py`**:
+  - `create_workflow_status`: `status_doc` agora inclui as 5 flags (persistidas como `None` se não fornecidas).
+  - `update_workflow_status`: `update_data` agora inclui as 5 flags (apenas se `data.flag is not None` — atualização parcial).
+
+### Frontend (`frontend/src/components/WorkflowEditor.js`)
+- **`formData` inicial**: Adicionadas as 5 flags (default `null` = fallback).
+- **`handleCreateStatus`**: Payload inclui as 5 flags.
+- **`handleEditStatus`**: Payload inclui as 5 flags.
+- **`openEditDialog`**: Lê as flags do status existente (`status.flag ?? null`).
+- **`resetForm`**: Reset flags a `null`.
+- **`renderAutomationTriggersSection(prefix)`**: Nova função reutilizável que renderiza a secção "Automações e Gatilhos do Sistema" com 4 Switches (cada um com Label, ícone lucide, descrição e `data-testid`). Inserida em ambos os Diálogos (Criar e Editar) antes do `DialogFooter`.
+- **Imports adicionados**: `Activity`, `DollarSign`, `Clock`, `CalendarClock` (lucide-react).
+
+### As 4 Switches
+| Switch | Flag | Ícone | Descrição |
+|--------|------|-------|-----------|
+| Considerar processo Ativo nesta fase | `is_active` | `Activity` (emerald) | Se desligado, o processo fica inativo (sai dos dashboards ativos e liberta slot do indexador) |
+| Disparar fecho financeiro e comissões | `trigger_finance` | `DollarSign` (green) | Cria snapshot financeiro (ProcessFinance) ao entrar nesta fase |
+| Iniciar contagem decrescente de 90 dias | `trigger_countdown` | `Clock` (blue) | Regista a data de aprovação bancária e inicia o countdown de 90 dias |
+| Ativar lembrete de agendamento de escritura | `trigger_deed_reminder` | `CalendarClock` (purple) | Cria lembrete automático 15 dias antes da data da escritura |
+
+### Decisão de UX
+- **`checked={formData.flag === true}`**: O switch só aparece ligado quando a flag é `true`. `null` (não configurado) e `false` (explicitamente desligado) aparecem visualmente como desligados. Quando o admin clica pela primeira vez, `null`→`true`; se clicar again, `true`→`false` (explicitamente desligado, override do fallback). O backend distingue `null` (fallback ativo) de `false` (override), pelo que o comportamento é correto.
+- **`trigger_property_check` sem switch dedicado**: No backend, esta flag cobre `ch_aprovado`/`fase_escritura`/`escritura_agendada` (verificação de docs do imóvel + alerta CPCV). É uma flag composta que não mapeia 1:1 para uma switch única — optei por não expô-la na UI para evitar confusão. Fica no payload para configuração avançada via API se necessário no futuro.
+
+### Técnico
+- **Backend** (`backend/models/workflow.py`): 5 flags `Optional[bool] = None` em Create/Update/Response.
+- **Backend** (`backend/routes/admin.py`): persistir flags em `create_workflow_status` (linhas 440-446) e `update_workflow_status` (linhas 489-499).
+- **Frontend** (`frontend/src/components/WorkflowEditor.js`): formData (linhas 70-76); payload create (linhas 112-117); payload edit (linhas 143-148); openEditDialog (linhas 218-223); resetForm (linhas 241-246); `renderAutomationTriggersSection` (linhas 256-356); inserção nos Diálogos Criar (linha 585) e Editar (linha 703); imports (linhas 37-40).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote BR: Dynamic Workflow Purpose Flags (Backend)
+
+### Alterado
+- **Gatilhos do Kanban agora lêem flags dinâmicas do `workflow_statuses`**: A função `move_process_kanban` (processes.py) deixou de usar strings hardcoded (`new_status == "concluidos"`, `new_status == "fase_bancaria"`, etc.) e passou a ler flags de comportamento configuradas na coleção `workflow_statuses`. O admin pode configurar quais estados disparam cada automação sem alterar código.
+
+### Flags Dinâmicas (PACOTE BR)
+- **`trigger_finance`**: cria snapshot financeiro (era: `new_status == "concluidos"`)
+- **`trigger_countdown`**: inicia countdown de 90 dias (era: `new_status == "fase_bancaria"`)
+- **`trigger_property_check`**: verifica docs do imóvel + alerta CPCV/Escritura (era: `new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]`)
+- **`trigger_deed_reminder`**: cria lembrete 15 dias antes da escritura (era: `new_status == "escritura_agendada"`)
+- **`is_active`**: determina se o processo fica ativo ou inativo (era: `new_status not in ["desistencias", "concluidos"]`)
+
+### Fallback Retrocompatível
+- Se a flag não existir no documento `workflow_statuses` (instalações existentes que ainda não migraram), o comportamento hardcoded atual é usado como fallback. Isto garante que nada quebra — à medida que o admin configura as flags, o fallback deixa de ser usado. Ex: `trigger_finance = status_exists.get("trigger_finance")`; se `None`, fallback para `new_status == "concluidos"`.
+
+### Gatilho de Fila de Espera Dinâmico
+- O gatilho de fila de espera (libertar slot do indexador) agora dispara em **qualquer estado inativo** (`is_active == False`), não apenas em `["concluidos", "desistencias"]`. Isto é mais correto: se o admin configurar um novo estado terminal com `is_active: False`, o gatilho dispara automaticamente.
+
+### Decisão de Arquitetura
+- **Fallback em vez de migração forçada**: As flags não existem ainda no modelo `workflow_statuses` (o seed só define name, label, order, color, is_default, visible_in_portal, portal_label, description). Em vez de forçar uma migração da BD, usei fallback retrocompatível — o sistema funciona imediatamente e à medida que o admin configura as flags (futuro, via WorkflowEditor), o fallback deixa de ser usado.
+- **`trigger_countdown and old_status != new_status`**: O countdown original tinha `old_status != "fase_bancaria"` para não disparar se o processo já estava em fase_bancaria. Generalizei para `old_status != new_status` — não disparar se o processo já estava no estado (independente do nome).
+- **`trigger_property_check` funde 2 blocos**: Os blocos `if new_status in ["ch_aprovado", "fase_escritura"]` (property check) e `if new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]` (CPCV alert) cobriam os mesmos 3 statuses. Fundi-os num só `if trigger_property_check` que faz ambas as verificações.
+- **Próximo passo (futuro)**: Expor estas flags no `WorkflowEditor` do frontend para o admin as configurar visualmente.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): bloco PACOTE BR com leitura das 5 flags + fallback (linhas 2926-2974); substituição dos 5 blocos de gatilhos hardcoded por flags dinâmicas (linhas 3021-3086); gatilho de fila de espera dinâmico `if not is_active` (linhas 3111-3129); remoção da lista fixa `inactive_statuses`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote BQ: Acesso Global para a Role de Indexação
+
+### Corrigido
+- **Indexacao via literalmente todos os processos no Kanban**: O frontend envia sempre `show_all=true`, e o backend com `show_all=true` não aplicava base filter — indexacao via processos não relevantes para o seu trabalho (ex: processos de outros consultores já atribuídos a outros indexadores). Agora indexacao vê globalmente (across all consultors/mediadores) mas scoped a: (a) processos atribuídos a si (`assigned_indexacao_id == user_id`) OU (b) processos na fila de espera (`status == "fila_espera"`).
+
+### Backend (`backend/routes/processes.py`)
+- **`GET /kanban`**: Adicionado bloco PACOTE BQ que aplica o scope para indexacao ANTES do `elif not show_all`. Como é um `if role == UserRole.INDEXACAO` (não `elif`), o scope aplica-se sempre, mesmo com `show_all=true`. Scope: `$or: [assigned_indexacao_id == user_id, status == "fila_espera"]`.
+- **`GET /processes`**: Adicionado `{"status": "fila_espera"}` ao `$or` do indexacao (que já tinha `assigned_indexacao_id` + `created_by`). Para consistência com o kanban.
+- **`GET /processes/paginated`**: Mesma alteração que `GET /processes`.
+
+### Frontend (`frontend/src/pages/KanbanPage.js`)
+- **Verificação**: Os 5 filtros (Consultor, Intermediário, Indexação, Parceiro, Estado de Indexação) já eram renderizados incondicionalmente para todos os roles. Indexacao já via todos os botões de filtro. ✓
+- **Verificação**: ProcessesPage `canMarkIndexed` já inclui indexacao, pelo que o "Filtro de Estado de Indexação" já aparecia. ✓
+- **Verificação**: `indexStatusFilter` default é 'pending' para indexacao — mostra apenas não-indexados por defeito. ✓
+- **Adicionado**: Badge visual teal no KanbanPage para indexacao: "Vista Indexação (atribuídos + fila de espera)" — comunica ao utilizador que está numa vista scoped. `data-testid="kanban-indexacao-scoped-badge"`.
+
+### Decisão de Arquitetura
+- **Scope sempre aplicado para indexacao**: O scope (atribuídos + fila_espera) aplica-se sempre, independentemente de `show_all`. Isto porque é o âmbito natural de trabalho da Indexação — não faz sentido indexacao ver processos de outros indexadores ou processos já atribuídos a outros. O `show_all` continua a funcionar para consultores/intermediarios (toggle entre vista pessoal e global).
+- **Consistência entre Kanban e listagens**: O scope foi aplicado aos 3 endpoints de listagem (kanban, /processes, /paginated) para que indexacao encontre os mesmos processos em qualquer vista.
+- **Filtros funcionam dentro do scope**: Os botões de filtro (Consultor, Intermediário, etc.) agora filtram DENTRO do scope do indexacao. Ex: indexacao pode filtrar por um consultor específico para ver apenas os processos desse consultor que estão atribuídos a si ou na fila.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): kanban scope (linhas 2098-2116); GET /processes scope (linhas 1481-1488); GET /paginated scope (linhas 1807-1813).
+- **Frontend** (`frontend/src/pages/KanbanPage.js`): badge visual para indexacao (linhas 221-229).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote BP: Fix Visibilidade do 2º Titular nas Listas
+
+### Corrigido
+- **2º titular não aparecia nas listagens globais**: Clientes que são apenas 2º titular num processo não apareciam em "Os Meus Clientes" / "Processos" se não tivessem um processo principal ativo. Causa raiz: o `process_ids` do 2º titular não era atualizado quando ele era associado como 2º titular, e o `client_ids` do processo não incluía o 2º titular.
+
+### Backend (`backend/routes/processes.py`)
+- **`POST /create-client`**: O campo `second_client_id` do `ProcessCreate` era **ignorado** na criação. Agora é lido, validado, injetado no `process_doc` (`second_client_id` + `second_client_name`), e o 2º titular é adicionado ao array `client_ids` do processo. Após a inserção, o `process_ids` do 2º titular é atualizado com `$addToSet`. O `lead_status` do 2º titular NÃO é alterado (pode continuar a ser lead pendente).
+- **`PUT /processes/{id}` (update_process)**: Ao adicionar/remover `second_client_id`, agora sincroniza: (a) `client_ids` do processo — remove o 2º titular antigo (se diferente do novo) e adiciona o novo; (b) `process_ids` do 2º titular — `$pull` do antigo e `$addToSet` no novo. Isto garante que queries `{"client_ids": cliente_id}` apanham processos em que o cliente é 1º OU 2º titular.
+- **`POST /{process_id}/remove-client`**: Se o cliente removido era o `second_client_id`, limpa `second_client_id`/`second_client_name` do processo para manter consistência (sem isto, o processo ficava com `second_client_id` apontando para um cliente que já não está associado). O `process_ids` do cliente já era removido com `$pull` (existente).
+
+### Sem Alteração (já estava correto)
+- **`POST /{process_id}/add-client`**: Já atualizava o `process_ids` do cliente adicionado (`$addToSet`) e o `client_ids` do processo. Sem alteração.
+- **`GET /clients/{client_id}`**: Já procurava processos onde o cliente é `second_client_id` (lê diretamente o campo `second_client_id` do processo). Sem alteração.
+
+### Decisão de Arquitetura
+- **Sincronização bidirecional**: O `process_ids` do cliente e o `client_ids` do processo são mantidos em sincronia. Quando o 2º titular é adicionado, ambos os arrays são atualizados; quando é removido, ambos são limpos. Isto garante que qualquer query (por `client.process_ids` ou por `process.client_ids`) encontra a associação correta.
+- **`lead_status` do 2º titular preservado**: O 2º titular pode continuar a ser um lead pendente (não tem processo próprio como 1º titular). Apenas o 1º titular tem `lead_status` alterado para "converted" na criação do processo.
+- **`second_client_id` vs `co_buyers`**: O `second_client_id` é a ligação formal a um cliente existente (com ID na coleção clients). Os `co_buyers` são dados embutidos (dict com name/email/nif/phone) que podem ou não ter `client_id`. A sincronização do `process_ids` aplica-se ao `second_client_id`; os `co_buyers` com `client_id` são sincronizados via `add-client`/`remove-client`.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): bloco PACOTE BP na criação (linhas 1119-1153 para injeção no process_doc, linhas 1248-1274 para atualização do process_ids do 2º titular); bloco `second_client_id` no PUT reescrito (linhas 4015-4095) com sincronização de client_ids e process_ids; bloco `remove-client` (linhas 5060-5066) com limpeza de second_client_id.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote BO: Auto-Avanço e Auto-Atribuição no Portal do Cliente
+
+### Adicionado
+- **Fecho do circuito de automação no Portal do Cliente**: Quando o cliente carrega os documentos obrigatórios e os submete via Portal, o sistema avança automaticamente o processo de `pre_registo` para o estado seguinte da pipeline e invoca `assign_to_indexer` para o processo cair logo na mesa do Indexador com menos carga. Isto elimina a intervenção manual necessária para tirar o processo do `pre_registo` após o cliente completar o onboarding.
+
+### Backend (`backend/routes/portal.py`)
+- **`_trigger_onboarding_check` (modificada)**: Após `check_onboarding_completion`, se onboarding completo (`completed=True`), chama `_auto_advance_from_pre_registo` para o processo recém-criado. Se não completo, chama `_check_and_advance_existing_pre_registo` para verificar processo existente em `pre_registo` (Flow 1 — processo criado pelo formulário público com docs ancorados diretamente).
+- **`_check_and_advance_existing_pre_registo` (nova)**: Procura processo do cliente em `pre_registo`, verifica se tem todos os docs obrigatórios via `_has_all_required_documents`, e se sim avança.
+- **`_has_all_required_documents` (nova)**: Reutiliza a lógica de validação do `onboarding_service` (`DOCUMENT_REQUIREMENT_MAP`, `REQUIREMENTS_BY_CONTRACT_TYPE`, `CONTRACT_TYPE_NORMALIZE`, `_detect_contract_type`) mas procura docs ancorados AO PROCESSO (com `process_id` definido) em vez de docs órfãos. Cobre o Flow 1 que o `check_onboarding_completion` não detecta.
+- **`_auto_advance_from_pre_registo` (nova)**: (a) verifica que processo está em `pre_registo`; (b) calcula próximo estado da pipeline (salto dinâmico, como `mark-indexed`); (c) atualiza status com stealth system user; (d) invoca `assign_to_indexer(process_id)`.
+
+### Silêncio no Histórico (Pacote BJ)
+- O auto-avanço usa `stealth_system_user = {"id": "system", "name": "Sistema (Auto-avanço Portal)", "role": "system", "track_history": False}`. O `track_history: False` dispara o `_is_stealth_user` do Pacote BJ, que retorna `True`, e `log_history` retorna imediatamente sem escrever na coleção `history`. Isto garante que o auto-avanço **não gera ruído no histórico** do cliente.
+- O `assign_to_indexer` gera os seus próprios logs internos (com `system_user role="admin"`) — esses são ações de sistema legítimas (atribuição de indexador), não do cliente, pelo que são mantidos no histórico.
+
+### Decisão de Arquitetura
+- **Dois fluxos cobertos**: Flow 1 (processo criado pelo formulário público em `pre_registo`, docs ancorados diretamente) e Flow 2 (processo criado pelo onboarding_service em `pre_registo`, docs órfãos completos). O `check_onboarding_completion` só detecta o Flow 2 (docs órfãos); o `_check_and_advance_existing_pre_registo` cobre o Flow 1.
+- **Salto dinâmico**: O próximo estado é calculado a partir da pipeline `workflow_statuses` ordenada por `order` (mesma lógica do `mark-indexed`), não hardcoded. Isto garante que mudanças na configuração do workflow são respeitadas.
+- **`assign_to_indexer` após avanço**: O processo avança primeiro para o estado seguinte (ex: `clientes_espera`), depois `assign_to_indexer` further routeia para `fase_documental` (com indexador) ou `fila_espera` (sem indexador disponível). Se `assign_to_indexer` falhar, o processo fica no estado intermédio (visível nos dashboards) mas sem indexador — o gatilho de fila de espera do `mark-indexed` pode recuperá-lo mais tarde.
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `_trigger_onboarding_check` modificada (linhas 1791-1835); `_check_and_advance_existing_pre_registo` nova (linhas 1838-1875); `_has_all_required_documents` nova (linhas 1878-1931); `_auto_advance_from_pre_registo` nova (linhas 1934-2031).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote BN: Evolução do Menu de Registos (Triagem de Entrada)
+
+### Adicionado
+- **Sala de Triagem na página de Registos de Clientes**: A página de Registos agora funciona como "Sala de Triagem", mostrando 3 tipos de itens com badges visuais distintas:
+  - **Leads pendentes** (sem processo) — Badge laranja "Sem Processo" (existente)
+  - **Processos em pré-registo** (cliente ainda a preencher no Portal) — Badge âmbar "Pré-Registo (A preencher Portal)" (NOVO)
+  - **Processos prontos para indexação** (sem `assigned_indexacao_id`, na fila de espera) — Badge azul "Pronto para Indexação (Na fila de espera)" (NOVO)
+
+### Backend
+- **`GET /clients/registered`** (`routes/clients.py`): Novo parâmetro `triage_mode` (opt-in, default `False`). Quando ativo:
+  - Pré-calcula `triage_client_map` buscando processos com `status="pre_registo"` OU `assigned_indexacao_id in [None, ""]` (excluindo eliminados).
+  - Alarga a query com `$or` entre "lead sem processo + lead_status pendente" e "cliente com id no triage_client_map".
+  - Enriquece cada cliente com `triage_status` (`null` | `"pre_registo"` | `"ready_for_indexing"`).
+  - Mantém os filtros existentes (ghost, search, assigned_to_me, cursor pagination).
+
+### Frontend
+- **`ClientRegistrationsPage.js`**:
+  - `fetchClients` agora envia `triage_mode=true` por defeito (página funciona como Sala de Triagem).
+  - Imports `FileInput` e `ClipboardList` adicionados ao lucide-react.
+  - Coluna "Estado" com 4 ramos condicionais por prioridade: `pre_registo` → `ready_for_indexing` → `has_process` → `Sem Processo`. Cada badge tem `data-testid` para testes e mostra o `process_number` quando aplicável.
+
+### Decisão de Arquitetura
+- **`triage_mode` opt-in (default False)**: O parâmetro é opt-in para não afetar outros callers do endpoint `GET /clients/registered` (ex: ClientRegistrationsAdminPage, ExportClientes). A página de Registos ativa-o explicitamente; os outros callers mantêm o comportamento original (apenas leads pendentes).
+- **Prioridade `pre_registo` > `ready_for_indexing`**: Um processo pode estar em `pre_registo` E sem `assigned_indexacao_id` simultaneamente. O `triage_client_map` dá prioridade ao `pre_registo` (estado anterior na pipeline), pelo que a badge âmbar tem precedência sobre a azul. Isto comunica ao utilizador o estágio mais inicial do processo.
+- **`triage_status` calculado no backend**: O backend determina o `triage_status` durante o enriquecimento (não no frontend) para garantir consistência e permitir que outros callers (ex: futura API de exportação) usem o mesmo campo.
+
+### Técnico
+- **Backend** (`backend/routes/clients.py`): parâmetro `triage_mode` (linha 260); bloco de pré-cálculo de `triage_client_map` (linhas 295-337); bloco de filtro `$or` em triage_mode (linhas 427-452); enriquecimento com `triage_status` (linhas 558-601).
+- **Frontend** (`frontend/src/pages/ClientRegistrationsPage.js`): `triage_mode=true` em fetchClients (linha 178); imports `FileInput`/`ClipboardList` (linhas 66-67); 4 ramos de badges na coluna Estado (linhas 502-553).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote BM: Bloqueio do Perfil do Cliente após Indexação
+
+### Adicionado
+- **Congelamento de dados do cliente após Indexação**: Quando a Indexação termina o tratamento documental e marca o processo como indexado (`mark-indexed`), o campo `is_data_confirmed: True` é persistido no processo. Isto assinala que os dados foram validados e congelados — o cliente já não pode alterar os seus dados pessoais no Portal.
+
+- **Flag `is_data_confirmed` no `GET /portal/me`**: O Portal do Cliente lê agora esta flag para determinar se os campos do perfil devem ser desativados.
+
+- **Alert específico no Portal do Cliente**: Quando `is_data_confirmed === true`, o `ProfilePanel` mostra um Alert âmbar (ícone `ShieldCheck`) no topo com a mensagem exata: "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." — com `role="alert"` e `data-testid="data-confirmed-alert"` para acessibilidade/testes.
+
+- **Defesa no backend (`PUT /portal/me`)**: Quando `is_data_confirmed === true`, o endpoint devolve HTTP 403 com a mesma mensagem específica. Isto garante que mesmo que o frontend seja manipulado, o backend bloqueia a edição.
+
+### Backend
+- **`PATCH/POST /processes/{id}/mark-indexed`** (`routes/processes.py`): `update_set` agora inclui `is_data_confirmed: True` + metadados (`data_confirmed_at`, `data_confirmed_by`, `data_confirmed_by_name`). Registo no histórico `DADOS_CONFIRMADOS_INDEXACAO`. Retorno inclui `is_data_confirmed: True`.
+- **`GET /portal/me`** (`routes/portal.py`): Query de `active_process` agora projeta `is_data_confirmed`; resposta inclui `"is_data_confirmed": true|false`.
+- **`PUT /portal/me`** (`routes/portal.py`): Quando `is_data_confirmed === true`, devolve 403 com mensagem "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." (distinta do 403 genérico "Dados trancados. Processo já em análise." para o caso pré-indexação).
+
+### Frontend
+- **`ClientPortal.jsx` — `ProfilePanel`**:
+  - Import `ShieldCheck` adicionado ao lucide-react.
+  - `isDataConfirmed = profile?.is_data_confirmed === true` (lida do `GET /portal/me`).
+  - `isLocked = profile?.has_process === true || isDataConfirmed` — bloqueio aplica-se em ambos os casos (pré e pós-indexação). Todos os campos `Field` já usavam `disabled={isLocked}`, pelo que ficam automaticamente desativados.
+  - Alert âmbar (ícone `ShieldCheck`) com a mensagem exata pedida — renderizado quando `isDataConfirmed === true`.
+  - Banner azul "Processo em Análise" existente agora só aparece quando `isLocked && !isDataConfirmed` (pré-indexação) — evita duplicação visual.
+
+### Decisão de Arquitetura
+- **Distinção `has_process` vs `is_data_confirmed`**: São dois estados distintos que merecem mensagens diferentes. `has_process` = cliente tem processo (bloqueio **pré-indexação**, banner azul "Processo em Análise", já existente). `is_data_confirmed` = Indexação validou e congelou os dados (bloqueio **pós-indexação**, Alert âmbar "Dados Bloqueados para Análise", novo). Ambos desativam os campos, mas a mensagem comunica ao cliente o estágio correto do processo.
+- **Defesa em profundidade**: O bloqueio é aplicado no frontend (disabled + Alert) E no backend (403 no PUT /portal/me). Mesmo que o frontend seja manipulado, o backend impede a edição.
+- **Metadados de auditoria**: `data_confirmed_at`, `data_confirmed_by`, `data_confirmed_by_name` permitem rastrear quem e quando congelou os dados.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): `update_set` no `mark_process_indexed` (linhas 3282-3291); registo histórico `DADOS_CONFIRMADOS_INDEXACAO` (linhas 3322-3330); `is_data_confirmed: True` no retorno (linhas 3533-3535).
+- **Backend** (`backend/routes/portal.py`): `GET /portal/me` projeta e devolve `is_data_confirmed` (linhas 760-772, 797-799); `PUT /portal/me` bloqueia com mensagem específica (linhas 845-865).
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): import `ShieldCheck` (linha 56); `isDataConfirmed` + `isLocked` estendido (linhas 1413-1418); Alert âmbar (linhas 1477-1502); banner azul condicionado a `!isDataConfirmed` (linha 1505).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote BL: Categoria INDEX forçada e privada
+
+### Adicionado
+- **Pasta cofre "Index" para documentos do cliente**: Todos os documentos enviados **diretamente** pelo cliente através do Portal recebem automaticamente `category="Index"`, ignorando qualquer categoria que venha do frontend do portal. Esta categoria é a "pasta cofre" tratada exclusivamente pela equipa de Indexação — os restantes roles não a veem no painel de documentos.
+
+### Backend (forçar categoria)
+- **`POST /portal/upload-url`** (`routes/portal.py`): Override da categoria para `"Index"` antes de gerar o `file_key` S3 — garante que a pasta S3 também seja "Index" (consistência com o registo da BD). Bloqueio de `PORTAL_HIDDEN_CATEGORIES` desativado (comentado) porque "Index" é exatamente a categoria a permitir.
+- **`POST /portal/confirm-upload`** (`routes/portal.py`): Override da categoria para `"Index"` após ler o payload, antes do bloco de triagem IA. Isto desativa a triagem IA (que só corria para "Outros"/"Auto") — a categoria já está definida. A categoria original é preservada no log para auditoria. O `_create_document_record` e o `update_one` (para docs REQUESTED) usam a categoria forçada.
+
+### Frontend (bloqueio de segurança)
+- **`S3FileManager.js`** (filtro granular — onde os ficheiros são listados):
+  - Constantes `INDEX_CATEGORY_ID = "Index"` e `INDEX_CATEGORY_ALLOWED_ROLES = ["admin", "ceo", "diretor", "indexacao"]`.
+  - `canSeeIndexCategory = hasAnyRole(user, INDEX_CATEGORY_ALLOWED_ROLES)` — flag de permissão.
+  - `visibleCategories` — `CATEGORIES` filtrado (exclui "Index" se sem permissão), usado em todos os 3 `CATEGORIES.map` da sidebar.
+  - `getCategoryCount("Index")` retorna 0 se sem permissão.
+  - `getAllFiles()` — skip da categoria "Index" ao agregar ficheiros se sem permissão.
+  - `getFilteredCategoryFiles("Index")` retorna `[]` se sem permissão (defesa contra state/URL manipulada).
+  - `useEffect` que reseta `selectedCategory` se for "Index" e o utilizador perder permissão (ex: impersonate terminou).
+  - Import de `hasAnyRole` adicionado (só tinha `hasRole`).
+- **`UnifiedDocumentsPanel.js`** (defesa em profundidade): flag `canSeeIndexCategory` via `useMemo` com os mesmos roles permitidos. Atributo `data-can-see-index` no div raiz para debugging/testes. O filtro granular fica no `S3FileManager`; o `UnifiedDocumentsPanel` serve como ponto de controlo documentado para futuros componentes.
+
+### Decisão de Arquitetura
+- **Scrapers automáticos NÃO afetados**: Os endpoints `_run_financas_scraper` e `_run_seguranca_social_scraper` (documentos obtidos automaticamente das Finanças/Segurança Social em nome do cliente) mantêm as suas categorias específicas (IRS, Segurança Social, etc.). Estes não são "uploads manuais do cliente" e têm categorias significativas que o cliente precisa de ver. O pedido do utilizador foca-se em documentos "enviados diretamente pelo cliente".
+- **Valor canónico `"Index"`** (com I maiúsculo): O sistema já usava este valor em `DocumentCategory.INDEX` (`models/enums.py:218`) e `PORTAL_HIDDEN_CATEGORIES` (`portal.py:446`). Mantido para consistência, em vez de `"index"` minúsculo.
+- **Defesa em profundidade**: O bloqueio é aplicado em 3 níveis no frontend (getCategoryCount, getAllFiles, getFilteredCategoryFiles) + useEffect guard + UnifiedDocumentsPanel flag, para garantir que documentos "Index" nunca sejam visíveis para roles não autorizados, mesmo em cenários edge (state legacy, URL manipulada, impersonate a terminar).
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): override em `generate_portal_upload_url` (linhas 1387-1402) e `confirm_portal_upload` (linhas 1463-1491); bloqueio `PORTAL_HIDDEN_CATEGORIES` comentado (linhas 1407-1412).
+- **Frontend** (`frontend/src/components/S3FileManager.js`): constantes (linhas 153-164); `canSeeIndexCategory` + `visibleCategories` + `useEffect` guard (linhas 284-304); filtros em `getCategoryCount`/`getAllFiles`/`getFilteredCategoryFiles` (linhas 1000-1046); 3 `CATEGORIES.map` → `visibleCategories.map` (linhas 2120, 2589, 2727); import `hasAnyRole` (linha 74).
+- **Frontend** (`frontend/src/components/UnifiedDocumentsPanel.js`): `canSeeIndexCategory` via `useMemo` (linhas 35-43); `data-can-see-index` no div raiz (linha 53); docstring atualizada (linhas 9-16).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros em ambos os ficheiros frontend.
+
+## [2026-07-16] — Pacote BK: Exclusão do Estado pré_registo dos Dashboards
+
+### Adicionado
+- **Exclusão global do estado `pre_registo` dos quadros de trabalho**: Processos em `pre_registo` (cliente ainda a preencher no portal) NÃO aparecem no Kanban, nas listagens tabulares nem em "Os Meus Clientes" — só entram nos quadros de trabalho quando transitam para a primeira fase da pipeline (disparando a dupla auto-atribuição em `services/process_assignment.py`). Isto elimina o ruído gerado por processos que ainda não são leads qualificadas.
+
+- **Helper centralizado `_should_hide_pre_registo(role, status, search)`**: Nova função em `routes/processes.py` que encapsula as regras de exclusão:
+  - **Regra 3 (universal)**: `status=="pre_registo"` explícito → nunca excluir (qualquer role pode ver especificamente esse estado).
+  - **Regra 1 (admin/CEO/diretor/administrativo)**: excluem na vista normal, MAS vêem pré-registos quando pesquisam (`search` ativo) ou filtram por `status` explícito — mantendo a capacidade de os encontrar através de pesquisa direta.
+  - **Regra 2 (consultor/intermediário/indexação/cliente)**: sempre excluem nos quadros de trabalho (nunca veem pré-registos).
+
+- **Constantes `PRE_REGISTO_STATUS` e `PRE_REGISTO_BYPASS_ROLES`**: Centralizam o nome do estado e os roles com privilégios de bypass (admin, CEO, diretor, administrativo).
+
+### Aplicado
+- **`GET /processes/kanban`**: Exclusão incondicional (todos os roles) após o bloco `view_mode` — o Kanban é o quadro de trabalho principal e não tem parâmetro de pesquisa, pelo que os pré-registos não devem poluí-lo para ninguém. Admins que precisem inspeccionar pré-registos usam a listagem tabular com `search`.
+- **`GET /processes`** (listagem tabular): Exclusão condicional via `_should_hide_pre_registo` — consultores nunca veem; admin vê com `search` ou `status` explícito.
+- **`GET /processes/paginated`**: Mesma lógica que `GET /processes`.
+- **`GET /my-clients`** (processes.py): Exclusão incondicional após query por role (endpoint sem `search`).
+- **`GET /my-clients`** (my_clients.py): Constante local `PRE_REGISTO_STATUS` (evita dependência circular) + exclusão com guard especial para `{"_id": None}` (sem acesso).
+
+### Decisão de Arquitetura
+- **Kanban e my-clients sem bypass para admin**: Estes endpoints não têm parâmetro `search`, pelo que a exclusão se aplica a todos os roles. O bypass para admin faz-se através da **listagem tabular** (`GET /processes` com `search`), que é o único endpoint com pesquisa direta. Isto garante que os quadros de trabalho ficam limpos de ruído para toda a equipa, incluindo admins, que mantêm a capacidade de encontrar pré-registos quando precisam.
+- **Compatibilidade com `dashboard_statuses()`**: O `models/enums.py` já tinha `dashboard_statuses()` que exclui pré-registos (linha 65-67). As rotas agora alinham-se com esta definição, que já era usada em `routes/stats.py`.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): constante `PRE_REGISTO_STATUS` + `PRE_REGISTO_BYPASS_ROLES` + helper `_should_hide_pre_registo` (linhas 1259-1302); exclusão aplicada em 4 endpoints (kanban, /processes, /paginated, /my-clients).
+- **Backend** (`backend/routes/my_clients.py`): constante local `PRE_REGISTO_STATUS` (linha 31); exclusão com guard `{"_id": None}` no `GET /my-clients` (linhas 114-131).
+- **Padrão de injeção**: `{"status": {"$ne": PRE_REGISTO_STATUS}}` adicionado a `$and` (ou combinado com query existente), preservando todos os outros filtros. No `GET /processes` e `/paginated`, a condição é adicionada a `and_conditions` antes da montagem final, garantindo combinação correta com `$and`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; teste funcional do helper com 21 casos (consultor/intermediário/indexação/cliente sempre escondem; admin/CEO/diretor/administrativo escondem na vista normal mas vêem com search/status explícito; regra 3 universal do status=pre_registo) — TODOS PASSARAM.
+
+## [2026-07-16] — Pacote BJ: Stealth Mode para o Histórico (Indexação Invisível)
+
+### Adicionado
+- **Switch global `track_history` (por utilizador)**: Qualquer utilizador pode agora ser silenciado individualmente no histórico/atividades definindo `track_history: False` no seu documento da coleção `users`. Quando a chave não existe, assume-se `True` (comportamento normal com rasto). Isto permite desligar o rasto de um utilizador específico sem afetar o restante sistema.
+
+- **Helper centralizado `_is_stealth_user(user)`**: Nova função em `services/history.py` que encapsula as regras de stealth mode: (1) `role == "indexacao"` → sempre silencioso; (2) `track_history is False` → silencioso; (3) default → não silencioso. Reutilizável por qualquer rota/serviço (já usado em `routes/activities.py`).
+
+### Corrigido
+- **`log_data_changes` não respeitava o stealth mode**: A função `log_data_changes` (que faz diff de dados e chama `log_history` por cada campo alterado) não tinha o early return de stealth mode. Adicionado o mesmo guard no início da função — agora percorre o diff APENAS se o utilizador não for silencioso, evitando trabalho desnecessário e garantindo consistência.
+
+- **`create_activity` inseria diretamente em `db.activities` sem passar pelo stealth mode**: A rota `POST /activities` inseria o comentário diretamente na coleção `activities` antes de chamar `log_history`, pelo que o guard do `log_history` não a cobria. Adicionado guard explícito: utilizador silencioso recebe HTTP 403 com mensagem clara ("O seu perfil está em modo de indexação silenciosa e não pode adicionar comentários ao histórico do processo"). Decisão de UX: seria contraditório silenciar o `log_history("Adicionou comentário")` mas deixar o comentário visível no mural.
+
+### Melhorado
+- **`log_history` agora respeita `track_history`**: O guard existente (Pacote D, modo fantasma para `indexacao`) foi generalizado para usar o helper `_is_stealth_user`, cobrindo também o switch global `track_history`. O guard específico do Pacote D (documentos) é mantido como defesa em profundidade (redundante mas intencional).
+
+### Decisão de Arquitetura (Importante)
+- **`audit_trail` é INTENCIONALMENTE EXCLUÍDO do stealth mode**: O `audit_trail_service.py` (`log_audit_event`) é um trilho de **compliance** separado — com IP, justificações, retention policy configurável pelo admin e campos críticos (financeiros, status). Silenciar o audit trail seria um risco de segurança/compliance. O stealth mode destina-se ao **histórico visível ao utilizador** (`db.history`, `db.activities`), não ao trilho de auditoria de compliance. Inserções diretas em `db.history` em `routes/admin.py` (ações administrativas: eliminar fases, corrigir duplicados, impersonate, editar/eliminar registos) também NÃO são silenciadas — são ações de gestão de sistema que precisam de rastreabilidade.
+
+### Técnico
+- **Backend** (`backend/services/history.py`): novo helper `_is_stealth_user(user)` (linhas 13-44); early return em `log_history` (linhas 58-69) e `log_data_changes` (linhas 120-132) usando o helper; guard do Pacote D mantido como defesa em profundidade.
+- **Backend** (`backend/routes/activities.py`): import de `_is_stealth_user`; guard 403 em `create_activity` antes de `db.activities.insert_one`.
+- **Regra do `track_history`**: usa `user.get("track_history", True) is False` (strict `is False`) — apenas o literal `False` dispara stealth, NÃO valores falsy como `None` ou `0`, evitando false positives.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; teste funcional do helper com 13 casos (None, vazio, admin, consultor, indexacao, track_history True/False/None/0, role desconhecido, combinações) — TODOS PASSARAM.
+
+## [2026-07-16] — Pacote BI: Bolinhas de Notificação nas Listas (My Clients / Processes)
+
+### Adicionado
+- **Indicadores visuais silenciosos nas listas tabulares de processos (UX)**: As tabelas de "Os Meus Processos" (`FilteredProcessList.js`) e "Os Meus Clientes" (`MyClientsPage.js`) mostram agora pequenas bolinhas junto ao nome do cliente — **azul** para mensagens não lidas do portal e **verde** para novos documentos enviados pelo cliente — exatamente como já acontecia no Kanban. As bolinhas usam `animate-ping` (pulse) para chamar a atenção de forma silenciosa, sem popups nem toasts. Acessibilidade garantida com `title`, `role="img"` e `aria-label`.
+
+### Corrigido (Backend)
+- **4 rotas de listagem não devolviam as flags `has_unread_messages` / `has_new_documents`**: Apenas o `GET /processes/kanban` injetava estas flags. Adicionada a **mesma lógica de agregação batch do Kanban** a:
+  1. `GET /processes` (paginação offset) — flags injetadas APÓS paginação (eficiência: só busca flags dos processos da página atual)
+  2. `GET /processes/paginated` (paginação cursor-based) — flags injetadas após `decrypt_processes_list`
+  3. `GET /my-clients` em `processes.py` — flags injetadas no `clients_list` final; leads ficam com `False`
+  4. `GET /my-clients` em `my_clients.py` (rota separada) — flags injetadas após o loop de `pending_tasks`; leads ficam com `False`
+- **Padrão de agregação**: `portal_messages` com `sender_type=client` + `read_by_staff=False` → `has_unread_messages`; `documents` com `status=uploaded` → `has_new_documents`. Variáveis prefixadas `_bi_` para evitar colisão de nomes.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): 3 blocos de enriquecimento batch (~25 linhas cada) nos endpoints `GET /processes`, `GET /processes/paginated`, `GET /my-clients`; flags adicionadas ao dicionário final de cada cliente em `clients_list`.
+- **Backend** (`backend/routes/my_clients.py`): 1 bloco de enriquecimento batch no endpoint `GET /my-clients`; flags injetadas em cada processo do array `processes`.
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): novo componente `NotificationDots` (reutilizável) + bolinhas na célula "Cliente" junto ao nome; import `MessageSquare` adicionado.
+- **Frontend** (`frontend/src/pages/MyClientsPage.js`): novo componente `NotificationDots` + bolinhas na célula "Cliente" junto ao nome; import `MessageSquare` adicionado.
+- **Padrão visual** (consistente com `KanbanCard.jsx`): `relative flex h-2.5 w-2.5` + `animate-ping` + `bg-blue-500` (mensagens) / `bg-emerald-500` (documentos). Componente retorna `null` quando não há sinal (sem ruído visual).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote BH: Ordenação do Histórico (Mais Recentes Primeiro)
+
+### Corrigido
+- **Atividades Recentes não ordenadas por data no Detalhe do Processo (UX)**: O cartão "Atividades Recentes" do `ProcessDetails.js` usava `[...activities].reverse()` que apenas inverte a ordem do array tal como vinha do backend — frágil e incorreto caso a ordem de origem mudasse. Substituído por `.sort()` descendente por `created_at` (fallback `timestamp`), com tratamento defensivo de datas inválidas via `safeDate()`: items sem data (ou inválidas) vão para o fim da lista em vez de quebrarem a ordenação com `NaN`. Agora as atividades mais recentes aparecem **sempre no topo**, sem necessidade de scroll.
+
+### Verificado (já estava correto)
+- **`UnifiedAuditTrail.js` (tab "Histórico" → "Filme da Lead")**: Já ordenava descendente por data (linha 297) — mantido sem alteração.
+- **`ProcessTimeline.js` (timeline visual de fases)**: Ordena ascendente intencionalmente, por representar a progressão esquerda→direita das fases do workflow — mantido sem alteração.
+
+### Técnico
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): linha 176 — adicionado `safeDate` ao import de `../lib/utils`; linhas 2857-2869 — substituído `[...activities].reverse()` por `.sort()` descendente robusto com comentário explicativo `PACOTE BH`.
+- **Validação**: `esbuild --loader=jsx` → 0 erros de sintaxe; confirmada exportação de `safeDate` em `lib/utils.js:101`; confirmado que nenhum teste e2e depende da ordem das atividades.
+
 ## [2026-06-29] — Pacote AE: Fix 500 no endpoint do Kanban
 
 ### Corrigido

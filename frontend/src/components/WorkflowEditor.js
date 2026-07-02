@@ -34,6 +34,10 @@ import {
   Eye,
   EyeOff,
   Globe,
+  Activity,
+  DollarSign,
+  Clock,
+  CalendarClock,
 } from "lucide-react";
 import {
   getWorkflowStatuses,
@@ -67,6 +71,13 @@ const WorkflowEditor = () => {
     description: "",
     portal_label: "",
     visible_in_portal: true,
+    // PACOTE BS — Dynamic Workflow Purpose Flags
+    // null = não configurado (fallback ativo no backend); true/false = configurado
+    is_active: null,
+    trigger_finance: null,
+    trigger_countdown: null,
+    trigger_property_check: null,
+    trigger_deed_reminder: null,
   });
 
   useEffect(() => {
@@ -102,6 +113,12 @@ const WorkflowEditor = () => {
         description: formData.description || undefined,
         portal_label: formData.portal_label || undefined,
         visible_in_portal: formData.visible_in_portal,
+        // PACOTE BS — Dynamic Workflow Purpose Flags
+        is_active: formData.is_active,
+        trigger_finance: formData.trigger_finance,
+        trigger_countdown: formData.trigger_countdown,
+        trigger_property_check: formData.trigger_property_check,
+        trigger_deed_reminder: formData.trigger_deed_reminder,
       });
       toast.success("Estado criado com sucesso");
       setIsCreateDialogOpen(false);
@@ -127,6 +144,12 @@ const WorkflowEditor = () => {
         description: formData.description || undefined,
         portal_label: formData.portal_label || null,
         visible_in_portal: formData.visible_in_portal,
+        // PACOTE BS — Dynamic Workflow Purpose Flags
+        is_active: formData.is_active,
+        trigger_finance: formData.trigger_finance,
+        trigger_countdown: formData.trigger_countdown,
+        trigger_property_check: formData.trigger_property_check,
+        trigger_deed_reminder: formData.trigger_deed_reminder,
       };
       await updateWorkflowStatus(selectedStatus.id, payload);
       toast.success("Estado atualizado com sucesso");
@@ -196,6 +219,12 @@ const WorkflowEditor = () => {
       description: status.description || "",
       portal_label: status.portal_label || "",
       visible_in_portal: status.visible_in_portal !== false,
+      // PACOTE BS — Dynamic Workflow Purpose Flags (lê do status existente; null = fallback)
+      is_active: status.is_active ?? null,
+      trigger_finance: status.trigger_finance ?? null,
+      trigger_countdown: status.trigger_countdown ?? null,
+      trigger_property_check: status.trigger_property_check ?? null,
+      trigger_deed_reminder: status.trigger_deed_reminder ?? null,
     });
     setIsEditDialogOpen(true);
   };
@@ -213,6 +242,12 @@ const WorkflowEditor = () => {
       description: "",
       portal_label: "",
       visible_in_portal: true,
+      // PACOTE BS — reset flags a null (fallback ativo)
+      is_active: null,
+      trigger_finance: null,
+      trigger_countdown: null,
+      trigger_property_check: null,
+      trigger_deed_reminder: null,
     });
     setSelectedStatus(null);
   };
@@ -221,6 +256,108 @@ const WorkflowEditor = () => {
     const option = statusColorOptions.find((c) => c.value === color);
     return option ? option.class : "bg-gray-500";
   };
+
+  // ====================================================================
+  // PACOTE BS — Automações e Gatilhos do Sistema
+  // ====================================================================
+  // Secção reutilizável com 4 Switches que controlam as flags de
+  // comportamento lidas pelo move_process_kanban (Pacote BR).
+  // Cada switch bounda uma propriedade do workflow_statuses:
+  //   is_active, trigger_finance, trigger_countdown, trigger_deed_reminder
+  // Nota: trigger_property_check não tem switch dedicado porque é derivado
+  // (no backend cobre ch_aprovado/fase_escritura/escritura_agendada) — mas
+  // está incluído no payload para configuração avançada via API se necessário.
+  // null = não configurado (fallback ativo); true/false = configurado pelo admin.
+  // ====================================================================
+  const renderAutomationTriggersSection = (prefix) => (
+    <div className="space-y-3 p-4 bg-gradient-to-br from-teal-50/50 to-emerald-50/30 dark:from-teal-950/20 dark:to-emerald-950/10 border border-teal-200/50 dark:border-teal-800/30 rounded-lg" data-testid={`${prefix}-automation-triggers`}>
+      <div className="flex items-center gap-2 pb-2 border-b border-teal-200/50 dark:border-teal-800/30">
+        <Workflow className="h-4 w-4 text-teal-600" />
+        <h4 className="text-sm font-semibold text-teal-800 dark:text-teal-300">
+          Automações e Gatilhos do Sistema
+        </h4>
+      </div>
+      <p className="text-xs text-muted-foreground -mt-1">
+        Configure o comportamento automático do processo nesta fase. Deixe desligado para usar o comportamento por defeito do sistema.
+      </p>
+
+      {/* is_active — Considerar processo Ativo nesta fase */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5 flex-1 min-w-0">
+          <Label htmlFor={`${prefix}-is-active`} className="text-sm font-medium flex items-center gap-1.5">
+            <Activity className="h-3.5 w-3.5 text-emerald-600" />
+            Considerar processo Ativo nesta fase
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Se desligado, o processo fica inativo (sai dos dashboards ativos e liberta slot do indexador)
+          </p>
+        </div>
+        <Switch
+          id={`${prefix}-is-active`}
+          checked={formData.is_active === true}
+          onCheckedChange={(checked) => setFormData({ ...formData, is_active: checked })}
+          data-testid={`${prefix}-switch-is-active`}
+        />
+      </div>
+
+      {/* trigger_finance — Disparar fecho financeiro e comissões */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5 flex-1 min-w-0">
+          <Label htmlFor={`${prefix}-trigger-finance`} className="text-sm font-medium flex items-center gap-1.5">
+            <DollarSign className="h-3.5 w-3.5 text-green-600" />
+            Disparar fecho financeiro e comissões
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Cria snapshot financeiro (ProcessFinance) ao entrar nesta fase
+          </p>
+        </div>
+        <Switch
+          id={`${prefix}-trigger-finance`}
+          checked={formData.trigger_finance === true}
+          onCheckedChange={(checked) => setFormData({ ...formData, trigger_finance: checked })}
+          data-testid={`${prefix}-switch-trigger-finance`}
+        />
+      </div>
+
+      {/* trigger_countdown — Iniciar contagem decrescente de 90 dias */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5 flex-1 min-w-0">
+          <Label htmlFor={`${prefix}-trigger-countdown`} className="text-sm font-medium flex items-center gap-1.5">
+            <Clock className="h-3.5 w-3.5 text-blue-600" />
+            Iniciar contagem decrescente de 90 dias
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Regista a data de aprovação bancária e inicia o countdown de 90 dias
+          </p>
+        </div>
+        <Switch
+          id={`${prefix}-trigger-countdown`}
+          checked={formData.trigger_countdown === true}
+          onCheckedChange={(checked) => setFormData({ ...formData, trigger_countdown: checked })}
+          data-testid={`${prefix}-switch-trigger-countdown`}
+        />
+      </div>
+
+      {/* trigger_deed_reminder — Ativar lembrete de agendamento de escritura */}
+      <div className="flex items-center justify-between gap-3">
+        <div className="space-y-0.5 flex-1 min-w-0">
+          <Label htmlFor={`${prefix}-trigger-deed-reminder`} className="text-sm font-medium flex items-center gap-1.5">
+            <CalendarClock className="h-3.5 w-3.5 text-purple-600" />
+            Ativar lembrete de agendamento de escritura
+          </Label>
+          <p className="text-xs text-muted-foreground">
+            Cria lembrete automático 15 dias antes da data da escritura (requer data definida)
+          </p>
+        </div>
+        <Switch
+          id={`${prefix}-trigger-deed-reminder`}
+          checked={formData.trigger_deed_reminder === true}
+          onCheckedChange={(checked) => setFormData({ ...formData, trigger_deed_reminder: checked })}
+          data-testid={`${prefix}-switch-trigger-deed-reminder`}
+        />
+      </div>
+    </div>
+  );
 
   if (loading) {
     return (
@@ -444,6 +581,8 @@ const WorkflowEditor = () => {
                 onCheckedChange={(checked) => setFormData({ ...formData, visible_in_portal: checked })}
               />
             </div>
+            {/* PACOTE BS — Automações e Gatilhos do Sistema (Criar) */}
+            {renderAutomationTriggersSection("create")}
             <DialogFooter>
               <Button
                 type="button"
@@ -560,6 +699,8 @@ const WorkflowEditor = () => {
                 onCheckedChange={(checked) => setFormData({ ...formData, visible_in_portal: checked })}
               />
             </div>
+            {/* PACOTE BS — Automações e Gatilhos do Sistema (Editar) */}
+            {renderAutomationTriggersSection("edit")}
             <DialogFooter>
               <Button
                 type="button"
