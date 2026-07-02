@@ -1798,3 +1798,29 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/routes/processes.py` (3 blocos: create-client, PUT update_process, remove-client).
 - Resultado: quando um 2º titular é associado a um processo (seja na criação, no PUT, ou via add-client), o seu `process_ids` é atualizado com `$addToSet` e o `client_ids` do processo inclui o seu ID. Isto garante que as listagens globais que confiam em `client.process_ids` ou `{"client_ids": cliente_id}` apanham processos em que o cliente é 1º OU 2º titular. Quando o 2º titular é removido (PUT com null/empty OU remove-client), o `process_ids` é limpo com `$pull` e o `second_client_id` do processo é limpo para consistência. O `add-client` já fazia a sincronização correta — sem alteração. O `get_client` já procurava por `second_client_id` diretamente — sem alteração.
+
+
+---
+Task ID: Pacote BQ (Acesso Global para a Role de Indexação)
+Agent: Main Agent (Code Assistant)
+Task: Indexacao vê globalmente no Kanban mas scoped a atribuídos + fila_espera
+
+Work Log:
+- Análise do estado atual: o frontend (useKanbanQuery.js linha 30) envia SEMPRE `show_all=true`. No backend, com `show_all=true`, não há base filter — todos os roles (incl. indexacao) viam literalmente todos os processos. O indexacao via processos não relevantes para o seu trabalho (ex: processos de outros consultores já atribuídos a outros indexadores).
+- Análise do pedido: indexacao deve ver "globalmente" (across all consultors/mediadores, como admin) MAS scoped a: (a) processos atribuídos a si (assigned_indexacao_id == user_id) OU (b) processos na fila de espera para indexação (status == "fila_espera"). Este scope aplica-se SEMPRE (independentemente de show_all).
+- Backend — 3 endpoints atualizados:
+  1. GET /kanban (processes.py ~linha 2108): adicionado bloco PACOTE BQ que aplica o scope para indexacao ANTES do `elif not show_all`. Como o scope é um `if role == UserRole.INDEXACAO` (não `elif`), aplica-se sempre, mesmo com show_all=true. O scope usa `$or: [assigned_indexacao_id == user_id, status == fila_espera]`.
+  2. GET /processes (processes.py ~linha 1481): adicionado `{"status": "fila_espera"}` ao `$or` do indexacao (que já tinha assigned_indexacao_id + created_by). Para consistência com o kanban.
+  3. GET /processes/paginated (processes.py ~linha 1807): mesma alteração que GET /processes.
+- Frontend — KanbanPage.js:
+  1. Verificação: os 5 filtros (Consultor, Intermediário, Indexação, Parceiro, Estado de Indexação) já são renderizados incondicionalmente para todos os roles (linhas 233-289). Indexacao já vê todos os botões de filtro. ✓
+  2. Verificação: ProcessesPage `canMarkIndexed` já inclui indexacao (linha 113), pelo que o "Filtro de Estado de Indexação" já aparece para indexacao. ✓
+  3. Verificação: `indexStatusFilter` default é 'pending' para indexacao (linha 105) — mostra apenas não-indexados por defeito. ✓
+  4. Adicionado indicador visual (badge teal) no KanbanPage para indexacao: "Vista Indexação (atribuídos + fila de espera)" — comunica ao utilizador que está numa vista scoped. `data-testid="kanban-indexacao-scoped-badge"` para testes.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/processes.py` (3 endpoints: kanban, /processes, /paginated — indexacao scope com assigned + fila_espera)
+  - `frontend/src/pages/KanbanPage.js` (badge visual para indexacao indicando vista scoped)
+- Resultado: a role indexacao vê agora globalmente no Kanban (across all consultors/mediadores) mas apenas os processos relevantes para o seu trabalho: atribuídos a si OU na fila de espera. O scope aplica-se sempre (independentemente de show_all=true enviado pelo frontend). Os botões de filtro (Consultor, Intermediário, Indexação, Parceiro, Estado de Indexação) já apareciam para indexacao e continuam a aparecer — agora filtram DENTRO do scope. Um badge visual comunica a vista scoped. Os endpoints de listagem (GET /processes, GET /paginated) também incluem fila_espera no scope do indexacao para consistência.

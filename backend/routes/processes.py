@@ -1479,9 +1479,12 @@ async def get_processes(
     elif role == UserRole.CLIENTE:
         and_conditions.append({"client_id": user["id"]})
     elif role == UserRole.INDEXACAO:
+        # PACOTE BQ — indexacao vê globalmente (across all consultors/mediadores)
+        # mas scoped a: atribuídos a si OU criados por si OU na fila de espera.
         and_conditions.append({"$or": [
             {"assigned_indexacao_id": user["id"]},
-            {"created_by": user.get("email", "")}
+            {"created_by": user.get("email", "")},
+            {"status": "fila_espera"},
         ]})
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         pass  # Vêem todos
@@ -1802,9 +1805,11 @@ async def get_processes_paginated(
     if role == UserRole.CLIENTE:
         and_conditions.append({"client_id": user["id"]})
     elif role == UserRole.INDEXACAO:
+        # PACOTE BQ — indexacao vê globalmente mas scoped a: atribuídos + criados + fila_espera
         and_conditions.append({"$or": [
             {"assigned_indexacao_id": user["id"]},
-            {"created_by": user.get("email", "")}
+            {"created_by": user.get("email", "")},
+            {"status": "fila_espera"},
         ]})
     elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
         pass
@@ -2095,7 +2100,26 @@ async def get_kanban_board(
     
     # Filter by role (base visibility) - suporte a múltiplos
     # Se show_all=True (visão global), ignorar filtro por utilizador
-    if not show_all:
+    #
+    # PACOTE BQ — ACESSO GLOBAL PARA A ROLE DE INDEXAÇÃO:
+    # A role indexacao tem permissão para ver processos globalmente no Kanban
+    # (across all consultors/mediadores, como se fosse admin), MAS o âmbito é
+    # restrito aos processos relevantes para o seu trabalho:
+    #   (a) Processos que lhes estão atribuídos (assigned_indexacao_id == user_id)
+    #   (b) Processos na fila de espera para indexação (status == "fila_espera")
+    # Este scope aplica-se SEMPRE (independentemente de show_all) porque é o
+    # âmbito natural de trabalho da Indexação. Sem isto, indexacao via literalmente
+    # todos os processos do sistema (incluindo os não relevantes para indexação).
+    if role == UserRole.INDEXACAO:
+        query["$or"] = [
+            {"assigned_indexacao_id": user_id},
+            {"status": "fila_espera"},
+        ]
+        logger.info(
+            f"[KANBAN-BQ] Indexacao {user_id} — vista scoped global: "
+            f"atribuídos a si OU em fila_espera"
+        )
+    elif not show_all:
         if role == UserRole.CONSULTOR:
             query["$or"] = [
                 {"assigned_consultor_ids": user_id},
@@ -2106,7 +2130,7 @@ async def get_kanban_board(
                 {"assigned_mediador_ids": user_id},
                 {"assigned_mediador_id": user_id}
             ]
-        # Admin, CEO, Administrativo, Diretor, Indexação see all (no base filter)
+        # Admin, CEO, Administrativo, Diretor see all (no base filter)
 
     # Apply additional filters for ALL staff roles
     # Consultor/Mediador filters within their assigned processes; others filter globally

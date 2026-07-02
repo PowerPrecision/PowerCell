@@ -3,6 +3,32 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BQ: Acesso Global para a Role de Indexação
+
+### Corrigido
+- **Indexacao via literalmente todos os processos no Kanban**: O frontend envia sempre `show_all=true`, e o backend com `show_all=true` não aplicava base filter — indexacao via processos não relevantes para o seu trabalho (ex: processos de outros consultores já atribuídos a outros indexadores). Agora indexacao vê globalmente (across all consultors/mediadores) mas scoped a: (a) processos atribuídos a si (`assigned_indexacao_id == user_id`) OU (b) processos na fila de espera (`status == "fila_espera"`).
+
+### Backend (`backend/routes/processes.py`)
+- **`GET /kanban`**: Adicionado bloco PACOTE BQ que aplica o scope para indexacao ANTES do `elif not show_all`. Como é um `if role == UserRole.INDEXACAO` (não `elif`), o scope aplica-se sempre, mesmo com `show_all=true`. Scope: `$or: [assigned_indexacao_id == user_id, status == "fila_espera"]`.
+- **`GET /processes`**: Adicionado `{"status": "fila_espera"}` ao `$or` do indexacao (que já tinha `assigned_indexacao_id` + `created_by`). Para consistência com o kanban.
+- **`GET /processes/paginated`**: Mesma alteração que `GET /processes`.
+
+### Frontend (`frontend/src/pages/KanbanPage.js`)
+- **Verificação**: Os 5 filtros (Consultor, Intermediário, Indexação, Parceiro, Estado de Indexação) já eram renderizados incondicionalmente para todos os roles. Indexacao já via todos os botões de filtro. ✓
+- **Verificação**: ProcessesPage `canMarkIndexed` já inclui indexacao, pelo que o "Filtro de Estado de Indexação" já aparecia. ✓
+- **Verificação**: `indexStatusFilter` default é 'pending' para indexacao — mostra apenas não-indexados por defeito. ✓
+- **Adicionado**: Badge visual teal no KanbanPage para indexacao: "Vista Indexação (atribuídos + fila de espera)" — comunica ao utilizador que está numa vista scoped. `data-testid="kanban-indexacao-scoped-badge"`.
+
+### Decisão de Arquitetura
+- **Scope sempre aplicado para indexacao**: O scope (atribuídos + fila_espera) aplica-se sempre, independentemente de `show_all`. Isto porque é o âmbito natural de trabalho da Indexação — não faz sentido indexacao ver processos de outros indexadores ou processos já atribuídos a outros. O `show_all` continua a funcionar para consultores/intermediarios (toggle entre vista pessoal e global).
+- **Consistência entre Kanban e listagens**: O scope foi aplicado aos 3 endpoints de listagem (kanban, /processes, /paginated) para que indexacao encontre os mesmos processos em qualquer vista.
+- **Filtros funcionam dentro do scope**: Os botões de filtro (Consultor, Intermediário, etc.) agora filtram DENTRO do scope do indexacao. Ex: indexacao pode filtrar por um consultor específico para ver apenas os processos desse consultor que estão atribuídos a si ou na fila.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): kanban scope (linhas 2098-2116); GET /processes scope (linhas 1481-1488); GET /paginated scope (linhas 1807-1813).
+- **Frontend** (`frontend/src/pages/KanbanPage.js`): badge visual para indexacao (linhas 221-229).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BP: Fix Visibilidade do 2º Titular nas Listas
 
 ### Corrigido
