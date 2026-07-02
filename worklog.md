@@ -1537,3 +1537,23 @@ Work Log:
 Stage Summary:
 - 1 ficheiro: frontend/src/pages/WebmailPage.jsx.
 - Resultado: payload do email envia null para campos vazios em vez de "" ou [], alinhando com o modelo Pydantic Optional.
+
+
+---
+Task ID: Pacote BH (Ordenação do Histórico)
+Agent: Main Agent (Code Assistant)
+Task: Ordenar histórico/atividades por mais recentes primeiro no detalhe do processo
+
+Work Log:
+- Análise de 3 componentes que renderizam histórico/timeline no detalhe do processo:
+  1. `UnifiedAuditTrail.js` (tab "Histórico" → "Filme da Lead"): JÁ ordenava descendente (linha 297) — sem alteração.
+  2. `ProcessTimeline.js` (timeline visual de fases, esquerda→direita): ordena ascendente — CORRETO, não mexer (é uma timeline de fases, não um feed).
+  3. `ProcessDetails.js` secção "Atividades Recentes" (linha 2857): usava `[...activities].reverse()` — FRÁGIL, apenas invertia o array tal como vinha do backend sem ordenar por data.
+- Bug corrigido: substituído `.reverse()` por `.sort()` descendente por `created_at` (fallback `timestamp`), com tratamento defensivo de datas inválidas via `safeDate()` (items sem data vão para o fim). Padrão consistente com `ProcessTimeline.js` (linhas 175-182) e `UnifiedAuditTrail.js` (linha 297).
+- Adicionado `safeDate` ao import de `../lib/utils` no `ProcessDetails.js` (linha 176) — antes só importava `safeDateStr, safeParseISO, safeFormat`.
+- Validação: `esbuild --loader=jsx` → 0 erros de sintaxe. Confirmado que `safeDate` está exportado de `lib/utils.js` (linha 101). Confirmado que não há testes e2e dependentes da ordem das atividades.
+
+Stage Summary:
+- 1 ficheiro modificado: `frontend/src/pages/ProcessDetails.js` (import de `safeDate` + reescrita da ordenação na secção "Atividades Recentes").
+- Resultado: as atividades mais recentes aparecem agora sempre no topo do cartão "Atividades Recentes", ordenadas por `created_at` de forma descendente e robusta (independente da ordem que vier do backend). O "Filme da Lead" (UnifiedAuditTrail) já estava correto e mantém-se.
+- Nota: a `ProcessTimeline` (timeline visual de fases) mantém ordenação ascendente intencionalmente, por representar a progressão esquerda→direita das fases do workflow.

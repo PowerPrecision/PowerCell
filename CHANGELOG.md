@@ -3,6 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BH: Ordenação do Histórico (Mais Recentes Primeiro)
+
+### Corrigido
+- **Atividades Recentes não ordenadas por data no Detalhe do Processo (UX)**: O cartão "Atividades Recentes" do `ProcessDetails.js` usava `[...activities].reverse()` que apenas inverte a ordem do array tal como vinha do backend — frágil e incorreto caso a ordem de origem mudasse. Substituído por `.sort()` descendente por `created_at` (fallback `timestamp`), com tratamento defensivo de datas inválidas via `safeDate()`: items sem data (ou inválidas) vão para o fim da lista em vez de quebrarem a ordenação com `NaN`. Agora as atividades mais recentes aparecem **sempre no topo**, sem necessidade de scroll.
+
+### Verificado (já estava correto)
+- **`UnifiedAuditTrail.js` (tab "Histórico" → "Filme da Lead")**: Já ordenava descendente por data (linha 297) — mantido sem alteração.
+- **`ProcessTimeline.js` (timeline visual de fases)**: Ordena ascendente intencionalmente, por representar a progressão esquerda→direita das fases do workflow — mantido sem alteração.
+
+### Técnico
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): linha 176 — adicionado `safeDate` ao import de `../lib/utils`; linhas 2857-2869 — substituído `[...activities].reverse()` por `.sort()` descendente robusto com comentário explicativo `PACOTE BH`.
+- **Validação**: `esbuild --loader=jsx` → 0 erros de sintaxe; confirmada exportação de `safeDate` em `lib/utils.js:101`; confirmado que nenhum teste e2e depende da ordem das atividades.
+
 ## [2026-06-29] — Pacote AE: Fix 500 no endpoint do Kanban
 
 ### Corrigido
