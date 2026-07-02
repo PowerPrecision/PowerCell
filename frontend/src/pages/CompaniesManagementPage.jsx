@@ -56,6 +56,11 @@ const EMPTY_FORM = {
   email_sync_enabled: false,
   logo_url: null,
   total_users: 0,
+  // PACOTE BF: campos de email config unificados no form
+  imap_server: "",
+  imap_port: 993,
+  smtp_server: "",
+  smtp_port: 465,
 };
 
 const CompaniesManagementPage = ({ embedded = false }) => {
@@ -69,9 +74,7 @@ const CompaniesManagementPage = ({ embedded = false }) => {
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
-  // PACOTE AS: config IMAP/SMTP da empresa
-  const [emailConfig, setEmailConfig] = useState({ imap_server: '', imap_port: 993, smtp_server: '', smtp_port: 465 });
-  const [emailConfigLoading, setEmailConfigLoading] = useState(false);
+  // PACOTE BF: config IMAP/SMTP unificada no form (estados de loading removidos)
   const [emailConfigSaving, setEmailConfigSaving] = useState(false);
 
   const fileInputRef = useRef(null);
@@ -129,7 +132,15 @@ const CompaniesManagementPage = ({ embedded = false }) => {
       email_sync_enabled: company.email_sync_enabled ?? false,
       logo_url: company.logo_url || null,
       total_users: company.total_users ?? 0,
+      imap_server: "",
+      imap_port: 993,
+      smtp_server: "",
+      smtp_port: 465,
     });
+    // PACOTE BF: carregar config de email em paralelo
+    if (company.email_sync_enabled && company.name) {
+      fetchEmailConfig(company.name);
+    }
   };
 
   // ── New company ────────────────────────────────────────────────
@@ -145,6 +156,7 @@ const CompaniesManagementPage = ({ embedded = false }) => {
   };
 
   // ── Save (create or update) ────────────────────────────────────
+  // PACOTE BF: guarda empresa + config de email em paralelo (Promise.all)
   const handleSave = async () => {
     if (!form.name.trim()) {
       toast.error("O nome da empresa é obrigatório.");
@@ -163,25 +175,38 @@ const CompaniesManagementPage = ({ embedded = false }) => {
         email_sync_enabled: form.email_sync_enabled,
       };
 
+      // Promise array: company save + email config save (se sync ativado)
+      const promises = [];
+
       if (isCreating) {
-        const res = await createCompany(payload);
-        const newCompany = res.data?.data ?? res.data;
-        toast.success(`Empresa "${newCompany.name}" criada com sucesso.`);
-        setIsCreating(false);
-        setSelectedId(newCompany.id);
-        setForm((prev) => ({
-          ...prev,
-          ...newCompany,
-        }));
+        promises.push(createCompany(payload));
       } else {
-        const res = await updateCompany(selectedId, payload);
-        const updated = res.data?.data ?? res.data;
-        toast.success("Empresa atualizada com sucesso.");
-        setForm((prev) => ({
-          ...prev,
-          ...updated,
+        promises.push(updateCompany(selectedId, payload));
+      }
+
+      // Se sync ativado e tem smtp_server, guardar config de email
+      if (form.email_sync_enabled && form.smtp_server && form.name) {
+        promises.push(upsertCompanyEmailConfig({
+          company_name: form.name,
+          imap_server: form.imap_server || "",
+          imap_port: parseInt(form.imap_port) || 993,
+          smtp_server: form.smtp_server,
+          smtp_port: parseInt(form.smtp_port) || 465,
         }));
       }
+
+      const results = await Promise.all(promises);
+      const companyResult = results[0];
+      const savedCompany = companyResult.data?.data ?? companyResult.data;
+
+      if (isCreating) {
+        toast.success(`Empresa "${savedCompany.name}" criada com sucesso.`);
+        setIsCreating(false);
+        setSelectedId(savedCompany.id);
+      } else {
+        toast.success("Empresa atualizada com sucesso.");
+      }
+      setForm((prev) => ({ ...prev, ...savedCompany }));
       fetchCompanies(search);
     } catch (err) {
       console.error("Erro ao guardar empresa:", err);
@@ -253,16 +278,11 @@ const CompaniesManagementPage = ({ embedded = false }) => {
   // ── Email sync toggle ──────────────────────────────────────────
   const handleEmailSyncToggle = async (checked) => {
     updateField("email_sync_enabled", checked);
-
     if (!isCreating && selectedId) {
       try {
         await updateCompany(selectedId, { email_sync_enabled: checked });
         toast.success(checked ? "Sincronização de e-mail ativada." : "Sincronização de e-mail desativada.");
         fetchCompanies(search);
-        // Se ativou, carregar config de email existente
-        if (checked && selectedCompany?.name) {
-          fetchEmailConfig(selectedCompany.name);
-        }
       } catch (err) {
         console.error("Erro ao atualizar sincronização de e-mail:", err);
         toast.error("Erro ao atualizar a sincronização de e-mail.");
@@ -271,56 +291,27 @@ const CompaniesManagementPage = ({ embedded = false }) => {
     }
   };
 
-  // ── Fetch email config (IMAP/SMTP) ───────────────────────────
+  // ── Fetch email config (IMAP/SMTP) — preenche o form ────────
   const fetchEmailConfig = useCallback(async (companyName) => {
-    setEmailConfigLoading(true);
     try {
       const res = await getCompanyEmailConfig(companyName);
       const cfg = res.data?.data ?? res.data;
-      if (cfg && cfg.imap_server) {
-        setEmailConfig({
-          imap_server: cfg.imap_server || '',
+      if (cfg) {
+        setForm(prev => ({
+          ...prev,
+          imap_server: cfg.imap_server || "",
           imap_port: cfg.imap_port || 993,
-          smtp_server: cfg.smtp_server || '',
+          smtp_server: cfg.smtp_server || "",
           smtp_port: cfg.smtp_port || 465,
-        });
+        }));
       }
     } catch (err) {
       // 404 = sem config, normal
       if (err?.response?.status !== 404) {
         console.error("Erro ao carregar config de email:", err);
       }
-    } finally {
-      setEmailConfigLoading(false);
     }
   }, []);
-
-  // ── Save email config (IMAP/SMTP) ────────────────────────────
-  const handleSaveEmailConfig = async () => {
-    if (!selectedCompany?.name) return;
-    setEmailConfigSaving(true);
-    try {
-      await upsertCompanyEmailConfig({
-        company_name: selectedCompany.name,
-        imap_server: emailConfig.imap_server,
-        imap_port: parseInt(emailConfig.imap_port) || 993,
-        smtp_server: emailConfig.smtp_server,
-        smtp_port: parseInt(emailConfig.smtp_port) || 465,
-      });
-      toast.success("Configuração de email (IMAP/SMTP) guardada.");
-    } catch (err) {
-      toast.error(err?.response?.data?.detail || "Erro ao guardar configuração.");
-    } finally {
-      setEmailConfigSaving(false);
-    }
-  };
-
-  // ── Carregar config de email quando seleciona empresa ────────
-  useEffect(() => {
-    if (selectedCompany?.name && form.email_sync_enabled) {
-      fetchEmailConfig(selectedCompany.name);
-    }
-  }, [selectedId, form.email_sync_enabled, fetchEmailConfig, selectedCompany]);
 
   // ── Selected company (derived) ─────────────────────────────────
   // Guard defensivo: se companies não for array (edge case), usar [] para
@@ -577,71 +568,53 @@ const CompaniesManagementPage = ({ embedded = false }) => {
                   />
                 </div>
 
-                {/* PACOTE AS: Campos IMAP/SMTP visíveis quando sync ativo */}
-                {form.email_sync_enabled && !isCreating && (
+                {/* PACOTE BF: Campos IMAP/SMTP unificados no form, visíveis quando sync ativo */}
+                {form.email_sync_enabled && (
                   <div className="mt-4 space-y-3 rounded-lg border border-amber-200 dark:border-amber-900 p-4 bg-amber-50/30 dark:bg-amber-950/10">
                     <p className="text-xs font-medium text-amber-700 dark:text-amber-400">
                       Configuração de Servidores (IMAP/SMTP)
                     </p>
                     <p className="text-[11px] text-muted-foreground">
-                      Estes servidores são usados como padrão para os utilizadores desta empresa que não tenham configuração individual.
+                      Estes servidores são usados como padrão para os utilizadores desta empresa que não tenham configuração individual. Guardados juntamente com a empresa.
                     </p>
-                    {emailConfigLoading ? (
-                      <p className="text-xs text-muted-foreground italic">A carregar configuração...</p>
-                    ) : (
-                      <div className="grid grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted-foreground">Servidor IMAP</label>
-                          <Input
-                            value={emailConfig.imap_server}
-                            onChange={(e) => setEmailConfig(prev => ({ ...prev, imap_server: e.target.value }))}
-                            placeholder="imap.exemplo.pt"
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted-foreground">Porta IMAP</label>
-                          <Input
-                            type="number"
-                            value={emailConfig.imap_port}
-                            onChange={(e) => setEmailConfig(prev => ({ ...prev, imap_port: e.target.value }))}
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted-foreground">Servidor SMTP</label>
-                          <Input
-                            value={emailConfig.smtp_server}
-                            onChange={(e) => setEmailConfig(prev => ({ ...prev, smtp_server: e.target.value }))}
-                            placeholder="smtp.exemplo.pt"
-                            className="h-8 text-sm"
-                          />
-                        </div>
-                        <div className="space-y-1">
-                          <label className="text-xs text-muted-foreground">Porta SMTP</label>
-                          <Input
-                            type="number"
-                            value={emailConfig.smtp_port}
-                            onChange={(e) => setEmailConfig(prev => ({ ...prev, smtp_port: e.target.value }))}
-                            className="h-8 text-sm"
-                          />
-                        </div>
+                    <div className="grid grid-cols-2 gap-3">
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Servidor IMAP</label>
+                        <Input
+                          value={form.imap_server}
+                          onChange={(e) => updateField("imap_server", e.target.value)}
+                          placeholder="imap.exemplo.pt"
+                          className="h-8 text-sm"
+                        />
                       </div>
-                    )}
-                    <Button
-                      size="sm"
-                      variant="outline"
-                      onClick={handleSaveEmailConfig}
-                      disabled={emailConfigSaving}
-                      className="gap-1.5 mt-2"
-                    >
-                      {emailConfigSaving ? (
-                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                      ) : (
-                        <Save className="h-3.5 w-3.5" />
-                      )}
-                      Guardar Servidores
-                    </Button>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Porta IMAP</label>
+                        <Input
+                          type="number"
+                          value={form.imap_port}
+                          onChange={(e) => updateField("imap_port", e.target.value)}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Servidor SMTP</label>
+                        <Input
+                          value={form.smtp_server}
+                          onChange={(e) => updateField("smtp_server", e.target.value)}
+                          placeholder="smtp.exemplo.pt"
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                      <div className="space-y-1">
+                        <label className="text-xs text-muted-foreground">Porta SMTP</label>
+                        <Input
+                          type="number"
+                          value={form.smtp_port}
+                          onChange={(e) => updateField("smtp_port", e.target.value)}
+                          className="h-8 text-sm"
+                        />
+                      </div>
+                    </div>
                   </div>
                 )}
               </div>
