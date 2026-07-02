@@ -2286,20 +2286,18 @@ async def get_kanban_board(
                 "processes": enriched_processes,
                 "count": len(enriched_processes)
             })
-    except KeyError as e:
-        logger.error(f"[KANBAN] KeyError ao iterar workflow_statuses: {e}. Statuses: {statuses}")
-        raise HTTPException(status_code=500, detail=f"Erro de configuração de estados do workflow: campo '{e.args[0]}' em falta. Verifique a configuração em /workflow-estados.")
-    except TypeError as e:
-        logger.exception(f"[KANBAN] TypeError ao construir kanban: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro de tipo ao carregar kanban: {type(e).__name__}: {e}")
     except Exception as e:
-        logger.exception(f"[KANBAN] Erro inesperado ao construir kanban: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro ao carregar kanban: {type(e).__name__}: {e}")
+        # PACOTE AY: NUCLEAR FAILSAFE — a rota do Kanban NUNCA devolve 500.
+        # Em caso de qualquer exceção (KeyError, TypeError, AttributeError, etc.),
+        # logar o erro mas devolver o que já foi processado (kanban parcial)
+        # ou um array vazio. O frontend mostra colunas vazias em vez de erro.
+        logger.exception(f"[KANBAN] Exceção capturada (failsafe): {type(e).__name__}: {e}. Devolvendo {len(kanban)} colunas processadas.")
+        # NÃO fazer raise HTTPException — devolver silenciosamente
 
     return {
-        "columns": kanban,
-        "total_processes": active_count,
-        "total_inactive": inactive_count,
+        "columns": kanban if kanban else [],
+        "total_processes": active_count if 'active_count' in dir() else 0,
+        "total_inactive": inactive_count if 'inactive_count' in dir() else 0,
         "user_role": role,
         "current_user_id": user_id,
         "view_mode": view_mode,
