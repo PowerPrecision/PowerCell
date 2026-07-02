@@ -3,6 +3,28 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BT: Fix Process List (Badges, Active Filter, Real Notes)
+
+### Corrigido
+- **Bolinhas de Notificação não apareciam**: As badges `has_unread_messages` (azul) e `has_new_documents` (verde) não estavam a renderizar na tabela de processos. Causa: as flags podiam chegar como `undefined` (em vez de `false`) quando o backend não as injetava, causando comportamento inesperado na verificação. Corrigido com coerção booleana explícita `Boolean()` no componente `NotificationDots`.
+
+- **Filtro Inativos não funcionava**: Os processos inativos apareciam mesmo com o filtro 'Ativos' ligado. Causa: `fetchData` passava sempre `view_mode='all'` em vez de `'active_only'`. Corrigido com `view_mode` dinâmico conforme o `filterType`: `'active_only'` para filtros de processos em curso; `'historical'` para `concluded`/`dropped`. O backend já respeita `view_mode=active_only` (exclui `INACTIVE_STATUSES`).
+
+- **Notas não liam dados corretos**: A coluna de notas lia `process.notes` (campo direto do processo), não a última nota real do histórico/atividades. Corrigido: o backend agora projeta a última atividade/comentário da coleção `activities` para o campo `latest_note` (batch enrichment com aggregation `$match + $sort + $group`); o frontend lê `latest_note` com fallback para `process.notes`.
+
+### Backend (`backend/routes/processes.py`)
+- **`GET /processes`**: Adicionado batch enrichment `latest_note` (linhas 1733-1770). Após paginação, aggregation na coleção `activities` busca o comentário mais recente de cada processo (`$match` por `process_id` + `comment` não vazio; `$sort` por `created_at` descendente; `$group` com `$first`). Injeta `latest_note`, `latest_note_at`, `latest_note_by` em cada processo.
+
+### Frontend (`frontend/src/pages/FilteredProcessList.js`)
+- **`NotificationDots`**: Coerção booleana explícita `Boolean(hasUnreadMessages)` / `Boolean(hasNewDocuments)` — `undefined`/`null`/`0`/`""` são tratados como `false` de forma determinística.
+- **`fetchData`**: `view_mode` dinâmico — `HISTORICAL_FILTERS = ["concluded", "dropped"]` → `'historical'`; todos os outros filtros → `'active_only'`. Antes era sempre `'all'`.
+- **Coluna "Notas do Consultor"**: Lê `process.latest_note || process.notes || ""` (IIFE para lógica limpa). Fallback para `process.notes` mantém retrocompatibilidade.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): batch enrichment `latest_note` no `GET /processes` (linhas 1733-1770).
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): `NotificationDots` com `Boolean()` (linhas 38-41); `fetchData` com `view_mode` dinâmico (linhas 158-165); coluna notas lê `latest_note` (linhas 518-534).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BS: Workflow Status Rules UI (Frontend)
 
 ### Adicionado

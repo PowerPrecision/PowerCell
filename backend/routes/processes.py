@@ -1730,6 +1730,45 @@ async def get_processes(
             p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
             p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
 
+    # ====================================================================
+    # PACOTE BT (Fix 3): BATCH ENRIQUECIMENTO — latest_note
+    # Projeta a ÚLTIMA nota real inserida no histórico/atividades do processo
+    # para dentro do campo latest_note. O frontend (FilteredProcessList) lê
+    # este campo para a coluna "Notas do Consultor" (com fallback para
+    # process.notes para retrocompatibilidade).
+    #
+    # Procura na coleção activities (comentários do staff) o comentário mais
+    # recente de cada processo. Usa aggregation com $match + $sort + $group
+    # para obter o último por created_at.
+    # ====================================================================
+    if processes:
+        _bt_process_ids = [p["id"] for p in processes if p.get("id")]
+        _bt_latest_notes = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bt_process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "latest_note": {"$first": "$comment"},
+                "latest_note_at": {"$first": "$created_at"},
+                "latest_note_by": {"$first": "$user_name"},
+            }}
+        ]).to_list(1000)
+        _bt_notes_map = {r["_id"]: r for r in _bt_latest_notes}
+
+        for p in processes:
+            note_info = _bt_notes_map.get(p.get("id"))
+            if note_info:
+                p["latest_note"] = note_info.get("latest_note")
+                p["latest_note_at"] = note_info.get("latest_note_at")
+                p["latest_note_by"] = note_info.get("latest_note_by")
+            else:
+                p["latest_note"] = None
+                p["latest_note_at"] = None
+                p["latest_note_by"] = None
+
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
     

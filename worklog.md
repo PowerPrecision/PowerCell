@@ -1894,3 +1894,30 @@ Stage Summary:
   - `backend/routes/admin.py` (persistir flags em create_workflow_status + update_workflow_status)
   - `frontend/src/components/WorkflowEditor.js` (formData + payload + openEditDialog + resetForm + renderAutomationTriggersSection com 4 Switches + imports)
 - Resultado: o admin pode agora configurar visualmente as flags de comportamento de cada fase do workflow no WorkflowEditor. As 4 switches (is_active, trigger_finance, trigger_countdown, trigger_deed_reminder) aparecem numa secção "Automações e Gatilhos do Sistema" em ambos os Diálogos (Criar e Editar). Os valores são enviados no payload POST/PUT e persistidos na coleção workflow_statuses. O move_process_kanban (Pacote BR) lê estas flags dinamicamente — quando configuradas (não-null), o fallback hardcoded deixa de ser usado. Completa o circuito iniciado no Pacote BR: agora o admin tem controlo total sobre as automações sem alterar código.
+
+
+---
+Task ID: Pacote BT (Fix Process List — Badges, Active Filter, Real Notes)
+Agent: Main Agent (Code Assistant)
+Task: Affinar listagem de processos (FilteredProcessList + backend)
+
+Work Log:
+- Análise do FilteredProcessList.js:
+  - Fix 1 (Badges): o componente NotificationDots (Pacote BI) JÁ existia e era renderizado na célula do nome (linha 436-439). O problema era que as flags has_unread_messages/has_new_documents podiam chegar como undefined (em vez de false) quando o backend não as injetava, causando comportamento inesperado na verificação !hasUnreadMessages && !hasNewDocuments.
+  - Fix 2 (Filtro Inativos): fetchData passava SEMPRE view_mode='all' (linha 159), o que fazia aparecer processos inativos mesmo com o filtro 'Ativos' ligado. O backend respeita view_mode=active_only (exclui concluídos/desistências/eliminados), mas o frontend não estava a passá-lo.
+  - Fix 3 (Notas): a coluna de notas lia process.notes (campo direto do processo, Pacote BE), não a última nota real do histórico/atividades.
+- Análise do backend (GET /processes): já injetava has_unread_messages/has_new_documents (Pacote BI, linhas 1700-1731). PROCESS_LIST_PROJECTION já inclui notes (linha 872). Mas não projetava a última atividade/comentário do histórico.
+- Fix 1 (Frontend — NotificationDots robusto): adicionada coerção booleana explícita com Boolean() no componente NotificationDots. Agora undefined/null/0/"" são tratados como false de forma determinística. As bolinhas (w-2.5 h-2.5 rounded-full bg-blue-500/bg-emerald-500 com animate-ping) continuam a ser renderizadas junto ao nome do cliente quando has_unread_messages=true (azul) ou has_new_documents=true (verde).
+- Fix 2 (Frontend — view_mode dinâmico): fetchData agora calcula viewMode conforme o filterType:
+  - 'concluded', 'dropped' → view_mode='historical' (apenas arquivados)
+  - todos os outros ('active', 'indexacao', 'no_indexacao', 'waiting', 'waiting_long', 'pending_deadlines') → view_mode='active_only' (exclui terminais)
+  Antes era sempre 'all'. O backend já respeita view_mode=active_only (INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]).
+- Fix 3 (Backend — latest_note): adicionado batch enrichment no GET /processes que projeta a ÚLTIMA nota real da coleção activities (comentários do staff) para dentro do campo latest_note. Usa aggregation $match (process_id in [...], comment exists e não vazio) + $sort (created_at -1) + $group ($first para obter o último). Injeta latest_note, latest_note_at, latest_note_by em cada processo. Executado após paginação (eficiência — só busca notas dos processos visíveis).
+- Fix 3 (Frontend — ler latest_note): coluna "Notas do Consultor" agora lê process.latest_note (com fallback para process.notes para retrocompatibilidade). IIFE para lógica limpa.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/processes.py` (batch enrichment latest_note no GET /processes, linhas 1733-1770)
+  - `frontend/src/pages/FilteredProcessList.js` (NotificationDots com Boolean() coercion; fetchData com view_mode dinâmico; coluna notas lê latest_note com fallback)
+- Resultado: (1) as bolinhas de notificação (azul/verde) aparecem de forma robusta junto ao nome do cliente quando há mensagens não lidas ou novos documentos; (2) o filtro 'Ativos' agora exclui corretamente processos inativos (view_mode=active_only enviado ao backend); (3) a coluna de notas mostra a última nota real do histórico/atividades do processo (latest_note), com fallback para o campo notes do processo.

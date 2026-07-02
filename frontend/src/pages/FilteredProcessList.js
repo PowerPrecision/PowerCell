@@ -29,12 +29,19 @@ const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|elimin
  * PACOTE BI: Bolinhas de notificação silenciosas (indicadores visuais).
  * Mesmo padrão visual do Kanban (KanbanCard.jsx): azul = mensagens não lidas,
  * verde = novos documentos do portal. Renderiza apenas se houver sinal positivo.
+ *
+ * PACOTE BT (Fix 1): coerção booleana explícita com Boolean() para garantir
+ * que undefined/null/0/"" são tratados como false. Antes, se as flags
+ * chegassem como undefined (backend não as injetou), a verificação
+ * !hasUnreadMessages && !hasNewDocuments podia ter comportamento inesperado.
  */
 const NotificationDots = ({ hasUnreadMessages, hasNewDocuments }) => {
-  if (!hasUnreadMessages && !hasNewDocuments) return null;
+  const unread = Boolean(hasUnreadMessages);
+  const newDocs = Boolean(hasNewDocuments);
+  if (!unread && !newDocs) return null;
   return (
     <span className="inline-flex items-center gap-1 ml-1.5 align-middle" data-testid="notification-dots">
-      {hasUnreadMessages && (
+      {unread && (
         <span
           className="relative flex h-2.5 w-2.5"
           title="Mensagens não lidas do cliente"
@@ -45,7 +52,7 @@ const NotificationDots = ({ hasUnreadMessages, hasNewDocuments }) => {
           <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
         </span>
       )}
-      {hasNewDocuments && (
+      {newDocs && (
         <span
           className="relative flex h-2.5 w-2.5"
           title="Novos documentos do cliente"
@@ -155,8 +162,17 @@ const FilteredProcessList = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
+      // PACOTE BT (Fix 2): view_mode dinâmico conforme o filterType.
+      // - 'active', 'indexacao', 'no_indexacao', 'waiting', 'waiting_long', 'pending_deadlines'
+      //   → view_mode='active_only' (exclui concluídos/desistências/eliminados)
+      // - 'concluded', 'dropped' → view_mode='historical' (apenas arquivados)
+      // Antes era sempre 'all', o que fazia aparecer processos inativos mesmo com
+      // o filtro 'Ativos' ligado.
+      const HISTORICAL_FILTERS = ["concluded", "dropped"];
+      const viewMode = HISTORICAL_FILTERS.includes(filterType) ? "historical" : "active_only";
+
       const [processesRes, statusesRes, deadlinesRes] = await Promise.all([
-        getProcesses({ view_mode: 'all', show_all: true, size: 100 }),
+        getProcesses({ view_mode: viewMode, show_all: true, size: 100 }),
         getWorkflowStatuses(),
         getCalendarDeadlines()
       ]);
@@ -499,15 +515,22 @@ const FilteredProcessList = () => {
                               )}
                             </TableCell>
                           )}
-                          {/* PACOTE BE: Notas do Consultor */}
+                          {/* PACOTE BT (Fix 3): Notas do Consultor — lê latest_note */}
+                          {/* latest_note é projetado pelo backend (Pacote BT) a partir da
+                              última atividade/comentário do histórico do processo. Fallback
+                              para process.notes (campo direto do processo) para retrocompat. */}
                           <TableCell className="min-w-[140px] max-w-[220px]">
-                            {process.notes ? (
-                              <div className="line-clamp-2 text-sm text-muted-foreground" title={process.notes}>
-                                {process.notes.length > 60 ? process.notes.substring(0, 60) + '…' : process.notes}
-                              </div>
-                            ) : (
-                              <span className="text-xs text-muted-foreground">—</span>
-                            )}
+                            {(() => {
+                              const noteText = process.latest_note || process.notes || "";
+                              if (noteText) {
+                                return (
+                                  <div className="line-clamp-2 text-sm text-muted-foreground" title={noteText}>
+                                    {noteText.length > 60 ? noteText.substring(0, 60) + '…' : noteText}
+                                  </div>
+                                );
+                              }
+                              return <span className="text-xs text-muted-foreground">—</span>;
+                            })()}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {process.created_at 
