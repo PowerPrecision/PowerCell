@@ -1771,3 +1771,30 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/routes/portal.py` (4 funções: _trigger_onboarding_check modificada + 3 novas helpers).
 - Resultado: quando o cliente carrega os documentos obrigatórios e os submete via Portal (confirm-upload), o sistema verifica se todos os docs obrigatórios estão presentes. Se sim E o processo está em pre_registo: (1) avança automaticamente para o estado seguinte da pipeline (salto dinâmico); (2) invoca assign_to_indexer para o processo cair na mesa do Indexador com menos carga (fase_documental ou fila_espera); (3) o avanço é silencioso (stealth mode via track_history=False do Pacote BJ) — não gera ruído no histórico do cliente. O assign_to_indexer gera logs de sistema legítimos (atribuição de indexador), que são mantidos. Cobre ambos os fluxos: processo criado pelo onboarding (Flow 2) e processo criado pelo formulário público (Flow 1).
+
+
+---
+Task ID: Pacote BP (Fix Visibilidade do 2º Titular nas Listas)
+Agent: Main Agent (Code Assistant)
+Task: Garantir que clientes que são apenas 2º titular aparecem nas listagens globais
+
+Work Log:
+- Análise do bug: clientes que são apenas 2º titular num processo não aparecem nas listagens globais ("Os Meus Clientes" / "Processos") se não tiverem um processo principal ativo. Causa raiz:
+  1. Na criação de processo (create-client, processes.py:937), o campo `second_client_id` do `ProcessCreate` era **ignorado** — não era incluído no `process_doc` nem atualizava o `process_ids` do 2º titular.
+  2. No PUT update_process (processes.py:4017), ao adicionar/remover `second_client_id`, o `process_ids` do 2º titular **não era atualizado** e o `client_ids` do processo **não incluía o 2º titular**.
+  3. As listagens globais (MyClientsPage, FilteredProcessList) confiam no `client.process_ids` ou em `{"client_ids": cliente_id}` — sem as sincronizações acima, o 2º titular não aparece.
+- Verificação das rotas existentes:
+  - `add-client` (processes.py:4792): **JÁ atualizava** o `process_ids` do cliente adicionado (linhas 4862-4869) e o `client_ids` do processo (linha 4835). Sem alteração.
+  - `remove-client` (processes.py:5009): **JÁ removia** o `process_ids` do cliente (linhas 5074-5081), mas **não limpa** o `second_client_id` do processo se o cliente removido era o 2º titular. Adicionada limpeza.
+  - `get_client` (clients.py:1326): já procura processos onde o cliente é `second_client_id` (linhas 1341-1345) — funciona porque lê diretamente o campo `second_client_id` do processo. Mas as listagens globais não usam esta rota.
+- Correção 1 — create-client (processes.py:1099): adicionado bloco PACOTE BP que lê `data.second_client_id`, valida o cliente, injeta `second_client_id`/`second_client_name` no `process_doc`, e adiciona o 2º titular ao array `client_ids` do processo. Após a inserção, atualiza o `process_ids` do 2º titular com `$addToSet` (linhas 1248-1274). O `lead_status` do 2º titular NÃO é alterado (pode continuar a ser lead pendente se não tem processo próprio).
+- Correção 2 — PUT update_process (processes.py:4015): bloco `second_client_id` reescrito para sincronizar:
+  (a) `client_ids` do processo: remove o 2º titular antigo (se diferente do novo) e adiciona o novo.
+  (b) `process_ids` do 2º titular: `$pull` do 2º titular antigo (se diferente do novo) e `$addToSet` no novo 2º titular.
+  Isto garante que queries `{"client_ids": cliente_id}` apanham processos em que o cliente é 1º OU 2º titular, e que `client.process_ids` inclui o processo.
+- Correção 3 — remove-client (processes.py:5009): se o cliente removido era o `second_client_id`, limpa `second_client_id`/`second_client_name` do processo para manter consistência (sem isto, o processo ficava com `second_client_id` apontando para um cliente que já não está associado).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/routes/processes.py` (3 blocos: create-client, PUT update_process, remove-client).
+- Resultado: quando um 2º titular é associado a um processo (seja na criação, no PUT, ou via add-client), o seu `process_ids` é atualizado com `$addToSet` e o `client_ids` do processo inclui o seu ID. Isto garante que as listagens globais que confiam em `client.process_ids` ou `{"client_ids": cliente_id}` apanham processos em que o cliente é 1º OU 2º titular. Quando o 2º titular é removido (PUT com null/empty OU remove-client), o `process_ids` é limpo com `$pull` e o `second_client_id` do processo é limpo para consistência. O `add-client` já fazia a sincronização correta — sem alteração. O `get_client` já procurava por `second_client_id` diretamente — sem alteração.

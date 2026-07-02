@@ -3,6 +3,29 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BP: Fix Visibilidade do 2º Titular nas Listas
+
+### Corrigido
+- **2º titular não aparecia nas listagens globais**: Clientes que são apenas 2º titular num processo não apareciam em "Os Meus Clientes" / "Processos" se não tivessem um processo principal ativo. Causa raiz: o `process_ids` do 2º titular não era atualizado quando ele era associado como 2º titular, e o `client_ids` do processo não incluía o 2º titular.
+
+### Backend (`backend/routes/processes.py`)
+- **`POST /create-client`**: O campo `second_client_id` do `ProcessCreate` era **ignorado** na criação. Agora é lido, validado, injetado no `process_doc` (`second_client_id` + `second_client_name`), e o 2º titular é adicionado ao array `client_ids` do processo. Após a inserção, o `process_ids` do 2º titular é atualizado com `$addToSet`. O `lead_status` do 2º titular NÃO é alterado (pode continuar a ser lead pendente).
+- **`PUT /processes/{id}` (update_process)**: Ao adicionar/remover `second_client_id`, agora sincroniza: (a) `client_ids` do processo — remove o 2º titular antigo (se diferente do novo) e adiciona o novo; (b) `process_ids` do 2º titular — `$pull` do antigo e `$addToSet` no novo. Isto garante que queries `{"client_ids": cliente_id}` apanham processos em que o cliente é 1º OU 2º titular.
+- **`POST /{process_id}/remove-client`**: Se o cliente removido era o `second_client_id`, limpa `second_client_id`/`second_client_name` do processo para manter consistência (sem isto, o processo ficava com `second_client_id` apontando para um cliente que já não está associado). O `process_ids` do cliente já era removido com `$pull` (existente).
+
+### Sem Alteração (já estava correto)
+- **`POST /{process_id}/add-client`**: Já atualizava o `process_ids` do cliente adicionado (`$addToSet`) e o `client_ids` do processo. Sem alteração.
+- **`GET /clients/{client_id}`**: Já procurava processos onde o cliente é `second_client_id` (lê diretamente o campo `second_client_id` do processo). Sem alteração.
+
+### Decisão de Arquitetura
+- **Sincronização bidirecional**: O `process_ids` do cliente e o `client_ids` do processo são mantidos em sincronia. Quando o 2º titular é adicionado, ambos os arrays são atualizados; quando é removido, ambos são limpos. Isto garante que qualquer query (por `client.process_ids` ou por `process.client_ids`) encontra a associação correta.
+- **`lead_status` do 2º titular preservado**: O 2º titular pode continuar a ser um lead pendente (não tem processo próprio como 1º titular). Apenas o 1º titular tem `lead_status` alterado para "converted" na criação do processo.
+- **`second_client_id` vs `co_buyers`**: O `second_client_id` é a ligação formal a um cliente existente (com ID na coleção clients). Os `co_buyers` são dados embutidos (dict com name/email/nif/phone) que podem ou não ter `client_id`. A sincronização do `process_ids` aplica-se ao `second_client_id`; os `co_buyers` com `client_id` são sincronizados via `add-client`/`remove-client`.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): bloco PACOTE BP na criação (linhas 1119-1153 para injeção no process_doc, linhas 1248-1274 para atualização do process_ids do 2º titular); bloco `second_client_id` no PUT reescrito (linhas 4015-4095) com sincronização de client_ids e process_ids; bloco `remove-client` (linhas 5060-5066) com limpeza de second_client_id.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote BO: Auto-Avanço e Auto-Atribuição no Portal do Cliente
 
 ### Adicionado

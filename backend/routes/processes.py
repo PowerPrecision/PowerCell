@@ -1115,6 +1115,42 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         "updated_at": now,
         "source": "staff_created"
     }
+
+    # ============================================================
+    # PACOTE BP — 2º TITULAR (second_client_id) NA CRIAÇÃO
+    # ============================================================
+    # Se o processo for criado com um 2º titular (cliente existente),
+    # injetamos second_client_id/second_client_name no process_doc e
+    # adicionamos o client_id do 2º titular ao array client_ids (para
+    # que as queries de listagem que usam {"client_ids": cliente_id}
+    # apanhem processos em que ele é 1º OU 2º titular).
+    #
+    # Após a inserção, atualizamos o array process_ids do 2º titular
+    # com $addToSet — sem isto, o 2º titular não aparece nas listagens
+    # globais ("Os Meus Clientes" / "Processos") que confiam em
+    # client.process_ids.
+    # ============================================================
+    second_client_id_for_process = None
+    if data.second_client_id:
+        second_client_id_clean = data.second_client_id.strip()
+        if second_client_id_clean and second_client_id_clean != client_id:
+            second_client = await db.clients.find_one({"id": second_client_id_clean})
+            if second_client:
+                second_client_id_for_process = second_client_id_clean
+                process_doc["second_client_id"] = second_client_id_clean
+                process_doc["second_client_name"] = second_client.get("nome", "")
+                # Adicionar ao array client_ids (para queries de listagem)
+                if second_client_id_clean not in process_doc["client_ids"]:
+                    process_doc["client_ids"].append(second_client_id_clean)
+                logger.info(
+                    f"[CREATE-PROCESS] 2º titular associado na criação: "
+                    f"{second_client_id_clean} ({second_client.get('nome', '')})"
+                )
+            else:
+                logger.warning(
+                    f"[CREATE-PROCESS] second_client_id {second_client_id_clean} "
+                    f"não encontrado — a ignorar 2º titular na criação."
+                )
     
     # Atribuir automaticamente ao criador baseado no seu papel
     # REGRA: consultor_id = quem cria o processo (consultor)
@@ -1208,6 +1244,34 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
                 }
             }
         )
+
+    # ============================================================
+    # PACOTE BP — Atualizar process_ids do 2º TITULAR
+    # ============================================================
+    # Injeta o process_id no array process_ids do cliente que é 2º
+    # titular. Sem isto, o 2º titular não aparece nas listagens globais
+    # ("Os Meus Clientes" / "Processos") que confiam em client.process_ids.
+    # O lead_status NÃO é alterado (o 2º titular pode continuar a ser um
+    # lead pendente se não tiver processo próprio como 1º titular).
+    # ============================================================
+    if second_client_id_for_process:
+        try:
+            await db.clients.update_one(
+                {"id": second_client_id_for_process},
+                {
+                    "$addToSet": {"process_ids": process_id},
+                    "$set": {"updated_at": now}
+                }
+            )
+            logger.info(
+                f"[CREATE-PROCESS] process_ids do 2º titular "
+                f"{second_client_id_for_process} atualizado com processo {process_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[CREATE-PROCESS] Erro ao atualizar process_ids do 2º titular "
+                f"{second_client_id_for_process}: {e}"
+            )
     
     # Registar no histórico
     await log_history(process_id, user, f"Criou processo para cliente {client_name}")
@@ -3950,6 +4014,12 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
 
         # Campos adicionais do CPCV
         # ── second_client_id (2º titular ligado a cliente existente) ──
+        # PACOTE BP — Sincronização do process_ids e client_ids:
+        # Quando se adiciona/remove o 2º titular, atualizamos o array
+        # process_ids do cliente 2º titular ($addToSet/$pull) E o array
+        # client_ids do processo. Sem isto, o 2º titular não aparece nas
+        # listagens globais que confiam em client.process_ids ou em
+        # {"client_ids": cliente_id}.
         if data.second_client_id is not None:
             new_second_id = data.second_client_id.strip() if data.second_client_id else None
             # Validar que o cliente existe (se foi fornecido um ID)
@@ -3961,12 +4031,68 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 if new_second_id == process.get("client_id"):
                     raise HTTPException(status_code=400, detail="O 2º titular não pode ser o mesmo cliente que o titular principal")
             update_data["second_client_id"] = new_second_id
+
+            # ── Determinar o 2º titular ANTIGO (para sincronização) ──
+            old_second_id = process.get("second_client_id")
+
             # Se removeu o 2º titular, limpar dados associados
             if not new_second_id:
                 update_data["second_client_name"] = None
                 # Não limpar titular2_data — pode ter dados preenchidos manualmente
             else:
                 update_data["second_client_name"] = second_client.get("nome", "")
+
+            # ── PACOTE BP: Sincronizar client_ids do processo ──
+            # Adicionar o novo 2º titular ao array client_ids do processo
+            # e remover o antigo (se diferente). Isto garante que queries
+            # {"client_ids": cliente_id} apanham processos em que o cliente
+            # é 1º OU 2º titular.
+            current_client_ids = list(process.get("client_ids") or [])
+            # Se há 2º titular antigo E é diferente do novo, remover do client_ids
+            if old_second_id and old_second_id != new_second_id:
+                current_client_ids = [cid for cid in current_client_ids if cid != old_second_id]
+            # Se há novo 2º titular, adicionar ao client_ids (se ainda não está)
+            if new_second_id and new_second_id not in current_client_ids:
+                current_client_ids.append(new_second_id)
+            update_data["client_ids"] = current_client_ids
+
+            # ── PACOTE BP: Sincronizar process_ids do 2º titular ──
+            # Adicionar o process_id ao array process_ids do NOVO 2º titular
+            # e remover do 2º titular ANTIGO (se diferente).
+            now_iso_sync = datetime.now(timezone.utc).isoformat()
+            if old_second_id and old_second_id != new_second_id:
+                # Remover process_id do 2º titular antigo
+                try:
+                    await db.clients.update_one(
+                        {"id": old_second_id},
+                        {
+                            "$pull": {"process_ids": process_id},
+                            "$set": {"updated_at": now_iso_sync}
+                        }
+                    )
+                    logger.info(
+                        f"[PACOTE-BP] Processo {process_id} removido do process_ids "
+                        f"do 2º titular antigo {old_second_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PACOTE-BP] Erro ao remover process_ids do 2º titular antigo: {e}")
+
+            if new_second_id:
+                # Adicionar process_id ao novo 2º titular
+                try:
+                    await db.clients.update_one(
+                        {"id": new_second_id},
+                        {
+                            "$addToSet": {"process_ids": process_id},
+                            "$set": {"updated_at": now_iso_sync}
+                        }
+                    )
+                    logger.info(
+                        f"[PACOTE-BP] Processo {process_id} adicionado ao process_ids "
+                        f"do 2º titular {new_second_id}"
+                    )
+                except Exception as e:
+                    logger.warning(f"[PACOTE-BP] Erro ao adicionar process_ids ao 2º titular: {e}")
 
         if data.co_buyers is not None:
             update_data["co_buyers"] = data.co_buyers
@@ -4930,7 +5056,15 @@ async def remove_client_from_process(
         "co_buyers": co_buyers if co_buyers else None,
         "updated_at": now
     }
-    
+
+    # PACOTE BP — Se o cliente removido era o second_client_id (2º titular
+    # ligado via backend), limpar também second_client_id e second_client_name
+    # para manter consistência. Sem isto, o processo ficava com second_client_id
+    # apontando para um cliente que já não está associado.
+    if process.get("second_client_id") == client_id:
+        update_data["second_client_id"] = None
+        update_data["second_client_name"] = None
+
     # Actualizar titular2_data se necessário
     if co_buyers:
         update_data["titular2_data"] = {
