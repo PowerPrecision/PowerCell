@@ -1746,3 +1746,28 @@ Stage Summary:
   - `backend/routes/clients.py` (parâmetro triage_mode + pré-cálculo de triage_client_map + bloco de filtro $or + enriquecimento com triage_status)
   - `frontend/src/pages/ClientRegistrationsPage.js` (fetchClients envia triage_mode=true; imports FileInput/ClipboardList; 4 ramos de badges na coluna Estado)
 - Resultado: a página de Registos de Clientes funciona agora como Sala de Triagem, mostrando 3 tipos de itens com badges visuais distintas: leads pendentes (Sem Processo — laranja, existente), processos em pré-registo (âmbar "Pré-Registo (A preencher Portal)"), e processos prontos para indexação (azul "Pronto para Indexação (Na fila de espera)"). A query backend usa $or para combinar leads sem processo + clientes com processo triável, mantendo os filtros existentes (ghost, search, assigned_to_me). O parâmetro triage_mode é opt-in (default False) para não afetar outros callers do endpoint.
+
+
+---
+Task ID: Pacote BO (Auto-Avanço e Auto-Atribuição no Portal do Cliente)
+Agent: Main Agent (Code Assistant)
+Task: Fechar o circuito de automação quando o cliente interage com o Portal
+
+Work Log:
+- Análise do fluxo de onboarding: `confirm-upload` (portal.py:1429) → `_trigger_onboarding_check` (linha 1791) → `check_onboarding_completion` (onboarding_service.py). Quando o cliente completa onboarding, um processo é criado em `pre_registo` (initial_status = primeiro workflow status). Mas NÃO há auto-avanço nem assign_to_indexer — o processo fica parado em pre_registo.
+- Análise de `assign_to_indexer` (process_assignment.py:391): atribui ao indexador com menor carga (least-busy, limite 15), muda status para `fase_documental` (ou `fila_espera` se todos no limite/sem indexadores). Retorna early se já tem indexador. Logs internos usam `system_user = {"role": "admin"}` (não stealth).
+- Análise do stealth mode (Pacote BJ): `_is_stealth_user` retorna True se `role=="indexacao"` OU `track_history is False`. O role `"client_portal"` NÃO é stealth por defeito. Para silenciar o auto-avanço, usei um system user com `track_history: False` (que dispara o stealth mode do Pacote BJ).
+- Identificação de 2 fluxos que precisam de auto-avanço:
+  - Flow 1: processo criado pelo formulário público (public.py) em `pre_registo`, docs ancorados diretamente ao processo via `confirm-upload`. `check_onboarding_completion` NÃO detecta (só procura docs órfãos).
+  - Flow 2: processo criado pelo onboarding_service em `pre_registo` (docs órfãos completos). `check_onboarding_completion` detecta e cria processo, mas não avança nem atribui indexador.
+- Implementação em portal.py — 4 funções:
+  1. `_trigger_onboarding_check` (modificada): após `check_onboarding_completion`, se `completed=True` chama `_auto_advance_from_pre_registo` para o processo recém-criado; se `completed=False`, chama `_check_and_advance_existing_pre_registo` para verificar processo existente em pre_registo (Flow 1).
+  2. `_check_and_advance_existing_pre_registo` (nova): procura processo do cliente em `pre_registo`, verifica se tem todos os docs obrigatórios via `_has_all_required_documents`, e se sim avança.
+  3. `_has_all_required_documents` (nova): reutiliza `DOCUMENT_REQUIREMENT_MAP`, `REQUIREMENTS_BY_CONTRACT_TYPE`, `CONTRACT_TYPE_NORMALIZE` e `_detect_contract_type` do onboarding_service, mas procura docs ancorados AO PROCESSO (com `process_id` definido) em vez de docs órfãos. Determina tipo de contrato e verifica todos os grupos obrigatórios.
+  4. `_auto_advance_from_pre_registo` (nova): (a) verifica que processo está em pre_registo; (b) calcula próximo estado da pipeline (salto dinâmico como mark-indexed); (c) atualiza status com stealth system user (`track_history: False` → silencia o log_history via Pacote BJ); (d) invoca `assign_to_indexer(process_id)` para atribuir ao indexador com menor carga.
+- Stealth mode: o auto-avanço usa `stealth_system_user = {"id": "system", "name": "Sistema (Auto-avanço Portal)", "role": "system", "track_history": False}`. O `track_history: False` dispara o `_is_stealth_user` do Pacote BJ, que retorna True, e `log_history` retorna imediatamente sem escrever na coleção history. O `assign_to_indexer` gera os seus próprios logs internos (com `system_user role="admin"`) — esses são ações de sistema legítimas (atribuição de indexador), não do cliente, pelo que são mantidos.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/routes/portal.py` (4 funções: _trigger_onboarding_check modificada + 3 novas helpers).
+- Resultado: quando o cliente carrega os documentos obrigatórios e os submete via Portal (confirm-upload), o sistema verifica se todos os docs obrigatórios estão presentes. Se sim E o processo está em pre_registo: (1) avança automaticamente para o estado seguinte da pipeline (salto dinâmico); (2) invoca assign_to_indexer para o processo cair na mesa do Indexador com menos carga (fase_documental ou fila_espera); (3) o avanço é silencioso (stealth mode via track_history=False do Pacote BJ) — não gera ruído no histórico do cliente. O assign_to_indexer gera logs de sistema legítimos (atribuição de indexador), que são mantidos. Cobre ambos os fluxos: processo criado pelo onboarding (Flow 2) e processo criado pelo formulário público (Flow 1).

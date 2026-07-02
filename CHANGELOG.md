@@ -3,6 +3,30 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BO: Auto-Avanço e Auto-Atribuição no Portal do Cliente
+
+### Adicionado
+- **Fecho do circuito de automação no Portal do Cliente**: Quando o cliente carrega os documentos obrigatórios e os submete via Portal, o sistema avança automaticamente o processo de `pre_registo` para o estado seguinte da pipeline e invoca `assign_to_indexer` para o processo cair logo na mesa do Indexador com menos carga. Isto elimina a intervenção manual necessária para tirar o processo do `pre_registo` após o cliente completar o onboarding.
+
+### Backend (`backend/routes/portal.py`)
+- **`_trigger_onboarding_check` (modificada)**: Após `check_onboarding_completion`, se onboarding completo (`completed=True`), chama `_auto_advance_from_pre_registo` para o processo recém-criado. Se não completo, chama `_check_and_advance_existing_pre_registo` para verificar processo existente em `pre_registo` (Flow 1 — processo criado pelo formulário público com docs ancorados diretamente).
+- **`_check_and_advance_existing_pre_registo` (nova)**: Procura processo do cliente em `pre_registo`, verifica se tem todos os docs obrigatórios via `_has_all_required_documents`, e se sim avança.
+- **`_has_all_required_documents` (nova)**: Reutiliza a lógica de validação do `onboarding_service` (`DOCUMENT_REQUIREMENT_MAP`, `REQUIREMENTS_BY_CONTRACT_TYPE`, `CONTRACT_TYPE_NORMALIZE`, `_detect_contract_type`) mas procura docs ancorados AO PROCESSO (com `process_id` definido) em vez de docs órfãos. Cobre o Flow 1 que o `check_onboarding_completion` não detecta.
+- **`_auto_advance_from_pre_registo` (nova)**: (a) verifica que processo está em `pre_registo`; (b) calcula próximo estado da pipeline (salto dinâmico, como `mark-indexed`); (c) atualiza status com stealth system user; (d) invoca `assign_to_indexer(process_id)`.
+
+### Silêncio no Histórico (Pacote BJ)
+- O auto-avanço usa `stealth_system_user = {"id": "system", "name": "Sistema (Auto-avanço Portal)", "role": "system", "track_history": False}`. O `track_history: False` dispara o `_is_stealth_user` do Pacote BJ, que retorna `True`, e `log_history` retorna imediatamente sem escrever na coleção `history`. Isto garante que o auto-avanço **não gera ruído no histórico** do cliente.
+- O `assign_to_indexer` gera os seus próprios logs internos (com `system_user role="admin"`) — esses são ações de sistema legítimas (atribuição de indexador), não do cliente, pelo que são mantidos no histórico.
+
+### Decisão de Arquitetura
+- **Dois fluxos cobertos**: Flow 1 (processo criado pelo formulário público em `pre_registo`, docs ancorados diretamente) e Flow 2 (processo criado pelo onboarding_service em `pre_registo`, docs órfãos completos). O `check_onboarding_completion` só detecta o Flow 2 (docs órfãos); o `_check_and_advance_existing_pre_registo` cobre o Flow 1.
+- **Salto dinâmico**: O próximo estado é calculado a partir da pipeline `workflow_statuses` ordenada por `order` (mesma lógica do `mark-indexed`), não hardcoded. Isto garante que mudanças na configuração do workflow são respeitadas.
+- **`assign_to_indexer` após avanço**: O processo avança primeiro para o estado seguinte (ex: `clientes_espera`), depois `assign_to_indexer` further routeia para `fase_documental` (com indexador) ou `fila_espera` (sem indexador disponível). Se `assign_to_indexer` falhar, o processo fica no estado intermédio (visível nos dashboards) mas sem indexador — o gatilho de fila de espera do `mark-indexed` pode recuperá-lo mais tarde.
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `_trigger_onboarding_check` modificada (linhas 1791-1835); `_check_and_advance_existing_pre_registo` nova (linhas 1838-1875); `_has_all_required_documents` nova (linhas 1878-1931); `_auto_advance_from_pre_registo` nova (linhas 1934-2031).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote BN: Evolução do Menu de Registos (Triagem de Entrada)
 
 ### Adicionado
