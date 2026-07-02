@@ -367,6 +367,8 @@ const FilteredProcessList = () => {
                     <TableHead>Contacto</TableHead>
                     <TableHead>Fase</TableHead>
                     <TableHead>Valor</TableHead>
+                    {/* PACOTE BE: coluna Notas do Consultor */}
+                    <TableHead className="min-w-[140px] max-w-[220px]">Notas do Consultor</TableHead>
                     {config.showDeadlineInfo && <TableHead>Prazo</TableHead>}
                     <TableHead>Data Criação</TableHead>
                     <TableHead className="text-right">Ações</TableHead>
@@ -456,6 +458,16 @@ const FilteredProcessList = () => {
                               )}
                             </TableCell>
                           )}
+                          {/* PACOTE BE: Notas do Consultor */}
+                          <TableCell className="min-w-[140px] max-w-[220px]">
+                            {process.notes ? (
+                              <div className="line-clamp-2 text-sm text-muted-foreground" title={process.notes}>
+                                {process.notes.length > 60 ? process.notes.substring(0, 60) + '…' : process.notes}
+                              </div>
+                            ) : (
+                              <span className="text-xs text-muted-foreground">—</span>
+                            )}
+                          </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
                             {process.created_at 
                               ? safeFormat(process.created_at, "dd/MM/yyyy", { locale: pt })

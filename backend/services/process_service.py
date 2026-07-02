@@ -869,6 +869,7 @@ PROCESS_LIST_PROJECTION = {
     "deed_date": 1,
     "tags": 1,
     "labels": 1,
+    "notes": 1,  # PACOTE BE: incluir notes para coluna 'Notas do Consultor'
 }
 
 # Campos necessários para o Kanban (visualização em colunas)
@@ -932,4 +933,5 @@ PROCESS_MY_CLIENTS_PROJECTION = {
     "property_id": 1,
     "tags": 1,
     "labels": 1,
+    "notes": 1,  # PACOTE BE: incluir notes para coluna 'Notas do Consultor'
 }
