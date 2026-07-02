@@ -2177,3 +2177,28 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/services/changelog_service.py`.
 - Resultado: a geração de changelog por IA agora processa apenas as novidades introduzidas desde a data do último changelog gerado/guardado. Para Git, usa `--since="{data}"` em vez de `--max-count=N`. Para ficheiros Markdown (CHANGELOG.md, worklog.md), usa heurística de parsing de datas em headers para filtrar apenas as entradas posteriores à última geração. Se não houver registo anterior na BD, usa o comportamento de limite de linhas (50) como fallback. O delta filtrado é enviado à IA, reduzindo tokens consumidos e evitando que a IA processe conteúdo já coberto numa geração anterior.
+
+
+---
+Task ID: Pacote CD (Create Emergency Restore Endpoint)
+Agent: Main Agent (Code Assistant)
+Task: Endpoint de restauro de emergência com swap atómico (S3 → BD)
+
+Work Log:
+- Análise do backup.py existente: já existe POST /restore-from-s3 (linha 335) que faz delete_many + insert_many diretamente — NÃO atómico. Se falhar a meio, a BD fica inconsistente. O utilizador pede um novo endpoint POST /api/backup/restore com swap atómico (coleções temporárias + rename).
+- Análise de services/backup.py: get_s3_client() cria cliente boto3 com credenciais do .env (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_BUCKET_NAME).
+- Análise de services/db_indexes.py: índices únicos em users.email, users.id, clients.id, processes.id, etc.
+- Criado POST /api/backup/restore em routes/backup.py (linhas 491-839) com:
+  1. Segurança: Depends(require_roles([UserRole.ADMIN, UserRole.CEO])) + confirmação explícita {"confirm": "RESTAURAR_PRODUCAO"}.
+  2. Download do último ZIP do S3 (prefixo backups/) para memória (BytesIO — não toca o disco).
+  3. Extrair JSON de todas as coleções do ZIP (ignorando backup_history, system.indexes, e system_config — preserva config atual).
+  4. insert_many para coleções temporárias (_restore_{collection}). Se todos os inserts falharem, aborta antes do swap e limpa temporárias.
+  5. Swap atómico: para cada coleção com dados na temporária, drop() da coleção real + rename() da temporária. O rename no MongoDB é atómico — a coleção fica disponível instantaneamente com o novo nome. Se uma coleção falhar no swap, as outras já swapped permanecem (swap parcial é seguro — cada rename é independente).
+  6. Recriar índices nas coleções principais: 16 coleções com índices definidos (users.email unique, users.id unique, clients.id unique, processes.id unique, etc.). Erros de índice não são fatais — a BD funciona sem índices (apenas mais lento).
+  7. Limpeza de temporárias órfãs (se alguma temporária não foi swapped, é removida).
+  8. Retorno com estatísticas detalhadas: collections_restored, collections_swapped, total_documents, indexes_created, index_errors, errors, warnings, ignored, restored_by, restored_at.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/routes/backup.py` (novo endpoint POST /restore com swap atómico, linhas 459-839).
+- Resultado: endpoint de restauro de emergência exposto para a UI de administração. Usa swap atómico (coleções temporárias _restore_* + rename) em vez de delete_many + insert_many, garantindo que a BD nunca fica inconsistente mesmo que o processo falhe a meio. Apenas ADMIN e CEO podem executar. Requer confirmação explícita {"confirm": "RESTAURAR_PRODUCAO"}. Ignora backup_history, system.indexes e system_config (preserva config atual do sistema). Recria 16 índices únicos nas coleções principais após o swap. O endpoint existente /restore-from-s3 (não-atómico) é mantido para retrocompatibilidade.

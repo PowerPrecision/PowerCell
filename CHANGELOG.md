@@ -3,6 +3,29 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CD: Create Emergency Restore Endpoint
+
+### Adicionado
+- **Endpoint de restauro de emergência com swap atómico** (`POST /api/backup/restore`): Novo endpoint que restaura a BD de Produção a partir do backup mais recente no S3, usando coleções temporárias e rename atómico para garantir que a BD nunca fica inconsistente (mesmo que o processo falhe a meio). Diferente do endpoint existente `/restore-from-s3` (que faz `delete_many` + `insert_many` diretamente — não atómico).
+
+### Segurança
+- **Acesso**: `Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))` — apenas Admin e CEO.
+- **Confirmação explícita**: Requer `{"confirm": "RESTAURAR_PRODUCAO"}` no body.
+- **Preserva system_config**: A config atual do sistema não é restaurada (ignora `system_config`, `backup_history`, `system.indexes`).
+
+### Fluxo do Swap Atómico
+1. **Download S3** → `BytesIO` (memória, não disco)
+2. **Extrair JSON** de todas as coleções do ZIP (ignora `backup_history`, `system.indexes`, `system_config`)
+3. **`insert_many`** para coleções temporárias `_restore_{collection}`
+4. **Swap atómico**: `drop()` coleção real + `rename()` temporária (cada rename é atómico no MongoDB)
+5. **Recriar índices**: 16 coleções com índices únicos (`users.email`, `users.id`, `clients.id`, `processes.id`, etc.)
+6. **Limpeza**: temporárias órfãs (não swapped) são removidas
+7. **Retorno**: estatísticas detalhadas (collections_swapped, total_documents, indexes_created, errors, warnings)
+
+### Técnico
+- **Backend** (`backend/routes/backup.py`): endpoint `POST /restore` (linhas 491-839); constantes `_RESTORE_IGNORE_COLLECTIONS` e `_INDEX_DEFINITIONS` (16 coleções); validação de confirmação; swap atómico com `drop()` + `rename()`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CC: Changelog Generation with Date/Time Diff
 
 ### Alterado
