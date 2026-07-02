@@ -1557,3 +1557,28 @@ Stage Summary:
 - 1 ficheiro modificado: `frontend/src/pages/ProcessDetails.js` (import de `safeDate` + reescrita da ordenação na secção "Atividades Recentes").
 - Resultado: as atividades mais recentes aparecem agora sempre no topo do cartão "Atividades Recentes", ordenadas por `created_at` de forma descendente e robusta (independente da ordem que vier do backend). O "Filme da Lead" (UnifiedAuditTrail) já estava correto e mantém-se.
 - Nota: a `ProcessTimeline` (timeline visual de fases) mantém ordenação ascendente intencionalmente, por representar a progressão esquerda→direita das fases do workflow.
+
+
+---
+Task ID: Pacote BI (Bolinhas de Notificação nas Listas)
+Agent: Main Agent (Code Assistant)
+Task: Indicadores visuais silenciosos (bolinhas) nas listas tabulares de processos
+
+Work Log:
+- Análise do padrão Kanban: `GET /processes/kanban` (processes.py linhas 2122-2155) já devolve `has_unread_messages` (portal_messages com sender_type=client e read_by_staff=False) e `has_new_documents` (documents com status="uploaded"). Padrão visual no `KanbanCard.jsx` (linhas 151-183, 296-311): bolinha azul = mensagens, bolinha verde = documentos, ambas com `animate-ping`.
+- Verificação das 4 rotas de listagem tabular — NENHUMA devolvia as flags:
+  1. `GET /processes` (processes.py ~linha 1247) — paginação em `processes[skip:skip+size]`
+  2. `GET /processes/paginated` (processes.py ~linha 1576) — paginação cursor-based
+  3. `GET /my-clients` em processes.py (~linha 2308) — constrói `clients_list` enriquecido
+  4. `GET /my-clients` em my_clients.py (linha 32) — query separada com leads
+- Backend: adicionada a MESMA lógica de agregação batch do Kanban às 4 rotas. Variáveis prefixadas `_bi_` para evitar colisão de nomes. Injeção das flags feita APÓS paginação (rotas 1, 2, 3) para só buscar flags dos processos visíveis na página atual (eficiência — não busca flags de 5000 processos, só dos 20-50 da página). Leads ficam com `has_unread_messages=False` e `has_new_documents=False` (não têm portal).
+- Frontend: criado componente reutilizável `NotificationDots` em ambos os ficheiros (mesmo padrão visual do KanbanCard: `relative flex h-2.5 w-2.5` + `animate-ping` + `bg-blue-500`/`bg-emerald-500`, com `title`+`role="img"`+`aria-label` para acessibilidade). Bolinhas inseridas junto ao nome do cliente (`<p>` em FilteredProcessList, `<span>` em MyClientsPage) — dentro da célula "Cliente" para coerência visual com o Kanban. Componente retorna `null` quando não há sinal (sem ruído visual). Adicionado `MessageSquare` aos imports do lucide-react em ambos os ficheiros.
+- Validação: `py_compile` ✓ em ambos os ficheiros backend; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros em ambos os ficheiros frontend.
+
+Stage Summary:
+- 6 ficheiros modificados:
+  - `backend/routes/processes.py` (3 endpoints: GET /processes, GET /processes/paginated, GET /my-clients)
+  - `backend/routes/my_clients.py` (1 endpoint: GET /my-clients)
+  - `frontend/src/pages/FilteredProcessList.js` (componente NotificationDots + bolinhas na célula Cliente + import MessageSquare)
+  - `frontend/src/pages/MyClientsPage.js` (componente NotificationDots + bolinhas na célula Cliente + import MessageSquare)
+- Resultado: as 4 listas tabulares (FilteredProcessList + MyClientsPage que consome 2 endpoints distintos) mostram agora bolinhas azuis/verdes junto ao nome do cliente quando há mensagens não lidas ou novos documentos do portal, exatamente como já acontecia no Kanban. Indicadores silenciosos (sem popups/toasts) — apenas dots com pulse animation.

@@ -203,7 +203,7 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
             },
             {"_id": 0, "id": 1, "title": 1, "priority": 1, "due_date": 1}
         ).sort("due_date", 1).limit(5).to_list(5)
-        
+
         process["pending_tasks"] = len(pending_tasks)
         process["pending_actions"] = [
             {
@@ -214,10 +214,43 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
             }
             for t in pending_tasks
         ]
-    
+
+    # ====================================================================
+    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
+    # Pistas visuais silenciosas (bolinhas) para interações do cliente no portal.
+    # Mesma lógica do Kanban (processes.py linhas 2122-2155). Leads não têm
+    # mensagens/documentos do portal, pelo que ficam com False por defeito.
+    # ====================================================================
+    _bi_process_ids = [p["id"] for p in processes if p.get("id")]
+    _bi_unread_map = {}
+    _bi_new_docs_map = {}
+    if _bi_process_ids:
+        _bi_unread = await db.portal_messages.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "sender_type": "client",
+                "read_by_staff": False
+            }},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+
+        _bi_new_docs = await db.documents.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "status": "uploaded"
+            }},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
+
+    for p in processes:
+        p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
+        p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
     # Combinar processos + leads
     all_clients = leads + processes
-    
+
     return {"clients": all_clients, "total": len(all_clients), "leads_count": len(leads)}
 
 

@@ -26,8 +26,9 @@ import {
 } from "../components/ui/select";
 import { getMyClients, getWorkflowStatuses } from "../services/api";
 import {
-  Search, Eye, CheckCircle2, AlertTriangle, FileText, 
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download
+  Search, Eye, CheckCircle2, AlertTriangle, FileText,
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download,
+  MessageSquare
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { toast } from "sonner";
@@ -55,6 +56,42 @@ const getContrastColor = (bgColor) => {
   const b = parseInt(clean.substring(4, 6), 16);
   const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
   return luminance > 0.55 ? '#1a1a1a' : '#ffffff';
+};
+
+/**
+ * PACOTE BI: Bolinhas de notificação silenciosas (indicadores visuais).
+ * Mesmo padrão visual do Kanban (KanbanCard.jsx) e do FilteredProcessList:
+ * azul = mensagens não lidas, verde = novos documentos do portal.
+ * Renderiza apenas se houver sinal positivo (sem ruído visual).
+ */
+const NotificationDots = ({ hasUnreadMessages, hasNewDocuments }) => {
+  if (!hasUnreadMessages && !hasNewDocuments) return null;
+  return (
+    <span className="inline-flex items-center gap-1 ml-1.5 align-middle" data-testid="notification-dots">
+      {hasUnreadMessages && (
+        <span
+          className="relative flex h-2.5 w-2.5"
+          title="Mensagens não lidas do cliente"
+          role="img"
+          aria-label="Mensagens não lidas"
+        >
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
+        </span>
+      )}
+      {hasNewDocuments && (
+        <span
+          className="relative flex h-2.5 w-2.5"
+          title="Novos documentos do cliente"
+          role="img"
+          aria-label="Novos documentos"
+        >
+          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
+          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
+        </span>
+      )}
+    </span>
+  );
 };
 
 const MyClientsPage = () => {
@@ -484,7 +521,14 @@ const MyClientsPage = () => {
                         <TableCell>
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-blue-600 hover:text-blue-800 hover:underline">{client.client_name}</span>
+                              <span className="font-medium text-blue-600 hover:text-blue-800 hover:underline">
+                                {client.client_name}
+                                {/* PACOTE BI: bolinhas de notificação junto ao nome */}
+                                <NotificationDots
+                                  hasUnreadMessages={client.has_unread_messages}
+                                  hasNewDocuments={client.has_new_documents}
+                                />
+                              </span>
                               {TERMINAL_STATUSES.includes(client.status) && (
                                 <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px]">
                                   {client.status_label || "Inativo"}

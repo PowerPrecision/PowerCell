@@ -1558,7 +1558,41 @@ async def get_processes(
     # Total e paginação (após ordenação)
     total = len(processes)
     processes = processes[skip:skip + size]
-    
+
+    # ====================================================================
+    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
+    # Pistas visuais silenciosas (bolinhas) para interações do cliente no portal.
+    # Mesma lógica do Kanban (linhas 2122-2155), aplicada APÓS paginação para
+    # só buscar flags dos processos visíveis na página atual (eficiência).
+    # ====================================================================
+    if processes:
+        _bi_process_ids = [p["id"] for p in processes if p.get("id")]
+
+        # 1) Mensagens não lidas do cliente (portal_messages)
+        _bi_unread = await db.portal_messages.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "sender_type": "client",
+                "read_by_staff": False
+            }},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+
+        # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
+        _bi_new_docs = await db.documents.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "status": "uploaded"
+            }},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
+
+        for p in processes:
+            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
+            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
     
@@ -1721,7 +1755,38 @@ async def get_processes_paginated(
         result["items"], 
         fields_to_decrypt=["client_phone", "client_nif"]
     )
-    
+
+    # ====================================================================
+    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
+    # Mesma lógica do Kanban e do GET /processes. A paginação cursor já foi
+    # aplicada, pelo que só enriquecemos os itens da página atual.
+    # ====================================================================
+    if result["items"]:
+        _bi_process_ids = [p["id"] for p in result["items"] if p.get("id")]
+
+        _bi_unread = await db.portal_messages.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "sender_type": "client",
+                "read_by_staff": False
+            }},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+
+        _bi_new_docs = await db.documents.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "status": "uploaded"
+            }},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
+
+        for p in result["items"]:
+            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
+            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
     return {
         "processes": result["items"],
         "next_cursor": result["next_cursor"],
@@ -2516,12 +2581,43 @@ async def get_my_clients(
         {"_id": 0, "id": 1, "name": 1}
     ).to_list(100)
     consultor_map = {c["id"]: c["name"] for c in consultores}
-    
+
+    # ====================================================================
+    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
+    # Pistas visuais silenciosas para a tabela de "Os Meus Clientes".
+    # Só busca flags dos processos paginados (não dos leads).
+    # ====================================================================
+    _bi_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
+    _bi_unread_map = {}
+    _bi_new_docs_map = {}
+    if _bi_process_ids:
+        _bi_unread = await db.portal_messages.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "sender_type": "client",
+                "read_by_staff": False
+            }},
+            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+
+        _bi_new_docs = await db.documents.aggregate([
+            {"$match": {
+                "process_id": {"$in": _bi_process_ids},
+                "status": "uploaded"
+            }},
+            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
+        ]).to_list(1000)
+        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
+
     # Construir lista de clientes com informações enriquecidas
     clients_list = []
     for p in paginated_items:
         # Leads já vêm formatados — adicionar directamente
         if p.get("is_lead"):
+            # Leads não têm mensagens/documentos do portal
+            p["has_unread_messages"] = False
+            p["has_new_documents"] = False
             clients_list.append(p)
             continue
         
@@ -2574,7 +2670,9 @@ async def get_my_clients(
             "created_at": p.get("created_at"),
             "updated_at": p.get("updated_at"),
             "deed_date": p.get("deed_date"),
-            "has_property": bool(p.get("property_id"))
+            "has_property": bool(p.get("property_id")),
+            "has_unread_messages": _bi_unread_map.get(p.get("id"), False),
+            "has_new_documents": _bi_new_docs_map.get(p.get("id"), False)
         })
     
     # Calcular total de páginas

@@ -3,6 +3,27 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BI: Bolinhas de Notificação nas Listas (My Clients / Processes)
+
+### Adicionado
+- **Indicadores visuais silenciosos nas listas tabulares de processos (UX)**: As tabelas de "Os Meus Processos" (`FilteredProcessList.js`) e "Os Meus Clientes" (`MyClientsPage.js`) mostram agora pequenas bolinhas junto ao nome do cliente — **azul** para mensagens não lidas do portal e **verde** para novos documentos enviados pelo cliente — exatamente como já acontecia no Kanban. As bolinhas usam `animate-ping` (pulse) para chamar a atenção de forma silenciosa, sem popups nem toasts. Acessibilidade garantida com `title`, `role="img"` e `aria-label`.
+
+### Corrigido (Backend)
+- **4 rotas de listagem não devolviam as flags `has_unread_messages` / `has_new_documents`**: Apenas o `GET /processes/kanban` injetava estas flags. Adicionada a **mesma lógica de agregação batch do Kanban** a:
+  1. `GET /processes` (paginação offset) — flags injetadas APÓS paginação (eficiência: só busca flags dos processos da página atual)
+  2. `GET /processes/paginated` (paginação cursor-based) — flags injetadas após `decrypt_processes_list`
+  3. `GET /my-clients` em `processes.py` — flags injetadas no `clients_list` final; leads ficam com `False`
+  4. `GET /my-clients` em `my_clients.py` (rota separada) — flags injetadas após o loop de `pending_tasks`; leads ficam com `False`
+- **Padrão de agregação**: `portal_messages` com `sender_type=client` + `read_by_staff=False` → `has_unread_messages`; `documents` com `status=uploaded` → `has_new_documents`. Variáveis prefixadas `_bi_` para evitar colisão de nomes.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): 3 blocos de enriquecimento batch (~25 linhas cada) nos endpoints `GET /processes`, `GET /processes/paginated`, `GET /my-clients`; flags adicionadas ao dicionário final de cada cliente em `clients_list`.
+- **Backend** (`backend/routes/my_clients.py`): 1 bloco de enriquecimento batch no endpoint `GET /my-clients`; flags injetadas em cada processo do array `processes`.
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): novo componente `NotificationDots` (reutilizável) + bolinhas na célula "Cliente" junto ao nome; import `MessageSquare` adicionado.
+- **Frontend** (`frontend/src/pages/MyClientsPage.js`): novo componente `NotificationDots` + bolinhas na célula "Cliente" junto ao nome; import `MessageSquare` adicionado.
+- **Padrão visual** (consistente com `KanbanCard.jsx`): `relative flex h-2.5 w-2.5` + `animate-ping` + `bg-blue-500` (mensagens) / `bg-emerald-500` (documentos). Componente retorna `null` quando não há sinal (sem ruído visual).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BH: Ordenação do Histórico (Mais Recentes Primeiro)
 
 ### Corrigido
