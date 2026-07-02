@@ -1646,3 +1646,38 @@ Stage Summary:
   - `backend/routes/processes.py` (constante + helper + 4 endpoints: kanban, /processes, /paginated, /my-clients)
   - `backend/routes/my_clients.py` (constante local + 1 endpoint: /my-clients)
 - Resultado: processos em pré_registo (cliente ainda a preencher no portal) NÃO aparecem no Kanban nem em "Os Meus Clientes" para nenhum role. Nas listagens tabulares (GET /processes, GET /paginated), consultores/intermediários/indexação nunca os veem; admin/CEO/diretor/administrativo vêem-nos apenas quando pesquisam ativamente (search) ou filtram por status explícito (incl. pré_registo). Os processos só entram nos quadros de trabalho quando transitam de pré_registo para a primeira fase da pipeline, disparando a dupla auto-atribuição em `services/process_assignment.py` (função `dual_auto_assign_on_pre_registo_transition`).
+
+
+---
+Task ID: Pacote BL (Categoria INDEX forçada e privada)
+Agent: Main Agent (Code Assistant)
+Task: Documentos do cliente vão para pasta cofre "Index" e são privados (só indexacao/gestão vêem)
+
+Work Log:
+- Análise do sistema de categorias: `DocumentCategory.INDEX = "Index"` (models/enums.py:218, com I maiúsculo — valor canónico). Já existia `PORTAL_HIDDEN_CATEGORIES = {"Index"}` em portal.py:446 que esconde a categoria do Portal do Cliente. O utilizador escreveu 'index' no prompt, mas usei o valor canónico "Index" para consistência.
+- Mapeamento dos pontos de upload do cliente em portal.py:
+  1. `POST /portal/upload-url` (linha 1357) — gera pre-signed URL; usa `category` para construir o file_key S3.
+  2. `POST /portal/confirm-upload` (linha 1429) — confirma upload e cria registo na BD; lê `category` do payload e tem bloco de triagem IA para "Outros"/"Auto".
+  3. `_create_document_record` (linha 1753) — helper chamado por confirm-upload; insere em db.documents com a categoria recebida.
+  4. `_run_financas_scraper` (linha 2785) e `_run_seguranca_social_scraper` (linha 2937) — scrapers automáticos das Finanças/Segurança Social. NÃO alterados: são documentos obtidos pelo sistema em nome do cliente (não "enviados diretamente" pelo cliente) e têm categorias específicas significativas (IRS, etc.) que o cliente precisa de ver. O pedido do utilizador foca-se em uploads manuais do cliente.
+- Backend — override da categoria para "Index" em 2 endpoints:
+  1. `generate_portal_upload_url`: override logo após ler `category` do payload, antes de gerar o file_key S3. Isto garante que a pasta S3 também seja "Index" (consistência com o registo da BD). Bloqueio de PORTAL_HIDDEN_CATEGORIES desativado (comentado) porque "Index" é EXATAMENTE a categoria que queremos permitir.
+  2. `confirm_portal_upload`: override após ler `category` do payload, antes do bloco de triagem IA. Isto desativa a triagem IA (que só corria para "Outros"/"Auto") — a categoria já está definida. A categoria original é preservada no log para auditoria. O `_create_document_record` e o `update_one` (para docs REQUESTED) usam a categoria forçada.
+- Frontend — bloqueio de segurança no S3FileManager.js (o UnifiedDocumentsPanel delega para S3FileManager, que é onde os ficheiros são listados):
+  1. Constantes `INDEX_CATEGORY_ID = "Index"` e `INDEX_CATEGORY_ALLOWED_ROLES = ["admin", "ceo", "diretor", "indexacao"]` junto de CATEGORIES.
+  2. `canSeeIndexCategory = hasAnyRole(user, INDEX_CATEGORY_ALLOWED_ROLES)` — flag de permissão.
+  3. `visibleCategories` — CATEGORIES filtrado (exclui "Index" se sem permissão) para usar em todos os CATEGORIES.map da sidebar (3 sítios substituídos).
+  4. `getCategoryCount("Index")` retorna 0 se sem permissão.
+  5. `getAllFiles()` — skip da categoria "Index" ao agregar se sem permissão.
+  6. `getFilteredCategoryFiles("Index")` retorna [] se sem permissão (defesa contra state/URL manipulada).
+  7. useEffect que reseta `selectedCategory` se for "Index" e o utilizador perder permissão (ex: impersonate terminou).
+  8. Import de `hasAnyRole` adicionado (só tinha `hasRole`).
+- Frontend — UnifiedDocumentsPanel.js (defesa em profundidade): adicionada flag `canSeeIndexCategory` via `useMemo` (não effectiveRole, mas user.role) com os mesmos roles permitidos. Atributo `data-can-see-index` no div raiz para debugging/testes. O filtro granular fica no S3FileManager; o UnifiedDocumentsPanel serve como ponto de controlo documentado para futuros componentes de documentos.
+- Validação: `py_compile` ✓ em portal.py; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros em ambos os ficheiros frontend.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/routes/portal.py` (override category="Index" em generate_portal_upload_url + confirm_portal_upload; bloqueio PORTAL_HIDDEN_CATEGORIES desativado para permitir a pasta cofre)
+  - `frontend/src/components/S3FileManager.js` (constantes + canSeeIndexCategory + visibleCategories + filtros em getCategoryCount/getAllFiles/getFilteredCategoryFiles + useEffect guard + import hasAnyRole + 3 CATEGORIES.map substituídos)
+  - `frontend/src/components/UnifiedDocumentsPanel.js` (defesa em profundidade: flag canSeeIndexCategory + data-can-see-index no div raiz)
+- Resultado: todos os documentos enviados diretamente pelo cliente através do Portal vão parar à pasta cofre "Index" (backend força a categoria, ignorando o que vem do frontend). Apenas admin/CEO/diretor/indexacao vêem estes documentos no painel de documentos (S3FileManager filtra por ficheiro e por categoria na sidebar). Consultores, intermediários, administrativos e outros roles não veem nada da categoria "Index" — nem na sidebar, nem na lista "Todos", nem por seleção direta. Scrapers automáticos (Finanças/Segurança Social) mantêm as suas categorias específicas porque não são uploads manuais do cliente.

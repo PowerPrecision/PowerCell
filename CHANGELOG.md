@@ -3,6 +3,38 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BL: Categoria INDEX forçada e privada
+
+### Adicionado
+- **Pasta cofre "Index" para documentos do cliente**: Todos os documentos enviados **diretamente** pelo cliente através do Portal recebem automaticamente `category="Index"`, ignorando qualquer categoria que venha do frontend do portal. Esta categoria é a "pasta cofre" tratada exclusivamente pela equipa de Indexação — os restantes roles não a veem no painel de documentos.
+
+### Backend (forçar categoria)
+- **`POST /portal/upload-url`** (`routes/portal.py`): Override da categoria para `"Index"` antes de gerar o `file_key` S3 — garante que a pasta S3 também seja "Index" (consistência com o registo da BD). Bloqueio de `PORTAL_HIDDEN_CATEGORIES` desativado (comentado) porque "Index" é exatamente a categoria a permitir.
+- **`POST /portal/confirm-upload`** (`routes/portal.py`): Override da categoria para `"Index"` após ler o payload, antes do bloco de triagem IA. Isto desativa a triagem IA (que só corria para "Outros"/"Auto") — a categoria já está definida. A categoria original é preservada no log para auditoria. O `_create_document_record` e o `update_one` (para docs REQUESTED) usam a categoria forçada.
+
+### Frontend (bloqueio de segurança)
+- **`S3FileManager.js`** (filtro granular — onde os ficheiros são listados):
+  - Constantes `INDEX_CATEGORY_ID = "Index"` e `INDEX_CATEGORY_ALLOWED_ROLES = ["admin", "ceo", "diretor", "indexacao"]`.
+  - `canSeeIndexCategory = hasAnyRole(user, INDEX_CATEGORY_ALLOWED_ROLES)` — flag de permissão.
+  - `visibleCategories` — `CATEGORIES` filtrado (exclui "Index" se sem permissão), usado em todos os 3 `CATEGORIES.map` da sidebar.
+  - `getCategoryCount("Index")` retorna 0 se sem permissão.
+  - `getAllFiles()` — skip da categoria "Index" ao agregar ficheiros se sem permissão.
+  - `getFilteredCategoryFiles("Index")` retorna `[]` se sem permissão (defesa contra state/URL manipulada).
+  - `useEffect` que reseta `selectedCategory` se for "Index" e o utilizador perder permissão (ex: impersonate terminou).
+  - Import de `hasAnyRole` adicionado (só tinha `hasRole`).
+- **`UnifiedDocumentsPanel.js`** (defesa em profundidade): flag `canSeeIndexCategory` via `useMemo` com os mesmos roles permitidos. Atributo `data-can-see-index` no div raiz para debugging/testes. O filtro granular fica no `S3FileManager`; o `UnifiedDocumentsPanel` serve como ponto de controlo documentado para futuros componentes.
+
+### Decisão de Arquitetura
+- **Scrapers automáticos NÃO afetados**: Os endpoints `_run_financas_scraper` e `_run_seguranca_social_scraper` (documentos obtidos automaticamente das Finanças/Segurança Social em nome do cliente) mantêm as suas categorias específicas (IRS, Segurança Social, etc.). Estes não são "uploads manuais do cliente" e têm categorias significativas que o cliente precisa de ver. O pedido do utilizador foca-se em documentos "enviados diretamente pelo cliente".
+- **Valor canónico `"Index"`** (com I maiúsculo): O sistema já usava este valor em `DocumentCategory.INDEX` (`models/enums.py:218`) e `PORTAL_HIDDEN_CATEGORIES` (`portal.py:446`). Mantido para consistência, em vez de `"index"` minúsculo.
+- **Defesa em profundidade**: O bloqueio é aplicado em 3 níveis no frontend (getCategoryCount, getAllFiles, getFilteredCategoryFiles) + useEffect guard + UnifiedDocumentsPanel flag, para garantir que documentos "Index" nunca sejam visíveis para roles não autorizados, mesmo em cenários edge (state legacy, URL manipulada, impersonate a terminar).
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): override em `generate_portal_upload_url` (linhas 1387-1402) e `confirm_portal_upload` (linhas 1463-1491); bloqueio `PORTAL_HIDDEN_CATEGORIES` comentado (linhas 1407-1412).
+- **Frontend** (`frontend/src/components/S3FileManager.js`): constantes (linhas 153-164); `canSeeIndexCategory` + `visibleCategories` + `useEffect` guard (linhas 284-304); filtros em `getCategoryCount`/`getAllFiles`/`getFilteredCategoryFiles` (linhas 1000-1046); 3 `CATEGORIES.map` → `visibleCategories.map` (linhas 2120, 2589, 2727); import `hasAnyRole` (linha 74).
+- **Frontend** (`frontend/src/components/UnifiedDocumentsPanel.js`): `canSeeIndexCategory` via `useMemo` (linhas 35-43); `data-can-see-index` no div raiz (linha 53); docstring atualizada (linhas 9-16).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros em ambos os ficheiros frontend.
+
 ## [2026-07-16] — Pacote BK: Exclusão do Estado pré_registo dos Dashboards
 
 ### Adicionado

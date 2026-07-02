@@ -1384,12 +1384,32 @@ async def generate_portal_upload_url(
     content_type = data.get("content_type", "application/octet-stream")
     category = data.get("category", "Outros")
 
+    # ====================================================================
+    # PACOTE BL — CATEGORIA INDEX FORÇADA (PASTA COFRE)
+    # ====================================================================
+    # Override da categoria: todos os uploads do cliente vão para a pasta
+    # cofre "Index", independentemente da categoria enviada pelo frontend.
+    # Isto garante que o file_key no S3 também fica na pasta "Index",
+    # consistente com o confirm-upload (que força a mesma categoria no
+    # registo da BD).
+    # ====================================================================
+    if category != "Index":
+        logger.info(
+            f"[PORTAL-PACOTE-BL] generate_upload_url: categoria original "
+            f"'{category}' forçada para 'Index' (pasta cofre). "
+            f"Ficheiro: {filename}, processo: {process_id}"
+        )
+    category = "Index"
+
     if not filename:
         raise HTTPException(status_code=400, detail="Nome do ficheiro é obrigatório")
 
     # Bloquear categorias internas no portal do cliente
-    if category in PORTAL_HIDDEN_CATEGORIES:
-        raise HTTPException(status_code=403, detail="Categoria de documento não disponível no portal")
+    # (Nota: "Index" está em PORTAL_HIDDEN_CATEGORIES, mas é EXATAMENTE a
+    # categoria que queremos forçar aqui — o bloqueio abaixo foi desativado
+    # para permitir o upload do cliente para a pasta cofre.)
+    # if category in PORTAL_HIDDEN_CATEGORIES:
+    #     raise HTTPException(status_code=403, detail="Categoria de documento não disponível no portal")
 
     # Normalizar nome
     safe_filename = filename.replace(" ", "_").replace("/", "-").replace("\\", "-")
@@ -1459,6 +1479,36 @@ async def confirm_portal_upload(
     content_type = data.get("content_type", "application/octet-stream")
     document_id = data.get("document_id")  # ID do doc REQUESTED a satisfazer
     custom_label = data.get("custom_label")  # Custom label for "Outros" category
+
+    # ====================================================================
+    # PACOTE BL — CATEGORIA INDEX FORÇADA E PRIVADA (PASTA COFRE)
+    # ====================================================================
+    # Todos os documentos enviados DIRETAMENTE pelo cliente através do
+    # Portal recebem automaticamente category="Index" (pasta cofre),
+    # ignorando qualquer categoria que venha do frontend do portal. Esta
+    # categoria é tratada exclusivamente pela equipa de Indexação — os
+    # outros roles não a veem no painel de documentos (filtro aplicado
+    # no frontend UnifiedDocumentsPanel/S3FileManager).
+    #
+    # A categoria original (enviada pelo frontend) é preservada no log
+    # para auditoria, mas o documento fica SEMPRE com category="Index".
+    # Isto garante que o cliente não consiga classificar documentos em
+    # categorias visíveis para consultores/mediadores, mantendo os docs
+    # do cliente numa "pasta cofre" até a Indexação os classificar.
+    #
+    # NOTA: A triagem automática com IA (bloco abaixo) fica desativada
+    # para uploads do cliente, porque a categoria já está definida ("Index").
+    # A triagem IA só faria sentido se a categoria fosse "Outros"/"Auto",
+    # o que já não acontece após este override.
+    # ====================================================================
+    original_category_from_client = category
+    category = "Index"
+    if original_category_from_client and original_category_from_client != "Index":
+        logger.info(
+            f"[PORTAL-PACOTE-BL] Upload do cliente com categoria original "
+            f"'{original_category_from_client}' forçada para 'Index' (pasta cofre). "
+            f"Ficheiro: {original_filename}, processo: {process_id}"
+        )
 
     # ====================================================================
     # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
