@@ -3,6 +3,30 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BJ: Stealth Mode para o Histórico (Indexação Invisível)
+
+### Adicionado
+- **Switch global `track_history` (por utilizador)**: Qualquer utilizador pode agora ser silenciado individualmente no histórico/atividades definindo `track_history: False` no seu documento da coleção `users`. Quando a chave não existe, assume-se `True` (comportamento normal com rasto). Isto permite desligar o rasto de um utilizador específico sem afetar o restante sistema.
+
+- **Helper centralizado `_is_stealth_user(user)`**: Nova função em `services/history.py` que encapsula as regras de stealth mode: (1) `role == "indexacao"` → sempre silencioso; (2) `track_history is False` → silencioso; (3) default → não silencioso. Reutilizável por qualquer rota/serviço (já usado em `routes/activities.py`).
+
+### Corrigido
+- **`log_data_changes` não respeitava o stealth mode**: A função `log_data_changes` (que faz diff de dados e chama `log_history` por cada campo alterado) não tinha o early return de stealth mode. Adicionado o mesmo guard no início da função — agora percorre o diff APENAS se o utilizador não for silencioso, evitando trabalho desnecessário e garantindo consistência.
+
+- **`create_activity` inseria diretamente em `db.activities` sem passar pelo stealth mode**: A rota `POST /activities` inseria o comentário diretamente na coleção `activities` antes de chamar `log_history`, pelo que o guard do `log_history` não a cobria. Adicionado guard explícito: utilizador silencioso recebe HTTP 403 com mensagem clara ("O seu perfil está em modo de indexação silenciosa e não pode adicionar comentários ao histórico do processo"). Decisão de UX: seria contraditório silenciar o `log_history("Adicionou comentário")` mas deixar o comentário visível no mural.
+
+### Melhorado
+- **`log_history` agora respeita `track_history`**: O guard existente (Pacote D, modo fantasma para `indexacao`) foi generalizado para usar o helper `_is_stealth_user`, cobrindo também o switch global `track_history`. O guard específico do Pacote D (documentos) é mantido como defesa em profundidade (redundante mas intencional).
+
+### Decisão de Arquitetura (Importante)
+- **`audit_trail` é INTENCIONALMENTE EXCLUÍDO do stealth mode**: O `audit_trail_service.py` (`log_audit_event`) é um trilho de **compliance** separado — com IP, justificações, retention policy configurável pelo admin e campos críticos (financeiros, status). Silenciar o audit trail seria um risco de segurança/compliance. O stealth mode destina-se ao **histórico visível ao utilizador** (`db.history`, `db.activities`), não ao trilho de auditoria de compliance. Inserções diretas em `db.history` em `routes/admin.py` (ações administrativas: eliminar fases, corrigir duplicados, impersonate, editar/eliminar registos) também NÃO são silenciadas — são ações de gestão de sistema que precisam de rastreabilidade.
+
+### Técnico
+- **Backend** (`backend/services/history.py`): novo helper `_is_stealth_user(user)` (linhas 13-44); early return em `log_history` (linhas 58-69) e `log_data_changes` (linhas 120-132) usando o helper; guard do Pacote D mantido como defesa em profundidade.
+- **Backend** (`backend/routes/activities.py`): import de `_is_stealth_user`; guard 403 em `create_activity` antes de `db.activities.insert_one`.
+- **Regra do `track_history`**: usa `user.get("track_history", True) is False` (strict `is False`) — apenas o literal `False` dispara stealth, NÃO valores falsy como `None` ou `0`, evitando false positives.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; teste funcional do helper com 13 casos (None, vazio, admin, consultor, indexacao, track_history True/False/None/0, role desconhecido, combinações) — TODOS PASSARAM.
+
 ## [2026-07-16] — Pacote BI: Bolinhas de Notificação nas Listas (My Clients / Processes)
 
 ### Adicionado

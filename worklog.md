@@ -1582,3 +1582,32 @@ Stage Summary:
   - `frontend/src/pages/FilteredProcessList.js` (componente NotificationDots + bolinhas na célula Cliente + import MessageSquare)
   - `frontend/src/pages/MyClientsPage.js` (componente NotificationDots + bolinhas na célula Cliente + import MessageSquare)
 - Resultado: as 4 listas tabulares (FilteredProcessList + MyClientsPage que consome 2 endpoints distintos) mostram agora bolinhas azuis/verdes junto ao nome do cliente quando há mensagens não lidas ou novos documentos do portal, exatamente como já acontecia no Kanban. Indicadores silenciosos (sem popups/toasts) — apenas dots com pulse animation.
+
+
+---
+Task ID: Pacote BJ (Stealth Mode para o Histórico)
+Agent: Main Agent (Code Assistant)
+Task: Stealth mode do histórico — indexação invisível + switch global track_history
+
+Work Log:
+- Análise do estado inicial do `services/history.py`: já existia um "modo fantasma" para `role=="indexacao"` na `log_history` (linhas 43-50), mas (1) faltava na `log_data_changes` e (2) faltava o switch global `track_history`.
+- Mapeamento de TODOS os pontos que escrevem em `db.history` e `db.activities`:
+  - `services/history.py`: `log_history` (linha 64) e `log_data_changes` (delega para log_history) — alvo principal.
+  - `routes/activities.py`: `create_activity` insere DIRETAMENTE em `db.activities` (linha 42) antes de chamar `log_history` — precisava de guard explícito para consistência.
+  - `routes/admin.py` (5 inserções diretas): ações administrativas (eliminar fases, corrigir duplicados, impersonate, editar/eliminar registos) — NÃO silenciadas (são ações de gestão de sistema que precisam de rastreabilidade).
+  - `routes/documents.py` (3 inserções diretas): já têm guard explícito `role != "indexacao"` (Pacote D) — mantidas.
+  - `routes/restore.py`: operações de restore — fora do âmbito do stealth mode.
+- Verificação de callers: 56 callers de `log_history` e 3 de `log_data_changes` — NENHUM usa o valor de retorno (fire-and-forget), pelo que o early return é seguro.
+- Distinguição crítica: `audit_trail_service.py` (log_audit_event) é um trilho de COMPLIANCE separado (com IP, justificações, retention policy configurável pelo admin) — INTENCIONALMENTE EXCLUÍDO do stealth mode. Silenciar o audit trail seria um risco de segurança/compliance. O stealth mode destina-se ao histórico visível ao utilizador, não ao trilho de auditoria de compliance.
+- Implementação:
+  1. Criado helper centralizado `_is_stealth_user(user)` em `history.py` (DRY, reutilizável). Regras: `role=="indexacao"` → True; `user.get("track_history", True) is False` → True (strict `is False` para evitar false positives com None/0); default False (não stealth).
+  2. `log_history`: substituído o guard legacy (linhas 43-50) pela chamada ao helper — agora também respeita `track_history`. Early return no início da função. Guard do Pacote D (documentos) mantido como defesa em profundidade (redundante mas intencional).
+  3. `log_data_changes`: adicionado early return no início (antes do loop de diff) para evitar trabalho desnecessário e garantir consistência.
+  4. `routes/activities.py` (`create_activity`): adicionado guard antes de `db.activities.insert_one` — utiliza stealth user recebe 403 com mensagem clara (seria contraditório silenciar o log_history mas deixar o comentário visível na coleção activities).
+- Validação: `py_compile` ✓ em ambos os ficheiros; `flake8 --select=E9,F63,F7,F82` → 0 erros; teste funcional do helper com 13 casos (None, vazio, admin, consultor, indexacao, track_history True/False/None/0, role desconhecido, combinações) — TODOS PASSARAM.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/services/history.py` (helper `_is_stealth_user` + early return em `log_history` e `log_data_changes`)
+  - `backend/routes/activities.py` (import `_is_stealth_user` + guard 403 em `create_activity`)
+- Resultado: ações do departamento de Indexação NÃO poluem o histórico do cliente (stealth mode automático por role); qualquer utilizador pode ser silenciado individualmente via `track_history=False` (switch global); utilizadores normais mantêm `track_history=True` por defeito (quando a chave não existe). O audit_trail (compliance) mantém-se INTACTO e independente — rastreabilidade garantida.
