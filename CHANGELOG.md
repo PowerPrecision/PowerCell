@@ -3,6 +3,34 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BR: Dynamic Workflow Purpose Flags (Backend)
+
+### Alterado
+- **Gatilhos do Kanban agora lêem flags dinâmicas do `workflow_statuses`**: A função `move_process_kanban` (processes.py) deixou de usar strings hardcoded (`new_status == "concluidos"`, `new_status == "fase_bancaria"`, etc.) e passou a ler flags de comportamento configuradas na coleção `workflow_statuses`. O admin pode configurar quais estados disparam cada automação sem alterar código.
+
+### Flags Dinâmicas (PACOTE BR)
+- **`trigger_finance`**: cria snapshot financeiro (era: `new_status == "concluidos"`)
+- **`trigger_countdown`**: inicia countdown de 90 dias (era: `new_status == "fase_bancaria"`)
+- **`trigger_property_check`**: verifica docs do imóvel + alerta CPCV/Escritura (era: `new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]`)
+- **`trigger_deed_reminder`**: cria lembrete 15 dias antes da escritura (era: `new_status == "escritura_agendada"`)
+- **`is_active`**: determina se o processo fica ativo ou inativo (era: `new_status not in ["desistencias", "concluidos"]`)
+
+### Fallback Retrocompatível
+- Se a flag não existir no documento `workflow_statuses` (instalações existentes que ainda não migraram), o comportamento hardcoded atual é usado como fallback. Isto garante que nada quebra — à medida que o admin configura as flags, o fallback deixa de ser usado. Ex: `trigger_finance = status_exists.get("trigger_finance")`; se `None`, fallback para `new_status == "concluidos"`.
+
+### Gatilho de Fila de Espera Dinâmico
+- O gatilho de fila de espera (libertar slot do indexador) agora dispara em **qualquer estado inativo** (`is_active == False`), não apenas em `["concluidos", "desistencias"]`. Isto é mais correto: se o admin configurar um novo estado terminal com `is_active: False`, o gatilho dispara automaticamente.
+
+### Decisão de Arquitetura
+- **Fallback em vez de migração forçada**: As flags não existem ainda no modelo `workflow_statuses` (o seed só define name, label, order, color, is_default, visible_in_portal, portal_label, description). Em vez de forçar uma migração da BD, usei fallback retrocompatível — o sistema funciona imediatamente e à medida que o admin configura as flags (futuro, via WorkflowEditor), o fallback deixa de ser usado.
+- **`trigger_countdown and old_status != new_status`**: O countdown original tinha `old_status != "fase_bancaria"` para não disparar se o processo já estava em fase_bancaria. Generalizei para `old_status != new_status` — não disparar se o processo já estava no estado (independente do nome).
+- **`trigger_property_check` funde 2 blocos**: Os blocos `if new_status in ["ch_aprovado", "fase_escritura"]` (property check) e `if new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]` (CPCV alert) cobriam os mesmos 3 statuses. Fundi-os num só `if trigger_property_check` que faz ambas as verificações.
+- **Próximo passo (futuro)**: Expor estas flags no `WorkflowEditor` do frontend para o admin as configurar visualmente.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): bloco PACOTE BR com leitura das 5 flags + fallback (linhas 2926-2974); substituição dos 5 blocos de gatilhos hardcoded por flags dinâmicas (linhas 3021-3086); gatilho de fila de espera dinâmico `if not is_active` (linhas 3111-3129); remoção da lista fixa `inactive_statuses`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote BQ: Acesso Global para a Role de Indexação
 
 ### Corrigido

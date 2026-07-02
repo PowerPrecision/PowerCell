@@ -1824,3 +1824,41 @@ Stage Summary:
   - `backend/routes/processes.py` (3 endpoints: kanban, /processes, /paginated — indexacao scope com assigned + fila_espera)
   - `frontend/src/pages/KanbanPage.js` (badge visual para indexacao indicando vista scoped)
 - Resultado: a role indexacao vê agora globalmente no Kanban (across all consultors/mediadores) mas apenas os processos relevantes para o seu trabalho: atribuídos a si OU na fila de espera. O scope aplica-se sempre (independentemente de show_all=true enviado pelo frontend). Os botões de filtro (Consultor, Intermediário, Indexação, Parceiro, Estado de Indexação) já apareciam para indexacao e continuam a aparecer — agora filtram DENTRO do scope. Um badge visual comunica a vista scoped. Os endpoints de listagem (GET /processes, GET /paginated) também incluem fila_espera no scope do indexacao para consistência.
+
+
+---
+Task ID: Pacote BR (Dynamic Workflow Purpose Flags)
+Agent: Main Agent (Code Assistant)
+Task: Substituir status hardcoded por flags dinâmicas do workflow_statuses
+
+Work Log:
+- Análise da função move_process_kanban (processes.py:2896): continha 5 blocos de gatilhos hardcoded:
+  1. `if new_status == "concluidos"` → snapshot financeiro
+  2. `if new_status in ["ch_aprovado", "fase_escritura"]` → verificação docs imóvel
+  3. `if new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]` → alerta CPCV/Escritura
+  4. `if new_status == "fase_bancaria" and old_status != "fase_bancaria"` → countdown 90 dias
+  5. `if new_status == "escritura_agendada"` → lembrete escritura
+  E 2 blocos de is_active/waitlist:
+  6. `inactive_statuses = ["desistencias", "concluidos"]` → is_active
+  7. `if new_status in ["concluidos", "desistencias"]` → gatilho fila de espera
+- Análise do modelo workflow_statuses: os campos `trigger_finance`, `trigger_countdown`, `trigger_property_check`, `trigger_deed_reminder`, `is_active` NÃO existem ainda no modelo (seed_massive_dev_data.py só define name, label, order, color, is_default, visible_in_portal, portal_label, description). O WorkflowEditor no frontend também não os expõe ainda.
+- Estratégia: ler as flags dinamicamente de `status_exists` com **fallback retrocompatível** — se a flag não existir no documento (None), usar o comportamento hardcoded atual. Isto garante que instalações existentes continuam a funcionar sem migração; à medida que o admin configura as flags no WorkflowEditor (futuro), o fallback deixa de ser usado.
+- Implementação em move_process_kanban (processes.py:2926-2974):
+  - `trigger_finance = status_exists.get("trigger_finance")`; fallback: `new_status == "concluidos"`
+  - `trigger_countdown = status_exists.get("trigger_countdown")`; fallback: `new_status == "fase_bancaria"`
+  - `trigger_property_check = status_exists.get("trigger_property_check")`; fallback: `new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]`
+  - `trigger_deed_reminder = status_exists.get("trigger_deed_reminder")`; fallback: `new_status == "escritura_agendada"`
+  - `is_active = status_exists.get("is_active")`; fallback: `new_status not in ["desistencias", "concluidos"]`
+  - Log info com todas as flags para diagnóstico.
+- Substituição dos 5 blocos de gatilhos:
+  1. `if new_status == "concluidos"` → `if trigger_finance`
+  2. Blocos 2+3 (property check + CPCV) fundidos num só: `if trigger_property_check` (cobria os mesmos 3 statuses)
+  3. `if new_status == "fase_bancaria" and old_status != "fase_bancaria"` → `if trigger_countdown and old_status != new_status` (generalizado: não disparar se já estava no estado)
+  4. `if new_status == "escritura_agendada"` → `if trigger_deed_reminder`
+- `move_update_data["is_active"]` agora usa `is_active` dinâmico (sem lista fixa `inactive_statuses`).
+- Gatilho de fila de espera: `if new_status in ["concluidos", "desistencias"]` → `if not is_active` (dispara quando o processo fica inativo, independentemente do nome do status).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/routes/processes.py` (função move_process_kanban).
+- Resultado: as automações do move_process_kanban agora leem flags de comportamento dinâmicas da coleção workflow_statuses em vez de strings hardcoded. O admin pode configurar quais estados disparam snapshot financeiro, countdown, verificação de docs, lembrete de escritura e is_active — sem alterar código. Fallback retrocompatível garante que instalações existentes continuam a funcionar até as flags serem configuradas. O gatilho de fila de espera agora dispara em qualquer estado inativo (is_active=False), não apenas em "concluidos"/"desistencias". O próximo passo (futuro) seria expor estas flags no WorkflowEditor do frontend para o admin as configurar visualmente.

@@ -2919,18 +2919,63 @@ async def move_process_kanban(
     status_exists = await db.workflow_statuses.find_one({"name": new_status})
     if not status_exists:
         raise HTTPException(status_code=400, detail="Estado inválido")
-    
+
     old_status = process.get("status", "")
     alerts_generated = []
-    
-    # Determinar se o processo deve estar ativo ou inativo
-    # Processos em Desistências ou Concluídos são marcados como inativos
-    inactive_statuses = ["desistencias", "concluidos"]
-    is_active = new_status not in inactive_statuses
-    
-    # Update process
+
+    # ==================================================================
+    # PACOTE BR — DYNAMIC WORKFLOW PURPOSE FLAGS
+    # ==================================================================
+    # Em vez de hardcoded status strings, lemos as flags de comportamento
+    # configuradas na coleção workflow_statuses. Isto dá flexibilidade total
+    # ao negócio: o admin pode configurar quais estados disparam cada
+    # automação sem alterar código.
+    #
+    # FALLBACK RETROCOMPATÍVEL: se a flag não existir no documento (instalações
+    # existentes que ainda não migraram), usamos o comportamento hardcoded
+    # atual para não quebrar nada. À medida que o admin configura as flags
+    # no WorkflowEditor, o fallback deixa de ser usado.
+    # ==================================================================
+    # trigger_finance: cria snapshot financeiro (era: new_status == "concluidos")
+    trigger_finance = status_exists.get("trigger_finance")
+    if trigger_finance is None:
+        trigger_finance = (new_status == "concluidos")
+
+    # trigger_countdown: inicia countdown de 90 dias (era: new_status == "fase_bancaria")
+    trigger_countdown = status_exists.get("trigger_countdown")
+    if trigger_countdown is None:
+        trigger_countdown = (new_status == "fase_bancaria")
+
+    # trigger_property_check: verifica docs do imóvel + alerta CPCV/Escritura
+    # (era: new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"])
+    trigger_property_check = status_exists.get("trigger_property_check")
+    if trigger_property_check is None:
+        trigger_property_check = new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]
+
+    # trigger_deed_reminder: cria lembrete 15 dias antes da escritura
+    # (era: new_status == "escritura_agendada")
+    trigger_deed_reminder = status_exists.get("trigger_deed_reminder")
+    if trigger_deed_reminder is None:
+        trigger_deed_reminder = (new_status == "escritura_agendada")
+
+    # is_active: determina se o processo fica ativo ou inativo
+    # (era: new_status not in ["desistencias", "concluidos"])
+    is_active = status_exists.get("is_active")
+    if is_active is None:
+        is_active = new_status not in ["desistencias", "concluidos"]
+
+    logger.info(
+        f"[KANBAN-MOVE-BR] Processo {process_id} → '{new_status}'. "
+        f"Flags dinâmicas: trigger_finance={trigger_finance}, "
+        f"trigger_countdown={trigger_countdown}, "
+        f"trigger_property_check={trigger_property_check}, "
+        f"trigger_deed_reminder={trigger_deed_reminder}, "
+        f"is_active={is_active}"
+    )
+
+    # Update process — is_active dinâmico (sem lista fixa inactive_statuses)
     move_update_data = {
-        "status": new_status, 
+        "status": new_status,
         "is_active": is_active,
         "updated_at": datetime.now(timezone.utc).isoformat()
     }
@@ -2973,8 +3018,8 @@ async def move_process_kanban(
     # Exclude the user who made the move to avoid duplicate updates
     await manager.broadcast(moved_message, exclude_user=str(user.get("id", "")))
     
-    # === SNAPSHOT FINANCEIRO: Criar ProcessFinance ao mover para Concluídos ===
-    if new_status == "concluidos":
+    # === SNAPSHOT FINANCEIRO: trigger_finance dinâmico (era: new_status == "concluidos") ===
+    if trigger_finance:
         try:
             await _create_finance_snapshot(process, user)
         except Exception as snap_err:
@@ -2983,11 +3028,13 @@ async def move_process_kanban(
             _log.getLogger(__name__).warning(
                 f"Falha ao criar snapshot financeiro para processo {process_id}: {snap_err}"
             )
-    
-    # === ALERTAS AUTOMÁTICOS BASEADOS NA MUDANÇA DE ESTADO ===
-    
-    # 1. Ao mover para CH Aprovado - Verificar documentos do imóvel
-    if new_status in ["ch_aprovado", "fase_escritura"]:
+
+    # === ALERTAS AUTOMÁTICOS BASEADOS NAS FLAGS DINÂMICAS (PACOTE BR) ===
+
+    # 1. trigger_property_check — Verificar documentos do imóvel + alerta CPCV/Escritura
+    # (era: new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"])
+    if trigger_property_check:
+        # 1a. Verificação de docs do imóvel (era: new_status in ["ch_aprovado", "fase_escritura"])
         property_check = await check_property_documents(process)
         if property_check.get("active"):
             alerts_generated.append({
@@ -2995,17 +3042,17 @@ async def move_process_kanban(
                 "message": property_check.get("message"),
                 "details": property_check.get("details")
             })
-    
-    # 1.1 Alerta de verificação de documentos para CPCV/Escritura
-    if new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]:
+
+        # 1b. Alerta de verificação de documentos para CPCV/Escritura
         await notify_cpcv_or_deed_document_check(process, new_status)
         alerts_generated.append({
             "type": "document_verification_alert",
             "message": "Alerta enviado aos envolvidos para verificação de documentos"
         })
-    
-    # 2. Ao mover para pré-aprovação - Iniciar countdown de 90 dias
-    if new_status == "fase_bancaria" and old_status != "fase_bancaria":
+
+    # 2. trigger_countdown — Iniciar countdown de 90 dias
+    # (era: new_status == "fase_bancaria" and old_status != "fase_bancaria")
+    if trigger_countdown and old_status != new_status:
         # Guardar data de aprovação se ainda não existir
         if not process.get("credit_data", {}).get("bank_approval_date"):
             bank_approval_data = {"credit_data.bank_approval_date": datetime.now().strftime("%Y-%m-%d")}
@@ -3021,9 +3068,10 @@ async def move_process_kanban(
             "type": "countdown_started",
             "message": "Countdown de 90 dias iniciado para pré-aprovação"
         })
-    
-    # 3. Ao mover para escritura agendada - Criar lembrete 15 dias antes
-    if new_status == "escritura_agendada":
+
+    # 3. trigger_deed_reminder — Criar lembrete 15 dias antes da escritura
+    # (era: new_status == "escritura_agendada")
+    if trigger_deed_reminder:
         if deed_date:
             deadline_id = await create_deed_reminder(process, deed_date, user)
             if deadline_id:
@@ -3060,10 +3108,12 @@ async def move_process_kanban(
         changed_by=user
     )
     
-    # === GATILHO: Fila de espera ao mover para estado terminal ===
-    # Se o processo foi atribuído a um indexador e moveu para concluídos/desistências,
+    # === GATILHO: Fila de espera ao mover para estado inativo (PACOTE BR) ===
+    # Se o processo foi atribuído a um indexador e moveu para um estado inativo
+    # (is_active == False, definido dinamicamente pela flag do workflow_status),
     # o indexador libertou um slot — verificar se há processos na fila_espera.
-    if new_status in ["concluidos", "desistencias"]:
+    # (era: new_status in ["concluidos", "desistencias"])
+    if not is_active:
         try:
             from services.process_assignment import check_waitlist_for_indexer
             import asyncio as _asyncio
@@ -3071,8 +3121,9 @@ async def move_process_kanban(
             if assigned_indexer_id:
                 _asyncio.create_task(check_waitlist_for_indexer(assigned_indexer_id))
                 logger.info(
-                    f"[KANBAN-MOVE] Gatilho de fila de espera disparado para "
-                    f"indexador {assigned_indexer_id} (processo {process_id} → {new_status})"
+                    f"[KANBAN-MOVE-BR] Gatilho de fila de espera disparado para "
+                    f"indexador {assigned_indexer_id} (processo {process_id} → {new_status}, "
+                    f"is_active=False dinâmico)"
                 )
         except Exception as waitlist_err:
             logger.warning(f"[KANBAN-MOVE] Erro ao verificar fila de espera: {waitlist_err}")
