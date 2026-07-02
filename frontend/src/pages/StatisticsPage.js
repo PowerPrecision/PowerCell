@@ -261,7 +261,7 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <SafeChartContainer className="h-[300px] min-w-0">
+                <SafeChartContainer className="h-[260px] min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={statusData}>
                       <CartesianGrid strokeDasharray="3 3" />
@@ -286,7 +286,7 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <SafeChartContainer className="h-[300px] min-w-0">
+                <SafeChartContainer className="h-[260px] min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <PieChart>
                       <Pie
@@ -320,7 +320,7 @@ const StatisticsPage = () => {
                 </CardDescription>
               </CardHeader>
               <CardContent>
-                <SafeChartContainer className="h-[300px] min-w-0">
+                <SafeChartContainer className="h-[260px] min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
                     <BarChart data={valorPorFaseData}>
                       <CartesianGrid strokeDasharray="3 3" />
@@ -348,7 +348,7 @@ const StatisticsPage = () => {
                 </CardHeader>
                 <CardContent>
                   {leadsStats?.funnel_data && Array.isArray(leadsStats.funnel_data) && (
-                    <SafeChartContainer className="h-[300px] min-w-0">
+                    <SafeChartContainer className="h-[260px] min-w-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <BarChart data={leadsStats.funnel_data} layout="vertical">
                           <CartesianGrid strokeDasharray="3 3" />
@@ -377,7 +377,7 @@ const StatisticsPage = () => {
                 </CardHeader>
                 <CardContent>
                   {Array.isArray(leadsStats?.leads_by_source) && leadsStats.leads_by_source.length > 0 ? (
-                    <SafeChartContainer className="h-[300px] min-w-0">
+                    <SafeChartContainer className="h-[260px] min-w-0">
                       <ResponsiveContainer width="100%" height="100%">
                         <PieChart>
                           <Pie

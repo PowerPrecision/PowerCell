@@ -365,26 +365,26 @@ const AdminDashboard = () => {
 
         {/* Funnel + Activity Feed Row */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-4">
-          {/* Funnel Chart */}
+          {/* Funnel Chart — PACOTE BX: altura reduzida de h-[280px] para h-[224px] (h-56) */}
           <Card className="lg:col-span-2 border-border">
-            <CardHeader>
+            <CardHeader className="pb-2">
               <CardTitle className="text-base flex items-center gap-2">
                 <LayoutGrid className="h-5 w-5 text-blue-500" />
                 Funil do Pipeline
               </CardTitle>
-              <CardDescription>
+              <CardDescription className="text-xs">
                 Processos por fase do workflow
               </CardDescription>
             </CardHeader>
-            <CardContent>
+            <CardContent className="pb-3">
               {funnelData.length > 0 ? (
-                <SafeChartContainer className="h-[280px] min-w-0">
+                <SafeChartContainer className="h-[224px] min-w-0">
                   <ResponsiveContainer width="100%" height="100%">
-                    <BarChart data={funnelData} layout="vertical" margin={{ left: 20, right: 20 }}>
+                    <BarChart data={funnelData} layout="vertical" margin={{ left: 20, right: 20, top: 5, bottom: 5 }}>
                       <CartesianGrid strokeDasharray="3 3" horizontal={false} />
                       <XAxis type="number" allowDecimals={false} />
                       <YAxis dataKey="name" type="category" width={100} tick={{ fontSize: 12 }} />
-                      <Tooltip 
+                      <Tooltip
                         formatter={(value) => [`${value} processos`, "Quantidade"]}
                         contentStyle={{ borderRadius: "8px", fontSize: "13px" }}
                       />
@@ -397,7 +397,7 @@ const AdminDashboard = () => {
                   </ResponsiveContainer>
                 </SafeChartContainer>
               ) : (
-                <div className="flex items-center justify-center h-[280px] text-muted-foreground">
+                <div className="flex items-center justify-center h-[224px] text-muted-foreground">
                   Sem dados de pipeline disponíveis
                 </div>
               )}

@@ -3,6 +3,29 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BX: Resize Pipeline Funnel
+
+### Alterado
+- **Funil do Pipeline mais compacto no AdminDashboard**: O gráfico de funil (`SafeChartContainer`) foi reduzido de `h-[280px]` para `h-[224px]` (h-56). Padding do `CardHeader` (`pb-2`) e `CardContent` (`pb-3`) também reduzido. `CardDescription` com `text-xs`. Margens internas do `BarChart` ajustadas (`top: 5, bottom: 5`). Poupança total: ~56px de altura vertical.
+
+- **Gráficos do StatisticsPage mais compactos**: Os 5 gráficos (`SafeChartContainer` com `h-[300px]`) foram reduzidos para `h-[260px]` (h-64). Aplicado a: funil de leads, funil de vendas, e 3 gráficos de status. Poupança: 40px por gráfico × 5 = 200px total.
+
+### Classes Tailwind ajustadas
+| Ficheiro | Elemento | Antes | Depois |
+|----------|----------|-------|--------|
+| `AdminDashboard.js` | `SafeChartContainer` | `h-[280px]` | `h-[224px]` |
+| `AdminDashboard.js` | Empty state div | `h-[280px]` | `h-[224px]` |
+| `AdminDashboard.js` | `CardHeader` | (default) | `pb-2` |
+| `AdminDashboard.js` | `CardDescription` | (default) | `text-xs` |
+| `AdminDashboard.js` | `CardContent` | (default) | `pb-3` |
+| `AdminDashboard.js` | `BarChart` margin | `{ left: 20, right: 20 }` | `{ left: 20, right: 20, top: 5, bottom: 5 }` |
+| `StatisticsPage.js` | 5× `SafeChartContainer` | `h-[300px]` | `h-[260px]` |
+
+### Técnico
+- **Frontend** (`frontend/src/pages/AdminDashboard.js`): Funil do Pipeline (linhas 368-405).
+- **Frontend** (`frontend/src/pages/StatisticsPage.js`): 5 gráficos com `h-[300px]` → `h-[260px]` (substituição global).
+- **Validação**: `esbuild --loader=jsx` → 0 erros nos 2 ficheiros.
+
 ## [2026-07-16] — Pacote BV: Fix Checklists, RGPD empty state, Backups Date
 
 ### Corrigido

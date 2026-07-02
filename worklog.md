@@ -1992,3 +1992,31 @@ Stage Summary:
   - `frontend/src/pages/RGPDAdminPage.js` (corrigir bug if(accessDenied) truthy → hasAnyRole boolean)
   - `frontend/src/lib/utils.js` (formatDateTime + formatDate usam safeParseISO em vez de safeDate)
 - Resultado: (1) quando o utilizador guarda/marca/remove documentos nos pedidos do portal, o UnifiedDocumentsPanel refresca automaticamente (via documentsRefreshKey); (2) a página de RGPD já renderiza o conteúdo para admin/ceo/administrativo em vez de retornar vazio; (3) as datas em BackupsPage (e em todo o sistema) agora formatam corretamente para dd/MM/yyyy HH:mm com ISO 8601.
+
+
+---
+Task ID: Pacote BX (Resize Pipeline Funnel)
+Agent: Main Agent (Code Assistant)
+Task: Reduzir altura do gráfico de Funil/Pipeline nos dashboards
+
+Work Log:
+- Análise: procurado funil/pipeline em todos os dashboards (AdminDashboard, ConsultorDashboard, MediadorDashboard, StaffDashboard, DashboardShared). O gráfico de funil (BarChart com SafeChartContainer) está APENAS no AdminDashboard.js (linha 381, h-[280px]). ConsultorDashboard, MediadorDashboard e StaffDashboard não têm gráfico de funil. StatisticsPage.js tem 5 gráficos com h-[300px] (funil de leads, funil de vendas, e 3 gráficos de status). FinanceDashboard.js tem h-[200px] sm:h-[300px] (já é compacto, não alterado).
+- AdminDashboard.js — Funil do Pipeline:
+  - SafeChartContainer: h-[280px] → h-[224px] (equivalente a h-56)
+  - Empty state div: h-[280px] → h-[224px] (mesma altura para alinhamento)
+  - CardHeader: adicionado `pb-2` (reduz padding inferior do header)
+  - CardDescription: adicionado `text-xs` (fonte mais pequena)
+  - CardContent: adicionado `pb-3` (reduz padding inferior)
+  - BarChart margin: adicionado `top: 5, bottom: 5` (margens internas mais tight)
+  - Poupança total: ~56px de altura vertical (280→224) + padding reduzido
+- StatisticsPage.js — 5 gráficos:
+  - h-[300px] → h-[260px] (h-64) em todos os 5 SafeChartContainer (funil de leads, funil de vendas, 3 gráficos de status)
+  - Poupança: 40px por gráfico × 5 = 200px de altura vertical total na página
+- Garantia de ajuste gracioso: o cartão do funil no AdminDashboard está num grid `lg:grid-cols-3` com `lg:col-span-2`. A redução de altura faz com que o cartão TeamFeed (coluna 3) também não seja empurrado para baixo desproporcionalmente. O conteúdo do funil (BarChart vertical) continua legível com h-224px — as labels do eixo Y (nomes das fases) continuam visíveis.
+- Validação: `esbuild --loader=jsx` → 0 erros nos 2 ficheiros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `frontend/src/pages/AdminDashboard.js` (Funil do Pipeline: h-[280px]→h-[224px] + padding reduzido)
+  - `frontend/src/pages/StatisticsPage.js` (5 gráficos: h-[300px]→h-[260px])
+- Resultado: o gráfico do Funil/Pipeline no AdminDashboard ocupa agora menos ~56px de altura vertical, e os 5 gráficos do StatisticsPage ocupam menos 40px cada. Os cartões ajustam-se graciosamente sem empurrar outros elementos para baixo desproporcionalmente. O conteúdo continua legível (labels do eixo Y, tooltips, barras coloridas).
