@@ -1251,10 +1251,18 @@ const RGPDAdminPage = ({ embedded = false }) => {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
   const { user } = useAuth();
 
-  // Verificar acesso
-  const accessDenied = <AccessRestricted userRole={user?.role} allowedRoles={["admin", "staff"]} />;
-  if (accessDenied) {
-    return wrapLayout(accessDenied);
+  // PACOTE BV (Fix 2): Verificar acesso corretamente.
+  // ANTES: `const accessDenied = <AccessRestricted .../>; if (accessDenied) {...}`
+  // — accessDenied é um elemento JSX (sempre truthy), pelo que a página
+  // retornava SEMPRE <AccessRestricted/> e nunca mostrava o conteúdo.
+  // Para admin/ceo/administrativo, AccessRestricted retorna null → página vazia.
+  // AGORA: verifica o role com hasAnyRole (boolean real) e só mostra
+  // AccessRestricted se o utilizador NÃO tiver permissão.
+  const RGPD_ALLOWED_ROLES = ["admin", "ceo", "administrativo"];
+  if (!hasAnyRole(user, RGPD_ALLOWED_ROLES)) {
+    return wrapLayout(
+      <AccessRestricted userRole={user?.role} allowedRoles={RGPD_ALLOWED_ROLES} />
+    );
   }
 
   return wrapLayout(

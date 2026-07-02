@@ -3,6 +3,22 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BV: Fix Checklists, RGPD empty state, Backups Date
+
+### Corrigido
+- **Checklist de Documentos não refletia alterações**: Quando o utilizador guardava/marcava/removia documentos nos pedidos do portal, a notificação de sucesso aparecia mas os documentos não ficavam refletidos na checklist/painel de documentos. Causa: `PortalDocumentRequests` fazia `fetchDocuments()` (state local) mas não notificava o `UnifiedDocumentsPanel` (componente irmão) para refrescar. Corrigido: adicionado prop `onDocumentsChange` ao `PortalDocumentRequests`, chamado após cada mutação bem-sucedida. No `ProcessDetails.js`, passado `onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}` — incrementa a key e força o `UnifiedDocumentsPanel` a remontar e refazer fetch.
+
+- **RGPD página vazia (BUG CRÍTICO)**: A página de Compliance > RGPD estava sempre vazia para todos os utilizadores. Causa raiz: `const accessDenied = <AccessRestricted .../>; if (accessDenied) {...}` — `accessDenied` é um elemento JSX (objeto React), que é **sempre truthy**. A página retornava **sempre** `<AccessRestricted/>` e nunca mostrava o conteúdo. Para admin/ceo/administrativo, `AccessRestricted` retorna `null` → página vazia. Corrigido: substituído por `if (!hasAnyRole(user, RGPD_ALLOWED_ROLES))` (boolean real). Roles alinhados com `ProtectedRoute` do App.js: `["admin", "ceo", "administrativo"]` (antes era `["admin", "staff"]` — "staff" não é um role do sistema).
+
+- **Backups datas não formatavam (apareciam '-')**: As datas em `BackupsPage.js` apareciam como `-` em vez de `dd/MM/yyyy HH:mm`. Causa raiz: `formatDateTime` e `formatDate` em `lib/utils.js` usavam `safeDate` → `safeDateStr` que convertia dashes→slashes mas mantinha o `T` do ISO 8601. Para input `"2025-01-15T14:30:00+00:00"`, produzia `"2025/01/15T14:30:00+00:00"` que é `Invalid Date` em V8/SpiderMonkey → `formatDateTime` retornava `"-"`. Corrigido: `formatDateTime` e `formatDate` agora usam `safeParseISO` (que tenta `parseISO` do date-fns primeiro — lida corretamente com ISO 8601 com `T`). Correção é **global** — afecta todas as páginas que usam `formatDateTime`/`formatDate`, não só BackupsPage.
+
+### Técnico
+- **Frontend** (`frontend/src/components/PortalDocumentRequests.js`): prop `onDocumentsChange` (linha 105); 4 chamadas `if (onDocumentsChange) onDocumentsChange()` após mutações (linhas 167, 182, 197, 213).
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): `onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}` (linhas 5025-5028).
+- **Frontend** (`frontend/src/pages/RGPDAdminPage.js`): substituição do bug `if (accessDenied)` por `if (!hasAnyRole(user, RGPD_ALLOWED_ROLES))` (linhas 1254-1266).
+- **Frontend** (`frontend/src/lib/utils.js`): `formatDate` e `formatDateTime` usam `safeParseISO` em vez de `safeDate` (linhas 114-158).
+- **Validação**: `esbuild --loader=jsx` → 0 erros nos 4 ficheiros.
+
 ## [2026-07-16] — Pacote BU: UI Cleanup (Menus, Emails, Automations)
 
 ### Alterado

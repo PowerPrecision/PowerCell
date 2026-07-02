@@ -1965,3 +1965,30 @@ Stage Summary:
   - `frontend/src/pages/AutomationPage.js` (`.filter(s => s.is_active !== false)` no Select de fases)
   - `frontend/src/pages/SystemConfigPage.js` (3 sub-fixes: Google OAuth Switch, IMAP reduzido, SMTP editável com Pencil)
 - Resultado: (1) os menus Minutas, Imóveis, Visitas e Financeiro estão temporariamente ocultos da sidebar (rotas continuam acessíveis via URL); (2) o Select de fases no construtor de automações mostra apenas workflows ativos; (3) os cartões de email do sistema foram limpos: Google OAuth tem Switch toggle, IMAP tem padding reduzido, e SMTP Transacional tem inputs disabled por defeito que são desbloqueados ao clicar no ícone de Lápis.
+
+
+---
+Task ID: Pacote BV (Fix Checklists, RGPD empty state, Backups Date)
+Agent: Main Agent (Code Assistant)
+Task: Corrigir 3 bugs funcionais — checklist, RGPD vazio, datas de backups
+
+Work Log:
+- Análise delegada a subagente Explore para RGPDAdminPage.js e BackupsPage.js (causas raiz identificadas). DocumentChecklist.js e PortalDocumentRequests.js analisados diretamente.
+- Fix 1 — Checklist de Documentos não refletia alterações:
+  - Causa raiz: PortalDocumentRequests faz fetchDocuments() após cada mutação (adicionar, marcar recebido, reativar, remover), mas NÃO notifica o UnifiedDocumentsPanel/S3FileManager (componente irmão no ProcessDetails.js) de que os documentos mudaram. O UnifiedDocumentsPanel tem um `key={documentsRefreshKey}` que força remontagem, mas ninguém incrementava essa key quando os pedidos do portal mudavam.
+  - Correção: adicionado prop `onDocumentsChange` ao PortalDocumentRequests. Após cada mutação bem-sucedida (4 sítios: handleAddDocument, handleMarkReceived, handleMarkPending, handleDelete), chama `if (onDocumentsChange) onDocumentsChange()`. No ProcessDetails.js, passado `onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}` — incrementa a key e força o UnifiedDocumentsPanel a remontar e refazer fetch dos documentos.
+- Fix 2 — RGPD página vazia:
+  - Causa raiz (CRÍTICO): bug de lógica em RGPDAdminPage.js linhas 1254-1258. `const accessDenied = <AccessRestricted .../>; if (accessDenied) {...}` — accessDenied é um elemento JSX (objeto React), que é SEMPRE truthy. A página retornava SEMPRE <AccessRestricted/> e nunca mostrava o conteúdo. Para admin/ceo/administrativo, AccessRestricted retorna null → página vazia.
+  - Correção: substituído por `if (!hasAnyRole(user, RGPD_ALLOWED_ROLES))` (boolean real). Roles alinhados com ProtectedRoute do App.js: ["admin", "ceo", "administrativo"] (antes era ["admin", "staff"] — "staff" não é um role do sistema).
+- Fix 3 — Backups datas não formatavam (apareciam '-'):
+  - Causa raiz: `formatDateTime` e `formatDate` em lib/utils.js usavam `safeDate` → `safeDateStr` que convertia dashes→slashes mas mantinha o 'T' do ISO 8601. Para input "2025-01-15T14:30:00+00:00", produzia "2025/01/15T14:30:00+00:00" que é Invalid Date em V8/SpiderMonkey → formatDateTime retornava "-".
+  - Correção: `formatDateTime` e `formatDate` agora usam `safeParseISO` (que tenta `parseISO` do date-fns primeiro — lida corretamente com ISO 8601 com 'T'). Fallback para safeDateStr mantido dentro do safeParseISO para strings com formato antigo (espaço em vez de T). Correção é GLOBAL — afecta todas as páginas que usam formatDateTime/formatDate, não só BackupsPage.
+- Validação: `esbuild --loader=jsx` → 0 erros nos 4 ficheiros modificados.
+
+Stage Summary:
+- 4 ficheiros modificados:
+  - `frontend/src/components/PortalDocumentRequests.js` (prop onDocumentsChange + 4 chamadas após mutações)
+  - `frontend/src/pages/ProcessDetails.js` (passar onDocumentsChange que incrementa documentsRefreshKey)
+  - `frontend/src/pages/RGPDAdminPage.js` (corrigir bug if(accessDenied) truthy → hasAnyRole boolean)
+  - `frontend/src/lib/utils.js` (formatDateTime + formatDate usam safeParseISO em vez de safeDate)
+- Resultado: (1) quando o utilizador guarda/marca/remove documentos nos pedidos do portal, o UnifiedDocumentsPanel refresca automaticamente (via documentsRefreshKey); (2) a página de RGPD já renderiza o conteúdo para admin/ceo/administrativo em vez de retornar vazio; (3) as datas em BackupsPage (e em todo o sistema) agora formatam corretamente para dd/MM/yyyy HH:mm com ISO 8601.

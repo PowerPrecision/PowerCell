@@ -5022,7 +5022,10 @@ const ProcessDetails = () => {
                       </Card>
 
                       {/* Pedidos de Documentos do Portal */}
-                      <PortalDocumentRequests processId={id} />
+                      <PortalDocumentRequests
+                        processId={id}
+                        onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}
+                      />
                     </div>
                   </TabsContent>
 
