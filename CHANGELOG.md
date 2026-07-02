@@ -3,6 +3,44 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BS: Workflow Status Rules UI (Frontend)
+
+### Adicionado
+- **Secção "Automações e Gatilhos do Sistema" no WorkflowEditor**: O admin pode agora configurar visualmente as flags de comportamento de cada fase do workflow, completando o circuito iniciado no Pacote BR (dynamic flags no backend). 4 Switches controlam: `is_active`, `trigger_finance`, `trigger_countdown`, `trigger_deed_reminder`.
+
+### Backend (necessário para persistir as flags)
+- **`models/workflow.py`**: Adicionadas 5 flags `Optional[bool] = None` aos modelos `WorkflowStatusCreate`, `WorkflowStatusUpdate`, `WorkflowStatusResponse`: `is_active`, `trigger_finance`, `trigger_countdown`, `trigger_property_check`, `trigger_deed_reminder`. `None` = não configurado (fallback ativo no `move_process_kanban` do Pacote BR).
+- **`routes/admin.py`**:
+  - `create_workflow_status`: `status_doc` agora inclui as 5 flags (persistidas como `None` se não fornecidas).
+  - `update_workflow_status`: `update_data` agora inclui as 5 flags (apenas se `data.flag is not None` — atualização parcial).
+
+### Frontend (`frontend/src/components/WorkflowEditor.js`)
+- **`formData` inicial**: Adicionadas as 5 flags (default `null` = fallback).
+- **`handleCreateStatus`**: Payload inclui as 5 flags.
+- **`handleEditStatus`**: Payload inclui as 5 flags.
+- **`openEditDialog`**: Lê as flags do status existente (`status.flag ?? null`).
+- **`resetForm`**: Reset flags a `null`.
+- **`renderAutomationTriggersSection(prefix)`**: Nova função reutilizável que renderiza a secção "Automações e Gatilhos do Sistema" com 4 Switches (cada um com Label, ícone lucide, descrição e `data-testid`). Inserida em ambos os Diálogos (Criar e Editar) antes do `DialogFooter`.
+- **Imports adicionados**: `Activity`, `DollarSign`, `Clock`, `CalendarClock` (lucide-react).
+
+### As 4 Switches
+| Switch | Flag | Ícone | Descrição |
+|--------|------|-------|-----------|
+| Considerar processo Ativo nesta fase | `is_active` | `Activity` (emerald) | Se desligado, o processo fica inativo (sai dos dashboards ativos e liberta slot do indexador) |
+| Disparar fecho financeiro e comissões | `trigger_finance` | `DollarSign` (green) | Cria snapshot financeiro (ProcessFinance) ao entrar nesta fase |
+| Iniciar contagem decrescente de 90 dias | `trigger_countdown` | `Clock` (blue) | Regista a data de aprovação bancária e inicia o countdown de 90 dias |
+| Ativar lembrete de agendamento de escritura | `trigger_deed_reminder` | `CalendarClock` (purple) | Cria lembrete automático 15 dias antes da data da escritura |
+
+### Decisão de UX
+- **`checked={formData.flag === true}`**: O switch só aparece ligado quando a flag é `true`. `null` (não configurado) e `false` (explicitamente desligado) aparecem visualmente como desligados. Quando o admin clica pela primeira vez, `null`→`true`; se clicar again, `true`→`false` (explicitamente desligado, override do fallback). O backend distingue `null` (fallback ativo) de `false` (override), pelo que o comportamento é correto.
+- **`trigger_property_check` sem switch dedicado**: No backend, esta flag cobre `ch_aprovado`/`fase_escritura`/`escritura_agendada` (verificação de docs do imóvel + alerta CPCV). É uma flag composta que não mapeia 1:1 para uma switch única — optei por não expô-la na UI para evitar confusão. Fica no payload para configuração avançada via API se necessário no futuro.
+
+### Técnico
+- **Backend** (`backend/models/workflow.py`): 5 flags `Optional[bool] = None` em Create/Update/Response.
+- **Backend** (`backend/routes/admin.py`): persistir flags em `create_workflow_status` (linhas 440-446) e `update_workflow_status` (linhas 489-499).
+- **Frontend** (`frontend/src/components/WorkflowEditor.js`): formData (linhas 70-76); payload create (linhas 112-117); payload edit (linhas 143-148); openEditDialog (linhas 218-223); resetForm (linhas 241-246); `renderAutomationTriggersSection` (linhas 256-356); inserção nos Diálogos Criar (linha 585) e Editar (linha 703); imports (linhas 37-40).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BR: Dynamic Workflow Purpose Flags (Backend)
 
 ### Alterado

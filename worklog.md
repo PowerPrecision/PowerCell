@@ -1862,3 +1862,35 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/routes/processes.py` (função move_process_kanban).
 - Resultado: as automações do move_process_kanban agora leem flags de comportamento dinâmicas da coleção workflow_statuses em vez de strings hardcoded. O admin pode configurar quais estados disparam snapshot financeiro, countdown, verificação de docs, lembrete de escritura e is_active — sem alterar código. Fallback retrocompatível garante que instalações existentes continuam a funcionar até as flags serem configuradas. O gatilho de fila de espera agora dispara em qualquer estado inativo (is_active=False), não apenas em "concluidos"/"desistencias". O próximo passo (futuro) seria expor estas flags no WorkflowEditor do frontend para o admin as configurar visualmente.
+
+
+---
+Task ID: Pacote BS (Workflow Status Rules UI)
+Agent: Main Agent (Code Assistant)
+Task: UI para admin configurar flags de comportamento das fases do workflow
+
+Work Log:
+- Análise do WorkflowEditor.js (componente que gere as colunas do Kanban): tem 2 Diálogos (Criar e Editar) com formData, handleCreateStatus, handleEditStatus, openEditDialog, resetForm. O formulário já tinha Switch para visible_in_portal. Imports de lucide-react já incluíam Workflow, Eye, EyeOff, Globe.
+- Análise do backend: modelos WorkflowStatusCreate/Update/Response (models/workflow.py) NÃO tinham as flags trigger_finance, trigger_countdown, trigger_property_check, trigger_deed_reminder, is_active. Endpoints create_workflow_status e update_workflow_status (routes/admin.py) também não as persistiam. Sem isto, as flags enviadas pelo frontend seriam ignoradas pelo backend.
+- Backend — models/workflow.py: adicionadas 5 flags Optional[bool] = None aos 3 modelos (Create, Update, Response). None = não configurado (fallback ativo no move_process_kanban do Pacote BR).
+- Backend — routes/admin.py:
+  1. create_workflow_status: status_doc agora inclui as 5 flags (persistidas como None se não fornecidas).
+  2. update_workflow_status: update_data agora inclui as 5 flags (apenas se data.flag is not None — atualização parcial).
+- Frontend — WorkflowEditor.js:
+  1. formData inicial: adicionadas as 5 flags (default null = fallback).
+  2. handleCreateStatus: payload inclui as 5 flags.
+  3. handleEditStatus: payload inclui as 5 flags.
+  4. openEditDialog: lê as flags do status existente (status.flag ?? null).
+  5. resetForm: reset flags a null.
+  6. Criado componente reutilizável renderAutomationTriggersSection(prefix) que renderiza a secção "Automações e Gatilhos do Sistema" com 4 Switches (is_active, trigger_finance, trigger_countdown, trigger_deed_reminder) — cada um com Label, ícone lucide, descrição e data-testid. trigger_property_check não tem switch dedicado (é derivado no backend) mas é incluído no payload para configuração avançada via API.
+  7. Secção inserida em ambos os Diálogos (Criar e Editar) antes do DialogFooter.
+  8. Imports adicionados: Activity, DollarSign, Clock, CalendarClock (lucide-react).
+- UX das switches: checked={formData.flag === true} (só true liga o switch; null e false desligam). onCheckedChange define true/false. Isto significa que null (não configurado) aparece visualmente como desligado, mas o backend distingue null (fallback) de false (explicitamente desligado). Quando o admin clica pela primeira vez, passa de null→true; se clicar again, true→false (explicitamente desligado, override do fallback).
+- Validação: `py_compile` ✓ em models/workflow.py + routes/admin.py; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros no WorkflowEditor.js.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/models/workflow.py` (5 flags Optional[bool] = None em Create/Update/Response)
+  - `backend/routes/admin.py` (persistir flags em create_workflow_status + update_workflow_status)
+  - `frontend/src/components/WorkflowEditor.js` (formData + payload + openEditDialog + resetForm + renderAutomationTriggersSection com 4 Switches + imports)
+- Resultado: o admin pode agora configurar visualmente as flags de comportamento de cada fase do workflow no WorkflowEditor. As 4 switches (is_active, trigger_finance, trigger_countdown, trigger_deed_reminder) aparecem numa secção "Automações e Gatilhos do Sistema" em ambos os Diálogos (Criar e Editar). Os valores são enviados no payload POST/PUT e persistidos na coleção workflow_statuses. O move_process_kanban (Pacote BR) lê estas flags dinamicamente — quando configuradas (não-null), o fallback hardcoded deixa de ser usado. Completa o circuito iniciado no Pacote BR: agora o admin tem controlo total sobre as automações sem alterar código.

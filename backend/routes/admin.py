@@ -437,8 +437,15 @@ async def create_workflow_status(data: WorkflowStatusCreate, user: dict = Depend
         "internal_code": str(data.order).zfill(2),
         "portal_label": data.portal_label,
         "visible_in_portal": data.visible_in_portal,
+        # PACOTE BS — Dynamic Workflow Purpose Flags
+        # Persistidas como None se não fornecidas (fallback ativo no move_process_kanban)
+        "is_active": data.is_active,
+        "trigger_finance": data.trigger_finance,
+        "trigger_countdown": data.trigger_countdown,
+        "trigger_property_check": data.trigger_property_check,
+        "trigger_deed_reminder": data.trigger_deed_reminder,
     }
-    
+
     await db.workflow_statuses.insert_one(status_doc)
     return WorkflowStatusResponse(**{k: v for k, v in status_doc.items() if k != "_id"})
 
@@ -479,10 +486,21 @@ async def update_workflow_status(status_id: str, data: WorkflowStatusUpdate, use
         update_data["portal_label"] = data.portal_label
     if data.visible_in_portal is not None:
         update_data["visible_in_portal"] = data.visible_in_portal
-    
+    # PACOTE BS — Dynamic Workflow Purpose Flags
+    if data.is_active is not None:
+        update_data["is_active"] = data.is_active
+    if data.trigger_finance is not None:
+        update_data["trigger_finance"] = data.trigger_finance
+    if data.trigger_countdown is not None:
+        update_data["trigger_countdown"] = data.trigger_countdown
+    if data.trigger_property_check is not None:
+        update_data["trigger_property_check"] = data.trigger_property_check
+    if data.trigger_deed_reminder is not None:
+        update_data["trigger_deed_reminder"] = data.trigger_deed_reminder
+
     if update_data:
         await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})
-    
+
     updated = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
     return WorkflowStatusResponse(**updated)
 
