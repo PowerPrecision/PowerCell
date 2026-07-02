@@ -2466,7 +2466,10 @@ export default function ClientPortal() {
                 <span className="hidden sm:inline">Simulador</span>
                 <span className="sm:hidden">Calc</span>
               </button>
-              <button
+              {/* PACOTE CB — Botão "As Minhas Visitas" temporariamente oculto.
+                  O código da Tab 'visitas' em baixo está mantido (apenas comentado
+                  o botão de acesso) para reativação futura. */}
+              {/* <button
                 onClick={() => setActiveTab('visitas')}
                 className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
                   activeTab === 'visitas'
@@ -2482,7 +2485,7 @@ export default function ClientPortal() {
                     {visits.filter(v => v.status === 'solicitada').length}
                   </span>
                 )}
-              </button>
+              </button> */}
             </div>
 
             {/* ── Tab Content ── */}

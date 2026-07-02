@@ -2051,3 +2051,174 @@ Work Log:
 Stage Summary:
 - 1 ficheiro criado: `backend/scripts/seed_qa_ultimate.py` (870 linhas).
 - Resultado: script de seeding definitivo para QA que gera 18 processos (configurável via --num-processes) com dados 100% realistas. Cobre todas as 5 regras: pré-registo minimalista, diversidade de titulares (solteiros + casais), dados 100% preenchidos em 8+ processos ativos (com financial_data completo para DSTI), 2+ atividades por processo, e atribuição mista. Suporta --clear (limpeza seletiva), --dry-run (simulação), e --num-processes (customização). Workflow_statuses alinhados com o enum canónico (16 estados). Utilizadores dummy criados automaticamente se não existirem.
+
+
+---
+Task ID: Pacote BZ (Fix Local Filtering causing Uneven Pagination)
+Agent: Main Agent (Code Assistant)
+Task: Remover filtragem local que causava tamanhos de página irregulares
+
+Work Log:
+- Análise de FilteredProcessList.js e ProcessesPage.js:
+  - FilteredProcessList: fetchData não passava 'search' à API; getFilteredProcesses() fazia .filter() local com config.filter (filtragem por status/indexacao), searchTerm (filtragem por nome/email/telefone), e ordenação local.
+  - ProcessesPage: fetchProcesses já passava search, view_mode, page, size, sort_field, sort_order, show_all corretamente. MAS o useEffect de sorting (linhas 408-425) filtrava localmente por indexStatusFilter (.filter(p => p.is_indexed) ou .filter(p => !p.is_indexed)), reduzindo o tamanho da página de forma invisível para o utilizador.
+- Fix FilteredProcessList.js:
+  1. fetchData agora passa search (>= 2 chars) e status (mapeado do filterType: concluded→concluidos, dropped→desistencias, waiting→clientes_espera) como query params.
+  2. useEffect que chama fetchData agora depende de searchTerm (para que a pesquisa dispare um novo fetch à API em vez de filtrar localmente).
+  3. getFilteredProcesses: removidas as .filter() locais de config.filter e searchTerm. Apenas mantém:
+     - Filtragem de pending_deadlines (cruzamento com deadlines — não há endpoint de backend para isto, filtragem local legítima).
+     - Ordenação por prioridade alta no topo (apresentação, não filtragem — não afeta o tamanho da página).
+- Fix ProcessesPage.js:
+  1. fetchProcesses agora passa is_indexed como query param (indexStatusFilter='completed' → is_indexed=true; 'pending' → is_indexed=false; 'all' → não envia).
+  2. fetchProcesses dependency array atualizado para incluir indexStatusFilter.
+  3. useEffect de sorting: removido o .filter() local de indexStatusFilter. Agora apenas ordena (não filtra). O backend filtra via is_indexed query param.
+- Fix Backend (routes/processes.py):
+  1. Adicionado parâmetro is_indexed: Optional[bool] = Query(None) ao endpoint GET /processes.
+  2. Adicionada condição ao and_conditions: se is_indexed=True, filtra {is_indexed: True}; se is_indexed=False, filtra processos pendentes ($or: [{is_indexed: {$ne: True}}, {is_indexed: {$exists: False}}] — inclui null/undefined para processos antigos sem o campo).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros nos 2 ficheiros frontend.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/routes/processes.py` (novo parâmetro is_indexed no GET /processes + condição no and_conditions)
+  - `frontend/src/pages/FilteredProcessList.js` (search e status passados como query params; .filter() locais removidos; useEffect depende de searchTerm)
+  - `frontend/src/pages/ProcessesPage.js` (is_indexed passado como query param; .filter() local de indexStatusFilter removido; fetchProcesses depende de indexStatusFilter)
+- Resultado: TODOS os filtros ativos no ecrã (status, search, view_mode, is_indexed) são agora passados como Query Parameters reais ao Backend. As .filter() locais que causavam tamanhos de página irregulares foram removidas. O Backend faz a filtragem globalmente e devolve apenas os processos que correspondem aos critérios, garantindo paginação uniforme. A única filtragem local remanescente é a de pending_deadlines (cruzamento com deadlines) que não tem equivalente no backend — é uma exceção legítima e documentada.
+
+
+---
+Task ID: Pacote CA (Persist Table Filters in URL Params)
+Agent: Main Agent (Code Assistant)
+Task: Migrar estado local de filtros/paginação para URL params (restauração Back/Forward)
+
+Work Log:
+- Análise de FilteredProcessList.js e ProcessesPage.js:
+  - FilteredProcessList: searchTerm era useState("") (linha 153) — perdia-se ao navegar para detalhes do processo e clicar Voltar. filterType já vinha do URL (searchParams.get("filter")).
+  - ProcessesPage: JÁ usava useSearchParams extensivamente para page, size, view_mode, sort, order, search (linhas 78-117). Apenas indexStatusFilter era useState (linha 104) — não persistia no URL.
+- Fix FilteredProcessList.js:
+  1. searchTerm migrado de useState("") para searchParams.get("search") || "" (lido do URL).
+  2. Criado handler handleSearchChange(value) que usa setSearchParams para escrever/search no URL em tempo real (replace: true para não poluir o histórico). Se value for vazio, remove o param do URL.
+  3. Input de pesquisa agora usa onChange={(e) => handleSearchChange(e.target.value)} em vez de setSearchTerm.
+  4. setSearchParams obtido de useSearchParams() (antes era apenas [searchParams], agora é [searchParams, setSearchParams]).
+  5. useEffect que chama fetchData continua a depender de [filterType, searchTerm] — agora searchTerm vem do URL, pelo que mudanças no URL (incluindo Back/Forward do browser) disparam o fetch automaticamente.
+- Fix ProcessesPage.js:
+  1. indexStatusFilter migrado de useState para searchParams.get("index_status") || (default do role). Default: 'pending' para indexacao, 'all' para os restantes.
+  2. setIndexStatusFilter reescrito como useCallback que usa setSearchParams para escrever index_status no URL (replace: true). Se value for 'all', remove o param.
+  3. Select do filtro de estado de indexação (linha 649) continua a usar onValueChange={setIndexStatusFilter} — agora atualiza o URL em vez de state local.
+  4. Como fetchProcesses já depende de indexStatusFilter (adicionado no Pacote BZ), mudanças no URL disparam o fetch automaticamente.
+- Estados que JÁ estavam no URL (ProcessesPage.js — confirmado, sem alteração):
+  - page: searchParams.get("page") || "1" (linha 79)
+  - size: searchParams.get("size") || "20" (linha 80)
+  - view_mode: searchParams.get("view_mode") || "active_only" (linha 93)
+  - sort: searchParams.get("sort") || "created_at" (linha 98)
+  - order: searchParams.get("order") || "desc" (linha 99)
+  - search: searchParams.get("search") || "" (linha 117)
+- Validação: `esbuild --loader=jsx` → 0 erros nos 2 ficheiros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `frontend/src/pages/FilteredProcessList.js` (searchTerm migrado de useState para useSearchParams; handleSearchChange handler; setSearchParams obtido)
+  - `frontend/src/pages/ProcessesPage.js` (indexStatusFilter migrado de useState para useSearchParams; setIndexStatusFilter como useCallback que atualiza URL)
+- Resultado: TODOS os filtros ativos no ecrã (search, filter, view_mode, page, size, sort, order, index_status) são agora persistidos no URL via useSearchParams. Quando o utilizador entra nos detalhes de um processo e clica em "Voltar", o browser restaura exatamente a vista pretendida — filtros, pesquisa, página atual, e ordem de classificação. A navegação Back/Forward do browser funciona corretamente porque os estados são lidos do URL no init do componente.
+
+
+---
+Task ID: Pacote CB (Fix Portal Profile Lock & Hide Visits Tab)
+Agent: Main Agent (Code Assistant)
+Task: Corrigir bloqueio prematuro do perfil + ocultar botão Visitas no Portal
+
+Work Log:
+- Análise do bug: GET /portal/me devolvia has_process=True para qualquer processo ativo (incluindo pre_registo). O frontend usava isLocked = profile?.has_process === true || isDataConfirmed, pelo que o perfil era bloqueado assim que o processo era criado em pre_registo — antes do cliente ter oportunidade de preencher os dados. O utilizador quer que o bloqueio aconteça APENAS quando o processo saiu da fase inicial (status != pre_registo) OU quando is_data_confirmed == True.
+- Fix 1 Backend — GET /portal/me (portal.py linhas 757-780):
+  - Query agora projeta "status": 1 além de "is_data_confirmed": 1.
+  - has_process = (proc_status != "pre_registo") or proc_confirmed — só True se o processo saiu do pre_registo OU dados confirmados.
+  - is_data_confirmed continua a ser True apenas quando o processo tem is_data_confirmed == True.
+- Fix 1 Backend — PUT /portal/me (portal.py linhas 853-880):
+  - Mesma regra: should_lock = (proc_status != "pre_registo") or proc_confirmed.
+  - Só lança 403 se should_lock for True. Se o processo está em pre_registo e não tem is_data_confirmed, o cliente PODE editar o perfil.
+  - Mensagens de 403 mantidas: "Os seus dados encontram-se bloqueados..." (is_data_confirmed) vs "Dados trancados. Processo já em análise." (saiu do pre_registo).
+- Fix 1 Frontend — ClientPortal.jsx:
+  - Nenhuma alteração necessária. O isLocked = profile?.has_process === true || isDataConfirmed já funciona corretamente com a nova lógica do backend. Como o backend agora só devolve has_process: true quando o processo saiu do pre_registo ou tem is_data_confirmed, o isLocked só será true nessas condições.
+- Fix 2 Frontend — ClientPortal.jsx (linhas 2469-2488):
+  - Botão "As Minhas Visitas" comentado (JSX comment {/* ... */}). O código da Tab 'visitas' em baixo (linhas 2591+) não foi alterado — apenas o botão de acesso foi ocultado para reativação futura.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/portal.py` (GET /portal/me + PUT /portal/me: has_process/should_lock só True se status != pre_registo OU is_data_confirmed)
+  - `frontend/src/pages/ClientPortal.jsx` (botão "As Minhas Visitas" comentado)
+- Resultado: (1) o perfil do cliente só é bloqueado quando o processo ativo saiu da fase pre_registo OU quando os dados foram confirmados pela Indexação (is_data_confirmed). Em pre_registo, o cliente pode editar o perfil livremente. (2) O botão "As Minhas Visitas" está temporariamente oculto no Portal do Cliente — o código da Tab mantém-se para reativação futura.
+
+
+---
+Task ID: Pacote CC (Changelog Generation with Date/Time Diff)
+Agent: Main Agent (Code Assistant)
+Task: Geração de changelog por IA processa apenas novidades desde a última geração
+
+Work Log:
+- Análise do changelog_service.py: funções read_git_log (usa --max-count=N), read_changelog_file e read_worklog_file (usam _read_local_file_tail com últimas N linhas), e _fetch_from_github (busca últimas N linhas do GitHub raw). A função generate_changelog_ai chamava todas com max_source_lines fixo (default 50). Não havia filtragem por data — a IA processava sempre as últimas 50 linhas, mesmo que já tivessem sido processadas numa geração anterior.
+- Análise dos formatos de data: CHANGELOG.md usa `## [2026-07-16] — Pacote...` e worklog.md usa `### Date: 2026-03-04`. Ambos têm datas parseáveis em headers Markdown.
+- Implementação — 4 novas funções em changelog_service.py:
+  1. `_get_last_changelog_date()`: query à coleção system_changelogs para obter published_at do último registo. Lida com datetime e string ISO. Retorna None se não houver registo anterior.
+  2. `_parse_md_date(line)`: extrai datetime de headers Markdown. Suporta 3 padrões: `## [YYYY-MM-DD]`, `### Date: YYYY-MM-DD`, `## YYYY-MM-DD`. Usa regex compiled no módulo.
+  3. `_filter_lines_since(lines, since_date, max_lines)`: heurística de filtragem. Percorre linhas do FIM para o INÍCIO. Quando encontra um header com data <= since_date, para — tudo a partir daí é histórico. Se since_date=None ou não houver datas, usa max_lines como fallback (comportamento original). Se delta for vazio (nenhuma entrada nova), também usa fallback.
+  4. Constante `_DEFAULT_MAX_SOURCE_LINES = 50` para fallback.
+- Atualização das funções de leitura (todas aceitam since_date: Optional[datetime] = None):
+  - `read_git_log(max_lines, since_date)`: se since_date fornecido, usa `--since="YYYY-MM-DDTHH:MM:SS"` em vez de `--max-count=N`. Caso contrário, mantém `--max-count` (fallback).
+  - `_read_local_file_tail(filepath, max_lines, since_date)`: chama _filter_lines_since em vez de ler as últimas N linhas diretamente.
+  - `_fetch_from_github(filename, max_lines, since_date)`: busca o ficheiro completo do GitHub e aplica _filter_lines_since.
+  - `read_changelog_file(max_lines, since_date)` e `read_worklog_file(max_lines, since_date)`: passam since_date às funções subordinadas.
+- Atualização de generate_changelog_ai:
+  - Antes de ler a fonte, chama `since_date = await _get_last_changelog_date()`.
+  - Passa since_date a todas as chamadas de leitura (read_git_log, read_changelog_file, read_worklog_file) com fallback automático em cadeia.
+  - Log informativo: se since_date existir, loga "Último changelog: YYYY-MM-DD — a filtrar fonte desde esta data"; se None, loga "Nenhum changelog anterior na BD — a usar fallback de N linhas".
+  - O delta filtrado é enviado à IA (truncado a 8000 chars se necessário, como antes).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/services/changelog_service.py`.
+- Resultado: a geração de changelog por IA agora processa apenas as novidades introduzidas desde a data do último changelog gerado/guardado. Para Git, usa `--since="{data}"` em vez de `--max-count=N`. Para ficheiros Markdown (CHANGELOG.md, worklog.md), usa heurística de parsing de datas em headers para filtrar apenas as entradas posteriores à última geração. Se não houver registo anterior na BD, usa o comportamento de limite de linhas (50) como fallback. O delta filtrado é enviado à IA, reduzindo tokens consumidos e evitando que a IA processe conteúdo já coberto numa geração anterior.
+
+
+---
+Task ID: Pacote CD (Create Emergency Restore Endpoint)
+Agent: Main Agent (Code Assistant)
+Task: Endpoint de restauro de emergência com swap atómico (S3 → BD)
+
+Work Log:
+- Análise do backup.py existente: já existe POST /restore-from-s3 (linha 335) que faz delete_many + insert_many diretamente — NÃO atómico. Se falhar a meio, a BD fica inconsistente. O utilizador pede um novo endpoint POST /api/backup/restore com swap atómico (coleções temporárias + rename).
+- Análise de services/backup.py: get_s3_client() cria cliente boto3 com credenciais do .env (AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION, AWS_BUCKET_NAME).
+- Análise de services/db_indexes.py: índices únicos em users.email, users.id, clients.id, processes.id, etc.
+- Criado POST /api/backup/restore em routes/backup.py (linhas 491-839) com:
+  1. Segurança: Depends(require_roles([UserRole.ADMIN, UserRole.CEO])) + confirmação explícita {"confirm": "RESTAURAR_PRODUCAO"}.
+  2. Download do último ZIP do S3 (prefixo backups/) para memória (BytesIO — não toca o disco).
+  3. Extrair JSON de todas as coleções do ZIP (ignorando backup_history, system.indexes, e system_config — preserva config atual).
+  4. insert_many para coleções temporárias (_restore_{collection}). Se todos os inserts falharem, aborta antes do swap e limpa temporárias.
+  5. Swap atómico: para cada coleção com dados na temporária, drop() da coleção real + rename() da temporária. O rename no MongoDB é atómico — a coleção fica disponível instantaneamente com o novo nome. Se uma coleção falhar no swap, as outras já swapped permanecem (swap parcial é seguro — cada rename é independente).
+  6. Recriar índices nas coleções principais: 16 coleções com índices definidos (users.email unique, users.id unique, clients.id unique, processes.id unique, etc.). Erros de índice não são fatais — a BD funciona sem índices (apenas mais lento).
+  7. Limpeza de temporárias órfãs (se alguma temporária não foi swapped, é removida).
+  8. Retorno com estatísticas detalhadas: collections_restored, collections_swapped, total_documents, indexes_created, index_errors, errors, warnings, ignored, restored_by, restored_at.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/routes/backup.py` (novo endpoint POST /restore com swap atómico, linhas 459-839).
+- Resultado: endpoint de restauro de emergência exposto para a UI de administração. Usa swap atómico (coleções temporárias _restore_* + rename) em vez de delete_many + insert_many, garantindo que a BD nunca fica inconsistente mesmo que o processo falhe a meio. Apenas ADMIN e CEO podem executar. Requer confirmação explícita {"confirm": "RESTAURAR_PRODUCAO"}. Ignora backup_history, system.indexes e system_config (preserva config atual do sistema). Recria 16 índices únicos nas coleções principais após o swap. O endpoint existente /restore-from-s3 (não-atómico) é mantido para retrocompatibilidade.
+
+
+---
+Task ID: Pacote CE (Add Restore Button to BackupsPage)
+Agent: Main Agent (Code Assistant)
+Task: Adicionar botão de restauro à UI de Backups com confirmação séria
+
+Work Log:
+- Análise de BackupsPage.js: já tinha botões "Verificar Integridade" e "Criar Backup" (com AlertDialog). AlertDialog já importado. Imports de lucide-react já incluem AlertTriangle, Loader2, Shield.
+- Implementação:
+  1. Novo estado `restoring` (useState(false)).
+  2. Função `handleRestore`: POST /api/backup/restore com body {confirm: "RESTAURAR_PRODUCAO"}. Se sucesso: toast.success com estatísticas (total_documents, collections_swapped) + setTimeout(window.location.reload, 1500) para que o frontend perca memórias corrompidas. Se erro: toast.error com detail do backend.
+  3. Botão "Restaurar Backup" com variant="destructive" (vermelho), ícone AlertTriangle, disabled quando restoring/backupInProgress/verifying.
+  4. AlertDialog de confirmação com título "Atenção! Operação Destrutiva" e descrição exata pedida: "Esta ação vai apagar a base de dados atual e substituí-la pelo último backup guardado no servidor cloud. Todas as ações efetuadas nas últimas horas serão perdidas. Tem a certeza que deseja avançar?". AlertDialogAction com classe destructive ("Sim, Restaurar Agora").
+  5. Overlay de loading full-screen (fixed inset-0 z-50 bg-black/50 backdrop-blur-sm) com Loader2 e texto "A descarregar e a restaurar a base de dados (isto pode demorar alguns minutos)..." durante o restoring.
+- Validação: `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `frontend/src/pages/BackupsPage.js`.
+- Resultado: botão "Restaurar Backup" vermelho (destructive) adicionado na barra superior ao lado de "Verificar Integridade". Clique abre AlertDialog sério com aviso de operação destrutiva. Se aceite, dispara POST /api/backup/restore (Pacote CD) com confirmação RESTAURAR_PRODUCAO. Overlay de loading full-screen com texto "A descarregar e a restaurar a base de dados (isto pode demorar alguns minutos)...". Sucesso: toast.success + window.location.reload() após 1.5s para carregar dados limpos. Erro: toast.error com detalhe do backend.

@@ -49,6 +49,8 @@ const BackupsPage = ({ embedded = false }) => {
   const [backupInProgress, setBackupInProgress] = useState(false);
   const [verifying, setVerifying] = useState(false);
   const [verificationResult, setVerificationResult] = useState(null);
+  // PACOTE CE — Estado de restauro de emergência (swap atómico)
+  const [restoring, setRestoring] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -192,6 +194,41 @@ const BackupsPage = ({ embedded = false }) => {
     }
   };
 
+  // PACOTE CE — Restauro de emergência com swap atómico
+  const handleRestore = async () => {
+    setRestoring(true);
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/api/backup/restore`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ confirm: "RESTAURAR_PRODUCAO" }),
+      });
+
+      const data = await response.json();
+
+      if (response.ok && data.success !== false) {
+        const msg = data.total_documents
+          ? `Base de dados restaurada: ${data.total_documents} documentos em ${data.collections_swapped?.length || 0} coleções.`
+          : "Base de dados restaurada com sucesso.";
+        toast.success(msg);
+        // Refresh imediato — o frontend perde as memórias corrompidas e
+        // carrega os dados limpos do backup restaurado.
+        setTimeout(() => window.location.reload(), 1500);
+      } else {
+        const detail = data.detail || data.errors?.join("; ") || "Erro desconhecido";
+        toast.error(`Erro no restauro: ${detail}`);
+      }
+    } catch (error) {
+      toast.error("Erro de ligação ao restaurar backup");
+    } finally {
+      setRestoring(false);
+    }
+  };
+
   const formatBytes = (bytes) => {
     if (!bytes || bytes === 0) return "0 B";
     const k = 1024;
@@ -238,6 +275,58 @@ const BackupsPage = ({ embedded = false }) => {
               )}
               Verificar Integridade
             </Button>
+            {/* PACOTE CE — Botão Restaurar Backup (destructive) com AlertDialog de confirmação */}
+            <AlertDialog>
+              <AlertDialogTrigger asChild>
+                <Button
+                  variant="destructive"
+                  disabled={restoring || backupInProgress || verifying}
+                >
+                  {restoring ? (
+                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                  ) : (
+                    <AlertTriangle className="h-4 w-4 mr-2" />
+                  )}
+                  {restoring ? "A restaurar..." : "Restaurar Backup"}
+                </Button>
+              </AlertDialogTrigger>
+              <AlertDialogContent>
+                <AlertDialogHeader>
+                  <AlertDialogTitle className="flex items-center gap-2 text-destructive">
+                    <AlertTriangle className="h-5 w-5" />
+                    Atenção! Operação Destrutiva
+                  </AlertDialogTitle>
+                  <AlertDialogDescription className="text-sm">
+                    Esta ação vai <strong>apagar a base de dados atual</strong> e
+                    substituí-la pelo último backup guardado no servidor cloud.
+                    Todas as ações efetuadas nas últimas horas serão perdidas.
+                    <br /><br />
+                    <strong>Tem a certeza que deseja avançar?</strong>
+                  </AlertDialogDescription>
+                </AlertDialogHeader>
+                <AlertDialogFooter>
+                  <AlertDialogCancel>Cancelar</AlertDialogCancel>
+                  <AlertDialogAction
+                    onClick={handleRestore}
+                    className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                  >
+                    Sim, Restaurar Agora
+                  </AlertDialogAction>
+                </AlertDialogFooter>
+              </AlertDialogContent>
+            </AlertDialog>
+            {/* Overlay de loading durante o restauro */}
+            {restoring && (
+              <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 backdrop-blur-sm">
+                <div className="bg-white dark:bg-gray-900 rounded-2xl p-8 shadow-2xl flex flex-col items-center gap-4 max-w-md">
+                  <Loader2 className="h-10 w-10 animate-spin text-destructive" />
+                  <p className="text-center text-sm font-medium text-gray-700 dark:text-gray-300">
+                    A descarregar e a restaurar a base de dados<br />
+                    <span className="text-muted-foreground">(isto pode demorar alguns minutos)...</span>
+                  </p>
+                </div>
+              </div>
+            )}
             <AlertDialog>
               <AlertDialogTrigger asChild>
                 <Button disabled={backupInProgress}>
