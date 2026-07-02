@@ -2147,3 +2147,33 @@ Stage Summary:
   - `backend/routes/portal.py` (GET /portal/me + PUT /portal/me: has_process/should_lock só True se status != pre_registo OU is_data_confirmed)
   - `frontend/src/pages/ClientPortal.jsx` (botão "As Minhas Visitas" comentado)
 - Resultado: (1) o perfil do cliente só é bloqueado quando o processo ativo saiu da fase pre_registo OU quando os dados foram confirmados pela Indexação (is_data_confirmed). Em pre_registo, o cliente pode editar o perfil livremente. (2) O botão "As Minhas Visitas" está temporariamente oculto no Portal do Cliente — o código da Tab mantém-se para reativação futura.
+
+
+---
+Task ID: Pacote CC (Changelog Generation with Date/Time Diff)
+Agent: Main Agent (Code Assistant)
+Task: Geração de changelog por IA processa apenas novidades desde a última geração
+
+Work Log:
+- Análise do changelog_service.py: funções read_git_log (usa --max-count=N), read_changelog_file e read_worklog_file (usam _read_local_file_tail com últimas N linhas), e _fetch_from_github (busca últimas N linhas do GitHub raw). A função generate_changelog_ai chamava todas com max_source_lines fixo (default 50). Não havia filtragem por data — a IA processava sempre as últimas 50 linhas, mesmo que já tivessem sido processadas numa geração anterior.
+- Análise dos formatos de data: CHANGELOG.md usa `## [2026-07-16] — Pacote...` e worklog.md usa `### Date: 2026-03-04`. Ambos têm datas parseáveis em headers Markdown.
+- Implementação — 4 novas funções em changelog_service.py:
+  1. `_get_last_changelog_date()`: query à coleção system_changelogs para obter published_at do último registo. Lida com datetime e string ISO. Retorna None se não houver registo anterior.
+  2. `_parse_md_date(line)`: extrai datetime de headers Markdown. Suporta 3 padrões: `## [YYYY-MM-DD]`, `### Date: YYYY-MM-DD`, `## YYYY-MM-DD`. Usa regex compiled no módulo.
+  3. `_filter_lines_since(lines, since_date, max_lines)`: heurística de filtragem. Percorre linhas do FIM para o INÍCIO. Quando encontra um header com data <= since_date, para — tudo a partir daí é histórico. Se since_date=None ou não houver datas, usa max_lines como fallback (comportamento original). Se delta for vazio (nenhuma entrada nova), também usa fallback.
+  4. Constante `_DEFAULT_MAX_SOURCE_LINES = 50` para fallback.
+- Atualização das funções de leitura (todas aceitam since_date: Optional[datetime] = None):
+  - `read_git_log(max_lines, since_date)`: se since_date fornecido, usa `--since="YYYY-MM-DDTHH:MM:SS"` em vez de `--max-count=N`. Caso contrário, mantém `--max-count` (fallback).
+  - `_read_local_file_tail(filepath, max_lines, since_date)`: chama _filter_lines_since em vez de ler as últimas N linhas diretamente.
+  - `_fetch_from_github(filename, max_lines, since_date)`: busca o ficheiro completo do GitHub e aplica _filter_lines_since.
+  - `read_changelog_file(max_lines, since_date)` e `read_worklog_file(max_lines, since_date)`: passam since_date às funções subordinadas.
+- Atualização de generate_changelog_ai:
+  - Antes de ler a fonte, chama `since_date = await _get_last_changelog_date()`.
+  - Passa since_date a todas as chamadas de leitura (read_git_log, read_changelog_file, read_worklog_file) com fallback automático em cadeia.
+  - Log informativo: se since_date existir, loga "Último changelog: YYYY-MM-DD — a filtrar fonte desde esta data"; se None, loga "Nenhum changelog anterior na BD — a usar fallback de N linhas".
+  - O delta filtrado é enviado à IA (truncado a 8000 chars se necessário, como antes).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/services/changelog_service.py`.
+- Resultado: a geração de changelog por IA agora processa apenas as novidades introduzidas desde a data do último changelog gerado/guardado. Para Git, usa `--since="{data}"` em vez de `--max-count=N`. Para ficheiros Markdown (CHANGELOG.md, worklog.md), usa heurística de parsing de datas em headers para filtrar apenas as entradas posteriores à última geração. Se não houver registo anterior na BD, usa o comportamento de limite de linhas (50) como fallback. O delta filtrado é enviado à IA, reduzindo tokens consumidos e evitando que a IA processe conteúdo já coberto numa geração anterior.

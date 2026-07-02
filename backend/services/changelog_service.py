@@ -25,6 +25,7 @@ COLEÇÃO MONGODB: system_changelogs
 ====================================================================
 """
 import os
+import re
 import subprocess
 import logging
 from typing import Optional, List, Dict, Any, Tuple
@@ -45,6 +46,106 @@ logger = logging.getLogger(__name__)
 
 # ── Defaults (usados apenas se a BD não tiver configuração) ──
 _DEFAULT_AI_MODEL = "gpt-4o-mini"
+
+# PACOTE CC — limite de linhas fallback quando não há changelog anterior na BD
+_DEFAULT_MAX_SOURCE_LINES = 50
+
+
+# ====================================================================
+# PACOTE CC — Obter data do último changelog gerado
+# ====================================================================
+async def _get_last_changelog_date() -> Optional[datetime]:
+    """
+    Query à coleção system_changelogs para obter a data (published_at)
+    do último registo publicado.
+
+    Returns:
+        datetime do último changelog, ou None se não houver registo anterior.
+    """
+    try:
+        last_doc = await db.system_changelogs.find_one(
+            {},
+            {"_id": 0, "published_at": 1}
+        )
+        if last_doc and last_doc.get("published_at"):
+            raw = last_doc["published_at"]
+            # published_at pode ser string ISO ou datetime
+            if isinstance(raw, datetime):
+                return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+            if isinstance(raw, str):
+                # Tentar parse ISO
+                try:
+                    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    pass
+        return None
+    except Exception as e:
+        logger.warning("[CHANGELOG-CC] Erro ao obter data do último changelog: %s", e)
+        return None
+
+
+# ====================================================================
+# PACOTE CC — Filtragem por data em ficheiros Markdown
+# ====================================================================
+# Padrões de data em headers Markdown:
+#   ## [2026-07-16] — Pacote CB: ...
+#   ### Date: 2026-03-04
+_MD_DATE_PATTERNS = [
+    re.compile(r"^##\s*\[(\d{4}-\d{2}-\d{2})\]"),      # ## [2026-07-16]
+    re.compile(r"^###\s*Date:\s*(\d{4}-\d{2}-\d{2})"),   # ### Date: 2026-03-04
+    re.compile(r"^##\s*(\d{4}-\d{2}-\d{2})"),             # ## 2026-07-16
+]
+
+
+def _parse_md_date(line: str) -> Optional[datetime]:
+    """Extrai datetime de uma linha de header Markdown, se contiver uma data."""
+    for pattern in _MD_DATE_PATTERNS:
+        match = pattern.match(line)
+        if match:
+            try:
+                return datetime.strptime(match.group(1), "%Y-%m-%d").replace(tzinfo=timezone.utc)
+            except ValueError:
+                pass
+    return None
+
+
+def _filter_lines_since(lines: List[str], since_date: Optional[datetime], max_lines: int) -> str:
+    """
+    Filtra linhas de um ficheiro Markdown para incluir apenas entradas
+    posteriores a since_date.
+
+    Heurística: percorre as linhas do FIM para o INÍCIO. Quando encontra
+    um header com data <= since_date, para — tudo a partir daí é histórico.
+    Se since_date for None ou não houver datas no ficheiro, usa max_lines
+    como fallback (comportamento original).
+
+    Returns:
+        String com as linhas filtradas (apenas o delta recente).
+    """
+    if since_date is None:
+        # Fallback: últimas max_lines linhas (comportamento original)
+        return "".join(lines[-max_lines:]).strip()
+
+    # Percorrer do fim para o início, coletando linhas até encontrar
+    # um header com data <= since_date
+    delta_lines: List[str] = []
+    for line in reversed(lines):
+        line_date = _parse_md_date(line)
+        if line_date and line_date <= since_date:
+            # Encontramos um header com data anterior ou igual à última
+            # geração. Tudo a partir daqui é histórico — parar.
+            break
+        delta_lines.insert(0, line)
+
+    if not delta_lines:
+        logger.info("[CHANGELOG-CC] Nenhuma entrada nova desde %s — a usar fallback de %d linhas",
+                     since_date.strftime("%Y-%m-%d"), max_lines)
+        return "".join(lines[-max_lines:]).strip()
+
+    logger.info("[CHANGELOG-CC] Filtrado %d linhas (delta desde %s)",
+                 len(delta_lines), since_date.strftime("%Y-%m-%d"))
+    return "".join(delta_lines).strip()
 
 
 async def get_ai_client_and_model() -> Tuple[Optional[AsyncOpenAI], str]:
@@ -174,14 +275,18 @@ def _resolve_project_file(filename: str) -> Optional[str]:
     return None
 
 
-def _read_local_file_tail(filepath: str, max_lines: int) -> str:
-    """Lê as últimas N linhas de um ficheiro local."""
+def _read_local_file_tail(filepath: str, max_lines: int, since_date: Optional[datetime] = None) -> str:
+    """Lê as últimas N linhas de um ficheiro local, com filtragem por data opcional.
+
+    PACOTE CC: se since_date for fornecido, filtra apenas as entradas posteriores
+    a essa data (via _filter_lines_since). Se None, usa as últimas max_lines linhas.
+    """
     with open(filepath, "r", encoding="utf-8") as f:
         lines = f.readlines()
-    return "".join(lines[-max_lines:]).strip()
+    return _filter_lines_since(lines, since_date, max_lines)
 
 
-async def _fetch_from_github(filename: str, max_lines: int) -> str:
+async def _fetch_from_github(filename: str, max_lines: int, since_date: Optional[datetime] = None) -> str:
     """
     Busca um ficheiro do GitHub via raw URL (fallback para produção).
 
@@ -190,8 +295,11 @@ async def _fetch_from_github(filename: str, max_lines: int) -> str:
     incluídos na imagem. Esta função busca-os directamente do GitHub
     via raw.githubusercontent.com (repo público, sem auth necessária).
 
+    PACOTE CC: se since_date for fornecido, filtra apenas as entradas
+    posteriores a essa data (via _filter_lines_since).
+
     Returns:
-        Últimas max_lines linhas do ficheiro, ou "" se falhar.
+        Linhas filtradas do ficheiro, ou "" se falhar.
     """
     import httpx
 
@@ -203,20 +311,35 @@ async def _fetch_from_github(filename: str, max_lines: int) -> str:
                 logger.warning("[CHANGELOG] GitHub raw devolveu %s para %s", resp.status_code, url)
                 return ""
             text = resp.text
-            lines = text.splitlines()
-            tail = "\n".join(lines[-max_lines:])
-            logger.info("[CHANGELOG] Ficheiro '%s' obtido do GitHub (%d linhas)", filename, len(lines))
-            return tail.strip()
+            lines = text.splitlines(keepends=True)
+            filtered = _filter_lines_since(lines, since_date, max_lines)
+            logger.info("[CHANGELOG] Ficheiro '%s' obtido do GitHub (%d linhas, filtrado para %d chars)",
+                         filename, len(lines), len(filtered))
+            return filtered
     except Exception as e:
         logger.warning("[CHANGELOG] Erro ao buscar '%s' do GitHub: %s", filename, e)
         return ""
 
 
-def read_git_log(max_lines: int = 50) -> str:
-    """Ler os últimos commits do Git como fonte para o changelog."""
+def read_git_log(max_lines: int = 50, since_date: Optional[datetime] = None) -> str:
+    """Ler os últimos commits do Git como fonte para o changelog.
+
+    PACOTE CC: se since_date for fornecido, usa --since="{data}" em vez de
+    --max-count, para obter apenas commits posteriores à última geração.
+    Se since_date for None, usa --max-count como fallback (comportamento original).
+    """
     try:
+        cmd = ["git", "log", "--pretty=format:%h %s (%cr)", "--no-merges"]
+        if since_date:
+            # Formato ISO para --since: "2026-07-16T00:00:00"
+            since_str = since_date.strftime("%Y-%m-%dT%H:%M:%S")
+            cmd.insert(1, f"--since={since_str}")
+            logger.info("[CHANGELOG-CC] git log --since=%s", since_str)
+        else:
+            cmd.insert(1, f"--max-count={max_lines}")
+
         result = subprocess.run(
-            ["git", "log", f"--max-count={max_lines}", "--pretty=format:%h %s (%cr)", "--no-merges"],
+            cmd,
             capture_output=True,
             text=True,
             timeout=10,
@@ -231,43 +354,51 @@ def read_git_log(max_lines: int = 50) -> str:
         return ""
 
 
-async def read_changelog_file(max_lines: int = 50) -> str:
-    """Ler as últimas linhas do ficheiro CHANGELOG.md.
+async def read_changelog_file(max_lines: int = 50, since_date: Optional[datetime] = None) -> str:
+    """Ler as últimas linhas do ficheiro CHANGELOG.md, com filtragem por data.
 
     PACOTE AI: tenta ficheiro local primeiro (_resolve_project_file).
     Se não encontrar (ex: no Render onde o build context é ./backend),
     faz fallback para GitHub raw URL.
+
+    PACOTE CC: se since_date for fornecido, filtra apenas as entradas
+    posteriores a essa data (via _filter_lines_since com parsing de
+    headers Markdown ## [YYYY-MM-DD]).
     """
     try:
         # 1. Tentar ficheiro local
         changelog_path = _resolve_project_file("CHANGELOG.md")
         if changelog_path:
-            return _read_local_file_tail(changelog_path, max_lines)
+            return _read_local_file_tail(changelog_path, max_lines, since_date)
 
         # 2. Fallback: GitHub raw URL
         logger.info("[CHANGELOG] CHANGELOG.md não encontrado localmente, a tentar GitHub...")
-        return await _fetch_from_github("CHANGELOG.md", max_lines)
+        return await _fetch_from_github("CHANGELOG.md", max_lines, since_date)
     except Exception as e:
         logger.warning("Não foi possível ler CHANGELOG.md: %s", e)
         return ""
 
 
-async def read_worklog_file(max_lines: int = 50) -> str:
-    """Ler as últimas linhas do ficheiro worklog.md.
+async def read_worklog_file(max_lines: int = 50, since_date: Optional[datetime] = None) -> str:
+    """Ler as últimas linhas do ficheiro worklog.md, com filtragem por data.
 
     PACOTE AI: tenta ficheiro local primeiro (_resolve_project_file).
     Se não encontrar (ex: no Render onde o build context é ./backend),
     faz fallback para GitHub raw URL.
+
+    PACOTE CC: se since_date for fornecido, filtra apenas as entradas
+    posteriores a essa data (via _filter_lines_since com parsing de
+    headers Markdown ### Date: YYYY-MM-DD).
     """
     try:
         # 1. Tentar ficheiro local
         worklog_path = _resolve_project_file("worklog.md")
         if worklog_path:
-            return _read_local_file_tail(worklog_path, max_lines)
+            return _read_local_file_tail(worklog_path, max_lines, since_date)
 
         # 2. Fallback: GitHub raw URL
         logger.info("[CHANGELOG] worklog.md não encontrado localmente, a tentar GitHub...")
-        return await _fetch_from_github("worklog.md", max_lines)
+        return await _fetch_from_github("worklog.md", max_lines, since_date)
     except Exception as e:
         logger.warning("Não foi possível ler worklog.md: %s", e)
         return ""
@@ -313,6 +444,18 @@ async def generate_changelog_ai(
     # onde get_ai_client_and_model() lê da BD (config do Admin) com
     # fallback para env vars. Isto respeita a regra multi-provider.
 
+    # PACOTE CC — Obter a data do último changelog gerado para filtrar
+    # apenas as novidades introduzidas desde então. Se não houver registo
+    # anterior, since_date = None e as funções de leitura usam max_source_lines
+    # como fallback (comportamento original).
+    since_date = await _get_last_changelog_date()
+    if since_date:
+        logger.info("[CHANGELOG-CC] Último changelog: %s — a filtrar fonte desde esta data",
+                     since_date.strftime("%Y-%m-%d %H:%M"))
+    else:
+        logger.info("[CHANGELOG-CC] Nenhum changelog anterior na BD — a usar fallback de %d linhas",
+                     max_source_lines)
+
     # 1. Recolher dados da fonte com fallback automático em cadeia
     # CORREÇÃO (Pacote AE-fix): no Render, a pasta .git não está disponível no
     # container de deploy, pelo que read_git_log() devolve "". O fallback agora
@@ -323,35 +466,35 @@ async def generate_changelog_ai(
     effective_source = source_type
 
     if source_type == "git":
-        source_text = read_git_log(max_source_lines)
+        source_text = read_git_log(max_source_lines, since_date=since_date)
         if source_text:
             effective_source = "git"
         else:
             # Fallback 1: worklog.md (mais fiável no Render — ficheiro físico)
             logger.info("[CHANGELOG] git log indisponível, a tentar worklog.md (fallback)")
-            source_text = await read_worklog_file(max_source_lines)
+            source_text = await read_worklog_file(max_source_lines, since_date=since_date)
             if source_text:
                 effective_source = "worklog (fallback de git)"
             else:
                 # Fallback 2: CHANGELOG.md
                 logger.info("[CHANGELOG] worklog.md vazio, a tentar CHANGELOG.md (fallback)")
-                source_text = await read_changelog_file(max_source_lines)
+                source_text = await read_changelog_file(max_source_lines, since_date=since_date)
                 if source_text:
                     effective_source = "changelog_file (fallback de git)"
     elif source_type == "changelog_file":
-        source_text = await read_changelog_file(max_source_lines)
+        source_text = await read_changelog_file(max_source_lines, since_date=since_date)
         if not source_text:
             # Fallback para worklog se CHANGELOG.md estiver vazio
             logger.info("[CHANGELOG] CHANGELOG.md vazio, a tentar worklog.md (fallback)")
-            source_text = await read_worklog_file(max_source_lines)
+            source_text = await read_worklog_file(max_source_lines, since_date=since_date)
             if source_text:
                 effective_source = "worklog (fallback de changelog_file)"
     elif source_type == "worklog":
-        source_text = await read_worklog_file(max_source_lines)
+        source_text = await read_worklog_file(max_source_lines, since_date=since_date)
         if not source_text:
             # Fallback para CHANGELOG.md se worklog estiver vazio
             logger.info("[CHANGELOG] worklog.md vazio, a tentar CHANGELOG.md (fallback)")
-            source_text = await read_changelog_file(max_source_lines)
+            source_text = await read_changelog_file(max_source_lines, since_date=since_date)
             if source_text:
                 effective_source = "changelog_file (fallback de worklog)"
     else:

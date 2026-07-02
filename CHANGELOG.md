@@ -3,6 +3,32 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CC: Changelog Generation with Date/Time Diff
+
+### Alterado
+- **Geração de changelog por IA processa apenas novidades desde a última geração**: Antes, a IA processava sempre as últimas 50 linhas da fonte (git/worklog/CHANGELOG), mesmo que já tivessem sido cobertas numa geração anterior. Agora, antes de ler a fonte, o sistema faz query à coleção `system_changelogs` para obter a data (`published_at`) do último changelog gerado, e filtra apenas as entradas posteriores a essa data.
+
+### Backend (`backend/services/changelog_service.py`)
+- **`_get_last_changelog_date()`**: Nova função async. Query à coleção `system_changelogs` para obter `published_at` do último registo. Lida com `datetime` e `string ISO`. Retorna `None` se não houver registo anterior.
+- **`_parse_md_date(line)`**: Extrai `datetime` de headers Markdown. Suporta 3 padrões: `## [YYYY-MM-DD]`, `### Date: YYYY-MM-DD`, `## YYYY-MM-DD`.
+- **`_filter_lines_since(lines, since_date, max_lines)`**: Heurística de filtragem. Percorre linhas do FIM para o INÍCIO. Quando encontra um header com data `<= since_date`, para. Se `since_date=None` ou não houver datas, usa `max_lines` como fallback (comportamento original).
+- **`read_git_log(max_lines, since_date)`**: Se `since_date` fornecido, usa `--since="YYYY-MM-DDTHH:MM:SS"` em vez de `--max-count=N`.
+- **`_read_local_file_tail(filepath, max_lines, since_date)`**: Chama `_filter_lines_since` em vez de ler as últimas N linhas diretamente.
+- **`_fetch_from_github(filename, max_lines, since_date)`**: Busca o ficheiro completo do GitHub e aplica `_filter_lines_since`.
+- **`read_changelog_file` / `read_worklog_file`**: Aceitam `since_date` e passam às funções subordinadas.
+- **`generate_changelog_ai`**: Chama `_get_last_changelog_date()` antes de ler a fonte. Passa `since_date` a todas as chamadas de leitura. Log informativo sobre a data de filtragem.
+
+### Lógica de Filtragem por Data
+| Fonte | Método de Filtragem | Fallback |
+|-------|---------------------|----------|
+| Git | `git log --since="{data}"` | `--max-count={N}` se `since_date=None` |
+| CHANGELOG.md | Parsing de `## [YYYY-MM-DD]` headers, do FIM para o INÍCIO | Últimas N linhas |
+| worklog.md | Parsing de `### Date: YYYY-MM-DD` headers, do FIM para o INÍCIO | Últimas N linhas |
+
+### Técnico
+- **Backend** (`backend/services/changelog_service.py`): `_get_last_changelog_date` (linhas 57-85); `_parse_md_date` (linhas 101-110); `_filter_lines_since` (linhas 113-148); `read_git_log` com `--since` (linhas 324-354); `_read_local_file_tail` com `since_date` (linhas 278-286); `_fetch_from_github` com `since_date` (linhas 289-321); `read_changelog_file` / `read_worklog_file` com `since_date` (linhas 357-404); `generate_changelog_ai` com `_get_last_changelog_date` (linhas 447-457).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CB: Fix Portal Profile Lock & Hide Visits Tab
 
 ### Corrigido
