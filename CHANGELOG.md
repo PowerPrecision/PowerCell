@@ -3,6 +3,22 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CE: Add Restore Button to BackupsPage
+
+### Adicionado
+- **Botão "Restaurar Backup" na UI de Backups**: Botão vermelho (`variant="destructive"`) adicionado na barra superior da `BackupsPage.js`, ao lado de "Verificar Integridade". Clique abre `AlertDialog` sério com aviso de operação destrutiva. Se aceito, dispara `POST /api/backup/restore` (Pacote CD — swap atómico).
+
+### Frontend (`frontend/src/pages/BackupsPage.js`)
+- **Estado `restoring`**: `useState(false)` — controla loading durante o restauro.
+- **`handleRestore()`**: `POST /api/backup/restore` com body `{confirm: "RESTAURAR_PRODUCAO"}`. Sucesso: `toast.success` com estatísticas + `window.location.reload()` após 1.5s. Erro: `toast.error` com detalhe.
+- **Botão "Restaurar Backup"**: `variant="destructive"`, ícone `AlertTriangle`, `disabled` quando `restoring || backupInProgress || verifying`.
+- **AlertDialog de confirmação**: Título "Atenção! Operação Destrutiva" + descrição exata: "Esta ação vai apagar a base de dados atual e substituí-la pelo último backup guardado no servidor cloud. Todas as ações efetuadas nas últimas horas serão perdidas."
+- **Overlay de loading full-screen**: `fixed inset-0 z-50 bg-black/50 backdrop-blur-sm` com `Loader2` e texto "A descarregar e a restaurar a base de dados (isto pode demorar alguns minutos)..."
+
+### Técnico
+- **Frontend** (`frontend/src/pages/BackupsPage.js`): estado `restoring` (linha 53); `handleRestore` (linhas 197-230); botão destructive + AlertDialog (linhas 278-317); overlay de loading (linhas 318-329).
+- **Validação**: `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote CD: Create Emergency Restore Endpoint
 
 ### Adicionado

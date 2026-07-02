@@ -2202,3 +2202,23 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/routes/backup.py` (novo endpoint POST /restore com swap atómico, linhas 459-839).
 - Resultado: endpoint de restauro de emergência exposto para a UI de administração. Usa swap atómico (coleções temporárias _restore_* + rename) em vez de delete_many + insert_many, garantindo que a BD nunca fica inconsistente mesmo que o processo falhe a meio. Apenas ADMIN e CEO podem executar. Requer confirmação explícita {"confirm": "RESTAURAR_PRODUCAO"}. Ignora backup_history, system.indexes e system_config (preserva config atual do sistema). Recria 16 índices únicos nas coleções principais após o swap. O endpoint existente /restore-from-s3 (não-atómico) é mantido para retrocompatibilidade.
+
+
+---
+Task ID: Pacote CE (Add Restore Button to BackupsPage)
+Agent: Main Agent (Code Assistant)
+Task: Adicionar botão de restauro à UI de Backups com confirmação séria
+
+Work Log:
+- Análise de BackupsPage.js: já tinha botões "Verificar Integridade" e "Criar Backup" (com AlertDialog). AlertDialog já importado. Imports de lucide-react já incluem AlertTriangle, Loader2, Shield.
+- Implementação:
+  1. Novo estado `restoring` (useState(false)).
+  2. Função `handleRestore`: POST /api/backup/restore com body {confirm: "RESTAURAR_PRODUCAO"}. Se sucesso: toast.success com estatísticas (total_documents, collections_swapped) + setTimeout(window.location.reload, 1500) para que o frontend perca memórias corrompidas. Se erro: toast.error com detail do backend.
+  3. Botão "Restaurar Backup" com variant="destructive" (vermelho), ícone AlertTriangle, disabled quando restoring/backupInProgress/verifying.
+  4. AlertDialog de confirmação com título "Atenção! Operação Destrutiva" e descrição exata pedida: "Esta ação vai apagar a base de dados atual e substituí-la pelo último backup guardado no servidor cloud. Todas as ações efetuadas nas últimas horas serão perdidas. Tem a certeza que deseja avançar?". AlertDialogAction com classe destructive ("Sim, Restaurar Agora").
+  5. Overlay de loading full-screen (fixed inset-0 z-50 bg-black/50 backdrop-blur-sm) com Loader2 e texto "A descarregar e a restaurar a base de dados (isto pode demorar alguns minutos)..." durante o restoring.
+- Validação: `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `frontend/src/pages/BackupsPage.js`.
+- Resultado: botão "Restaurar Backup" vermelho (destructive) adicionado na barra superior ao lado de "Verificar Integridade". Clique abre AlertDialog sério com aviso de operação destrutiva. Se aceite, dispara POST /api/backup/restore (Pacote CD) com confirmação RESTAURAR_PRODUCAO. Overlay de loading full-screen com texto "A descarregar e a restaurar a base de dados (isto pode demorar alguns minutos)...". Sucesso: toast.success + window.location.reload() após 1.5s para carregar dados limpos. Erro: toast.error com detalhe do backend.
