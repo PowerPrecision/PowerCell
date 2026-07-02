@@ -2020,3 +2020,34 @@ Stage Summary:
   - `frontend/src/pages/AdminDashboard.js` (Funil do Pipeline: h-[280px]→h-[224px] + padding reduzido)
   - `frontend/src/pages/StatisticsPage.js` (5 gráficos: h-[300px]→h-[260px])
 - Resultado: o gráfico do Funil/Pipeline no AdminDashboard ocupa agora menos ~56px de altura vertical, e os 5 gráficos do StatisticsPage ocupam menos 40px cada. Os cartões ajustam-se graciosamente sem empurrar outros elementos para baixo desproporcionalmente. O conteúdo continua legível (labels do eixo Y, tooltips, barras coloridas).
+
+
+---
+Task ID: Pacote BY (The Ultimate QA Seed Script)
+Agent: Main Agent (Code Assistant)
+Task: Criar script de seeding definitivo para QA com dados 100% realistas
+
+Work Log:
+- Análise delegada a subagente Explore: modelos de dados (process.py, client.py, enums.py), scripts de seed existentes (seed_massive_dev_data.py, seed_realistic_data.py, seed.py), estrutura das coleções (processes, clients, activities, history, users, workflow_statuses), e serviços de encriptação (encryption.py). Relatório completo com campos exatos, padrões de bootstrap, e recomendações.
+- Criado backend/scripts/seed_qa_ultimate.py (870 linhas) com:
+  1. Bootstrap: Motor async + dotenv + Faker('pt_PT') + sys.path para imports.
+  2. Helpers: iso(), seed_mark(), gerar_nif() (com validação de dígito de controlo), gerar_telefone(), gerar_cc().
+  3. Catálogos estáticos: NOMES_PT_MASCULINO/FEMININO, PROFISSOES, BANCOS, TIPOS_IMOVEL, TIPOLOGIAS, ESTADOS_CIVIS, CONCELHOS, NOTAS_EXEMPLO.
+  4. DISTRIBUICAO_STATUS: 10 grupos cobrindo pre_registo(4), clientes_espera(2), documentacao(2), analise(2), pre_aprovacao(1), credito_aprovado(2), cpcv(1), escritura(2), concluido(1), desistencias(1) = 18 processos.
+  5. Geradores de dados: gerar_cliente(), gerar_cliente_pre_registo(), gerar_personal_data(), gerar_financial_data() (salario_bruto/liquido, despesas, capital_proprio, tipo_contrato, dependentes), gerar_real_estate_data() (morada, valor, tipologia, CPCV, link idealista), gerar_credit_data() (montante, prazo, spread, euribor, prestacao_mensal calculada), gerar_titular2_data(), gerar_co_buyer(), gerar_atividade(), gerar_historico().
+  6. WORKFLOW_STATUSES: 16 estados alinhados com o enum canónico ProcessStatus (pre_registo a fila_espera), cada um com name, label, order, color, is_active, visible_in_portal.
+  7. ensure_workflow_statuses(): upsert dos 16 estados (atualiza campos em falta se já existem).
+  8. resolve_users(): resolve consultores, indexadores, intermediários e gestores; cria 2 dummies por role se não existirem.
+  9. clear_seed_data(): remove documentos marcados com _seed_script == "seed_qa_ultimate" (limpeza seletiva via --clear).
+  10. run_seed(): gera clientes, processos, atividades e histórico conforme as 5 regras do utilizador:
+      - 4 processos em pre_registo com cliente minimalista (apenas nome/email/telefone)
+      - ~25% dos processos ativos são casais (titular2_data + co_buyers preenchidos exaustivamente)
+      - 8+ processos ativos com TODOS os objetos preenchidos (personal_data, financial_data, real_estate_data, credit_data)
+      - 2-4 atividades/notas por processo ativo (timeline não vazia)
+      - Atribuição mista (consultores, intermediários, indexação)
+  11. CLI: --clear, --num-processes, --dry-run.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros (após corrigir typo 'conelho' → 'concelho').
+
+Stage Summary:
+- 1 ficheiro criado: `backend/scripts/seed_qa_ultimate.py` (870 linhas).
+- Resultado: script de seeding definitivo para QA que gera 18 processos (configurável via --num-processes) com dados 100% realistas. Cobre todas as 5 regras: pré-registo minimalista, diversidade de titulares (solteiros + casais), dados 100% preenchidos em 8+ processos ativos (com financial_data completo para DSTI), 2+ atividades por processo, e atribuição mista. Suporta --clear (limpeza seletiva), --dry-run (simulação), e --num-processes (customização). Workflow_statuses alinhados com o enum canónico (16 estados). Utilizadores dummy criados automaticamente se não existirem.

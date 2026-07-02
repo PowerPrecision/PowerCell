@@ -3,6 +3,36 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BY: The Ultimate QA Seed Script
+
+### Adicionado
+- **Script de seeding definitivo para QA** (`backend/scripts/seed_qa_ultimate.py`, 870 linhas): Gera 18 processos (configurável) com dados 100% realistas e todos os campos preenchidos, cobrindo as 5 regras de negócio:
+  1. **4 processos em pré-registo**: Cliente minimalista (apenas nome/email/telefone), `dados_pessoais` vazio, `registration_completed=False`, `lead_status="new"`.
+  2. **Diversidade de titulares**: ~25% dos processos ativos são casais com `titular2_data` exaustivo (nome, nif, email, telefone, rendimentos, profissão) e `co_buyers` array preenchido.
+  3. **Dados 100% preenchidos**: 8+ processos ativos (em `documentacao`, `analise`, `pre_aprovacao`, `credito_aprovado`, `cpcv`, `escritura`) com `personal_data`, `financial_data` (salário bruto/líquido, despesas, capital próprio, tipo_contrato), `real_estate_data` (morada, valor, tipologia, CPCV, link idealista), e `credit_data` (montante, prazo, spread, euribor, prestação mensal calculada por fórmula de amortização francesa).
+  4. **Histórico e notas**: 2-4 atividades/notas por processo ativo (10 notas realistas) + 1 entrada de histórico (status change).
+  5. **Atribuições mistas**: Processos atribuídos a consultores, intermediários e indexadores aleatoriamente.
+
+### Funcionalidades do script
+- **CLI**: `--clear` (limpeza seletiva de seeds anteriores via `_seed_script`), `--num-processes` (customizar quantidade), `--dry-run` (simulação sem escrever).
+- **Workflow statuses**: Garante os 16 estados canónicos do `ProcessStatus` (alinhados com o enum, não com os 7 antigos do `seed_massive_dev_data.py`).
+- **Utilizadores dummy**: Cria 2 utilizadores por role (consultor, indexacao, intermediario) se não existirem.
+- **NIF válido**: Gera NIFs portugueses com dígito de controlo validado.
+- **Faker pt_PT**: Nomes, empresas, moradas e datas realistas em português.
+
+### Uso
+```bash
+cd backend
+python scripts/seed_qa_ultimate.py                    # seed com defaults (18 processos)
+python scripts/seed_qa_ultimate.py --clear            # limpar dados seed anteriores
+python scripts/seed_qa_ultimate.py --num-processes 25 # customizar quantidade
+python scripts/seed_qa_ultimate.py --dry-run          # simular sem escrever
+```
+
+### Técnico
+- **Backend** (`backend/scripts/seed_qa_ultimate.py`): 870 linhas; bootstrap com Motor async + dotenv + Faker('pt_PT'); catálogos estáticos (nomes, profissões, bancos, concelhos); 10 geradores de dados (cliente, personal_data, financial_data, real_estate_data, credit_data, titular2_data, co_buyer, atividade, historico); `ensure_workflow_statuses` (16 estados); `resolve_users` (cria dummies); `clear_seed_data` (limpeza seletiva); `run_seed` (orquestração).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote BX: Resize Pipeline Funnel
 
 ### Alterado
