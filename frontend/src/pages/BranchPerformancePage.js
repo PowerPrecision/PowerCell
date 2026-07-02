@@ -15,6 +15,7 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { FullPageSkeleton } from "../components/ui/skeletons";
 import { useTheme } from "../contexts/ThemeContext";
+import DashboardLayout from "../layouts/DashboardLayout";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -204,10 +205,10 @@ export default function BranchPerformancePage() {
   }
 
   return (
+    <DashboardLayout title="Performance de Balcões">
     <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto overflow-visible">
       {/* ── Header ── */}
-      {/* PACOTE BA: overflow-visible + z-index para Selects/Dropdowns */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 relative z-30 overflow-visible">
+      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 relative z-10 overflow-visible">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Building2 className="h-6 w-6 text-primary" />
@@ -346,5 +347,6 @@ export default function BranchPerformancePage() {
         </CardContent>
       </Card>
     </div>
+    </DashboardLayout>
   );
 }
