@@ -35,7 +35,7 @@
  * // Acesso via layout protegido — visível para roles admin e CEO
  * // Tabs técnicas exclusivas do admin
  */
-import { useState, lazy, Suspense } from "react";
+import { useState, useEffect, lazy, Suspense } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";
@@ -85,22 +85,26 @@ const ProcessMigrationTab = lazy(() => import("../components/admin/ProcessMigrat
 const FinanceTab = lazy(() => import("../components/admin/FinanceTab"));
 const CompaniesManagementPage = lazy(() => import("./CompaniesManagementPage"));
 
-// PACOTE AZ: Named exports de SystemConfigPage não podem ser extraídos de
-// lazy(). Em vez disso, usamos um wrapper que importa dinamicamente.
+// PACOTE AZ/BD: Named exports de SystemConfigPage não podem ser extraídos de
+// lazy(). Usamos wrappers com useEffect para evitar TDZ no render.
 const SystemEmailsSectionWrapper = (props) => {
   const [Component, setComponent] = useState(null);
-  if (!Component) {
-    import("./SystemConfigPage").then(mod => setComponent(() => mod.SystemEmailsSection));
-    return <TabLoader />;
-  }
+  useEffect(() => {
+    import("./SystemConfigPage").then(mod => {
+      if (mod.SystemEmailsSection) setComponent(() => mod.SystemEmailsSection);
+    }).catch(err => console.error("[SystemEmailsSectionWrapper] import error:", err));
+  }, []);
+  if (!Component) return <TabLoader />;
   return <Component {...props} />;
 };
 const IntegrationsConfigSectionWrapper = (props) => {
   const [Component, setComponent] = useState(null);
-  if (!Component) {
-    import("./SystemConfigPage").then(mod => setComponent(() => mod.IntegrationsConfigSection));
-    return <TabLoader />;
-  }
+  useEffect(() => {
+    import("./SystemConfigPage").then(mod => {
+      if (mod.IntegrationsConfigSection) setComponent(() => mod.IntegrationsConfigSection);
+    }).catch(err => console.error("[IntegrationsConfigSectionWrapper] import error:", err));
+  }, []);
+  if (!Component) return <TabLoader />;
   return <Component {...props} />;
 };
 

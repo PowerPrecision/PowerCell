@@ -2723,114 +2723,124 @@ const ProcessDetails = () => {
           mediadorName={process.mediador_name || process.assigned_mediador_name}
         />
 
-        {/* ═══════ PACOTE AQ V2: Meta-dados compactos (Prioridade + Etiquetas) ═══════ */}
-        <div className="flex flex-wrap items-center gap-3 px-1">
-          {/* Prioridade */}
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground">Prioridade</Label>
-            <Select
-              value={process?.prioridade || "media"}
-              onValueChange={(value) => {
-                setProcess(prev => ({ ...prev, prioridade: value }));
-                if (canEditPersonal && !isProcessLocked) handleSaveOrganization();
-              }}
-              disabled={!canEditPersonal || isProcessLocked}
-            >
-              <SelectTrigger className="h-8 w-28 text-xs">
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="baixa"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Baixa</span></SelectItem>
-                <SelectItem value="media"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Média</span></SelectItem>
-                <SelectItem value="alta"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-red-500" />Alta</span></SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-          {/* Etiquetas */}
-          <div className="flex items-center gap-1.5 flex-wrap">
-            <Label className="text-xs text-muted-foreground">Etiquetas</Label>
-            {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
-              <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
-                {safeString(label)}
-                {canEditPersonal && (
-                  <button
-                    onClick={() => setProcess(prev => ({ ...prev, labels: (prev.labels || []).filter((_, i) => i !== idx) }))}
-                    className="ml-0.5 hover:text-destructive"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </Badge>
-            ))}
-            {canEditPersonal && (
-              <Input
-                value={newLabel}
-                onChange={(e) => setNewLabel(e.target.value)}
-                onKeyDown={(e) => {
-                  if (e.key === "Enter" && newLabel.trim()) {
-                    e.preventDefault();
-                    setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
-                    setNewLabel("");
-                    if (!isProcessLocked) handleSaveOrganization();
-                  }
-                }}
-                className="h-7 w-28 text-xs"
-                placeholder="Nova etiqueta"
-              />
-            )}
-          </div>
-        </div>
+        {/* ═══════ PACOTE BC: Layout reestruturado ═══════
+            Ordem visual exata:
+            1. Timeline (full width)
+            2. Cartão meta-dados: Etiquetas + Prioridade (full width)
+            3. Grid 2 colunas: Input (esquerda) + Atividades Recentes (direita) */}
 
-        {/* ═══════ PACOTE AQ V2: Cartão "Registar Atividade / Nota" (isolado) ═══════ */}
-        {!isProcessLocked && (
-          <Card className="border-violet-200 dark:border-violet-900">
-            <CardHeader className="pb-2 py-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <MessageSquare className="h-4 w-4 text-violet-600" />
-                Registar Atividade / Nota
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0 pb-3">
-              <div className="flex gap-2">
-                <Textarea
-                  placeholder="Escreva uma nota ou registo de atividade para este processo..."
-                  value={newComment}
-                  onChange={(e) => setNewComment(e.target.value)}
-                  className="flex-1 min-h-[60px] text-sm resize-none"
-                  data-testid="quick-note-input"
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                      e.preventDefault();
-                      handleSendComment();
-                    }
+        {/* ── 1. Timeline (full width) ── */}
+        <ProcessTimeline
+          processId={id}
+          currentStatus={process.status}
+          history={process.status_history || activities.filter(a => a.type === 'status_change')}
+          workflowStatuses={workflowStatuses}
+        />
+
+        {/* ── 2. Cartão meta-dados: Etiquetas + Prioridade (full width) ── */}
+        <Card>
+          <CardContent className="pt-4 pb-4">
+            <div className="flex flex-wrap items-center gap-4">
+              {/* Prioridade */}
+              <div className="flex items-center gap-2">
+                <Label className="text-xs text-muted-foreground">Prioridade</Label>
+                <Select
+                  value={process?.prioridade || "media"}
+                  onValueChange={(value) => {
+                    setProcess(prev => ({ ...prev, prioridade: value }));
+                    if (canEditPersonal && !isProcessLocked) handleSaveOrganization();
                   }}
-                />
-                <Button
-                  onClick={handleSendComment}
-                  disabled={sendingComment || !newComment.trim()}
-                  size="sm"
-                  data-testid="quick-note-submit"
-                  className="bg-violet-600 hover:bg-violet-700"
+                  disabled={!canEditPersonal || isProcessLocked}
                 >
-                  {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                </Button>
+                  <SelectTrigger className="h-8 w-28 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="baixa"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Baixa</span></SelectItem>
+                    <SelectItem value="media"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Média</span></SelectItem>
+                    <SelectItem value="alta"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-red-500" />Alta</span></SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <p className="text-[10px] text-muted-foreground mt-1.5">Cmd/Ctrl+Enter para enviar rápido</p>
-            </CardContent>
-          </Card>
-        )}
+              {/* Etiquetas */}
+              <div className="flex items-center gap-1.5 flex-wrap">
+                <Label className="text-xs text-muted-foreground">Etiquetas</Label>
+                {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
+                  <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
+                    {safeString(label)}
+                    {canEditPersonal && (
+                      <button
+                        onClick={() => setProcess(prev => ({ ...prev, labels: (prev.labels || []).filter((_, i) => i !== idx) }))}
+                        className="ml-0.5 hover:text-destructive"
+                      >
+                        <X className="h-3 w-3" />
+                      </button>
+                    )}
+                  </Badge>
+                ))}
+                {canEditPersonal && (
+                  <Input
+                    value={newLabel}
+                    onChange={(e) => setNewLabel(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" && newLabel.trim()) {
+                        e.preventDefault();
+                        setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
+                        setNewLabel("");
+                        if (!isProcessLocked) handleSaveOrganization();
+                      }
+                    }}
+                    className="h-7 w-28 text-xs"
+                    placeholder="Nova etiqueta"
+                  />
+                )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* ═══════ PACOTE AQ V2: Timeline + Feed de Atividades (autónomo) ═══════ */}
-        <div className="space-y-3">
-          {/* Timeline visual (passos do workflow) */}
-          <ProcessTimeline
-            processId={id}
-            currentStatus={process.status}
-            history={process.status_history || activities.filter(a => a.type === 'status_change')}
-            workflowStatuses={workflowStatuses}
-          />
+        {/* ── 3. Grid 2 colunas: Input (esquerda) + Atividades (direita) ── */}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          {/* Lado Esquerdo: Registar Atividade / Nota */}
+          {!isProcessLocked && (
+            <Card className="border-violet-200 dark:border-violet-900">
+              <CardHeader className="pb-2 py-3">
+                <CardTitle className="text-sm flex items-center gap-2">
+                  <MessageSquare className="h-4 w-4 text-violet-600" />
+                  Registar Atividade / Nota
+                </CardTitle>
+              </CardHeader>
+              <CardContent className="pt-0 pb-3">
+                <div className="flex gap-2">
+                  <Textarea
+                    placeholder="Escreva uma nota ou registo de atividade para este processo..."
+                    value={newComment}
+                    onChange={(e) => setNewComment(e.target.value)}
+                    className="flex-1 min-h-[60px] text-sm resize-none"
+                    data-testid="quick-note-input"
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
+                        e.preventDefault();
+                        handleSendComment();
+                      }
+                    }}
+                  />
+                  <Button
+                    onClick={handleSendComment}
+                    disabled={sendingComment || !newComment.trim()}
+                    size="sm"
+                    data-testid="quick-note-submit"
+                    className="bg-violet-600 hover:bg-violet-700"
+                  >
+                    {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
+                  </Button>
+                </div>
+                <p className="text-[10px] text-muted-foreground mt-1.5">Cmd/Ctrl+Enter para enviar rápido</p>
+              </CardContent>
+            </Card>
+          )}
 
-          {/* Feed de atividades recentes */}
+          {/* Lado Direito: Atividades Recentes / Histórico */}
           <Card>
             <CardHeader className="pb-2 py-3">
               <CardTitle className="text-sm flex items-center gap-2">
@@ -2842,7 +2852,7 @@ const ProcessDetails = () => {
               <ScrollArea className="h-[300px]">
                 <div className="space-y-2 pr-2">
                   {activities.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-4 text-xs">Sem registos. Adicione a primeira nota acima.</p>
+                    <p className="text-center text-muted-foreground py-4 text-xs">Sem registos. Adicione a primeira nota à esquerda.</p>
                   ) : (
                     [...activities].reverse().map((activity) => (
                       <div key={activity.id} className="p-2 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
@@ -2867,9 +2877,7 @@ const ProcessDetails = () => {
           </Card>
         </div>
 
-        {/* PACOTE AQ V2: Cartão "Organização do Processo" removido.
-            Prioridade e Etiquetas movidas para a zona de meta-dados compacta no topo.
-            Notas do Consultor removidas (substituídas pelo cartão "Registar Atividade / Nota"). */}
+        {/* PACOTE BC: Cartão "Organização do Processo" removido. */}
 
         {/* TAREFA 2: Resolver conflitos de dados IA */}
         <DataConflictResolver

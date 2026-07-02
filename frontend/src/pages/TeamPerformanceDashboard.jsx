@@ -238,9 +238,8 @@ const TeamPerformanceDashboard = () => {
     <DashboardLayout title="Desempenho da Equipa">
     <div className="space-y-6 p-1">
       {/* ══ CABEÇALHO ══════════════════════════════════════ */}
-      {/* PACOTE BA: overflow-visible + z-index para garantir que os
-          Selects (Radix UI) não ficam cortados pelo contentor pai. */}
-      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-30 overflow-visible">
+      {/* PACOTE BA/BD: overflow-visible + z-10 (abaixo da sidebar z-50) */}
+      <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4 relative z-10 overflow-visible">
         <div>
           <h1 className="text-2xl font-bold flex items-center gap-2">
             <Activity className="h-6 w-6 text-blue-500" />
