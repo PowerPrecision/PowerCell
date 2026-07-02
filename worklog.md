@@ -1681,3 +1681,32 @@ Stage Summary:
   - `frontend/src/components/S3FileManager.js` (constantes + canSeeIndexCategory + visibleCategories + filtros em getCategoryCount/getAllFiles/getFilteredCategoryFiles + useEffect guard + import hasAnyRole + 3 CATEGORIES.map substituídos)
   - `frontend/src/components/UnifiedDocumentsPanel.js` (defesa em profundidade: flag canSeeIndexCategory + data-can-see-index no div raiz)
 - Resultado: todos os documentos enviados diretamente pelo cliente através do Portal vão parar à pasta cofre "Index" (backend força a categoria, ignorando o que vem do frontend). Apenas admin/CEO/diretor/indexacao vêem estes documentos no painel de documentos (S3FileManager filtra por ficheiro e por categoria na sidebar). Consultores, intermediários, administrativos e outros roles não veem nada da categoria "Index" — nem na sidebar, nem na lista "Todos", nem por seleção direta. Scrapers automáticos (Finanças/Segurança Social) mantêm as suas categorias específicas porque não são uploads manuais do cliente.
+
+
+---
+Task ID: Pacote BM (Bloqueio do Perfil do Cliente após Indexação)
+Agent: Main Agent (Code Assistant)
+Task: Congelar dados do cliente no portal quando a Indexação marca processo como indexado
+
+Work Log:
+- Análise do endpoint mark-indexed (processes.py linhas 3182-3536): quando a Indexação conclui, faz update_set com is_indexed=True, indexed_at, indexed_by, limpa assigned_indexacao_id e faz salto dinâmico de estado. Retorno inclui is_indexed, status_transition, etc.
+- Análise do Portal do Cliente (ClientPortal.jsx ProfilePanel linhas 1276-1624): já existe bloqueio baseado em `isLocked = profile?.has_process === true` (linha 1412) que desativa todos os campos via `disabled={isLocked}` no componente `Field`. Há um banner azul "Processo em Análise" quando isLocked. O GET /portal/me (portal.py linhas 723-791) devolvia has_process mas NÃO is_data_confirmed.
+- Distinção conceptual importante: `has_process` = cliente tem processo (bloqueio PRÉ-indexação, já existente); `is_data_confirmed` = Indexação validou e congelou os dados (bloqueio PÓS-indexação, NOVO). São dois estados distintos que merecem mensagens diferentes.
+- Backend — 3 alterações:
+  1. mark-indexed (processes.py): adicionado `is_data_confirmed: True` + metadados (data_confirmed_at, data_confirmed_by, data_confirmed_by_name) ao update_set. Adicionado registo no histórico (DADOS_CONFIRMADOS_INDEXACAO). Adicionado `is_data_confirmed: True` ao retorno do endpoint.
+  2. GET /portal/me (portal.py): query de active_process agora projeta `is_data_confirmed: 1`; determina `is_data_confirmed` (True se algum processo ativo tem is_data_confirmed===True); devolve `is_data_confirmed` no JSON de resposta.
+  3. PUT /portal/me (portal.py): defesa no backend — quando is_data_confirmed===True, devolve 403 com mensagem específica "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." (mensagem diferente do 403 genérico "Dados trancados. Processo já em análise." para o caso pré-indexação).
+- Frontend — ClientPortal.jsx ProfilePanel:
+  1. Import `ShieldCheck` adicionado ao lucide-react.
+  2. `isDataConfirmed = profile?.is_data_confirmed === true` (nova flag lida do GET /portal/me).
+  3. `isLocked = profile?.has_process === true || isDataConfirmed` — bloqueio aplica-se em ambos os casos (pré e pós-indexação). Todos os campos `Field` já usam `disabled={isLocked}`, pelo que ficam automaticamente desativados.
+  4. Alert específico (âmbar/laranja, ícone ShieldCheck) com a mensagem exata pedida: "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." — renderizado quando `isDataConfirmed === true`, com `role="alert"` e `data-testid="data-confirmed-alert"` para acessibilidade/testes.
+  5. Banner azul "Processo em Análise" existente agora só aparece quando `isLocked && !isDataConfirmed` (pré-indexação) — evita duplicação visual de banners.
+- Validação: `py_compile` ✓ em ambos os ficheiros backend; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros no ClientPortal.jsx.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/routes/processes.py` (is_data_confirmed + metadados no mark-indexed update_set; registo histórico DADOS_CONFIRMADOS_INDEXACAO; is_data_confirmed no retorno)
+  - `backend/routes/portal.py` (GET /portal/me devolve is_data_confirmed; PUT /portal/me bloqueia com mensagem específica quando is_data_confirmed)
+  - `frontend/src/pages/ClientPortal.jsx` (isDataConfirmed flag; isLocked estendido; Alert âmbar com mensagem exata; banner azul condicionado a !isDataConfirmed; import ShieldCheck)
+- Resultado: quando a Indexação termina e marca o processo como indexado (mark-indexed), o campo is_data_confirmed=True é persistido. O Portal do Cliente lê esta flag (GET /portal/me), desativa todos os campos de input do perfil (nome, morada, dados financeiros, contactos, etc.) e mostra um Alert âmbar no topo com a mensagem "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." O backend também bloqueia o PUT /portal/me com 403 e a mesma mensagem (defesa em profundidade). Antes da indexação (has_process mas sem is_data_confirmed), o banner azul "Processo em Análise" existente mantém-se.

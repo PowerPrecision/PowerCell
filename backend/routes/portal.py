@@ -757,13 +757,19 @@ async def get_client_profile(
     # Determinar se o cliente tem processo associado (para bloqueio de edição)
     process_ids = client.get("process_ids", [])
     has_process = False
+    # PACOTE BM — is_data_confirmed: verdadeiro quando a Indexação terminou e
+    # validou os dados (campo definido em mark-indexed). O Portal lê esta flag
+    # para bloquear a edição do perfil com mensagem específica.
+    is_data_confirmed = False
     if process_ids:
-        # Verificar se existe pelo menos um processo activo
+        # Verificar se existe pelo menos um processo activo E trazer is_data_confirmed
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1}
+            {"_id": 0, "id": 1, "is_data_confirmed": 1}
         )
         has_process = active_process is not None
+        if active_process and active_process.get("is_data_confirmed") is True:
+            is_data_confirmed = True
 
     # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
     dados_pessoais = client.get("dados_pessoais", {}) or {}
@@ -788,6 +794,9 @@ async def get_client_profile(
         "contacto": clean_contacto,
         "dados_pessoais": clean_dados_pessoais,
         "has_process": has_process,
+        # PACOTE BM — flag de dados confirmados/congelados pela Indexação.
+        # Quando true, o Portal bloqueia todos os campos de input do perfil.
+        "is_data_confirmed": is_data_confirmed,
     }
 
 
@@ -836,11 +845,20 @@ async def update_client_profile(
     process_ids = client.get("process_ids", [])
     if process_ids:
         # Verificar se existe pelo menos um processo activo (não eliminado)
+        # e trazer is_data_confirmed para mensagem de bloqueio específica.
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1}
+            {"_id": 0, "id": 1, "is_data_confirmed": 1}
         )
         if active_process:
+            # PACOTE BM — Mensagem específica quando os dados foram confirmados
+            # pela Indexação (is_data_confirmed=True). Caso contrário, mantém a
+            # mensagem original de "processo em análise".
+            if active_process.get("is_data_confirmed") is True:
+                raise HTTPException(
+                    status_code=403,
+                    detail="Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito."
+                )
             raise HTTPException(
                 status_code=403,
                 detail="Dados trancados. Processo já em análise."

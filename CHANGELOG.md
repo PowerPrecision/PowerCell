@@ -3,6 +3,41 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BM: Bloqueio do Perfil do Cliente após Indexação
+
+### Adicionado
+- **Congelamento de dados do cliente após Indexação**: Quando a Indexação termina o tratamento documental e marca o processo como indexado (`mark-indexed`), o campo `is_data_confirmed: True` é persistido no processo. Isto assinala que os dados foram validados e congelados — o cliente já não pode alterar os seus dados pessoais no Portal.
+
+- **Flag `is_data_confirmed` no `GET /portal/me`**: O Portal do Cliente lê agora esta flag para determinar se os campos do perfil devem ser desativados.
+
+- **Alert específico no Portal do Cliente**: Quando `is_data_confirmed === true`, o `ProfilePanel` mostra um Alert âmbar (ícone `ShieldCheck`) no topo com a mensagem exata: "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." — com `role="alert"` e `data-testid="data-confirmed-alert"` para acessibilidade/testes.
+
+- **Defesa no backend (`PUT /portal/me`)**: Quando `is_data_confirmed === true`, o endpoint devolve HTTP 403 com a mesma mensagem específica. Isto garante que mesmo que o frontend seja manipulado, o backend bloqueia a edição.
+
+### Backend
+- **`PATCH/POST /processes/{id}/mark-indexed`** (`routes/processes.py`): `update_set` agora inclui `is_data_confirmed: True` + metadados (`data_confirmed_at`, `data_confirmed_by`, `data_confirmed_by_name`). Registo no histórico `DADOS_CONFIRMADOS_INDEXACAO`. Retorno inclui `is_data_confirmed: True`.
+- **`GET /portal/me`** (`routes/portal.py`): Query de `active_process` agora projeta `is_data_confirmed`; resposta inclui `"is_data_confirmed": true|false`.
+- **`PUT /portal/me`** (`routes/portal.py`): Quando `is_data_confirmed === true`, devolve 403 com mensagem "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." (distinta do 403 genérico "Dados trancados. Processo já em análise." para o caso pré-indexação).
+
+### Frontend
+- **`ClientPortal.jsx` — `ProfilePanel`**:
+  - Import `ShieldCheck` adicionado ao lucide-react.
+  - `isDataConfirmed = profile?.is_data_confirmed === true` (lida do `GET /portal/me`).
+  - `isLocked = profile?.has_process === true || isDataConfirmed` — bloqueio aplica-se em ambos os casos (pré e pós-indexação). Todos os campos `Field` já usavam `disabled={isLocked}`, pelo que ficam automaticamente desativados.
+  - Alert âmbar (ícone `ShieldCheck`) com a mensagem exata pedida — renderizado quando `isDataConfirmed === true`.
+  - Banner azul "Processo em Análise" existente agora só aparece quando `isLocked && !isDataConfirmed` (pré-indexação) — evita duplicação visual.
+
+### Decisão de Arquitetura
+- **Distinção `has_process` vs `is_data_confirmed`**: São dois estados distintos que merecem mensagens diferentes. `has_process` = cliente tem processo (bloqueio **pré-indexação**, banner azul "Processo em Análise", já existente). `is_data_confirmed` = Indexação validou e congelou os dados (bloqueio **pós-indexação**, Alert âmbar "Dados Bloqueados para Análise", novo). Ambos desativam os campos, mas a mensagem comunica ao cliente o estágio correto do processo.
+- **Defesa em profundidade**: O bloqueio é aplicado no frontend (disabled + Alert) E no backend (403 no PUT /portal/me). Mesmo que o frontend seja manipulado, o backend impede a edição.
+- **Metadados de auditoria**: `data_confirmed_at`, `data_confirmed_by`, `data_confirmed_by_name` permitem rastrear quem e quando congelou os dados.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): `update_set` no `mark_process_indexed` (linhas 3282-3291); registo histórico `DADOS_CONFIRMADOS_INDEXACAO` (linhas 3322-3330); `is_data_confirmed: True` no retorno (linhas 3533-3535).
+- **Backend** (`backend/routes/portal.py`): `GET /portal/me` projeta e devolve `is_data_confirmed` (linhas 760-772, 797-799); `PUT /portal/me` bloqueia com mensagem específica (linhas 845-865).
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): import `ShieldCheck` (linha 56); `isDataConfirmed` + `isLocked` estendido (linhas 1413-1418); Alert âmbar (linhas 1477-1502); banner azul condicionado a `!isDataConfirmed` (linha 1505).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BL: Categoria INDEX forçada e privada
 
 ### Adicionado

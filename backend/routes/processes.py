@@ -3279,6 +3279,15 @@ async def mark_process_indexed(
         "assigned_indexacao_id": None,   # Limpar — trabalho de indexação concluído
         "indexacao_name": None,          # Limpar nome do indexador
         "updated_at": now,
+        # PACOTE BM — Bloqueio do Perfil do Cliente após Indexação.
+        # Assinala que os dados foram validados e congelados pela Indexação.
+        # O Portal do Cliente lê esta flag (GET /portal/me) e desativa todos
+        # os campos de input do perfil + mostra um Alert a informar que os
+        # dados estão bloqueados para análise da equipa de crédito.
+        "is_data_confirmed": True,
+        "data_confirmed_at": now,
+        "data_confirmed_by": user.get("id"),
+        "data_confirmed_by_name": user.get("name", ""),
     }
 
     # Se conseguimos calcular o próximo estado, adicioná-lo ao update
@@ -3307,6 +3316,15 @@ async def mark_process_indexed(
             user=user,
             action="INDEXACAO_CONCLUIDA",
             field="is_indexed",
+            old_value="false",
+            new_value="true"
+        )
+        # PACOTE BM — Registar também o congelamento dos dados do cliente
+        await log_history(
+            process_id,
+            user=user,
+            action="DADOS_CONFIRMADOS_INDEXACAO",
+            field="is_data_confirmed",
             old_value="false",
             new_value="true"
         )
@@ -3512,6 +3530,9 @@ async def mark_process_indexed(
         # Dupla auto-atribuição (pre_registo → pipeline)
         "dual_auto_assigned": is_pre_registo_transition,
         "assignment": consultant_result if is_pre_registo_transition else None,
+        # PACOTE BM — Dados do cliente confirmados/congelados pela Indexação.
+        # O Portal do Cliente lê esta flag via GET /portal/me e bloqueia a edição.
+        "is_data_confirmed": True,
     }
 
 
