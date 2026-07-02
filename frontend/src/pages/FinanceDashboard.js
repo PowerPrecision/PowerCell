@@ -232,7 +232,7 @@ const KpiCard = ({ title, value, subtitle, icon: Icon, accent = "purple" }) => {
   const a = accents[accent] || accents.purple;
 
   return (
-    <Card className="overflow-hidden relative">
+    <Card className="overflow-visible relative">
       <div className={`absolute left-0 top-0 bottom-0 w-1 ${a.bar}`} />
       <CardContent className="p-5 pl-6">
         <div className="flex items-center justify-between">
@@ -484,7 +484,8 @@ const PoolDistributionPanel = ({ companyId }) => {
               Comissões faturadas divididas igualmente pelos consultores ativos
             </CardDescription>
           </div>
-          <div className="flex items-center gap-2 flex-wrap">
+          {/* PACOTE BA: overflow-visible + z-index para Selects não ficarem cortados */}
+          <div className="flex items-center gap-2 flex-wrap relative z-30 overflow-visible">
             {/* Export CSV — Admin/CEO only */}
             {isAdminOrCeo && (
               <Button
