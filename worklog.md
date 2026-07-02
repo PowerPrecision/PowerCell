@@ -1710,3 +1710,39 @@ Stage Summary:
   - `backend/routes/portal.py` (GET /portal/me devolve is_data_confirmed; PUT /portal/me bloqueia com mensagem específica quando is_data_confirmed)
   - `frontend/src/pages/ClientPortal.jsx` (isDataConfirmed flag; isLocked estendido; Alert âmbar com mensagem exata; banner azul condicionado a !isDataConfirmed; import ShieldCheck)
 - Resultado: quando a Indexação termina e marca o processo como indexado (mark-indexed), o campo is_data_confirmed=True é persistido. O Portal do Cliente lê esta flag (GET /portal/me), desativa todos os campos de input do perfil (nome, morada, dados financeiros, contactos, etc.) e mostra um Alert âmbar no topo com a mensagem "Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito." O backend também bloqueia o PUT /portal/me com 403 e a mesma mensagem (defesa em profundidade). Antes da indexação (has_process mas sem is_data_confirmed), o banner azul "Processo em Análise" existente mantém-se.
+
+
+---
+Task ID: Pacote BN (Evolução do Menu de Registos — Sala de Triagem)
+Agent: Main Agent (Code Assistant)
+Task: Página de Registos como Sala de Triagem (leads + pre_registo + sem indexador)
+
+Work Log:
+- Análise da página de Registos: ClientRegistrationsPage.js consome `GET /api/clients/registered` (clients.py:254). A query atual filtra clientes com registration_completed=True + filtros de fantasma/lead_status. Por defeito mostra apenas leads pendentes (lead_status="new" sem processo). Leads convertidos com processo NÃO aparecem.
+- Análise do endpoint backend (clients.py list_registered_clients linhas 254-524): query base + filtro de fantasmas + filtro has_process + assigned_to_me + cursor pagination. Enriquecimento com processes_info, has_process, lead_status.
+- Estratégia "Sala de Triagem": adicionar parâmetro `triage_mode` que alarga a query para incluir 3 tipos de itens:
+  (a) Leads normais pendentes (lead_status="new" sem processo) — já existentes
+  (b) Clientes com processo em status "pre_registo" (cliente ainda a preencher Portal) — NOVO
+  (c) Clientes com processo sem assigned_indexacao_id (na fila de espera para indexação) — NOVO
+  Cada cliente é enriquecido com `triage_status` para o frontend renderizar a badge correta.
+- Backend (clients.py):
+  1. Adicionado parâmetro `triage_mode: bool = Query(False)` ao endpoint.
+  2. Bloco de pré-cálculo: se triage_mode, busca processos com `status="pre_registo"` OU `assigned_indexacao_id in [None, ""]` (excluindo is_deleted). Constrói `triage_client_map` (client_id → {process_id, status, has_indexador}) com prioridade para pre_registo (um processo pode estar em pre_registo E sem indexador).
+  3. Bloco de filtro: em triage_mode, substitui o filtro has_process por um $or entre "lead sem processo + lead_status pendente" e "cliente com id no triage_client_map". Mantém os outros filtros (ghost, search, assigned_to_me).
+  4. Enriquecimento: adicionado `triage_status` a cada cliente (None | "pre_registo" | "ready_for_indexing"). Projeção de processes agora inclui assigned_indexacao_id (necessário para determinação local, embora o triage_status já venha calculado do triage_client_map).
+- Frontend (ClientRegistrationsPage.js):
+  1. fetchClients agora envia `triage_mode=true` por defeito (a página funciona como Sala de Triagem).
+  2. Imports `FileInput` e `ClipboardList` adicionados ao lucide-react.
+  3. Coluna "Estado" (linhas 502-553): 4 ramos condicionais por prioridade:
+     - triage_status === "pre_registo" → Badge âmbar "Pré-Registo (A preencher Portal)" (ícone FileInput)
+     - triage_status === "ready_for_indexing" → Badge azul "Pronto para Indexação (Na fila de espera)" (ícone ClipboardList)
+     - has_process (sem triage_status) → Badge verde "Tem Processo" (existente)
+     - else → Badge laranja "Sem Processo" (existente)
+     Cada badge tem data-testid para testes e mostra o process_number abaixo quando aplicável.
+- Validação: `py_compile` ✓ em clients.py; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros no ClientRegistrationsPage.js.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/clients.py` (parâmetro triage_mode + pré-cálculo de triage_client_map + bloco de filtro $or + enriquecimento com triage_status)
+  - `frontend/src/pages/ClientRegistrationsPage.js` (fetchClients envia triage_mode=true; imports FileInput/ClipboardList; 4 ramos de badges na coluna Estado)
+- Resultado: a página de Registos de Clientes funciona agora como Sala de Triagem, mostrando 3 tipos de itens com badges visuais distintas: leads pendentes (Sem Processo — laranja, existente), processos em pré-registo (âmbar "Pré-Registo (A preencher Portal)"), e processos prontos para indexação (azul "Pronto para Indexação (Na fila de espera)"). A query backend usa $or para combinar leads sem processo + clientes com processo triável, mantendo os filtros existentes (ghost, search, assigned_to_me). O parâmetro triage_mode é opt-in (default False) para não afetar outros callers do endpoint.

@@ -257,6 +257,7 @@ async def list_registered_clients(
     has_process: Optional[bool] = Query(None, description="Filtrar por ter processo criado"),
     assigned_to_me: bool = Query(False, description="Mostrar apenas clientes atribuídos ao utilizador atual"),
     include_ghosts: bool = Query(False, description="Incluir clientes fantasma (2º titular apenas). Admin/CEO podem ver todos."),
+    triage_mode: bool = Query(False, description="PACOTE BN — Sala de Triagem: inclui leads + processos pre_registo + processos sem indexador atribuído"),
     sort_field: str = Query("nome", description="Campo de ordenação"),
     sort_order: str = Query("asc", description="Ordem: asc ou desc"),
     limit: int = Query(50, le=200),
@@ -267,25 +268,74 @@ async def list_registered_clients(
 ):
     """
     Listar clientes registados via formulário público.
-    
+
     PÁGINA: Registo de Cliente
     ACESSO: Todos os utilizadores
-    
+
     Filtros disponíveis:
     - search: Pesquisar por nome, email ou NIF
     - has_process: True = com processo, False = sem processo
     - assigned_to_me: Mostrar apenas clientes atribuídos ao utilizador atual (para INDEXACAO)
-    
+    - triage_mode: PACOTE BN — Sala de Triagem. Alarga a query para incluir:
+      (a) Leads normais pendentes de triagem (lead_status="new" sem processo)
+      (b) Clientes com processo em status "pre_registo" (cliente ainda a preencher no Portal)
+      (c) Clientes com processo sem assigned_indexacao_id (pronto para indexação, na fila)
+      Cada cliente é enriquecido com `triage_status` para o frontend renderizar badges.
+
     Ordenação por defeito: data de registo (mais recentes primeiro)
     """
     user_role = user.get("role", "")
     user_id = user.get("id", "")
-    
+
     # Sanitize search params used in MongoDB queries
     if search:
         search = sanitize_string(search, max_length=200)
     sort_field = sanitize_string(sort_field, max_length=50)
-    
+
+    # ==================================================================
+    # PACOTE BN — SALA DE TRIAGEM
+    # ==================================================================
+    # Em triage_mode, a query inclui 3 tipos de itens:
+    # (a) Leads normais pendentes (lead_status="new" ou ausente, sem processo)
+    # (b) Clientes com processo em "pre_registo" (cliente ainda a preencher Portal)
+    # (c) Clientes com processo sem assigned_indexacao_id (na fila de espera
+    #     para indexação — status inicial de entrada sem indexador atribuído)
+    #
+    # Para (b) e (c), precisamos de identificar os process_ids relevantes
+    # e depois trazer os clientes associados. A query de clientes usa um $or
+    # entre "lead sem processo" e "cliente com processo triável".
+    # ==================================================================
+    triage_process_ids = set()
+    if triage_mode:
+        # Buscar processos que estão em pre_registo OU sem assigned_indexacao_id
+        # (status inicial de entrada aguardando atribuição ao indexador).
+        # Excluímos processos eliminados e processos já com indexador atribuído.
+        triage_processes_cursor = db.processes.find(
+            {
+                "is_deleted": {"$ne": True},
+                "$or": [
+                    {"status": "pre_registo"},
+                    {"assigned_indexacao_id": {"$in": [None, ""]}},
+                ],
+            },
+            {"_id": 0, "id": 1, "client_id": 1, "status": 1, "assigned_indexacao_id": 1}
+        )
+        triage_processes = await triage_processes_cursor.to_list(length=500)
+        # Mapa client_id → info do processo triável (para enriquecimento)
+        triage_client_map = {}
+        for p in triage_processes:
+            cid = p.get("client_id")
+            if cid:
+                # Prioridade: pre_registo tem prioridade sobre "sem indexador"
+                # (um processo pode estar em pre_registo E sem indexador)
+                if cid not in triage_client_map or p.get("status") == "pre_registo":
+                    triage_client_map[cid] = {
+                        "process_id": p.get("id"),
+                        "status": p.get("status"),
+                        "has_indexador": bool(p.get("assigned_indexacao_id")),
+                    }
+                triage_process_ids.add(p.get("id"))
+
     # Construir query
     # REGRAS DE NEGÓCIO (Triagem Manual):
     # - lead_status="new" → Lead pendente de triagem na página de Registos
@@ -371,7 +421,36 @@ async def list_registered_clients(
     # Filtro por ter processo + lead_status (triagem manual)
     # Por defeito (has_process=false), mostrar apenas leads pendentes (lead_status="new" ou sem lead_status)
     # Leads convertidos (lead_status="converted") com processo NÃO aparecem por defeito
-    if has_process is not None:
+    #
+    # PACOTE BN — triage_mode: alarga a query para incluir também clientes com
+    # processo em pre_registo ou sem indexador atribuído (Sala de Triagem).
+    if triage_mode:
+        # Em triage_mode, incluímos:
+        # (a) Leads sem processo (lead_status="new" ou ausente, sem process_ids)
+        # (b) Clientes cujo ID está no triage_client_map (processo triável)
+        query["$and"] = query.get("$and", [])
+        triage_client_ids = list(triage_client_map.keys()) if triage_client_map else []
+        triage_or_conditions = [
+            # (a) Lead sem processo + lead_status pendente
+            {
+                "$and": [
+                    {"$or": [
+                        {"process_ids": {"$exists": False}},
+                        {"process_ids": []},
+                        {"process_ids": None}
+                    ]},
+                    {"$or": [
+                        {"lead_status": {"$exists": False}},
+                        {"lead_status": "new"},
+                    ]}
+                ]
+            }
+        ]
+        # (b) Cliente com processo triável (pre_registo ou sem indexador)
+        if triage_client_ids:
+            triage_or_conditions.append({"id": {"$in": triage_client_ids}})
+        query["$and"].append({"$or": triage_or_conditions})
+    elif has_process is not None:
         if has_process:
             query["process_ids"] = {"$exists": True, "$ne": []}
         else:
@@ -466,16 +545,38 @@ async def list_registered_clients(
         if process_ids:
             processes = await db.processes.find(
                 {"id": {"$in": process_ids}},
-                {"_id": 0, "id": 1, "process_number": 1, "status": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1}
+                {"_id": 0, "id": 1, "process_number": 1, "status": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1, "assigned_indexacao_id": 1}
             ).to_list(length=10)
-            
+
             for p in processes:
                 processes_info.append({
                     "id": p.get("id"),
                     "process_number": p.get("process_number"),
                     "status": p.get("status")
                 })
-        
+
+        # ==================================================================
+        # PACOTE BN — triage_status (Sala de Triagem)
+        # ==================================================================
+        # Determina o estado de triagem do cliente para o frontend renderizar
+        # a badge correta. Valores possíveis:
+        # - "pre_registo": cliente tem processo em status "pre_registo"
+        #   (ainda a preencher no Portal) → Badge amarela
+        # - "ready_for_indexing": cliente tem processo sem assigned_indexacao_id
+        #   (na fila de espera para indexação) → Badge azul/verde
+        # - "new_lead": lead pendente sem processo (lead_status="new") → sem badge
+        #   específica (comportamento existente)
+        # - "converted": lead já convertido em processo fora da triagem → sem badge
+        # ==================================================================
+        triage_status = None
+        if triage_mode and client_id_val:
+            triage_info = triage_client_map.get(client_id_val)
+            if triage_info:
+                if triage_info.get("status") == "pre_registo":
+                    triage_status = "pre_registo"
+                elif not triage_info.get("has_indexador"):
+                    triage_status = "ready_for_indexing"
+
         enriched_clients.append({
             "id": c.get("id"),
             "nome": c.get("nome"),
@@ -495,7 +596,9 @@ async def list_registered_clients(
             "fonte": c.get("fonte"),
             "has_property": c.get("has_property"),
             "idade_menos_35": c.get("idade_menos_35"),
-            "lead_status": c.get("lead_status", "new")  # "new" = pendente, "converted" = com processo
+            "lead_status": c.get("lead_status", "new"),  # "new" = pendente, "converted" = com processo
+            # PACOTE BN — estado de triagem para badges no frontend
+            "triage_status": triage_status,
         })
     
     # Desencriptar dados sensíveis

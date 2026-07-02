@@ -3,6 +3,37 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BN: Evolução do Menu de Registos (Triagem de Entrada)
+
+### Adicionado
+- **Sala de Triagem na página de Registos de Clientes**: A página de Registos agora funciona como "Sala de Triagem", mostrando 3 tipos de itens com badges visuais distintas:
+  - **Leads pendentes** (sem processo) — Badge laranja "Sem Processo" (existente)
+  - **Processos em pré-registo** (cliente ainda a preencher no Portal) — Badge âmbar "Pré-Registo (A preencher Portal)" (NOVO)
+  - **Processos prontos para indexação** (sem `assigned_indexacao_id`, na fila de espera) — Badge azul "Pronto para Indexação (Na fila de espera)" (NOVO)
+
+### Backend
+- **`GET /clients/registered`** (`routes/clients.py`): Novo parâmetro `triage_mode` (opt-in, default `False`). Quando ativo:
+  - Pré-calcula `triage_client_map` buscando processos com `status="pre_registo"` OU `assigned_indexacao_id in [None, ""]` (excluindo eliminados).
+  - Alarga a query com `$or` entre "lead sem processo + lead_status pendente" e "cliente com id no triage_client_map".
+  - Enriquece cada cliente com `triage_status` (`null` | `"pre_registo"` | `"ready_for_indexing"`).
+  - Mantém os filtros existentes (ghost, search, assigned_to_me, cursor pagination).
+
+### Frontend
+- **`ClientRegistrationsPage.js`**:
+  - `fetchClients` agora envia `triage_mode=true` por defeito (página funciona como Sala de Triagem).
+  - Imports `FileInput` e `ClipboardList` adicionados ao lucide-react.
+  - Coluna "Estado" com 4 ramos condicionais por prioridade: `pre_registo` → `ready_for_indexing` → `has_process` → `Sem Processo`. Cada badge tem `data-testid` para testes e mostra o `process_number` quando aplicável.
+
+### Decisão de Arquitetura
+- **`triage_mode` opt-in (default False)**: O parâmetro é opt-in para não afetar outros callers do endpoint `GET /clients/registered` (ex: ClientRegistrationsAdminPage, ExportClientes). A página de Registos ativa-o explicitamente; os outros callers mantêm o comportamento original (apenas leads pendentes).
+- **Prioridade `pre_registo` > `ready_for_indexing`**: Um processo pode estar em `pre_registo` E sem `assigned_indexacao_id` simultaneamente. O `triage_client_map` dá prioridade ao `pre_registo` (estado anterior na pipeline), pelo que a badge âmbar tem precedência sobre a azul. Isto comunica ao utilizador o estágio mais inicial do processo.
+- **`triage_status` calculado no backend**: O backend determina o `triage_status` durante o enriquecimento (não no frontend) para garantir consistência e permitir que outros callers (ex: futura API de exportação) usem o mesmo campo.
+
+### Técnico
+- **Backend** (`backend/routes/clients.py`): parâmetro `triage_mode` (linha 260); bloco de pré-cálculo de `triage_client_map` (linhas 295-337); bloco de filtro `$or` em triage_mode (linhas 427-452); enriquecimento com `triage_status` (linhas 558-601).
+- **Frontend** (`frontend/src/pages/ClientRegistrationsPage.js`): `triage_mode=true` em fetchClients (linha 178); imports `FileInput`/`ClipboardList` (linhas 66-67); 4 ramos de badges na coluna Estado (linhas 502-553).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote BM: Bloqueio do Perfil do Cliente após Indexação
 
 ### Adicionado
