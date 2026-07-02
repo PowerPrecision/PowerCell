@@ -1921,3 +1921,47 @@ Stage Summary:
   - `backend/routes/processes.py` (batch enrichment latest_note no GET /processes, linhas 1733-1770)
   - `frontend/src/pages/FilteredProcessList.js` (NotificationDots com Boolean() coercion; fetchData com view_mode dinâmico; coluna notas lê latest_note com fallback)
 - Resultado: (1) as bolinhas de notificação (azul/verde) aparecem de forma robusta junto ao nome do cliente quando há mensagens não lidas ou novos documentos; (2) o filtro 'Ativos' agora exclui corretamente processos inativos (view_mode=active_only enviado ao backend); (3) a coluna de notas mostra a última nota real do histórico/atividades do processo (latest_note), com fallback para o campo notes do processo.
+
+
+---
+Task ID: Pacote BU (UI Cleanup — Menus, Emails, Automations)
+Agent: Main Agent (Code Assistant)
+Task: Ajustes de UI/UX — ocultar menus, filtrar automações, limpar cartões de email
+
+Work Log:
+- Análise de 3 ficheiros frontend em paralelo (DashboardLayout.js, AutomationPage.js, SystemConfigPage.js). Delegada análise detalhada do SystemConfigPage.js (4167 linhas) a subagente Explore que devolveu relatório completo com linhas exactas, imports disponíveis, estado de saving/testing, e modelo shared_email_configs.
+- Fix 1 — Ocultar Menus (DashboardLayout.js): comentados os itens de menu para Minutas, Imóveis, Visitas e Financeiro em 3 sítios:
+  1. `meuNegocioGroup.items` (linhas 283-286): Imóveis, Visitas, Financeiro comentados.
+  2. `comunicacoesGroup.items` (linhas 324-325): Minutas comentado.
+  3. `consultorNegocioItems` (linhas 415-418): Visitas, Imóveis, Financeiro comentados.
+  Os itens já filtrados para indexacao (linha 396) e diretor (linha 452) continuam a funcionar. As rotas continuam acessíveis via URL directa — apenas os links na sidebar estão ocultos.
+- Fix 2 — Filtrar Select de Fases (AutomationPage.js): adicionado `.filter(s => s.is_active !== false)` ao `workflowStatuses.map` no Select do bloco SE (linha 416). Estados inativos (concluídos, desistências — com `is_active: false` configurado via Pacote BS) não aparecem como gatilho de automação. Usa `!== false` (em vez de `=== true`) para manter retrocompatibilidade: estados sem a flag `is_active` configurada (null/undefined) continuam a aparecer.
+- Fix 3a — Google OAuth Switch (SystemConfigPage.js): adicionado `<Switch>` no CardHeader de cada role-Card na secção "Contas Partilhadas por Departamento" (linhas 1076-1087). O Switch:
+  - `checked={!!isConnected}` — reflete o estado do Google OAuth
+  - `onCheckedChange`: se ligado → `handleGoogleAuth(role)` (inicia OAuth); se desligado → `handleDisconnect(role)` (desconecta)
+  - `disabled={isAuth || isSyncingRole}` — desativa durante autenticação/sincronização
+  - `data-testid={`shared-email-toggle-${role}`}` para testes
+  - Card com `opacity-75` quando não conectado (feedback visual)
+  Não há campo `is_active` no backend shared_email_configs — o Switch usa `has_google_oauth` como proxy (ligar = autenticar, desligar = desconectar).
+- Fix 3b — IMAP Recepção reduzido (SystemConfigPage.js): Bloco C enxutado:
+  - CardHeader `pb-4` → `pb-3`; CardContent `space-y-4` → `space-y-3`; grid `gap-4` → `gap-3`; divs `space-y-2` → `space-y-1`
+  - Removida `CardDescription` ("Conta IMAP partilhada para sincronização...")
+  - Removido wrapper decorativo do ícone Globe (ícone agora direto)
+  - Removido `<p>` da App Password ("Password de aplicação...")
+  - Removido `pt-2` do botão Guardar
+  - Título encurtado: "Conta Global de Indexação (Webmail Partilhado)" → "Webmail Partilhado (Indexação)"
+- Fix 3c — SMTP Transacional editável (SystemConfigPage.js):
+  - Novo estado `smtpEditMode` (false por defeito)
+  - Botão Lápis (`<Pencil>`) no CardHeader (linhas 638-647): `variant={smtpEditMode ? "default" : "ghost"}`, `size="icon"`, `h-7 w-7`. Alterna `smtpEditMode`.
+  - 3 inputs (Resend API Key, From Email, From Name) agora têm `disabled={!smtpEditMode}`
+  - Botão Guardar também tem `disabled={saving === "system_smtp" || !smtpEditMode}` — não pode guardar sem desbloquear primeiro
+  - Os dados continuam a ser carregados da BD (useEffect fetchConfig, linhas 479-525) — apenas a edição é que está bloqueada por defeito
+  - `Pencil` já estava importado (linha 94)
+- Validação: `esbuild --loader=jsx` → 0 erros nos 3 ficheiros.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `frontend/src/layouts/DashboardLayout.js` (4 itens de menu comentados em 3 grupos)
+  - `frontend/src/pages/AutomationPage.js` (`.filter(s => s.is_active !== false)` no Select de fases)
+  - `frontend/src/pages/SystemConfigPage.js` (3 sub-fixes: Google OAuth Switch, IMAP reduzido, SMTP editável com Pencil)
+- Resultado: (1) os menus Minutas, Imóveis, Visitas e Financeiro estão temporariamente ocultos da sidebar (rotas continuam acessíveis via URL); (2) o Select de fases no construtor de automações mostra apenas workflows ativos; (3) os cartões de email do sistema foram limpos: Google OAuth tem Switch toggle, IMAP tem padding reduzido, e SMTP Transacional tem inputs disabled por defeito que são desbloqueados ao clicar no ícone de Lápis.

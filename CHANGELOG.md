@@ -3,6 +3,26 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote BU: UI Cleanup (Menus, Emails, Automations)
+
+### Alterado
+- **Menus temporariamente ocultos**: Os links de navegação para Minutas, Imóveis, Visitas e Gestão Financeira foram comentados na sidebar do `DashboardLayout.js`. As rotas continuam acessíveis via URL directa — apenas os links na sidebar estão ocultos. Aplicado em 3 grupos: `meuNegocioGroup`, `comunicacoesGroup`, e `consultorNegocioItems`.
+
+- **Select de fases filtra workflows ativos**: No `AutomationPage.js`, o Select do bloco SE (gatilho de automação) agora filtra com `.filter(s => s.is_active !== false)` para mostrar apenas fases ativas. Estados inativos (concluídos, desistências — com `is_active: false` configurado via Pacote BS) não aparecem como gatilho. Usa `!== false` para retrocompatibilidade (estados sem a flag continuam a aparecer).
+
+### UI Emails do Sistema (`SystemConfigPage.js`)
+- **Google OAuth — Switch toggle**: Adicionado `<Switch>` no CardHeader de cada cartão de "Contas Partilhadas por Departamento". O Switch reflete o estado do Google OAuth: ligado = conectado, desligado = desconectado. `onCheckedChange`: ligar → `handleGoogleAuth(role)` (inicia OAuth); desligar → `handleDisconnect(role)`. Card com `opacity-75` quando não conectado. `data-testid` para testes.
+
+- **IMAP Recepção — tamanho reduzido**: Bloco C enxutado: `CardHeader pb-4→pb-3`, `CardContent space-y-4→space-y-3`, `gap-4→gap-3`, `space-y-2→space-y-1`. Removida `CardDescription`, wrapper decorativo do ícone, `<p>` da App Password, e `pt-2` do botão. Título encurtado.
+
+- **SMTP Transacional — editável com Lápis**: Novo estado `smtpEditMode` (false por defeito). Botão Lápis (`<Pencil>`) no CardHeader alterna o modo de edição. 3 inputs (Resend API Key, From Email, From Name) e botão Guardar têm `disabled={!smtpEditMode}`. Os dados continuam a ser carregados da BD — apenas a edição está bloqueada por defeito. Ícone `Pencil` já estava importado.
+
+### Técnico
+- **Frontend** (`frontend/src/layouts/DashboardLayout.js`): 4 itens comentados em 3 grupos (linhas 283-286, 324-325, 415-418).
+- **Frontend** (`frontend/src/pages/AutomationPage.js`): `.filter(s => s.is_active !== false)` no Select de fases (linha 416).
+- **Frontend** (`frontend/src/pages/SystemConfigPage.js`): estado `smtpEditMode` (linha 475); Pencil button (linhas 638-647); inputs `disabled={!smtpEditMode}` (linhas 662, 669, 676); Save `disabled` (linha 722); IMAP reduzido (linhas 845-890); Google OAuth Switch (linhas 1074-1098).
+- **Validação**: `esbuild --loader=jsx` → 0 erros nos 3 ficheiros.
+
 ## [2026-07-16] — Pacote BT: Fix Process List (Badges, Active Filter, Real Notes)
 
 ### Corrigido

@@ -470,6 +470,9 @@ const IntegrationsConfigSection = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(null);
   const [testing, setTesting] = useState(null);
+  // PACOTE BU — SMTP Transacional: inputs disabled por defeito, desbloqueados
+  // ao clicar no ícone de Lápis (Pencil) no topo do cartão.
+  const [smtpEditMode, setSmtpEditMode] = useState(false);
   // Resultado do teste isolado por secção (evita bleed de notificações entre sub-menus)
   const [testResults, setTestResults] = useState({});
 
@@ -630,11 +633,24 @@ const IntegrationsConfigSection = () => {
                 </CardDescription>
               </div>
             </div>
-            {systemSmtp.resend_api_key && (
-              <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-                Configurado
-              </Badge>
-            )}
+            {/* PACOTE BU — Botão Lápis para desbloquear edição (inputs disabled por defeito) */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant={smtpEditMode ? "default" : "ghost"}
+                size="icon"
+                className="h-7 w-7"
+                onClick={() => setSmtpEditMode(!smtpEditMode)}
+                title={smtpEditMode ? "Bloquear edição" : "Editar configuração"}
+                data-testid="smtp-edit-toggle"
+              >
+                <Pencil className="h-3.5 w-3.5" />
+              </Button>
+              {systemSmtp.resend_api_key && (
+                <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
+                  Configurado
+                </Badge>
+              )}
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">
@@ -642,19 +658,22 @@ const IntegrationsConfigSection = () => {
             <div className="space-y-2">
               <Label htmlFor="sys_resend_key">Resend API Key</Label>
               <Input id="sys_resend_key" type="password" placeholder="re_xxxxxxxxxxxx" value={systemSmtp.resend_api_key}
-                onChange={(e) => setSystemSmtp((p) => ({ ...p, resend_api_key: e.target.value }))} />
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, resend_api_key: e.target.value }))}
+                disabled={!smtpEditMode} />
               <p className="text-xs text-muted-foreground">Chave de API do Resend (obter em <a href="https://resend.com/api-keys" target="_blank" rel="noopener noreferrer" className="text-teal-600 hover:underline">resend.com/api-keys</a>)</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="sys_smtp_from">Email do Remetente (From)</Label>
               <Input id="sys_smtp_from" placeholder="no-reply@powerealestate.pt" value={systemSmtp.smtp_from_email}
-                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_email: e.target.value }))} />
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_email: e.target.value }))}
+                disabled={!smtpEditMode} />
               <p className="text-xs text-muted-foreground">Endereço que aparecerá como remetente nos emails do sistema. O domínio deve estar verificado no Resend.</p>
             </div>
             <div className="space-y-2">
               <Label htmlFor="sys_smtp_from_name">Nome do Remetente</Label>
               <Input id="sys_smtp_from_name" placeholder="Power Real Estate" value={systemSmtp.smtp_from_name}
-                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_name: e.target.value }))} />
+                onChange={(e) => setSystemSmtp((p) => ({ ...p, smtp_from_name: e.target.value }))}
+                disabled={!smtpEditMode} />
               <p className="text-xs text-muted-foreground">Nome que aparecerá como remetente (ex: Power Real Estate)</p>
             </div>
           </div>
@@ -700,7 +719,7 @@ const IntegrationsConfigSection = () => {
             </p>
           </div>
           <div className="flex items-center gap-3 pt-2">
-            <Button onClick={() => handleSave("system_smtp")} disabled={saving === "system_smtp"}>
+            <Button onClick={() => handleSave("system_smtp")} disabled={saving === "system_smtp" || !smtpEditMode}>
               {saving === "system_smtp" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               Guardar
             </Button>
@@ -823,20 +842,13 @@ const IntegrationsConfigSection = () => {
         </CardContent>
       </Card>
 
-      {/* Bloco C: Conta Global de Indexação */}
+      {/* Bloco C: Conta Global de Indexação — PACOTE BU: padding/descrições reduzidos */}
       <Card>
-        <CardHeader className="pb-4">
+        <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
-                <Globe className="h-5 w-5 text-amber-700 dark:text-amber-400" />
-              </div>
-              <div>
-                <CardTitle className="text-base">Conta Global de Indexação (Webmail Partilhado)</CardTitle>
-                <CardDescription className="text-xs mt-0.5">
-                  Conta IMAP partilhada para sincronização de emails do departamento de indexação
-                </CardDescription>
-              </div>
+              <Globe className="h-5 w-5 text-amber-700 dark:text-amber-400" />
+              <CardTitle className="text-base">Webmail Partilhado (Indexação)</CardTitle>
             </div>
             {systemWebmail.imap_host && (
               <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
@@ -845,31 +857,30 @@ const IntegrationsConfigSection = () => {
             )}
           </div>
         </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-2">
+        <CardContent className="space-y-3">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            <div className="space-y-1">
               <Label htmlFor="wm_imap_host">IMAP Host</Label>
               <Input id="wm_imap_host" placeholder="imap.gmail.com" value={systemWebmail.imap_host}
                 onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_host: e.target.value }))} />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="wm_imap_port">IMAP Port</Label>
               <Input id="wm_imap_port" type="number" placeholder="993" value={systemWebmail.imap_port}
                 onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_port: e.target.value }))} />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="wm_email">Email / User</Label>
               <Input id="wm_email" placeholder="indexacao@empresa.pt" value={systemWebmail.email_user}
                 onChange={(e) => setSystemWebmail((p) => ({ ...p, email_user: e.target.value }))} />
             </div>
-            <div className="space-y-2">
+            <div className="space-y-1">
               <Label htmlFor="wm_pass">App Password</Label>
               <Input id="wm_pass" type="password" placeholder="••••••••" value={systemWebmail.app_password}
                 onChange={(e) => setSystemWebmail((p) => ({ ...p, app_password: e.target.value }))} />
-              <p className="text-xs text-muted-foreground">Password de aplicação (não a password da conta)</p>
             </div>
           </div>
-          <div className="flex items-center gap-3 pt-2">
+          <div className="flex items-center gap-3">
             <Button onClick={() => handleSave("system_webmail")} disabled={saving === "system_webmail"}>
               {saving === "system_webmail" ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
               Guardar
@@ -1050,7 +1061,7 @@ const SharedEmailConfigSection = () => {
         const isSyncingRole = syncing === role;
 
         return (
-          <Card key={role}>
+          <Card key={role} className={!isConnected ? "opacity-75" : ""}>
             <CardHeader>
               <div className="flex items-center justify-between">
                 <div className="flex items-center gap-2">
@@ -1060,16 +1071,31 @@ const SharedEmailConfigSection = () => {
                     <CardDescription>{description}</CardDescription>
                   </div>
                 </div>
-                {isConnected ? (
-                  <Badge className="bg-green-50 text-green-700 border-green-200">
-                    <CheckCircle className="h-3 w-3 mr-1" />
-                    Conectado
-                  </Badge>
-                ) : (
-                  <Badge variant="outline" className="text-muted-foreground">
-                    Não configurado
-                  </Badge>
-                )}
+                {/* PACOTE BU — Switch toggle para ligar/desligar a conta partilhada */}
+                <div className="flex items-center gap-3">
+                  <Switch
+                    checked={!!isConnected}
+                    onCheckedChange={(checked) => {
+                      if (checked) {
+                        handleGoogleAuth(role);
+                      } else {
+                        handleDisconnect(role);
+                      }
+                    }}
+                    disabled={isAuth || isSyncingRole}
+                    data-testid={`shared-email-toggle-${role}`}
+                  />
+                  {isConnected ? (
+                    <Badge className="bg-green-50 text-green-700 border-green-200">
+                      <CheckCircle className="h-3 w-3 mr-1" />
+                      Conectado
+                    </Badge>
+                  ) : (
+                    <Badge variant="outline" className="text-muted-foreground">
+                      Não configurado
+                    </Badge>
+                  )}
+                </div>
               </div>
             </CardHeader>
             <CardContent className="space-y-4">
