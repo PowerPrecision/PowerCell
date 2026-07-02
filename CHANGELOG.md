@@ -3,6 +3,24 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CB: Fix Portal Profile Lock & Hide Visits Tab
+
+### Corrigido
+- **Perfil bloqueado prematuramente em pré-registo**: O perfil do cliente era bloqueado assim que o processo era criado em `pre_registo`, antes do cliente ter oportunidade de preencher os dados. Corrigido: o bloqueio (`has_process=True`) agora só acontece quando o processo ativo tem `status != "pre_registo"` OU `is_data_confirmed == True`. Em `pre_registo`, o cliente pode editar o perfil livremente.
+
+### Backend (`backend/routes/portal.py`)
+- **`GET /portal/me`**: Query agora projeta `status` além de `is_data_confirmed`. `has_process = (proc_status != "pre_registo") or proc_confirmed`.
+- **`PUT /portal/me`**: Mesma regra — `should_lock = (proc_status != "pre_registo") or proc_confirmed`. Só lança 403 se `should_lock` for True. Mensagens mantidas: "Os seus dados encontram-se bloqueados..." (is_data_confirmed) vs "Dados trancados. Processo já em análise." (saiu do pre_registo).
+
+### Frontend (`frontend/src/pages/ClientPortal.jsx`)
+- **`isLocked`**: Sem alteração necessária — `profile?.has_process === true || isDataConfirmed` já funciona corretamente com a nova lógica do backend.
+- **Botão "As Minhas Visitas"**: Temporariamente comentado (JSX comment). O código da Tab `visitas` mantém-se intacto para reativação futura.
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `GET /portal/me` (linhas 757-780); `PUT /portal/me` (linhas 853-880).
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): botão Visitas comentado (linhas 2469-2488).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote CA: Persist Table Filters in URL Params
 
 ### Corrigido

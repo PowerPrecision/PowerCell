@@ -762,14 +762,22 @@ async def get_client_profile(
     # para bloquear a edição do perfil com mensagem específica.
     is_data_confirmed = False
     if process_ids:
-        # Verificar se existe pelo menos um processo activo E trazer is_data_confirmed
+        # Verificar se existe pelo menos um processo activo E trazer is_data_confirmed + status
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1, "is_data_confirmed": 1}
+            {"_id": 0, "id": 1, "is_data_confirmed": 1, "status": 1}
         )
-        has_process = active_process is not None
-        if active_process and active_process.get("is_data_confirmed") is True:
-            is_data_confirmed = True
+        # PACOTE CB — has_process deve ser True APENAS SE o processo ativo
+        # tiver saído da fase inicial (status != "pre_registo") OU se tiver
+        # is_data_confirmed == True. Antes, has_process era True para qualquer
+        # processo ativo (incluindo pre_registo), bloqueando o perfil prematuramente.
+        if active_process:
+            proc_status = active_process.get("status", "")
+            proc_confirmed = active_process.get("is_data_confirmed") is True
+            # Bloqueia apenas se saiu do pre_registo OU dados confirmados
+            has_process = (proc_status != "pre_registo") or proc_confirmed
+            if proc_confirmed:
+                is_data_confirmed = True
 
     # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
     dados_pessoais = client.get("dados_pessoais", {}) or {}
@@ -845,24 +853,31 @@ async def update_client_profile(
     process_ids = client.get("process_ids", [])
     if process_ids:
         # Verificar se existe pelo menos um processo activo (não eliminado)
-        # e trazer is_data_confirmed para mensagem de bloqueio específica.
+        # e trazer is_data_confirmed + status para a regra de bloqueio.
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1, "is_data_confirmed": 1}
+            {"_id": 0, "id": 1, "is_data_confirmed": 1, "status": 1}
         )
+        # PACOTE CB — Só bloquear a edição se o processo tiver saído do
+        # pre_registo (status != "pre_registo") OU se is_data_confirmed == True.
+        # Antes, qualquer processo ativo (incluindo pre_registo) bloqueava.
         if active_process:
-            # PACOTE BM — Mensagem específica quando os dados foram confirmados
-            # pela Indexação (is_data_confirmed=True). Caso contrário, mantém a
-            # mensagem original de "processo em análise".
-            if active_process.get("is_data_confirmed") is True:
+            proc_status = active_process.get("status", "")
+            proc_confirmed = active_process.get("is_data_confirmed") is True
+            should_lock = (proc_status != "pre_registo") or proc_confirmed
+
+            if should_lock:
+                # PACOTE BM — Mensagem específica quando os dados foram confirmados
+                # pela Indexação (is_data_confirmed=True).
+                if proc_confirmed:
+                    raise HTTPException(
+                        status_code=403,
+                        detail="Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito."
+                    )
                 raise HTTPException(
                     status_code=403,
-                    detail="Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito."
+                    detail="Dados trancados. Processo já em análise."
                 )
-            raise HTTPException(
-                status_code=403,
-                detail="Dados trancados. Processo já em análise."
-            )
 
     # ── Filtrar campos permitidos (whitelist) ──
     update_fields = {}

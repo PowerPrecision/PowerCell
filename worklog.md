@@ -2119,3 +2119,31 @@ Stage Summary:
   - `frontend/src/pages/FilteredProcessList.js` (searchTerm migrado de useState para useSearchParams; handleSearchChange handler; setSearchParams obtido)
   - `frontend/src/pages/ProcessesPage.js` (indexStatusFilter migrado de useState para useSearchParams; setIndexStatusFilter como useCallback que atualiza URL)
 - Resultado: TODOS os filtros ativos no ecrã (search, filter, view_mode, page, size, sort, order, index_status) são agora persistidos no URL via useSearchParams. Quando o utilizador entra nos detalhes de um processo e clica em "Voltar", o browser restaura exatamente a vista pretendida — filtros, pesquisa, página atual, e ordem de classificação. A navegação Back/Forward do browser funciona corretamente porque os estados são lidos do URL no init do componente.
+
+
+---
+Task ID: Pacote CB (Fix Portal Profile Lock & Hide Visits Tab)
+Agent: Main Agent (Code Assistant)
+Task: Corrigir bloqueio prematuro do perfil + ocultar botão Visitas no Portal
+
+Work Log:
+- Análise do bug: GET /portal/me devolvia has_process=True para qualquer processo ativo (incluindo pre_registo). O frontend usava isLocked = profile?.has_process === true || isDataConfirmed, pelo que o perfil era bloqueado assim que o processo era criado em pre_registo — antes do cliente ter oportunidade de preencher os dados. O utilizador quer que o bloqueio aconteça APENAS quando o processo saiu da fase inicial (status != pre_registo) OU quando is_data_confirmed == True.
+- Fix 1 Backend — GET /portal/me (portal.py linhas 757-780):
+  - Query agora projeta "status": 1 além de "is_data_confirmed": 1.
+  - has_process = (proc_status != "pre_registo") or proc_confirmed — só True se o processo saiu do pre_registo OU dados confirmados.
+  - is_data_confirmed continua a ser True apenas quando o processo tem is_data_confirmed == True.
+- Fix 1 Backend — PUT /portal/me (portal.py linhas 853-880):
+  - Mesma regra: should_lock = (proc_status != "pre_registo") or proc_confirmed.
+  - Só lança 403 se should_lock for True. Se o processo está em pre_registo e não tem is_data_confirmed, o cliente PODE editar o perfil.
+  - Mensagens de 403 mantidas: "Os seus dados encontram-se bloqueados..." (is_data_confirmed) vs "Dados trancados. Processo já em análise." (saiu do pre_registo).
+- Fix 1 Frontend — ClientPortal.jsx:
+  - Nenhuma alteração necessária. O isLocked = profile?.has_process === true || isDataConfirmed já funciona corretamente com a nova lógica do backend. Como o backend agora só devolve has_process: true quando o processo saiu do pre_registo ou tem is_data_confirmed, o isLocked só será true nessas condições.
+- Fix 2 Frontend — ClientPortal.jsx (linhas 2469-2488):
+  - Botão "As Minhas Visitas" comentado (JSX comment {/* ... */}). O código da Tab 'visitas' em baixo (linhas 2591+) não foi alterado — apenas o botão de acesso foi ocultado para reativação futura.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/portal.py` (GET /portal/me + PUT /portal/me: has_process/should_lock só True se status != pre_registo OU is_data_confirmed)
+  - `frontend/src/pages/ClientPortal.jsx` (botão "As Minhas Visitas" comentado)
+- Resultado: (1) o perfil do cliente só é bloqueado quando o processo ativo saiu da fase pre_registo OU quando os dados foram confirmados pela Indexação (is_data_confirmed). Em pre_registo, o cliente pode editar o perfil livremente. (2) O botão "As Minhas Visitas" está temporariamente oculto no Portal do Cliente — o código da Tab mantém-se para reativação futura.
