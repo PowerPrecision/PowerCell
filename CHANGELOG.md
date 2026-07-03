@@ -3,10 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-07-16] — Pacote CO: Create Data Backfill Script
+## [2026-07-16] — Pacote CO v2: Backfill — campos de dropdown/select adicionados
 
-### Adicionado
-- **Script de backfill seguro** (`backend/scripts/backfill_empty_fields.py`, 320 linhas): Preenche campos em falta em clientes e processos existentes com dados realistas portugueses (Faker pt_PT). NUNCA apaga ou substitui dados já preenchidos — só faz `$set` se a chave não existir ou for vazia.
+### Corrigido
+- **Script de backfill não preenchia campos de dropdown/select**: O script original (Pacote CO) não preenchia ~25 campos, principalmente campos de caixa de seleção. Corrigido: agora preenche TODOS os campos dos modelos.
+
+### Campos de SELECT/DROPDOWN adicionados
+- **financial_data**: `tipo_contrato`, `irs_taxa_retencao`, `dependentes`
+- **real_estate_data**: `tipologia`, `tipo_imovel`, `finalidade`, `certificado_energetico`, `num_quartos`, `estacionamento`, `arrecadacao`
+- **credit_data**: `prazo_meses`, `spread`, `banco`, `tipo_taxa`, `interest_rate`/`taxa_anual`, `admission_year`, `is_ppe`, `is_fpe`
+
+### Outros campos adicionados
+- **Clientes**: `nome_pai`, `nome_mae`, `data_validade_cc`
+- **financial_data**: `antiguidade_anos`, `renda_mensal`, `prestacao_auto`, `outros_creditos`, `despesas_total`, `valor_entrada`
+- **real_estate_data**: `ja_tem_imovel`, `has_property`, `ja_tem_casa_escolhida`, `freguesia`, `area_bruta`, `area_util`, `valor_patrimonial`
+- **credit_data**: `monthly_payment`/`prestacao_mensal` (calculada por fórmula de amortização francesa), `requested_amount`, `loan_term_years`, `bank_name`
+
+### Técnico
+- **Backend** (`backend/scripts/backfill_empty_fields.py`): v2 — ~25 campos adicionais; `is_empty()` simplificado (0 não é vazio); prestação mensal calculada.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
 
 ### Regras de Preenchimento
 - **Clientes**: `dados_pessoais` (nif, documento_id, telefone, profissao, estado_civil, data_nascimento, naturalidade, nacionalidade, morada_fiscal, sexo) + `contacto` (telefone, telefone_secundario, email_secundario).

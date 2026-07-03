@@ -2377,3 +2377,27 @@ Work Log:
 Stage Summary:
 - 1 ficheiro criado: `backend/scripts/backfill_empty_fields.py` (320 linhas).
 - Resultado: script de backfill seguro que percorre clientes e processos existentes e preenche apenas campos em falta (NIF, telefone, profissão, salário, valor do imóvel, montante financiado, etc.) com dados realistas portugueses. NUNCA apaga ou substitui dados já preenchidos. Usa update_one individual com contagem granular. Suporta --dry-run e --limit.
+
+
+---
+Task ID: Pacote CO v2 (Backfill — campos de dropdown/select adicionados)
+Agent: Main Agent (Code Assistant)
+Task: Corrigir script de backfill — adicionar TODOS os campos em falta (especialmente dropdowns)
+
+Work Log:
+- Análise dos modelos (process.py, client.py) e do seed_qa_ultimate.py para identificar TODOS os campos em falta no script original. Encontrados ~25 campos em falta, principalmente campos de dropdown/select.
+- Campos de SELECT/DROPDOWN adicionados:
+  - Clientes: profissao, estado_civil, sexo (já existiam mas confirmados)
+  - Processos financial_data: tipo_contrato, irs_taxa_retencao, dependentes
+  - Processos real_estate_data: tipologia, tipo_imovel, finalidade, certificado_energetico, num_quartos, estacionamento, arrecadacao
+  - Processos credit_data: prazo_meses, spread, banco, tipo_taxa, interest_rate/taxa_anual, admission_year, is_ppe, is_fpe
+- Outros campos adicionados:
+  - Clientes: nome_pai, nome_mae, data_validade_cc
+  - Processos financial_data: antiguidade_anos, renda_mensal, prestacao_auto, outros_creditos, despesas_total, valor_entrada
+  - Processos real_estate_data: ja_tem_imovel, has_property, ja_tem_casa_escolhida, freguesia, area_bruta, area_util, valor_patrimonial
+  - Processos credit_data: monthly_payment/prestacao_mensal (calculada por fórmula de amortização francesa), requested_amount, loan_term_years, bank_name
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/scripts/backfill_empty_fields.py` (v2 — ~25 campos adicionais, especialmente dropdowns).
+- Resultado: o script agora preenche TODOS os campos dos modelos, incluindo os de caixa de seleção (tipo_contrato, tipologia, finalidade, certificado_energetico, num_quartos, estacionamento, banco, tipo_taxa, etc.) e campos calculados (montante_financiado, prestacao_mensal, despesas_total).
