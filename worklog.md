@@ -2604,3 +2604,61 @@ Work Log:
 Stage Summary:
 - 1 ficheiro criado: `backend/scripts/bulk_ai_document_scan.py` (~430 linhas).
 - Resultado: Script de background conservador e imune a falhas para processar documentos legados com IA. Reutiliza `analyze_single_document` (que já tem tenacity retry) e adiciona camada EXTRA de segurança: após cada sucesso pausa 60s; após rate-limit pausa 300s e continua. Respeita manually_edited_fields e field_metadata=manual (Consultor tem prioridade sobre IA). Atualiza BD com field_metadata source="ai" (merge seguro Pacote CS). Registra auditoria em ai_extraction_history. CLI completa (--dry-run, --limit, --process-id, --sleep-*).
+
+---
+Task ID: Pacote CV (Robust Omnichannel Bulk Document Scanner)
+Agent: Main Agent (Code Assistant)
+Task: Reescrever backend/scripts/bulk_ai_document_scan.py com regras omnicanal estritas (substitui Pacote CU)
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacotes CS, CT, CU confirmados implementados).
+- Clonado repo PowerCell branch dev para /tmp/powercell_cv → /home/z/powercell_cv (commit base be970be = Pacote CU).
+- Verificada assinatura de analyze_document_from_base64(base64_content, mime_type, document_type) -> Dict em services/ai_document.py linha 1183. Return shape: success={success:True, document_type, extracted_data, analysis_method, model, ...}; failure={success:False, error, extracted_data:{}}; rate-limit capturado internamente e devolvido como success:False com error msg (mas RateLimitError também pode propagar).
+- Confirmado boto3==1.42.21 + botocore==1.42.21 no requirements.txt do backend.
+
+- Escrito `backend/scripts/bulk_ai_document_scan.py` (~635 linhas, SUBSTITUI o Pacote CU):
+  - **Bootstrap**: sys.path.insert(backend/), load_dotenv(backend/.env), AsyncIOMotorClient(MONGO_URL), db = client[DB_NAME]. Mesma convenção de seed_qa_ultimate.py e backfill_empty_fields.py.
+  - **Imports**: boto3, botocore.exceptions.ClientError, base64, urllib.parse.unquote, motor, dotenv, services.ai_document.{analyze_document_from_base64, build_update_data_from_extraction, RateLimitError}.
+
+  **1. Conexão e Configuração**:
+  - init_s3_client() lê AWS_ACCESS_KEY_ID, AWS_SECRET_ACCESS_KEY, AWS_REGION (default 'eu-north-1'), AWS_BUCKET_NAME. Retorna (client, bucket, err). Se faltar config → sys.exit(1) com mensagem clara.
+
+  **2. Resiliência Omnicanal**:
+  - resolve_s3_key(doc) tenta campos em ordem: s3_key, file_key, key, path, url. Se valor contiver 'amazonaws.com/', faz split e agarra apenas o sufixo (chave limpa). unquote() para descodificar %20. Retorna None se nenhuma chave → continue.
+  - Query: db.documents.find({"is_deleted": {"$ne": True}}).
+
+  **3. Pipeline**:
+  - Download S3 via asyncio.to_thread(_download_s3_object_sync, client, bucket, key) — não bloqueia event loop.
+  - base64.b64encode(content).decode("utf-8").
+  - get_mime_type(filename, content_type) — usa content_type do doc se presente, senão extensão do filename, fallback application/pdf.
+  - analyze_document_from_base64(content_b64, mime_type, "outro").
+
+  **4. Integração + Rastreabilidade**:
+  - Se success: db.documents.update_one({"id": doc_id}, {"$set": {"ai_processed": True, "ai_processed_at": ISO, "ai_document_type": tipo}}).
+  - Busca processo: db.processes.find_one({"id": process_id}).
+  - build_update_data_from_extraction(extracted_data, detected_type, existing_data) onde existing_data = {personal_data, financial_data, real_estate_data, credit_data} do processo.
+  - Constrói field_metadata_new["<group>.<field>"] = {"source": "ai", "updated_at": now_iso} para cada campo preenchido (não-vazio).
+  - Merge seguro: merged_fm = {**existing_fm, **new_ai_fm}.
+  - $set no processo: process_set com campos + field_metadata merged + updated_at.
+
+  **5. Gestão de Erros + Rate Limiting**:
+  - Rate limit (429): print ⚠️ + await asyncio.sleep(300) (5 min) + continue.
+  - S3 404/NoSuchKey: print 🚫 + continue (sem pausa).
+  - Sucesso: await asyncio.sleep(25) entre documentos.
+  - is_rate_limit_exception(exc): 4 camadas — (1) isinstance(exc, RateLimitError) do serviço; (2) isinstance(exc, openai.RateLimitError) do SDK; (3) botocore ClientError com código Throttling/RequestThrottled/SlowDown/ThrottlingException; (4) heurística por mensagem.
+  - is_s3_not_found_exception(exc): botocore ClientError com código NoSuchKey/404/NoSuchBucket OU HTTP 404 OU heurística por mensagem.
+  - Safety net: try-except no loop principal apanha qualquer exceção que escape.
+
+  **CLI**: --dry-run, --limit N, --sleep-success (default 25), --sleep-rate-limit (default 300).
+
+  **Resumo final**: stats com 10 estados (success, dry_run, failed, error, skipped, empty, rate_limited, not_found, success_no_process, success_no_fields).
+
+- Validação:
+  - python3 -m py_compile → OK
+  - python3 -m flake8 --select=F,E9 (após fix de 2 warnings: List import não usado + f-string sem placeholders) → 0 erros.
+  - Imports verificados: analyze_document_from_base64 (linha 1183), build_update_data_from_extraction (linha 1784), RateLimitError (linha 200) — todos exportáveis de services.ai_document.
+  - (motor/boto3/openai não instalados neste sandbox — esperado; o script corre no backend do PowerCell.)
+
+Stage Summary:
+- 1 ficheiro reescrito: `backend/scripts/bulk_ai_document_scan.py` (~635 linhas, substitui ~430 do Pacote CU).
+- Resultado: Script omnicanal robusto que percorre db.documents (is_deleted != True), resolve chave S3 tentando 5 campos + split amazonaws.com, descarrega via boto3 direto, envia à IA via analyze_document_from_base64 (tipo 'outro'), marca ai_processed: True no doc, atualiza processo + field_metadata (source: "ai", merge seguro Pacote CS). Travões: 25s sucesso, 300s rate-limit, S3 404 → continue. Deteção de rate-limit em 4 camadas + safety net. CLI completa. Pacote CU explicitamente substituído (documentado no CHANGELOG).

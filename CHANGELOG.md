@@ -3,7 +3,71 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CV: Robust Omnichannel Bulk Document Scanner
+
+### Alterado
+- **`backend/scripts/bulk_ai_document_scan.py` REESCRITO** (substitui o Pacote CU por uma implementação mais robusta e estrita, com regras omnicanal explícitas). O script percorre `db.documents` (is_deleted != True), descarrega o binário do S3 via **boto3 direto**, envia à OpenAI (gpt-4o-mini via `analyze_document_from_base64`), e atualiza o processo + `field_metadata` (source: "ai").
+
+### 1. Conexão e Configuração
+- **MongoDB**: `motor_asyncio.AsyncIOMotorClient(MONGO_URL)`, `db = client[DB_NAME]`.
+- **S3 (boto3 direto)**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (default `'eu-north-1'`), `AWS_BUCKET_NAME`. Falta de qualquer variável → `sys.exit(1)` com mensagem clara.
+
+### 2. Resiliência Omnicanal do Esquema de Dados
+- **Query**: `db.documents.find({"is_deleted": {"$ne": True}})` — todos os documentos não apagados.
+- **Resolução de chave S3**: Para cada documento, tenta os campos em ordem: `s3_key`, `file_key`, `key`, `path`, `url`.
+- **URL pública S3**: Se o valor contiver `amazonaws.com/`, faz split e agarra apenas o sufixo (chave limpa). Faz `unquote()` para descodificar `%20` etc.
+- **Sem chave**: Se nenhuma chave for encontrada → `continue` (status `skipped`).
+
+### 3. Pipeline de Análise
+1. **Download S3** (`asyncio.to_thread` para não bloquear event loop): `s3_client.get_object(Bucket, Key)`.
+2. **Base64**: `base64.b64encode(content).decode("utf-8")`.
+3. **MIME type**: Derivado de `content_type` do documento ou extensão do filename (fallback `application/pdf`).
+4. **IA**: `analyze_document_from_base64(base64_content, mime_type, "outro")` de `services.ai_document`.
+
+### 4. Integração com Processos e Rastreabilidade
+- **Marca documento**: Se extração bem-sucedida → `db.documents.update_one({"id": doc_id}, {"$set": {"ai_processed": True, "ai_processed_at": ISO, "ai_document_type": tipo}})`.
+- **Busca processo**: `db.processes.find_one({"id": process_id})`.
+- **Build update**: `build_update_data_from_extraction(extracted_data, tipo_detetado, existing_data)` — mapeia extração → `personal_data`/`financial_data`/`real_estate_data`/`credit_data`.
+- **field_metadata**: Para cada campo preenchido, injeta `field_metadata["<group>.<field>"] = {"source": "ai", "updated_at": ISO}`.
+- **Merge seguro**: `{**existing_fm, **new_ai_fm}` — não apaga metadata de campos não atualizados (Pacote CS).
+- **$set no processo**: Aplica `process_set` com campos + `field_metadata` merged + `updated_at`.
+
+### 5. Gestão de Erros e Rate Limiting
+- **Rate limit (429)**: Print de aviso + `await asyncio.sleep(300)` (5 min de "castigo") + `continue` para o próximo documento.
+- **S3 404 / NoSuchKey**: Aviso + `continue` (sem pausa — ficheiro inexistente não é erro de API).
+- **Sucesso**: `await asyncio.sleep(25)` (travão de segurança entre documentos).
+- **Deteção robusta de rate-limit**: 4 camadas — (1) `RateLimitError` custom de `services.ai_document`; (2) `openai.RateLimitError` do SDK; (3) `botocore.exceptions.ClientError` com código Throttling/SlowDown; (4) heurística por mensagem ("429", "rate limit", "too many requests", "quota", "throttle", "tpm", "rpm limit", "limite de pedidos", "tente novamente mais tarde").
+- **Safety net**: `try-except` no loop principal apanha qualquer exceção que escape do helper interno — o script nunca rebenta.
+
+### CLI
+```
+cd backend
+python scripts/bulk_ai_document_scan.py --dry-run
+python scripts/bulk_ai_document_scan.py --limit 20
+python scripts/bulk_ai_document_scan.py --sleep-success 25 --sleep-rate-limit 300
+```
+
+### Diferenças vs Pacote CU (substituído)
+| Aspecto | Pacote CU | Pacote CV |
+|---|---|---|
+| Cliente S3 | `s3_service` (wrapper) | **boto3 direto** |
+| Coleções pesquisadas | `document_metadata` + `documents` | **`db.documents`** (is_deleted != True) |
+| Resolução de chave S3 | só `s3_path` | **omnicanal**: s3_key, file_key, key, path, url + split amazonaws.com |
+| Função IA | `analyze_single_document` (bytes) | **`analyze_document_from_base64`** (base64, tipo 'outro') |
+| Marcar doc processado | não | **`ai_processed: True`** + `ai_processed_at` + `ai_document_type` |
+| Pausa sucesso | 60s | **25s** |
+| Pausa rate-limit | 300s | 300s (igual) |
+| S3 404 handling | não específico | **NoSuchKey/404 → continue sem pausa** |
+
+### Técnico
+- **Ficheiro reescrito**: `backend/scripts/bulk_ai_document_scan.py` (~635 linhas, substitui ~430 do CU).
+- **Imports novos**: `boto3`, `botocore.exceptions.ClientError`, `urllib.parse.unquote`, `base64`.
+- **Validação**: `py_compile` ✓; `flake8 --select=F,E9` → 0 erros.
+- **Dependências**: Nenhuma nova — `boto3==1.42.21`, `botocore==1.42.21` já no `requirements.txt`.
+
 ## [2026-07-16] — Pacote CU: Safe Staggered AI Bulk Scanner Script
+
+> ⚠️ **SUBSTITUÍDO pelo Pacote CV** (mesmo ficheiro). Mantido no histórico para referência.
 
 ### Adicionado
 - **Script `backend/scripts/bulk_ai_document_scan.py`**: Script de background que percorre documentos legados associados a processos ativos e extrai dados com IA, preenchendo campos vazios e marcando proveniência no `field_metadata` (`source: "ai"`). Desenhado para conta de API gratuita — **rate-limit extremamente conservador e imune a falhas**.
