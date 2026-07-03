@@ -57,11 +57,20 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     - Consultores e Intermediários: query sincronizada com my-processes
       (is_active=True, status ∉ INACTIVE_STATUSES, is_deleted≠True)
     - Leads (clientes sem processo) criados pelo utilizador são adicionados à lista
+
+    PACOTE CP — Suporte a view_mode="deleted" / status="eliminado":
+    Quando o utilizador pede eliminados, remove o filtro is_active e
+    INACTIVE_STATUSES, e aplica apenas is_deleted=True.
     """
     user_id = user["id"]
     user_email = user.get("email", "")
     role = get_effective_role(request, user)
-    
+
+    # PACOTE CP — Verificar se o utilizador quer ver eliminados
+    view_mode = request.query_params.get("view_mode", "active_only")
+    status_filter = request.query_params.get("status")
+    wants_deleted = (status_filter == "eliminado" or view_mode == "deleted")
+
     # Construir query baseada no papel do utilizador
     #
     # SINCRONIZAÇÃO COM "Os Meus Processos":
@@ -69,7 +78,44 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     # my-processes (assigned_consultor_ids + is_active + status), para que
     # os clientes listados correspondam aos processos visíveis.
     # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
-    if role == UserRole.CONSULTOR:
+    if wants_deleted:
+        # PACOTE CP — Modo eliminados: remover is_active e INACTIVE_STATUSES
+        if role == UserRole.CONSULTOR:
+            query = {
+                "$and": [
+                    {"$or": [
+                        {"assigned_consultor_ids": user_id},
+                        {"assigned_consultor_id": user_id}
+                    ]},
+                    {"is_deleted": True}
+                ]
+            }
+        elif role == UserRole.INTERMEDIARIO:
+            query = {
+                "$and": [
+                    {"$or": [
+                        {"assigned_mediador_ids": user_id},
+                        {"assigned_mediador_id": user_id},
+                        {"created_by": user_email}
+                    ]},
+                    {"is_deleted": True}
+                ]
+            }
+        elif role == UserRole.INDEXACAO:
+            query = {
+                "$and": [
+                    {"$or": [
+                        {"assigned_indexacao_id": user_id},
+                        {"created_by": user_email}
+                    ]},
+                    {"is_deleted": True}
+                ]
+            }
+        elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+            query = {"is_deleted": True}
+        else:
+            query = {"_id": None}
+    elif role == UserRole.CONSULTOR:
         query = {
             "$and": [
                 {"$or": [

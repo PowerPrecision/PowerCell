@@ -3,6 +3,23 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CP: Fix My Clients Table UI & Filters
+
+### Corrigido
+- **Filtro Eliminados**: `my_clients.py` agora suporta `view_mode="deleted"` / `status="eliminado"` — remove `is_active` e `INACTIVE_STATUSES`, aplica apenas `is_deleted=True` com filtro de role. `processes.py` já tinha `wants_deleted` implementado.
+
+- **Bolinhas de Notificação**: Confirmadas em `MyClientsPage.js` e `FilteredProcessList.js` — `NotificationDots` renderiza junto ao nome com `has_unread_messages` (azul) e `has_new_documents` (verde).
+
+- **Nome Clicável com Modal**: `MyClientsPage.js` — nome do cliente transformado em `cursor-pointer text-primary hover:underline` com `onClick` que abre `ClientDetailsModal` com `client.client_id || client.id`. `FilteredProcessList.js` já tinha (Pacote CH).
+
+- **Notas na Tabela**: Ambas as tabelas agora lêem `process.notes` primeiro (sobrescrito pelo Pacote CJ com última atividade real), com fallback `latest_activity_note` → `latest_note` → "Sem notas recentes".
+
+### Técnico
+- **Backend** (`backend/routes/my_clients.py`): `wants_deleted` (linhas 69-117).
+- **Frontend** (`frontend/src/pages/MyClientsPage.js`): import `ClientDetailsModal`; estado `clientDetailsModal`; nome clicável (linhas 530-545); notas lê `notes` primeiro (linhas 603-616); modal no final (linhas 654-660).
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): notas lê `notes` primeiro (linhas 561-574).
+- **Validação**: `py_compile` ✓; `flake8` → 0 erros; `esbuild` → 0 erros.
+
 ## [2026-07-16] — Pacote CO v2: Backfill — campos de dropdown/select adicionados
 
 ### Corrigido

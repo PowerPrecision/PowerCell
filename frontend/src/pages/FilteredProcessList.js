@@ -558,13 +558,10 @@ const FilteredProcessList = () => {
                               )}
                             </TableCell>
                           )}
-                          {/* PACOTE CG: Notas do Consultor — lê latest_activity_note */}
-                          {/* latest_activity_note é injetado pelo backend (Pacote CG) a partir
-                              da última atividade/comentário da coleção activities. Fallback
-                              para latest_note (Pacote BT) e process.notes para retrocompat. */}
+                          {/* PACOTE CP: Notas — lê notes do backend (Pacote CJ) com fallback */}
                           <TableCell className="min-w-[140px] max-w-[220px]">
                             {(() => {
-                              const noteText = process.latest_activity_note || process.latest_note || process.notes || "";
+                              const noteText = process.notes || process.latest_activity_note || process.latest_note || "";
                               if (noteText) {
                                 return (
                                   <div className="line-clamp-2 text-sm text-muted-foreground" title={noteText}>
@@ -572,7 +569,7 @@ const FilteredProcessList = () => {
                                   </div>
                                 );
                               }
-                              return <span className="text-xs text-muted-foreground">—</span>;
+                              return <span className="text-xs text-muted-foreground">Sem notas recentes</span>;
                             })()}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">

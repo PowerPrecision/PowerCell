@@ -2401,3 +2401,32 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/scripts/backfill_empty_fields.py` (v2 — ~25 campos adicionais, especialmente dropdowns).
 - Resultado: o script agora preenche TODOS os campos dos modelos, incluindo os de caixa de seleção (tipo_contrato, tipologia, finalidade, certificado_energetico, num_quartos, estacionamento, banco, tipo_taxa, etc.) e campos calculados (montante_financiado, prestacao_mensal, despesas_total).
+
+
+---
+Task ID: Pacote CP (Fix My Clients Table UI & Filters)
+Agent: Main Agent (Code Assistant)
+Task: Filtro eliminados + bolinhas + nome clicável + ClientDetailsModal + notas
+
+Work Log:
+- Backend (my_clients.py): adicionado suporte a view_mode="deleted" / status="eliminado". Quando wants_deleted=True, a query remove is_active e INACTIVE_STATUSES, aplicando apenas is_deleted=True com o filtro de role. Lê view_mode e status de request.query_params.
+- Backend (processes.py): já tinha wants_deleted implementado (linhas 1436-1441 e 1858-1862) — confirmado, sem alteração necessária.
+- Frontend (MyClientsPage.js):
+  1. Import de ClientDetailsModal.
+  2. Estado clientDetailsModal = { open: false, clientId: null }.
+  3. Nome do cliente: span com cursor-pointer text-primary hover:underline + onClick que abre ClientDetailsModal com client.client_id || client.id.
+  4. NotificationDots: já existia (Pacote BI), confirmado a renderizar com has_unread_messages e has_new_documents.
+  5. Célula Notas: alterada para ler client.notes primeiro (Pacote CJ sobrescreve notes), fallback latest_activity_note e latest_note. Empty state: "Sem notas recentes".
+  6. ClientDetailsModal renderizado no final com onNavigateToProcess.
+- Frontend (FilteredProcessList.js):
+  1. Nome clicável: já existia (Pacote CH), confirmado.
+  2. NotificationDots: já existia (Pacote BI), confirmado.
+  3. Célula Notas: alterada para ler process.notes primeiro (Pacote CJ), fallback latest_activity_note e latest_note. Empty state: "Sem notas recentes".
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/routes/my_clients.py` (wants_deleted: remove is_active/INACTIVE_STATUSES, aplica is_deleted=True)
+  - `frontend/src/pages/MyClientsPage.js` (nome clicável + ClientDetailsModal + notas lê notes primeiro)
+  - `frontend/src/pages/FilteredProcessList.js` (notas lê notes primeiro, empty state "Sem notas recentes")
+- Resultado: (1) filtro eliminados funciona em my_clients.py; (2) bolinhas de notificação renderizadas junto ao nome; (3) nome do cliente é clicável e abre ClientDetailsModal; (4) coluna Notas lê process.notes (sobrescrito pelo Pacote CJ com última atividade real) com fallback.

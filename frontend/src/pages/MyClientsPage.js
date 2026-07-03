@@ -31,6 +31,8 @@ import {
   MessageSquare
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
+// PACOTE CP — ClientDetailsModal reutilizável
+import ClientDetailsModal from "../components/ClientDetailsModal";
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
 import { pt } from "date-fns/locale";
@@ -103,6 +105,8 @@ const MyClientsPage = () => {
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showCreateModal, setShowCreateModal] = useState(false);
+  // PACOTE CP — estado para ClientDetailsModal
+  const [clientDetailsModal, setClientDetailsModal] = useState({ open: false, clientId: null });
   
   // Admin/CEO sempre podem exportar
   const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
@@ -523,9 +527,17 @@ const MyClientsPage = () => {
                         <TableCell>
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
-                              <span className="font-medium text-blue-600 hover:text-blue-800 hover:underline">
+                              <span
+                                className="font-medium cursor-pointer text-primary hover:underline"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  if (client.client_id || client.id) {
+                                    setClientDetailsModal({ open: true, clientId: client.client_id || client.id });
+                                  }
+                                }}
+                              >
                                 {client.client_name}
-                                {/* PACOTE BI: bolinhas de notificação junto ao nome */}
+                                {/* PACOTE CP: bolinhas de notificação junto ao nome */}
                                 <NotificationDots
                                   hasUnreadMessages={client.has_unread_messages}
                                   hasNewDocuments={client.has_new_documents}
@@ -588,10 +600,10 @@ const MyClientsPage = () => {
                             </span>
                           )}
                         </TableCell>
-                        {/* PACOTE CG — coluna Notas com latest_activity_note */}
+                        {/* PACOTE CP — coluna Notas: lê notes do backend (Pacote CJ) com fallback */}
                         <TableCell className="min-w-[140px] max-w-[220px]">
                           {(() => {
-                            const noteText = client.latest_activity_note || client.latest_note || client.notes || "";
+                            const noteText = client.notes || client.latest_activity_note || client.latest_note || "";
                             if (noteText) {
                               return (
                                 <div className="line-clamp-2 text-sm text-gray-500" title={noteText}>
@@ -599,7 +611,7 @@ const MyClientsPage = () => {
                                 </div>
                               );
                             }
-                            return <span className="text-xs text-gray-400">—</span>;
+                            return <span className="text-xs text-gray-400">Sem notas recentes</span>;
                           })()}
                         </TableCell>
                         <TableCell className="text-gray-500 text-sm">
@@ -638,6 +650,14 @@ const MyClientsPage = () => {
           onSuccess={handleCreateSuccess}
         />
       </div>
+
+      {/* PACOTE CP — ClientDetailsModal reutilizável */}
+      <ClientDetailsModal
+        open={clientDetailsModal.open}
+        clientId={clientDetailsModal.clientId}
+        onClose={() => setClientDetailsModal({ open: false, clientId: null })}
+        onNavigateToProcess={(pid) => navigate(`/process/${pid}`)}
+      />
     </DashboardLayout>
   );
 };
