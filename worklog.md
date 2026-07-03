@@ -2522,3 +2522,51 @@ Stage Summary:
   - `backend/routes/processes.py` (update_process: field_metadata merge antes do $set)
   - `backend/routes/portal.py` (update_client_profile: field_metadata automático source=client)
 - Resultado: Data Provenance implementada. O objeto field_metadata é aceito em PUT de clients e processes (merge seguro), e injetado automaticamente no Portal do Cliente com source="client". O formato é um dict onde a chave é o nome do campo (ex: "dados_pessoais.nif") e o valor é {"source": "ai"|"manual"|"client", "updated_at": "ISO", "confidence": 0.95}. O merge preserva metadata de campos não atualizados.
+
+---
+Task ID: Pacote CT (AI Field Indicator UI)
+Agent: Main Agent (Code Assistant)
+Task: Consumir a metadata de rastreabilidade (field_metadata) na UI — AIBadge nos formulários
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacote CS confirmado implementado e committed: d1129ce).
+- Clonado repo PowerCell branch dev para /tmp/powercell_ct → /home/z/powercell_ct.
+- 3 subagentes Explore em paralelo para analisar:
+  1. ProcessDetails.js (5830 linhas): estado `process` + `clientData` + dicts flat; `executeSave` em L1508 faz 2 PUTs (process + client); fields em Variant B (flex com Label + Badge de confiança); 10 campos importantes identificados com line numbers exactos.
+  2. ClientDetailPage.js (893 linhas): estado `client`; `ContactRow` (L146-235) com inline edit; `handleEditSave` (L268) com payload parcial; 6 ContactRows + 4 campos de modal.
+  3. UI patterns: badge.jsx (4 variantes cva), tooltip.jsx (Radix), hover-card.jsx, cn de @/lib/utils, lucide-react v0.507.0 com Sparkles/User/Brain/Bot; AutoDSTIBadge.js como referência canónica de pattern icon+tooltip+badge.
+
+- Criado `frontend/src/components/ui/AIBadge.jsx`:
+  - Props: `source` ("ai"|"client"|"manual"), `updated_at`, `confidence`, `compact=true`, `className`.
+  - `AI_SOURCE_CONFIG`: ai → Sparkles (roxo), client → User (teal). manual → return null.
+  - Tooltip: label da fonte + confiança % + data formatada (safeFormat dd/MM/yyyy 'às' HH:mm).
+  - Helpers exportados: `getFieldMeta(fieldPath, ...metadataSources)` (lê de múltiplas fontes com prioridade), `buildManualMetadata(fieldPaths)` (constrói dict {path: {source:"manual", updated_at:now}}), `buildManualMeta()` (entrada única).
+  - Estrutura: TooltipProvider > Tooltip > [TooltipTrigger asChild > Badge outline] > TooltipContent. Segue pattern do AutoDSTIBadge.
+
+- ProcessDetails.js — 4 alterações:
+  1. Import AIBadge + getFieldMeta + buildManualMetadata (linha 118).
+  2. Helper `getFieldMetaFor(path)` que lê de process.field_metadata com fallback para clientData.field_metadata (linhas 1850-1854).
+  3. AIBadge em 10 campos: NIF, CC, Rendimento Mensal, Rendimento Bruto, Valor a Financiar, Valor do Imóvel, Valor Patrimonial, Valor do Empréstimo, Taxa de Juro, Prestação Mensal. Para NIF/CC (que já tinham flex com getConfidenceIndicator), AIBadge foi aninhado num sub-flex ao lado da Label. Para os restantes, Label foi envolvida num flex com AIBadge.
+  4. `executeSave`: `MANUAL_FIELDS_BY_CARD` mapeia editingCardId → field paths. buildManualMetadata gera dict. Split: dados_pessoais.*/contacto.*/nome → clientUpdateData.field_metadata; restantes → processUpdateData.field_metadata. Backend (Pacote CS) faz merge seguro.
+
+- ClientDetailPage.js — 6 alterações:
+  1. Import AIBadge + getFieldMeta + buildManualMetadata (linha 24).
+  2. `ContactRow` estendido com prop `meta` (linha 147). Render: `<div className="flex items-center gap-1 mb-0.5"><p>{label}</p>{meta && <AIBadge {...meta} />}</div>`.
+  3. 6 ContactRows com `meta={getFieldMeta(path, client?.field_metadata) || undefined}`: Email, Telefone, NIF, Estado Civil, Profissão, Morada Fiscal.
+  4. Inline `onEdit` (Email/Telefone): payload inclui `field_metadata: buildManualMetadata([path])`. Estado local atualizado com `field_metadata: {...prev, [path]: {source:"manual", updated_at:now}}` para badge desaparecer imediatamente.
+  5. `handleEditSave`: `changedPaths` recolhe caminhos alterados (nome, contacto.email, contacto.telefone, dados_pessoais.nif). `buildManualMetadata(changedPaths)` → payload.field_metadata. Estado local merge field_metadata.
+  6. 4 AIBadge no modal: Nome, NIF, Email, Telefone (Label envolvida em flex com AIBadge).
+
+- Validação backend (Pacote CS):
+  - GET /clients/{id} (clients.py L1331): sem response_model → retorna dict raw → field_metadata incluído ✓
+  - GET /processes/{id} (processes.py L3334): response_model=ProcessResponse com extra="allow" → field_metadata passa ✓
+  - PUT /clients/{id}, PUT /processes/{id}, PUT /portal/me: field_metadata merge confirmado (Pacote CS).
+
+- Validação sintaxe: `npx esbuild --loader:.js=jsx --packages=external` → 0 erros nos 3 ficheiros (AIBadge.jsx, ProcessDetails.js, ClientDetailPage.js).
+
+Stage Summary:
+- 3 ficheiros modificados/criados:
+  - `frontend/src/components/ui/AIBadge.jsx` (NOVO — componente + 3 helpers)
+  - `frontend/src/pages/ProcessDetails.js` (import + helper + 10 AIBadge + MANUAL_FIELDS_BY_CARD no executeSave)
+  - `frontend/src/pages/ClientDetailPage.js` (import + ContactRow meta + 6 call sites + 2 onEdit + handleEditSave + 4 modal AIBadge)
+- Resultado: Data Provenance UI completa. AIBadge mostra Sparkles roxo (IA) ou User teal (Cliente) ao lado de campos importantes. Quando o Consultor edita e guarda, o frontend envia field_metadata com source="manual" → backend faz merge → badge desaparece (o humano sobrepôs o dado). Compatível com Pacote CS (backend field_metadata) e com o Portal do Cliente (injeção automática source="client").

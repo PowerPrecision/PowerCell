@@ -3,6 +3,39 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CT: AI Field Indicator UI (Frontend)
+
+### Adicionado
+- **Componente `AIBadge`** (`frontend/src/components/ui/AIBadge.jsx`): Indicador visual de proveniência de dados. Recebe `source` (`"ai"` | `"client"` | `"manual"`), `updated_at` e `confidence`.
+  - `"ai"` → ícone `Sparkles` (roxo) com tooltip "Preenchido pela IA" (+ confiança % + data).
+  - `"client"` → ícone `User` (teal) com tooltip "Preenchido pelo Cliente no Portal" (+ data).
+  - `"manual"` → **não renderiza nada** (o humano sobrepôs o dado).
+- **Helpers exportados**: `getFieldMeta(fieldPath, ...metadataSources)` para ler metadata de múltiplas fontes (process + client) com prioridade; `buildManualMetadata(fieldPaths)` para construir payloads de proveniência manual.
+
+### Frontend — `ProcessDetails.js` (Detalhes do Processo)
+- **Leitura de `field_metadata`**: Helper `getFieldMetaFor(path)` que lê de `process.field_metadata` com fallback para `clientData.field_metadata`.
+- **AIBadge em 10 campos importantes**: NIF (`dados_pessoais.nif`), CC (`dados_pessoais.documento_id`), Rendimento Mensal (`financial_data.monthly_income`), Rendimento Bruto (`financial_data.rendimento_bruto`), Valor a Financiar (`financial_data.valor_financiado`), Valor do Imóvel (`real_estate_data.valor_imovel`), Valor Patrimonial (`real_estate_data.valor_patrimonial`), Valor do Empréstimo (`credit_data.requested_amount`), Taxa de Juro (`credit_data.interest_rate`), Prestação Mensal (`credit_data.monthly_payment`).
+- **Save manual**: `executeSave` envia `field_metadata` com `source="manual"` para os campos do cartão editado (`editingCardId`). Mapeamento `MANUAL_FIELDS_BY_CARD` cobre `personal_identificacao`, `personal_morada`, `financial_rendimentos`, `realestate_caracteristicas`, `credit_dados`. Campos `dados_pessoais.*`/`contacto.*`/`nome` vão para o `PUT /clients`; restantes vão para o `PUT /processes`. O backend (Pacote CS) faz merge seguro.
+
+### Frontend — `ClientDetailPage.js` (Ficha do Cliente)
+- **`ContactRow` estendido**: Aceita prop `meta` e renderiza `<AIBadge />` ao lado da label.
+- **AIBadge em 6 ContactRows**: Email (`contacto.email`), Telefone (`contacto.telefone`), NIF (`dados_pessoais.nif`), Estado Civil (`dados_pessoais.estado_civil`), Profissão (`dados_pessoais.profissao`), Morada Fiscal (`dados_pessoais.morada_fiscal`).
+- **AIBadge em 4 campos do modal de edição**: Nome (`nome`), NIF, Email, Telefone.
+- **Inline edit (Email/Telefone)**: `onEdit` envia `field_metadata` com `source="manual"` para o campo editado + atualiza estado local (badge desaparece imediatamente).
+- **Modal save (`handleEditSave`)**: Recolhe caminhos alterados (`nome`, `contacto.email`, `contacto.telefone`, `dados_pessoais.nif`) e envia `field_metadata` manual apenas para esses campos. Atualiza estado local para o AIBadge reagir.
+
+### Comportamento
+- **IA extrai dado** → badge `Sparkles` roxo aparece ao lado da label.
+- **Cliente preenche no Portal** → badge `User` teal aparece (via Pacote CS, injeção automática `source="client"`).
+- **Consultor edita e guarda** → frontend envia `source="manual"` → backend faz merge → badge desaparece (o humano sobrepôs o dado).
+
+### Técnico
+- **Novo ficheiro**: `frontend/src/components/ui/AIBadge.jsx` (componente + helpers `getFieldMeta`/`buildManualMetadata`/`buildManualMeta`).
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): import AIBadge (linha 118); helper `getFieldMetaFor` (linhas 1850-1854); AIBadge em 10 campos; `MANUAL_FIELDS_BY_CARD` + merge no `executeSave` (linhas 1595-1644).
+- **Frontend** (`frontend/src/pages/ClientDetailPage.js`): import AIBadge (linha 24); `ContactRow` com prop `meta` (linha 147, render linha 188-191); 6 call sites com `meta`; inline `onEdit` com `field_metadata` (linhas 489-500, 530-541); `handleEditSave` com `changedPaths` + `buildManualMetadata` (linhas 276-310); 4 AIBadge no modal (linhas 866-907).
+- **Validação**: `esbuild --packages=external` ✓ nos 3 ficheiros (0 erros de sintaxe).
+- **Dependências**: Nenhuma nova — usa `lucide-react` (Sparkles, User), `@radix-ui/react-tooltip`, `class-variance-authority` (já instalados).
+
 ## [2026-07-16] — Pacote CS: Data Provenance Foundation (Backend)
 
 ### Adicionado
