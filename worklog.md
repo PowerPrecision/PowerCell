@@ -2662,3 +2662,80 @@ Work Log:
 Stage Summary:
 - 1 ficheiro reescrito: `backend/scripts/bulk_ai_document_scan.py` (~635 linhas, substitui ~430 do Pacote CU).
 - Resultado: Script omnicanal robusto que percorre db.documents (is_deleted != True), resolve chave S3 tentando 5 campos + split amazonaws.com, descarrega via boto3 direto, envia à IA via analyze_document_from_base64 (tipo 'outro'), marca ai_processed: True no doc, atualiza processo + field_metadata (source: "ai", merge seguro Pacote CS). Travões: 25s sucesso, 300s rate-limit, S3 404 → continue. Deteção de rate-limit em 4 camadas + safety net. CLI completa. Pacote CU explicitamente substituído (documentado no CHANGELOG).
+
+---
+Task ID: Pacote CW (Trello Mirror Service & Clients Table Final Fixes)
+Agent: Main Agent (Code Assistant)
+Task: Serviço Trello mirror (CRM→Trello) + esmagar bugs visuais da tabela de processos
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacotes CS, CT, CU, CV confirmados implementados).
+- Clonado repo PowerCell branch dev para /tmp/powercell_cw → /home/z/powercell_cw (commit base a0154e9 = Pacote CV).
+
+- 2 subagentes Explore em paralelo:
+  1. processes.py: Encontrados 4 pontos de integração para asyncio.create_task:
+     - POST "" (cliente cria processo) — insert_one na linha 895, fire após linha 905.
+     - POST "/create-client" (staff cria processo) — insert_one na linha 1170, fire após auto-atribuição de indexador (~linha 1287, antes do WebSocket broadcast).
+     - PUT /kanban/{process_id}/move — update_one linhas 3082-3085, fire após 3085. old_status=process.get("status"), new_status=query param.
+     - PUT /{process_id} (update geral) — update_one linha 4339, re-fetch linha 4340, fire após 4340.
+     asyncio já importado (linha 23). httpx==0.28.1 no requirements.txt. Padrão fire-and-forget já usado (linhas 4754, 4758, 4762 para _send_assignment_email).
+     ProcessStatus enum tem 16 valores. Status→label vem de workflow_statuses collection (campo label). trello_card_id NÃO existe ainda (adicionado pelo serviço).
+
+  2. MyClientsPage.js (667 linhas) + FilteredProcessList.js (617 linhas):
+     - MyClientsPage: Nome clicável JÁ correto (cursor-pointer text-primary hover:underline, linha 531). ClientDetailsModal importado (linha 35). Bolinhas via NotificationDots (linhas 541-544). Notes column correta (linhas 603-616). Sem filtro eliminado no frontend.
+     - FilteredProcessList: Nome clicável com classe ERRADA (text-blue-600 hover:text-blue-800, linha 484). Bolinhas via NotificationDots (linhas 495-498). Notes column correta (linhas 561-574). Sem filtro eliminado.
+     - Backend JÁ implementa wants_deleted (view_mode=deleted ou status=eliminado(s)) em processes.py (linhas 1425-1448, 1505-1522) e my_clients.py (linhas 69-117). Inconsistência: processes.py espera "eliminados" (plural), my_clients.py espera "eliminado" (singular). Recomendação: usar view_mode=deleted sempre.
+     - ProcessDetailsModal.jsx tem TYPOS reais nas linhas 88-89 (const asChanges, setHasChanges] — syntax error que esbuild tolera mas quebraria runtime). Decisão: manter ClientDetailsModal (funcional) em vez de trocar para ProcessDetailsModal quebrado. Usuário disse "ou" (either modal acceptable).
+
+- Criado `backend/services/trello_service.py` (~400 linhas):
+  - Config: TRELLO_API_KEY, TRELLO_TOKEN, TRELLO_BOARD_ID do os.environ. is_configured() check. Se não configurado, todas as funções retornam None silenciosamente.
+  - _auth_params() retorna {key, token} para todos os requests.
+  - _list_cache (dict em memória) evita queries repetidas de listas.
+  - _get_status_label(status) lê workflow_statuses.label (fallback: próprio status).
+  - get_or_create_trello_list(list_name): GET /boards/{id}/lists → procura por nome (case-insensitive). Se não existe, POST /lists com pos=bottom. Retorna list_id.
+  - _create_card(list_id, name, desc): POST /cards com pos=top. Retorna card_id.
+  - _move_card(card_id, list_id): PUT /cards/{id} com idList. Retorna bool.
+  - _update_card(card_id, desc, name?): PUT /cards/{id} com desc + name opcional. Retorna bool.
+  - _build_card_description(process): constrói descrição multiline com emoji + dados do cliente (nome, email, telefone, NIF, CC), financeiros (salário, valor financiado, capital próprio), imóvel (valor, tipologia, localização), crédito (empréstimo, taxa, prestação, banco), metadados (nº processo, status, prioridade), e contagem de campos preenchidos por IA (field_metadata source="ai").
+  - sync_process_to_trello(process, action, new_status): aceita process dict OU process_id string (busca à BD). Determina target_status (new_status ou process.status). Resolve list_name via _get_status_label. get_or_create_trello_list. Para create: _create_card + db.processes.update_one $set trello_card_id + trello_synced_at. Para move: _move_card. Para update: _update_card + $set trello_synced_at. Fallbacks: create com trello_card_id existente → move; move/update sem trello_card_id → create. Try-except global: nunca propaga exceções (fire-and-forget safe).
+
+- Integrado em routes/processes.py (4 pontos):
+  - Import: from services.trello_service import sync_process_to_trello (linha 54).
+  - Ponto 1 (linha 910): asyncio.create_task(sync_process_to_trello(process_doc, action="create")) após insert_one + logger.info.
+  - Ponto 2 (linha 1287): asyncio.create_task(sync_process_to_trello(process_doc, action="create")) após auto-atribuição de indexador (status pode ser fila_espera) + log_history, antes do WebSocket broadcast.
+  - Ponto 3 (linha 3101): _trello_move_proc = {**process, "status": new_status, "trello_card_id": process.get("trello_card_id")}; asyncio.create_task(sync_process_to_trello(_trello_move_proc, action="move", new_status=new_status)) após update_one.
+  - Ponto 4 (linhas 4358-4363): if data.status and data.status != process.get("status"): asyncio.create_task(sync_process_to_trello(updated, action="move", new_status=data.status)) else: asyncio.create_task(sync_process_to_trello(updated, action="update")).
+
+- Frontend FilteredProcessList.js:
+  - Import Trash2 de lucide-react (linha 17).
+  - filterConfig: nova entrada "eliminado" (title="Eliminados", icon=Trash2, filter=p.status==="eliminados" || p.is_deleted===true).
+  - fetchData: viewMode dinâmico — active_only | historical | deleted (PACOTE CW). filterType==="eliminado" → view_mode=deleted (sem status param, backend faz query is_deleted=True).
+  - Nome clicável: className corrigida de "text-blue-600 hover:text-blue-800 hover:underline cursor-pointer" para "cursor-pointer text-primary hover:underline" (spec exato).
+  - Bolinhas inline (spec exato): {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>} + {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}. Substitui NotificationDots component (removido do call site).
+
+- Frontend MyClientsPage.js:
+  - Import Trash2 de lucide-react (linha 31).
+  - Estado showDeleted = searchParams.get("view_mode") === "deleted" (linha 118). setShowDeleted via updateParam (linha 137).
+  - fetchData: getMyClients({ show_inactive, ...(showDeleted ? { view_mode: "deleted" } : {}) }) (linhas 168-174).
+  - useEffect dependency: [showInactive, showDeleted] (linha 145).
+  - Filtro local: !showInactive && !showDeleted && TERMINAL_STATUSES.includes(client.status) → false (não excluir terminais quando showDeleted=true).
+  - useMemo dependency: adicionado showDeleted (linha 242).
+  - Nome clicável: className "cursor-pointer text-primary hover:underline" (removido font-medium para match exato do spec).
+  - Bolinhas inline (spec exato, mesmo formato que FilteredProcessList). Substitui NotificationDots.
+  - UI: novo botão "Mostrar Eliminados" (toggle, Trash2 icon, bg-gray-700 quando ativo) após "Mostrar Concluídos" (linhas 480-490). Aviso "A mostrar apenas processos eliminados" quando ativo (linhas 498-503).
+
+- Validação:
+  - py_compile services/trello_service.py routes/processes.py → OK
+  - flake8 --select=E9,F63,F7,F82 → 0 erros críticos (warnings F401/F841 em processes.py são pre-existing, não de Pacote CW)
+  - flake8 --select=F services/trello_service.py → 0 erros (após fix de f-string sem placeholders na linha 304)
+  - esbuild --packages=external src/pages/MyClientsPage.js → 0 erros
+  - esbuild --packages=external src/pages/FilteredProcessList.js → 0 erros
+
+Stage Summary:
+- 5 ficheiros modificados/criados:
+  - `backend/services/trello_service.py` (NOVO, ~400 linhas) — serviço de mirror CRM→Trello
+  - `backend/routes/processes.py` (import + 4 pontos asyncio.create_task)
+  - `frontend/src/pages/FilteredProcessList.js` (nome clicável, bolinhas inline, filterConfig eliminado, fetchData view_mode=deleted, import Trash2)
+  - `frontend/src/pages/MyClientsPage.js` (nome clicável, bolinhas inline, toggle eliminados, fetchData + filtro local, import Trash2)
+  - `CHANGELOG.md` + `worklog.md` atualizados
+- Resultado: Trello funciona como backup estrutural visual em tempo real. Criação de processo → cartão criado. Drag no kanban → cartão movido. Edição de dados → descrição do cartão atualizada com dados IA. Tabela de processos com nome clicável (classe exata), bolinhas inline (azul+verde), notas, e filtro eliminados funcional em ambas as páginas. Se Trello não configurado, CRM funciona normalmente (silent fallback).

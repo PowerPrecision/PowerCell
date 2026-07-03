@@ -14,7 +14,7 @@ import { ScrollArea } from "../components/ui/scroll-area";
 import {
   ArrowLeft, Search, Eye, Loader2, Users, CheckCircle,
   XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame,
-  MessageSquare
+  MessageSquare, Trash2
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
@@ -93,6 +93,14 @@ const filterConfig = {
     color: "text-red-600",
     bgColor: "bg-red-50",
     filter: (p) => p.status === "desistencias"
+  },
+  eliminado: {
+    title: "Eliminados",
+    description: "Processos eliminados (recuperação administrativa)",
+    icon: Trash2,
+    color: "text-gray-700",
+    bgColor: "bg-gray-100",
+    filter: (p) => p.status === "eliminados" || p.is_deleted === true
   },
   pending_deadlines: {
     title: "Prazos Pendentes",
@@ -191,7 +199,11 @@ const FilteredProcessList = () => {
       // Antes, a API era chamada sem 'search' e a filtragem era feita localmente
       // com .filter(), causando tamanhos de página irregulares.
       const HISTORICAL_FILTERS = ["concluded", "dropped"];
-      const viewMode = HISTORICAL_FILTERS.includes(filterType) ? "historical" : "active_only";
+      // PACOTE CW: "eliminado" usa view_mode=deleted para que o backend
+      // desligue o filtro padrão de ativos e traga apenas eliminados.
+      let viewMode = "active_only";
+      if (HISTORICAL_FILTERS.includes(filterType)) viewMode = "historical";
+      else if (filterType === "eliminado") viewMode = "deleted";
 
       // PACOTE BZ: passar search como query param (>= 2 chars) para o backend filtrar
       const searchParam = searchTerm.length >= 2 ? searchTerm : undefined;
@@ -201,6 +213,8 @@ const FilteredProcessList = () => {
       if (filterType === "concluded") statusParam = "concluidos";
       else if (filterType === "dropped") statusParam = "desistencias";
       else if (filterType === "waiting") statusParam = "clientes_espera";
+      // Nota: "eliminado" usa apenas view_mode=deleted (sem status param) —
+      // o backend já faz a query is_deleted: True quando view_mode=deleted.
 
       const [processesRes, statusesRes, deadlinesRes] = await Promise.all([
         getProcesses({
@@ -479,9 +493,9 @@ const FilteredProcessList = () => {
                               <div className="flex items-center gap-2">
                                 <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
                                   {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
-                                  {/* PACOTE CH — nome do cliente clicável abre ClientDetailsModal */}
+                                  {/* PACOTE CW — nome do cliente clicável (classe exata + bolinhas inline) */}
                                   <span
-                                    className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                                    className="cursor-pointer text-primary hover:underline"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       if (process.client_id) {
@@ -490,12 +504,9 @@ const FilteredProcessList = () => {
                                     }}
                                   >
                                     {safeString(process.client_name)}
+                                    {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+                                    {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
                                   </span>
-                                  {/* PACOTE BI: bolinhas de notificação junto ao nome */}
-                                  <NotificationDots
-                                    hasUnreadMessages={process.has_unread_messages}
-                                    hasNewDocuments={process.has_new_documents}
-                                  />
                                 </p>
                                 {prio.isAlta && (
                                   <Badge className="bg-red-500 text-white border-red-600 text-[10px] px-1.5 py-0 h-4 gap-0.5 shadow-sm shadow-red-300/50">

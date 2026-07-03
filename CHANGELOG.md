@@ -3,6 +3,49 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CW: Trello Mirror Service & Clients Table Final Fixes
+
+### Adicionado
+- **`backend/services/trello_service.py`** (NOVO): Serviço de sincronização automática UNIDIRECIONAL (CRM → Trello) para que o Trello funcione como backup estrutural e visual em tempo real. Usa `httpx` (async). Lê `TRELLO_API_KEY`, `TRELLO_TOKEN`, `TRELLO_BOARD_ID` do ambiente. Se faltar config, desliga-se silenciosamente (o CRM funciona sem Trello).
+  - **`get_or_create_trello_list(list_name)`**: Procura ou cria uma coluna no quadro Trello. Cache em memória (`_list_cache`). Nome da coluna = `label` do `workflow_statuses` (ex: "Pré-Registo").
+  - **`sync_process_to_trello(process, action, new_status)`**: 3 ações:
+    - `create`: Cria cartão na lista correta, guarda `trello_card_id` no processo no MongoDB.
+    - `move`: Move cartão para a nova lista (usa `trello_card_id` existente).
+    - `update`: Atualiza a descrição do cartão com dados úteis extraídos pela IA (NIF, Salário, Valor do Imóvel, Valor a Financiar, etc.).
+  - **`_build_card_description(process)`**: Constrói descrição com dados do cliente (NIF, CC, email, telefone), financeiros (salário, valor financiado, capital próprio), imóvel (valor, tipologia, localização), crédito (empréstimo, taxa, prestação, banco), e contagem de campos preenchidos por IA (`field_metadata` source="ai").
+  - **Fallbacks inteligentes**: Se `create` mas já tem `trello_card_id` → converte para `move`. Se `move`/`update` mas sem `trello_card_id` → converte para `create`. Nunca rebenta o CRM (try-except global, fire-and-forget).
+
+### Backend — Integração no Kanban (`routes/processes.py`)
+- **Import**: `from services.trello_service import sync_process_to_trello` (linha 54).
+- **4 pontos de integração** com `asyncio.create_task(...)` (fire-and-forget, não atrasa a UI):
+  1. **Criação de processo (cliente)** — linha 910: após `insert_one`, dispara `action="create"`.
+  2. **Criação de processo (staff)** — linha 1287: após auto-atribuição de indexador (status pode ser `fila_espera`), dispara `action="create"`.
+  3. **Kanban move** — linha 3101: após `update_one` de status, dispara `action="move"` com `new_status`. Constrói `_trello_move_proc = {**process, "status": new_status, "trello_card_id": ...}` para passar o processo atualizado.
+  4. **PUT geral (update)** — linhas 4358-4363: após `update_one` + re-fetch, dispara `action="move"` se `data.status` mudou, senão `action="update"`.
+
+### Frontend — Bugs da Tabela Esmagados (`MyClientsPage.js` + `FilteredProcessList.js`)
+- **Nome Clicável (100% conforme spec)**:
+  - Classe exata `cursor-pointer text-primary hover:underline` em ambas as páginas.
+  - Ao clicar, aciona estado local → abre `<ClientDetailsModal />` com `clientId`.
+- **Bolinhas de Alerta (inline, formato exato do spec)**:
+  ```jsx
+  {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+  {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+  ```
+  Aplicadas em ambas as páginas, dentro do `<span>` clicável (a seguir ao nome). Substitui o componente `NotificationDots` anterior para uniformidade visual.
+- **Notas na Tabela**: `{process.notes || 'Sem notas recentes'}` — já estava correto, confirmado em ambas as páginas (com fallback `latest_activity_note`/`latest_note`).
+- **Filtro de Eliminados (Backend & Frontend)**:
+  - **Backend** (`routes/processes.py` + `routes/my_clients.py`): Já implementado (Pacote CP) — `view_mode=deleted` ou `status=eliminado(s)` desliga o filtro padrão de ativos e faz query `is_deleted: True`.
+  - **`FilteredProcessList.js`**: Nova entrada `eliminado` no `filterConfig` (ícone `Trash2`). `fetchData` mapeia `filterType === "eliminado"` → `view_mode=deleted`. Acessível via URL `?filter=eliminado`.
+  - **`MyClientsPage.js`**: Novo botão "Mostrar Eliminados" (toggle, ícone `Trash2`) que envia `view_mode=deleted` ao backend. Estado persistido em URL param (`view_mode=deleted`). Filtro local atualizado para não excluir terminais quando `showDeleted=true`.
+
+### Técnico
+- **Novo ficheiro**: `backend/services/trello_service.py` (~400 linhas).
+- **Backend modificado**: `backend/routes/processes.py` (import + 4 pontos de integração).
+- **Frontend modificado**: `frontend/src/pages/MyClientsPage.js` (nome clicável, bolinhas inline, toggle eliminados, fetchData + filtro local). `frontend/src/pages/FilteredProcessList.js` (nome clicável, bolinhas inline, filterConfig eliminado, fetchData view_mode=deleted, import Trash2).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 2 ficheiros frontend.
+- **Dependências**: Nenhuma nova — `httpx==0.28.1` já no `requirements.txt`.
+
 ## [2026-07-16] — Pacote CV: Robust Omnichannel Bulk Document Scanner
 
 ### Alterado

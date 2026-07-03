@@ -28,7 +28,7 @@ import { getMyClients, getWorkflowStatuses } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText,
   Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download,
-  MessageSquare
+  MessageSquare, Trash2
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 // PACOTE CP — ClientDetailsModal reutilizável
@@ -115,6 +115,7 @@ const MyClientsPage = () => {
   const searchTerm = searchParams.get("search") || "";
   const statusFilter = searchParams.get("status") || "all";
   const showInactive = searchParams.get("show_inactive") === "true";
+  const showDeleted = searchParams.get("view_mode") === "deleted";
   const sortField = searchParams.get("sort") || "updated_at";
   const sortOrder = searchParams.get("order") || "desc";
 
@@ -133,6 +134,7 @@ const MyClientsPage = () => {
   const setSearchTerm = (value) => updateParam("search", value);
   const setStatusFilter = (value) => updateParam("status", value);
   const setShowInactive = (value) => updateParam("show_inactive", value ? "true" : "");
+  const setShowDeleted = (value) => updateParam("view_mode", value ? "deleted" : "");
   const setSortField = (v) => updateParam("sort", v);
   const setSortOrder = (v) => updateParam("order", v);
 
@@ -140,7 +142,7 @@ const MyClientsPage = () => {
     fetchData();
     checkExportPermission();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showInactive]);
+  }, [showInactive, showDeleted]);
 
   const checkExportPermission = async () => {
     try {
@@ -164,7 +166,10 @@ const MyClientsPage = () => {
       // "Mostrar Concluídos" está ativo. Sem isto, o cliente cujo único
       // processo ficou terminal desaparece da lista mesmo com o toggle on.
       const [clientsRes, statusesRes] = await Promise.all([
-        getMyClients({ show_inactive: showInactive ? "true" : "false" }),
+        getMyClients({
+          show_inactive: showInactive ? "true" : "false",
+          ...(showDeleted ? { view_mode: "deleted" } : {}),
+        }),
         getWorkflowStatuses()
       ]);
       
@@ -187,8 +192,10 @@ const MyClientsPage = () => {
       : "";
 
     let result = clients.filter((client) => {
-      // Excluir status terminais por padrão (a menos que o toggle esteja ativo)
-      if (!showInactive && TERMINAL_STATUSES.includes(client.status)) {
+      // Excluir status terminais por padrão (a menos que o toggle esteja ativo).
+      // PACOTE CW: quando showDeleted=true, o backend já retorna apenas
+      // eliminados — não aplicar o filtro terminal local.
+      if (!showInactive && !showDeleted && TERMINAL_STATUSES.includes(client.status)) {
         return false;
       }
 
@@ -232,7 +239,7 @@ const MyClientsPage = () => {
     });
 
     return result;
-  }, [clients, searchTerm, statusFilter, showInactive, sortField, sortOrder]);
+  }, [clients, searchTerm, statusFilter, showInactive, showDeleted, sortField, sortOrder]);
 
   const getPriorityColor = (priority) => {
     switch (priority) {
@@ -470,11 +477,28 @@ const MyClientsPage = () => {
                 {showInactive ? <X className="w-4 h-4" /> : <Filter className="w-4 h-4" />}
                 {showInactive ? "Ocultar Concluídos" : "Mostrar Concluídos"}
               </Button>
+              {/* PACOTE CW — Toggle: Mostrar Eliminados (view_mode=deleted) */}
+              <Button
+                variant={showDeleted ? "default" : "outline"}
+                size="sm"
+                className={`h-10 w-full md:w-auto gap-2 ${showDeleted ? "bg-gray-700 hover:bg-gray-800 text-white" : ""}`}
+                onClick={() => setShowDeleted(!showDeleted)}
+                data-testid="toggle-deleted"
+              >
+                {showDeleted ? <X className="w-4 h-4" /> : <Trash2 className="w-4 h-4" />}
+                {showDeleted ? "Ocultar Eliminados" : "Mostrar Eliminados"}
+              </Button>
             </div>
             {showInactive && (
               <p className="text-xs text-amber-600 mt-2 flex items-center gap-1">
                 <AlertTriangle className="w-3 h-3" />
                 A mostrar todos os processos, incluindo concluídos e desistências
+              </p>
+            )}
+            {showDeleted && (
+              <p className="text-xs text-gray-600 mt-2 flex items-center gap-1">
+                <Trash2 className="w-3 h-3" />
+                A mostrar apenas processos eliminados (recuperação administrativa)
               </p>
             )}
           </CardContent>
@@ -528,7 +552,7 @@ const MyClientsPage = () => {
                           <div className="space-y-1">
                             <div className="flex items-center gap-2">
                               <span
-                                className="font-medium cursor-pointer text-primary hover:underline"
+                                className="cursor-pointer text-primary hover:underline"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   if (client.client_id || client.id) {
@@ -537,11 +561,8 @@ const MyClientsPage = () => {
                                 }}
                               >
                                 {client.client_name}
-                                {/* PACOTE CP: bolinhas de notificação junto ao nome */}
-                                <NotificationDots
-                                  hasUnreadMessages={client.has_unread_messages}
-                                  hasNewDocuments={client.has_new_documents}
-                                />
+                                {client.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+                                {client.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
                               </span>
                               {TERMINAL_STATUSES.includes(client.status) && (
                                 <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px]">

@@ -50,6 +50,8 @@ from services.alerts import (
 )
 from services.realtime_notifications import notify_process_status_change
 from services.encryption import decrypt_client_data
+# PACOTE CW — Trello Mirror Service (sync unidirecional CRM → Trello)
+from services.trello_service import sync_process_to_trello
 
 # Importar serviços refatorados
 from services.process_service import (
@@ -903,7 +905,10 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         }
     )
     logger.info(f"Processo {process_id} criado e associado ao cliente {data.client_id}")
-    
+
+    # === PACOTE CW — Trello Mirror: criar cartão em background ===
+    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
+
     # === CACHE INVALIDATION: Novo processo afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     
@@ -1275,7 +1280,12 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     
     # Registar no histórico
     await log_history(process_id, user, f"Criou processo para cliente {client_name}")
-    
+
+    # === PACOTE CW — Trello Mirror: criar cartão em background ===
+    # Disparado APÓS auto-atribuição de indexador (process_doc["status"] pode
+    # ser fila_espera) para que a coluna Trello reflita o status final.
+    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
+
     # === WEBSOCKET BROADCAST: Novo processo criado por staff ===
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_CREATED,
@@ -3083,7 +3093,13 @@ async def move_process_kanban(
         {"id": process_id},
         {"$set": move_update_data}
     )
-    
+
+    # === PACOTE CW — Trello Mirror: mover cartão em background ===
+    # O cartão é movido para a coluna correspondente ao new_status.
+    # Busca o processo atualizado (tem trello_card_id) e dispara em background.
+    _trello_move_proc = {**process, "status": new_status, "trello_card_id": process.get("trello_card_id")}
+    asyncio.create_task(sync_process_to_trello(_trello_move_proc, action="move", new_status=new_status))
+
     # === CACHE INVALIDATION: Mover processo altera KPIs (concluídos/ativos/desistências) ===
     await invalidate_stats_cache(user_id=user.get("id"))
     
@@ -4338,7 +4354,14 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
 
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    
+
+    # === PACOTE CW — Trello Mirror: atualizar cartão em background ===
+    # Se o status mudou, converte para 'move'; senão, 'update' (descrição com dados IA).
+    if data.status and data.status != process.get("status"):
+        asyncio.create_task(sync_process_to_trello(updated, action="move", new_status=data.status))
+    else:
+        asyncio.create_task(sync_process_to_trello(updated, action="update"))
+
     # === SINCRONIZAÇÃO FINANCEIRA RETROATIVA ===
     # Se o processo está num status de ganho (concluído/escritura), garantir que
     # o snapshot financeiro (process_finances) existe e está atualizado com os
