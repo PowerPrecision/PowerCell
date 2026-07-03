@@ -2447,3 +2447,34 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/routes/portal.py` (GET /me e PUT /me: query baseada em status $nin em vez de is_indexed).
 - Resultado: o perfil do cliente é bloqueado quando o processo avança para além das fases iniciais (pre_registo, clientes_espera, documentacao, eliminado, desistencias). Isto é mais fiável do que depender da flag is_indexed, pois avalia diretamente o status atual do processo no Kanban.
+
+
+---
+Task ID: Pacote CR (Hardcode Changelog Time-Diff Logic)
+Agent: Main Agent (Code Assistant)
+Task: Forçar filtragem temporal na geração de changelog via announcements + prompt IA
+
+Work Log:
+- Análise: o Pacote CC já tinha filtragem temporal via system_changelogs, mas o utilizador reporta que não está a funcionar. Pede para usar a coleção announcements (Mural da Equipa) e injetar a data no prompt da IA como barreira de segurança extra.
+- 3 alterações em changelog_service.py:
+
+1. _get_last_changelog_date() reescrita (PACOTE CR):
+   - Primeiro tenta announcements.find_one({"type": "changelog"}, sort=[("created_at", -1)]).
+   - Fallback para system_changelogs (published_at) se announcements não tiver registo.
+   - Retorna datetime ou None. Não falha se não houver registo.
+
+2. since_date_str adicionada:
+   - since_date_str = since_date.strftime("%Y-%m-%d %H:%M") if since_date else "nunca"
+   - Usada tanto no log como no prompt da IA.
+
+3. Prompt de sistema com instrução temporal obrigatória (PACOTE CR):
+   - temporal_instruction = "IMPORTANTE: A última nota de atualização foi gerada em {since_date_str}. A tua tarefa é extrair e resumir APENAS as novidades e alterações que tenham ocorrido DEPOIS dessa data. Ignora completamente qualquer ponto do histórico que seja anterior a essa data."
+   - system_prompt = CHANGELOG_SYSTEM_PROMPT + "\n\n" + temporal_instruction
+   - A chamada à IA agora usa system_prompt (com a instrução temporal) em vez de CHANGELOG_SYSTEM_PROMPT (constante estática).
+
+- As funções de leitura (read_git_log com --since, _filter_lines_since para markdown) continuam a funcionar — fazem o corte no código Python. O prompt da IA é a barreira de segurança extra para casos onde o corte Python não é perfeito.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/services/changelog_service.py`.
+- Resultado: dupla barreira temporal: (1) código Python filtra a fonte (git --since, markdown _filter_lines_since) baseado na data do último anúncio em announcements; (2) prompt de sistema da IA inclui instrução furiosa "A última nota foi em X. Ignora tudo antes dessa data!" como barreira de segurança extra. O endpoint não falha se não houver last_announcement (since_date=None → since_date_str="nunca" → a IA resume tudo).

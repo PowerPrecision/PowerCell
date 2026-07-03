@@ -3,6 +3,24 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CR: Hardcode Changelog Time-Diff Logic
+
+### Alterado
+- **Filtragem temporal forçada na geração de changelog**: Dupla barreira: (1) código Python filtra a fonte (git `--since`, markdown `_filter_lines_since`) baseado na data do último anúncio em `announcements`; (2) prompt de sistema da IA inclui instrução temporal obrigatória como barreira de segurança extra.
+
+### Backend (`backend/services/changelog_service.py`)
+- **`_get_last_changelog_date()`**: Reescrita para procurar em `announcements` (`{"type": "changelog"}`, `sort=[("created_at", -1)]`) primeiro, com fallback para `system_changelogs` (`published_at`).
+- **`since_date_str`**: `since_date.strftime("%Y-%m-%d %H:%M")` se existir, `"nunca"` se None.
+- **Prompt de sistema**: `system_prompt = CHANGELOG_SYSTEM_PROMPT + "\n\n" + temporal_instruction` onde `temporal_instruction` = "IMPORTANTE: A última nota de atualização foi gerada em {since_date_str}. A tua tarefa é extrair e resumir APENAS as novidades e alterações que tenham ocorrido DEPOIS dessa data. Ignora completamente qualquer ponto do histórico que seja anterior a essa data."
+- **Chamada à IA**: Usa `system_prompt` (com instrução temporal) em vez de `CHANGELOG_SYSTEM_PROMPT` (constante estática).
+
+### Segurança
+- Não falha se não houver `last_announcement` — `since_date=None` → `since_date_str="nunca"` → a IA resume tudo (primeira geração).
+
+### Técnico
+- **Backend** (`backend/services/changelog_service.py`): `_get_last_changelog_date` (linhas 57-105); `since_date_str` (linha 472); `temporal_instruction` + `system_prompt` (linhas 537-547); chamada IA (linha 580).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CQ: Robust Portal Lock Logic
 
 ### Alterado

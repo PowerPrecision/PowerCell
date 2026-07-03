@@ -56,12 +56,34 @@ _DEFAULT_MAX_SOURCE_LINES = 50
 # ====================================================================
 async def _get_last_changelog_date() -> Optional[datetime]:
     """
-    Query à coleção system_changelogs para obter a data (published_at)
-    do último registo publicado.
+    PACOTE CR — Procurar o último anúncio gerado na coleção announcements.
 
-    Returns:
-        datetime do último changelog, ou None se não houver registo anterior.
+    Query: {"type": "changelog"}, sort=[("created_at", -1)].
+    Retorna a data (created_at) do último anúncio, ou None se não houver.
+
+    Fallback: se announcements não tiver registo, tenta system_changelogs
+    (published_at) para retrocompatibilidade.
     """
+    # 1. Tentar announcements (coleção do Mural da Equipa)
+    try:
+        last_announcement = await db.announcements.find_one(
+            {"type": "changelog"},
+            sort=[("created_at", -1)]
+        )
+        if last_announcement and "created_at" in last_announcement:
+            raw = last_announcement["created_at"]
+            if isinstance(raw, datetime):
+                return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
+            if isinstance(raw, str):
+                try:
+                    dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+                    return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
+                except ValueError:
+                    pass
+    except Exception as e:
+        logger.warning("[CHANGELOG-CR] Erro ao obter data do último announcement: %s", e)
+
+    # 2. Fallback: system_changelogs (published_at)
     try:
         last_doc = await db.system_changelogs.find_one(
             {},
@@ -69,20 +91,18 @@ async def _get_last_changelog_date() -> Optional[datetime]:
         )
         if last_doc and last_doc.get("published_at"):
             raw = last_doc["published_at"]
-            # published_at pode ser string ISO ou datetime
             if isinstance(raw, datetime):
                 return raw if raw.tzinfo else raw.replace(tzinfo=timezone.utc)
             if isinstance(raw, str):
-                # Tentar parse ISO
                 try:
                     dt = datetime.fromisoformat(raw.replace("Z", "+00:00"))
                     return dt if dt.tzinfo else dt.replace(tzinfo=timezone.utc)
                 except ValueError:
                     pass
-        return None
     except Exception as e:
-        logger.warning("[CHANGELOG-CC] Erro ao obter data do último changelog: %s", e)
-        return None
+        logger.warning("[CHANGELOG-CR] Erro ao obter data do último changelog (fallback): %s", e)
+
+    return None
 
 
 # ====================================================================
@@ -444,16 +464,17 @@ async def generate_changelog_ai(
     # onde get_ai_client_and_model() lê da BD (config do Admin) com
     # fallback para env vars. Isto respeita a regra multi-provider.
 
-    # PACOTE CC — Obter a data do último changelog gerado para filtrar
+    # PACOTE CR — Obter a data do último anúncio/changelog gerado para filtrar
     # apenas as novidades introduzidas desde então. Se não houver registo
     # anterior, since_date = None e as funções de leitura usam max_source_lines
     # como fallback (comportamento original).
     since_date = await _get_last_changelog_date()
+    since_date_str = since_date.strftime("%Y-%m-%d %H:%M") if since_date else "nunca"
     if since_date:
-        logger.info("[CHANGELOG-CC] Último changelog: %s — a filtrar fonte desde esta data",
-                     since_date.strftime("%Y-%m-%d %H:%M"))
+        logger.info("[CHANGELOG-CR] Último anúncio: %s — a filtrar fonte desde esta data",
+                     since_date_str)
     else:
-        logger.info("[CHANGELOG-CC] Nenhum changelog anterior na BD — a usar fallback de %d linhas",
+        logger.info("[CHANGELOG-CR] Nenhum anúncio anterior na BD — a usar fallback de %d linhas",
                      max_source_lines)
 
     # 1. Recolher dados da fonte com fallback automático em cadeia
@@ -514,6 +535,17 @@ async def generate_changelog_ai(
         source_text = source_text[:8000] + "\n[... truncado]"
 
     # 3. Montar prompt
+    # PACOTE CR — Injeção obrigatória da data no prompt de sistema para
+    # que o LLM faça o corte temporal mesmo que o código Python não consiga
+    # filtrar perfeitamente (barreira de segurança extra).
+    temporal_instruction = (
+        f"IMPORTANTE: A última nota de atualização foi gerada em {since_date_str}. "
+        f"A tua tarefa é extrair e resumir APENAS as novidades e alterações que tenham ocorrido DEPOIS dessa data. "
+        f"Ignora completamente qualquer ponto do histórico que seja anterior a essa data."
+    )
+
+    system_prompt = CHANGELOG_SYSTEM_PROMPT + "\n\n" + temporal_instruction
+
     user_prompt = f"""Aqui estão os dados técnicos recentes do nosso CRM (PowerCell - Crédito Habitacional):
 
 --- INÍCIO DOS DADOS ---
@@ -545,7 +577,7 @@ Transforma estes dados num anúncio de lançamento amigável para os utilizadore
         response = await client.chat.completions.create(
             model=ai_model,
             messages=[
-                {"role": "system", "content": CHANGELOG_SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_prompt},
             ],
             temperature=0.7,
