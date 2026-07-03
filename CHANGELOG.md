@@ -3,6 +3,27 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CQ: Robust Portal Lock Logic
+
+### Alterado
+- **Bloqueio do portal baseado em Fases do Kanban**: A flag `is_indexed` pode não estar atualizada atempadamente na BD. Substituído por avaliação direta do `status` do processo. O perfil é trancado se o processo avançou para além das fases iniciais (`pre_registo`, `clientes_espera`, `documentacao`, `eliminado`, `desistencias`).
+
+### Backend (`backend/routes/portal.py`)
+- **`GET /portal/me`**: Query alterada para `{"status": {"$nin": ["pre_registo", "clientes_espera", "documentacao", "eliminado", "desistencias"]}}`.
+- **`PUT /portal/me`**: Mesma query. Lança 403 se o processo estiver numa fase avançada.
+
+### Evolução da regra de bloqueio
+| Pacote | Regra | Problema |
+|--------|-------|----------|
+| Original | Qualquer processo ativo | Bloqueava em pre_registo |
+| Pacote CB | `status != "pre_registo"` | Bloqueava em fases intermédias |
+| Pacote CF/CI | `is_indexed == True` | Flag pode não estar atualizada |
+| **Pacote CQ** | **`status $nin [fases iniciais]`** | ✅ Avalia diretamente o Kanban |
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `GET /me` (linhas 762-774); `PUT /me` (linhas 849-864).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CP: Fix My Clients Table UI & Filters
 
 ### Corrigido

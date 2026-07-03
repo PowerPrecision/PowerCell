@@ -759,9 +759,16 @@ async def get_client_profile(
     has_process = False
     is_data_confirmed = False
     if process_ids:
-        # PACOTE CI — Verificar se existe pelo menos um processo activo E indexado
+        # PACOTE CQ — O perfil é trancado se o processo avançar para além
+        # da fase de recolha de documentos. Avalia diretamente as Fases do
+        # Kanban (Status) em vez da flag is_indexed (que pode não estar
+        # atualizada atempadamente na BD).
         active_process = await db.processes.find_one(
-            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}, "is_indexed": True},
+            {
+                "id": {"$in": process_ids},
+                "is_deleted": {"$ne": True},
+                "status": {"$nin": ["pre_registo", "clientes_espera", "documentacao", "eliminado", "desistencias"]}
+            },
             {"_id": 0, "id": 1}
         )
         has_process = active_process is not None
@@ -839,9 +846,15 @@ async def update_client_profile(
 
     process_ids = client.get("process_ids", [])
     if process_ids:
-        # PACOTE CI — Verificar se existe pelo menos um processo activo E indexado
+        # PACOTE CQ — O perfil é trancado se o processo avançar para além
+        # da fase de recolha de documentos. Avalia diretamente as Fases do
+        # Kanban (Status) em vez da flag is_indexed.
         active_process = await db.processes.find_one(
-            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}, "is_indexed": True},
+            {
+                "id": {"$in": process_ids},
+                "is_deleted": {"$ne": True},
+                "status": {"$nin": ["pre_registo", "clientes_espera", "documentacao", "eliminado", "desistencias"]}
+            },
             {"_id": 0, "id": 1}
         )
         if active_process:

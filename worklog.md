@@ -2430,3 +2430,20 @@ Stage Summary:
   - `frontend/src/pages/MyClientsPage.js` (nome clicável + ClientDetailsModal + notas lê notes primeiro)
   - `frontend/src/pages/FilteredProcessList.js` (notas lê notes primeiro, empty state "Sem notas recentes")
 - Resultado: (1) filtro eliminados funciona em my_clients.py; (2) bolinhas de notificação renderizadas junto ao nome; (3) nome do cliente é clicável e abre ClientDetailsModal; (4) coluna Notas lê process.notes (sobrescrito pelo Pacote CJ com última atividade real) com fallback.
+
+
+---
+Task ID: Pacote CQ (Robust Portal Lock Logic)
+Agent: Main Agent (Code Assistant)
+Task: Trancar portal baseado em Fases do Kanban (Status) em vez de is_indexed
+
+Work Log:
+- Análise: o Pacote CI usava is_indexed=True para bloquear o perfil, mas a flag pode não estar atualizada atempadamente na BD. O utilizador pede para avaliar diretamente as Fases do Kanban (Status).
+- Substituição em GET /me (linhas 757-774): query alterada de is_indexed: True para status: {$nin: ["pre_registo", "clientes_espera", "documentacao", "eliminado", "desistencias"]}. O perfil é trancado se o processo avançou para além da fase de recolha de documentos.
+- Substituição em PUT /me (linhas 847-864): mesma query. Se active_process existe (processo em fase avançada), lança 403.
+- Frontend (ClientPortal.jsx): sem alteração necessária — isLocked = profile?.has_process === true || isDataConfirmed já funciona com a nova query. has_process só é True quando o processo está numa fase avançada.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/routes/portal.py` (GET /me e PUT /me: query baseada em status $nin em vez de is_indexed).
+- Resultado: o perfil do cliente é bloqueado quando o processo avança para além das fases iniciais (pre_registo, clientes_espera, documentacao, eliminado, desistencias). Isto é mais fiável do que depender da flag is_indexed, pois avalia diretamente o status atual do processo no Kanban.
