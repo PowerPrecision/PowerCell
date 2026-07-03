@@ -757,24 +757,14 @@ async def get_client_profile(
     # Determinar se o cliente tem processo associado (para bloqueio de edição)
     process_ids = client.get("process_ids", [])
     has_process = False
-    # PACOTE BM — is_data_confirmed: verdadeiro quando a Indexação terminou e
-    # validou os dados (campo definido em mark-indexed). O Portal lê esta flag
-    # para bloquear a edição do perfil com mensagem específica.
     is_data_confirmed = False
     if process_ids:
-        # PACOTE CF — has_process deve ser True APENAS SE o processo ativo
-        # estiver indexado (is_indexed == True). Antes (Pacote CB), bloqueava
-        # quando o processo saía do pre_registo, o que era demasiado agressivo.
-        # Agora, clientes com processos em pre_registo ou aguardando indexação
-        # podem alterar o perfil livremente. Só bloqueia quando a Indexação
-        # marca o processo como indexado (is_indexed=True no mark-indexed).
+        # PACOTE CI — Verificar se existe pelo menos um processo activo E indexado
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}, "is_indexed": True},
-            {"_id": 0, "id": 1, "is_data_confirmed": 1, "status": 1}
+            {"_id": 0, "id": 1}
         )
         has_process = active_process is not None
-        if active_process and active_process.get("is_data_confirmed") is True:
-            is_data_confirmed = True
 
     # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
     dados_pessoais = client.get("dados_pessoais", {}) or {}
@@ -849,25 +839,15 @@ async def update_client_profile(
 
     process_ids = client.get("process_ids", [])
     if process_ids:
-        # PACOTE CF — Só bloquear a edição se o processo estiver indexado
-        # (is_indexed == True). Antes (Pacote CB), bloqueava quando o processo
-        # saía do pre_registo, o que era demasiado agressivo. Agora, clientes
-        # com processos em pre_registo ou aguardando indexação podem editar.
+        # PACOTE CI — Verificar se existe pelo menos um processo activo E indexado
         active_process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}, "is_indexed": True},
-            {"_id": 0, "id": 1, "is_data_confirmed": 1, "status": 1}
+            {"_id": 0, "id": 1}
         )
         if active_process:
-            # PACOTE BM — Mensagem específica quando os dados foram confirmados
-            # pela Indexação (is_data_confirmed=True).
-            if active_process.get("is_data_confirmed") is True:
-                raise HTTPException(
-                    status_code=403,
-                    detail="Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito."
-                )
             raise HTTPException(
                 status_code=403,
-                detail="Dados trancados. Processo já em análise."
+                detail="Dados trancados. O seu processo já se encontra em análise."
             )
 
     # ── Filtrar campos permitidos (whitelist) ──

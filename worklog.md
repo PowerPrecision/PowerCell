@@ -2301,3 +2301,19 @@ Stage Summary:
   - `frontend/src/components/ClientDetailsModal.jsx` (NOVO — componente reutilizável com bloco Observações)
   - `frontend/src/pages/FilteredProcessList.js` (nome do cliente clicável abre ClientDetailsModal)
 - Resultado: a modal de detalhes do cliente é agora um componente reutilizável (ClientDetailsModal) que pode ser usado em qualquer ecrã. Inclui o bloco "Observações" (client.notas) com ícone StickyNote. No FilteredProcessList, o nome do cliente é clicável (azul/underline) e abre a modal com os detalhes completos do cliente. O componente faz fetch automático dos dados via GET /api/clients/{id} quando abre.
+
+
+---
+Task ID: Pacote CI (Fix Portal Profile Lock Code)
+Agent: Main Agent (Code Assistant)
+Task: Simplificar e uniformizar código de bloqueio do portal (is_indexed)
+
+Work Log:
+- Análise: o Pacote CF já tinha a query correta (is_indexed: True), mas o código tinha complexidade desnecessária — projeção de is_data_confirmed e status, lógica condicional de is_data_confirmed, e duas mensagens de erro diferentes no PUT.
+- Substituição GET /me (linhas 757-767): código exato pedido — query com is_indexed: True, projeção minimalista {"_id": 0, "id": 1}, has_process = active_process is not None. Removida lógica is_data_confirmed (is_data_confirmed fica sempre False — o frontend continua a funcionar pois isDataConfirmed será false e isLocked depende apenas de has_process).
+- Substituição PUT /me (linhas 840-851): código exato pedido — mesma query, projeção minimalista, mensagem unificada "Dados trancados. O seu processo já se encontra em análise." Removidas as duas mensagens condicionais (is_data_confirmed vs não).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro modificado: `backend/routes/portal.py` (GET /me e PUT /me simplificados com código exato pedido).
+- Resultado: o código de bloqueio do portal está agora simples e uniforme — ambos os endpoints usam a mesma query minimalista (is_indexed: True, projeção {"_id": 0, "id": 1}) e a mesma mensagem de erro. O perfil só é bloqueado quando o processo está indexado.

@@ -3,6 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CI: Fix Portal Profile Lock Code
+
+### Alterado
+- **Simplificação do código de bloqueio do portal**: O Pacote CF já tinha a query correta (`is_indexed: True`), mas com complexidade desnecessária (projeção de `is_data_confirmed`/`status`, lógica condicional, duas mensagens de erro). Simplificado para o código exato pedido: query minimalista, projeção `{"_id": 0, "id": 1}`, mensagem unificada.
+
+### Backend (`backend/routes/portal.py`)
+- **`GET /portal/me`**: `has_process = active_process is not None` (projeção minimalista, sem `is_data_confirmed`/`status`).
+- **`PUT /portal/me`**: Mensagem unificada: "Dados trancados. O seu processo já se encontra em análise." (removidas as duas mensagens condicionais).
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `GET /me` (linhas 757-767); `PUT /me` (linhas 840-851).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CH: Reusable Client Details Modal with Observations
 
 ### Adicionado
