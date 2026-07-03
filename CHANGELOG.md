@@ -3,6 +3,30 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CF: Lock Client Portal Profile ONLY if is_indexed
+
+### Corrigido
+- **Bloqueio do perfil demasiado agressivo**: O perfil do cliente era bloqueado quando o processo saía do `pre_registo` (Pacote CB), o que impedia clientes em fases intermédias (documentacao, analise, etc.) de editar o perfil. Corrigido: o bloqueio agora acontece **apenas** quando o processo tem `is_indexed == True` (ou seja, a Indexação marcou o processo como indexado). Clientes com processos em `pre_registo`, `clientes_espera`, `documentacao`, `analise`, ou qualquer fase anterior à indexação podem editar o perfil livremente.
+
+### Backend (`backend/routes/portal.py`)
+- **`GET /portal/me`**: Query alterada para `{"id": {"$in": process_ids}, "is_deleted": {"$ne": True}, "is_indexed": True}`. `has_process = active_process is not None` (simplificado).
+- **`PUT /portal/me`**: Mesma query com `is_indexed: True`. Só lança 403 se o processo estiver indexado.
+
+### Frontend (`frontend/src/pages/ClientPortal.jsx`)
+- **Comentário atualizado** para refletir a nova regra (PACOTE CF). Lógica `isLocked = profile?.has_process === true || isDataConfirmed` sem alteração — já obedece ao backend.
+
+### Evolução da regra de bloqueio
+| Pacote | Regra de bloqueio |
+|--------|------------------|
+| Original (pré-BM) | `has_process = True` para qualquer processo ativo |
+| Pacote CB | `status != "pre_registo" OR is_data_confirmed` |
+| **Pacote CF** | **`is_indexed == True`** (apenas quando a Indexação marca o processo) |
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `GET /portal/me` (linhas 765-777); `PUT /portal/me` (linhas 850-871).
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): comentário (linhas 1413-1416).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote CE: Add Restore Button to BackupsPage
 
 ### Adicionado

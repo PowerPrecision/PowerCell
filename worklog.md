@@ -2222,3 +2222,31 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `frontend/src/pages/BackupsPage.js`.
 - Resultado: botão "Restaurar Backup" vermelho (destructive) adicionado na barra superior ao lado de "Verificar Integridade". Clique abre AlertDialog sério com aviso de operação destrutiva. Se aceite, dispara POST /api/backup/restore (Pacote CD) com confirmação RESTAURAR_PRODUCAO. Overlay de loading full-screen com texto "A descarregar e a restaurar a base de dados (isto pode demorar alguns minutos)...". Sucesso: toast.success + window.location.reload() após 1.5s para carregar dados limpos. Erro: toast.error com detalhe do backend.
+
+
+---
+Task ID: Pacote CF (Lock Client Portal Profile ONLY if is_indexed)
+Agent: Main Agent (Code Assistant)
+Task: Bloquear perfil do cliente apenas quando o processo está indexado
+
+Work Log:
+- Análise do estado atual (Pacote CB): GET /portal/me e PUT /portal/me bloqueavam o perfil quando o processo tinha saído do pre_registo (status != "pre_registo") OU is_data_confirmed == True. Isto era demasiado agressivo — bloqueava clientes cujo processo estava em fases intermédias (documentacao, analise, etc.) mas ainda não tinha sido indexado.
+- Pacote CF: altera a query de ambos os endpoints para filtrar por is_indexed: True. Agora has_process só é True quando o processo ativo tem is_indexed == True (ou seja, a Indexação marcou o processo como indexado no mark-indexed). Clientes com processos em pre_registo, clientes_espera, documentacao, analise, etc. podem editar o perfil livremente.
+- Fix GET /portal/me (portal.py linhas 757-777):
+  - Query: `{"id": {"$in": process_ids}, "is_deleted": {"$ne": True}, "is_indexed": True}`
+  - has_process = active_process is not None (simplificado — sem lógica condicional de status)
+  - is_data_confirmed continua a ser True apenas quando o processo tem is_data_confirmed == True
+- Fix PUT /portal/me (portal.py linhas 850-871):
+  - Mesma query com is_indexed: True
+  - Se active_process existe (is_indexed=True), lança 403 com mensagem apropriada
+  - Se não existe (processo não indexado), permite a edição
+- Fix ClientPortal.jsx (linha 1413-1418):
+  - Comentário atualizado para refletir a nova regra (PACOTE CF)
+  - isLocked = profile?.has_process === true || isDataConfirmed — sem alteração de lógica, apenas o backend agora devolve has_process correto
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/portal.py` (GET /portal/me + PUT /portal/me: query agora filtra por is_indexed: True)
+  - `frontend/src/pages/ClientPortal.jsx` (comentário atualizado para PACOTE CF; lógica isLocked sem alteração — já obedece ao backend)
+- Resultado: o perfil do cliente só é bloqueado quando o processo associado está indexado (is_indexed == True). Clientes com processos em pre_registo, clientes_espera, documentacao, analise, ou qualquer fase anterior à indexação podem editar o seu perfil livremente no Portal do Cliente. A flag is_data_confirmed (Pacote BM) continua a funcionar para mostrar o Alert âmbar específico quando os dados foram confirmados pela Indexação.
