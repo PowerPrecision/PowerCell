@@ -3,6 +3,27 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CG: Show Latest Activity Note in Process Lists
+
+### Corrigido
+- **Coluna de Notas mostrava campo desatualizado**: As listas de processos (`FilteredProcessList.js` e `MyClientsPage.js`) mostravam `process.notes` (campo estático do processo) em vez da última nota real que o consultor escreveu na timeline. Corrigido: o backend agora injeta `latest_activity_note` (da coleção `activities`) em ambos os endpoints de listagem, e o frontend lê este campo.
+
+### Backend
+- **`GET /my-clients` (processes.py)**: Adicionado batch enrichment `latest_activity_note` via aggregation na coleção `activities` (`$match` por `process_id` + `comment` não vazio, `$sort` por `created_at` descendente, `$group` com `$first`). Injetado em `clients_list.append`. Leads ficam com `null`.
+- **`GET /my-clients` (my_clients.py)**: Mesma aggregation. Injetado em cada processo do array `processes`.
+- **`GET /processes`**: Já tinha `latest_note` (Pacote BT) — mantido para retrocompatibilidade.
+
+### Frontend
+- **`FilteredProcessList.js`**: Atualizado para ler `latest_activity_note` primeiro (fallback para `latest_note` do Pacote BT, depois `process.notes`).
+- **`MyClientsPage.js`**: Nova coluna "Notas" adicionada entre "Ações Pendentes" e "Última Atualização". Lê `client.latest_activity_note` com fallback.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): batch enrichment `latest_activity_note` no `GET /my-clients` (linhas 2870-2890); injeção no `clients_list.append` (linhas 2956-2959).
+- **Backend** (`backend/routes/my_clients.py`): batch enrichment `latest_activity_note` (linhas 274-301).
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): lê `latest_activity_note` (linhas 546-552).
+- **Frontend** (`frontend/src/pages/MyClientsPage.js`): coluna "Notas" (TableHead linha 506-507; TableCell linhas 591-604).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote CF: Lock Client Portal Profile ONLY if is_indexed
 
 ### Corrigido

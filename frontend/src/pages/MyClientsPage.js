@@ -503,6 +503,8 @@ const MyClientsPage = () => {
                       <TableHead>Cliente</TableHead>
                       <TableHead>Fase</TableHead>
                       <TableHead>Ações Pendentes</TableHead>
+                      {/* PACOTE CG — coluna Notas com latest_activity_note */}
+                      <TableHead className="min-w-[140px] max-w-[220px]">Notas</TableHead>
                       <TableHead>Última Atualização</TableHead>
                       <TableHead className="text-right">Ações</TableHead>
                     </TableRow>
@@ -585,6 +587,20 @@ const MyClientsPage = () => {
                               Sem pendências
                             </span>
                           )}
+                        </TableCell>
+                        {/* PACOTE CG — coluna Notas com latest_activity_note */}
+                        <TableCell className="min-w-[140px] max-w-[220px]">
+                          {(() => {
+                            const noteText = client.latest_activity_note || client.latest_note || client.notes || "";
+                            if (noteText) {
+                              return (
+                                <div className="line-clamp-2 text-sm text-gray-500" title={noteText}>
+                                  {noteText.length > 60 ? noteText.substring(0, 60) + '…' : noteText}
+                                </div>
+                              );
+                            }
+                            return <span className="text-xs text-gray-400">—</span>;
+                          })()}
                         </TableCell>
                         <TableCell className="text-gray-500 text-sm">
                           <div className="flex items-center gap-1">

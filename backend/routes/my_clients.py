@@ -271,6 +271,35 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
         p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
         p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
 
+    # ====================================================================
+    # PACOTE CG — BATCH ENRIQUECIMENTO: latest_activity_note
+    # Para cada processo, busca a atividade/comentário mais recente.
+    # O frontend (MyClientsPage) lê este campo para a coluna "Notas".
+    # ====================================================================
+    _cg_process_ids = [p["id"] for p in processes if p.get("id")]
+    _cg_notes_map = {}
+    if _cg_process_ids:
+        _cg_latest_notes = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": _cg_process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "latest_activity_note": {"$first": "$comment"},
+                "latest_activity_note_at": {"$first": "$created_at"},
+                "latest_activity_note_by": {"$first": "$user_name"},
+            }}
+        ]).to_list(1000)
+        _cg_notes_map = {r["_id"]: r for r in _cg_latest_notes}
+
+    for p in processes:
+        note_info = _cg_notes_map.get(p.get("id"), {})
+        p["latest_activity_note"] = note_info.get("latest_activity_note")
+        p["latest_activity_note_at"] = note_info.get("latest_activity_note_at")
+        p["latest_activity_note_by"] = note_info.get("latest_activity_note_by")
+
     # Combinar processos + leads
     all_clients = leads + processes
 

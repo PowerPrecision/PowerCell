@@ -2867,6 +2867,28 @@ async def get_my_clients(
         ]).to_list(1000)
         _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
 
+    # PACOTE CG — BATCH ENRIQUECIMENTO: latest_activity_note
+    # Para cada processo, busca a atividade/comentário mais recente na
+    # coleção activities. O frontend (MyClientsPage) lê este campo para
+    # a coluna "Notas" — mostra sempre a última interação real do consultor.
+    _cg_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
+    _cg_notes_map = {}
+    if _cg_process_ids:
+        _cg_latest_notes = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": _cg_process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "latest_activity_note": {"$first": "$comment"},
+                "latest_activity_note_at": {"$first": "$created_at"},
+                "latest_activity_note_by": {"$first": "$user_name"},
+            }}
+        ]).to_list(1000)
+        _cg_notes_map = {r["_id"]: r for r in _cg_latest_notes}
+
     # Construir lista de clientes com informações enriquecidas
     clients_list = []
     for p in paginated_items:
@@ -2875,6 +2897,7 @@ async def get_my_clients(
             # Leads não têm mensagens/documentos do portal
             p["has_unread_messages"] = False
             p["has_new_documents"] = False
+            p["latest_activity_note"] = None
             clients_list.append(p)
             continue
         
@@ -2929,7 +2952,11 @@ async def get_my_clients(
             "deed_date": p.get("deed_date"),
             "has_property": bool(p.get("property_id")),
             "has_unread_messages": _bi_unread_map.get(p.get("id"), False),
-            "has_new_documents": _bi_new_docs_map.get(p.get("id"), False)
+            "has_new_documents": _bi_new_docs_map.get(p.get("id"), False),
+            # PACOTE CG — última nota real do consultor (da coleção activities)
+            "latest_activity_note": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note"),
+            "latest_activity_note_at": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note_at"),
+            "latest_activity_note_by": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note_by"),
         })
     
     # Calcular total de páginas

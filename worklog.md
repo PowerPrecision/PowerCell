@@ -2250,3 +2250,25 @@ Stage Summary:
   - `backend/routes/portal.py` (GET /portal/me + PUT /portal/me: query agora filtra por is_indexed: True)
   - `frontend/src/pages/ClientPortal.jsx` (comentário atualizado para PACOTE CF; lógica isLocked sem alteração — já obedece ao backend)
 - Resultado: o perfil do cliente só é bloqueado quando o processo associado está indexado (is_indexed == True). Clientes com processos em pre_registo, clientes_espera, documentacao, analise, ou qualquer fase anterior à indexação podem editar o seu perfil livremente no Portal do Cliente. A flag is_data_confirmed (Pacote BM) continua a funcionar para mostrar o Alert âmbar específico quando os dados foram confirmados pela Indexação.
+
+
+---
+Task ID: Pacote CG (Show Latest Activity Note in Process Lists)
+Agent: Main Agent (Code Assistant)
+Task: Mostrar última nota real do consultor nas listas de processos
+
+Work Log:
+- Análise do estado atual: FilteredProcessList.js já lê latest_note (Pacote BT, backend GET /processes injeta via aggregation activities). MyClientsPage.js NÃO tem coluna de notas e não lê latest_note nem latest_activity_note. Backend GET /my-clients (processes.py e my_clients.py) NÃO injeta latest_note.
+- Backend 1 — processes.py GET /my-clients (linhas 2870-2890): adicionado batch enrichment _cg_notes_map com aggregation activities ($match por process_id + comment não vazio, $sort created_at -1, $group com $first). Injetado latest_activity_note, latest_activity_note_at, latest_activity_note_by no clients_list.append. Leads ficam com latest_activity_note=None.
+- Backend 2 — my_clients.py GET /my-clients (linhas 274-301): mesma aggregation _cg_notes_map. Injetado latest_activity_note, latest_activity_note_at, latest_activity_note_by em cada processo do array processes.
+- Frontend 1 — FilteredProcessList.js (linha 546-552): atualizado para ler latest_activity_note primeiro (fallback para latest_note do Pacote BT, depois process.notes para retrocompatibilidade).
+- Frontend 2 — MyClientsPage.js: adicionada coluna "Notas" (TableHead) entre "Ações Pendentes" e "Última Atualização". Célula lê client.latest_activity_note (fallback para latest_note e notes). line-clamp-2 com truncate a 60 chars + title para tooltip.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros nos 2 ficheiros frontend.
+
+Stage Summary:
+- 4 ficheiros modificados:
+  - `backend/routes/processes.py` (GET /my-clients: batch enrichment latest_activity_note)
+  - `backend/routes/my_clients.py` (GET /my-clients: batch enrichment latest_activity_note)
+  - `frontend/src/pages/FilteredProcessList.js` (lê latest_activity_note com fallback)
+  - `frontend/src/pages/MyClientsPage.js` (nova coluna "Notas" com latest_activity_note)
+- Resultado: ambas as listas de processos (FilteredProcessList e MyClientsPage) mostram agora a última nota real do consultor (da coleção activities) em vez do campo desatualizado process.notes. A aggregation busca o comentário mais recente (created_at DESC) para cada processo e injeta em latest_activity_note. O frontend lê este campo com fallback para latest_note (Pacote BT) e process.notes (retrocompatibilidade).

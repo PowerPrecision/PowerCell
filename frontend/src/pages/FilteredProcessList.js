@@ -543,13 +543,13 @@ const FilteredProcessList = () => {
                               )}
                             </TableCell>
                           )}
-                          {/* PACOTE BT (Fix 3): Notas do Consultor — lê latest_note */}
-                          {/* latest_note é projetado pelo backend (Pacote BT) a partir da
-                              última atividade/comentário do histórico do processo. Fallback
-                              para process.notes (campo direto do processo) para retrocompat. */}
+                          {/* PACOTE CG: Notas do Consultor — lê latest_activity_note */}
+                          {/* latest_activity_note é injetado pelo backend (Pacote CG) a partir
+                              da última atividade/comentário da coleção activities. Fallback
+                              para latest_note (Pacote BT) e process.notes para retrocompat. */}
                           <TableCell className="min-w-[140px] max-w-[220px]">
                             {(() => {
-                              const noteText = process.latest_note || process.notes || "";
+                              const noteText = process.latest_activity_note || process.latest_note || process.notes || "";
                               if (noteText) {
                                 return (
                                   <div className="line-clamp-2 text-sm text-muted-foreground" title={noteText}>
