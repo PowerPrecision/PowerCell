@@ -2478,3 +2478,47 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/services/changelog_service.py`.
 - Resultado: dupla barreira temporal: (1) código Python filtra a fonte (git --since, markdown _filter_lines_since) baseado na data do último anúncio em announcements; (2) prompt de sistema da IA inclui instrução furiosa "A última nota foi em X. Ignora tudo antes dessa data!" como barreira de segurança extra. O endpoint não falha se não houver last_announcement (since_date=None → since_date_str="nunca" → a IA resume tudo).
+
+
+---
+Task ID: Pacote CS (Data Provenance Foundation)
+Agent: Main Agent (Code Assistant)
+Task: Rastreabilidade de Dados (field_metadata) em clients, processes e portal
+
+Work Log:
+- Análise dos 3 endpoints PUT:
+  1. clients.py update_client (linha 1493): aceita ClientUpdate, faz $set update_dict. Não recebia request.
+  2. processes.py update_process (linha 3844): aceita ProcessUpdate, faz $set update_data na linha 4325. Já recebe request.
+  3. portal.py update_client_profile (linha 812): aceita ClientProfileUpdate, faz $set mongo_update na linha 940.
+
+- Alteração 1 — clients.py update_client:
+  - Adicionado `request: Request` à assinatura da função.
+  - Após construir update_dict, lê raw_body = await request.json() e extrai field_metadata.
+  - Se field_metadata existir e for dict, faz merge com existing_metadata (client.get("field_metadata") ou {}). merged_metadata = {**existing, **new}. update_dict["field_metadata"] = merged_metadata.
+  - Merge seguro: não apaga metadata de campos que não foram atualizados neste request.
+
+- Alteração 2 — processes.py update_process:
+  - Antes do $set, lê raw_body = await request.json() e extrai field_metadata.
+  - Mesma lógica de merge: existing_metadata = process.get("field_metadata") ou {}. merged = {**existing, **new}. update_data["field_metadata"] = merged.
+  - Merge seguro preserva metadata de campos não atualizados.
+
+- Alteração 3 — portal.py update_client_profile:
+  - Após processar contacto_updates e dp_updates, injeta automaticamente field_metadata para cada campo atualizado pelo cliente.
+  - Para cada key em contacto_updates: field_metadata_portal[f"contacto.{key}"] = {"source": "client", "updated_at": now}.
+  - Para cada key em dp_updates: field_metadata_portal[f"dados_pessoais.{key}"] = {"source": "client", "updated_at": now}.
+  - Merge com existing_fm (client.get("field_metadata") ou {}). mongo_update["field_metadata"] = merged_fm.
+  - Automático: o cliente não precisa de enviar field_metadata — o backend injeta.
+
+- Formato do field_metadata:
+  {"dados_pessoais.nif": {"source": "ai", "updated_at": "2026-07-16T...", "confidence": 0.95},
+   "contacto.email": {"source": "client", "updated_at": "2026-07-16T..."},
+   "financial_data.salario_bruto": {"source": "manual", "updated_at": "2026-07-16T..."}}
+
+- Validação: `py_compile` ✓ em todos os 3 ficheiros; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - `backend/routes/clients.py` (update_client: request adicionado + field_metadata merge)
+  - `backend/routes/processes.py` (update_process: field_metadata merge antes do $set)
+  - `backend/routes/portal.py` (update_client_profile: field_metadata automático source=client)
+- Resultado: Data Provenance implementada. O objeto field_metadata é aceito em PUT de clients e processes (merge seguro), e injetado automaticamente no Portal do Cliente com source="client". O formato é um dict onde a chave é o nome do campo (ex: "dados_pessoais.nif") e o valor é {"source": "ai"|"manual"|"client", "updated_at": "ISO", "confidence": 0.95}. O merge preserva metadata de campos não atualizados.

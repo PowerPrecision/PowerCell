@@ -3,6 +3,35 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CS: Data Provenance Foundation (Backend)
+
+### Adicionado
+- **Rastreabilidade de Dados (`field_metadata`)**: Novo objeto `field_metadata` em `clients` e `processes` que rastreia a origem e data de atualização de cada campo. Formato: `{"dados_pessoais.nif": {"source": "ai"|"manual"|"client", "updated_at": "ISO", "confidence": 0.95}}`.
+
+### Backend
+- **`PUT /clients/{id}`** (`routes/clients.py`): Aceita `field_metadata` do frontend e faz **merge seguro** (`{**existing, **new}`) — não apaga metadata de campos não atualizados. Adicionado `request: Request` à assinatura.
+- **`PUT /processes/{id}`** (`routes/processes.py`): Mesma lógica de merge antes do `$set`.
+- **`PUT /portal/me`** (`routes/portal.py`): **Injeção automática** — para cada campo atualizado pelo cliente, injeta `field_metadata[f"contacto.{key}"] = {"source": "client", "updated_at": now}`. O cliente não precisa de enviar `field_metadata`.
+
+### Formato do `field_metadata`
+```json
+{
+  "dados_pessoais.nif": {"source": "ai", "updated_at": "2026-07-16T...", "confidence": 0.95},
+  "contacto.email": {"source": "client", "updated_at": "2026-07-16T..."},
+  "financial_data.salario_bruto": {"source": "manual", "updated_at": "2026-07-16T..."}
+}
+```
+
+### Segurança
+- **Merge seguro**: `{**existing_metadata, **new_metadata}` — apenas campos enviados neste request são sobrescritos; metadata de campos não atualizados é preservada.
+- **Portal automático**: O cliente não envia `field_metadata` — o backend injeta `source="client"` automaticamente.
+
+### Técnico
+- **Backend** (`backend/routes/clients.py`): `request: Request` (linha 1496); `field_metadata` merge (linhas 1580-1588).
+- **Backend** (`backend/routes/processes.py`): `field_metadata` merge (linhas 4326-4337).
+- **Backend** (`backend/routes/portal.py`): injeção automática `source="client"` (linhas 924-944).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CR: Hardcode Changelog Time-Diff Logic
 
 ### Alterado

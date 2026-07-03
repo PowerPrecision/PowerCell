@@ -4322,6 +4322,20 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 logger.error(f"  Suspeito root: update_data[{k}] = {type(v).__name__}: {repr(v)[:100]}")
         raise HTTPException(status_code=500, detail=f"TypeError em encrypt: {e} | {tb.split(chr(10))[-3] if tb else 'no traceback'}")
     inject_cdc_context(update_data, user)
+
+    # PACOTE CS — Data Provenance: aceitar field_metadata do frontend
+    # e fazer merge seguro (não apaga metadata de campos não atualizados).
+    # Formato: {"financial_data.salario_bruto": {"source": "ai", "updated_at": "...", "confidence": 0.95}}
+    try:
+        raw_body_cs = await request.json()
+    except Exception:
+        raw_body_cs = {}
+    field_metadata_cs = raw_body_cs.get("field_metadata")
+    if field_metadata_cs and isinstance(field_metadata_cs, dict):
+        existing_metadata_cs = process.get("field_metadata") or {}
+        merged_metadata_cs = {**existing_metadata_cs, **field_metadata_cs}
+        update_data["field_metadata"] = merged_metadata_cs
+
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
     

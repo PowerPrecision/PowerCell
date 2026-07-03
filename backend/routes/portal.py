@@ -921,6 +921,28 @@ async def update_client_profile(
         for key, value in update_fields["dados_pessoais"].items():
             mongo_update[f"dados_pessoais.{key}"] = value
 
+    # PACOTE CS — Data Provenance: injetar automaticamente field_metadata
+    # com source="client" para cada campo atualizado pelo cliente no Portal.
+    # Formato: {"contacto.email": {"source": "client", "updated_at": "ISO"}}
+    field_metadata_portal = {}
+    if "contacto" in update_fields:
+        for key in update_fields["contacto"]:
+            field_metadata_portal[f"contacto.{key}"] = {
+                "source": "client",
+                "updated_at": now
+            }
+    if "dados_pessoais" in update_fields:
+        for key in update_fields["dados_pessoais"]:
+            field_metadata_portal[f"dados_pessoais.{key}"] = {
+                "source": "client",
+                "updated_at": now
+            }
+    if field_metadata_portal:
+        # Merge com field_metadata existente (não apaga campos anteriores)
+        existing_fm = client.get("field_metadata") or {}
+        merged_fm = {**existing_fm, **field_metadata_portal}
+        mongo_update["field_metadata"] = merged_fm
+
     result = await db.clients.update_one(
         {"id": client_id},
         {"$set": mongo_update}

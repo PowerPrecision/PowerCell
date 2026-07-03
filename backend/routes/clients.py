@@ -1493,6 +1493,7 @@ async def create_client(
 async def update_client(
     client_id: str,
     client_data: ClientUpdate,
+    request: Request,
     user: dict = Depends(get_current_user)
 ):
     """Actualizar dados de um cliente."""
@@ -1565,7 +1566,7 @@ async def update_client(
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas is not None else None
     
     update_dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    
+
     if sanitized_nome:
         update_dict["nome"] = sanitized_nome
     if sanitized_contacto:
@@ -1576,6 +1577,16 @@ async def update_client(
         update_dict["tags"] = client_data.tags
     if sanitized_notas is not None:
         update_dict["notas"] = sanitized_notas
+
+    # PACOTE CS — Data Provenance: aceitar field_metadata do frontend
+    # e fazer merge seguro (não apaga metadata de campos não atualizados).
+    # Formato: {"dados_pessoais.nif": {"source": "manual", "updated_at": "...", "confidence": 0.95}}
+    raw_body = await request.json() if hasattr(request, 'json') else {}
+    field_metadata = raw_body.get("field_metadata")
+    if field_metadata and isinstance(field_metadata, dict):
+        existing_metadata = client.get("field_metadata") or {}
+        merged_metadata = {**existing_metadata, **field_metadata}
+        update_dict["field_metadata"] = merged_metadata
 
     # RGPD: Encriptar dados sensíveis antes de actualizar
     # Isto garante que NIFs, telefones e outros dados sensíveis
