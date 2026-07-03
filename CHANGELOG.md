@@ -3,6 +3,54 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CU: Safe Staggered AI Bulk Scanner Script
+
+### Adicionado
+- **Script `backend/scripts/bulk_ai_document_scan.py`**: Script de background que percorre documentos legados associados a processos ativos e extrai dados com IA, preenchendo campos vazios e marcando proveniência no `field_metadata` (`source: "ai"`). Desenhado para conta de API gratuita — **rate-limit extremamente conservador e imune a falhas**.
+
+### Travões de Segurança (CRÍTICO)
+- **Pausa pós-sucesso**: Após cada extração com sucesso, `await asyncio.sleep(60)` (1 minuto) para não estourar o RPM gratuito.
+- **Pausa de "castigo"**: Se apanhar erro de rate-limit (429 Too Many Requests ou exceção genérica de rate limit), faz `await asyncio.sleep(300)` (5 minutos) e `continue` para o próximo documento — **não rebenta o script**.
+- **Deteção de rate-limit robusta**: Cobre (1) `RateLimitError` custom de `services.ai_document`, (2) `openai.RateLimitError` do SDK, (3) heurística por mensagem ("429", "rate limit", "too many requests", "quota", "throttle", "tpm", "rpm limit").
+- **Safety net**: `try-except` no loop principal apanha qualquer `RateLimitError` ou exceção genérica que escape do helper interno — o script nunca rebenta por rate-limit.
+
+### Lógica de Pesquisa
+1. **Processos ativos não-terminais**: `is_deleted != True` E `status $nin [concluido, desistencias, desistido, cancelado, arquivado, eliminado]`.
+2. **Campos-chave vazios**: Verifica cliente (`dados_pessoais.nif`, `dados_pessoais.documento_id`) e processo (`financial_data.salario_bruto`/`monthly_income`/`valor_financiado`, `real_estate_data.valor_imovel`/`valor_patrimonial`, `credit_data.requested_amount`/`interest_rate`/`monthly_payment`).
+3. **Documentos com ficheiro em S3**: Procura em `document_metadata` (s3_path exists) e `documents` (status UPLOADED/RECEIVED/SUBMITTED com s3_path).
+4. **Apenas processa** processos que tenham pelo menos 1 campo vazio E documentos associados.
+
+### Respeito por Dados Existentes
+- **`manually_edited_fields`**: Campos na lista `manually_edited_fields` do processo **não são sobrescritos** pela IA.
+- **`field_metadata[source]="manual"`**: Campos já marcados como manuais (no processo ou no cliente) **não são sobrescritos** — o Consultor tem prioridade sobre a IA.
+- **Merge seguro de `field_metadata`**: `{**existing_fm, **new_ai_fm}` — não apaga metadata de campos não atualizados neste request (Pacote CS).
+- **`ai_extraction_history`**: Cada extração é registada no array `ai_extraction_history` do processo (doc_id, filename, document_type, fields, analyzed_at, source_collection) para auditoria.
+
+### Atualização da BD
+- **Cliente**: `dados_pessoais.*` (NIF, CC, data_nascimento, etc.) + `field_metadata["dados_pessoais.<field>"] = {source:"ai", updated_at, confidence?}`.
+- **Processo**: `financial_data.*`, `real_estate_data.*`, `credit_data.*` + `field_metadata["<group>.<field>"] = {source:"ai", ...}`.
+- **Separação cliente/processo**: helper `split_metadata_client_process` manda `dados_pessoais.*`/`contacto.*`/`nome` para o cliente; restantes para o processo.
+
+### Reutilização de Serviços Existentes
+- **`analyze_single_document`** (`services/ai_document.py`): Já tem tenacity retry em `RateLimitError` com backoff exponencial (2-32s, 5 tentativas) + `MAX_CONCURRENT_ANALYSIS=5`. Este script adiciona uma camada EXTRA de segurança por cima.
+- **`build_update_data_from_extraction`** (`services/ai_document.py`): Mapeia extração → formato de update do processo (com validação de NIF, filtragem de placeholders como "YYYY-MM-DD" e "123456789").
+- **`s3_service.get_file_content`** (`services/s3_storage.py`): Lê bytes do S3 (síncrono → envolvido em `asyncio.to_thread` para não bloquear o event loop).
+
+### CLI
+```
+cd backend
+python scripts/bulk_ai_document_scan.py --dry-run              # simular
+python scripts/bulk_ai_document_scan.py --limit 10             # processar 10 docs
+python scripts/bulk_ai_document_scan.py --process-id <uuid>    # processo específico
+python scripts/bulk_ai_document_scan.py --sleep-success 60 --sleep-rate-limit 300
+```
+
+### Técnico
+- **Novo ficheiro**: `backend/scripts/bulk_ai_document_scan.py` (~430 linhas).
+- **Bootstrap**: `sys.path.insert(backend/)`, `load_dotenv(backend/.env)`, `AsyncIOMotorClient`, `asyncio.run(_run())` — segue convenção de `seed_qa_ultimate.py` e `backfill_empty_fields.py`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+- **Dependências**: Nenhuma nova — usa `motor`, `python-dotenv`, `openai`, `boto3` (já instalados no backend).
+
 ## [2026-07-16] — Pacote CT: AI Field Indicator UI (Frontend)
 
 ### Adicionado

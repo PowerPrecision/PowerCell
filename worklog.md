@@ -2570,3 +2570,37 @@ Stage Summary:
   - `frontend/src/pages/ProcessDetails.js` (import + helper + 10 AIBadge + MANUAL_FIELDS_BY_CARD no executeSave)
   - `frontend/src/pages/ClientDetailPage.js` (import + ContactRow meta + 6 call sites + 2 onEdit + handleEditSave + 4 modal AIBadge)
 - Resultado: Data Provenance UI completa. AIBadge mostra Sparkles roxo (IA) ou User teal (Cliente) ao lado de campos importantes. Quando o Consultor edita e guarda, o frontend envia field_metadata com source="manual" → backend faz merge → badge desaparece (o humano sobrepôs o dado). Compatível com Pacote CS (backend field_metadata) e com o Portal do Cliente (injeção automática source="client").
+
+---
+Task ID: Pacote CU (Safe Staggered AI Bulk Scanner Script)
+Agent: Main Agent (Code Assistant)
+Task: Script de background para processar documentos legados com IA, com rate-limit conservador e imune a falhas
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacotes CS e CT confirmados implementados).
+- Clonado repo PowerCell branch dev para /tmp/powercell_cu → /home/z/powercell_cu (commit base b0f46ed).
+
+- 2 subagentes Explore em paralelo:
+  1. Infraestrutura de IA: Encontrado `services/ai_document.py` (3150 linhas) com `analyze_single_document(content, filename, client_name, process_id) -> Dict` como entry point canónico. Usa OpenAI gpt-4o-mini via AsyncOpenAI, EMERGENT_LLM_KEY, tenacity retry em RateLimitError custom (5 tentativas, backoff exponencial 2-32s), MAX_CONCURRENT_ANALYSIS=5. `build_update_data_from_extraction(extracted_data, document_type, existing_data)` mapeia extração → update shape com validação de NIF e filtragem de placeholders. `services/s3_storage.py` tem `s3_service.get_file_content(s3_path)` (síncrono, retorna bytes|None). 25 scripts existentes inventariados; bootstrap pattern de seed_qa_ultimate.py + backfill_empty_fields.py identificado.
+  2. Documents collection + process fields: DUAS coleções — `document_metadata` (s3_path, is_categorized, extracted_data) e `documents` (portal checklist, status UPLOADED/RECEIVED, s3_path). Linkagem por `process_id` (string FK, não embedded). KEY INSIGHT: `personal_data` no processo é SYNTHETIC (frontend-compat); NIF/CC reais vivem em `clients.dados_pessoais`. `populate_client_data` injeta `personal_data` na resposta API mas não persiste. backfill_empty_fields.py usa `is_empty()` helper (None ou whitespace string → empty; 0 é NÃO-vazio).
+
+- Escrito `backend/scripts/bulk_ai_document_scan.py` (~430 linhas):
+  - **Bootstrap**: sys.path.insert(backend/), load_dotenv(backend/.env), AsyncIOMotorClient(MONGO_URL), db = client[DB_NAME], asyncio.run(_run()). Segue convenção de scripts existentes.
+  - **Imports**: `from services.ai_document import analyze_single_document, build_update_data_from_extraction, RateLimitError` e `from services.s3_storage import s3_service`.
+  - **Constantes**: DEFAULT_SLEEP_SUCCESS=60, DEFAULT_SLEEP_RATE_LIMIT=300, TERMINAL_STATUSES={concluido, desistencias, desistido, cancelado, arquivado, eliminado}, KEY_FIELDS_CLIENT (NIF, CC), KEY_FIELDS_PROCESS (salario_bruto, monthly_income, valor_financiado, valor_imovel, valor_patrimonial, requested_amount, interest_rate, monthly_payment).
+  - **find_candidate_documents(db, process_id=None)**: Query processes (is_deleted != True, status $nin TERMINAL). Carrega clients associados. Para cada processo, verifica se tem campos-chave vazios (respeitando manually_edited_fields e field_metadata=manual). Para processos candidatos, procura em document_metadata (s3_path exists) e documents (status UPLOADED/RECEIVED/SUBMITTED, s3_path exists). Retorna lista de {process_id, client_id, client_name, s3_path, filename, doc_id, source_collection}.
+  - **process_single_document(db, doc, dry_run, sleep_success)**: (1) Verifica S3 configurado. (2) Lê bytes via `asyncio.to_thread(s3_service.get_file_content, s3_path)` (não bloqueia event loop). (3) Carrega processo + cliente atuais. (4) Chama `analyze_single_document` em try-except que apanha RateLimitError e exceções genéricas de rate-limit. (5) Se success: `build_update_data_from_extraction` mapeia extração. (6) `map_extraction_to_field_metadata` constrói entradas {source:"ai", updated_at, confidence?} para cada campo preenchido. (7) Filtra campos locked (manually_edited_fields ou field_metadata=manual existente). (8) `split_metadata_client_process` separa: dados_pessoais.*/contacto.*/nome → cliente; restantes → processo. (9) Aplica $set na BD (com merge seguro de field_metadata: {**existing, **new}).
+  - **is_rate_limit_exception(exc)**: 3 camadas — (1) isinstance(exc, RateLimitError) do nosso serviço; (2) isinstance(exc, openai.RateLimitError) do SDK; (3) heurística por mensagem ("429", "rate limit", "too many requests", "quota", "throttle", "tpm", "rpm limit").
+  - **run_scan()**: Loop principal. Para cada doc: chama process_single_document em try-except (safety net). Se status=="success": print ✅ + `await asyncio.sleep(sleep_success)` (60s). Se status=="rate_limited": print ⚠️ + `await asyncio.sleep(sleep_rate_limit)` (300s) + `continue`. Outros status: logado, sem pausa. Resumo final com stats (success, dry_run, rate_limited, skipped, empty, failed, error).
+  - **CLI**: --dry-run, --limit N, --process-id UUID, --sleep-success S, --sleep-rate-limit S. Validar MONGO_URL/DB_NAME (sys.exit(1) se faltar). KeyboardInterrupt handled. mongo_client.close() no finally.
+
+- Validação:
+  - `python3 -m py_compile scripts/bulk_ai_document_scan.py` → OK
+  - `python3 -m flake8 --select=E9,F63,F7,F82` → 0 erros críticos
+  - Imports verificados: RateLimitError (linha 200 de ai_document.py), analyze_single_document (linha 1630), build_update_data_from_extraction (linha 1784) — todos exportáveis.
+  - Bootstrap pattern confirmado idêntico a backfill_empty_fields.py (sys.path.insert + load_dotenv + AsyncIOMotorClient + asyncio.run + mongo_client.close).
+  - (motor/openai não instalados neste sandbox — esperado; o script corre no backend do PowerCell onde estão instalados.)
+
+Stage Summary:
+- 1 ficheiro criado: `backend/scripts/bulk_ai_document_scan.py` (~430 linhas).
+- Resultado: Script de background conservador e imune a falhas para processar documentos legados com IA. Reutiliza `analyze_single_document` (que já tem tenacity retry) e adiciona camada EXTRA de segurança: após cada sucesso pausa 60s; após rate-limit pausa 300s e continua. Respeita manually_edited_fields e field_metadata=manual (Consultor tem prioridade sobre IA). Atualiza BD com field_metadata source="ai" (merge seguro Pacote CS). Registra auditoria em ai_extraction_history. CLI completa (--dry-run, --limit, --process-id, --sleep-*).
