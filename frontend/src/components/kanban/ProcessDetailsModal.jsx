@@ -43,7 +43,7 @@ import {
   User, Mail, Phone, Home, MapPin, Euro, Calendar, Users,
   AlertTriangle, Building2, CreditCard, FileText, ExternalLink,
   Loader2, Save, Pencil, X, CalendarClock, Inbox, CheckCircle2,
-  XCircle, ClipboardCheck
+  XCircle, ClipboardCheck, Sparkles
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits } from '../../services/api';
@@ -855,6 +855,19 @@ const ProcessDetailsModal = memo(({
                     </p>
                   )}
                 </div>
+
+                {/* PACOTE CX — Notas da IA (ai_extracted_notes) com formatação distinta */}
+                {safeString(process.ai_extracted_notes) && !isEditing && (
+                  <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-3">
+                    <h4 className="text-xs font-semibold mb-1.5 flex items-center gap-1.5 text-purple-700 dark:text-purple-300">
+                      <Sparkles className="h-3.5 w-3.5" />
+                      Notas da IA
+                    </h4>
+                    <p className="text-sm whitespace-pre-wrap text-purple-900 dark:text-purple-200">
+                      {safeString(process.ai_extracted_notes)}
+                    </p>
+                  </div>
+                )}
               </div>
 
               {/* Atribuições */}

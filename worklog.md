@@ -2739,3 +2739,57 @@ Stage Summary:
   - `frontend/src/pages/MyClientsPage.js` (nome clicável, bolinhas inline, toggle eliminados, fetchData + filtro local, import Trash2)
   - `CHANGELOG.md` + `worklog.md` atualizados
 - Resultado: Trello funciona como backup estrutural visual em tempo real. Criação de processo → cartão criado. Drag no kanban → cartão movido. Edição de dados → descrição do cartão atualizada com dados IA. Tabela de processos com nome clicável (classe exata), bolinhas inline (azul+verde), notas, e filtro eliminados funcional em ambas as páginas. Se Trello não configurado, CRM funciona normalmente (silent fallback).
+
+---
+Task ID: Pacote CX (Sync UI across Clients and Processes Tables & Modals)
+Agent: Main Agent (Code Assistant)
+Task: Nivelar UI entre tabelas de Clientes e Processos + secção Notas da IA nos modais
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacotes CS, CT, CU, CV, CW confirmados implementados).
+- Clonado repo PowerCell branch dev para /tmp/powercell_cx → /home/z/powercell_cx (commit base e404552 = Pacote CW).
+
+- 1 subagente Explore para análise completa:
+  1. ProcessesPage.js (936 linhas): Tem tabela de processos. client_name na linha 768 é texto plain (não clicável, sem bolinhas). TableRow inteira é clicável (navigate /process/{id}). Sem ClientDetailsModal importado. Sem bolinhas.
+  2. FilteredProcessList.js (628 linhas): Desktop view (linhas 497-509) JÁ corrigido no Pacote CW. MAS mobile card view (linha 424) tem client_name como texto plain — OMITIDO no Pacote CW. Bug confirmado.
+  3. KanbanPage.js (315 linhas): Não renderiza client_name diretamente (usa KanbanBoard component). N/A.
+  4. ProcessDetailsModal.jsx (1168 linhas): Linhas 88-89 ESTÃO CORRETAS (const [hasChanges, setHasChanges] — não há typo). Já tem secção "Notas" (linhas 842-857) que lê process.notes (editável). NÃO lê ai_extracted_notes.
+  5. ClientDetailsModal.jsx (356→357 linhas): Já tem secção "Observações" (linhas 316-327) que lê client.notas. NÃO lê ai_extracted_notes.
+  6. MyClientsPage.js (687 linhas): Confirmado corrigido (linhas 554-566).
+  7. PendingItemsList.js: tasks list, não process table — fora de scope.
+
+- Fix 1: ProcessesPage.js — nome clicável + bolinhas + ClientDetailsModal:
+  - Import ClientDetailsModal (linha 32).
+  - Estado clientDetailsModal = { open: false, clientId: null } (linha 105).
+  - Nome do cliente (linha 768) envolvido em <span className="cursor-pointer text-primary hover:underline" onClick={e.stopPropagation() + setClientDetailsModal}> com bolinhas inline (has_unread_messages bg-blue-500, has_new_documents bg-green-500). e.stopPropagation() impede navegação da row.
+  - Render <ClientDetailsModal> no fim (linhas 948-954) com onClose + onNavigateToProcess.
+
+- Fix 2: FilteredProcessList.js mobile card view (linha 424):
+  - Nome do cliente no mobile card era texto plain. Substituído por <span className="cursor-pointer text-primary hover:underline" onClick={e.stopPropagation() + setClientDetailsModal}> com bolinhas inline. e.stopPropagation() impede navigate do card parent.
+
+- Fix 3: ClientDetailsModal.jsx — secção Notas da IA:
+  - Import Sparkles de lucide-react (linha 52).
+  - Nova secção "Notas da IA" (linhas 330-341) logo após "Observações". Formatação distinta: bg-purple-50 dark:bg-purple-950/20, border-purple-200, ícone Sparkles roxo, título "Notas da IA", texto purple-900. Renderiza client.ai_extracted_notes. Condicional (só mostra se ai_extracted_notes existir).
+
+- Fix 4: ProcessDetailsModal.jsx — secção Notas da IA:
+  - Import Sparkles de lucide-react (linha 46).
+  - Nova secção "Notas da IA" (linhas 859-870) logo após "Notas" existente. Mesma formatação roxa + Sparkles. Renderiza process.ai_extracted_notes. Só em modo leitura (!isEditing). Condicional (só mostra se ai_extracted_notes existir).
+
+- Distinção visual clara:
+  - Notas manuais (Observações) = âmbar + StickyNote icon.
+  - Notas da IA = roxo + Sparkles icon.
+  - Utilizador distingue instantaneamente a origem do dado.
+
+- Validação:
+  - esbuild --packages=external src/pages/ProcessesPage.js → 0 erros
+  - esbuild --packages=external src/pages/FilteredProcessList.js → 0 erros
+  - esbuild --packages=external src/components/ClientDetailsModal.jsx → 0 erros
+  - esbuild --packages=external src/components/kanban/ProcessDetailsModal.jsx → 0 erros
+
+Stage Summary:
+- 4 ficheiros modificados:
+  - `frontend/src/pages/ProcessesPage.js` (import + estado + nome clicável + bolinhas + render modal)
+  - `frontend/src/pages/FilteredProcessList.js` (mobile card nome clicável + bolinhas — bug omitido no Pacote CW)
+  - `frontend/src/components/ClientDetailsModal.jsx` (import Sparkles + secção Notas da IA roxa)
+  - `frontend/src/components/kanban/ProcessDetailsModal.jsx` (import Sparkles + secção Notas da IA roxa)
+- Resultado: UI idêntica e funcional em ambas as views (Clientes e Processos). Nome clicável com classe exata cursor-pointer text-primary hover:underline em todas as tabelas (ProcessesPage desktop, FilteredProcessList desktop + mobile, MyClientsPage). Bolinhas inline (azul+verde) uniformes. Popups de detalhes mostram agora notas manuais (âmbar) E notas da IA (roxo) com formatação distinta. Bug do mobile card view (omitido no Pacote CW) corrigido.

@@ -49,6 +49,7 @@ import {
   Users,
   StickyNote,
   Loader2,
+  Sparkles,
 } from "lucide-react";
 import { safeString } from "../utils/safeString";
 import { formatDate } from "../lib/utils";
@@ -322,6 +323,19 @@ const ClientDetailsModal = ({
                 </h4>
                 <p className="text-sm whitespace-pre-wrap text-amber-900 dark:text-amber-200">
                   {safeString(client.notas)}
+                </p>
+              </div>
+            )}
+
+            {/* PACOTE CX — Bloco Notas da IA (ai_extracted_notes) com formatação distinta */}
+            {client.ai_extracted_notes && (
+              <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 text-purple-700 dark:text-purple-300">
+                  <Sparkles className="h-4 w-4" />
+                  Notas da IA
+                </h4>
+                <p className="text-sm whitespace-pre-wrap text-purple-900 dark:text-purple-200">
+                  {safeString(client.ai_extracted_notes)}
                 </p>
               </div>
             )}

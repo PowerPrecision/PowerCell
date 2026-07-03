@@ -3,6 +3,36 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CX: Sync UI across Clients and Processes Tables & Modals
+
+### Alterado
+- **Nivelamento de UI entre tabelas de Clientes e Processos** + **secção de Notas da IA nos modais**. O Pacote CW funcionou na tabela de Clientes mas falhou na de Processos — este pacote corrige e completa a sincronização visual.
+
+### 1. Tabela de Processos (`ProcessesPage.js`)
+- **Nome clicável**: O nome do cliente na tabela (linha 768) era texto plain — agora tem a classe exata `cursor-pointer text-primary hover:underline` e abre o `<ClientDetailsModal />` ao clicar (com `e.stopPropagation()` para não acionar a navegação da row).
+- **Bolinhas de notificação inline** ao lado do nome:
+  ```jsx
+  {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+  {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+  ```
+- **Import + estado + render** do `ClientDetailsModal` adicionados (igual a MyClientsPage e FilteredProcessList).
+
+### 2. Mobile Card View (`FilteredProcessList.js`)
+- **Bug corrigido**: A vista de cartão móvel (linha 424) tinha o nome do cliente como texto plain — foi **omitida** no Pacote CW. Agora tem o mesmo `<span>` clicável com a classe exata + bolinhas inline, abrindo o `<ClientDetailsModal />`.
+
+### 3. Popups de Detalhes — Notas da IA
+- **`ClientDetailsModal.jsx`**: Nova secção **"Notas da IA"** (linhas 330-341) com formatação distinta — fundo roxo (`bg-purple-50 dark:bg-purple-950/20`), ícone `Sparkles`, texto roxo. Renderiza `client.ai_extracted_notes`. Aparece logo após o bloco "Observações" (que lê `client.notas`).
+- **`ProcessDetailsModal.jsx`**: Nova secção **"Notas da IA"** (linhas 859-870) com a mesma formatação roxa + `Sparkles`. Renderiza `process.ai_extracted_notes` (só em modo leitura, não editável). Aparece logo após o bloco "Notas" existente (que lê `process.notes` e é editável).
+- **Distinção visual clara**: Notas manuais (Observações) = âmbar + `StickyNote`. Notas da IA = roxo + `Sparkles`. O utilizador distingue instantaneamente a origem.
+
+### Técnico
+- **`frontend/src/pages/ProcessesPage.js`**: import ClientDetailsModal (linha 32); estado `clientDetailsModal` (linha 105); nome clicável + bolinhas (linhas 772-785); render do modal (linhas 948-954).
+- **`frontend/src/pages/FilteredProcessList.js`**: mobile card nome clicável + bolinhas (linhas 424-437).
+- **`frontend/src/components/ClientDetailsModal.jsx`**: import `Sparkles` (linha 52); bloco Notas da IA (linhas 330-341).
+- **`frontend/src/components/kanban/ProcessDetailsModal.jsx`**: import `Sparkles` (linha 46); bloco Notas da IA (linhas 859-870).
+- **Validação**: `esbuild --packages=external` ✓ nos 4 ficheiros (0 erros).
+- **Dependências**: Nenhuma nova — `Sparkles` já existe em `lucide-react`.
+
 ## [2026-07-16] — Pacote CW: Trello Mirror Service & Clients Table Final Fixes
 
 ### Adicionado

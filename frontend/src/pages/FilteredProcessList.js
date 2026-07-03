@@ -421,7 +421,20 @@ const FilteredProcessList = () => {
                         <div className="min-w-0">
                           <p className={`text-sm truncate ${prio.isAlta ? 'font-bold' : 'font-medium'}`}>
                             {prio.isAlta && <span className="mr-1">🔥</span>}
-                            {safeString(process.client_name)}
+                            {/* PACOTE CX — nome clicável + bolinhas inline (mobile card view) */}
+                            <span
+                              className="cursor-pointer text-primary hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (process.client_id) {
+                                  setClientDetailsModal({ open: true, clientId: process.client_id });
+                                }
+                              }}
+                            >
+                              {safeString(process.client_name)}
+                              {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+                              {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+                            </span>
                           </p>
                           <p className="text-xs text-muted-foreground">{safeString(process.client_phone) || safeString(process.client_email) || "-"}</p>
                         </div>

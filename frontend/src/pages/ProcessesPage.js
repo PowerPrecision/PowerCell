@@ -28,6 +28,8 @@ import { toast } from "sonner";
 import { getProcesses, markProcessIndexed, restoreProcess } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
+// PACOTE CX — ClientDetailsModal para popup de detalhes ao clicar no nome
+import ClientDetailsModal from "../components/ClientDetailsModal";
 import { useAuth } from "../contexts/AuthContext";
 import { safeString } from "../utils/safeString";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -99,6 +101,8 @@ const ProcessesPage = () => {
   const [sortOrder, setSortOrder] = useState(searchParams.get("order") || "desc");
   const [sortedProcesses, setSortedProcesses] = useState([]);
   const [showCreateProcess, setShowCreateProcess] = useState(false);
+  // PACOTE CX — estado para ClientDetailsModal (popup ao clicar no nome do cliente)
+  const [clientDetailsModal, setClientDetailsModal] = useState({ open: false, clientId: null });
 
   // PACOTE CA — indexStatusFilter persistido no URL para restauração na navegação Back/Forward.
   // Default: 'pending' para role indexacao, 'all' para os restantes.
@@ -765,7 +769,20 @@ const ProcessesPage = () => {
                               <div className="flex items-center gap-2">
                                 <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
                                   {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
-                                  {safeString(process.client_name)}
+                                  {/* PACOTE CX — nome clicável + bolinhas inline (igual a MyClientsPage/FilteredProcessList) */}
+                                  <span
+                                    className="cursor-pointer text-primary hover:underline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (process.client_id) {
+                                        setClientDetailsModal({ open: true, clientId: process.client_id });
+                                      }
+                                    }}
+                                  >
+                                    {safeString(process.client_name)}
+                                    {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+                                    {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+                                  </span>
                                 </p>
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
@@ -927,6 +944,13 @@ const ProcessesPage = () => {
         open={showCreateProcess}
         onOpenChange={setShowCreateProcess}
         onSuccess={fetchProcesses}
+      />
+      {/* PACOTE CX — ClientDetailsModal (popup ao clicar no nome do cliente) */}
+      <ClientDetailsModal
+        open={clientDetailsModal.open}
+        clientId={clientDetailsModal.clientId}
+        onClose={() => setClientDetailsModal({ open: false, clientId: null })}
+        onNavigateToProcess={(pid) => navigate(`/process/${pid}`)}
       />
     </DashboardLayout>
   );
