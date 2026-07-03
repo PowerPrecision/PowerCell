@@ -3,6 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CH: Reusable Client Details Modal with Observations
+
+### Adicionado
+- **Componente `ClientDetailsModal.jsx` reutilizável**: Extraído da modal de detalhes do cliente em `ClientRegistrationsPage.js`. Mostra dados completos do cliente (contactos, dados pessoais, financeiros, 2º titular, metadados) + novo bloco **"Observações"** (`client.notas`) com ícone `StickyNote` e fundo âmbar. Props: `open`, `clientId`, `onClose`, `onNavigateToProcess`.
+
+### Integração
+- **`FilteredProcessList.js`**: Nome do cliente transformado em texto clicável (azul/underline) que abre `ClientDetailsModal` com `process.client_id`. `onNavigateToProcess` permite navegar diretamente para o processo.
+
+### Técnico
+- **Frontend** (`frontend/src/components/ClientDetailsModal.jsx`): NOVO componente (280 linhas). Fetch via `GET /api/clients/{id}`. Bloco "Observações" com `StickyNote` + `client.notas` + `whitespace-pre-wrap`.
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): import `ClientDetailsModal`; estado `clientDetailsModal`; nome clicável (`text-blue-600 hover:underline`); modal renderizada no final.
+- **Validação**: `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote CG: Show Latest Activity Note in Process Lists
 
 ### Corrigido

@@ -2272,3 +2272,32 @@ Stage Summary:
   - `frontend/src/pages/FilteredProcessList.js` (lê latest_activity_note com fallback)
   - `frontend/src/pages/MyClientsPage.js` (nova coluna "Notas" com latest_activity_note)
 - Resultado: ambas as listas de processos (FilteredProcessList e MyClientsPage) mostram agora a última nota real do consultor (da coleção activities) em vez do campo desatualizado process.notes. A aggregation busca o comentário mais recente (created_at DESC) para cada processo e injeta em latest_activity_note. O frontend lê este campo com fallback para latest_note (Pacote BT) e process.notes (retrocompatibilidade).
+
+
+---
+Task ID: Pacote CH (Reusable Client Details Modal with Observations)
+Agent: Main Agent (Code Assistant)
+Task: Extrair modal de detalhes do cliente para componente reutilizável + integração
+
+Work Log:
+- Análise da modal existente em ClientRegistrationsPage.js (linhas 634-972): Dialog completo com nome/avatar, contactos, dados pessoais, dados financeiros, 2º titular, metadados, e notas. Faz fetch via GET /api/clients/{id}. Tem botões "Ver Processo" e "Adicionar Processo" no DialogFooter.
+- Criação de ClientDetailsModal.jsx (novo componente reutilizável):
+  1. Props: open (boolean), clientId (string|null), onClose (callback), onNavigateToProcess (callback opcional).
+  2. Faz fetch via GET /api/clients/{id} quando abre (useEffect).
+  3. Renderiza todos os blocos da modal original: nome/avatar, contactos, dados pessoais, dados financeiros, 2º titular, metadados.
+  4. PACOTE CH — bloco "Observações" (client.notas) com ícone StickyNote, fundo âmbar, whitespace-pre-wrap.
+  5. DialogFooter com "Fechar" + "Ver Processo" (se onNavigateToProcess fornecido e cliente tem processo).
+  6. Import de Loader2 de lucide-react (não de ui/alert).
+- Integração em FilteredProcessList.js:
+  1. Import de ClientDetailsModal.
+  2. Estado clientDetailsModal = { open: false, clientId: null }.
+  3. Nome do cliente transformado em span clicável (text-blue-600 hover:underline cursor-pointer) com onClick que faz e.stopPropagation() e abre a modal com process.client_id.
+  4. ClientDetailsModal renderizado no final do componente, antes do </DashboardLayout>.
+  5. onNavigateToProcess passa navigate(`/process/${pid}`) para permitir navegação direta.
+- Validação: `esbuild --loader=jsx` → 0 erros nos 2 ficheiros.
+
+Stage Summary:
+- 2 ficheiros criados/modificados:
+  - `frontend/src/components/ClientDetailsModal.jsx` (NOVO — componente reutilizável com bloco Observações)
+  - `frontend/src/pages/FilteredProcessList.js` (nome do cliente clicável abre ClientDetailsModal)
+- Resultado: a modal de detalhes do cliente é agora um componente reutilizável (ClientDetailsModal) que pode ser usado em qualquer ecrã. Inclui o bloco "Observações" (client.notas) com ícone StickyNote. No FilteredProcessList, o nome do cliente é clicável (azul/underline) e abre a modal com os detalhes completos do cliente. O componente faz fetch automático dos dados via GET /api/clients/{id} quando abre.

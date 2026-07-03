@@ -22,6 +22,8 @@ import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
 import { safeDateStr, safeFormat } from "../lib/utils";
 import { safeString } from "../utils/safeString";
+// PACOTE CH — ClientDetailsModal reutilizável
+import ClientDetailsModal from "../components/ClientDetailsModal";
 
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
 
@@ -169,6 +171,8 @@ const FilteredProcessList = () => {
   const [processes, setProcesses] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
+  // PACOTE CH — estado para ClientDetailsModal
+  const [clientDetailsModal, setClientDetailsModal] = useState({ open: false, clientId: null });
 
   const config = filterConfig[filterType] || filterConfig.active;
   const IconComponent = config.icon;
@@ -475,7 +479,18 @@ const FilteredProcessList = () => {
                               <div className="flex items-center gap-2">
                                 <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
                                   {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
-                                  {safeString(process.client_name)}
+                                  {/* PACOTE CH — nome do cliente clicável abre ClientDetailsModal */}
+                                  <span
+                                    className="text-blue-600 hover:text-blue-800 hover:underline cursor-pointer"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (process.client_id) {
+                                        setClientDetailsModal({ open: true, clientId: process.client_id });
+                                      }
+                                    }}
+                                  >
+                                    {safeString(process.client_name)}
+                                  </span>
                                   {/* PACOTE BI: bolinhas de notificação junto ao nome */}
                                   <NotificationDots
                                     hasUnreadMessages={process.has_unread_messages}
@@ -590,6 +605,14 @@ const FilteredProcessList = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* PACOTE CH — ClientDetailsModal reutilizável */}
+      <ClientDetailsModal
+        open={clientDetailsModal.open}
+        clientId={clientDetailsModal.clientId}
+        onClose={() => setClientDetailsModal({ open: false, clientId: null })}
+        onNavigateToProcess={(pid) => navigate(`/process/${pid}`)}
+      />
     </DashboardLayout>
   );
 };
