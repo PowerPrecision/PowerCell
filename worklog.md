@@ -2317,3 +2317,23 @@ Work Log:
 Stage Summary:
 - 1 ficheiro modificado: `backend/routes/portal.py` (GET /me e PUT /me simplificados com código exato pedido).
 - Resultado: o código de bloqueio do portal está agora simples e uniforme — ambos os endpoints usam a mesma query minimalista (is_indexed: True, projeção {"_id": 0, "id": 1}) e a mesma mensagem de erro. O perfil só é bloqueado quando o processo está indexado.
+
+
+---
+Task ID: Pacote CJ (Fetch Latest Activity Note for Lists)
+Agent: Main Agent (Code Assistant)
+Task: Sobrescrever notes com última atividade real do consultor nas listagens
+
+Work Log:
+- Análise: o Pacote CG já injeta latest_activity_note via aggregation, mas o campo notes (usado por algumas vistas do frontend como fallback) não era sobrescrito. O utilizador pede para sobrescrever notes com a última atividade real.
+- Aplicado bloco exato pedido em 3 sítios:
+  1. get_processes (processes.py, linhas 1790-1797): antes do return, loop sobre processes com find_one na coleção activities (action in [note_added, comment], sort created_at -1). Se encontrar, sobrescreve p["notes"].
+  2. get_processes_paginated (processes.py, linhas 1998-2005): mesmo bloco sobre result["items"].
+  3. my_clients.py (linhas 303-310): mesmo bloco sobre processes.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/processes.py` (get_processes + get_processes_paginated)
+  - `backend/routes/my_clients.py` (get_my_clients)
+- Resultado: o campo notes é agora sobrescrito com a última atividade real do consultor (action in [note_added, comment], mais recente por created_at) em todas as rotas de listagem. O frontend lê notes como fallback de latest_activity_note, pelo que a coluna de Notas mostra sempre a última interação real.

@@ -300,6 +300,15 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
         p["latest_activity_note_at"] = note_info.get("latest_activity_note_at")
         p["latest_activity_note_by"] = note_info.get("latest_activity_note_by")
 
+    # PACOTE CJ — Injetar a última nota real do consultor
+    for p in processes:
+        latest_note = await db.activities.find_one(
+            {"process_id": p["id"], "action": {"$in": ["note_added", "comment"]}},
+            sort=[("created_at", -1)]
+        )
+        if latest_note and latest_note.get("comment"):
+            p["notes"] = latest_note["comment"]
+
     # Combinar processos + leads
     all_clients = leads + processes
 

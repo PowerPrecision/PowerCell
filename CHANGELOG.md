@@ -3,6 +3,18 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CJ: Fetch Latest Activity Note for Lists
+
+### Alterado
+- **Campo `notes` sobrescrito com última atividade real**: Em todas as rotas de listagem (`get_processes`, `get_processes_paginated`, `get_my_clients`), o campo `notes` é agora sobrescrito com a última atividade real do consultor (da coleção `activities`, `action` in `["note_added", "comment"]`, mais recente por `created_at`).
+
+### Backend
+- **`backend/routes/processes.py`**: `get_processes` (linhas 1790-1797) e `get_processes_paginated` (linhas 1998-2005) — bloco `find_one` em `activities` com `sort=[("created_at", -1)]`.
+- **`backend/routes/my_clients.py`**: `get_my_clients` (linhas 303-310) — mesmo bloco.
+
+### Técnico
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CI: Fix Portal Profile Lock Code
 
 ### Alterado

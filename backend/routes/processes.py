@@ -1786,7 +1786,16 @@ async def get_processes(
 
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
-    
+
+    # PACOTE CJ — Injetar a última nota real do consultor
+    for p in processes:
+        latest_note = await db.activities.find_one(
+            {"process_id": p["id"], "action": {"$in": ["note_added", "comment"]}},
+            sort=[("created_at", -1)]
+        )
+        if latest_note and latest_note.get("comment"):
+            p["notes"] = latest_note["comment"]
+
     return {
         "items": processes,
         "total": total,
@@ -1985,6 +1994,15 @@ async def get_processes_paginated(
         for p in result["items"]:
             p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
             p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
+    # PACOTE CJ — Injetar a última nota real do consultor
+    for p in result["items"]:
+        latest_note = await db.activities.find_one(
+            {"process_id": p["id"], "action": {"$in": ["note_added", "comment"]}},
+            sort=[("created_at", -1)]
+        )
+        if latest_note and latest_note.get("comment"):
+            p["notes"] = latest_note["comment"]
 
     return {
         "processes": result["items"],
