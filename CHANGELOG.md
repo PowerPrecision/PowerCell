@@ -3,6 +3,53 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CY: Fix Client Onboarding, Timeline & Config Bugs
+
+### Corrigido
+- **4 bugs detetados em QA em dev** no fluxo de criação de clientes e configurações. Todos resolvidos com precisão cirúrgica.
+
+### Bug 1 — Email do Portal não era enviado
+- **Causa raiz**: O email de boas-vindas com o `portal_access_code` NUNCA era invocado nas rotas de criação (`POST /clients`, `POST /processes/create-client`). O `portal_access_code` era gerado mas o email não era disparado — falha silenciosa sem logs.
+- **Correção**:
+  - **`backend/routes/clients.py`**: Adicionado `import asyncio` + helper `_send_portal_welcome_email_safe()` (fire-and-forget com try-except aninhado + `logger.error`/`logger.warning` em cada falha). Disparado via `asyncio.create_task()` após `db.clients.insert_one()`. Tenta `task_queue.send_registration_email()` primeiro; se indisponível, envia diretamente via `send_registration_confirmation()`.
+  - **`backend/routes/processes.py`**: Adicionado helper `_send_portal_welcome_email_from_process()` (busca/gera `portal_access_code` do cliente, depois envia email). Disparado via `asyncio.create_task()` após `log_history()` na rota `POST /processes/create-client`.
+  - **Logs**: `[PORTAL-EMAIL]` prefix em todos os logs (info/warning/error) — falhas de SMTP nunca mais são silenciosas.
+
+### Bug 2 — Timeline a assumir fases fantasma
+- **Causa raiz**: `ProcessTimeline.js` recebia `history={process.status_history || activities.filter(...)}` — mas `process.status_history` não existe e `activities` não têm `type`. O prop era SEMPRE `[]`, activando o branch "sem histórico" que marcava `isCompleted: p.order < currentOrder` (index-based — o bug). Fases saltadas apareciam como "Concluídas" com checkmark verde.
+- **Causa secundária**: O branch "com histórico" lia `entry.new_status` (campo inexistente) em vez de `entry.new_value` (campo real do `db.history`).
+- **Correção**:
+  - **`frontend/src/pages/ProcessDetails.js`**: Passa o estado `history` real (já fetched via `getHistory(id)` na linha 1106) em vez da expressão quebrada.
+  - **`frontend/src/components/ProcessTimeline.js`**:
+    - `buildTimeline` reescrito: constrói `reachedStatuses` (Set) a partir do histórico real (`entry.new_value`), iterando sobre TODAS as fases (`sortedPhases`) em vez do histórico.
+    - 4 estados por fase: **Concluída** (alcançada + não atual), **Atual** (atual), **Saltada** (não alcançada + antes da atual), **Pendente** (não alcançada + depois da atual).
+    - Datas só aparecem se a fase foi alcançada (registo explícito no histórico) — sem datas inventadas.
+    - `TimelineNode`: adicionado `isSkipped` prop (círculo tracejado cinza + label itálico "Saltada").
+    - Legenda: adicionado 4º estado "Saltada".
+
+### Bug 3 — Encaminhamento para 'Registos de Clientes'
+- **Causa raiz**: `POST /processes/create-client` sempre definia `initial_status = first_status_by_order` (`clientes_espera` — primeira coluna do Kanban ativo). Não havia forma de criar um Lead (status `pre_registo` — a caixa "Registos de Clientes"). Além disso, `lead_status` era sempre `"converted"` (removia o cliente da triagem) e `assign_to_indexer` corria prematuramente.
+- **Correção**:
+  - **`backend/models/process.py`**: Adicionado `is_lead: Optional[bool] = False` ao `ProcessCreate` model.
+  - **`backend/routes/processes.py`** (rota `POST /create-client`):
+    - Se `is_lead=True`: `initial_status = "pre_registo"` (vai para Registos de Clientes). `source = "lead"`.
+    - Skip `assign_to_indexer()` (pre_registo não deve ser indexado — a auto-atribuição dispara na transição pre_registo → pipeline).
+    - `lead_status` mantém-se `"new"` (não `"converted"`) — o cliente continua na triagem.
+  - **`frontend/src/pages/StaffDashboard.js`**: `handleCreateLead` passa `is_lead: true` no payload. Toast atualizado para "Registo criado em Registos de Clientes".
+  - **`frontend/src/components/CreateProcessModal.jsx`**: Aceita prop `isLead` (default false). Se true, envia `is_lead: true` no payload. Toast diferenciado.
+
+### Bug 4 — Configuração dos Documentos Obrigatórios não gravava
+- **Causa raiz**: O SAVE funcionava corretamente (backend gravava no MongoDB). O READ é que estava quebrado — `MandatoryDocumentsSection.fetchConfig()` lia `data.mandatory_documents` (sempre `undefined` porque a API retorna `{config: {...}, fields: [...]}`) em vez de `data.config.mandatory_documents`. O utilizador via uma lista vazia após guardar, pensando que não gravou.
+- **Correção**:
+  - **`frontend/src/pages/SystemConfigPage.js`** (linha 1810): `data.mandatory_documents` → `(data.config && data.config.mandatory_documents) || data.mandatory_documents || {}`. Agora lê corretamente do nested `config`.
+  - **Backend**: Sem alterações necessárias — o save (`replace_one` com full dump) e o merge (`MandatoryDocumentsConfig`) já funcionavam.
+
+### Técnico
+- **Backend modificado**: `backend/routes/clients.py` (import asyncio + helper + email send), `backend/routes/processes.py` (helper + email send + is_lead routing), `backend/models/process.py` (campo is_lead).
+- **Frontend modificado**: `frontend/src/pages/ProcessDetails.js` (history prop fix), `frontend/src/components/ProcessTimeline.js` (buildTimeline rewrite + isSkipped + legenda), `frontend/src/pages/SystemConfigPage.js` (read path fix), `frontend/src/pages/StaffDashboard.js` (is_lead: true), `frontend/src/components/CreateProcessModal.jsx` (isLead prop).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 5 ficheiros frontend.
+- **Dependências**: Nenhuma nova.
+
 ## [2026-07-16] — Pacote CX: Sync UI across Clients and Processes Tables & Modals
 
 ### Alterado

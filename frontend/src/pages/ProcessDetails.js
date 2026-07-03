@@ -2792,7 +2792,7 @@ const ProcessDetails = () => {
         <ProcessTimeline
           processId={id}
           currentStatus={process.status}
-          history={process.status_history || activities.filter(a => a.type === 'status_change')}
+          history={history}
           workflowStatuses={workflowStatuses}
         />
 

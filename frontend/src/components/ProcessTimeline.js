@@ -50,7 +50,8 @@ const normalizeStatus = (status) => {
 };
 
 // Componente de nó da timeline (compacto)
-const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) => {
+// PACOTE CY: adicionado isSkipped para fases saltadas (sem registo no histórico)
+const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, isSkipped, date, daysInPhase }) => {
   const nodeColor = phaseInfo ? getColor(phaseInfo.color) : "#9CA3AF";
   const label = phaseInfo?.label || "Desconhecida";
 
@@ -63,6 +64,8 @@ const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) 
             ? "bg-green-500 border-green-500 text-white"
             : isCurrent
             ? "border-blue-500 bg-blue-50"
+            : isSkipped
+            ? "border-gray-300 bg-gray-50 border-dashed"
             : "border-gray-300 bg-white"
         }`}
         style={isCurrent ? { borderColor: nodeColor } : {}}
@@ -78,13 +81,18 @@ const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, date, daysInPhase }) 
 
       {/* Label */}
       <div className="mt-1 text-center max-w-[80px]">
-        <p className={`text-[10px] font-medium leading-tight ${isCurrent ? "text-blue-600" : isCompleted ? "text-green-600" : "text-gray-500"}`}>
+        <p className={`text-[10px] font-medium leading-tight ${
+          isCurrent ? "text-blue-600" : isCompleted ? "text-green-600" : isSkipped ? "text-gray-400 italic" : "text-gray-500"
+        }`}>
           {safeLabel(label)}
         </p>
         {date && (
           <p className="text-[9px] text-muted-foreground">
             {safeFormat(date, "dd/MM", { locale: pt })}
           </p>
+        )}
+        {isSkipped && (
+          <p className="text-[8px] text-gray-400 italic">Saltada</p>
         )}
         {daysInPhase !== undefined && daysInPhase > 0 && (
           <Badge variant="outline" className="text-[9px] mt-0.5 px-1 py-0">
@@ -145,6 +153,8 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
   const currentOrder = currentPhaseInfo?.order || 0;
 
   // Processar histórico para construir timeline
+  // PACOTE CY: Uma fase só é "Concluída" se existir registo explícito no
+  // histórico. Fases anteriores à atual sem registo = "Saltada" (não Concluída).
   const buildTimeline = useCallback(() => {
 
     // Se não há fases carregadas, não mostrar nada
@@ -154,81 +164,93 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
       return;
     }
 
-    // Se não há histórico, mostrar todas as fases até a atual
-    if (!history || history.length === 0) {
-      const timeline = sortedPhases
-        .filter(p => p.order <= currentOrder)
-        .map(p => ({
-          phase: p.id,
-          phaseInfo: p,
-          date: null,
-          isCurrent: p.id === normalizedCurrentStatus,
-          isCompleted: p.order < currentOrder,
-        }));
-      
-      setTimelineData(timeline);
-      setLoading(false);
-      return;
-    }
+    // ============================================================
+    // PACOTE CY — Construir set de fases alcançadas a partir do histórico
+    // ============================================================
+    // O histórico (db.history) tem entradas com:
+    //   action: "Moveu processo" | "Alterou estado" | "Criou processo"
+    //   field: "status" (quando é mudança de status)
+    //   new_value: <novo status>
+    // Uma fase X foi alcançada se há entrada com new_value === X.
+    // O status atual conta sempre como alcançado (mesmo sem histórico).
+    // ============================================================
+    const reachedStatuses = new Set();
+    reachedStatuses.add(normalizedCurrentStatus); // status atual conta sempre
 
-    // Ordenar histórico por data (protecção defensiva contra datas inválidas)
-    const sortedHistory = [...history].sort((a, b) => {
-      const dateA = safeDate(a.timestamp || a.created_at);
-      const dateB = safeDate(b.timestamp || b.created_at);
-      if (!dateA && !dateB) return 0;
-      if (!dateA) return 1;  // items sem data ficam no fim
-      if (!dateB) return -1;
-      return dateA - dateB;
-    });
+    // Map: status → data do registo histórico (primeira ocorrência)
+    const statusDates = {};
 
-    // Construir timeline a partir do histórico
-    const timeline = [];
-    const seenPhases = new Set();
+    if (history && history.length > 0) {
+      // Ordenar histórico por data
+      const sortedHistory = [...history].sort((a, b) => {
+        const dateA = safeDate(a.timestamp || a.created_at);
+        const dateB = safeDate(b.timestamp || b.created_at);
+        if (!dateA && !dateB) return 0;
+        if (!dateA) return 1;
+        if (!dateB) return -1;
+        return dateA - dateB;
+      });
 
-    sortedHistory.forEach((entry, index) => {
-      const status = normalizeStatus(entry.new_status || entry.status);
-      if (status && !seenPhases.has(status)) {
-        seenPhases.add(status);
-        
-        const nextEntry = sortedHistory[index + 1];
-        const entryDate = entry.timestamp || entry.created_at;
-        const nextDate = nextEntry ? (nextEntry.timestamp || nextEntry.created_at) : new Date().toISOString();
-        
-        // Protecção defensiva: differenceInDays lança erro se receber null/undefined
-        const parsedNext = safeParseISO(nextDate);
-        const parsedEntry = safeParseISO(entryDate);
-        const daysInPhase = (parsedNext && parsedEntry)
-          ? differenceInDays(parsedNext, parsedEntry)
-          : 0;
-
-        timeline.push({
-          phase: status,
-          phaseInfo: phasesMap[status] || { id: status, label: status, color: "#6B7280", order: 50 },
-          date: entryDate,
-          daysInPhase: status !== normalizedCurrentStatus ? daysInPhase : undefined,
-          isCurrent: status === normalizedCurrentStatus,
-          isCompleted: status !== normalizedCurrentStatus,
-        });
-      }
-    });
-
-    // Adicionar fase atual se não estiver no histórico
-    if (!seenPhases.has(normalizedCurrentStatus)) {
-      timeline.push({
-        phase: normalizedCurrentStatus,
-        phaseInfo: currentPhaseInfo || { id: normalizedCurrentStatus, label: normalizedCurrentStatus, color: "#6B7280", order: currentOrder },
-        date: null,
-        isCurrent: true,
-        isCompleted: false,
+      sortedHistory.forEach((entry) => {
+        // PACOTE CY: ler o campo correto — new_value (não new_status)
+        const status = normalizeStatus(entry.new_value || entry.new_status || entry.status);
+        if (status) {
+          reachedStatuses.add(status);
+          if (!statusDates[status]) {
+            statusDates[status] = entry.timestamp || entry.created_at;
+          }
+        }
       });
     }
 
-    // Ordenar pela ordem das fases (usando order da BD)
-    timeline.sort((a, b) => (a.phaseInfo?.order || 50) - (b.phaseInfo?.order || 50));
+    // ============================================================
+    // Construir timeline iterando sobre TODAS as fases (sortedPhases),
+    // não sobre o histórico. Isto garante que fases saltadas aparecem.
+    // ============================================================
+    const timeline = sortedPhases.map(p => {
+      const isReached = reachedStatuses.has(p.id);
+      const isCurrent = p.id === normalizedCurrentStatus;
+      const isBefore = p.order < currentOrder;
+      const isAfter = p.order > currentOrder;
+
+      // Determinar estado da fase:
+      // - Alcançada e não atual → Concluída (com data do histórico)
+      // - Atual → Atual
+      // - NÃO alcançada e antes da atual → Saltada (sem data inventada)
+      // - NÃO alcançada e depois da atual → Pendente
+      const isCompleted = isReached && !isCurrent;
+      const isSkipped = !isReached && isBefore;
+      const isPendente = !isReached && isAfter;
+
+      // Data: só se a fase foi alcançada (registo explícito no histórico)
+      const date = isReached ? (statusDates[p.id] || null) : null;
+
+      // daysInPhase: só para fases alcançadas e não-atuais
+      let daysInPhase = undefined;
+      if (isCompleted && date) {
+        // Calcular dias entre esta fase e a próxima alcançada (ou hoje)
+        const parsedEntry = safeParseISO(date);
+        const now = new Date();
+        if (parsedEntry) {
+          daysInPhase = differenceInDays(now, parsedEntry);
+        }
+      }
+
+      return {
+        phase: p.id,
+        phaseInfo: p,
+        date,
+        isCurrent,
+        isCompleted,
+        isSkipped,
+        isPendente,
+        daysInPhase,
+      };
+    });
 
     setTimelineData(timeline);
     setLoading(false);
-  }, [history, normalizedCurrentStatus, phasesMap, sortedPhases, currentPhaseInfo]);
+  }, [history, normalizedCurrentStatus, phasesMap, sortedPhases, currentPhaseInfo, currentOrder]);
 
   useEffect(() => {
     buildTimeline();
@@ -283,6 +305,7 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
                   phaseInfo={item.phaseInfo}
                   isCompleted={item.isCompleted}
                   isCurrent={item.isCurrent}
+                  isSkipped={item.isSkipped}
                   date={item.date}
                   daysInPhase={item.daysInPhase}
                 />
@@ -308,6 +331,11 @@ const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }
           <div className="flex items-center gap-1">
             <div className="w-2 h-2 rounded-full border border-gray-300" />
             <span>Pendente</span>
+          </div>
+          {/* PACOTE CY — novo estado Saltada */}
+          <div className="flex items-center gap-1">
+            <div className="w-2 h-2 rounded-full border border-gray-300 border-dashed bg-gray-50" />
+            <span>Saltada</span>
           </div>
         </div>
       </CardContent>

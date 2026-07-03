@@ -550,6 +550,66 @@ def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
 router = APIRouter(prefix="/processes", tags=["Processes"])
 
 
+# ============================================================
+# PACOTE CY — Helper para enviar email do Portal em background
+# ============================================================
+# Fire-and-forget: busca/gera portal_access_code e envia email de
+# boas-vindas. Falhas são LOGADAS (logger.error) mas não propagadas.
+# ============================================================
+async def _send_portal_welcome_email_from_process(
+    client_id: str,
+    client_email: str,
+    client_name: str,
+) -> None:
+    """Envia email de boas-vindas do Portal após criar um processo."""
+    try:
+        # Buscar ou gerar portal_access_code
+        portal_access_code = None
+        try:
+            client_doc = await db.clients.find_one({"id": client_id}, {"portal_access_code": 1, "_id": 0})
+            if client_doc:
+                portal_access_code = client_doc.get("portal_access_code")
+                if not portal_access_code:
+                    from models.client import generate_portal_access_code as _gen_code
+                    portal_access_code = _gen_code()
+                    await db.clients.update_one(
+                        {"id": client_id},
+                        {"$set": {"portal_access_code": portal_access_code}}
+                    )
+        except Exception as e:
+            logger.warning(f"[PORTAL-EMAIL] Erro ao obter/gerar portal_access_code para {client_id}: {e}")
+
+        # Enviar email via task_queue (fallback: directo)
+        from services.task_queue import task_queue
+        from services.email import send_registration_confirmation
+
+        job_id = None
+        try:
+            job_id = await task_queue.send_registration_email(
+                client_email=client_email,
+                client_name=client_name,
+                portal_access_code=portal_access_code,
+            )
+        except Exception as tq_err:
+            logger.warning(f"[PORTAL-EMAIL] Task Queue indisponível para cliente {client_id}: {tq_err}")
+
+        if not job_id:
+            logger.info(f"[PORTAL-EMAIL] A enviar email diretamente para {client_email} (client_id={client_id})")
+            try:
+                await send_registration_confirmation(
+                    client_email=client_email,
+                    client_name=client_name,
+                    portal_access_code=portal_access_code,
+                )
+                logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
+            except Exception as direct_err:
+                logger.error(f"[PORTAL-EMAIL] Falha ao enviar email diretamente para {client_email} "
+                             f"(client_id={client_id}): {direct_err}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
+                     f"para {client_email} (client_id={client_id}): {e}", exc_info=True)
+
+
 # ====================================================================
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
@@ -991,7 +1051,22 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     
     # Obter o primeiro estado do workflow
     first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    initial_status = first_status["name"] if first_status else "clientes_espera"
+    default_status = first_status["name"] if first_status else "clientes_espera"
+
+    # ============================================================
+    # PACOTE CY — Routing: Lead vs Processo Ativo
+    # ============================================================
+    # Se is_lead=True, o processo vai para a caixa "Registos de Clientes"
+    # (status pre_registo) — NÃO aparece no Kanban ativo, aparece na sala
+    # de triagem. lead_status do cliente mantém-se "new" (não "converted").
+    # Se is_lead=False (default), vai para a primeira coluna do Kanban ativo.
+    # ============================================================
+    is_lead = bool(getattr(data, 'is_lead', False))
+    if is_lead:
+        initial_status = "pre_registo"
+        logger.info("[CREATE-PROCESS] is_lead=True → status=pre_registo (Registos de Clientes)")
+    else:
+        initial_status = default_status
     
     # Gerar ID único e número sequencial
     process_id = str(uuid.uuid4())
@@ -1118,7 +1193,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         "credit_data": None,
         "created_at": now,
         "updated_at": now,
-        "source": "staff_created"
+        "source": "lead" if is_lead else "staff_created"
     }
 
     # ============================================================
@@ -1181,25 +1256,31 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # 2. Atribuir o processo ao indexador (assigned_indexacao_id)
     # 3. Se nenhum indexador disponível → status = fila_espera
     # ============================================================
+    # PACOTE CY: SKIPPED se is_lead=True — pre_registo não deve ser indexado
+    # (a auto-atribuição dispara na transição pre_registo → pipeline).
+    # ============================================================
     try:
-        from services.process_assignment import assign_to_indexer
-        assign_success, assign_data, assign_msg = await assign_to_indexer(process_id)
-        if assign_success and assign_data.get("assigned"):
-            logger.info(
-                f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
-                f"para processo {process_id}"
-            )
-            # Atualizar o process_doc local para a resposta (já foi atualizado na BD por assign_to_indexer)
-            process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
-            process_doc["indexacao_name"] = assign_data.get("indexacao_name")
-            if assign_data.get("status"):
-                process_doc["status"] = assign_data["status"]
+        if is_lead:
+            logger.info(f"[CREATE-PROCESS] is_lead=True — a saltar auto-atribuição de indexador para processo {process_id} (pre_registo)")
         else:
-            logger.warning(
-                f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg}"
-            )
-            if assign_data.get("status"):
-                process_doc["status"] = assign_data["status"]
+            from services.process_assignment import assign_to_indexer
+            assign_success, assign_data, assign_msg = await assign_to_indexer(process_id)
+            if assign_success and assign_data.get("assigned"):
+                logger.info(
+                    f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
+                    f"para processo {process_id}"
+                )
+                # Atualizar o process_doc local para a resposta (já foi atualizado na BD por assign_to_indexer)
+                process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
+                process_doc["indexacao_name"] = assign_data.get("indexacao_name")
+                if assign_data.get("status"):
+                    process_doc["status"] = assign_data["status"]
+            else:
+                logger.warning(
+                    f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg}"
+                )
+                if assign_data.get("status"):
+                    process_doc["status"] = assign_data["status"]
     except Exception as e:
         logger.warning(f"[CREATE-PROCESS] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
     
@@ -1238,15 +1319,19 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     await invalidate_stats_cache(user_id=user["id"])
     
     # Actualizar process_ids do cliente + marcar lead como convertido
+    # PACOTE CY: Se is_lead=True, NÃO marcar como "converted" — o cliente
+    # deve continuar a aparecer na página de Registos de Clientes (triagem).
     if client_id:
+        client_set = {"updated_at": now}
+        if not is_lead:
+            client_set["lead_status"] = "converted"  # Lead já não aparece na página de Registos
+        else:
+            client_set["lead_status"] = "new"  # Mantém-se na triagem de Registos
         await db.clients.update_one(
             {"id": client_id},
             {
                 "$addToSet": {"process_ids": process_id},
-                "$set": {
-                    "updated_at": now,
-                    "lead_status": "converted"  # Lead já não aparece na página de Registos
-                }
+                "$set": client_set
             }
         )
 
@@ -1285,6 +1370,20 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # Disparado APÓS auto-atribuição de indexador (process_doc["status"] pode
     # ser fila_espera) para que a coluna Trello reflita o status final.
     asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
+
+    # ============================================================
+    # PACOTE CY — Enviar email de boas-vindas do Portal em background
+    # ============================================================
+    # Dispara o email com o portal_access_code para o cliente. Busca o
+    # portal_access_code do cliente (gera se não existir) e envia via
+    # task_queue ou diretamente. Fire-and-forget com logs de erro.
+    # ============================================================
+    if client_email:
+        asyncio.create_task(_send_portal_welcome_email_from_process(
+            client_id=client_id,
+            client_email=client_email,
+            client_name=client_name,
+        ))
 
     # === WEBSOCKET BROADCAST: Novo processo criado por staff ===
     await broadcast_process_delta(

@@ -2793,3 +2793,52 @@ Stage Summary:
   - `frontend/src/components/ClientDetailsModal.jsx` (import Sparkles + secção Notas da IA roxa)
   - `frontend/src/components/kanban/ProcessDetailsModal.jsx` (import Sparkles + secção Notas da IA roxa)
 - Resultado: UI idêntica e funcional em ambas as views (Clientes e Processos). Nome clicável com classe exata cursor-pointer text-primary hover:underline em todas as tabelas (ProcessesPage desktop, FilteredProcessList desktop + mobile, MyClientsPage). Bolinhas inline (azul+verde) uniformes. Popups de detalhes mostram agora notas manuais (âmbar) E notas da IA (roxo) com formatação distinta. Bug do mobile card view (omitido no Pacote CW) corrigido.
+
+---
+Task ID: Pacote CY (Fix Client Onboarding, Timeline & Config Bugs)
+Agent: Main Agent (Code Assistant)
+Task: Corrigir 4 bugs do QA em dev — email portal, timeline fantasma, routing registos, config docs
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacotes CS..CX confirmados implementados).
+- Clonado repo PowerCell branch dev para /tmp/powercell_cy → /home/z/powercell_cy (commit base f4f7e2d = Pacote CX).
+
+- 4 subagentes Explore em paralelo (um por bug):
+  1. Bug 1 (email portal): NENHUMA das 3 rotas de criação (POST /clients, POST /processes, POST /processes/create-client) envia email. portal_access_code é gerado em clients.py:1471 mas email nunca disparado. send_registration_confirmation existe em services/email.py:221. task_queue.send_registration_email em services/task_queue.py:155. Padrão ouro em routes/public.py:454-484. asyncio.create_task já usado em processes.py para _send_assignment_email.
+  2. Bug 2 (timeline): ProcessTimeline.js recebe history={process.status_history || activities.filter(a => a.type === 'status_change')} — mas status_history não existe e activities não têm type → prop sempre []. Branch "sem histórico" usa isCompleted: p.order < currentOrder (index-based = BUG). Branch "com histórico" lê entry.new_status (campo inexistente) em vez de entry.new_value (campo real). Estado real history (fetched via getHistory) está em ProcessDetails.js:1106 mas NUNCA passado ao timeline.
+  3. Bug 3 (routing): POST /processes/create-client sempre usa first_status_by_order = clientes_espera (Kanban ativo). Não há campo is_lead no ProcessCreate. lead_status sempre "converted" (remove da triagem). assign_to_indexer sempre corre. Status correto para Leads = pre_registo (excluído do Kanban, incluído na triagem). StaffDashboard.handleCreateLead cria processo ativo apesar do nome.
+  4. Bug 4 (docs config): SAVE funciona (backend replace_one correto). READ quebrado: MandatoryDocumentsSection.fetchConfig lê data.mandatory_documents (undefined) em vez de data.config.mandatory_documents. API retorna {config: {...}, fields: [...]}. Bug é só no read path do frontend.
+
+- Fix Bug 1 (email portal):
+  - clients.py: import asyncio (linha 18). Helper _send_portal_welcome_email_safe() no topo (linhas 63-98). asyncio.create_task após insert_one (linha 1497). Tenta task_queue primeiro, fallback send_registration_confirmation directo. logger.error/warning em cada falha — prefix [PORTAL-EMAIL].
+  - processes.py: Helper _send_portal_welcome_email_from_process() (linhas 559-610) — busca/gera portal_access_code, depois envia. asyncio.create_task após log_history no create-client (linha 1322).
+
+- Fix Bug 2 (timeline fantasma):
+  - ProcessDetails.js:2795: history={history} em vez de history={process.status_history || activities.filter(...)}.
+  - ProcessTimeline.js: buildTimeline reescrito (linhas 155-253). Constrói reachedStatuses (Set) a partir de entry.new_value (campo correto do db.history). Itera sobre sortedPhases (não sobre histórico) — garante que fases saltadas aparecem. 4 estados: Concluída (alcançada+not atual), Atual, Saltada (not alcançada+antes), Pendente (not alcançada+depois). Datas só se alcançada. TimelineNode: isSkipped prop (border-dashed + italic "Saltada"). Legenda: 4º estado "Saltada".
+
+- Fix Bug 3 (routing registos):
+  - models/process.py: is_lead: Optional[bool] = False em ProcessCreate.
+  - processes.py create-client: is_lead=True → initial_status="pre_registo", source="lead". Skip assign_to_indexer (try block com if is_lead). lead_status mantém "new" (não "converted").
+  - StaffDashboard.js handleCreateLead: is_lead: true no payload. Toast "Registo criado em Registos de Clientes".
+  - CreateProcessModal.jsx: prop isLead (default false). Se true, envia is_lead: true. Toast diferenciado.
+
+- Fix Bug 4 (docs config):
+  - SystemConfigPage.js:1810: data.mandatory_documents → (data.config && data.config.mandatory_documents) || data.mandatory_documents || {}. Read path corrigido. Backend sem alterações (save já funcionava).
+
+- Validação:
+  - py_compile routes/clients.py routes/processes.py models/process.py → OK
+  - flake8 --select=E9,F63,F7,F82 → 0 erros (após fix de F821 undefined name 'process_id' no log line)
+  - esbuild --packages=external → 0 erros nos 5 ficheiros frontend (ProcessTimeline.js, ProcessDetails.js, SystemConfigPage.js, CreateProcessModal.jsx, StaffDashboard.js)
+
+Stage Summary:
+- 8 ficheiros modificados:
+  - backend/routes/clients.py (import asyncio + helper _send_portal_welcome_email_safe + email send)
+  - backend/routes/processes.py (helper _send_portal_welcome_email_from_process + email send + is_lead routing + skip assign_to_indexer + lead_status "new")
+  - backend/models/process.py (campo is_lead em ProcessCreate)
+  - frontend/src/pages/ProcessDetails.js (history prop fix)
+  - frontend/src/components/ProcessTimeline.js (buildTimeline rewrite + isSkipped + legenda + field new_value)
+  - frontend/src/pages/SystemConfigPage.js (read path fix data.config.mandatory_documents)
+  - frontend/src/pages/StaffDashboard.js (is_lead: true no handleCreateLead)
+  - frontend/src/components/CreateProcessModal.jsx (prop isLead + payload is_lead)
+- Resultado: 4 bugs resolvidos. (1) Email portal enviado em background com logs. (2) Timeline só marca Concluída se há registo explícito; fases saltadas aparecem como "Saltada" sem datas inventadas. (3) Leads vão para pre_registo (Registos de Clientes) em vez de clientes_espera (Kanban ativo); lead_status mantém "new"; assign_to_indexer skipado. (4) Docs obrigatórios lêem corretamente do nested config — lista persiste após guardar.

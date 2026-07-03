@@ -15,6 +15,7 @@ SEGURANÇA:
 
 import uuid
 import logging
+import asyncio
 import copy
 import re
 import unicodedata
@@ -49,6 +50,52 @@ from utils.input_sanitization import (
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# PACOTE CY — Helper para enviar email do Portal em background
+# ============================================================
+# Fire-and-forget: envia o email de boas-vindas com o portal_access_code.
+# Tenta primeiro via task_queue (Redis); se indisponível, envia diretamente.
+# Falhas são LOGADAS (logger.error) mas não propagadas — o fluxo de criação
+# do cliente não pode rebentar por causa de um erro de email.
+# ============================================================
+async def _send_portal_welcome_email_safe(
+    client_email: str,
+    client_name: str,
+    portal_access_code: str = None,
+    client_id: str = None,
+) -> None:
+    """Envia email de boas-vindas do Portal em background, com logs de erro."""
+    try:
+        from services.task_queue import task_queue
+        from services.email import send_registration_confirmation
+
+        job_id = None
+        try:
+            job_id = await task_queue.send_registration_email(
+                client_email=client_email,
+                client_name=client_name,
+                portal_access_code=portal_access_code,
+            )
+        except Exception as tq_err:
+            logger.warning(f"[PORTAL-EMAIL] Task Queue indisponível para cliente {client_id}: {tq_err}")
+
+        if not job_id:
+            logger.info(f"[PORTAL-EMAIL] A enviar email diretamente para {client_email} (client_id={client_id})")
+            try:
+                await send_registration_confirmation(
+                    client_email=client_email,
+                    client_name=client_name,
+                    portal_access_code=portal_access_code,
+                )
+                logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
+            except Exception as direct_err:
+                logger.error(f"[PORTAL-EMAIL] Falha ao enviar email diretamente para {client_email} "
+                             f"(client_id={client_id}): {direct_err}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
+                     f"para {client_email} (client_id={client_id}): {e}", exc_info=True)
 
 
 @router.get("/me")
@@ -1481,9 +1528,25 @@ async def create_client(
     client_dict = encrypt_client_data(client_dict)
     
     await db.clients.insert_one(client_dict)
-    
+
     logger.info(f"Cliente criado: {client.id} - {client.nome} por {user.get('email')}")
-    
+
+    # ============================================================
+    # PACOTE CY — Enviar email de boas-vindas do Portal em background
+    # ============================================================
+    # Antes o email NÃO era enviado na criação do cliente (só gerava o
+    # portal_access_code). Agora dispara em background via asyncio.create_task
+    # para não atrasar a resposta da API. Falhas são logadas mas não
+    # rebentam o fluxo de criação.
+    # ============================================================
+    if sanitized_email:
+        asyncio.create_task(_send_portal_welcome_email_safe(
+            client_email=sanitized_email,
+            client_name=sanitized_nome,
+            portal_access_code=client.portal_access_code,
+            client_id=client.id,
+        ))
+
     # Desencriptar para a resposta
     client_dict = decrypt_client_data(client_dict)
     return Client(**client_dict)

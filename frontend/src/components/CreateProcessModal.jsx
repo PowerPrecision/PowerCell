@@ -40,7 +40,7 @@ import { createClientProcess, createClient, searchClients } from "../services/ap
 import { toast } from "sonner";
 import { PROCESS_TYPE_LABELS } from "./SmartClientSearch";
 
-const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }) => {
+const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, isLead = false }) => {
   const navigate = useNavigate();
 
   const [selectedClient, setSelectedClient] = useState(preSelectedClient || null);
@@ -168,14 +168,18 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient }
     setSubmitting(true);
     try {
       // FASE 3: Enviar APENAS { client_id, process_type } — sem personal_data
+      // PACOTE CY: isLead=true → processo vai para Registos de Clientes (pre_registo)
       const payload = {
         client_id: clientId,
         process_type: processType,
+        ...(isLead ? { is_lead: true } : {}),
       };
 
       const res = await createClientProcess(payload);
       const data = res.data;
-      toast.success(`Processo #${data.process_number} criado com sucesso`);
+      toast.success(isLead
+        ? `Registo #${data.process_number} criado em Registos de Clientes`
+        : `Processo #${data.process_number} criado com sucesso`);
       onOpenChange(false);
       if (onSuccess) onSuccess(data);
       // Navegar para o novo processo
