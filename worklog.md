@@ -2355,3 +2355,25 @@ Stage Summary:
   - `backend/routes/clients.py` (should_exclude: clientes com processos avançados saem dos Registos)
   - `frontend/src/pages/ClientRegistrationsPage.js` (fallback notas || notes na modal)
 - Resultado: (1) clientes com processos em fases avançadas (fora de pre_registo, clientes_espera, eliminado) já não aparecem na tabela de Registos de Leads; (2) a modal de detalhes mostra notas com fallback (notas || notes || 'Sem observações'); (3) botão Visitas no ClientPortal.jsx já estava comentado (Pacote CB).
+
+
+---
+Task ID: Pacote CO (Create Data Backfill Script)
+Agent: Main Agent (Code Assistant)
+Task: Script de backfill seguro para preencher campos em falta
+
+Work Log:
+- Criado backend/scripts/backfill_empty_fields.py (320 linhas) com:
+  1. Conexão: motor_asyncio + dotenv (MONGO_URL, DB_NAME).
+  2. Bibliotecas: Faker('pt_PT') + random para dados realistas portugueses.
+  3. Geradores: gerar_nif() (com dígito de controlo validado), gerar_telefone(), gerar_cc(), gerar_salario(), gerar_valor_imovel(). Catálogos estáticos: PROFISSOES (27), CONCELHOS (30), TIPOLOGIAS, ESTADOS_CIVIS.
+  4. is_empty(value): verifica se None/vazio/string vazia. Não considera 0 como vazio para valores numéricos (capital_proprio=0 é válido).
+  5. backfill_clients: percorre clientes ativos. Preenche dados_pessoais (nif, documento_id, telefone, profissao, estado_civil, data_nascimento, naturalidade, nacionalidade, morada_fiscal, sexo) e contacto (telefone, telefone_secundario, email_secundario). Só faz $set se chave não existir ou for vazia. update_one individual.
+  6. backfill_processes: percorre processos não eliminados. Preenche financial_data (salario_bruto, salario_liquido, vencimento_mensal, rendimento_total, tipo_contrato, empresa, capitais_proprios), real_estate_data (valor_imovel, tipologia, concelho, localidade, localizacao, tipo_imovel, codigo_postal), credit_data (montante_financiado calculado = valor_imovel - capitais_proprios, requested_amount, prazo_meses, loan_term_years, spread, banco, bank_name, tipo_taxa). Só faz $set se vazio.
+  7. Execução segura: update_one individual, contagem de atualizados/ignorados/campos preenchidos, resumo bonito no terminal.
+  8. CLI: --dry-run (simular), --limit N (limitar docs por coleção).
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+Stage Summary:
+- 1 ficheiro criado: `backend/scripts/backfill_empty_fields.py` (320 linhas).
+- Resultado: script de backfill seguro que percorre clientes e processos existentes e preenche apenas campos em falta (NIF, telefone, profissão, salário, valor do imóvel, montante financiado, etc.) com dados realistas portugueses. NUNCA apaga ou substitui dados já preenchidos. Usa update_one individual com contagem granular. Suporta --dry-run e --limit.

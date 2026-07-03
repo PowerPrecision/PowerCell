@@ -3,6 +3,31 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CO: Create Data Backfill Script
+
+### Adicionado
+- **Script de backfill seguro** (`backend/scripts/backfill_empty_fields.py`, 320 linhas): Preenche campos em falta em clientes e processos existentes com dados realistas portugueses (Faker pt_PT). NUNCA apaga ou substitui dados já preenchidos — só faz `$set` se a chave não existir ou for vazia.
+
+### Regras de Preenchimento
+- **Clientes**: `dados_pessoais` (nif, documento_id, telefone, profissao, estado_civil, data_nascimento, naturalidade, nacionalidade, morada_fiscal, sexo) + `contacto` (telefone, telefone_secundario, email_secundario).
+- **Processos**: `financial_data` (salario_bruto, salario_liquido, tipo_contrato, empresa, capitais_proprios) + `real_estate_data` (valor_imovel, tipologia, concelho, localidade, tipo_imovel, codigo_postal) + `credit_data` (montante_financiado calculado = valor_imovel - capitais_proprios, prazo_meses, spread, banco, tipo_taxa).
+
+### Segurança
+- `is_empty()`: verifica None/vazio/string vazia. Não considera `0` como vazio para valores numéricos.
+- `update_one` individual (não `update_many`) para logging granular.
+- Contagem de atualizados/ignorados/campos preenchidos + resumo no terminal.
+
+### CLI
+```bash
+python scripts/backfill_empty_fields.py                # executar
+python scripts/backfill_empty_fields.py --dry-run      # simular
+python scripts/backfill_empty_fields.py --limit 50     # limitar
+```
+
+### Técnico
+- **Backend** (`backend/scripts/backfill_empty_fields.py`): 320 linhas; Motor async + dotenv + Faker('pt_PT'); `gerar_nif()` com dígito de controlo; `backfill_clients()` + `backfill_processes()`; `print_summary()`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
 ## [2026-07-16] — Pacote CK: Registrations Rule & Modal Notes
 
 ### Corrigido
