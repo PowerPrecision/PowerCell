@@ -2337,3 +2337,21 @@ Stage Summary:
   - `backend/routes/processes.py` (get_processes + get_processes_paginated)
   - `backend/routes/my_clients.py` (get_my_clients)
 - Resultado: o campo notes é agora sobrescrito com a última atividade real do consultor (action in [note_added, comment], mais recente por created_at) em todas as rotas de listagem. O frontend lê notes como fallback de latest_activity_note, pelo que a coluna de Notas mostra sempre a última interação real.
+
+
+---
+Task ID: Pacote CK (Registrations Rule & Modal Notes)
+Agent: Main Agent (Code Assistant)
+Task: Excluir clientes avançados dos Registos + fallback notas na modal
+
+Work Log:
+- Backend (clients.py list_registered_clients): substituído o bloco processes_info pelo código exato pedido com should_exclude. Se um cliente tem um processo com status NOT in [pre_registo, clientes_espera, eliminado], o cliente é excluído da lista de Registos (continue). A projeção foi simplificada para apenas id, process_number, status (removidos assigned_consultor_id, assigned_mediador_id, assigned_indexacao_id que não são usados no processes_info).
+- Frontend (ClientRegistrationsPage.js): bloco Notas atualizado para usar fallback notas || notes. Renderiza se detailsDialog.client.notas OU detailsDialog.client.notes existir. Texto: safeString(notas || notes) || 'Sem observações'.
+- ClientPortal.jsx: botão "As Minhas Visitas" já está comentado (Pacote CB, linha 2469). Confirmado — sem alteração necessária.
+- Validação: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - `backend/routes/clients.py` (should_exclude: clientes com processos avançados saem dos Registos)
+  - `frontend/src/pages/ClientRegistrationsPage.js` (fallback notas || notes na modal)
+- Resultado: (1) clientes com processos em fases avançadas (fora de pre_registo, clientes_espera, eliminado) já não aparecem na tabela de Registos de Leads; (2) a modal de detalhes mostra notas com fallback (notas || notes || 'Sem observações'); (3) botão Visitas no ClientPortal.jsx já estava comentado (Pacote CB).

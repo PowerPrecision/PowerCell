@@ -542,18 +542,23 @@ async def list_registered_clients(
         
         # Buscar informação dos processos
         processes_info = []
+        should_exclude = False
         if process_ids:
             processes = await db.processes.find(
                 {"id": {"$in": process_ids}},
-                {"_id": 0, "id": 1, "process_number": 1, "status": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1, "assigned_indexacao_id": 1}
+                {"_id": 0, "id": 1, "process_number": 1, "status": 1}
             ).to_list(length=10)
 
             for p in processes:
-                processes_info.append({
-                    "id": p.get("id"),
-                    "process_number": p.get("process_number"),
-                    "status": p.get("status")
-                })
+                # PACOTE CK — REGRA estrita: Se tem um processo que já passou
+                # da fase inicial, desaparece dos Registos (Leads)
+                if p.get("status") not in ["pre_registo", "clientes_espera", "eliminado"]:
+                    should_exclude = True
+                    break
+                processes_info.append(p)
+
+        if should_exclude:
+            continue  # Salta este cliente, não o mostra na tabela de Leads
 
         # ==================================================================
         # PACOTE BN — triage_status (Sala de Triagem)

@@ -3,6 +3,26 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CK: Registrations Rule & Modal Notes
+
+### Corrigido
+- **Clientes avançados apareciam nos Registos**: Clientes com processos em fases avançadas (fora de `pre_registo`, `clientes_espera`, `eliminado`) apareciam na tabela de Registos de Leads. Corrigido: `should_exclude` faz `continue` se o cliente tem um processo que já passou da fase inicial.
+
+- **Modal não mostrava notas**: A modal de detalhes do cliente só lia `client.notas`. Atualizado para usar fallback `notas || notes || 'Sem observações'`.
+
+- **Botão Visitas no Portal**: Confirmado já comentado (Pacote CB) — sem alteração.
+
+### Backend (`backend/routes/clients.py`)
+- **`list_registered_clients`**: Bloco `processes_info` substituído com `should_exclude` — se `status not in ["pre_registo", "clientes_espera", "eliminado"]`, `continue` (cliente não aparece nos Registos).
+
+### Frontend (`frontend/src/pages/ClientRegistrationsPage.js`)
+- **Modal de detalhes**: `{safeString(detailsDialog.client.notas || detailsDialog.client.notes) || 'Sem observações'}`.
+
+### Técnico
+- **Backend** (`backend/routes/clients.py`): `should_exclude` (linhas 543-561).
+- **Frontend** (`frontend/src/pages/ClientRegistrationsPage.js`): fallback notas (linhas 916-925).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote CJ: Fetch Latest Activity Note for Lists
 
 ### Alterado
