@@ -1428,7 +1428,29 @@ async def get_client(
                 p["client_role"] = "2º titular"
     
     client["processes"] = processes
-    
+
+    # ============================================================
+    # PACOTE DA — latest_activity: atividade mais recente do cliente
+    # ============================================================
+    # Busca a última entrada da coleção activities ligada a qualquer
+    # processo deste cliente (all_process_ids). O Frontend
+    # (ClientDetailsModal) mostra isto na secção "Observações e IA"
+    # para que o consultor veja a última interação registada.
+    # ============================================================
+    try:
+        if all_process_ids:
+            latest_act = await db.activities.find_one(
+                {"process_id": {"$in": all_process_ids}, "comment": {"$exists": True, "$ne": ""}},
+                {"_id": 0},
+                sort=[("created_at", -1)]
+            )
+            client["latest_activity"] = latest_act
+        else:
+            client["latest_activity"] = None
+    except Exception as e:
+        logger.warning(f"Erro ao buscar latest_activity para cliente {client_id}: {e}")
+        client["latest_activity"] = None
+
     # Desencriptar dados sensíveis
     client = decrypt_client_data(client)
     

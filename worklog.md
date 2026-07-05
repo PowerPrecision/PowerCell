@@ -2895,3 +2895,57 @@ Stage Summary:
   - frontend/src/components/kanban/ProcessDetailsModal.jsx (4ª tab "Obs. e IA" incondicional + import StickyNote)
   - frontend/src/components/ClientDetailsModal.jsx (secções incondicionais com fallback)
 - Resultado: (1) Tabelas mostram a atividade mais recente do consultor (latest_activity_preview), não process.notes estático. Dead code PACOTE CJ removido. GET /paginated agora tem enrichação. (2) Secção "Observações e IA" sempre visível — nova tab no ProcessDetailsModal, secções incondicionais no ClientDetailsModal. Ambas mostram notas IA (roxo) + manuais (âmbar) com fallbacks claros quando vazias.
+
+---
+Task ID: Pacote DA (Always Show Notes Section & Aggregate Sources)
+Agent: Main Agent (Code Assistant)
+Task: Secção de Observações sempre visível + agregar todas as fontes (IA + manuais + atividade)
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacotes CS..CZ confirmados implementados).
+- Clonado repo PowerCell branch dev para /tmp/powercell_da → /home/z/powercell_da (commit base db359c8 = Pacote CZ).
+
+- 1 subagente Explore para análise completa:
+  1. ProcessDetailsModal: tab "observacoes" (linhas 1046-1101) já incondicional do CZ. Mas `process` vem do KanbanBoard (GET /kanban), NÃO de GET /processes/{id}. Sem latest_activity. Precisa de enrichment no /kanban também.
+  2. ClientDetailsModal: secções (linhas 325-360) já incondicionais do CZ. `client` vem de GET /clients/{id}. Precisa de enrichment no GET /clients/{id}.
+  3. Backend GET /processes/{id} (linha 3476): sem enrichment de activities. Inserir após populate_client_data (linha 3518).
+  4. Backend GET /clients/{id} (linha 1378): sem enrichment. all_process_ids disponível (linha 1400). Inserir após client["processes"] = processes (linha 1430).
+  5. Backend GET /kanban (linha 2275): enrichment de has_unread_messages/has_new_documents nas linhas 2611-2614. Sem latest_activity. Inserir batch aggregation após linha 2614.
+  6. Activities schema: {id, process_id, user_id, user_name, user_role, comment, created_at}. Sem type/action field.
+  7. FilteredProcessList: notas column (linhas 585-598) já tem fallback "Sem notas recentes" do CZ.
+
+- Backend Fix 1 — GET /processes/{id}: Adicionado db.activities.find_one({"process_id": process_id, "comment": {"$exists": True, "$ne": ""}}, sort=[("created_at", -1)]) → process["latest_activity"] (linhas 3520-3536).
+
+- Backend Fix 2 — GET /kanban: Adicionado batch aggregation PACOTE DA (linhas 2616-2651) — $match process_ids + $sort created_at -1 + $group por process_id com $first de comment/user_name/user_role/created_at. Injeta p["latest_activity"] em cada processo. CRÍTICO: sem isto, ProcessDetailsModal (que lê do /kanban) não teria latest_activity.
+
+- Backend Fix 3 — GET /clients/{id}: Adicionado db.activities.find_one({"process_id": {"$in": all_process_ids}, ...}, sort=[("created_at", -1)]) → client["latest_activity"] (linhas 1432-1452). all_process_ids já disponível da secção de processes.
+
+- Frontend Fix 1 — ProcessDetailsModal.jsx:
+  - Import MessageSquare de lucide-react (linha 46).
+  - TabsContent "observacoes" reescrito com IIFE (linhas 1046-1138):
+    * hasAiNotes = !!safeString(process.ai_extracted_notes)
+    * hasManualNotes = !!safeString(editProcess.notes) || isEditing
+    * hasActivity = !!(latestAct && safeString(latestAct.comment))
+    * hasAnyContent = hasAiNotes || hasManualNotes || hasActivity
+    * Se !hasAnyContent → fallback itálico cinza "Nenhuma observação, nota da IA ou atividade recente registada."
+    * Se houver conteúdo: 3 blocos condicionais (IA roxo, Observações âmbar editável, Atividade azul com autor+data)
+
+- Frontend Fix 2 — ClientDetailsModal.jsx:
+  - Import MessageSquare + formatDateTime (linhas 53, 56).
+  - Secção reescrita com IIFE (linhas 318-397):
+    * Mesma lógica: hasAiNotes, hasManualNotes, hasActivity, hasAnyContent
+    * Fallback all-empty: "Nenhuma observação, nota da IA ou atividade recente registada." (em div com border-dashed)
+    * 3 blocos condicionais (IA roxo, Observações âmbar, Atividade azul com autor+data)
+
+- Validação:
+  - py_compile routes/processes.py routes/clients.py → OK
+  - flake8 --select=E9,F63,F7,F82 → 0 erros (F541 warnings em linhas 2380/4603 são pre-existing)
+  - esbuild --packages=external → 0 erros nos 2 ficheiros frontend
+
+Stage Summary:
+- 4 ficheiros modificados:
+  - backend/routes/processes.py (latest_activity no GET /{id} + batch enrichment no /kanban)
+  - backend/routes/clients.py (latest_activity no GET /{id})
+  - frontend/src/components/kanban/ProcessDetailsModal.jsx (IIFE agregada + 3º bloco Atividade Recente + fallback all-empty + import MessageSquare)
+  - frontend/src/components/ClientDetailsModal.jsx (IIFE agregada + 3º bloco + fallback all-empty + import MessageSquare + formatDateTime)
+- Resultado: Secção "Observações e IA" SEMPRE visível em ambos os modais. Agrega 3 fontes: (1) Notas da IA (roxo), (2) Observações manuais (âmbar), (3) Atividade Recente (azul, com autor+data). Se TODAS vazias → fallback itálico cinza "Nenhuma observação, nota da IA ou atividade recente registada." Backend garante que latest_activity chega ao frontend via 3 rotas: GET /processes/{id}, GET /clients/{id}, e GET /kanban (CRÍTICO para ProcessDetailsModal que lê do kanban).

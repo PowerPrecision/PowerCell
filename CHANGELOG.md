@@ -3,6 +3,35 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote DA: Always Show Notes Section & Aggregate Sources
+
+### Corrigido
+- **Secção de Observações só aparecia para alguns clientes/processos** — agora é **sempre visível** e **agrega todas as fontes de notas** disponíveis (IA + manuais + atividade recente).
+
+### 1. Visibilidade Incondicional (Frontend)
+- **`ProcessDetailsModal.jsx`**: A tab "Obs. e IA" (4ª tab, adicionada no Pacote CZ) agora usa uma IIFE que renderiza **sempre**. Se houver conteúdo, mostra os blocos relevantes; se TODOS os campos estiverem vazios, mostra um fallback em itálico cinza: *"Nenhuma observação, nota da IA ou atividade recente registada."*
+- **`ClientDetailsModal.jsx`**: Mesma lógica — a secção renderiza incondicionalmente com o mesmo fallback all-empty.
+
+### 2. Agregação de Fontes (3 blocos)
+Dentro da secção, cada bloco só aparece se tiver conteúdo (não mostra blocos vazios com "Sem ..."):
+1. **Notas da IA** (`ai_extracted_notes`) — roxo + `Sparkles` + badge "Automático"
+2. **Observações manuais** (`notas` / `notes`) — âmbar + `StickyNote` (editável no ProcessDetailsModal)
+3. **Atividade Recente** (`latest_activity`) — azul + `MessageSquare` + autor + data (NOVO)
+
+**CRÍTICO**: Se TODOS os 3 campos estiverem vazios/null → fallback itálico cinza: *"Nenhuma observação, nota da IA ou atividade recente registada."*
+
+### 3. Agregação no Backend (Garantia de Dados)
+- **`GET /processes/{id}`** (`processes.py`): Adicionado `db.activities.find_one({"process_id": process_id}, sort=[("created_at", -1)])` → popula `process.latest_activity` com `{comment, user_name, user_role, created_at}`.
+- **`GET /clients/{id}`** (`clients.py`): Adicionado `db.activities.find_one({"process_id": {"$in": all_process_ids}}, sort=[("created_at", -1)])` → popula `client.latest_activity` com a atividade mais recente de qualquer processo do cliente.
+- **`GET /processes/kanban`** (`processes.py`): Adicionado batch aggregation PACOTE DA (mesmo pattern do PACOTE BT/CZ) → popula `latest_activity` em todos os processos do kanban. **CRÍTICO**: O `ProcessDetailsModal` recebe `process` do KanbanBoard (que chama `/kanban`), não de `/processes/{id}` — sem este enrichment, a atividade não apareceria no modal.
+
+### Técnico
+- **Backend modificado**: `backend/routes/processes.py` (latest_activity no GET /{id} + batch enrichment no /kanban), `backend/routes/clients.py` (latest_activity no GET /{id}).
+- **Frontend modificado**: `frontend/src/components/kanban/ProcessDetailsModal.jsx` (IIFE agregada + 3º bloco Atividade Recente + fallback all-empty + import `MessageSquare`), `frontend/src/components/ClientDetailsModal.jsx` (IIFE agregada + 3º bloco + fallback all-empty + import `MessageSquare` + `formatDateTime`).
+- **FilteredProcessList.js**: Verificado — a coluna de Notas já tem fallback "Sem notas recentes" (do Pacote CZ). Sem alterações necessárias.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 2 ficheiros frontend.
+- **Dependências**: Nenhuma nova — `MessageSquare` já existe em `lucide-react`.
+
 ## [2026-07-16] — Pacote CZ: Fix Notes Data Source in Table & Force Observations in Modal
 
 ### Corrigido

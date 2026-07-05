@@ -50,9 +50,10 @@ import {
   StickyNote,
   Loader2,
   Sparkles,
+  MessageSquare,
 } from "lucide-react";
 import { safeString } from "../utils/safeString";
-import { formatDate } from "../lib/utils";
+import { formatDate, formatDateTime } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -315,49 +316,85 @@ const ClientDetailsModal = ({
             </div>
 
             {/* ============================================================
-                PACOTE CZ — Secção "Observações e IA" (INCONDICIONAL)
+                PACOTE DA — Secção "Observações e IA" (INCONDICIONAL + AGREGADA)
                 ============================================================
-                Ambas as secções renderizam SEMPRE (sem && conditional).
-                Se o campo estiver vazio, mostra fallback "Sem ...".
-                Isto garante que a secção é visível mal a Modal abre.
+                A secção renderiza SEMPRE. Dentro dela:
+                1. Notas da IA (ai_extracted_notes) — se houver
+                2. Observações manuais (notas) — se houver
+                3. Atividade Recente (latest_activity) — se houver
+                CRÍTICO: Se TODOS vazios → fallback itálico cinza.
                 ============================================================ */}
+            {(() => {
+              const hasAiNotes = !!safeString(client.ai_extracted_notes);
+              const hasManualNotes = !!safeString(client.notas);
+              const latestAct = client.latest_activity;
+              const hasActivity = !!(latestAct && safeString(latestAct.comment));
+              const hasAnyContent = hasAiNotes || hasManualNotes || hasActivity;
 
-            {/* ── Observações manuais (client.notas) — INCONDICIONAL ── */}
-            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-              <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                <StickyNote className="h-4 w-4 text-amber-600" />
-                Observações
-              </h4>
-              {safeString(client.notas) ? (
-                <p className="text-sm whitespace-pre-wrap text-amber-900 dark:text-amber-200">
-                  {safeString(client.notas)}
-                </p>
-              ) : (
-                <p className="text-sm text-amber-500 dark:text-amber-600 italic">
-                  Sem observações manuais registadas.
-                </p>
-              )}
-            </div>
+              if (!hasAnyContent) {
+                return (
+                  <div className="text-center py-6 px-4 bg-muted/30 rounded-lg border border-dashed">
+                    <p className="text-sm text-muted-foreground italic">
+                      Nenhuma observação, nota da IA ou atividade recente registada.
+                    </p>
+                  </div>
+                );
+              }
 
-            {/* ── Notas da IA (client.ai_extracted_notes) — INCONDICIONAL ── */}
-            <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-              <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 text-purple-700 dark:text-purple-300">
-                <Sparkles className="h-4 w-4" />
-                Notas da IA
-                <span className="text-[9px] font-normal px-1.5 py-0.5 rounded border border-purple-300 text-purple-600">
-                  Automático
-                </span>
-              </h4>
-              {safeString(client.ai_extracted_notes) ? (
-                <p className="text-sm whitespace-pre-wrap text-purple-900 dark:text-purple-200">
-                  {safeString(client.ai_extracted_notes)}
-                </p>
-              ) : (
-                <p className="text-sm text-purple-400 dark:text-purple-500 italic">
-                  Sem notas extraídas pela IA. As notas aparecerão aqui automaticamente após o processamento de documentos.
-                </p>
-              )}
-            </div>
+              return (
+                <div className="space-y-4">
+                  {/* ── Notas da IA (ai_extracted_notes) — só se houver ── */}
+                  {hasAiNotes && (
+                    <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+                      <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 text-purple-700 dark:text-purple-300">
+                        <Sparkles className="h-4 w-4" />
+                        Notas da IA
+                        <span className="text-[9px] font-normal px-1.5 py-0.5 rounded border border-purple-300 text-purple-600">
+                          Automático
+                        </span>
+                      </h4>
+                      <p className="text-sm whitespace-pre-wrap text-purple-900 dark:text-purple-200">
+                        {safeString(client.ai_extracted_notes)}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ── Observações manuais (client.notas) — só se houver ── */}
+                  {hasManualNotes && (
+                    <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                      <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                        <StickyNote className="h-4 w-4 text-amber-600" />
+                        Observações
+                      </h4>
+                      <p className="text-sm whitespace-pre-wrap text-amber-900 dark:text-amber-200">
+                        {safeString(client.notas)}
+                      </p>
+                    </div>
+                  )}
+
+                  {/* ── Atividade Recente (latest_activity) — só se houver ── */}
+                  {hasActivity && (
+                    <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                      <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 text-blue-700 dark:text-blue-300">
+                        <MessageSquare className="h-4 w-4" />
+                        Atividade Recente
+                      </h4>
+                      <p className="text-sm whitespace-pre-wrap text-blue-900 dark:text-blue-200 mb-2">
+                        {safeString(latestAct.comment)}
+                      </p>
+                      <div className="flex items-center gap-3 text-xs text-blue-600 dark:text-blue-400">
+                        {latestAct.user_name && (
+                          <span>por {safeString(latestAct.user_name)}</span>
+                        )}
+                        {latestAct.created_at && (
+                          <span>{formatDateTime(latestAct.created_at)}</span>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
           </div>
         ) : null}
 

@@ -2613,6 +2613,43 @@ async def get_kanban_board(
         p["has_unread_messages"] = unread_map.get(p["id"], False)
         p["has_new_documents"] = new_docs_map.get(p["id"], False)
 
+    # ============================================================
+    # PACOTE DA — Batch enrichment: latest_activity (atividade mais recente)
+    # ============================================================
+    # O ProcessDetailsModal recebe o `process` do KanbanBoard (que chama
+    # /kanban). Sem este enrichment, a tab "Observações e IA" não teria
+    # a atividade recente. Usamos o mesmo pattern batch aggregation do
+    # PACOTE BT/CZ: $group por process_id, $first da mais recente.
+    # ============================================================
+    try:
+        _da_latest_acts = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "comment": {"$first": "$comment"},
+                "user_name": {"$first": "$user_name"},
+                "user_role": {"$first": "$user_role"},
+                "created_at": {"$first": "$created_at"},
+            }}
+        ]).to_list(1000)
+        _da_acts_map = {r["_id"]: r for r in _da_latest_acts}
+        for p in processes:
+            act = _da_acts_map.get(p.get("id"))
+            if act:
+                # Remover o _id do objeto antes de atribuir
+                act_clean = {k: v for k, v in act.items() if k != "_id"}
+                p["latest_activity"] = act_clean
+            else:
+                p["latest_activity"] = None
+    except Exception as e:
+        logger.warning(f"[KANBAN] Erro no batch enrichment latest_activity: {e}")
+        for p in processes:
+            p.setdefault("latest_activity", None)
+
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
     user_map = {u["id"]: u for u in users}
@@ -3516,7 +3553,25 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     # Garantir campos obrigatórios para ProcessResponse (processos antigos
     # podem não ter client_id após a refatoração Fase 1→2)
     process.setdefault("client_id", process.get("client_id") or "")
-    
+
+    # ============================================================
+    # PACOTE DA —latest_activity: atividade/nota mais recente do processo
+    # ============================================================
+    # Busca a última entrada da coleção activities ligada a este process_id.
+    # O Frontend (ProcessDetailsModal) mostra isto na tab "Observações e IA"
+    # para que o consultor veja a última interação registada.
+    # ============================================================
+    try:
+        latest_act = await db.activities.find_one(
+            {"process_id": process_id, "comment": {"$exists": True, "$ne": ""}},
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        process["latest_activity"] = latest_act
+    except Exception as e:
+        logger.warning(f"[GET-PROCESS] Erro ao buscar latest_activity para {process_id}: {e}")
+        process["latest_activity"] = None
+
     try:
         return ProcessResponse(**process)
     except Exception as e:

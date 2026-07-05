@@ -43,7 +43,7 @@ import {
   User, Mail, Phone, Home, MapPin, Euro, Calendar, Users,
   AlertTriangle, Building2, CreditCard, FileText, ExternalLink,
   Loader2, Save, Pencil, X, CalendarClock, Inbox, CheckCircle2,
-  XCircle, ClipboardCheck, Sparkles, StickyNote
+  XCircle, ClipboardCheck, Sparkles, StickyNote, MessageSquare
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits } from '../../services/api';
@@ -1045,58 +1045,95 @@ const ProcessDetailsModal = memo(({
               ══════════════════════════════════════════════════════════ */}
           <TabsContent value="observacoes" className="overflow-y-auto max-h-[60vh] mt-0">
             <div className="space-y-4 p-1">
+              {(() => {
+                // PACOTE DA — Agregar todas as fontes de notas disponíveis
+                const hasAiNotes = !!safeString(process.ai_extracted_notes);
+                const hasManualNotes = !!safeString(editProcess.notes) || isEditing;
+                const latestAct = process.latest_activity;
+                const hasActivity = !!(latestAct && safeString(latestAct.comment));
+                const hasAnyContent = hasAiNotes || hasManualNotes || hasActivity;
 
-              {/* ── Notas da IA (ai_extracted_notes) — INCONDICIONAL ── */}
-              <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <Sparkles className="h-4 w-4 text-purple-600" />
-                  <h4 className="text-sm font-semibold text-purple-700 dark:text-purple-300">
-                    Notas extraídas pela IA
-                  </h4>
-                  <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-purple-600 border-purple-300">
-                    Automático
-                  </Badge>
-                </div>
-                {safeString(process.ai_extracted_notes) ? (
-                  <p className="text-sm whitespace-pre-wrap text-purple-900 dark:text-purple-200">
-                    {safeString(process.ai_extracted_notes)}
-                  </p>
-                ) : (
-                  <p className="text-sm text-purple-400 dark:text-purple-500 italic">
-                    Sem notas extraídas pela IA. As notas aparecerão aqui automaticamente após o processamento de documentos.
-                  </p>
-                )}
-              </div>
+                // CRÍTICO: Se TODOS os campos estiverem vazios, mostrar fallback
+                if (!hasAnyContent) {
+                  return (
+                    <div className="text-center py-8 px-4">
+                      <p className="text-sm text-muted-foreground italic">
+                        Nenhuma observação, nota da IA ou atividade recente registada.
+                      </p>
+                    </div>
+                  );
+                }
 
-              {/* ── Observações manuais (process.notes) — INCONDICIONAL ── */}
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                <div className="flex items-center gap-2 mb-2">
-                  <StickyNote className="h-4 w-4 text-amber-600" />
-                  <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
-                    Observações do Consultor
-                  </h4>
-                </div>
-                {isEditing ? (
-                  <Textarea
-                    value={editProcess.notes || ''}
-                    onChange={(e) => setEditProcess(prev => ({ ...prev, notes: e.target.value }))}
-                    placeholder="Escreva observações sobre o processo..."
-                    rows={5}
-                    className="bg-white dark:bg-amber-950/30"
-                  />
-                ) : (
-                  safeString(editProcess.notes) ? (
-                    <p className="text-sm whitespace-pre-wrap text-amber-900 dark:text-amber-200">
-                      {safeString(editProcess.notes)}
-                    </p>
-                  ) : (
-                    <p className="text-sm text-amber-500 dark:text-amber-600 italic">
-                      Sem observações manuais. Clique em "Editar" para adicionar.
-                    </p>
-                  )
-                )}
-              </div>
+                return (
+                  <>
+                    {/* ── Notas da IA (ai_extracted_notes) — só se houver ── */}
+                    {hasAiNotes && (
+                      <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <Sparkles className="h-4 w-4 text-purple-600" />
+                          <h4 className="text-sm font-semibold text-purple-700 dark:text-purple-300">
+                            Notas extraídas pela IA
+                          </h4>
+                          <Badge variant="outline" className="text-[9px] px-1.5 py-0 text-purple-600 border-purple-300">
+                            Automático
+                          </Badge>
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap text-purple-900 dark:text-purple-200">
+                          {safeString(process.ai_extracted_notes)}
+                        </p>
+                      </div>
+                    )}
 
+                    {/* ── Observações manuais (process.notes) — só se houver ou em edição ── */}
+                    {(hasManualNotes || isEditing) && (
+                      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <StickyNote className="h-4 w-4 text-amber-600" />
+                          <h4 className="text-sm font-semibold text-amber-700 dark:text-amber-300">
+                            Observações do Consultor
+                          </h4>
+                        </div>
+                        {isEditing ? (
+                          <Textarea
+                            value={editProcess.notes || ''}
+                            onChange={(e) => setEditProcess(prev => ({ ...prev, notes: e.target.value }))}
+                            placeholder="Escreva observações sobre o processo..."
+                            rows={5}
+                            className="bg-white dark:bg-amber-950/30"
+                          />
+                        ) : (
+                          <p className="text-sm whitespace-pre-wrap text-amber-900 dark:text-amber-200">
+                            {safeString(editProcess.notes)}
+                          </p>
+                        )}
+                      </div>
+                    )}
+
+                    {/* ── Atividade Recente (latest_activity) — só se houver ── */}
+                    {hasActivity && (
+                      <div className="bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+                        <div className="flex items-center gap-2 mb-2">
+                          <MessageSquare className="h-4 w-4 text-blue-600" />
+                          <h4 className="text-sm font-semibold text-blue-700 dark:text-blue-300">
+                            Atividade Recente
+                          </h4>
+                        </div>
+                        <p className="text-sm whitespace-pre-wrap text-blue-900 dark:text-blue-200 mb-2">
+                          {safeString(latestAct.comment)}
+                        </p>
+                        <div className="flex items-center gap-3 text-xs text-blue-600 dark:text-blue-400">
+                          {latestAct.user_name && (
+                            <span>por {safeString(latestAct.user_name)}</span>
+                          )}
+                          {latestAct.created_at && (
+                            <span>{formatDateTime(latestAct.created_at)}</span>
+                          )}
+                        </div>
+                      </div>
+                    )}
+                  </>
+                );
+              })()}
             </div>
           </TabsContent>
         </Tabs>
