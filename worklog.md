@@ -2842,3 +2842,56 @@ Stage Summary:
   - frontend/src/pages/StaffDashboard.js (is_lead: true no handleCreateLead)
   - frontend/src/components/CreateProcessModal.jsx (prop isLead + payload is_lead)
 - Resultado: 4 bugs resolvidos. (1) Email portal enviado em background com logs. (2) Timeline só marca Concluída se há registo explícito; fases saltadas aparecem como "Saltada" sem datas inventadas. (3) Leads vão para pre_registo (Registos de Clientes) em vez de clientes_espera (Kanban ativo); lead_status mantém "new"; assign_to_indexer skipado. (4) Docs obrigatórios lêem corretamente do nested config — lista persiste após guardar.
+
+---
+Task ID: Pacote CZ (Fix Notes Data Source in Table & Force Observations in Modal)
+Agent: Main Agent (Code Assistant)
+Task: Corrigir origem das notas na tabela + forçar secção Observações na Modal
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacotes CS..CY confirmados implementados).
+- Clonado repo PowerCell branch dev para /tmp/powercell_cz → /home/z/powercell_cz (commit base 2bdb5f2 = Pacote CY).
+
+- 2 subagentes Explore em paralelo:
+  1. Bug 1 (notas tabela): Backend JÁ envia latest_note (PACOTE BT batch aggregation) e latest_activity_note (PACOTE CG). Mas frontend lia process.notes PRIMEIRO (fallback chain invertida) → stale notes sempre ganhavam. PACOTE CJ (backend) era dead code: filtrava por "action" field inexistente em activities. GET /processes/paginated não tinha enrichação nenhuma. ProcessesPage.js nem lia latest_activity_note/latest_note.
+  2. Bug 2 (modais): ProcessDetailsModal — "Notas da IA" na tab "process" (NÃO default), condicionada a safeString(...) && !isEditing. ClientDetailsModal — ambas secções condicionadas a client.notas && e client.ai_extracted_notes && (escondidas quando vazias).
+
+- Fix Bug 1 backend:
+  - processes.py GET /processes: Removido dead code PACOTE CJ (linhas 1899-1906). Adicionado p["latest_activity_preview"] = p.get("latest_note") no loop PACOTE BT (linha 1898).
+  - processes.py GET /processes/paginated: Adicionado batch aggregation PACOTE CZ (linhas 2107-2141) — mesmo pattern do PACOTE BT. Antes não tinha enrichação nenhuma. Adicionado latest_note + latest_activity_preview.
+  - my_clients.py: Removido dead code PACOTE CJ (linhas 349-356). Adicionado p["latest_activity_preview"] = note_info.get("latest_activity_note") (linha 349).
+
+- Fix Bug 1 frontend (fallback chain invertida):
+  - FilteredProcessList.js:588: process.latest_activity_preview || process.latest_activity_note || process.latest_note (antes: process.notes || ...).
+  - MyClientsPage.js:627: client.latest_activity_preview || client.latest_activity_note || client.latest_note (antes: client.notes || ...).
+  - ProcessesPage.js:818: Chain reescrita — latest_activity_preview → latest_note → latest_activity_note → last_activity.content → activities[] (antes nem tinha latest_activity_note/latest_note).
+
+- Fix Bug 2 ProcessDetailsModal:
+  - Import StickyNote de lucide-react (linha 46).
+  - TabsList: grid-cols-3 → grid-cols-4 (linha 387).
+  - Nova TabsTrigger "observacoes" (linhas 432-440) — ícone StickyNote, cor âmbar.
+  - Nova TabsContent "observacoes" (linhas 1046-1101) — INCONDICIONAL:
+    * Notas da IA (roxo + Sparkles + badge "Automático"): safeString(process.ai_extracted_notes) ou fallback "Sem notas extraídas pela IA..."
+    * Observações do Consultor (âmbar + StickyNote): editável em isEditing; safeString(editProcess.notes) ou fallback "Sem observações manuais..."
+
+- Fix Bug 2 ClientDetailsModal:
+  - Removido {client.notas && ...} e {client.ai_extracted_notes && ...} (linhas 317-341).
+  - Ambas as secções agora INCONDICIONAIS (wrapper div sempre renderiza):
+    * Observações (âmbar + StickyNote): safeString(client.notas) ou fallback "Sem observações manuais registadas."
+    * Notas da IA (roxo + Sparkles + badge "Automático"): safeString(client.ai_extracted_notes) ou fallback "Sem notas extraídas pela IA..."
+
+- Validação:
+  - py_compile routes/processes.py routes/my_clients.py → OK
+  - flake8 --select=E9,F63,F7,F82 → 0 erros
+  - esbuild --packages=external → 0 erros nos 5 ficheiros frontend
+
+Stage Summary:
+- 7 ficheiros modificados:
+  - backend/routes/processes.py (latest_activity_preview no GET /processes + batch aggregation no GET /paginated + remoção dead code PACOTE CJ)
+  - backend/routes/my_clients.py (latest_activity_preview + remoção dead code PACOTE CJ)
+  - frontend/src/pages/ProcessesPage.js (notes chain invertida)
+  - frontend/src/pages/FilteredProcessList.js (notes chain invertida)
+  - frontend/src/pages/MyClientsPage.js (notes chain invertida)
+  - frontend/src/components/kanban/ProcessDetailsModal.jsx (4ª tab "Obs. e IA" incondicional + import StickyNote)
+  - frontend/src/components/ClientDetailsModal.jsx (secções incondicionais com fallback)
+- Resultado: (1) Tabelas mostram a atividade mais recente do consultor (latest_activity_preview), não process.notes estático. Dead code PACOTE CJ removido. GET /paginated agora tem enrichação. (2) Secção "Observações e IA" sempre visível — nova tab no ProcessDetailsModal, secções incondicionais no ClientDetailsModal. Ambas mostram notas IA (roxo) + manuais (âmbar) com fallbacks claros quando vazias.

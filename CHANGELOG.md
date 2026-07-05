@@ -3,6 +3,42 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote CZ: Fix Notes Data Source in Table & Force Observations in Modal
+
+### Corrigido
+- **Desfasamento entre notas da tabela e notas reais dos consultores** + **secção de Observações que não aparecia na Modal**. Ambos os bugs resolvidos.
+
+### Bug 1 — Origem das Notas na Tabela de Processos
+- **Causa raiz**: As tabelas liam `process.notes` (campo estático) PRIMEIRO, com fallback para `latest_activity_note`/`latest_note`. Como `process.notes` quase sempre tinha valor (mesmo desatualizado), a atividade mais recente nunca aparecia. Além disso, o PACOTE CJ (backend) que deveria sobrescrever `p["notes"]` era **dead code** — filtrava por `action` field que não existe na coleção `activities`.
+- **Backend**:
+  - **`GET /processes`**: Removido dead code PACOTE CJ. Adicionado `latest_activity_preview` (alias explícito de `latest_note` do batch aggregation PACOTE BT) a cada processo.
+  - **`GET /processes/paginated`**: Adicionado batch aggregation PACOTE CZ (mesmo pattern do PACOTE BT) — antes não tinha enrichação de notas nenhuma. Adicionado `latest_note` + `latest_activity_preview`.
+  - **`GET /my-clients`** (`my_clients.py`): Removido dead code PACOTE CJ. Adicionado `latest_activity_preview` (alias de `latest_activity_note` do PACOTE CG).
+- **Frontend** (fallback chain invertida — atividade mais recente PRIMEIRO):
+  - **`FilteredProcessList.js`**: `process.latest_activity_preview || process.latest_activity_note || process.latest_note` (antes era `process.notes || ...`).
+  - **`MyClientsPage.js`**: `client.latest_activity_preview || client.latest_activity_note || client.latest_note` (antes era `client.notes || ...`).
+  - **`ProcessesPage.js`**: Chain reescrita — agora prioriza `latest_activity_preview` → `latest_note` → `latest_activity_note` → `last_activity.content` → `activities[]` (antes nem tinha `latest_activity_note`/`latest_note`).
+
+### Bug 2 — Secção de Observações não renderizava na Modal
+- **Causa raiz (ProcessDetailsModal)**: A secção "Notas da IA" estava: (1) dentro da tab "process" (NÃO era a default — a default era "client"), (2) condicionada a `safeString(process.ai_extracted_notes) && !isEditing` — escondida quando vazia OU em modo de edição.
+- **Causa raiz (ClientDetailsModal)**: Ambas as secções ("Observações" e "Notas da IA") eram condicionadas a `client.notas &&` e `client.ai_extracted_notes &&` — completamente escondidas quando os campos estavam vazios.
+- **Correção (ProcessDetailsModal)**:
+  - Nova **4ª tab "Obs. e IA"** (grid-cols-4), sempre visível.
+  - TabsContent incondicional com:
+    1. **Notas da IA** (roxo + `Sparkles` + badge "Automático") — sempre renderiza; fallback "Sem notas extraídas pela IA..." se vazio.
+    2. **Observações do Consultor** (âmbar + `StickyNote`) — sempre renderiza; editável em modo de edição; fallback "Sem observações manuais..." se vazio.
+  - Import `StickyNote` adicionado aos ícones lucide.
+- **Correção (ClientDetailsModal)**:
+  - Removida a renderização condicional `{client.notas && ...}` e `{client.ai_extracted_notes && ...}`.
+  - Ambas as secções agora renderizam **sempre** (wrapper div incondicional), com fallback "Sem observações manuais registadas." / "Sem notas extraídas pela IA..." dentro do `<p>`.
+  - Badge "Automático" adicionado ao header das Notas da IA.
+
+### Técnico
+- **Backend modificado**: `backend/routes/processes.py` (latest_activity_preview no GET /processes + batch aggregation no GET /paginated + remoção dead code), `backend/routes/my_clients.py` (latest_activity_preview + remoção dead code).
+- **Frontend modificado**: `frontend/src/pages/ProcessesPage.js` (notes chain), `frontend/src/pages/FilteredProcessList.js` (notes chain), `frontend/src/pages/MyClientsPage.js` (notes chain), `frontend/src/components/kanban/ProcessDetailsModal.jsx` (4ª tab + import StickyNote), `frontend/src/components/ClientDetailsModal.jsx` (secções incondicionais).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 5 ficheiros frontend.
+- **Dependências**: Nenhuma nova — `StickyNote` já existe em `lucide-react`.
+
 ## [2026-07-16] — Pacote CY: Fix Client Onboarding, Timeline & Config Bugs
 
 ### Corrigido

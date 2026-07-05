@@ -813,16 +813,18 @@ const ProcessesPage = () => {
                               )}
                             </div>
                           </TableCell>
-                          {/* PACOTE AP: Notas do Consultor — extrai última nota/observação do processo */}
+                          {/* PACOTE CZ: Notas do Consultor — lê a atividade mais recente PRIMEIRO */}
                           <TableCell className="min-w-[180px] max-w-[280px]">
                             {(() => {
-                              // Tentar obter a última nota: process.notes (string),
-                              // process.last_activity (objeto), ou activities array
+                              // PACOTE CZ: Priorizar latest_activity_preview (alias explícito do backend)
+                              // e latest_note (batch aggregation PACOTE BT) sobre process.notes estático.
                               let noteText = '';
-                              if (typeof process.notes === 'string' && process.notes.trim()) {
-                                noteText = process.notes.trim();
-                              } else if (process.last_note && typeof process.last_note === 'string') {
-                                noteText = process.last_note.trim();
+                              if (typeof process.latest_activity_preview === 'string' && process.latest_activity_preview.trim()) {
+                                noteText = process.latest_activity_preview.trim();
+                              } else if (typeof process.latest_note === 'string' && process.latest_note.trim()) {
+                                noteText = process.latest_note.trim();
+                              } else if (typeof process.latest_activity_note === 'string' && process.latest_activity_note.trim()) {
+                                noteText = process.latest_activity_note.trim();
                               } else if (process.last_activity?.content) {
                                 noteText = String(process.last_activity.content);
                               } else if (Array.isArray(process.activities) && process.activities.length > 0) {

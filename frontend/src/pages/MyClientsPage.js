@@ -621,10 +621,10 @@ const MyClientsPage = () => {
                             </span>
                           )}
                         </TableCell>
-                        {/* PACOTE CP — coluna Notas: lê notes do backend (Pacote CJ) com fallback */}
+                        {/* PACOTE CZ — coluna Notas: lê a atividade mais recente PRIMEIRO (não client.notes estático) */}
                         <TableCell className="min-w-[140px] max-w-[220px]">
                           {(() => {
-                            const noteText = client.notes || client.latest_activity_note || client.latest_note || "";
+                            const noteText = client.latest_activity_preview || client.latest_activity_note || client.latest_note || "";
                             if (noteText) {
                               return (
                                 <div className="line-clamp-2 text-sm text-gray-500" title={noteText}>

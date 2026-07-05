@@ -1892,18 +1892,18 @@ async def get_processes(
                 p["latest_note"] = None
                 p["latest_note_at"] = None
                 p["latest_note_by"] = None
+            # PACOTE CZ — latest_activity_preview: alias explícito da última
+            # atividade/nota do consultor. O frontend lê este campo EM VEZ de
+            # process.notes (que é estático e pode estar desatualizado).
+            p["latest_activity_preview"] = p.get("latest_note")
 
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
 
-    # PACOTE CJ — Injetar a última nota real do consultor
-    for p in processes:
-        latest_note = await db.activities.find_one(
-            {"process_id": p["id"], "action": {"$in": ["note_added", "comment"]}},
-            sort=[("created_at", -1)]
-        )
-        if latest_note and latest_note.get("comment"):
-            p["notes"] = latest_note["comment"]
+    # PACOTE CZ — Removido o bloco PACOTE CJ (dead code): fazia find_one por
+    # "action" field que não existe na coleção activities. A enrichação real
+    # já é feita pelo batch aggregation PACOTE BT acima (latest_note +
+    # latest_activity_preview alias).
 
     return {
         "items": processes,
@@ -2104,14 +2104,41 @@ async def get_processes_paginated(
             p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
             p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
 
-    # PACOTE CJ — Injetar a última nota real do consultor
-    for p in result["items"]:
-        latest_note = await db.activities.find_one(
-            {"process_id": p["id"], "action": {"$in": ["note_added", "comment"]}},
-            sort=[("created_at", -1)]
-        )
-        if latest_note and latest_note.get("comment"):
-            p["notes"] = latest_note["comment"]
+    # ============================================================
+    # PACOTE CZ — Batch enrichment: última nota do consultor
+    # ============================================================
+    # Antes este endpoint só tinha o bloco PACOTE CJ (dead code que filtrava
+    # por "action" field inexistente). Agora usa o mesmo pattern batch do
+    # PACOTE BT: aggregation $group por process_id, $first da mais recente.
+    # Adiciona latest_note + latest_activity_preview a cada processo.
+    # ============================================================
+    if result.get("items"):
+        _cz_process_ids = [p["id"] for p in result["items"] if p.get("id")]
+        _cz_latest_notes = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": _cz_process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "latest_note": {"$first": "$comment"},
+                "latest_note_at": {"$first": "$created_at"},
+                "latest_note_by": {"$first": "$user_name"},
+            }}
+        ]).to_list(1000)
+        _cz_notes_map = {r["_id"]: r for r in _cz_latest_notes}
+        for p in result["items"]:
+            note_info = _cz_notes_map.get(p.get("id"))
+            if note_info:
+                p["latest_note"] = note_info.get("latest_note")
+                p["latest_note_at"] = note_info.get("latest_note_at")
+                p["latest_note_by"] = note_info.get("latest_note_by")
+            else:
+                p["latest_note"] = None
+                p["latest_note_at"] = None
+                p["latest_note_by"] = None
+            p["latest_activity_preview"] = p.get("latest_note")
 
     return {
         "processes": result["items"],

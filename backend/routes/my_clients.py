@@ -345,15 +345,12 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
         p["latest_activity_note"] = note_info.get("latest_activity_note")
         p["latest_activity_note_at"] = note_info.get("latest_activity_note_at")
         p["latest_activity_note_by"] = note_info.get("latest_activity_note_by")
+        # PACOTE CZ — latest_activity_preview: alias explícito para o frontend
+        p["latest_activity_preview"] = note_info.get("latest_activity_note") if note_info else None
 
-    # PACOTE CJ — Injetar a última nota real do consultor
-    for p in processes:
-        latest_note = await db.activities.find_one(
-            {"process_id": p["id"], "action": {"$in": ["note_added", "comment"]}},
-            sort=[("created_at", -1)]
-        )
-        if latest_note and latest_note.get("comment"):
-            p["notes"] = latest_note["comment"]
+    # PACOTE CZ — Removido o bloco PACOTE CJ (dead code): filtrava por "action"
+    # field inexistente na coleção activities. A enrichação real já é feita pelo
+    # batch aggregation PACOTE CG acima (latest_activity_note + alias).
 
     # Combinar processos + leads
     all_clients = leads + processes

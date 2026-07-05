@@ -314,31 +314,50 @@ const ClientDetailsModal = ({
               </div>
             </div>
 
-            {/* PACOTE CH — Bloco Observações / Notas */}
-            {client.notas && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
-                  <StickyNote className="h-4 w-4 text-amber-600" />
-                  Observações
-                </h4>
+            {/* ============================================================
+                PACOTE CZ — Secção "Observações e IA" (INCONDICIONAL)
+                ============================================================
+                Ambas as secções renderizam SEMPRE (sem && conditional).
+                Se o campo estiver vazio, mostra fallback "Sem ...".
+                Isto garante que a secção é visível mal a Modal abre.
+                ============================================================ */}
+
+            {/* ── Observações manuais (client.notas) — INCONDICIONAL ── */}
+            <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
+              <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
+                <StickyNote className="h-4 w-4 text-amber-600" />
+                Observações
+              </h4>
+              {safeString(client.notas) ? (
                 <p className="text-sm whitespace-pre-wrap text-amber-900 dark:text-amber-200">
                   {safeString(client.notas)}
                 </p>
-              </div>
-            )}
+              ) : (
+                <p className="text-sm text-amber-500 dark:text-amber-600 italic">
+                  Sem observações manuais registadas.
+                </p>
+              )}
+            </div>
 
-            {/* PACOTE CX — Bloco Notas da IA (ai_extracted_notes) com formatação distinta */}
-            {client.ai_extracted_notes && (
-              <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
-                <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 text-purple-700 dark:text-purple-300">
-                  <Sparkles className="h-4 w-4" />
-                  Notas da IA
-                </h4>
+            {/* ── Notas da IA (client.ai_extracted_notes) — INCONDICIONAL ── */}
+            <div className="bg-purple-50 dark:bg-purple-950/20 border border-purple-200 dark:border-purple-800 rounded-lg p-4">
+              <h4 className="text-sm font-semibold mb-2 flex items-center gap-2 text-purple-700 dark:text-purple-300">
+                <Sparkles className="h-4 w-4" />
+                Notas da IA
+                <span className="text-[9px] font-normal px-1.5 py-0.5 rounded border border-purple-300 text-purple-600">
+                  Automático
+                </span>
+              </h4>
+              {safeString(client.ai_extracted_notes) ? (
                 <p className="text-sm whitespace-pre-wrap text-purple-900 dark:text-purple-200">
                   {safeString(client.ai_extracted_notes)}
                 </p>
-              </div>
-            )}
+              ) : (
+                <p className="text-sm text-purple-400 dark:text-purple-500 italic">
+                  Sem notas extraídas pela IA. As notas aparecerão aqui automaticamente após o processamento de documentos.
+                </p>
+              )}
+            </div>
           </div>
         ) : null}
 

@@ -582,10 +582,10 @@ const FilteredProcessList = () => {
                               )}
                             </TableCell>
                           )}
-                          {/* PACOTE CP: Notas — lê notes do backend (Pacote CJ) com fallback */}
+                          {/* PACOTE CZ: Notas — lê a atividade mais recente PRIMEIRO (não process.notes estático) */}
                           <TableCell className="min-w-[140px] max-w-[220px]">
                             {(() => {
-                              const noteText = process.notes || process.latest_activity_note || process.latest_note || "";
+                              const noteText = process.latest_activity_preview || process.latest_activity_note || process.latest_note || "";
                               if (noteText) {
                                 return (
                                   <div className="line-clamp-2 text-sm text-muted-foreground" title={noteText}>
