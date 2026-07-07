@@ -5017,9 +5017,11 @@ const ProcessDetails = () => {
                       </div>
                       )}
 
-                      {/* AI Executive Summary — só visível para admin e CEO */}
-                      {hasAnyRole(user, ["admin", "ceo"]) && (
-                      <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10">
+                      {/* PACOTE DB — AI Executive Summary temporariamente oculto (display: none).
+                          O Card é mantido para reativação futura — não apagar.
+                          Originalmente: só visível para admin e CEO. */}
+                      {hasAnyRole(user, ["admin", "ceo"]) && false && (
+                      <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10" style={{ display: 'none' }}>
                         <CardContent className="pt-4">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">

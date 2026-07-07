@@ -52,7 +52,9 @@ const UnifiedDocumentsPanel = ({ processId, clientName, onAIDataExtracted }) => 
   return (
     <div className="space-y-2" data-testid="unified-documents-panel" data-can-see-index={canSeeIndexCategory ? "true" : "false"}>
       <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
-        <TabsList className={canSeeLinks ? "grid w-full grid-cols-2 h-8" : ""}>
+        {/* PACOTE DB — Separador "Links" temporariamente oculto (display: none).
+            O código é mantido para reativação futura — não apagar. */}
+        <TabsList className="" style={{ display: 'none' }}>
           <TabsTrigger value="files" className="text-xs gap-1.5" data-testid="files-tab">
             <Upload className="h-3.5 w-3.5" />
             Ficheiros
@@ -73,8 +75,10 @@ const UnifiedDocumentsPanel = ({ processId, clientName, onAIDataExtracted }) => 
           />
         </TabsContent>
 
+        {/* PACOTE DB — TabsContent "Links" temporariamente oculto (display: none).
+            Mantido para reativação futura. */}
         {canSeeLinks && (
-          <TabsContent value="links" className="mt-3">
+          <TabsContent value="links" className="mt-3" style={{ display: 'none' }}>
             <DriveLinks
               processId={processId}
               clientName={clientName}

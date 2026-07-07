@@ -29,6 +29,9 @@ INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
 # PACOTE BK — Estado pré_registo (cliente ainda a preencher no portal).
 # Não aparece nos quadros de trabalho da equipa para não gerar ruído.
 PRE_REGISTO_STATUS = "pre_registo"
+# PACOTE DB — Valores de status "Lead" (sem fase do Kanban ativo).
+# Inclui "pre_registo" (legacy) e None (novos registos do formulário público).
+LEAD_STATUS_VALUES = ["pre_registo", None]
 
 router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 
@@ -168,7 +171,8 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     # não há nada a excluir — preserva-se para clareza.
     # ====================================================================
     if query != {"_id": None}:
-        pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+        # PACOTE DB — excluir pre_registo E None (Lead) dos Meus Clientes
+        pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
         if "$and" in query:
             query["$and"].append(pre_registo_filter)
         elif query:

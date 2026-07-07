@@ -359,11 +359,10 @@ async def _create_process_and_anchor(
     )
     next_number = (last_process.get("process_number", 0) if last_process else 0) + 1
 
-    # Obter estado inicial do workflow
-    first_status = await db.workflow_statuses.find_one(
-        {}, {"_id": 0}, sort=[("order", 1)]
-    )
-    initial_status = first_status["name"] if first_status else "clientes_espera"
+    # PACOTE DB — O processo é criado com status VAZIO (Lead). Só transita
+    # para a 1ª fase real do Kanban via _auto_advance_from_pre_registo
+    # (portal.py), que é invocado logo após esta criação quando os docs
+    # obrigatórios já estão todos submetidos.
 
     # Dados do cliente
     client_name = client.get("nome", "Cliente")
@@ -415,7 +414,10 @@ async def _create_process_and_anchor(
         "client_email": client_email,
         "client_phone": client_phone,
         "process_type": "credito_habitacao",  # Default — pode ser alterado pelo staff
-        "status": initial_status,
+        # PACOTE DB — status VAZIO (Lead); transita para 1ª fase real via
+        # _auto_advance_from_pre_registo (portal.py) após criação.
+        "status": None,
+        "workflow_step": None,
         "personal_data": personal_data,
         "financial_data": client.get("dados_financeiros", {}),
         "real_estate_data": {},

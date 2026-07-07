@@ -168,7 +168,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
     setSubmitting(true);
     try {
       // FASE 3: Enviar APENAS { client_id, process_type } — sem personal_data
-      // PACOTE CY: isLead=true → processo vai para Registos de Clientes (pre_registo)
+      // PACOTE CY/DB: isLead=true → processo vai para Registos de Clientes (status vazio/Lead)
       const payload = {
         client_id: clientId,
         process_type: processType,

@@ -283,7 +283,7 @@ const StaffDashboard = () => {
           telefone: clientPhone,
           ...(clientNif ? { nif: clientNif } : {}),
         },
-        // PACOTE CY — is_lead=true → vai para Registos de Clientes (pre_registo)
+        // PACOTE CY/DB — is_lead=true → vai para Registos de Clientes (status vazio/Lead)
         is_lead: true,
       };
 

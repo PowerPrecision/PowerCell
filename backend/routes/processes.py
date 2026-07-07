@@ -921,8 +921,10 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         )
     
     # Obter o primeiro estado do workflow (Clientes em Espera)
+    # PACOTE DB — Se não houver workflow_statuses, deixa vazio (None) em vez
+    # de inventar "clientes_espera". Não inventar nomes de fases no código.
     first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    initial_status = first_status["name"] if first_status else "clientes_espera"
+    initial_status = first_status["name"] if first_status else None
     
     # Gerar ID único, número sequencial e timestamp
     process_id = str(uuid.uuid4())
@@ -1050,23 +1052,30 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         )
     
     # Obter o primeiro estado do workflow
+    # PACOTE DB — Se não houver workflow_statuses, deixa vazio (None) em vez
+    # de inventar "clientes_espera". Não inventar nomes de fases no código.
     first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    default_status = first_status["name"] if first_status else "clientes_espera"
+    default_status = first_status["name"] if first_status else None
 
     # ============================================================
     # PACOTE CY — Routing: Lead vs Processo Ativo
     # ============================================================
     # Se is_lead=True, o processo vai para a caixa "Registos de Clientes"
-    # (status pre_registo) — NÃO aparece no Kanban ativo, aparece na sala
+    # (status vazio/Lead) — NÃO aparece no Kanban ativo, aparece na sala
     # de triagem. lead_status do cliente mantém-se "new" (não "converted").
     # Se is_lead=False (default), vai para a primeira coluna do Kanban ativo.
+    # PACOTE DB — is_lead usa status=None (Lead) em vez de "pre_registo".
     # ============================================================
     is_lead = bool(getattr(data, 'is_lead', False))
     if is_lead:
-        initial_status = "pre_registo"
-        logger.info("[CREATE-PROCESS] is_lead=True → status=pre_registo (Registos de Clientes)")
+        initial_status = None
+        logger.info("[CREATE-PROCESS] is_lead=True → status vazio (Lead / Registos de Clientes)")
     else:
         initial_status = default_status
+        if initial_status:
+            logger.info(f"[CREATE-PROCESS] status inicial = 1ª fase real do workflow: {initial_status}")
+        else:
+            logger.warning("[CREATE-PROCESS] workflow_statuses vazio — status inicial = None (sem fases configuradas)")
     
     # Gerar ID único e número sequencial
     process_id = str(uuid.uuid4())
@@ -1261,26 +1270,28 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # ============================================================
     try:
         if is_lead:
-            logger.info(f"[CREATE-PROCESS] is_lead=True — a saltar auto-atribuição de indexador para processo {process_id} (pre_registo)")
+            logger.info(f"[CREATE-PROCESS] is_lead=True — a saltar auto-atribuição de indexador para processo {process_id} (Lead)")
         else:
             from services.process_assignment import assign_to_indexer
-            assign_success, assign_data, assign_msg = await assign_to_indexer(process_id)
+            # PACOTE DB — update_status=False: NÃO forçar fila_espera/fase_documental.
+            # O processo mantém o initial_status (1ª fase real do workflow_statuses).
+            # O indexador é atribuído se disponível, mas o status não é alterado.
+            assign_success, assign_data, assign_msg = await assign_to_indexer(process_id, update_status=False)
             if assign_success and assign_data.get("assigned"):
                 logger.info(
                     f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
-                    f"para processo {process_id}"
+                    f"para processo {process_id} (status mantém: {initial_status})"
                 )
-                # Atualizar o process_doc local para a resposta (já foi atualizado na BD por assign_to_indexer)
+                # Atualizar o process_doc local para a resposta
                 process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
                 process_doc["indexacao_name"] = assign_data.get("indexacao_name")
-                if assign_data.get("status"):
-                    process_doc["status"] = assign_data["status"]
+                # PACOTE DB — status NÃO é sobrescrito pelo assign_to_indexer
             else:
                 logger.warning(
-                    f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg}"
+                    f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg} "
+                    f"(status mantém: {initial_status})"
                 )
-                if assign_data.get("status"):
-                    process_doc["status"] = assign_data["status"]
+                # PACOTE DB — status NÃO é sobrescrito (processo fica na 1ª fase real sem indexador)
     except Exception as e:
         logger.warning(f"[CREATE-PROCESS] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
     
@@ -1430,6 +1441,10 @@ ARCHIVED_STATUSES = ["concluidos", "desistencias"]
 # pipeline, disparando a dupla auto-atribuição — ver process_assignment).
 # ====================================================================
 PRE_REGISTO_STATUS = "pre_registo"
+# PACOTE DB — Valores de status que representam "Lead" (sem fase do Kanban ativo).
+# Inclui "pre_registo" (legacy) e None (novos registos do formulário público).
+# Usado em queries $nin para excluir leads dos quadros de trabalho (Kanban, listagens).
+LEAD_STATUS_VALUES = ["pre_registo", None]
 # Roles com privilégios de gestão — podem contornar a exclusão do pré-registo
 PRE_REGISTO_BYPASS_ROLES = {
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
@@ -1673,7 +1688,7 @@ async def get_processes(
     # encapsula toda a lógica de bypass.
     # ====================================================================
     if _should_hide_pre_registo(role, status, search):
-        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+        and_conditions.append({"status": {"$nin": LEAD_STATUS_VALUES}})
 
     # ====================================================================
     # MONTAR QUERY FINAL COM $and
@@ -2036,7 +2051,7 @@ async def get_processes_paginated(
     # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
     # ====================================================================
     if _should_hide_pre_registo(role, status, search):
-        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+        and_conditions.append({"status": {"$nin": LEAD_STATUS_VALUES}})
 
     # Montar query final
     if len(and_conditions) == 1:
@@ -2479,7 +2494,7 @@ async def get_kanban_board(
     # precisem inspeccionar pré-registos devem usar a listagem tabular
     # (GET /processes com search) ou o endpoint de diagnóstico.
     # ====================================================================
-    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
     if "$and" in query:
         query["$and"].append(pre_registo_filter)
     elif query:
@@ -2887,7 +2902,7 @@ async def get_my_clients(
     # não tem parâmetro search, pelo que o bypass para admin faz-se através
     # da listagem tabular (GET /processes com search) ou do Kanban diagnose.
     # ====================================================================
-    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
     if "$and" in query:
         query["$and"].append(pre_registo_filter)
     elif query:
@@ -3887,13 +3902,14 @@ async def mark_process_indexed(
         logger.warning(f"[INDEXACAO] Erro ao verificar fila de espera: {waitlist_err}")
 
     # ==================================================================
-    # DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo → Pipeline)
+    # DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo/Lead → Pipeline)
     # ==================================================================
-    # Se o processo transitou de pre_registo, dispara a dupla
-    # auto-atribuição (consultor + intermediário em simultâneo).
+    # Se o processo transitou de pre_registo (ou status vazio/Lead), dispara
+    # a dupla auto-atribuição (consultor + intermediário em simultâneo).
     # Caso contrário, usa a lógica de auto-atribuição de consultor apenas.
+    # PACOTE DB — aceita também current_status=None (novos registos).
     consultant_result = None
-    is_pre_registo_transition = (current_status == "pre_registo")
+    is_pre_registo_transition = (current_status in ("pre_registo", None))
 
     if is_pre_registo_transition:
         try:

@@ -134,6 +134,13 @@ const KanbanBoard = ({
   // === ESTADO DE DRAG & DROP ===
   const [draggingCard, setDraggingCard] = useState(null);
   const [dragOverColumn, setDragOverColumn] = useState(null);
+
+  // === PACOTE DB — OPTIMISTIC MOVE LOCAL (reatividade imediata do Kanban) ===
+  // Mapa processId → newStatus aplicado IMEDIATAMENTE no handleDrop, antes
+  // de aguardar a resposta da API. Garante que o cartão se move visualmente
+  // sem delay, independentemente do cache do TanStack Query. Limpo no
+  // onSettled do mutation (quando a API responde e a query é invalidada).
+  const [localMoves, setLocalMoves] = useState({});
   
   // === ESTADO DE COLUNAS COLAPSADAS ===
   const [collapsedColumns, setCollapsedColumns] = useState(new Set());
@@ -222,7 +229,19 @@ const KanbanBoard = ({
   });
 
   // === REACT QUERY - MUTATIONS ===
-  const moveProcessMutation = useMoveProcessMutation(addPendingMove, removePendingMove, { filters });
+  // PACOTE DB — onSettled limpa o localMoves do processo quando a API responde
+  const moveProcessMutation = useMoveProcessMutation(addPendingMove, removePendingMove, {
+    filters,
+    onSettled: (_data, _error, variables) => {
+      // Limpar o move local — a query invalidada já tem o estado real
+      setLocalMoves(prev => {
+        if (!prev[variables.processId]) return prev;
+        const next = { ...prev };
+        delete next[variables.processId];
+        return next;
+      });
+    },
+  });
 
   // === AUTO-COLLAPSE EMPTY COLUMNS ===
   // Este efeito é local, não precisa de React Query
@@ -267,7 +286,12 @@ const KanbanBoard = ({
     const { process, sourceColumn } = draggingCard;
     setDraggingCard(null);
 
-    // Usar mutation com optimistic update
+    // PACOTE DB — Optimistic update LOCAL IMEDIATO: o cartão muda de coluna
+    // VISUALMENTE no momento do drop, antes de aguardar a API. Esta camada
+    // local é aplicada sobre as `columns` do TanStack Query (ver optimisticColumns).
+    setLocalMoves(prev => ({ ...prev, [process.id]: targetColumn }));
+
+    // Disparar a mutation (tem o seu próprio optimistic update no cache)
     moveProcessMutation.mutate({
       processId: process.id,
       newStatus: targetColumn,
@@ -309,8 +333,41 @@ const KanbanBoard = ({
     setShowProcessDialog(open);
   }, [selectedProcess, sendMessage]);
 
+  // === PACOTE DB — OPTIMISTIC COLUMNS (reatividade imediata do Kanban) ===
+  // Aplica `localMoves` sobre `columns` ANTES do filtro: move cada processo
+  // da sua coluna original para a coluna-alvo definida em localMoves.
+  // Isto garante que o drag-drop se reflete INSTANTANEAMENTE no render,
+  // independentemente do cache do TanStack Query.
+  const optimisticColumns = useMemo(() => {
+    const moveEntries = Object.entries(localMoves);
+    if (moveEntries.length === 0) return columns;
+
+    const moveMap = new Map(moveEntries); // processId → newStatus
+
+    // Recolher processos movidos (removê-los das colunas originais)
+    const movedProcesses = new Map(); // processId → process object
+    for (const col of columns) {
+      for (const p of (col.processes || [])) {
+        if (moveMap.has(p.id)) {
+          movedProcesses.set(p.id, { ...p, status: moveMap.get(p.id) });
+        }
+      }
+    }
+
+    return columns.map(col => {
+      let processes = (col.processes || []).filter(p => !moveMap.has(p.id));
+      // Adicionar processos movidos PARA esta coluna
+      for (const [, p] of movedProcesses) {
+        if (p.status === col.name) {
+          processes = [...processes, p];
+        }
+      }
+      return { ...col, processes, count: processes.length };
+    });
+  }, [columns, localMoves]);
+
   // === FILTERED DATA ===
-  const filteredColumns = columns.map(column => ({
+  const filteredColumns = optimisticColumns.map(column => ({
     ...column,
     processes: sortProcessesByPriority(
       column.processes.filter(process => {

@@ -274,18 +274,23 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
     # =========================================
     # Anteriormente: NÃO se criava processo nesta fase (triagem manual
     # obrigatória). A partir do Pacote D, o formulário público cria
-    # automaticamente um processo em "pre_registo" e envia o email de
-    # convite para o Portal do Cliente usando o email do sistema.
+    # automaticamente um processo e envia o email de convite para o
+    # Portal do Cliente usando o email do sistema.
+    #
+    # PACOTE DB — O processo é criado com status VAZIO (Lead), NÃO em
+    # "pre_registo". Só entra no Kanban ativo quando o cliente submete
+    # os Documentos Obrigatórios via Portal.
     #
     # Fluxo:
-    # 1. Criar processo com status="pre_registo", is_active=True
+    # 1. Criar processo com status=None (Lead), is_active=True
     # 2. Gerar JWT magic_link (create_client_magic_token) + short_id
     # 3. Guardar em portal_tokens (upsert por process_id)
     # 4. Enviar email de convite via send_email(force_system=True)
     #
     # Nota: o staff continua a poder fazer triagem (mudar status,
-    # atribuir consultor, etc.) — o processo em pre_registo aparece
-    # no Kanban. O cliente recebe imediatamente o link do portal.
+    # atribuir consultor, etc.) — o processo com status vazio NÃO aparece
+    # no Kanban ativo (ver processes.py _should_hide_pre_registo que agora
+    # também esconde status=None). O cliente recebe imediatamente o link do portal.
     # =========================================
     process_id = None
     magic_link_sent = False
@@ -308,7 +313,12 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             "client_phone": clean_phone,
             "process_type": process_type,
             "type": process_type,
-            "status": "pre_registo",
+            # PACOTE DB — Novos registos entram com status/workflow_step VAZIOS
+            # (sem fase do Kanban). Só transitam para a 1ª fase real do Kanban
+            # quando o cliente submete os Documentos Obrigatórios via Portal
+            # (ver portal.py _auto_advance_from_pre_registo).
+            "status": None,
+            "workflow_step": None,
             "is_active": True,
             "is_deleted": False,
             "fonte": "public_form",
@@ -326,7 +336,8 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
         )
         logger.info(
             f"[PUBLIC FORM] Processo {process_id} (PROC-{process_number:04d}) "
-            f"criado em pre_registo para cliente {client_id}"
+            f"criado com status vazio (Lead) para cliente {client_id} — aguarda "
+            f"documentos obrigatórios para entrar no Kanban ativo"
         )
 
         # ── Pacote G — Gerar pedidos de documentos obrigatórios ───────────
@@ -556,7 +567,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             "success": True,
             "message": "Registo criado com sucesso. A equipa entrará em contacto.",
             "client_id": client_id,
-            "process_id": process_id,  # Pacote D — processo criado em pre_registo
+            "process_id": process_id,  # Pacote D — processo criado com status vazio (Lead)
             "magic_link_sent": magic_link_sent,  # Pacote D — email de convite enviado
             "lead_status": "new",  # Pendente de triagem
             "is_new_client": is_new_client,

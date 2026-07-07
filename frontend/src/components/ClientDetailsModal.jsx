@@ -51,6 +51,7 @@ import {
   Loader2,
   Sparkles,
   MessageSquare,
+  ExternalLink,
 } from "lucide-react";
 import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
@@ -402,6 +403,9 @@ const ClientDetailsModal = ({
           <Button variant="outline" onClick={onClose}>
             Fechar
           </Button>
+          {/* PACOTE DB — Botão "Abrir Processo Completo" destacado no rodapé.
+              Navega para /process/{id} (página dedicada de ProcessDetails).
+              Só aparece se o cliente tem processo e o pai passou onNavigateToProcess. */}
           {client?.has_process && client?.processes?.length > 0 && onNavigateToProcess && (
             <Button
               onClick={() => {
@@ -412,9 +416,10 @@ const ClientDetailsModal = ({
                 ) || procs[0];
                 onNavigateToProcess(activeProc.id);
               }}
+              className="gap-2 bg-blue-600 hover:bg-blue-700 text-white font-medium"
             >
-              <FileText className="h-4 w-4 mr-2" />
-              Ver Processo
+              <ExternalLink className="h-4 w-4" />
+              Abrir Processo Completo
             </Button>
           )}
         </DialogFooter>

@@ -3,6 +3,54 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote DB: UAT Refinements (Leads Flow, Kanban Reactivity, UI Cleanup)
+
+### Alterado
+- **Refinamentos cirúrgicos da sessão de UAT** — 5 alterações de lógica e usabilidade no fluxo de Leads, reatividade do Kanban e limpeza de UI.
+
+### 1. Novo Fluxo de Leads e Menu (Visão Global)
+- **Menu**: A página "Registos de Clientes" foi movida do grupo "O Meu Negócio" para o grupo **"Visão Global"** na barra lateral (`DashboardLayout.js`). Atualizadas as rotas de expansão automática de secções (`meuNegocioRoutes` / `visaoGlobalRoutes`). A restrição do perfil **Indexação** (não vê Registos de Clientes) foi mantida via filtragem do `visaoGlobalGroup`.
+- **Criação**: Novos registos do formulário público entram agora com `status = None` e `workflow_step = None` (Lead) — **não entram no Kanban ativo**. Anteriormente entravam em `"pre_registo"`.
+  - `backend/routes/public.py`: `process_doc.status` passa a `None`.
+  - `backend/services/onboarding_service.py`: `new_process.status` passa a `None`.
+- **Gatilho de Transição**: Quando o sistema deteta que o cliente submeteu os **Documentos Obrigatórios** via Portal, o processo transita automaticamente para a **1ª fase real do Kanban** (1º status do `workflow_statuses` que não seja `pre_registo`, `fila_espera` nem terminal).
+  - `backend/routes/portal.py` `_check_and_advance_existing_pre_registo`: query passa a procurar `{"status": {"$in": ["pre_registo", None]}}` (cobre legacy + novos).
+  - `backend/routes/portal.py` `_auto_advance_from_pre_registo`: aceita `pre_registo` OU `None`; calcula a 1ª fase REAL do Kanban (em vez do "próximo estado" da pipeline); define também `workflow_step`; invoca `assign_to_indexer(update_status=False)`.
+- **Consistência em todo o backend**: queries de exclusão de leads atualizadas de `{"$ne": "pre_registo"}` para `{"$nin": ["pre_registo", None]}` (via constante `LEAD_STATUS_VALUES`):
+  - `backend/routes/processes.py` (4 queries: GET /processes, GET /paginated, Kanban, my-clients paginated) + `update_process` (`is_pre_registo_transition` aceita `None`).
+  - `backend/routes/my_clients.py` (1 query).
+  - `backend/routes/clients.py` (triagem: query `$or` inclui `None`; `triage_status = "pre_registo"` retornado para ambos os casos; regra de exclusão de Registos inclui `None`).
+  - `backend/routes/portal.py` (2 queries de lock de perfil: `$nin` inclui `None`).
+
+### 2. Eliminar Criação de Fases Fantasma
+- Ao criar um processo manualmente via CRM (`POST /processes/create-client` e `POST /processes`), o sistema **não força mais fases hardcoded** (`fila_espera` / `fase_documental` / `clientes_espera`).
+  - `backend/services/process_assignment.py` `assign_to_indexer`: novo parâmetro `update_status: bool = True`. Quando `False`, **não altera o status em nenhum cenário** (sem indexadores / todos no limite / indexador disponível) — apenas atribui o indexador se disponível.
+  - `backend/routes/processes.py` `create-client`: chama `assign_to_indexer(process_id, update_status=False)`. O processo mantém o `initial_status` = 1ª fase real do `workflow_statuses`.
+  - Fallback quando `workflow_statuses` está vazio: `initial_status = None` (antes: `"clientes_espera"`). **Não se inventam nomes de fases no código.**
+
+### 3. Reatividade Imediata do Kanban
+- O drag-and-drop passou a atualizar **instantaneamente** via duas camadas de optimistic update:
+  - **Hook** (`frontend/src/hooks/mutations/useProcessMutations.js` `useMoveProcessMutation`): `onMutate` reescrito — `setQueryData` executa **síncrono e primeiro** (antes do `cancelQueries` com `await`, que passou a fire-and-forget). Adicionado suporte para callback `onSettled` nas options.
+  - **Componente** (`frontend/src/components/KanbanBoard.js`): nova camada de estado local `localMoves` (mapa `processId → newStatus`) aplicada sobre `columns` via `optimisticColumns` (`useMemo`). No `handleDrop`, `setLocalMoves` é despachado **imediatamente** antes de `mutate`. Limpo no `onSettled` do mutation. O `filteredColumns` passa a derivar de `optimisticColumns`.
+
+### 4. Limpeza de UI (Documentos)
+- Botões de IA temporariamente ocultos (via `style={{ display: 'none' }}` — código mantido para reativação futura):
+  - **"Analisar IA"**, **"Renomear IA"** e **"Organizar"** no `frontend/src/components/S3FileManager.js` (barra de ações).
+  - **Card "Resumo Executivo IA"** no `frontend/src/pages/ProcessDetails.js` (condição `&& false` + `display: none`).
+- Separador **"Links"** temporariamente oculto no `frontend/src/components/UnifiedDocumentsPanel.js` (`TabsList` e `TabsContent` com `display: none`). O `DriveLinks` continua importado para reativação futura.
+
+### 5. Botão de Expansão na Modal
+- **`ProcessDetailsModal.jsx`**: o botão "Página Completa" foi renomeado para **"Abrir Processo Completo"** e tornado mais visível (variante `secondary` + cor azul `bg-blue-600`, no header). Mantém a navegação para `/process/${process.id}`.
+- **`ClientDetailsModal.jsx`**: o botão "Ver Processo" foi renomeado para **"Abrir Processo Completo"**, com ícone `ExternalLink` e cor azul destacada (`bg-blue-600`) no rodapé. Import `ExternalLink` adicionado.
+
+### Técnico
+- **Backend modificado** (7 ficheiros): `routes/public.py`, `services/onboarding_service.py`, `routes/portal.py`, `services/process_assignment.py`, `routes/processes.py`, `routes/clients.py`, `routes/my_clients.py`.
+- **Frontend modificado** (8 ficheiros): `layouts/DashboardLayout.js`, `hooks/mutations/useProcessMutations.js`, `components/KanbanBoard.js`, `components/UnifiedDocumentsPanel.js`, `components/S3FileManager.js`, `pages/ProcessDetails.js`, `components/kanban/ProcessDetailsModal.jsx`, `components/ClientDetailsModal.jsx`. (Comentários atualizados em `components/CreateProcessModal.jsx` e `pages/StaffDashboard.js`.)
+- **Constantes novas**: `LEAD_STATUS_VALUES = ["pre_registo", None]` em `routes/processes.py` e `routes/my_clients.py`.
+- **Parâmetro novo**: `update_status: bool = True` em `services/process_assignment.py::assign_to_indexer`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (0 erros de sintaxe em todos os ficheiros frontend).
+- **Dependências**: Nenhuma nova — `ExternalLink` já existia em `lucide-react`.
+
 ## [2026-07-16] — Pacote DA: Always Show Notes Section & Aggregate Sources
 
 ### Corrigido

@@ -140,8 +140,11 @@ PowerCell/
 - Rascunho automático (localStorage)
 
 ### Registo de Clientes
-- Tabela mostra por defeito apenas clientes **sem processo atribuído**
-- Quando o processo é criado, o cliente desaparece da vista principal
+- Tabela mostra por defeito apenas clientes **sem processo atribuído** (leads) e clientes com processo em **status vazio/Lead** (ainda a preencher o Portal)
+- **PACOTE DB — Fluxo de Leads**: novos registos do formulário público entram com `status = None` (Lead) e `workflow_step = None` — **não entram no Kanban ativo**. Quando o cliente submete os **Documentos Obrigatórios** via Portal, o processo transita automaticamente para a **1ª fase real do Kanban** (1º status do `workflow_statuses` que não seja `pre_registo`, `fila_espera` nem terminal).
+- A página "Registos de Clientes" está no grupo **"Visão Global"** da barra lateral (PACOTE DB — movida de "O Meu Negócio"). O perfil Indexação mantém-se sem acesso a esta página.
+- Quando o processo é criado manualmente no CRM, usa a **1ª fase real do `workflow_statuses`** (sem forçar `fila_espera`/`fase_documental`); se não houver fases configuradas, o status fica vazio.
+- Quando o processo entra no Kanban ativo, o cliente desaparece da vista principal de Registos
 - Filtro disponível para ver "Todos", "Com Processo" ou "Sem Processo"
 - Link S3 automático ao criar processo: `s3://powerprecision-docs-storage/Documentação Clientes/Nome_Do_Cliente/`
 

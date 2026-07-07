@@ -354,14 +354,15 @@ async def list_registered_clients(
     # ==================================================================
     triage_process_ids = set()
     if triage_mode:
-        # Buscar processos que estão em pre_registo OU sem assigned_indexacao_id
-        # (status inicial de entrada aguardando atribuição ao indexador).
-        # Excluímos processos eliminados e processos já com indexador atribuído.
+        # Buscar processos que estão em pre_registo OU com status vazio (Lead)
+        # OU sem assigned_indexacao_id (status inicial de entrada aguardando atribuição
+        # ao indexador). Excluímos processos eliminados e processos já com indexador atribuído.
+        # PACOTE DB — incluímos status=None (novos registos do formulário público).
         triage_processes_cursor = db.processes.find(
             {
                 "is_deleted": {"$ne": True},
                 "$or": [
-                    {"status": "pre_registo"},
+                    {"status": {"$in": ["pre_registo", None]}},
                     {"assigned_indexacao_id": {"$in": [None, ""]}},
                 ],
             },
@@ -373,12 +374,14 @@ async def list_registered_clients(
         for p in triage_processes:
             cid = p.get("client_id")
             if cid:
-                # Prioridade: pre_registo tem prioridade sobre "sem indexador"
-                # (um processo pode estar em pre_registo E sem indexador)
-                if cid not in triage_client_map or p.get("status") == "pre_registo":
+                # Prioridade: pre_registo/Lead tem prioridade sobre "sem indexador"
+                # (um processo pode estar em pre_registo/Lead E sem indexador)
+                # PACOTE DB — aceita pre_registo OU None (Lead)
+                p_status = p.get("status")
+                if cid not in triage_client_map or p_status in ("pre_registo", None):
                     triage_client_map[cid] = {
                         "process_id": p.get("id"),
-                        "status": p.get("status"),
+                        "status": p_status,
                         "has_indexador": bool(p.get("assigned_indexacao_id")),
                     }
                 triage_process_ids.add(p.get("id"))
@@ -599,7 +602,8 @@ async def list_registered_clients(
             for p in processes:
                 # PACOTE CK — REGRA estrita: Se tem um processo que já passou
                 # da fase inicial, desaparece dos Registos (Leads)
-                if p.get("status") not in ["pre_registo", "clientes_espera", "eliminado"]:
+                # PACOTE DB — None (Lead) também conta como fase inicial.
+                if p.get("status") not in ["pre_registo", None, "clientes_espera", "eliminado"]:
                     should_exclude = True
                     break
                 processes_info.append(p)
@@ -612,8 +616,8 @@ async def list_registered_clients(
         # ==================================================================
         # Determina o estado de triagem do cliente para o frontend renderizar
         # a badge correta. Valores possíveis:
-        # - "pre_registo": cliente tem processo em status "pre_registo"
-        #   (ainda a preencher no Portal) → Badge amarela
+        # - "pre_registo": cliente tem processo em status "pre_registo" ou vazio
+        #   (Lead, ainda a preencher no Portal) → Badge amarela
         # - "ready_for_indexing": cliente tem processo sem assigned_indexacao_id
         #   (na fila de espera para indexação) → Badge azul/verde
         # - "new_lead": lead pendente sem processo (lead_status="new") → sem badge
@@ -624,7 +628,8 @@ async def list_registered_clients(
         if triage_mode and client_id_val:
             triage_info = triage_client_map.get(client_id_val)
             if triage_info:
-                if triage_info.get("status") == "pre_registo":
+                # PACOTE DB — aceita pre_registo OU None (Lead)
+                if triage_info.get("status") in ("pre_registo", None):
                     triage_status = "pre_registo"
                 elif not triage_info.get("has_indexador"):
                     triage_status = "ready_for_indexing"

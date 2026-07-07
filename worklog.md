@@ -2949,3 +2949,54 @@ Stage Summary:
   - frontend/src/components/kanban/ProcessDetailsModal.jsx (IIFE agregada + 3º bloco Atividade Recente + fallback all-empty + import MessageSquare)
   - frontend/src/components/ClientDetailsModal.jsx (IIFE agregada + 3º bloco + fallback all-empty + import MessageSquare + formatDateTime)
 - Resultado: Secção "Observações e IA" SEMPRE visível em ambos os modais. Agrega 3 fontes: (1) Notas da IA (roxo), (2) Observações manuais (âmbar), (3) Atividade Recente (azul, com autor+data). Se TODAS vazias → fallback itálico cinza "Nenhuma observação, nota da IA ou atividade recente registada." Backend garante que latest_activity chega ao frontend via 3 rotas: GET /processes/{id}, GET /clients/{id}, e GET /kanban (CRÍTICO para ProcessDetailsModal que lê do kanban).
+
+
+---
+Task ID: Pacote DB (UAT Refinements — Leads Flow, Kanban Reactivity, UI Cleanup)
+Agent: Main Agent (Z.ai Code Assistant)
+Task: Aplicar 5 alterações cirúrgicas da sessão UAT — fluxo de leads, fases fantasma, reatividade kanban, limpeza UI, botão expansão modal.
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Task 0 confirmada, ambiente pronto).
+- git pull origin dev → commit base 328eca5 (Pacote DA). Re-clonado /home/z/powercell (pasta tinha sido limpa entre sessões).
+- Exploração em paralelo (Grep/Read diretos): DashboardLayout.js (sidebar grupos), routes/processes.py (criação manual + _should_hide_pre_registo + queries), routes/portal.py (_check_and_advance + _auto_advance_from_pre_registo), services/process_assignment.py (assign_to_indexer fila_espera), services/onboarding_service.py (criação processo), routes/clients.py (triagem), routes/my_clients.py, hooks/mutations/useProcessMutations.js (optimistic update), components/KanbanBoard.js (onDragEnd/handleDrop), components/UnifiedDocumentsPanel.js (tabs Links), components/S3FileManager.js (botões IA), pages/ProcessDetails.js (Card Resumo Executivo), components/kanban/ProcessDetailsModal.jsx + ClientDetailsModal.jsx (botões existentes).
+
+- 1a (Sidebar): DashboardLayout.js — "Registos de Clientes" removido de meuNegocioGroup.items e consultorNegocioItems; adicionado como 1º item do visaoGlobalGroup. meuNegocioRoutes/visaoGlobalRoutes atualizados. Indexação mantém restrição via indexacaoVisaoGlobal (filter href !== "/registos-clientes").
+
+- 1b (status vazio): public.py process_doc.status → None + workflow_step: None. onboarding_service.py new_process.status → None + workflow_step: None (busca first_status removida — não usada). Comentários atualizados.
+
+- 1c (Gatilho transição): portal.py _check_and_advance_existing_pre_registo query → {"$in": ["pre_registo", None]}. _auto_advance_from_pre_registo reescrita: aceita current_status in (None, "pre_registo"); calcula 1ª fase REAL do Kanban (EXCLUDED_FROM_KANBAN_START = {pre_registo, fila_espera, concluido, arquivo, perdido, desistencias, concluidos, desistido, cancelado, recusado}); fallback para 1º status != pre_registo; define status + workflow_step; invoca assign_to_indexer(update_status=False).
+
+- 1 (Consistência backend): processes.py constante LEAD_STATUS_VALUES = ["pre_registo", None]. 4 queries $ne → $nin LEAD_STATUS_VALUES (GET /processes, GET /paginated, Kanban, my-clients paginated). update_process is_pre_registo_transition aceita None. my_clients.py: LEAD_STATUS_VALUES + query $nin. clients.py: triagem $or inclui None; p_status in (pre_registo, None); regra exclusão Registos inclui None; triage_status "pre_registo" para ambos. portal.py: 2 queries $nin lock perfil incluem None.
+
+- 2 (Fases fantasma): process_assignment.py assign_to_indexer novo param update_status: bool = True. 3 cenários respeitam False (sem indexadores / todos no limite / indexador disponível) — não mudam status. processes.py create-client chama assign_to_indexer(update_status=False); POST /processes fallback None (antes clientes_espera); create-client is_lead → initial_status=None.
+
+- 3 (Kanban reativo): useProcessMutations.js onMutate reescrito — setQueryData SÍNCRONO primeiro; cancelQueries fire-and-forget (.catch). onSettled option adicionada. KanbanBoard.js: localMoves state; optimisticColumns useMemo (aplica localMoves sobre columns); filteredColumns deriva de optimisticColumns; handleDrop despacha setLocalMoves IMEDIATAMENTE antes de mutate; onSettled limpa localMoves[processId].
+
+- 4 (Limpeza UI): UnifiedDocumentsPanel.js TabsList + TabsContent Links com display:none. S3FileManager.js 3 botões (Analisar IA / Renomear IA / Organizar) com display:none. ProcessDetails.js Card Resumo Executivo IA com && false + display:none.
+
+- 5 (Botão expansão): ProcessDetailsModal.jsx "Página Completa" → "Abrir Processo Completo" (variant secondary + bg-blue-600). ClientDetailsModal.jsx "Ver Processo" → "Abrir Processo Completo" (ExternalLink + bg-blue-600); import ExternalLink adicionado.
+
+- Comentários atualizados: CreateProcessModal.jsx e StaffDashboard.js (is_lead → status vazio/Lead).
+
+- Validação: py_compile ✓ 7 ficheiros backend. flake8 --select=E9,F63,F7,F82 → 0 erros (/home/z/.local/bin/flake8). bun build --no-bundle ✓ 8 ficheiros frontend (0 erros sintaxe).
+
+Stage Summary:
+- 15 ficheiros modificados (7 backend + 8 frontend):
+  - backend/routes/public.py (status None + workflow_step None + comentários)
+  - backend/services/onboarding_service.py (status None + workflow_step None)
+  - backend/routes/portal.py (_check_and_advance query $in None + _auto_advance rewrite 1ª fase real + 2 queries $nin None)
+  - backend/services/process_assignment.py (assign_to_indexer update_status param)
+  - backend/routes/processes.py (LEAD_STATUS_VALUES + 4 queries $nin + update_process None + create-client update_status=False + fallback None)
+  - backend/routes/clients.py (triagem None + triage_status + regra exclusão)
+  - backend/routes/my_clients.py (LEAD_STATUS_VALUES + query $nin)
+  - frontend/src/layouts/DashboardLayout.js (Registos → Visão Global + rotas)
+  - frontend/src/hooks/mutations/useProcessMutations.js (onMutate síncrono + onSettled option)
+  - frontend/src/components/KanbanBoard.js (localMoves + optimisticColumns + handleDrop)
+  - frontend/src/components/UnifiedDocumentsPanel.js (tab Links display:none)
+  - frontend/src/components/S3FileManager.js (3 botões IA display:none)
+  - frontend/src/pages/ProcessDetails.js (Card Resumo Executivo display:none)
+  - frontend/src/components/kanban/ProcessDetailsModal.jsx (botão Abrir Processo Completo)
+  - frontend/src/components/ClientDetailsModal.jsx (botão Abrir Processo Completo + ExternalLink)
+  - (+ CreateProcessModal.jsx e StaffDashboard.js comentários)
+- Resultado: (1) Registos de Clientes em Visão Global; novos registos status=None (Lead); upload docs obrigatórios → 1ª fase real do Kanban. (2) Criação manual usa 1ª fase real do workflow_statuses, sem forçar fila_espera/fase_documental. (3) Kanban drag-drop instantâneo (optimistic local + cache). (4) Botões IA + Organizar + tab Links + Card Resumo Executivo ocultos (display:none, código mantido). (5) Botão "Abrir Processo Completo" destacado (azul) em ambas as modais.

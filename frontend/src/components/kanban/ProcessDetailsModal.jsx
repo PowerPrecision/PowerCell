@@ -342,14 +342,17 @@ const ProcessDetailsModal = memo(({
                 </>
               ) : (
                 <>
+                  {/* PACOTE DB — Botão "Abrir Processo Completo" destacado no topo.
+                      Navega para /process/{id} (página dedicada de ProcessDetails). */}
                   <Button
-                    variant="outline"
+                    variant="secondary"
                     size="sm"
                     onClick={handleOpenFullPage}
-                    className="gap-1"
+                    className="gap-1.5 bg-blue-600 hover:bg-blue-700 text-white border-blue-700 font-medium"
+                    title="Abrir página completa do processo"
                   >
                     <ExternalLink className="h-3.5 w-3.5" />
-                    Página Completa
+                    Abrir Processo Completo
                   </Button>
                   {!isLockedByOther && (
                     <Button
