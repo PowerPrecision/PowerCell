@@ -1807,7 +1807,8 @@ const MandatoryDocumentsSection = ({ token }) => {
       });
       if (res.ok) {
         const data = await res.json();
-        const md = data.mandatory_documents || {};
+        // PACOTE CY — fix read path: data.config.mandatory_documents (não data.mandatory_documents)
+        const md = (data.config && data.config.mandatory_documents) || data.mandatory_documents || {};
         setEnabled(md.enabled !== false);
         setDocuments(Array.isArray(md.documents) ? md.documents : []);
       } else {

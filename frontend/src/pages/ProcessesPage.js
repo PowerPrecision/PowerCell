@@ -28,6 +28,8 @@ import { toast } from "sonner";
 import { getProcesses, markProcessIndexed, restoreProcess } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
+// PACOTE CX — ClientDetailsModal para popup de detalhes ao clicar no nome
+import ClientDetailsModal from "../components/ClientDetailsModal";
 import { useAuth } from "../contexts/AuthContext";
 import { safeString } from "../utils/safeString";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
@@ -99,6 +101,8 @@ const ProcessesPage = () => {
   const [sortOrder, setSortOrder] = useState(searchParams.get("order") || "desc");
   const [sortedProcesses, setSortedProcesses] = useState([]);
   const [showCreateProcess, setShowCreateProcess] = useState(false);
+  // PACOTE CX — estado para ClientDetailsModal (popup ao clicar no nome do cliente)
+  const [clientDetailsModal, setClientDetailsModal] = useState({ open: false, clientId: null });
 
   // PACOTE CA — indexStatusFilter persistido no URL para restauração na navegação Back/Forward.
   // Default: 'pending' para role indexacao, 'all' para os restantes.
@@ -765,7 +769,20 @@ const ProcessesPage = () => {
                               <div className="flex items-center gap-2">
                                 <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
                                   {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
-                                  {safeString(process.client_name)}
+                                  {/* PACOTE CX — nome clicável + bolinhas inline (igual a MyClientsPage/FilteredProcessList) */}
+                                  <span
+                                    className="cursor-pointer text-primary hover:underline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (process.client_id) {
+                                        setClientDetailsModal({ open: true, clientId: process.client_id });
+                                      }
+                                    }}
+                                  >
+                                    {safeString(process.client_name)}
+                                    {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+                                    {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+                                  </span>
                                 </p>
                               </div>
                               <div className="flex items-center gap-2 mt-0.5">
@@ -796,16 +813,18 @@ const ProcessesPage = () => {
                               )}
                             </div>
                           </TableCell>
-                          {/* PACOTE AP: Notas do Consultor — extrai última nota/observação do processo */}
+                          {/* PACOTE CZ: Notas do Consultor — lê a atividade mais recente PRIMEIRO */}
                           <TableCell className="min-w-[180px] max-w-[280px]">
                             {(() => {
-                              // Tentar obter a última nota: process.notes (string),
-                              // process.last_activity (objeto), ou activities array
+                              // PACOTE CZ: Priorizar latest_activity_preview (alias explícito do backend)
+                              // e latest_note (batch aggregation PACOTE BT) sobre process.notes estático.
                               let noteText = '';
-                              if (typeof process.notes === 'string' && process.notes.trim()) {
-                                noteText = process.notes.trim();
-                              } else if (process.last_note && typeof process.last_note === 'string') {
-                                noteText = process.last_note.trim();
+                              if (typeof process.latest_activity_preview === 'string' && process.latest_activity_preview.trim()) {
+                                noteText = process.latest_activity_preview.trim();
+                              } else if (typeof process.latest_note === 'string' && process.latest_note.trim()) {
+                                noteText = process.latest_note.trim();
+                              } else if (typeof process.latest_activity_note === 'string' && process.latest_activity_note.trim()) {
+                                noteText = process.latest_activity_note.trim();
                               } else if (process.last_activity?.content) {
                                 noteText = String(process.last_activity.content);
                               } else if (Array.isArray(process.activities) && process.activities.length > 0) {
@@ -927,6 +946,13 @@ const ProcessesPage = () => {
         open={showCreateProcess}
         onOpenChange={setShowCreateProcess}
         onSuccess={fetchProcesses}
+      />
+      {/* PACOTE CX — ClientDetailsModal (popup ao clicar no nome do cliente) */}
+      <ClientDetailsModal
+        open={clientDetailsModal.open}
+        clientId={clientDetailsModal.clientId}
+        onClose={() => setClientDetailsModal({ open: false, clientId: null })}
+        onNavigateToProcess={(pid) => navigate(`/process/${pid}`)}
       />
     </DashboardLayout>
   );

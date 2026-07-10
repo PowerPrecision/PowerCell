@@ -28,29 +28,25 @@ import { moveProcessKanban, updateProcess, assignProcess, createActivity } from 
  */
 export function useMoveProcessMutation(addPendingMove, removePendingMove, options = {}) {
   const queryClient = useQueryClient();
-  const { onSuccess, onError, filters = {} } = options;
+  const { onSuccess, onError, onSettled, filters = {} } = options;
 
   return useMutation({
     mutationFn: async ({ processId, newStatus, oldStatus }) => {
       const response = await moveProcessKanban(processId, newStatus);
       return response.data;
     },
-    
-    // Optimistic update - actualiza a UI antes da resposta do servidor
+
+    // PACOTE DB — Optimistic update REFORÇADO: setQueryData é executado
+    // SÍNCRONO e PRIMEIRO (antes do cancelQueries com await) para garantir
+    // que o cartão se move VISUALMENTE no momento do drop, sem delay.
     onMutate: async ({ processId, newStatus, oldStatus }) => {
-      // Cancelar queries em flight para evitar race conditions
-      await queryClient.cancelQueries({ queryKey: queryKeys.processes.all });
-      
-      // Track pending move for real-time sync exclusion
-      addPendingMove?.(processId);
-      
-      // Snapshot do estado anterior para rollback
+      // Snapshot do estado anterior para rollback (síncrono)
       const previousKanban = queryClient.getQueryData(queryKeys.processes.kanban(filters));
-      
-      // Optimistic update
+
+      // Optimistic update IMEDIATO (síncrono — nenhuma await antes disto)
       queryClient.setQueryData(queryKeys.processes.kanban(filters), (oldData) => {
         if (!oldData) return oldData;
-        
+
         const newColumns = oldData.columns.map(col => {
           // Remover da coluna antiga
           if (col.name === oldStatus) {
@@ -73,19 +69,26 @@ export function useMoveProcessMutation(addPendingMove, removePendingMove, option
           }
           return col;
         });
-        
+
         return { ...oldData, columns: newColumns };
       });
-      
+
+      // Track pending move for real-time sync exclusion (síncrono)
+      addPendingMove?.(processId);
+
+      // Cancelar queries em flight DEPOIS do setQueryData (fire-and-forget,
+      // sem await) para não bloquear o optimistic update visual.
+      queryClient.cancelQueries({ queryKey: queryKeys.processes.all }).catch(() => {});
+
       return { previousKanban };
     },
-    
+
     // Sucesso - mostrar toast e invalidar
     onSuccess: (data, variables, context) => {
       toast.success('Processo movido com sucesso');
       onSuccess?.(data, variables, context);
     },
-    
+
     // Erro - rollback e mostrar toast
     onError: (error, variables, context) => {
       // Rollback para o estado anterior
@@ -95,11 +98,13 @@ export function useMoveProcessMutation(addPendingMove, removePendingMove, option
       toast.error('Erro ao mover processo');
       onError?.(error, variables, context);
     },
-    
+
     // Sempre invalidar para garantir sincronização
     onSettled: (_data, _error, variables) => {
       // Remove from pending moves after settled
       removePendingMove?.(variables.processId);
+      // PACOTE DB — callback extra para limpar estado local de optimistic move
+      onSettled?.(_data, _error, variables);
       queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanban(filters) });
     },
   });

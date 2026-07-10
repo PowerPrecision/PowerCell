@@ -913,14 +913,14 @@ const ClientRegistrationsPage = () => {
                 </div>
               </div>
 
-              {/* Notas */}
-              {detailsDialog.client.notas && (
+              {/* PACOTE CK — Notas com fallback notas || notes */}
+              {(detailsDialog.client.notas || detailsDialog.client.notes) && (
                 <div className="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200 dark:border-yellow-800 rounded-lg p-4">
                   <h4 className="text-sm font-semibold mb-2 flex items-center gap-2">
                     <FileText className="h-4 w-4 text-yellow-600" />
                     Notas
                   </h4>
-                  <p className="text-sm whitespace-pre-wrap">{safeString(detailsDialog.client.notas)}</p>
+                  <p className="text-sm whitespace-pre-wrap">{safeString(detailsDialog.client.notas || detailsDialog.client.notes) || 'Sem observações'}</p>
                 </div>
               )}
             </div>

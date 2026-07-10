@@ -14,7 +14,7 @@ import { ScrollArea } from "../components/ui/scroll-area";
 import {
   ArrowLeft, Search, Eye, Loader2, Users, CheckCircle,
   XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame,
-  MessageSquare
+  MessageSquare, Trash2
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
@@ -22,6 +22,8 @@ import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
 import { safeDateStr, safeFormat } from "../lib/utils";
 import { safeString } from "../utils/safeString";
+// PACOTE CH — ClientDetailsModal reutilizável
+import ClientDetailsModal from "../components/ClientDetailsModal";
 
 const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|eliminado|eliminados|cancelado|arquivo|perdido|inativo/i;
 
@@ -91,6 +93,14 @@ const filterConfig = {
     color: "text-red-600",
     bgColor: "bg-red-50",
     filter: (p) => p.status === "desistencias"
+  },
+  eliminado: {
+    title: "Eliminados",
+    description: "Processos eliminados (recuperação administrativa)",
+    icon: Trash2,
+    color: "text-gray-700",
+    bgColor: "bg-gray-100",
+    filter: (p) => p.status === "eliminados" || p.is_deleted === true
   },
   pending_deadlines: {
     title: "Prazos Pendentes",
@@ -169,6 +179,8 @@ const FilteredProcessList = () => {
   const [processes, setProcesses] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
+  // PACOTE CH — estado para ClientDetailsModal
+  const [clientDetailsModal, setClientDetailsModal] = useState({ open: false, clientId: null });
 
   const config = filterConfig[filterType] || filterConfig.active;
   const IconComponent = config.icon;
@@ -187,7 +199,11 @@ const FilteredProcessList = () => {
       // Antes, a API era chamada sem 'search' e a filtragem era feita localmente
       // com .filter(), causando tamanhos de página irregulares.
       const HISTORICAL_FILTERS = ["concluded", "dropped"];
-      const viewMode = HISTORICAL_FILTERS.includes(filterType) ? "historical" : "active_only";
+      // PACOTE CW: "eliminado" usa view_mode=deleted para que o backend
+      // desligue o filtro padrão de ativos e traga apenas eliminados.
+      let viewMode = "active_only";
+      if (HISTORICAL_FILTERS.includes(filterType)) viewMode = "historical";
+      else if (filterType === "eliminado") viewMode = "deleted";
 
       // PACOTE BZ: passar search como query param (>= 2 chars) para o backend filtrar
       const searchParam = searchTerm.length >= 2 ? searchTerm : undefined;
@@ -197,6 +213,8 @@ const FilteredProcessList = () => {
       if (filterType === "concluded") statusParam = "concluidos";
       else if (filterType === "dropped") statusParam = "desistencias";
       else if (filterType === "waiting") statusParam = "clientes_espera";
+      // Nota: "eliminado" usa apenas view_mode=deleted (sem status param) —
+      // o backend já faz a query is_deleted: True quando view_mode=deleted.
 
       const [processesRes, statusesRes, deadlinesRes] = await Promise.all([
         getProcesses({
@@ -403,7 +421,20 @@ const FilteredProcessList = () => {
                         <div className="min-w-0">
                           <p className={`text-sm truncate ${prio.isAlta ? 'font-bold' : 'font-medium'}`}>
                             {prio.isAlta && <span className="mr-1">🔥</span>}
-                            {safeString(process.client_name)}
+                            {/* PACOTE CX — nome clicável + bolinhas inline (mobile card view) */}
+                            <span
+                              className="cursor-pointer text-primary hover:underline"
+                              onClick={(e) => {
+                                e.stopPropagation();
+                                if (process.client_id) {
+                                  setClientDetailsModal({ open: true, clientId: process.client_id });
+                                }
+                              }}
+                            >
+                              {safeString(process.client_name)}
+                              {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+                              {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+                            </span>
                           </p>
                           <p className="text-xs text-muted-foreground">{safeString(process.client_phone) || safeString(process.client_email) || "-"}</p>
                         </div>
@@ -475,12 +506,20 @@ const FilteredProcessList = () => {
                               <div className="flex items-center gap-2">
                                 <p className={prio.isAlta ? 'font-bold' : 'font-medium'}>
                                   {prio.isAlta && <span className="mr-1" title="Prioridade Alta">🔥</span>}
-                                  {safeString(process.client_name)}
-                                  {/* PACOTE BI: bolinhas de notificação junto ao nome */}
-                                  <NotificationDots
-                                    hasUnreadMessages={process.has_unread_messages}
-                                    hasNewDocuments={process.has_new_documents}
-                                  />
+                                  {/* PACOTE CW — nome do cliente clicável (classe exata + bolinhas inline) */}
+                                  <span
+                                    className="cursor-pointer text-primary hover:underline"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (process.client_id) {
+                                        setClientDetailsModal({ open: true, clientId: process.client_id });
+                                      }
+                                    }}
+                                  >
+                                    {safeString(process.client_name)}
+                                    {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+                                    {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+                                  </span>
                                 </p>
                                 {prio.isAlta && (
                                   <Badge className="bg-red-500 text-white border-red-600 text-[10px] px-1.5 py-0 h-4 gap-0.5 shadow-sm shadow-red-300/50">
@@ -543,13 +582,10 @@ const FilteredProcessList = () => {
                               )}
                             </TableCell>
                           )}
-                          {/* PACOTE BT (Fix 3): Notas do Consultor — lê latest_note */}
-                          {/* latest_note é projetado pelo backend (Pacote BT) a partir da
-                              última atividade/comentário do histórico do processo. Fallback
-                              para process.notes (campo direto do processo) para retrocompat. */}
+                          {/* PACOTE CZ: Notas — lê a atividade mais recente PRIMEIRO (não process.notes estático) */}
                           <TableCell className="min-w-[140px] max-w-[220px]">
                             {(() => {
-                              const noteText = process.latest_note || process.notes || "";
+                              const noteText = process.latest_activity_preview || process.latest_activity_note || process.latest_note || "";
                               if (noteText) {
                                 return (
                                   <div className="line-clamp-2 text-sm text-muted-foreground" title={noteText}>
@@ -557,7 +593,7 @@ const FilteredProcessList = () => {
                                   </div>
                                 );
                               }
-                              return <span className="text-xs text-muted-foreground">—</span>;
+                              return <span className="text-xs text-muted-foreground">Sem notas recentes</span>;
                             })()}
                           </TableCell>
                           <TableCell className="text-sm text-muted-foreground">
@@ -590,6 +626,14 @@ const FilteredProcessList = () => {
           </CardContent>
         </Card>
       </div>
+
+      {/* PACOTE CH — ClientDetailsModal reutilizável */}
+      <ClientDetailsModal
+        open={clientDetailsModal.open}
+        clientId={clientDetailsModal.clientId}
+        onClose={() => setClientDetailsModal({ open: false, clientId: null })}
+        onNavigateToProcess={(pid) => navigate(`/process/${pid}`)}
+      />
     </DashboardLayout>
   );
 };

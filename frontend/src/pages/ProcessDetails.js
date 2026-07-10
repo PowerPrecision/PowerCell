@@ -115,6 +115,7 @@ import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
+import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
 import PortalDocumentRequests from "../components/PortalDocumentRequests";
@@ -1591,9 +1592,60 @@ const ProcessDetails = () => {
       if (process.prioridade) processUpdateData.prioridade = process.prioridade;
       if (process.labels !== undefined) processUpdateData.labels = process.labels;
 
+      // ── Pacote CT (Data Provenance UI): marcar proveniência "manual" ──
+      // Quando o Consultor guarda um cartão, todos os campos desse cartão
+      // passam a ser de origem manual (o humano sobrepôs/revisou o dado).
+      // O backend (Pacote CS) faz merge seguro — preserva metadata de outros
+      // campos não incluídos neste request.
+      // O mapeamento editingCardId → field paths cobre apenas os cartões
+      // com campos "importantes" badgados; outros cartões (ex: notas,
+      // prazos) não geram field_metadata.
+      const MANUAL_FIELDS_BY_CARD = {
+        personal_identificacao: [
+          "dados_pessoais.nif", "dados_pessoais.documento_id",
+          "dados_pessoais.data_validade_cc", "dados_pessoais.data_nascimento",
+          "dados_pessoais.niss",
+        ],
+        personal_morada: ["dados_pessoais.morada_fiscal"],
+        financial_rendimentos: [
+          "financial_data.monthly_income", "financial_data.rendimento_bruto",
+          "financial_data.valor_financiado", "financial_data.capital_proprio",
+          "financial_data.renda_habitacao_atual",
+          "financial_data.rendimento_co_titular", "financial_data.rendimento_anual",
+        ],
+        realestate_caracteristicas: [
+          "real_estate_data.valor_imovel", "real_estate_data.valor_patrimonial",
+        ],
+        credit_dados: [
+          "credit_data.requested_amount", "credit_data.loan_term_years",
+          "credit_data.interest_rate", "credit_data.monthly_payment",
+          "credit_data.bank_name",
+        ],
+      };
+      const _manualFields = editingCardId ? MANUAL_FIELDS_BY_CARD[editingCardId] : null;
+      const _manualMeta = buildManualMetadata(_manualFields);
+      if (_manualMeta) {
+        // dados_pessoais.* / contacto.* / nome vivem no client; os restantes no process
+        const _clientMeta = {};
+        const _processMeta = {};
+        for (const [k, v] of Object.entries(_manualMeta)) {
+          if (k.startsWith("dados_pessoais.") || k.startsWith("contacto.") || k === "nome") {
+            _clientMeta[k] = v;
+          } else {
+            _processMeta[k] = v;
+          }
+        }
+        if (Object.keys(_processMeta).length > 0) {
+          processUpdateData.field_metadata = _processMeta;
+        }
+        if (Object.keys(_clientMeta).length > 0) {
+          clientUpdateData.field_metadata = _clientMeta;
+        }
+      }
+
       // 4. DISPARAR OS DOIS REQUESTS EM SIMULTÂNEO (PROMISE.ALL)
       const promises = [];
-      
+
       // Update do Processo — incluir client_email/client_phone no body
       // (o backend lê do raw_body para sincronizar com o cliente)
       // Só incluímos se tiverem valor: evita sobrescrever campos válidos
@@ -1844,6 +1896,13 @@ const ProcessDetails = () => {
       return { badge: "bg-red-100 text-red-700 border-red-300", label: `${pct}%`, borderClass: "border-l-4 border-l-red-400", level: "low" };
     }
   };
+
+  // ── Helper: detect if a card has no meaningful data ────────────
+  // Helper: proveniência do dado (Data Provenance — Pacote CS/CT).
+  // Lê do field_metadata do processo e, em fallback, do cliente.
+  // Retorna {source, updated_at, confidence} ou null.
+  const getFieldMetaFor = (fieldPath) =>
+    getFieldMeta(fieldPath, process?.field_metadata, clientData?.field_metadata);
 
   // ── Helper: detect if a card has no meaningful data ────────────
   const isCardEmpty = (cardId) => {
@@ -2733,7 +2792,7 @@ const ProcessDetails = () => {
         <ProcessTimeline
           processId={id}
           currentStatus={process.status}
-          history={process.status_history || activities.filter(a => a.type === 'status_change')}
+          history={history}
           workflowStatuses={workflowStatuses}
         />
 
@@ -3039,7 +3098,10 @@ const ProcessDetails = () => {
                             </div>
                             <div className="space-y-1">
                               <div className="flex items-center justify-between">
-                                <Label className="text-xs text-muted-foreground">NIF</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">NIF</Label>
+                                  <AIBadge {...(getFieldMetaFor("dados_pessoais.nif") || {})} />
+                                </div>
                                 {getConfidenceIndicator("nif") && (
                                   <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("nif").badge}`}>
                                     IA {getConfidenceIndicator("nif").label}
@@ -3076,7 +3138,10 @@ const ProcessDetails = () => {
                             </div>
                             <div className="space-y-1">
                               <div className="flex items-center justify-between">
-                                <Label className="text-xs text-muted-foreground">Nº Documento (CC)</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">Nº Documento (CC)</Label>
+                                  <AIBadge {...(getFieldMetaFor("dados_pessoais.documento_id") || {})} />
+                                </div>
                                 {getConfidenceIndicator("documento_id") && (
                                   <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("documento_id").badge}`}>
                                     IA {getConfidenceIndicator("documento_id").label}
@@ -3415,7 +3480,10 @@ const ProcessDetails = () => {
                           {!shouldCardBeCollapsed('financial_rendimentos') && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Rendimento Mensal (€)</Label>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-xs text-muted-foreground">Rendimento Mensal (€)</Label>
+                                <AIBadge {...(getFieldMetaFor("financial_data.monthly_income") || {})} />
+                              </div>
                               <Input
                                 type="number"
                                 value={financialData.monthly_income || financialData.salario_liquido || ""}
@@ -3425,7 +3493,10 @@ const ProcessDetails = () => {
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Rendimento Bruto (€)</Label>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-xs text-muted-foreground">Rendimento Bruto (€)</Label>
+                                <AIBadge {...(getFieldMetaFor("financial_data.rendimento_bruto") || {})} />
+                              </div>
                               <Input
                                 type="number"
                                 value={financialData.rendimento_bruto || financialData.salario_bruto || ""}
@@ -3455,7 +3526,10 @@ const ProcessDetails = () => {
                               />
                             </div>
                             <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Valor a Financiar</Label>
+                              <div className="flex items-center gap-1">
+                                <Label className="text-xs text-muted-foreground">Valor a Financiar</Label>
+                                <AIBadge {...(getFieldMetaFor("financial_data.valor_financiado") || {})} />
+                              </div>
                               <Input
                                 value={financialData.valor_financiado || ""}
                                 onChange={(e) => setFinancialData({ ...financialData, valor_financiado: e.target.value })}
@@ -4269,7 +4343,10 @@ const ProcessDetails = () => {
                                 />
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Valor do Imóvel (€)</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">Valor do Imóvel (€)</Label>
+                                  <AIBadge {...(getFieldMetaFor("real_estate_data.valor_imovel") || {})} />
+                                </div>
                                 <Input
                                   type="number"
                                   value={realEstateData.valor_imovel || ""}
@@ -4280,7 +4357,10 @@ const ProcessDetails = () => {
                                 />
                               </div>
                               <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Valor Patrimonial (€)</Label>
+                                <div className="flex items-center gap-1">
+                                  <Label className="text-xs text-muted-foreground">Valor Patrimonial (€)</Label>
+                                  <AIBadge {...(getFieldMetaFor("real_estate_data.valor_patrimonial") || {})} />
+                                </div>
                                 <Input
                                   type="number"
                                   value={realEstateData.valor_patrimonial || ""}
@@ -4697,7 +4777,10 @@ const ProcessDetails = () => {
                           {!shouldCardBeCollapsed('credit_dados') && (
                           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <div className="space-y-2">
-                          <Label>Valor do Empréstimo (€)</Label>
+                          <div className="flex items-center gap-1">
+                            <Label>Valor do Empréstimo (€)</Label>
+                            <AIBadge {...(getFieldMetaFor("credit_data.requested_amount") || {})} />
+                          </div>
                           <Input
                             type="number"
                             value={creditData.requested_amount || ""}
@@ -4715,7 +4798,10 @@ const ProcessDetails = () => {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Taxa de Juro (%)</Label>
+                          <div className="flex items-center gap-1">
+                            <Label>Taxa de Juro (%)</Label>
+                            <AIBadge {...(getFieldMetaFor("credit_data.interest_rate") || {})} />
+                          </div>
                           <Input
                             type="number"
                             step="0.01"
@@ -4725,7 +4811,10 @@ const ProcessDetails = () => {
                           />
                         </div>
                         <div className="space-y-2">
-                          <Label>Prestação Mensal (€)</Label>
+                          <div className="flex items-center gap-1">
+                            <Label>Prestação Mensal (€)</Label>
+                            <AIBadge {...(getFieldMetaFor("credit_data.monthly_payment") || {})} />
+                          </div>
                           <Input
                             type="number"
                             value={creditData.monthly_payment || ""}
@@ -4928,9 +5017,11 @@ const ProcessDetails = () => {
                       </div>
                       )}
 
-                      {/* AI Executive Summary — só visível para admin e CEO */}
-                      {hasAnyRole(user, ["admin", "ceo"]) && (
-                      <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10">
+                      {/* PACOTE DB — AI Executive Summary temporariamente oculto (display: none).
+                          O Card é mantido para reativação futura — não apagar.
+                          Originalmente: só visível para admin e CEO. */}
+                      {hasAnyRole(user, ["admin", "ceo"]) && false && (
+                      <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10" style={{ display: 'none' }}>
                         <CardContent className="pt-4">
                           <div className="flex items-center justify-between">
                             <div className="flex items-center gap-3">

@@ -21,6 +21,7 @@ import { Separator } from "../components/ui/separator";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
+import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import {
   ArrowLeft,
   User,
@@ -143,7 +144,7 @@ const getStatusBorderClass = (statusColor) => {
  * Contact info row component for the profile card.
  * Supports inline editing when onEdit prop is provided.
  */
-function ContactRow({ icon: Icon, label, children, editable, onEdit, saving }) {
+function ContactRow({ icon: Icon, label, children, editable, onEdit, saving, meta }) {
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const inputRef = useRef(null);
@@ -184,7 +185,10 @@ function ContactRow({ icon: Icon, label, children, editable, onEdit, saving }) {
         <Icon className="h-4 w-4 text-muted-foreground group-hover:text-teal-600 dark:group-hover:text-teal-400 transition-colors duration-200" />
       </div>
       <div className="flex-1 min-w-0">
-        <p className="text-xs text-muted-foreground leading-none mb-0.5">{label}</p>
+        <div className="flex items-center gap-1 mb-0.5">
+          <p className="text-xs text-muted-foreground leading-none">{label}</p>
+          {meta && <AIBadge {...meta} />}
+        </div>
         {editing ? (
           <div className="flex items-center gap-1.5">
             <Input
@@ -269,18 +273,25 @@ export default function ClientDetailPage() {
     setEditSaving(true);
     try {
       const payload = {};
+      // Pacote CT: recolher caminhos de campos alterados para marcar proveniência manual
+      const changedPaths = [];
       if (editForm.nome && editForm.nome !== client?.nome) {
         payload.nome = editForm.nome;
+        changedPaths.push("nome");
       }
       const currentContato = client?.contacto || {};
       const currentDadosPessoais = client?.dados_pessoais || {};
-      const contatoChanged = editForm.email !== currentContato.email || editForm.telefone !== currentContato.telefone;
+      const emailChanged = editForm.email !== currentContato.email;
+      const telefoneChanged = editForm.telefone !== currentContato.telefone;
+      const contatoChanged = emailChanged || telefoneChanged;
       if (contatoChanged) {
         payload.contacto = {
           ...currentContato,
           email: editForm.email || currentContato.email,
           telefone: editForm.telefone || currentContato.telefone,
         };
+        if (emailChanged) changedPaths.push("contacto.email");
+        if (telefoneChanged) changedPaths.push("contacto.telefone");
       }
       const nifChanged = editForm.nif !== currentDadosPessoais.nif;
       if (nifChanged) {
@@ -288,17 +299,28 @@ export default function ClientDetailPage() {
           ...currentDadosPessoais,
           nif: editForm.nif,
         };
+        changedPaths.push("dados_pessoais.nif");
+      }
+
+      // Pacote CT: anexar field_metadata com source="manual" para os campos alterados.
+      // O backend (Pacote CS) faz merge seguro — preserva metadata dos restantes.
+      const manualMeta = buildManualMetadata(changedPaths);
+      if (manualMeta) {
+        payload.field_metadata = manualMeta;
       }
 
       // Só fazer update se houver alterações
       if (Object.keys(payload).length > 0) {
         await updateClient(id, payload);
-        // Atualizar estado local
+        // Atualizar estado local (inclui field_metadata para o AIBadge reagir)
         setClient((prev) => ({
           ...prev,
           ...(payload.nome && { nome: payload.nome }),
           ...(payload.contacto && { contacto: payload.contacto }),
           ...(payload.dados_pessoais && { dados_pessoais: payload.dados_pessoais }),
+          ...(manualMeta && {
+            field_metadata: { ...(prev.field_metadata || {}), ...manualMeta },
+          }),
         }));
         toast.success("Dados do cliente atualizados com sucesso");
       }
@@ -478,13 +500,21 @@ export default function ClientDetailPage() {
                     label="Email"
                     editable
                     saving={savingField === "email"}
+                    meta={getFieldMeta("contacto.email", client?.field_metadata) || undefined}
                     onEdit={async (value) => {
                       setSavingField("email");
                       try {
-                        await updateClient(id, { contacto: { email: value } });
+                        await updateClient(id, {
+                          contacto: { email: value },
+                          field_metadata: buildManualMetadata(["contacto.email"]),
+                        });
                         setClient((prev) => ({
                           ...prev,
                           contacto: { ...(prev.contacto || {}), email: value },
+                          field_metadata: {
+                            ...(prev.field_metadata || {}),
+                            "contacto.email": { source: "manual", updated_at: new Date().toISOString() },
+                          },
                         }));
                         toast.success("Email atualizado com sucesso");
                       } catch (err) {
@@ -511,13 +541,21 @@ export default function ClientDetailPage() {
                     label="Telefone"
                     editable
                     saving={savingField === "telefone"}
+                    meta={getFieldMeta("contacto.telefone", client?.field_metadata) || undefined}
                     onEdit={async (value) => {
                       setSavingField("telefone");
                       try {
-                        await updateClient(id, { contacto: { telefone: value } });
+                        await updateClient(id, {
+                          contacto: { telefone: value },
+                          field_metadata: buildManualMetadata(["contacto.telefone"]),
+                        });
                         setClient((prev) => ({
                           ...prev,
                           contacto: { ...(prev.contacto || {}), telefone: value },
+                          field_metadata: {
+                            ...(prev.field_metadata || {}),
+                            "contacto.telefone": { source: "manual", updated_at: new Date().toISOString() },
+                          },
                         }));
                         toast.success("Telefone atualizado com sucesso");
                       } catch (err) {
@@ -539,19 +577,19 @@ export default function ClientDetailPage() {
                     )}
                   </ContactRow>
 
-                  <ContactRow icon={Hash} label="NIF">
+                  <ContactRow icon={Hash} label="NIF" meta={getFieldMeta("dados_pessoais.nif", client?.field_metadata) || undefined}>
                     <span className="font-mono">{renderSafe(dadosPessoais.nif)}</span>
                   </ContactRow>
 
-                  <ContactRow icon={Heart} label="Estado Civil">
+                  <ContactRow icon={Heart} label="Estado Civil" meta={getFieldMeta("dados_pessoais.estado_civil", client?.field_metadata) || undefined}>
                     {renderSafe(dadosPessoais.estado_civil)}
                   </ContactRow>
 
-                  <ContactRow icon={Briefcase} label="Profissão">
+                  <ContactRow icon={Briefcase} label="Profissão" meta={getFieldMeta("dados_pessoais.profissao", client?.field_metadata) || undefined}>
                     {renderSafe(dadosPessoais.profissao)}
                   </ContactRow>
 
-                  <ContactRow icon={MapPin} label="Morada Fiscal">
+                  <ContactRow icon={MapPin} label="Morada Fiscal" meta={getFieldMeta("dados_pessoais.morada_fiscal", client?.field_metadata) || undefined}>
                     {renderSafe(dadosPessoais.morada_fiscal)}
                   </ContactRow>
                 </div>
@@ -825,7 +863,10 @@ export default function ClientDetailPage() {
             </DialogHeader>
             <div className="space-y-4 py-2">
               <div className="space-y-2">
-                <Label htmlFor="edit-nome">Nome Completo</Label>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="edit-nome">Nome Completo</Label>
+                  <AIBadge {...(getFieldMeta("nome", client?.field_metadata) || {})} />
+                </div>
                 <Input
                   id="edit-nome"
                   value={editForm.nome}
@@ -834,7 +875,10 @@ export default function ClientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-nif">NIF</Label>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="edit-nif">NIF</Label>
+                  <AIBadge {...(getFieldMeta("dados_pessoais.nif", client?.field_metadata) || {})} />
+                </div>
                 <Input
                   id="edit-nif"
                   value={editForm.nif}
@@ -844,7 +888,10 @@ export default function ClientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-email">Email</Label>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="edit-email">Email</Label>
+                  <AIBadge {...(getFieldMeta("contacto.email", client?.field_metadata) || {})} />
+                </div>
                 <Input
                   id="edit-email"
                   type="email"
@@ -854,7 +901,10 @@ export default function ClientDetailPage() {
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="edit-telefone">Telefone</Label>
+                <div className="flex items-center gap-1">
+                  <Label htmlFor="edit-telefone">Telefone</Label>
+                  <AIBadge {...(getFieldMeta("contacto.telefone", client?.field_metadata) || {})} />
+                </div>
                 <Input
                   id="edit-telefone"
                   value={editForm.telefone}

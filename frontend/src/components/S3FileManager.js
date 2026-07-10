@@ -1958,6 +1958,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   <span className="hidden xs:inline">Upload</span>
                 </Button>
               )}
+              {/* PACOTE DB — Botão "Analisar IA" temporariamente oculto (display: none).
+                  Mantido para reativação futura — não apagar. */}
               <Button
                 size="sm"
                 variant="outline"
@@ -1965,6 +1967,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 disabled={aiAnalyzing || getAllFiles().length === 0}
                 data-testid="ai-analyze-btn"
                 className="bg-purple-50 hover:bg-purple-100 border-purple-200 dark:bg-purple-950/50 dark:border-purple-800 dark:hover:bg-purple-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
+                style={{ display: 'none' }}
               >
                 {aiAnalyzing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600 sm:mr-1" />
@@ -1973,6 +1976,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 )}
                 <span className="hidden sm:inline">Analisar</span> IA
               </Button>
+              {/* PACOTE DB — Botão "Renomear IA" temporariamente oculto (display: none).
+                  Mantido para reativação futura — não apagar. */}
               <Button
                 size="sm"
                 variant="outline"
@@ -1981,6 +1986,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 data-testid="smart-rename-btn"
                 title="Renomear documentos com nomes inteligentes baseados na análise IA"
                 className="bg-amber-50 hover:bg-amber-100 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:hover:bg-amber-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
+                style={{ display: 'none' }}
               >
                 {renaming ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 sm:mr-1" />
@@ -1989,6 +1995,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 )}
                 <span className="hidden md:inline">Renomear</span> IA
               </Button>
+              {/* PACOTE DB — Botão "Organizar" temporariamente oculto (display: none).
+                  Mantido para reativação futura — não apagar. */}
               <Button
                 size="sm"
                 variant="outline"
@@ -1997,6 +2005,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                 data-testid="quick-organize-btn"
                 title="Analisar e organizar documentos automaticamente nas pastas corretas"
                 className="bg-teal-50 hover:bg-teal-100 border-teal-200 dark:bg-teal-950/50 dark:border-teal-800 dark:hover:bg-teal-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
+                style={{ display: 'none' }}
               >
                 {organizing ? (
                   <Loader2 className="h-3.5 w-3.5 animate-spin text-teal-600 sm:mr-1" />

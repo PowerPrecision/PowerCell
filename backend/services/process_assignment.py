@@ -388,7 +388,7 @@ async def _count_active_processes_for_indexer(indexer_id: str) -> int:
     return count
 
 
-async def assign_to_indexer(process_id: str) -> Tuple[bool, dict, str]:
+async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tuple[bool, dict, str]:
     """
     Atribui automaticamente um processo ao indexador com menor carga.
 
@@ -405,6 +405,16 @@ async def assign_to_indexer(process_id: str) -> Tuple[bool, dict, str]:
     6. Se TODOS os indexadores estiverem no limite:
        - O processo NÃO é atribuído a ninguém.
        - O status muda para 'fila_espera' (aguarda vaga).
+
+    PACOTE DB — parâmetro `update_status`:
+    - Quando True (default, retrocompatível): o status é atualizado para
+      'fase_documental' (indexador disponível) ou 'fila_espera' (sem vaga).
+    - Quando False: o status do processo NÃO é alterado em NENHUM cenário.
+      O indexador é atribuído se disponível (cenário 5), mas o processo
+      mantém o status atual (ex.: 1ª fase real do Kanban definida na criação).
+      Isto evita "fases fantasma" hardcoded (fila_espera/fase_documental)
+      quando o chamador já definiu o status correto (ex.: criação manual
+      no CRM, auto-avanço do Portal).
 
     Args:
         process_id: ID do processo a atribuir
@@ -438,7 +448,19 @@ async def assign_to_indexer(process_id: str) -> Tuple[bool, dict, str]:
     indexers = await indexers_cursor.to_list(length=100)
 
     if not indexers:
-        # Sem indexadores no sistema — colocar na fila
+        # Sem indexadores no sistema
+        # PACOTE DB — se update_status=False, NÃO forçar fila_espera.
+        # O processo mantém o status atual (ex.: 1ª fase real do Kanban).
+        if not update_status:
+            logger.warning(
+                f"[ASSIGN-INDEXER] Nenhum indexador encontrado no sistema. "
+                f"Processo {process_id} mantém status atual (update_status=False)."
+            )
+            return True, {
+                "status": process.get("status"),
+                "assigned": False,
+                "reason": "no_indexers",
+            }, "Nenhum indexador disponível no sistema — processo mantém status atual"
         now = datetime.now(timezone.utc).isoformat()
         update_data = {
             "status": "fila_espera",
@@ -481,6 +503,23 @@ async def assign_to_indexer(process_id: str) -> Tuple[bool, dict, str]:
 
     # ── 5. Se não há indexadores disponíveis → FILA DE ESPERA ──
     if not available_indexers:
+        # PACOTE DB — se update_status=False, NÃO forçar fila_espera.
+        # O processo mantém o status atual; fica apenas sem indexador atribuído.
+        if not update_status:
+            logger.info(
+                f"[ASSIGN-INDEXER] Todos os {len(indexers)} indexadores estão no limite "
+                f"({MAX_ACTIVE_PROCESSES_PER_INDEXER} processos). "
+                f"Processo {process_id} mantém status atual (update_status=False)."
+            )
+            return True, {
+                "status": process.get("status"),
+                "assigned": False,
+                "reason": "all_indexers_full",
+                "indexers_checked": len(indexers),
+            }, (
+                f"Todos os {len(indexers)} indexadores estão no limite de "
+                f"{MAX_ACTIVE_PROCESSES_PER_INDEXER} processos — processo mantém status atual"
+            )
         now = datetime.now(timezone.utc).isoformat()
         update_data = {
             "status": "fila_espera",
@@ -533,12 +572,15 @@ async def assign_to_indexer(process_id: str) -> Tuple[bool, dict, str]:
 
     # ── 7. Atribuir processo ao indexador ──
     now = datetime.now(timezone.utc).isoformat()
+    # PACOTE DB — se update_status=False, NÃO forçar fase_documental.
+    # O indexador é atribuído mas o processo mantém o status atual.
     update_data = {
         "assigned_indexacao_id": chosen["id"],
         "indexacao_name": chosen["name"],
-        "status": "fase_documental",
         "updated_at": now,
     }
+    if update_status:
+        update_data["status"] = "fase_documental"
 
     result = await db.processes.update_one(
         {"id": process_id},

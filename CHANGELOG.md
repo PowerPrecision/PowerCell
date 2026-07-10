@@ -3,6 +3,612 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote DB: UAT Refinements (Leads Flow, Kanban Reactivity, UI Cleanup)
+
+### Alterado
+- **Refinamentos cirúrgicos da sessão de UAT** — 5 alterações de lógica e usabilidade no fluxo de Leads, reatividade do Kanban e limpeza de UI.
+
+### 1. Novo Fluxo de Leads e Menu (Visão Global)
+- **Menu**: A página "Registos de Clientes" foi movida do grupo "O Meu Negócio" para o grupo **"Visão Global"** na barra lateral (`DashboardLayout.js`). Atualizadas as rotas de expansão automática de secções (`meuNegocioRoutes` / `visaoGlobalRoutes`). A restrição do perfil **Indexação** (não vê Registos de Clientes) foi mantida via filtragem do `visaoGlobalGroup`.
+- **Criação**: Novos registos do formulário público entram agora com `status = None` e `workflow_step = None` (Lead) — **não entram no Kanban ativo**. Anteriormente entravam em `"pre_registo"`.
+  - `backend/routes/public.py`: `process_doc.status` passa a `None`.
+  - `backend/services/onboarding_service.py`: `new_process.status` passa a `None`.
+- **Gatilho de Transição**: Quando o sistema deteta que o cliente submeteu os **Documentos Obrigatórios** via Portal, o processo transita automaticamente para a **1ª fase real do Kanban** (1º status do `workflow_statuses` que não seja `pre_registo`, `fila_espera` nem terminal).
+  - `backend/routes/portal.py` `_check_and_advance_existing_pre_registo`: query passa a procurar `{"status": {"$in": ["pre_registo", None]}}` (cobre legacy + novos).
+  - `backend/routes/portal.py` `_auto_advance_from_pre_registo`: aceita `pre_registo` OU `None`; calcula a 1ª fase REAL do Kanban (em vez do "próximo estado" da pipeline); define também `workflow_step`; invoca `assign_to_indexer(update_status=False)`.
+- **Consistência em todo o backend**: queries de exclusão de leads atualizadas de `{"$ne": "pre_registo"}` para `{"$nin": ["pre_registo", None]}` (via constante `LEAD_STATUS_VALUES`):
+  - `backend/routes/processes.py` (4 queries: GET /processes, GET /paginated, Kanban, my-clients paginated) + `update_process` (`is_pre_registo_transition` aceita `None`).
+  - `backend/routes/my_clients.py` (1 query).
+  - `backend/routes/clients.py` (triagem: query `$or` inclui `None`; `triage_status = "pre_registo"` retornado para ambos os casos; regra de exclusão de Registos inclui `None`).
+  - `backend/routes/portal.py` (2 queries de lock de perfil: `$nin` inclui `None`).
+
+### 2. Eliminar Criação de Fases Fantasma
+- Ao criar um processo manualmente via CRM (`POST /processes/create-client` e `POST /processes`), o sistema **não força mais fases hardcoded** (`fila_espera` / `fase_documental` / `clientes_espera`).
+  - `backend/services/process_assignment.py` `assign_to_indexer`: novo parâmetro `update_status: bool = True`. Quando `False`, **não altera o status em nenhum cenário** (sem indexadores / todos no limite / indexador disponível) — apenas atribui o indexador se disponível.
+  - `backend/routes/processes.py` `create-client`: chama `assign_to_indexer(process_id, update_status=False)`. O processo mantém o `initial_status` = 1ª fase real do `workflow_statuses`.
+  - Fallback quando `workflow_statuses` está vazio: `initial_status = None` (antes: `"clientes_espera"`). **Não se inventam nomes de fases no código.**
+
+### 3. Reatividade Imediata do Kanban
+- O drag-and-drop passou a atualizar **instantaneamente** via duas camadas de optimistic update:
+  - **Hook** (`frontend/src/hooks/mutations/useProcessMutations.js` `useMoveProcessMutation`): `onMutate` reescrito — `setQueryData` executa **síncrono e primeiro** (antes do `cancelQueries` com `await`, que passou a fire-and-forget). Adicionado suporte para callback `onSettled` nas options.
+  - **Componente** (`frontend/src/components/KanbanBoard.js`): nova camada de estado local `localMoves` (mapa `processId → newStatus`) aplicada sobre `columns` via `optimisticColumns` (`useMemo`). No `handleDrop`, `setLocalMoves` é despachado **imediatamente** antes de `mutate`. Limpo no `onSettled` do mutation. O `filteredColumns` passa a derivar de `optimisticColumns`.
+
+### 4. Limpeza de UI (Documentos)
+- Botões de IA temporariamente ocultos (via `style={{ display: 'none' }}` — código mantido para reativação futura):
+  - **"Analisar IA"**, **"Renomear IA"** e **"Organizar"** no `frontend/src/components/S3FileManager.js` (barra de ações).
+  - **Card "Resumo Executivo IA"** no `frontend/src/pages/ProcessDetails.js` (condição `&& false` + `display: none`).
+- Separador **"Links"** temporariamente oculto no `frontend/src/components/UnifiedDocumentsPanel.js` (`TabsList` e `TabsContent` com `display: none`). O `DriveLinks` continua importado para reativação futura.
+
+### 5. Botão de Expansão na Modal
+- **`ProcessDetailsModal.jsx`**: o botão "Página Completa" foi renomeado para **"Abrir Processo Completo"** e tornado mais visível (variante `secondary` + cor azul `bg-blue-600`, no header). Mantém a navegação para `/process/${process.id}`.
+- **`ClientDetailsModal.jsx`**: o botão "Ver Processo" foi renomeado para **"Abrir Processo Completo"**, com ícone `ExternalLink` e cor azul destacada (`bg-blue-600`) no rodapé. Import `ExternalLink` adicionado.
+
+### Técnico
+- **Backend modificado** (7 ficheiros): `routes/public.py`, `services/onboarding_service.py`, `routes/portal.py`, `services/process_assignment.py`, `routes/processes.py`, `routes/clients.py`, `routes/my_clients.py`.
+- **Frontend modificado** (8 ficheiros): `layouts/DashboardLayout.js`, `hooks/mutations/useProcessMutations.js`, `components/KanbanBoard.js`, `components/UnifiedDocumentsPanel.js`, `components/S3FileManager.js`, `pages/ProcessDetails.js`, `components/kanban/ProcessDetailsModal.jsx`, `components/ClientDetailsModal.jsx`. (Comentários atualizados em `components/CreateProcessModal.jsx` e `pages/StaffDashboard.js`.)
+- **Constantes novas**: `LEAD_STATUS_VALUES = ["pre_registo", None]` em `routes/processes.py` e `routes/my_clients.py`.
+- **Parâmetro novo**: `update_status: bool = True` em `services/process_assignment.py::assign_to_indexer`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (0 erros de sintaxe em todos os ficheiros frontend).
+- **Dependências**: Nenhuma nova — `ExternalLink` já existia em `lucide-react`.
+
+## [2026-07-16] — Pacote DA: Always Show Notes Section & Aggregate Sources
+
+### Corrigido
+- **Secção de Observações só aparecia para alguns clientes/processos** — agora é **sempre visível** e **agrega todas as fontes de notas** disponíveis (IA + manuais + atividade recente).
+
+### 1. Visibilidade Incondicional (Frontend)
+- **`ProcessDetailsModal.jsx`**: A tab "Obs. e IA" (4ª tab, adicionada no Pacote CZ) agora usa uma IIFE que renderiza **sempre**. Se houver conteúdo, mostra os blocos relevantes; se TODOS os campos estiverem vazios, mostra um fallback em itálico cinza: *"Nenhuma observação, nota da IA ou atividade recente registada."*
+- **`ClientDetailsModal.jsx`**: Mesma lógica — a secção renderiza incondicionalmente com o mesmo fallback all-empty.
+
+### 2. Agregação de Fontes (3 blocos)
+Dentro da secção, cada bloco só aparece se tiver conteúdo (não mostra blocos vazios com "Sem ..."):
+1. **Notas da IA** (`ai_extracted_notes`) — roxo + `Sparkles` + badge "Automático"
+2. **Observações manuais** (`notas` / `notes`) — âmbar + `StickyNote` (editável no ProcessDetailsModal)
+3. **Atividade Recente** (`latest_activity`) — azul + `MessageSquare` + autor + data (NOVO)
+
+**CRÍTICO**: Se TODOS os 3 campos estiverem vazios/null → fallback itálico cinza: *"Nenhuma observação, nota da IA ou atividade recente registada."*
+
+### 3. Agregação no Backend (Garantia de Dados)
+- **`GET /processes/{id}`** (`processes.py`): Adicionado `db.activities.find_one({"process_id": process_id}, sort=[("created_at", -1)])` → popula `process.latest_activity` com `{comment, user_name, user_role, created_at}`.
+- **`GET /clients/{id}`** (`clients.py`): Adicionado `db.activities.find_one({"process_id": {"$in": all_process_ids}}, sort=[("created_at", -1)])` → popula `client.latest_activity` com a atividade mais recente de qualquer processo do cliente.
+- **`GET /processes/kanban`** (`processes.py`): Adicionado batch aggregation PACOTE DA (mesmo pattern do PACOTE BT/CZ) → popula `latest_activity` em todos os processos do kanban. **CRÍTICO**: O `ProcessDetailsModal` recebe `process` do KanbanBoard (que chama `/kanban`), não de `/processes/{id}` — sem este enrichment, a atividade não apareceria no modal.
+
+### Técnico
+- **Backend modificado**: `backend/routes/processes.py` (latest_activity no GET /{id} + batch enrichment no /kanban), `backend/routes/clients.py` (latest_activity no GET /{id}).
+- **Frontend modificado**: `frontend/src/components/kanban/ProcessDetailsModal.jsx` (IIFE agregada + 3º bloco Atividade Recente + fallback all-empty + import `MessageSquare`), `frontend/src/components/ClientDetailsModal.jsx` (IIFE agregada + 3º bloco + fallback all-empty + import `MessageSquare` + `formatDateTime`).
+- **FilteredProcessList.js**: Verificado — a coluna de Notas já tem fallback "Sem notas recentes" (do Pacote CZ). Sem alterações necessárias.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 2 ficheiros frontend.
+- **Dependências**: Nenhuma nova — `MessageSquare` já existe em `lucide-react`.
+
+## [2026-07-16] — Pacote CZ: Fix Notes Data Source in Table & Force Observations in Modal
+
+### Corrigido
+- **Desfasamento entre notas da tabela e notas reais dos consultores** + **secção de Observações que não aparecia na Modal**. Ambos os bugs resolvidos.
+
+### Bug 1 — Origem das Notas na Tabela de Processos
+- **Causa raiz**: As tabelas liam `process.notes` (campo estático) PRIMEIRO, com fallback para `latest_activity_note`/`latest_note`. Como `process.notes` quase sempre tinha valor (mesmo desatualizado), a atividade mais recente nunca aparecia. Além disso, o PACOTE CJ (backend) que deveria sobrescrever `p["notes"]` era **dead code** — filtrava por `action` field que não existe na coleção `activities`.
+- **Backend**:
+  - **`GET /processes`**: Removido dead code PACOTE CJ. Adicionado `latest_activity_preview` (alias explícito de `latest_note` do batch aggregation PACOTE BT) a cada processo.
+  - **`GET /processes/paginated`**: Adicionado batch aggregation PACOTE CZ (mesmo pattern do PACOTE BT) — antes não tinha enrichação de notas nenhuma. Adicionado `latest_note` + `latest_activity_preview`.
+  - **`GET /my-clients`** (`my_clients.py`): Removido dead code PACOTE CJ. Adicionado `latest_activity_preview` (alias de `latest_activity_note` do PACOTE CG).
+- **Frontend** (fallback chain invertida — atividade mais recente PRIMEIRO):
+  - **`FilteredProcessList.js`**: `process.latest_activity_preview || process.latest_activity_note || process.latest_note` (antes era `process.notes || ...`).
+  - **`MyClientsPage.js`**: `client.latest_activity_preview || client.latest_activity_note || client.latest_note` (antes era `client.notes || ...`).
+  - **`ProcessesPage.js`**: Chain reescrita — agora prioriza `latest_activity_preview` → `latest_note` → `latest_activity_note` → `last_activity.content` → `activities[]` (antes nem tinha `latest_activity_note`/`latest_note`).
+
+### Bug 2 — Secção de Observações não renderizava na Modal
+- **Causa raiz (ProcessDetailsModal)**: A secção "Notas da IA" estava: (1) dentro da tab "process" (NÃO era a default — a default era "client"), (2) condicionada a `safeString(process.ai_extracted_notes) && !isEditing` — escondida quando vazia OU em modo de edição.
+- **Causa raiz (ClientDetailsModal)**: Ambas as secções ("Observações" e "Notas da IA") eram condicionadas a `client.notas &&` e `client.ai_extracted_notes &&` — completamente escondidas quando os campos estavam vazios.
+- **Correção (ProcessDetailsModal)**:
+  - Nova **4ª tab "Obs. e IA"** (grid-cols-4), sempre visível.
+  - TabsContent incondicional com:
+    1. **Notas da IA** (roxo + `Sparkles` + badge "Automático") — sempre renderiza; fallback "Sem notas extraídas pela IA..." se vazio.
+    2. **Observações do Consultor** (âmbar + `StickyNote`) — sempre renderiza; editável em modo de edição; fallback "Sem observações manuais..." se vazio.
+  - Import `StickyNote` adicionado aos ícones lucide.
+- **Correção (ClientDetailsModal)**:
+  - Removida a renderização condicional `{client.notas && ...}` e `{client.ai_extracted_notes && ...}`.
+  - Ambas as secções agora renderizam **sempre** (wrapper div incondicional), com fallback "Sem observações manuais registadas." / "Sem notas extraídas pela IA..." dentro do `<p>`.
+  - Badge "Automático" adicionado ao header das Notas da IA.
+
+### Técnico
+- **Backend modificado**: `backend/routes/processes.py` (latest_activity_preview no GET /processes + batch aggregation no GET /paginated + remoção dead code), `backend/routes/my_clients.py` (latest_activity_preview + remoção dead code).
+- **Frontend modificado**: `frontend/src/pages/ProcessesPage.js` (notes chain), `frontend/src/pages/FilteredProcessList.js` (notes chain), `frontend/src/pages/MyClientsPage.js` (notes chain), `frontend/src/components/kanban/ProcessDetailsModal.jsx` (4ª tab + import StickyNote), `frontend/src/components/ClientDetailsModal.jsx` (secções incondicionais).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 5 ficheiros frontend.
+- **Dependências**: Nenhuma nova — `StickyNote` já existe em `lucide-react`.
+
+## [2026-07-16] — Pacote CY: Fix Client Onboarding, Timeline & Config Bugs
+
+### Corrigido
+- **4 bugs detetados em QA em dev** no fluxo de criação de clientes e configurações. Todos resolvidos com precisão cirúrgica.
+
+### Bug 1 — Email do Portal não era enviado
+- **Causa raiz**: O email de boas-vindas com o `portal_access_code` NUNCA era invocado nas rotas de criação (`POST /clients`, `POST /processes/create-client`). O `portal_access_code` era gerado mas o email não era disparado — falha silenciosa sem logs.
+- **Correção**:
+  - **`backend/routes/clients.py`**: Adicionado `import asyncio` + helper `_send_portal_welcome_email_safe()` (fire-and-forget com try-except aninhado + `logger.error`/`logger.warning` em cada falha). Disparado via `asyncio.create_task()` após `db.clients.insert_one()`. Tenta `task_queue.send_registration_email()` primeiro; se indisponível, envia diretamente via `send_registration_confirmation()`.
+  - **`backend/routes/processes.py`**: Adicionado helper `_send_portal_welcome_email_from_process()` (busca/gera `portal_access_code` do cliente, depois envia email). Disparado via `asyncio.create_task()` após `log_history()` na rota `POST /processes/create-client`.
+  - **Logs**: `[PORTAL-EMAIL]` prefix em todos os logs (info/warning/error) — falhas de SMTP nunca mais são silenciosas.
+
+### Bug 2 — Timeline a assumir fases fantasma
+- **Causa raiz**: `ProcessTimeline.js` recebia `history={process.status_history || activities.filter(...)}` — mas `process.status_history` não existe e `activities` não têm `type`. O prop era SEMPRE `[]`, activando o branch "sem histórico" que marcava `isCompleted: p.order < currentOrder` (index-based — o bug). Fases saltadas apareciam como "Concluídas" com checkmark verde.
+- **Causa secundária**: O branch "com histórico" lia `entry.new_status` (campo inexistente) em vez de `entry.new_value` (campo real do `db.history`).
+- **Correção**:
+  - **`frontend/src/pages/ProcessDetails.js`**: Passa o estado `history` real (já fetched via `getHistory(id)` na linha 1106) em vez da expressão quebrada.
+  - **`frontend/src/components/ProcessTimeline.js`**:
+    - `buildTimeline` reescrito: constrói `reachedStatuses` (Set) a partir do histórico real (`entry.new_value`), iterando sobre TODAS as fases (`sortedPhases`) em vez do histórico.
+    - 4 estados por fase: **Concluída** (alcançada + não atual), **Atual** (atual), **Saltada** (não alcançada + antes da atual), **Pendente** (não alcançada + depois da atual).
+    - Datas só aparecem se a fase foi alcançada (registo explícito no histórico) — sem datas inventadas.
+    - `TimelineNode`: adicionado `isSkipped` prop (círculo tracejado cinza + label itálico "Saltada").
+    - Legenda: adicionado 4º estado "Saltada".
+
+### Bug 3 — Encaminhamento para 'Registos de Clientes'
+- **Causa raiz**: `POST /processes/create-client` sempre definia `initial_status = first_status_by_order` (`clientes_espera` — primeira coluna do Kanban ativo). Não havia forma de criar um Lead (status `pre_registo` — a caixa "Registos de Clientes"). Além disso, `lead_status` era sempre `"converted"` (removia o cliente da triagem) e `assign_to_indexer` corria prematuramente.
+- **Correção**:
+  - **`backend/models/process.py`**: Adicionado `is_lead: Optional[bool] = False` ao `ProcessCreate` model.
+  - **`backend/routes/processes.py`** (rota `POST /create-client`):
+    - Se `is_lead=True`: `initial_status = "pre_registo"` (vai para Registos de Clientes). `source = "lead"`.
+    - Skip `assign_to_indexer()` (pre_registo não deve ser indexado — a auto-atribuição dispara na transição pre_registo → pipeline).
+    - `lead_status` mantém-se `"new"` (não `"converted"`) — o cliente continua na triagem.
+  - **`frontend/src/pages/StaffDashboard.js`**: `handleCreateLead` passa `is_lead: true` no payload. Toast atualizado para "Registo criado em Registos de Clientes".
+  - **`frontend/src/components/CreateProcessModal.jsx`**: Aceita prop `isLead` (default false). Se true, envia `is_lead: true` no payload. Toast diferenciado.
+
+### Bug 4 — Configuração dos Documentos Obrigatórios não gravava
+- **Causa raiz**: O SAVE funcionava corretamente (backend gravava no MongoDB). O READ é que estava quebrado — `MandatoryDocumentsSection.fetchConfig()` lia `data.mandatory_documents` (sempre `undefined` porque a API retorna `{config: {...}, fields: [...]}`) em vez de `data.config.mandatory_documents`. O utilizador via uma lista vazia após guardar, pensando que não gravou.
+- **Correção**:
+  - **`frontend/src/pages/SystemConfigPage.js`** (linha 1810): `data.mandatory_documents` → `(data.config && data.config.mandatory_documents) || data.mandatory_documents || {}`. Agora lê corretamente do nested `config`.
+  - **Backend**: Sem alterações necessárias — o save (`replace_one` com full dump) e o merge (`MandatoryDocumentsConfig`) já funcionavam.
+
+### Técnico
+- **Backend modificado**: `backend/routes/clients.py` (import asyncio + helper + email send), `backend/routes/processes.py` (helper + email send + is_lead routing), `backend/models/process.py` (campo is_lead).
+- **Frontend modificado**: `frontend/src/pages/ProcessDetails.js` (history prop fix), `frontend/src/components/ProcessTimeline.js` (buildTimeline rewrite + isSkipped + legenda), `frontend/src/pages/SystemConfigPage.js` (read path fix), `frontend/src/pages/StaffDashboard.js` (is_lead: true), `frontend/src/components/CreateProcessModal.jsx` (isLead prop).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 5 ficheiros frontend.
+- **Dependências**: Nenhuma nova.
+
+## [2026-07-16] — Pacote CX: Sync UI across Clients and Processes Tables & Modals
+
+### Alterado
+- **Nivelamento de UI entre tabelas de Clientes e Processos** + **secção de Notas da IA nos modais**. O Pacote CW funcionou na tabela de Clientes mas falhou na de Processos — este pacote corrige e completa a sincronização visual.
+
+### 1. Tabela de Processos (`ProcessesPage.js`)
+- **Nome clicável**: O nome do cliente na tabela (linha 768) era texto plain — agora tem a classe exata `cursor-pointer text-primary hover:underline` e abre o `<ClientDetailsModal />` ao clicar (com `e.stopPropagation()` para não acionar a navegação da row).
+- **Bolinhas de notificação inline** ao lado do nome:
+  ```jsx
+  {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+  {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+  ```
+- **Import + estado + render** do `ClientDetailsModal` adicionados (igual a MyClientsPage e FilteredProcessList).
+
+### 2. Mobile Card View (`FilteredProcessList.js`)
+- **Bug corrigido**: A vista de cartão móvel (linha 424) tinha o nome do cliente como texto plain — foi **omitida** no Pacote CW. Agora tem o mesmo `<span>` clicável com a classe exata + bolinhas inline, abrindo o `<ClientDetailsModal />`.
+
+### 3. Popups de Detalhes — Notas da IA
+- **`ClientDetailsModal.jsx`**: Nova secção **"Notas da IA"** (linhas 330-341) com formatação distinta — fundo roxo (`bg-purple-50 dark:bg-purple-950/20`), ícone `Sparkles`, texto roxo. Renderiza `client.ai_extracted_notes`. Aparece logo após o bloco "Observações" (que lê `client.notas`).
+- **`ProcessDetailsModal.jsx`**: Nova secção **"Notas da IA"** (linhas 859-870) com a mesma formatação roxa + `Sparkles`. Renderiza `process.ai_extracted_notes` (só em modo leitura, não editável). Aparece logo após o bloco "Notas" existente (que lê `process.notes` e é editável).
+- **Distinção visual clara**: Notas manuais (Observações) = âmbar + `StickyNote`. Notas da IA = roxo + `Sparkles`. O utilizador distingue instantaneamente a origem.
+
+### Técnico
+- **`frontend/src/pages/ProcessesPage.js`**: import ClientDetailsModal (linha 32); estado `clientDetailsModal` (linha 105); nome clicável + bolinhas (linhas 772-785); render do modal (linhas 948-954).
+- **`frontend/src/pages/FilteredProcessList.js`**: mobile card nome clicável + bolinhas (linhas 424-437).
+- **`frontend/src/components/ClientDetailsModal.jsx`**: import `Sparkles` (linha 52); bloco Notas da IA (linhas 330-341).
+- **`frontend/src/components/kanban/ProcessDetailsModal.jsx`**: import `Sparkles` (linha 46); bloco Notas da IA (linhas 859-870).
+- **Validação**: `esbuild --packages=external` ✓ nos 4 ficheiros (0 erros).
+- **Dependências**: Nenhuma nova — `Sparkles` já existe em `lucide-react`.
+
+## [2026-07-16] — Pacote CW: Trello Mirror Service & Clients Table Final Fixes
+
+### Adicionado
+- **`backend/services/trello_service.py`** (NOVO): Serviço de sincronização automática UNIDIRECIONAL (CRM → Trello) para que o Trello funcione como backup estrutural e visual em tempo real. Usa `httpx` (async). Lê `TRELLO_API_KEY`, `TRELLO_TOKEN`, `TRELLO_BOARD_ID` do ambiente. Se faltar config, desliga-se silenciosamente (o CRM funciona sem Trello).
+  - **`get_or_create_trello_list(list_name)`**: Procura ou cria uma coluna no quadro Trello. Cache em memória (`_list_cache`). Nome da coluna = `label` do `workflow_statuses` (ex: "Pré-Registo").
+  - **`sync_process_to_trello(process, action, new_status)`**: 3 ações:
+    - `create`: Cria cartão na lista correta, guarda `trello_card_id` no processo no MongoDB.
+    - `move`: Move cartão para a nova lista (usa `trello_card_id` existente).
+    - `update`: Atualiza a descrição do cartão com dados úteis extraídos pela IA (NIF, Salário, Valor do Imóvel, Valor a Financiar, etc.).
+  - **`_build_card_description(process)`**: Constrói descrição com dados do cliente (NIF, CC, email, telefone), financeiros (salário, valor financiado, capital próprio), imóvel (valor, tipologia, localização), crédito (empréstimo, taxa, prestação, banco), e contagem de campos preenchidos por IA (`field_metadata` source="ai").
+  - **Fallbacks inteligentes**: Se `create` mas já tem `trello_card_id` → converte para `move`. Se `move`/`update` mas sem `trello_card_id` → converte para `create`. Nunca rebenta o CRM (try-except global, fire-and-forget).
+
+### Backend — Integração no Kanban (`routes/processes.py`)
+- **Import**: `from services.trello_service import sync_process_to_trello` (linha 54).
+- **4 pontos de integração** com `asyncio.create_task(...)` (fire-and-forget, não atrasa a UI):
+  1. **Criação de processo (cliente)** — linha 910: após `insert_one`, dispara `action="create"`.
+  2. **Criação de processo (staff)** — linha 1287: após auto-atribuição de indexador (status pode ser `fila_espera`), dispara `action="create"`.
+  3. **Kanban move** — linha 3101: após `update_one` de status, dispara `action="move"` com `new_status`. Constrói `_trello_move_proc = {**process, "status": new_status, "trello_card_id": ...}` para passar o processo atualizado.
+  4. **PUT geral (update)** — linhas 4358-4363: após `update_one` + re-fetch, dispara `action="move"` se `data.status` mudou, senão `action="update"`.
+
+### Frontend — Bugs da Tabela Esmagados (`MyClientsPage.js` + `FilteredProcessList.js`)
+- **Nome Clicável (100% conforme spec)**:
+  - Classe exata `cursor-pointer text-primary hover:underline` em ambas as páginas.
+  - Ao clicar, aciona estado local → abre `<ClientDetailsModal />` com `clientId`.
+- **Bolinhas de Alerta (inline, formato exato do spec)**:
+  ```jsx
+  {process.has_unread_messages && <span className="w-2 h-2 rounded-full bg-blue-500 inline-block ml-2" title="Nova Mensagem"></span>}
+  {process.has_new_documents && <span className="w-2 h-2 rounded-full bg-green-500 inline-block ml-2" title="Novo Ficheiro"></span>}
+  ```
+  Aplicadas em ambas as páginas, dentro do `<span>` clicável (a seguir ao nome). Substitui o componente `NotificationDots` anterior para uniformidade visual.
+- **Notas na Tabela**: `{process.notes || 'Sem notas recentes'}` — já estava correto, confirmado em ambas as páginas (com fallback `latest_activity_note`/`latest_note`).
+- **Filtro de Eliminados (Backend & Frontend)**:
+  - **Backend** (`routes/processes.py` + `routes/my_clients.py`): Já implementado (Pacote CP) — `view_mode=deleted` ou `status=eliminado(s)` desliga o filtro padrão de ativos e faz query `is_deleted: True`.
+  - **`FilteredProcessList.js`**: Nova entrada `eliminado` no `filterConfig` (ícone `Trash2`). `fetchData` mapeia `filterType === "eliminado"` → `view_mode=deleted`. Acessível via URL `?filter=eliminado`.
+  - **`MyClientsPage.js`**: Novo botão "Mostrar Eliminados" (toggle, ícone `Trash2`) que envia `view_mode=deleted` ao backend. Estado persistido em URL param (`view_mode=deleted`). Filtro local atualizado para não excluir terminais quando `showDeleted=true`.
+
+### Técnico
+- **Novo ficheiro**: `backend/services/trello_service.py` (~400 linhas).
+- **Backend modificado**: `backend/routes/processes.py` (import + 4 pontos de integração).
+- **Frontend modificado**: `frontend/src/pages/MyClientsPage.js` (nome clicável, bolinhas inline, toggle eliminados, fetchData + filtro local). `frontend/src/pages/FilteredProcessList.js` (nome clicável, bolinhas inline, filterConfig eliminado, fetchData view_mode=deleted, import Trash2).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --packages=external` ✓ nos 2 ficheiros frontend.
+- **Dependências**: Nenhuma nova — `httpx==0.28.1` já no `requirements.txt`.
+
+## [2026-07-16] — Pacote CV: Robust Omnichannel Bulk Document Scanner
+
+### Alterado
+- **`backend/scripts/bulk_ai_document_scan.py` REESCRITO** (substitui o Pacote CU por uma implementação mais robusta e estrita, com regras omnicanal explícitas). O script percorre `db.documents` (is_deleted != True), descarrega o binário do S3 via **boto3 direto**, envia à OpenAI (gpt-4o-mini via `analyze_document_from_base64`), e atualiza o processo + `field_metadata` (source: "ai").
+
+### 1. Conexão e Configuração
+- **MongoDB**: `motor_asyncio.AsyncIOMotorClient(MONGO_URL)`, `db = client[DB_NAME]`.
+- **S3 (boto3 direto)**: `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_REGION` (default `'eu-north-1'`), `AWS_BUCKET_NAME`. Falta de qualquer variável → `sys.exit(1)` com mensagem clara.
+
+### 2. Resiliência Omnicanal do Esquema de Dados
+- **Query**: `db.documents.find({"is_deleted": {"$ne": True}})` — todos os documentos não apagados.
+- **Resolução de chave S3**: Para cada documento, tenta os campos em ordem: `s3_key`, `file_key`, `key`, `path`, `url`.
+- **URL pública S3**: Se o valor contiver `amazonaws.com/`, faz split e agarra apenas o sufixo (chave limpa). Faz `unquote()` para descodificar `%20` etc.
+- **Sem chave**: Se nenhuma chave for encontrada → `continue` (status `skipped`).
+
+### 3. Pipeline de Análise
+1. **Download S3** (`asyncio.to_thread` para não bloquear event loop): `s3_client.get_object(Bucket, Key)`.
+2. **Base64**: `base64.b64encode(content).decode("utf-8")`.
+3. **MIME type**: Derivado de `content_type` do documento ou extensão do filename (fallback `application/pdf`).
+4. **IA**: `analyze_document_from_base64(base64_content, mime_type, "outro")` de `services.ai_document`.
+
+### 4. Integração com Processos e Rastreabilidade
+- **Marca documento**: Se extração bem-sucedida → `db.documents.update_one({"id": doc_id}, {"$set": {"ai_processed": True, "ai_processed_at": ISO, "ai_document_type": tipo}})`.
+- **Busca processo**: `db.processes.find_one({"id": process_id})`.
+- **Build update**: `build_update_data_from_extraction(extracted_data, tipo_detetado, existing_data)` — mapeia extração → `personal_data`/`financial_data`/`real_estate_data`/`credit_data`.
+- **field_metadata**: Para cada campo preenchido, injeta `field_metadata["<group>.<field>"] = {"source": "ai", "updated_at": ISO}`.
+- **Merge seguro**: `{**existing_fm, **new_ai_fm}` — não apaga metadata de campos não atualizados (Pacote CS).
+- **$set no processo**: Aplica `process_set` com campos + `field_metadata` merged + `updated_at`.
+
+### 5. Gestão de Erros e Rate Limiting
+- **Rate limit (429)**: Print de aviso + `await asyncio.sleep(300)` (5 min de "castigo") + `continue` para o próximo documento.
+- **S3 404 / NoSuchKey**: Aviso + `continue` (sem pausa — ficheiro inexistente não é erro de API).
+- **Sucesso**: `await asyncio.sleep(25)` (travão de segurança entre documentos).
+- **Deteção robusta de rate-limit**: 4 camadas — (1) `RateLimitError` custom de `services.ai_document`; (2) `openai.RateLimitError` do SDK; (3) `botocore.exceptions.ClientError` com código Throttling/SlowDown; (4) heurística por mensagem ("429", "rate limit", "too many requests", "quota", "throttle", "tpm", "rpm limit", "limite de pedidos", "tente novamente mais tarde").
+- **Safety net**: `try-except` no loop principal apanha qualquer exceção que escape do helper interno — o script nunca rebenta.
+
+### CLI
+```
+cd backend
+python scripts/bulk_ai_document_scan.py --dry-run
+python scripts/bulk_ai_document_scan.py --limit 20
+python scripts/bulk_ai_document_scan.py --sleep-success 25 --sleep-rate-limit 300
+```
+
+### Diferenças vs Pacote CU (substituído)
+| Aspecto | Pacote CU | Pacote CV |
+|---|---|---|
+| Cliente S3 | `s3_service` (wrapper) | **boto3 direto** |
+| Coleções pesquisadas | `document_metadata` + `documents` | **`db.documents`** (is_deleted != True) |
+| Resolução de chave S3 | só `s3_path` | **omnicanal**: s3_key, file_key, key, path, url + split amazonaws.com |
+| Função IA | `analyze_single_document` (bytes) | **`analyze_document_from_base64`** (base64, tipo 'outro') |
+| Marcar doc processado | não | **`ai_processed: True`** + `ai_processed_at` + `ai_document_type` |
+| Pausa sucesso | 60s | **25s** |
+| Pausa rate-limit | 300s | 300s (igual) |
+| S3 404 handling | não específico | **NoSuchKey/404 → continue sem pausa** |
+
+### Técnico
+- **Ficheiro reescrito**: `backend/scripts/bulk_ai_document_scan.py` (~635 linhas, substitui ~430 do CU).
+- **Imports novos**: `boto3`, `botocore.exceptions.ClientError`, `urllib.parse.unquote`, `base64`.
+- **Validação**: `py_compile` ✓; `flake8 --select=F,E9` → 0 erros.
+- **Dependências**: Nenhuma nova — `boto3==1.42.21`, `botocore==1.42.21` já no `requirements.txt`.
+
+## [2026-07-16] — Pacote CU: Safe Staggered AI Bulk Scanner Script
+
+> ⚠️ **SUBSTITUÍDO pelo Pacote CV** (mesmo ficheiro). Mantido no histórico para referência.
+
+### Adicionado
+- **Script `backend/scripts/bulk_ai_document_scan.py`**: Script de background que percorre documentos legados associados a processos ativos e extrai dados com IA, preenchendo campos vazios e marcando proveniência no `field_metadata` (`source: "ai"`). Desenhado para conta de API gratuita — **rate-limit extremamente conservador e imune a falhas**.
+
+### Travões de Segurança (CRÍTICO)
+- **Pausa pós-sucesso**: Após cada extração com sucesso, `await asyncio.sleep(60)` (1 minuto) para não estourar o RPM gratuito.
+- **Pausa de "castigo"**: Se apanhar erro de rate-limit (429 Too Many Requests ou exceção genérica de rate limit), faz `await asyncio.sleep(300)` (5 minutos) e `continue` para o próximo documento — **não rebenta o script**.
+- **Deteção de rate-limit robusta**: Cobre (1) `RateLimitError` custom de `services.ai_document`, (2) `openai.RateLimitError` do SDK, (3) heurística por mensagem ("429", "rate limit", "too many requests", "quota", "throttle", "tpm", "rpm limit").
+- **Safety net**: `try-except` no loop principal apanha qualquer `RateLimitError` ou exceção genérica que escape do helper interno — o script nunca rebenta por rate-limit.
+
+### Lógica de Pesquisa
+1. **Processos ativos não-terminais**: `is_deleted != True` E `status $nin [concluido, desistencias, desistido, cancelado, arquivado, eliminado]`.
+2. **Campos-chave vazios**: Verifica cliente (`dados_pessoais.nif`, `dados_pessoais.documento_id`) e processo (`financial_data.salario_bruto`/`monthly_income`/`valor_financiado`, `real_estate_data.valor_imovel`/`valor_patrimonial`, `credit_data.requested_amount`/`interest_rate`/`monthly_payment`).
+3. **Documentos com ficheiro em S3**: Procura em `document_metadata` (s3_path exists) e `documents` (status UPLOADED/RECEIVED/SUBMITTED com s3_path).
+4. **Apenas processa** processos que tenham pelo menos 1 campo vazio E documentos associados.
+
+### Respeito por Dados Existentes
+- **`manually_edited_fields`**: Campos na lista `manually_edited_fields` do processo **não são sobrescritos** pela IA.
+- **`field_metadata[source]="manual"`**: Campos já marcados como manuais (no processo ou no cliente) **não são sobrescritos** — o Consultor tem prioridade sobre a IA.
+- **Merge seguro de `field_metadata`**: `{**existing_fm, **new_ai_fm}` — não apaga metadata de campos não atualizados neste request (Pacote CS).
+- **`ai_extraction_history`**: Cada extração é registada no array `ai_extraction_history` do processo (doc_id, filename, document_type, fields, analyzed_at, source_collection) para auditoria.
+
+### Atualização da BD
+- **Cliente**: `dados_pessoais.*` (NIF, CC, data_nascimento, etc.) + `field_metadata["dados_pessoais.<field>"] = {source:"ai", updated_at, confidence?}`.
+- **Processo**: `financial_data.*`, `real_estate_data.*`, `credit_data.*` + `field_metadata["<group>.<field>"] = {source:"ai", ...}`.
+- **Separação cliente/processo**: helper `split_metadata_client_process` manda `dados_pessoais.*`/`contacto.*`/`nome` para o cliente; restantes para o processo.
+
+### Reutilização de Serviços Existentes
+- **`analyze_single_document`** (`services/ai_document.py`): Já tem tenacity retry em `RateLimitError` com backoff exponencial (2-32s, 5 tentativas) + `MAX_CONCURRENT_ANALYSIS=5`. Este script adiciona uma camada EXTRA de segurança por cima.
+- **`build_update_data_from_extraction`** (`services/ai_document.py`): Mapeia extração → formato de update do processo (com validação de NIF, filtragem de placeholders como "YYYY-MM-DD" e "123456789").
+- **`s3_service.get_file_content`** (`services/s3_storage.py`): Lê bytes do S3 (síncrono → envolvido em `asyncio.to_thread` para não bloquear o event loop).
+
+### CLI
+```
+cd backend
+python scripts/bulk_ai_document_scan.py --dry-run              # simular
+python scripts/bulk_ai_document_scan.py --limit 10             # processar 10 docs
+python scripts/bulk_ai_document_scan.py --process-id <uuid>    # processo específico
+python scripts/bulk_ai_document_scan.py --sleep-success 60 --sleep-rate-limit 300
+```
+
+### Técnico
+- **Novo ficheiro**: `backend/scripts/bulk_ai_document_scan.py` (~430 linhas).
+- **Bootstrap**: `sys.path.insert(backend/)`, `load_dotenv(backend/.env)`, `AsyncIOMotorClient`, `asyncio.run(_run())` — segue convenção de `seed_qa_ultimate.py` e `backfill_empty_fields.py`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+- **Dependências**: Nenhuma nova — usa `motor`, `python-dotenv`, `openai`, `boto3` (já instalados no backend).
+
+## [2026-07-16] — Pacote CT: AI Field Indicator UI (Frontend)
+
+### Adicionado
+- **Componente `AIBadge`** (`frontend/src/components/ui/AIBadge.jsx`): Indicador visual de proveniência de dados. Recebe `source` (`"ai"` | `"client"` | `"manual"`), `updated_at` e `confidence`.
+  - `"ai"` → ícone `Sparkles` (roxo) com tooltip "Preenchido pela IA" (+ confiança % + data).
+  - `"client"` → ícone `User` (teal) com tooltip "Preenchido pelo Cliente no Portal" (+ data).
+  - `"manual"` → **não renderiza nada** (o humano sobrepôs o dado).
+- **Helpers exportados**: `getFieldMeta(fieldPath, ...metadataSources)` para ler metadata de múltiplas fontes (process + client) com prioridade; `buildManualMetadata(fieldPaths)` para construir payloads de proveniência manual.
+
+### Frontend — `ProcessDetails.js` (Detalhes do Processo)
+- **Leitura de `field_metadata`**: Helper `getFieldMetaFor(path)` que lê de `process.field_metadata` com fallback para `clientData.field_metadata`.
+- **AIBadge em 10 campos importantes**: NIF (`dados_pessoais.nif`), CC (`dados_pessoais.documento_id`), Rendimento Mensal (`financial_data.monthly_income`), Rendimento Bruto (`financial_data.rendimento_bruto`), Valor a Financiar (`financial_data.valor_financiado`), Valor do Imóvel (`real_estate_data.valor_imovel`), Valor Patrimonial (`real_estate_data.valor_patrimonial`), Valor do Empréstimo (`credit_data.requested_amount`), Taxa de Juro (`credit_data.interest_rate`), Prestação Mensal (`credit_data.monthly_payment`).
+- **Save manual**: `executeSave` envia `field_metadata` com `source="manual"` para os campos do cartão editado (`editingCardId`). Mapeamento `MANUAL_FIELDS_BY_CARD` cobre `personal_identificacao`, `personal_morada`, `financial_rendimentos`, `realestate_caracteristicas`, `credit_dados`. Campos `dados_pessoais.*`/`contacto.*`/`nome` vão para o `PUT /clients`; restantes vão para o `PUT /processes`. O backend (Pacote CS) faz merge seguro.
+
+### Frontend — `ClientDetailPage.js` (Ficha do Cliente)
+- **`ContactRow` estendido**: Aceita prop `meta` e renderiza `<AIBadge />` ao lado da label.
+- **AIBadge em 6 ContactRows**: Email (`contacto.email`), Telefone (`contacto.telefone`), NIF (`dados_pessoais.nif`), Estado Civil (`dados_pessoais.estado_civil`), Profissão (`dados_pessoais.profissao`), Morada Fiscal (`dados_pessoais.morada_fiscal`).
+- **AIBadge em 4 campos do modal de edição**: Nome (`nome`), NIF, Email, Telefone.
+- **Inline edit (Email/Telefone)**: `onEdit` envia `field_metadata` com `source="manual"` para o campo editado + atualiza estado local (badge desaparece imediatamente).
+- **Modal save (`handleEditSave`)**: Recolhe caminhos alterados (`nome`, `contacto.email`, `contacto.telefone`, `dados_pessoais.nif`) e envia `field_metadata` manual apenas para esses campos. Atualiza estado local para o AIBadge reagir.
+
+### Comportamento
+- **IA extrai dado** → badge `Sparkles` roxo aparece ao lado da label.
+- **Cliente preenche no Portal** → badge `User` teal aparece (via Pacote CS, injeção automática `source="client"`).
+- **Consultor edita e guarda** → frontend envia `source="manual"` → backend faz merge → badge desaparece (o humano sobrepôs o dado).
+
+### Técnico
+- **Novo ficheiro**: `frontend/src/components/ui/AIBadge.jsx` (componente + helpers `getFieldMeta`/`buildManualMetadata`/`buildManualMeta`).
+- **Frontend** (`frontend/src/pages/ProcessDetails.js`): import AIBadge (linha 118); helper `getFieldMetaFor` (linhas 1850-1854); AIBadge em 10 campos; `MANUAL_FIELDS_BY_CARD` + merge no `executeSave` (linhas 1595-1644).
+- **Frontend** (`frontend/src/pages/ClientDetailPage.js`): import AIBadge (linha 24); `ContactRow` com prop `meta` (linha 147, render linha 188-191); 6 call sites com `meta`; inline `onEdit` com `field_metadata` (linhas 489-500, 530-541); `handleEditSave` com `changedPaths` + `buildManualMetadata` (linhas 276-310); 4 AIBadge no modal (linhas 866-907).
+- **Validação**: `esbuild --packages=external` ✓ nos 3 ficheiros (0 erros de sintaxe).
+- **Dependências**: Nenhuma nova — usa `lucide-react` (Sparkles, User), `@radix-ui/react-tooltip`, `class-variance-authority` (já instalados).
+
+## [2026-07-16] — Pacote CS: Data Provenance Foundation (Backend)
+
+### Adicionado
+- **Rastreabilidade de Dados (`field_metadata`)**: Novo objeto `field_metadata` em `clients` e `processes` que rastreia a origem e data de atualização de cada campo. Formato: `{"dados_pessoais.nif": {"source": "ai"|"manual"|"client", "updated_at": "ISO", "confidence": 0.95}}`.
+
+### Backend
+- **`PUT /clients/{id}`** (`routes/clients.py`): Aceita `field_metadata` do frontend e faz **merge seguro** (`{**existing, **new}`) — não apaga metadata de campos não atualizados. Adicionado `request: Request` à assinatura.
+- **`PUT /processes/{id}`** (`routes/processes.py`): Mesma lógica de merge antes do `$set`.
+- **`PUT /portal/me`** (`routes/portal.py`): **Injeção automática** — para cada campo atualizado pelo cliente, injeta `field_metadata[f"contacto.{key}"] = {"source": "client", "updated_at": now}`. O cliente não precisa de enviar `field_metadata`.
+
+### Formato do `field_metadata`
+```json
+{
+  "dados_pessoais.nif": {"source": "ai", "updated_at": "2026-07-16T...", "confidence": 0.95},
+  "contacto.email": {"source": "client", "updated_at": "2026-07-16T..."},
+  "financial_data.salario_bruto": {"source": "manual", "updated_at": "2026-07-16T..."}
+}
+```
+
+### Segurança
+- **Merge seguro**: `{**existing_metadata, **new_metadata}` — apenas campos enviados neste request são sobrescritos; metadata de campos não atualizados é preservada.
+- **Portal automático**: O cliente não envia `field_metadata` — o backend injeta `source="client"` automaticamente.
+
+### Técnico
+- **Backend** (`backend/routes/clients.py`): `request: Request` (linha 1496); `field_metadata` merge (linhas 1580-1588).
+- **Backend** (`backend/routes/processes.py`): `field_metadata` merge (linhas 4326-4337).
+- **Backend** (`backend/routes/portal.py`): injeção automática `source="client"` (linhas 924-944).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote CR: Hardcode Changelog Time-Diff Logic
+
+### Alterado
+- **Filtragem temporal forçada na geração de changelog**: Dupla barreira: (1) código Python filtra a fonte (git `--since`, markdown `_filter_lines_since`) baseado na data do último anúncio em `announcements`; (2) prompt de sistema da IA inclui instrução temporal obrigatória como barreira de segurança extra.
+
+### Backend (`backend/services/changelog_service.py`)
+- **`_get_last_changelog_date()`**: Reescrita para procurar em `announcements` (`{"type": "changelog"}`, `sort=[("created_at", -1)]`) primeiro, com fallback para `system_changelogs` (`published_at`).
+- **`since_date_str`**: `since_date.strftime("%Y-%m-%d %H:%M")` se existir, `"nunca"` se None.
+- **Prompt de sistema**: `system_prompt = CHANGELOG_SYSTEM_PROMPT + "\n\n" + temporal_instruction` onde `temporal_instruction` = "IMPORTANTE: A última nota de atualização foi gerada em {since_date_str}. A tua tarefa é extrair e resumir APENAS as novidades e alterações que tenham ocorrido DEPOIS dessa data. Ignora completamente qualquer ponto do histórico que seja anterior a essa data."
+- **Chamada à IA**: Usa `system_prompt` (com instrução temporal) em vez de `CHANGELOG_SYSTEM_PROMPT` (constante estática).
+
+### Segurança
+- Não falha se não houver `last_announcement` — `since_date=None` → `since_date_str="nunca"` → a IA resume tudo (primeira geração).
+
+### Técnico
+- **Backend** (`backend/services/changelog_service.py`): `_get_last_changelog_date` (linhas 57-105); `since_date_str` (linha 472); `temporal_instruction` + `system_prompt` (linhas 537-547); chamada IA (linha 580).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote CQ: Robust Portal Lock Logic
+
+### Alterado
+- **Bloqueio do portal baseado em Fases do Kanban**: A flag `is_indexed` pode não estar atualizada atempadamente na BD. Substituído por avaliação direta do `status` do processo. O perfil é trancado se o processo avançou para além das fases iniciais (`pre_registo`, `clientes_espera`, `documentacao`, `eliminado`, `desistencias`).
+
+### Backend (`backend/routes/portal.py`)
+- **`GET /portal/me`**: Query alterada para `{"status": {"$nin": ["pre_registo", "clientes_espera", "documentacao", "eliminado", "desistencias"]}}`.
+- **`PUT /portal/me`**: Mesma query. Lança 403 se o processo estiver numa fase avançada.
+
+### Evolução da regra de bloqueio
+| Pacote | Regra | Problema |
+|--------|-------|----------|
+| Original | Qualquer processo ativo | Bloqueava em pre_registo |
+| Pacote CB | `status != "pre_registo"` | Bloqueava em fases intermédias |
+| Pacote CF/CI | `is_indexed == True` | Flag pode não estar atualizada |
+| **Pacote CQ** | **`status $nin [fases iniciais]`** | ✅ Avalia diretamente o Kanban |
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `GET /me` (linhas 762-774); `PUT /me` (linhas 849-864).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote CP: Fix My Clients Table UI & Filters
+
+### Corrigido
+- **Filtro Eliminados**: `my_clients.py` agora suporta `view_mode="deleted"` / `status="eliminado"` — remove `is_active` e `INACTIVE_STATUSES`, aplica apenas `is_deleted=True` com filtro de role. `processes.py` já tinha `wants_deleted` implementado.
+
+- **Bolinhas de Notificação**: Confirmadas em `MyClientsPage.js` e `FilteredProcessList.js` — `NotificationDots` renderiza junto ao nome com `has_unread_messages` (azul) e `has_new_documents` (verde).
+
+- **Nome Clicável com Modal**: `MyClientsPage.js` — nome do cliente transformado em `cursor-pointer text-primary hover:underline` com `onClick` que abre `ClientDetailsModal` com `client.client_id || client.id`. `FilteredProcessList.js` já tinha (Pacote CH).
+
+- **Notas na Tabela**: Ambas as tabelas agora lêem `process.notes` primeiro (sobrescrito pelo Pacote CJ com última atividade real), com fallback `latest_activity_note` → `latest_note` → "Sem notas recentes".
+
+### Técnico
+- **Backend** (`backend/routes/my_clients.py`): `wants_deleted` (linhas 69-117).
+- **Frontend** (`frontend/src/pages/MyClientsPage.js`): import `ClientDetailsModal`; estado `clientDetailsModal`; nome clicável (linhas 530-545); notas lê `notes` primeiro (linhas 603-616); modal no final (linhas 654-660).
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): notas lê `notes` primeiro (linhas 561-574).
+- **Validação**: `py_compile` ✓; `flake8` → 0 erros; `esbuild` → 0 erros.
+
+## [2026-07-16] — Pacote CO v2: Backfill — campos de dropdown/select adicionados
+
+### Corrigido
+- **Script de backfill não preenchia campos de dropdown/select**: O script original (Pacote CO) não preenchia ~25 campos, principalmente campos de caixa de seleção. Corrigido: agora preenche TODOS os campos dos modelos.
+
+### Campos de SELECT/DROPDOWN adicionados
+- **financial_data**: `tipo_contrato`, `irs_taxa_retencao`, `dependentes`
+- **real_estate_data**: `tipologia`, `tipo_imovel`, `finalidade`, `certificado_energetico`, `num_quartos`, `estacionamento`, `arrecadacao`
+- **credit_data**: `prazo_meses`, `spread`, `banco`, `tipo_taxa`, `interest_rate`/`taxa_anual`, `admission_year`, `is_ppe`, `is_fpe`
+
+### Outros campos adicionados
+- **Clientes**: `nome_pai`, `nome_mae`, `data_validade_cc`
+- **financial_data**: `antiguidade_anos`, `renda_mensal`, `prestacao_auto`, `outros_creditos`, `despesas_total`, `valor_entrada`
+- **real_estate_data**: `ja_tem_imovel`, `has_property`, `ja_tem_casa_escolhida`, `freguesia`, `area_bruta`, `area_util`, `valor_patrimonial`
+- **credit_data**: `monthly_payment`/`prestacao_mensal` (calculada por fórmula de amortização francesa), `requested_amount`, `loan_term_years`, `bank_name`
+
+### Técnico
+- **Backend** (`backend/scripts/backfill_empty_fields.py`): v2 — ~25 campos adicionais; `is_empty()` simplificado (0 não é vazio); prestação mensal calculada.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+### Regras de Preenchimento
+- **Clientes**: `dados_pessoais` (nif, documento_id, telefone, profissao, estado_civil, data_nascimento, naturalidade, nacionalidade, morada_fiscal, sexo) + `contacto` (telefone, telefone_secundario, email_secundario).
+- **Processos**: `financial_data` (salario_bruto, salario_liquido, tipo_contrato, empresa, capitais_proprios) + `real_estate_data` (valor_imovel, tipologia, concelho, localidade, tipo_imovel, codigo_postal) + `credit_data` (montante_financiado calculado = valor_imovel - capitais_proprios, prazo_meses, spread, banco, tipo_taxa).
+
+### Segurança
+- `is_empty()`: verifica None/vazio/string vazia. Não considera `0` como vazio para valores numéricos.
+- `update_one` individual (não `update_many`) para logging granular.
+- Contagem de atualizados/ignorados/campos preenchidos + resumo no terminal.
+
+### CLI
+```bash
+python scripts/backfill_empty_fields.py                # executar
+python scripts/backfill_empty_fields.py --dry-run      # simular
+python scripts/backfill_empty_fields.py --limit 50     # limitar
+```
+
+### Técnico
+- **Backend** (`backend/scripts/backfill_empty_fields.py`): 320 linhas; Motor async + dotenv + Faker('pt_PT'); `gerar_nif()` com dígito de controlo; `backfill_clients()` + `backfill_processes()`; `print_summary()`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote CK: Registrations Rule & Modal Notes
+
+### Corrigido
+- **Clientes avançados apareciam nos Registos**: Clientes com processos em fases avançadas (fora de `pre_registo`, `clientes_espera`, `eliminado`) apareciam na tabela de Registos de Leads. Corrigido: `should_exclude` faz `continue` se o cliente tem um processo que já passou da fase inicial.
+
+- **Modal não mostrava notas**: A modal de detalhes do cliente só lia `client.notas`. Atualizado para usar fallback `notas || notes || 'Sem observações'`.
+
+- **Botão Visitas no Portal**: Confirmado já comentado (Pacote CB) — sem alteração.
+
+### Backend (`backend/routes/clients.py`)
+- **`list_registered_clients`**: Bloco `processes_info` substituído com `should_exclude` — se `status not in ["pre_registo", "clientes_espera", "eliminado"]`, `continue` (cliente não aparece nos Registos).
+
+### Frontend (`frontend/src/pages/ClientRegistrationsPage.js`)
+- **Modal de detalhes**: `{safeString(detailsDialog.client.notas || detailsDialog.client.notes) || 'Sem observações'}`.
+
+### Técnico
+- **Backend** (`backend/routes/clients.py`): `should_exclude` (linhas 543-561).
+- **Frontend** (`frontend/src/pages/ClientRegistrationsPage.js`): fallback notas (linhas 916-925).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote CJ: Fetch Latest Activity Note for Lists
+
+### Alterado
+- **Campo `notes` sobrescrito com última atividade real**: Em todas as rotas de listagem (`get_processes`, `get_processes_paginated`, `get_my_clients`), o campo `notes` é agora sobrescrito com a última atividade real do consultor (da coleção `activities`, `action` in `["note_added", "comment"]`, mais recente por `created_at`).
+
+### Backend
+- **`backend/routes/processes.py`**: `get_processes` (linhas 1790-1797) e `get_processes_paginated` (linhas 1998-2005) — bloco `find_one` em `activities` com `sort=[("created_at", -1)]`.
+- **`backend/routes/my_clients.py`**: `get_my_clients` (linhas 303-310) — mesmo bloco.
+
+### Técnico
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote CI: Fix Portal Profile Lock Code
+
+### Alterado
+- **Simplificação do código de bloqueio do portal**: O Pacote CF já tinha a query correta (`is_indexed: True`), mas com complexidade desnecessária (projeção de `is_data_confirmed`/`status`, lógica condicional, duas mensagens de erro). Simplificado para o código exato pedido: query minimalista, projeção `{"_id": 0, "id": 1}`, mensagem unificada.
+
+### Backend (`backend/routes/portal.py`)
+- **`GET /portal/me`**: `has_process = active_process is not None` (projeção minimalista, sem `is_data_confirmed`/`status`).
+- **`PUT /portal/me`**: Mensagem unificada: "Dados trancados. O seu processo já se encontra em análise." (removidas as duas mensagens condicionais).
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `GET /me` (linhas 757-767); `PUT /me` (linhas 840-851).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros.
+
+## [2026-07-16] — Pacote CH: Reusable Client Details Modal with Observations
+
+### Adicionado
+- **Componente `ClientDetailsModal.jsx` reutilizável**: Extraído da modal de detalhes do cliente em `ClientRegistrationsPage.js`. Mostra dados completos do cliente (contactos, dados pessoais, financeiros, 2º titular, metadados) + novo bloco **"Observações"** (`client.notas`) com ícone `StickyNote` e fundo âmbar. Props: `open`, `clientId`, `onClose`, `onNavigateToProcess`.
+
+### Integração
+- **`FilteredProcessList.js`**: Nome do cliente transformado em texto clicável (azul/underline) que abre `ClientDetailsModal` com `process.client_id`. `onNavigateToProcess` permite navegar diretamente para o processo.
+
+### Técnico
+- **Frontend** (`frontend/src/components/ClientDetailsModal.jsx`): NOVO componente (280 linhas). Fetch via `GET /api/clients/{id}`. Bloco "Observações" com `StickyNote` + `client.notas` + `whitespace-pre-wrap`.
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): import `ClientDetailsModal`; estado `clientDetailsModal`; nome clicável (`text-blue-600 hover:underline`); modal renderizada no final.
+- **Validação**: `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote CG: Show Latest Activity Note in Process Lists
+
+### Corrigido
+- **Coluna de Notas mostrava campo desatualizado**: As listas de processos (`FilteredProcessList.js` e `MyClientsPage.js`) mostravam `process.notes` (campo estático do processo) em vez da última nota real que o consultor escreveu na timeline. Corrigido: o backend agora injeta `latest_activity_note` (da coleção `activities`) em ambos os endpoints de listagem, e o frontend lê este campo.
+
+### Backend
+- **`GET /my-clients` (processes.py)**: Adicionado batch enrichment `latest_activity_note` via aggregation na coleção `activities` (`$match` por `process_id` + `comment` não vazio, `$sort` por `created_at` descendente, `$group` com `$first`). Injetado em `clients_list.append`. Leads ficam com `null`.
+- **`GET /my-clients` (my_clients.py)**: Mesma aggregation. Injetado em cada processo do array `processes`.
+- **`GET /processes`**: Já tinha `latest_note` (Pacote BT) — mantido para retrocompatibilidade.
+
+### Frontend
+- **`FilteredProcessList.js`**: Atualizado para ler `latest_activity_note` primeiro (fallback para `latest_note` do Pacote BT, depois `process.notes`).
+- **`MyClientsPage.js`**: Nova coluna "Notas" adicionada entre "Ações Pendentes" e "Última Atualização". Lê `client.latest_activity_note` com fallback.
+
+### Técnico
+- **Backend** (`backend/routes/processes.py`): batch enrichment `latest_activity_note` no `GET /my-clients` (linhas 2870-2890); injeção no `clients_list.append` (linhas 2956-2959).
+- **Backend** (`backend/routes/my_clients.py`): batch enrichment `latest_activity_note` (linhas 274-301).
+- **Frontend** (`frontend/src/pages/FilteredProcessList.js`): lê `latest_activity_note` (linhas 546-552).
+- **Frontend** (`frontend/src/pages/MyClientsPage.js`): coluna "Notas" (TableHead linha 506-507; TableCell linhas 591-604).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
+## [2026-07-16] — Pacote CF: Lock Client Portal Profile ONLY if is_indexed
+
+### Corrigido
+- **Bloqueio do perfil demasiado agressivo**: O perfil do cliente era bloqueado quando o processo saía do `pre_registo` (Pacote CB), o que impedia clientes em fases intermédias (documentacao, analise, etc.) de editar o perfil. Corrigido: o bloqueio agora acontece **apenas** quando o processo tem `is_indexed == True` (ou seja, a Indexação marcou o processo como indexado). Clientes com processos em `pre_registo`, `clientes_espera`, `documentacao`, `analise`, ou qualquer fase anterior à indexação podem editar o perfil livremente.
+
+### Backend (`backend/routes/portal.py`)
+- **`GET /portal/me`**: Query alterada para `{"id": {"$in": process_ids}, "is_deleted": {"$ne": True}, "is_indexed": True}`. `has_process = active_process is not None` (simplificado).
+- **`PUT /portal/me`**: Mesma query com `is_indexed: True`. Só lança 403 se o processo estiver indexado.
+
+### Frontend (`frontend/src/pages/ClientPortal.jsx`)
+- **Comentário atualizado** para refletir a nova regra (PACOTE CF). Lógica `isLocked = profile?.has_process === true || isDataConfirmed` sem alteração — já obedece ao backend.
+
+### Evolução da regra de bloqueio
+| Pacote | Regra de bloqueio |
+|--------|------------------|
+| Original (pré-BM) | `has_process = True` para qualquer processo ativo |
+| Pacote CB | `status != "pre_registo" OR is_data_confirmed` |
+| **Pacote CF** | **`is_indexed == True`** (apenas quando a Indexação marca o processo) |
+
+### Técnico
+- **Backend** (`backend/routes/portal.py`): `GET /portal/me` (linhas 765-777); `PUT /portal/me` (linhas 850-871).
+- **Frontend** (`frontend/src/pages/ClientPortal.jsx`): comentário (linhas 1413-1416).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `esbuild --loader=jsx` → 0 erros.
+
 ## [2026-07-16] — Pacote CE: Add Restore Button to BackupsPage
 
 ### Adicionado

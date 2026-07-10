@@ -1410,10 +1410,10 @@ function ProfilePanel() {
     }
   };
 
-  // PACOTE BM — Bloqueio do Perfil após Indexação.
-  // isLocked: verdadeiro quando o cliente tem processo (bloqueio pré-indexação)
-  // OU quando a Indexação confirmou/congelou os dados (is_data_confirmed=true).
-  // Em ambos os casos, todos os campos de input ficam desativados.
+  // PACOTE CF — Bloqueio do Perfil APENAS quando o processo está indexado.
+  // has_process (do backend) só é true quando o processo ativo tem
+  // is_indexed == True. Clientes com processos em pre_registo ou
+  // aguardando indexação podem editar o perfil livremente.
   const isDataConfirmed = profile?.is_data_confirmed === true;
   const isLocked = profile?.has_process === true || isDataConfirmed;
 

@@ -757,27 +757,21 @@ async def get_client_profile(
     # Determinar se o cliente tem processo associado (para bloqueio de edição)
     process_ids = client.get("process_ids", [])
     has_process = False
-    # PACOTE BM — is_data_confirmed: verdadeiro quando a Indexação terminou e
-    # validou os dados (campo definido em mark-indexed). O Portal lê esta flag
-    # para bloquear a edição do perfil com mensagem específica.
     is_data_confirmed = False
     if process_ids:
-        # Verificar se existe pelo menos um processo activo E trazer is_data_confirmed + status
+        # PACOTE CQ — O perfil é trancado se o processo avançar para além
+        # da fase de recolha de documentos. Avalia diretamente as Fases do
+        # Kanban (Status) em vez da flag is_indexed (que pode não estar
+        # atualizada atempadamente na BD).
         active_process = await db.processes.find_one(
-            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1, "is_data_confirmed": 1, "status": 1}
+            {
+                "id": {"$in": process_ids},
+                "is_deleted": {"$ne": True},
+                "status": {"$nin": ["pre_registo", None, "clientes_espera", "documentacao", "eliminado", "desistencias"]}
+            },
+            {"_id": 0, "id": 1}
         )
-        # PACOTE CB — has_process deve ser True APENAS SE o processo ativo
-        # tiver saído da fase inicial (status != "pre_registo") OU se tiver
-        # is_data_confirmed == True. Antes, has_process era True para qualquer
-        # processo ativo (incluindo pre_registo), bloqueando o perfil prematuramente.
-        if active_process:
-            proc_status = active_process.get("status", "")
-            proc_confirmed = active_process.get("is_data_confirmed") is True
-            # Bloqueia apenas se saiu do pre_registo OU dados confirmados
-            has_process = (proc_status != "pre_registo") or proc_confirmed
-            if proc_confirmed:
-                is_data_confirmed = True
+        has_process = active_process is not None
 
     # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
     dados_pessoais = client.get("dados_pessoais", {}) or {}
@@ -852,32 +846,22 @@ async def update_client_profile(
 
     process_ids = client.get("process_ids", [])
     if process_ids:
-        # Verificar se existe pelo menos um processo activo (não eliminado)
-        # e trazer is_data_confirmed + status para a regra de bloqueio.
+        # PACOTE CQ — O perfil é trancado se o processo avançar para além
+        # da fase de recolha de documentos. Avalia diretamente as Fases do
+        # Kanban (Status) em vez da flag is_indexed.
         active_process = await db.processes.find_one(
-            {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
-            {"_id": 0, "id": 1, "is_data_confirmed": 1, "status": 1}
+            {
+                "id": {"$in": process_ids},
+                "is_deleted": {"$ne": True},
+                "status": {"$nin": ["pre_registo", None, "clientes_espera", "documentacao", "eliminado", "desistencias"]}
+            },
+            {"_id": 0, "id": 1}
         )
-        # PACOTE CB — Só bloquear a edição se o processo tiver saído do
-        # pre_registo (status != "pre_registo") OU se is_data_confirmed == True.
-        # Antes, qualquer processo ativo (incluindo pre_registo) bloqueava.
         if active_process:
-            proc_status = active_process.get("status", "")
-            proc_confirmed = active_process.get("is_data_confirmed") is True
-            should_lock = (proc_status != "pre_registo") or proc_confirmed
-
-            if should_lock:
-                # PACOTE BM — Mensagem específica quando os dados foram confirmados
-                # pela Indexação (is_data_confirmed=True).
-                if proc_confirmed:
-                    raise HTTPException(
-                        status_code=403,
-                        detail="Os seus dados encontram-se bloqueados para análise da nossa equipa de crédito."
-                    )
-                raise HTTPException(
-                    status_code=403,
-                    detail="Dados trancados. Processo já em análise."
-                )
+            raise HTTPException(
+                status_code=403,
+                detail="Dados trancados. O seu processo já se encontra em análise."
+            )
 
     # ── Filtrar campos permitidos (whitelist) ──
     update_fields = {}
@@ -936,6 +920,28 @@ async def update_client_profile(
     if "dados_pessoais" in update_fields:
         for key, value in update_fields["dados_pessoais"].items():
             mongo_update[f"dados_pessoais.{key}"] = value
+
+    # PACOTE CS — Data Provenance: injetar automaticamente field_metadata
+    # com source="client" para cada campo atualizado pelo cliente no Portal.
+    # Formato: {"contacto.email": {"source": "client", "updated_at": "ISO"}}
+    field_metadata_portal = {}
+    if "contacto" in update_fields:
+        for key in update_fields["contacto"]:
+            field_metadata_portal[f"contacto.{key}"] = {
+                "source": "client",
+                "updated_at": now
+            }
+    if "dados_pessoais" in update_fields:
+        for key in update_fields["dados_pessoais"]:
+            field_metadata_portal[f"dados_pessoais.{key}"] = {
+                "source": "client",
+                "updated_at": now
+            }
+    if field_metadata_portal:
+        # Merge com field_metadata existente (não apaga campos anteriores)
+        existing_fm = client.get("field_metadata") or {}
+        merged_fm = {**existing_fm, **field_metadata_portal}
+        mongo_update["field_metadata"] = merged_fm
 
     result = await db.clients.update_one(
         {"id": client_id},
@@ -1853,12 +1859,13 @@ async def _trigger_onboarding_check(client_id: str):
 async def _check_and_advance_existing_pre_registo(client_id: str):
     """
     PACOTE BO — Verifica se o cliente tem um processo EXISTENTE em pre_registo
-    com todos os documentos obrigatórios já submetidos (ancorados ao processo).
+    (ou status vazio/Lead) com todos os documentos obrigatórios já submetidos
+    (ancorados ao processo).
 
     Isto cobre o Flow 1: processo criado pelo formulário público (routes/public.py)
-    em pre_registo, onde os docs são ancorados diretamente ao processo via
-    confirm-upload. O check_onboarding_completion não detecta este caso porque
-    só procura docs órfãos (sem process_id).
+    em pre_registo (PACOTE DB: status=None/Lead), onde os docs são ancorados
+    diretamente ao processo via confirm-upload. O check_onboarding_completion não
+    detecta este caso porque só procura docs órfãos (sem process_id).
 
     Se o processo tiver todos os docs obrigatórios, avança automaticamente.
     """
@@ -1870,20 +1877,25 @@ async def _check_and_advance_existing_pre_registo(client_id: str):
         if not process_ids:
             return
 
-        # Procurar processo em pre_registo (não eliminado)
+        # PACOTE DB — Procurar processo em pre_registo OU com status vazio (Lead)
+        # (novos registos do formulário público entram com status=None)
         process = await db.processes.find_one(
-            {"id": {"$in": process_ids}, "status": "pre_registo", "is_deleted": {"$ne": True}},
+            {
+                "id": {"$in": process_ids},
+                "status": {"$in": ["pre_registo", None]},
+                "is_deleted": {"$ne": True},
+            },
             {"_id": 0, "id": 1, "status": 1}
         )
         if not process:
-            return  # Não há processo em pre_registo
+            return  # Não há processo em pre_registo/Lead
 
         # Verificar se tem todos os documentos obrigatórios
         if await _has_all_required_documents(process["id"], client_id):
             await _auto_advance_from_pre_registo(process["id"], client_id)
         else:
             logger.debug(
-                f"[PACOTE-BO] Processo {process['id']} em pre_registo mas ainda "
+                f"[PACOTE-BO] Processo {process['id']} em pre_registo/Lead mas ainda "
                 f"faltam documentos obrigatórios. Cliente {client_id}."
             )
     except Exception as e:
@@ -1948,13 +1960,17 @@ async def _has_all_required_documents(process_id: str, client_id: str) -> bool:
 
 async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     """
-    PACOTE BO — Auto-avanço do pre_registo para o estado seguinte + assign_to_indexer.
+    PACOTE BO + DB — Auto-avanço do pre_registo/Lead para a 1ª fase REAL do
+    Kanban + assign_to_indexer.
 
-    1. Verifica que o processo está em pre_registo.
-    2. Avança para o próximo estado da pipeline (salto dinâmico, como mark-indexed).
-    3. Invoca assign_to_indexer(process_id) para o processo cair na mesa do
-       Indexador com menos carga.
-    4. O avanço é SILENCIOSO (stealth mode) — usa um system user com
+    1. Verifica que o processo está em pre_registo OU com status vazio (Lead).
+    2. Calcula a 1ª fase REAL do Kanban (1º status do workflow_statuses que
+       NÃO seja pre_registo, fila_espera, nem terminal). Em vez do "próximo
+       estado" da pipeline, vai diretamente para a 1ª fase ativa.
+    3. Avança o processo para essa fase.
+    4. Invoca assign_to_indexer(process_id, update_status=False) para o processo
+       cair na mesa do Indexador com menos carga, SEM forçar fase_documental.
+    5. O avanço é SILENCIOSO (stealth mode) — usa um system user com
        track_history=False para não gerar ruído no histórico do cliente.
        O assign_to_indexer gera os seus próprios logs de sistema (indexer
        assignment), que são ações de sistema legítimas, não do cliente.
@@ -1962,34 +1978,52 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     from services.process_assignment import assign_to_indexer
     from services.history import log_history
 
-    # ── 1. Verificar que o processo está em pre_registo ──
+    # ── 1. Verificar que o processo está em pre_registo/Lead ──
     process = await db.processes.find_one({"id": process_id}, {"_id": 0, "status": 1, "client_name": 1})
     if not process:
         logger.warning(f"[PACOTE-BO] Processo {process_id} não encontrado para auto-avanço.")
         return
 
     current_status = process.get("status")
-    if current_status != "pre_registo":
+    # PACOTE DB — aceitar pre_registo (legacy) OU None (novos registos)
+    if current_status not in ("pre_registo", None):
         logger.debug(
-            f"[PACOTE-BO] Processo {process_id} não está em pre_registo "
+            f"[PACOTE-BO] Processo {process_id} não está em pre_registo/Lead "
             f"(status={current_status}). Auto-avanço cancelado."
         )
         return
 
-    # ── 2. Calcular próximo estado da pipeline (salto dinâmico) ──
+    # ── 2. Calcular a 1ª fase REAL do Kanban ──
+    # Excluir pre_registo (Lead), fila_espera e terminais — queremos a 1ª fase
+    # ativa do Kanban onde o processo deve aparecer após submeter os docs.
+    EXCLUDED_FROM_KANBAN_START = {
+        "pre_registo", "fila_espera",
+        "concluido", "arquivo", "perdido", "desistencias",
+        # variants legacy
+        "concluidos", "desistido", "cancelado", "recusado",
+    }
     all_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-    status_pipeline = [s["name"] for s in all_statuses]
 
-    next_status = None
-    if current_status in status_pipeline:
-        current_idx = status_pipeline.index(current_status)
-        if current_idx < len(status_pipeline) - 1:
-            next_status = status_pipeline[current_idx + 1]
+    target_status = None
+    for s in all_statuses:
+        name = s.get("name", "")
+        if name and name not in EXCLUDED_FROM_KANBAN_START:
+            target_status = name
+            break
 
-    if not next_status:
+    # Fallback: se TODOS os statuses estiverem excluídos (config inválida),
+    # usar o 1º status da pipeline que não seja pre_registo.
+    if not target_status:
+        for s in all_statuses:
+            name = s.get("name", "")
+            if name and name != "pre_registo":
+                target_status = name
+                break
+
+    if not target_status:
         logger.warning(
-            f"[PACOTE-BO] Não há estado seguinte após 'pre_registo' na pipeline. "
-            f"Processo {process_id} não avançado."
+            f"[PACOTE-BO] Sem fases reais no workflow_statuses para auto-avanço. "
+            f"Processo {process_id} mantém status={current_status}."
         )
         return
 
@@ -1997,7 +2031,7 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     now = datetime.now(timezone.utc).isoformat()
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": {"status": next_status, "updated_at": now}}
+        {"$set": {"status": target_status, "workflow_step": target_status, "updated_at": now}}
     )
 
     # Log silencioso: o system user tem track_history=False, pelo que o
@@ -2014,10 +2048,10 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
         await log_history(
             process_id=process_id,
             user=stealth_system_user,
-            action=f"Auto-avanço: pre_registo → {next_status} (documentos obrigatórios submetidos pelo cliente)",
+            action=f"Auto-avanço: {current_status or 'Lead'} → {target_status} (documentos obrigatórios submetidos pelo cliente)",
             field="status",
-            old_value="pre_registo",
-            new_value=next_status,
+            old_value=current_status or "",
+            new_value=target_status,
         )
     except Exception as e:
         logger.warning(f"[PACOTE-BO] Erro ao registar histórico (stealth): {e}")
@@ -2025,16 +2059,16 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     client_name = process.get("client_name", "Cliente")
     logger.info(
         f"[PACOTE-BO] Processo {process_id} ({client_name}) avançado de "
-        f"pre_registo → {next_status}. A invocar assign_to_indexer..."
+        f"{current_status or 'Lead'} → {target_status}. A invocar assign_to_indexer..."
     )
 
-    # ── 4. Invocar assign_to_indexer ──
-    # assign_to_indexer atribui o processo ao indexador com menor carga e
-    # altera o status para fase_documental (ou fila_espera se todos no limite).
-    # Os logs internos do assign_to_indexer usam system_user role="admin" —
-    # são ações de sistema legítimas (atribuição de indexador), não do cliente.
+    # ── 4. Invocar assign_to_indexer (PACOTE DB: update_status=False) ──
+    # assign_to_indexer atribui o processo ao indexador com menor carga.
+    # PACOTE DB: passamos update_status=False para NÃO forçar fase_documental
+    # nem fila_espera — o processo fica na 1ª fase real (target_status) e o
+    # indexador é atribuído se disponível.
     try:
-        success, data, msg = await assign_to_indexer(process_id)
+        success, data, msg = await assign_to_indexer(process_id, update_status=False)
         logger.info(
             f"[PACOTE-BO] assign_to_indexer para processo {process_id}: "
             f"success={success}, data={data}, msg={msg}"
@@ -2042,7 +2076,7 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     except Exception as e:
         logger.warning(
             f"[PACOTE-BO] Erro em assign_to_indexer para processo {process_id}: {e}. "
-            f"O processo ficou em {next_status} mas sem indexador atribuído."
+            f"O processo ficou em {target_status} mas sem indexador atribuído."
         )
 
 

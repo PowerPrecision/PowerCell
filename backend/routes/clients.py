@@ -15,6 +15,7 @@ SEGURANÇA:
 
 import uuid
 import logging
+import asyncio
 import copy
 import re
 import unicodedata
@@ -49,6 +50,52 @@ from utils.input_sanitization import (
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
+
+
+# ============================================================
+# PACOTE CY — Helper para enviar email do Portal em background
+# ============================================================
+# Fire-and-forget: envia o email de boas-vindas com o portal_access_code.
+# Tenta primeiro via task_queue (Redis); se indisponível, envia diretamente.
+# Falhas são LOGADAS (logger.error) mas não propagadas — o fluxo de criação
+# do cliente não pode rebentar por causa de um erro de email.
+# ============================================================
+async def _send_portal_welcome_email_safe(
+    client_email: str,
+    client_name: str,
+    portal_access_code: str = None,
+    client_id: str = None,
+) -> None:
+    """Envia email de boas-vindas do Portal em background, com logs de erro."""
+    try:
+        from services.task_queue import task_queue
+        from services.email import send_registration_confirmation
+
+        job_id = None
+        try:
+            job_id = await task_queue.send_registration_email(
+                client_email=client_email,
+                client_name=client_name,
+                portal_access_code=portal_access_code,
+            )
+        except Exception as tq_err:
+            logger.warning(f"[PORTAL-EMAIL] Task Queue indisponível para cliente {client_id}: {tq_err}")
+
+        if not job_id:
+            logger.info(f"[PORTAL-EMAIL] A enviar email diretamente para {client_email} (client_id={client_id})")
+            try:
+                await send_registration_confirmation(
+                    client_email=client_email,
+                    client_name=client_name,
+                    portal_access_code=portal_access_code,
+                )
+                logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
+            except Exception as direct_err:
+                logger.error(f"[PORTAL-EMAIL] Falha ao enviar email diretamente para {client_email} "
+                             f"(client_id={client_id}): {direct_err}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
+                     f"para {client_email} (client_id={client_id}): {e}", exc_info=True)
 
 
 @router.get("/me")
@@ -307,14 +354,15 @@ async def list_registered_clients(
     # ==================================================================
     triage_process_ids = set()
     if triage_mode:
-        # Buscar processos que estão em pre_registo OU sem assigned_indexacao_id
-        # (status inicial de entrada aguardando atribuição ao indexador).
-        # Excluímos processos eliminados e processos já com indexador atribuído.
+        # Buscar processos que estão em pre_registo OU com status vazio (Lead)
+        # OU sem assigned_indexacao_id (status inicial de entrada aguardando atribuição
+        # ao indexador). Excluímos processos eliminados e processos já com indexador atribuído.
+        # PACOTE DB — incluímos status=None (novos registos do formulário público).
         triage_processes_cursor = db.processes.find(
             {
                 "is_deleted": {"$ne": True},
                 "$or": [
-                    {"status": "pre_registo"},
+                    {"status": {"$in": ["pre_registo", None]}},
                     {"assigned_indexacao_id": {"$in": [None, ""]}},
                 ],
             },
@@ -326,12 +374,14 @@ async def list_registered_clients(
         for p in triage_processes:
             cid = p.get("client_id")
             if cid:
-                # Prioridade: pre_registo tem prioridade sobre "sem indexador"
-                # (um processo pode estar em pre_registo E sem indexador)
-                if cid not in triage_client_map or p.get("status") == "pre_registo":
+                # Prioridade: pre_registo/Lead tem prioridade sobre "sem indexador"
+                # (um processo pode estar em pre_registo/Lead E sem indexador)
+                # PACOTE DB — aceita pre_registo OU None (Lead)
+                p_status = p.get("status")
+                if cid not in triage_client_map or p_status in ("pre_registo", None):
                     triage_client_map[cid] = {
                         "process_id": p.get("id"),
-                        "status": p.get("status"),
+                        "status": p_status,
                         "has_indexador": bool(p.get("assigned_indexacao_id")),
                     }
                 triage_process_ids.add(p.get("id"))
@@ -542,26 +592,32 @@ async def list_registered_clients(
         
         # Buscar informação dos processos
         processes_info = []
+        should_exclude = False
         if process_ids:
             processes = await db.processes.find(
                 {"id": {"$in": process_ids}},
-                {"_id": 0, "id": 1, "process_number": 1, "status": 1, "assigned_consultor_id": 1, "assigned_mediador_id": 1, "assigned_indexacao_id": 1}
+                {"_id": 0, "id": 1, "process_number": 1, "status": 1}
             ).to_list(length=10)
 
             for p in processes:
-                processes_info.append({
-                    "id": p.get("id"),
-                    "process_number": p.get("process_number"),
-                    "status": p.get("status")
-                })
+                # PACOTE CK — REGRA estrita: Se tem um processo que já passou
+                # da fase inicial, desaparece dos Registos (Leads)
+                # PACOTE DB — None (Lead) também conta como fase inicial.
+                if p.get("status") not in ["pre_registo", None, "clientes_espera", "eliminado"]:
+                    should_exclude = True
+                    break
+                processes_info.append(p)
+
+        if should_exclude:
+            continue  # Salta este cliente, não o mostra na tabela de Leads
 
         # ==================================================================
         # PACOTE BN — triage_status (Sala de Triagem)
         # ==================================================================
         # Determina o estado de triagem do cliente para o frontend renderizar
         # a badge correta. Valores possíveis:
-        # - "pre_registo": cliente tem processo em status "pre_registo"
-        #   (ainda a preencher no Portal) → Badge amarela
+        # - "pre_registo": cliente tem processo em status "pre_registo" ou vazio
+        #   (Lead, ainda a preencher no Portal) → Badge amarela
         # - "ready_for_indexing": cliente tem processo sem assigned_indexacao_id
         #   (na fila de espera para indexação) → Badge azul/verde
         # - "new_lead": lead pendente sem processo (lead_status="new") → sem badge
@@ -572,7 +628,8 @@ async def list_registered_clients(
         if triage_mode and client_id_val:
             triage_info = triage_client_map.get(client_id_val)
             if triage_info:
-                if triage_info.get("status") == "pre_registo":
+                # PACOTE DB — aceita pre_registo OU None (Lead)
+                if triage_info.get("status") in ("pre_registo", None):
                     triage_status = "pre_registo"
                 elif not triage_info.get("has_indexador"):
                     triage_status = "ready_for_indexing"
@@ -1376,7 +1433,29 @@ async def get_client(
                 p["client_role"] = "2º titular"
     
     client["processes"] = processes
-    
+
+    # ============================================================
+    # PACOTE DA — latest_activity: atividade mais recente do cliente
+    # ============================================================
+    # Busca a última entrada da coleção activities ligada a qualquer
+    # processo deste cliente (all_process_ids). O Frontend
+    # (ClientDetailsModal) mostra isto na secção "Observações e IA"
+    # para que o consultor veja a última interação registada.
+    # ============================================================
+    try:
+        if all_process_ids:
+            latest_act = await db.activities.find_one(
+                {"process_id": {"$in": all_process_ids}, "comment": {"$exists": True, "$ne": ""}},
+                {"_id": 0},
+                sort=[("created_at", -1)]
+            )
+            client["latest_activity"] = latest_act
+        else:
+            client["latest_activity"] = None
+    except Exception as e:
+        logger.warning(f"Erro ao buscar latest_activity para cliente {client_id}: {e}")
+        client["latest_activity"] = None
+
     # Desencriptar dados sensíveis
     client = decrypt_client_data(client)
     
@@ -1476,9 +1555,25 @@ async def create_client(
     client_dict = encrypt_client_data(client_dict)
     
     await db.clients.insert_one(client_dict)
-    
+
     logger.info(f"Cliente criado: {client.id} - {client.nome} por {user.get('email')}")
-    
+
+    # ============================================================
+    # PACOTE CY — Enviar email de boas-vindas do Portal em background
+    # ============================================================
+    # Antes o email NÃO era enviado na criação do cliente (só gerava o
+    # portal_access_code). Agora dispara em background via asyncio.create_task
+    # para não atrasar a resposta da API. Falhas são logadas mas não
+    # rebentam o fluxo de criação.
+    # ============================================================
+    if sanitized_email:
+        asyncio.create_task(_send_portal_welcome_email_safe(
+            client_email=sanitized_email,
+            client_name=sanitized_nome,
+            portal_access_code=client.portal_access_code,
+            client_id=client.id,
+        ))
+
     # Desencriptar para a resposta
     client_dict = decrypt_client_data(client_dict)
     return Client(**client_dict)
@@ -1488,6 +1583,7 @@ async def create_client(
 async def update_client(
     client_id: str,
     client_data: ClientUpdate,
+    request: Request,
     user: dict = Depends(get_current_user)
 ):
     """Actualizar dados de um cliente."""
@@ -1560,7 +1656,7 @@ async def update_client(
     sanitized_notas = sanitize_string(client_data.notas, max_length=500) if client_data.notas is not None else None
     
     update_dict = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    
+
     if sanitized_nome:
         update_dict["nome"] = sanitized_nome
     if sanitized_contacto:
@@ -1571,6 +1667,16 @@ async def update_client(
         update_dict["tags"] = client_data.tags
     if sanitized_notas is not None:
         update_dict["notas"] = sanitized_notas
+
+    # PACOTE CS — Data Provenance: aceitar field_metadata do frontend
+    # e fazer merge seguro (não apaga metadata de campos não atualizados).
+    # Formato: {"dados_pessoais.nif": {"source": "manual", "updated_at": "...", "confidence": 0.95}}
+    raw_body = await request.json() if hasattr(request, 'json') else {}
+    field_metadata = raw_body.get("field_metadata")
+    if field_metadata and isinstance(field_metadata, dict):
+        existing_metadata = client.get("field_metadata") or {}
+        merged_metadata = {**existing_metadata, **field_metadata}
+        update_dict["field_metadata"] = merged_metadata
 
     # RGPD: Encriptar dados sensíveis antes de actualizar
     # Isto garante que NIFs, telefones e outros dados sensíveis

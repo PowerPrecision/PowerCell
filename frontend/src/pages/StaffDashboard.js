@@ -282,12 +282,14 @@ const StaffDashboard = () => {
           email: clientEmail,
           telefone: clientPhone,
           ...(clientNif ? { nif: clientNif } : {}),
-        }
+        },
+        // PACOTE CY/DB — is_lead=true → vai para Registos de Clientes (status vazio/Lead)
+        is_lead: true,
       };
 
       await createClientProcess(payload);
-      
-      toast.success(`Processo criado para "${clientName}"!`);
+
+      toast.success(`Registo criado para "${clientName}" em Registos de Clientes!`);
       setShowLeadDialog(false);
       setSelectedClient(null);
       setNewLead({

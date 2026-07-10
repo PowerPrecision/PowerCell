@@ -162,9 +162,11 @@ const DashboardLayout = ({ children, title }) => {
     const path = location.pathname;
     
     // Rotas do grupo O Meu Negócio (inclui rotas de detalhe: /processo/:id, /imovel/:id, etc.)
-    const meuNegocioRoutes = ["/registos-clientes", "/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro"];
+    // PACOTE DB — "/registos-clientes" movido para Visão Global
+    const meuNegocioRoutes = ["/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro"];
     // Rotas do grupo Visão Global (inclui rotas de detalhe: /cliente/:id, /processo-detalhe/:id, etc.)
-    const visaoGlobalRoutes = ["/clientes", "/cliente", "/lista-processos"];
+    // PACOTE DB — "/registos-clientes" adicionado aqui (Visão Global)
+    const visaoGlobalRoutes = ["/registos-clientes", "/clientes", "/cliente", "/lista-processos"];
     // Rotas do grupo Comunicações e Ficheiros
     const comunicacoesRoutes = ["/webmail", "/minutas", "/ficheiros"];
     // Rotas do grupo Dashboard Executivo (admin/CEO only)
@@ -260,11 +262,7 @@ const DashboardLayout = ({ children, title }) => {
       label: "O Meu Negócio",
       icon: Building2,
       items: [
-        {
-          label: "Registos de Clientes",
-          icon: ClipboardList,
-          href: "/registos-clientes",
-        },
+        // PACOTE DB — "Registos de Clientes" movido para o grupo Visão Global
         {
           label: "Os Meus Clientes",
           icon: User,
@@ -295,6 +293,12 @@ const DashboardLayout = ({ children, title }) => {
       label: "Visão Global",
       icon: Eye,
       items: [
+        // PACOTE DB — "Registos de Clientes" movido para este grupo (Visão Global)
+        {
+          label: "Registos de Clientes",
+          icon: ClipboardList,
+          href: "/registos-clientes",
+        },
         {
           label: "Todos os Clientes",
           icon: Users,
@@ -381,6 +385,12 @@ const DashboardLayout = ({ children, title }) => {
         icon: Mail,
         items: comunicacoesGroup.items.filter(i => i.href !== "/minutas"),
       };
+      // PACOTE DB — Visão Global do indexacao SEM "Registos de Clientes"
+      // (restrição mantida: indexacao não necessita de acesso a registos de clientes)
+      const indexacaoVisaoGlobal = {
+        ...visaoGlobalGroup,
+        items: visaoGlobalGroup.items.filter(i => i.href !== "/registos-clientes"),
+      };
       return {
         main: [], // Sem Dashboard para indexação
         groups: [
@@ -395,7 +405,7 @@ const DashboardLayout = ({ children, title }) => {
               { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
             ],
           },
-          visaoGlobalGroup,
+          indexacaoVisaoGlobal,
           indexacaoComunicacoes,
         ],
         showAdminButton: false,
@@ -407,7 +417,7 @@ const DashboardLayout = ({ children, title }) => {
     // ====================================================================
     if (["consultor", "intermediario"].includes(userRole)) {
       const consultorNegocioItems = [
-        { label: "Registos de Clientes", icon: ClipboardList, href: "/registos-clientes" },
+        // PACOTE DB — "Registos de Clientes" movido para o grupo Visão Global
         { label: "Os Meus Clientes", icon: User, href: "/meus-clientes" },
         { label: "Os Meus Processos", icon: FileText, href: "/processos" },
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },

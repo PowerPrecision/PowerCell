@@ -50,6 +50,8 @@ from services.alerts import (
 )
 from services.realtime_notifications import notify_process_status_change
 from services.encryption import decrypt_client_data
+# PACOTE CW — Trello Mirror Service (sync unidirecional CRM → Trello)
+from services.trello_service import sync_process_to_trello
 
 # Importar serviços refatorados
 from services.process_service import (
@@ -548,6 +550,66 @@ def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
 router = APIRouter(prefix="/processes", tags=["Processes"])
 
 
+# ============================================================
+# PACOTE CY — Helper para enviar email do Portal em background
+# ============================================================
+# Fire-and-forget: busca/gera portal_access_code e envia email de
+# boas-vindas. Falhas são LOGADAS (logger.error) mas não propagadas.
+# ============================================================
+async def _send_portal_welcome_email_from_process(
+    client_id: str,
+    client_email: str,
+    client_name: str,
+) -> None:
+    """Envia email de boas-vindas do Portal após criar um processo."""
+    try:
+        # Buscar ou gerar portal_access_code
+        portal_access_code = None
+        try:
+            client_doc = await db.clients.find_one({"id": client_id}, {"portal_access_code": 1, "_id": 0})
+            if client_doc:
+                portal_access_code = client_doc.get("portal_access_code")
+                if not portal_access_code:
+                    from models.client import generate_portal_access_code as _gen_code
+                    portal_access_code = _gen_code()
+                    await db.clients.update_one(
+                        {"id": client_id},
+                        {"$set": {"portal_access_code": portal_access_code}}
+                    )
+        except Exception as e:
+            logger.warning(f"[PORTAL-EMAIL] Erro ao obter/gerar portal_access_code para {client_id}: {e}")
+
+        # Enviar email via task_queue (fallback: directo)
+        from services.task_queue import task_queue
+        from services.email import send_registration_confirmation
+
+        job_id = None
+        try:
+            job_id = await task_queue.send_registration_email(
+                client_email=client_email,
+                client_name=client_name,
+                portal_access_code=portal_access_code,
+            )
+        except Exception as tq_err:
+            logger.warning(f"[PORTAL-EMAIL] Task Queue indisponível para cliente {client_id}: {tq_err}")
+
+        if not job_id:
+            logger.info(f"[PORTAL-EMAIL] A enviar email diretamente para {client_email} (client_id={client_id})")
+            try:
+                await send_registration_confirmation(
+                    client_email=client_email,
+                    client_name=client_name,
+                    portal_access_code=portal_access_code,
+                )
+                logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
+            except Exception as direct_err:
+                logger.error(f"[PORTAL-EMAIL] Falha ao enviar email diretamente para {client_email} "
+                             f"(client_id={client_id}): {direct_err}", exc_info=True)
+    except Exception as e:
+        logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
+                     f"para {client_email} (client_id={client_id}): {e}", exc_info=True)
+
+
 # ====================================================================
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
@@ -859,8 +921,10 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         )
     
     # Obter o primeiro estado do workflow (Clientes em Espera)
+    # PACOTE DB — Se não houver workflow_statuses, deixa vazio (None) em vez
+    # de inventar "clientes_espera". Não inventar nomes de fases no código.
     first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    initial_status = first_status["name"] if first_status else "clientes_espera"
+    initial_status = first_status["name"] if first_status else None
     
     # Gerar ID único, número sequencial e timestamp
     process_id = str(uuid.uuid4())
@@ -903,7 +967,10 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         }
     )
     logger.info(f"Processo {process_id} criado e associado ao cliente {data.client_id}")
-    
+
+    # === PACOTE CW — Trello Mirror: criar cartão em background ===
+    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
+
     # === CACHE INVALIDATION: Novo processo afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
     
@@ -985,8 +1052,30 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         )
     
     # Obter o primeiro estado do workflow
+    # PACOTE DB — Se não houver workflow_statuses, deixa vazio (None) em vez
+    # de inventar "clientes_espera". Não inventar nomes de fases no código.
     first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    initial_status = first_status["name"] if first_status else "clientes_espera"
+    default_status = first_status["name"] if first_status else None
+
+    # ============================================================
+    # PACOTE CY — Routing: Lead vs Processo Ativo
+    # ============================================================
+    # Se is_lead=True, o processo vai para a caixa "Registos de Clientes"
+    # (status vazio/Lead) — NÃO aparece no Kanban ativo, aparece na sala
+    # de triagem. lead_status do cliente mantém-se "new" (não "converted").
+    # Se is_lead=False (default), vai para a primeira coluna do Kanban ativo.
+    # PACOTE DB — is_lead usa status=None (Lead) em vez de "pre_registo".
+    # ============================================================
+    is_lead = bool(getattr(data, 'is_lead', False))
+    if is_lead:
+        initial_status = None
+        logger.info("[CREATE-PROCESS] is_lead=True → status vazio (Lead / Registos de Clientes)")
+    else:
+        initial_status = default_status
+        if initial_status:
+            logger.info(f"[CREATE-PROCESS] status inicial = 1ª fase real do workflow: {initial_status}")
+        else:
+            logger.warning("[CREATE-PROCESS] workflow_statuses vazio — status inicial = None (sem fases configuradas)")
     
     # Gerar ID único e número sequencial
     process_id = str(uuid.uuid4())
@@ -1113,7 +1202,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         "credit_data": None,
         "created_at": now,
         "updated_at": now,
-        "source": "staff_created"
+        "source": "lead" if is_lead else "staff_created"
     }
 
     # ============================================================
@@ -1176,25 +1265,33 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     # 2. Atribuir o processo ao indexador (assigned_indexacao_id)
     # 3. Se nenhum indexador disponível → status = fila_espera
     # ============================================================
+    # PACOTE CY: SKIPPED se is_lead=True — pre_registo não deve ser indexado
+    # (a auto-atribuição dispara na transição pre_registo → pipeline).
+    # ============================================================
     try:
-        from services.process_assignment import assign_to_indexer
-        assign_success, assign_data, assign_msg = await assign_to_indexer(process_id)
-        if assign_success and assign_data.get("assigned"):
-            logger.info(
-                f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
-                f"para processo {process_id}"
-            )
-            # Atualizar o process_doc local para a resposta (já foi atualizado na BD por assign_to_indexer)
-            process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
-            process_doc["indexacao_name"] = assign_data.get("indexacao_name")
-            if assign_data.get("status"):
-                process_doc["status"] = assign_data["status"]
+        if is_lead:
+            logger.info(f"[CREATE-PROCESS] is_lead=True — a saltar auto-atribuição de indexador para processo {process_id} (Lead)")
         else:
-            logger.warning(
-                f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg}"
-            )
-            if assign_data.get("status"):
-                process_doc["status"] = assign_data["status"]
+            from services.process_assignment import assign_to_indexer
+            # PACOTE DB — update_status=False: NÃO forçar fila_espera/fase_documental.
+            # O processo mantém o initial_status (1ª fase real do workflow_statuses).
+            # O indexador é atribuído se disponível, mas o status não é alterado.
+            assign_success, assign_data, assign_msg = await assign_to_indexer(process_id, update_status=False)
+            if assign_success and assign_data.get("assigned"):
+                logger.info(
+                    f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
+                    f"para processo {process_id} (status mantém: {initial_status})"
+                )
+                # Atualizar o process_doc local para a resposta
+                process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
+                process_doc["indexacao_name"] = assign_data.get("indexacao_name")
+                # PACOTE DB — status NÃO é sobrescrito pelo assign_to_indexer
+            else:
+                logger.warning(
+                    f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg} "
+                    f"(status mantém: {initial_status})"
+                )
+                # PACOTE DB — status NÃO é sobrescrito (processo fica na 1ª fase real sem indexador)
     except Exception as e:
         logger.warning(f"[CREATE-PROCESS] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
     
@@ -1233,15 +1330,19 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     await invalidate_stats_cache(user_id=user["id"])
     
     # Actualizar process_ids do cliente + marcar lead como convertido
+    # PACOTE CY: Se is_lead=True, NÃO marcar como "converted" — o cliente
+    # deve continuar a aparecer na página de Registos de Clientes (triagem).
     if client_id:
+        client_set = {"updated_at": now}
+        if not is_lead:
+            client_set["lead_status"] = "converted"  # Lead já não aparece na página de Registos
+        else:
+            client_set["lead_status"] = "new"  # Mantém-se na triagem de Registos
         await db.clients.update_one(
             {"id": client_id},
             {
                 "$addToSet": {"process_ids": process_id},
-                "$set": {
-                    "updated_at": now,
-                    "lead_status": "converted"  # Lead já não aparece na página de Registos
-                }
+                "$set": client_set
             }
         )
 
@@ -1275,7 +1376,26 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     
     # Registar no histórico
     await log_history(process_id, user, f"Criou processo para cliente {client_name}")
-    
+
+    # === PACOTE CW — Trello Mirror: criar cartão em background ===
+    # Disparado APÓS auto-atribuição de indexador (process_doc["status"] pode
+    # ser fila_espera) para que a coluna Trello reflita o status final.
+    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
+
+    # ============================================================
+    # PACOTE CY — Enviar email de boas-vindas do Portal em background
+    # ============================================================
+    # Dispara o email com o portal_access_code para o cliente. Busca o
+    # portal_access_code do cliente (gera se não existir) e envia via
+    # task_queue ou diretamente. Fire-and-forget com logs de erro.
+    # ============================================================
+    if client_email:
+        asyncio.create_task(_send_portal_welcome_email_from_process(
+            client_id=client_id,
+            client_email=client_email,
+            client_name=client_name,
+        ))
+
     # === WEBSOCKET BROADCAST: Novo processo criado por staff ===
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_CREATED,
@@ -1321,6 +1441,10 @@ ARCHIVED_STATUSES = ["concluidos", "desistencias"]
 # pipeline, disparando a dupla auto-atribuição — ver process_assignment).
 # ====================================================================
 PRE_REGISTO_STATUS = "pre_registo"
+# PACOTE DB — Valores de status que representam "Lead" (sem fase do Kanban ativo).
+# Inclui "pre_registo" (legacy) e None (novos registos do formulário público).
+# Usado em queries $nin para excluir leads dos quadros de trabalho (Kanban, listagens).
+LEAD_STATUS_VALUES = ["pre_registo", None]
 # Roles com privilégios de gestão — podem contornar a exclusão do pré-registo
 PRE_REGISTO_BYPASS_ROLES = {
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO
@@ -1564,7 +1688,7 @@ async def get_processes(
     # encapsula toda a lógica de bypass.
     # ====================================================================
     if _should_hide_pre_registo(role, status, search):
-        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+        and_conditions.append({"status": {"$nin": LEAD_STATUS_VALUES}})
 
     # ====================================================================
     # MONTAR QUERY FINAL COM $and
@@ -1783,10 +1907,19 @@ async def get_processes(
                 p["latest_note"] = None
                 p["latest_note_at"] = None
                 p["latest_note_by"] = None
+            # PACOTE CZ — latest_activity_preview: alias explícito da última
+            # atividade/nota do consultor. O frontend lê este campo EM VEZ de
+            # process.notes (que é estático e pode estar desatualizado).
+            p["latest_activity_preview"] = p.get("latest_note")
 
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
-    
+
+    # PACOTE CZ — Removido o bloco PACOTE CJ (dead code): fazia find_one por
+    # "action" field que não existe na coleção activities. A enrichação real
+    # já é feita pelo batch aggregation PACOTE BT acima (latest_note +
+    # latest_activity_preview alias).
+
     return {
         "items": processes,
         "total": total,
@@ -1918,7 +2051,7 @@ async def get_processes_paginated(
     # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
     # ====================================================================
     if _should_hide_pre_registo(role, status, search):
-        and_conditions.append({"status": {"$ne": PRE_REGISTO_STATUS}})
+        and_conditions.append({"status": {"$nin": LEAD_STATUS_VALUES}})
 
     # Montar query final
     if len(and_conditions) == 1:
@@ -1985,6 +2118,42 @@ async def get_processes_paginated(
         for p in result["items"]:
             p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
             p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
+    # ============================================================
+    # PACOTE CZ — Batch enrichment: última nota do consultor
+    # ============================================================
+    # Antes este endpoint só tinha o bloco PACOTE CJ (dead code que filtrava
+    # por "action" field inexistente). Agora usa o mesmo pattern batch do
+    # PACOTE BT: aggregation $group por process_id, $first da mais recente.
+    # Adiciona latest_note + latest_activity_preview a cada processo.
+    # ============================================================
+    if result.get("items"):
+        _cz_process_ids = [p["id"] for p in result["items"] if p.get("id")]
+        _cz_latest_notes = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": _cz_process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "latest_note": {"$first": "$comment"},
+                "latest_note_at": {"$first": "$created_at"},
+                "latest_note_by": {"$first": "$user_name"},
+            }}
+        ]).to_list(1000)
+        _cz_notes_map = {r["_id"]: r for r in _cz_latest_notes}
+        for p in result["items"]:
+            note_info = _cz_notes_map.get(p.get("id"))
+            if note_info:
+                p["latest_note"] = note_info.get("latest_note")
+                p["latest_note_at"] = note_info.get("latest_note_at")
+                p["latest_note_by"] = note_info.get("latest_note_by")
+            else:
+                p["latest_note"] = None
+                p["latest_note_at"] = None
+                p["latest_note_by"] = None
+            p["latest_activity_preview"] = p.get("latest_note")
 
     return {
         "processes": result["items"],
@@ -2325,7 +2494,7 @@ async def get_kanban_board(
     # precisem inspeccionar pré-registos devem usar a listagem tabular
     # (GET /processes com search) ou o endpoint de diagnóstico.
     # ====================================================================
-    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
     if "$and" in query:
         query["$and"].append(pre_registo_filter)
     elif query:
@@ -2458,6 +2627,43 @@ async def get_kanban_board(
     for p in processes:
         p["has_unread_messages"] = unread_map.get(p["id"], False)
         p["has_new_documents"] = new_docs_map.get(p["id"], False)
+
+    # ============================================================
+    # PACOTE DA — Batch enrichment: latest_activity (atividade mais recente)
+    # ============================================================
+    # O ProcessDetailsModal recebe o `process` do KanbanBoard (que chama
+    # /kanban). Sem este enrichment, a tab "Observações e IA" não teria
+    # a atividade recente. Usamos o mesmo pattern batch aggregation do
+    # PACOTE BT/CZ: $group por process_id, $first da mais recente.
+    # ============================================================
+    try:
+        _da_latest_acts = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "comment": {"$first": "$comment"},
+                "user_name": {"$first": "$user_name"},
+                "user_role": {"$first": "$user_role"},
+                "created_at": {"$first": "$created_at"},
+            }}
+        ]).to_list(1000)
+        _da_acts_map = {r["_id"]: r for r in _da_latest_acts}
+        for p in processes:
+            act = _da_acts_map.get(p.get("id"))
+            if act:
+                # Remover o _id do objeto antes de atribuir
+                act_clean = {k: v for k, v in act.items() if k != "_id"}
+                p["latest_activity"] = act_clean
+            else:
+                p["latest_activity"] = None
+    except Exception as e:
+        logger.warning(f"[KANBAN] Erro no batch enrichment latest_activity: {e}")
+        for p in processes:
+            p.setdefault("latest_activity", None)
 
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
@@ -2696,7 +2902,7 @@ async def get_my_clients(
     # não tem parâmetro search, pelo que o bypass para admin faz-se através
     # da listagem tabular (GET /processes com search) ou do Kanban diagnose.
     # ====================================================================
-    pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+    pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
     if "$and" in query:
         query["$and"].append(pre_registo_filter)
     elif query:
@@ -2867,6 +3073,28 @@ async def get_my_clients(
         ]).to_list(1000)
         _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
 
+    # PACOTE CG — BATCH ENRIQUECIMENTO: latest_activity_note
+    # Para cada processo, busca a atividade/comentário mais recente na
+    # coleção activities. O frontend (MyClientsPage) lê este campo para
+    # a coluna "Notas" — mostra sempre a última interação real do consultor.
+    _cg_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
+    _cg_notes_map = {}
+    if _cg_process_ids:
+        _cg_latest_notes = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": _cg_process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "latest_activity_note": {"$first": "$comment"},
+                "latest_activity_note_at": {"$first": "$created_at"},
+                "latest_activity_note_by": {"$first": "$user_name"},
+            }}
+        ]).to_list(1000)
+        _cg_notes_map = {r["_id"]: r for r in _cg_latest_notes}
+
     # Construir lista de clientes com informações enriquecidas
     clients_list = []
     for p in paginated_items:
@@ -2875,6 +3103,7 @@ async def get_my_clients(
             # Leads não têm mensagens/documentos do portal
             p["has_unread_messages"] = False
             p["has_new_documents"] = False
+            p["latest_activity_note"] = None
             clients_list.append(p)
             continue
         
@@ -2929,7 +3158,11 @@ async def get_my_clients(
             "deed_date": p.get("deed_date"),
             "has_property": bool(p.get("property_id")),
             "has_unread_messages": _bi_unread_map.get(p.get("id"), False),
-            "has_new_documents": _bi_new_docs_map.get(p.get("id"), False)
+            "has_new_documents": _bi_new_docs_map.get(p.get("id"), False),
+            # PACOTE CG — última nota real do consultor (da coleção activities)
+            "latest_activity_note": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note"),
+            "latest_activity_note_at": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note_at"),
+            "latest_activity_note_by": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note_by"),
         })
     
     # Calcular total de páginas
@@ -3038,7 +3271,13 @@ async def move_process_kanban(
         {"id": process_id},
         {"$set": move_update_data}
     )
-    
+
+    # === PACOTE CW — Trello Mirror: mover cartão em background ===
+    # O cartão é movido para a coluna correspondente ao new_status.
+    # Busca o processo atualizado (tem trello_card_id) e dispara em background.
+    _trello_move_proc = {**process, "status": new_status, "trello_card_id": process.get("trello_card_id")}
+    asyncio.create_task(sync_process_to_trello(_trello_move_proc, action="move", new_status=new_status))
+
     # === CACHE INVALIDATION: Mover processo altera KPIs (concluídos/ativos/desistências) ===
     await invalidate_stats_cache(user_id=user.get("id"))
     
@@ -3329,7 +3568,25 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     # Garantir campos obrigatórios para ProcessResponse (processos antigos
     # podem não ter client_id após a refatoração Fase 1→2)
     process.setdefault("client_id", process.get("client_id") or "")
-    
+
+    # ============================================================
+    # PACOTE DA —latest_activity: atividade/nota mais recente do processo
+    # ============================================================
+    # Busca a última entrada da coleção activities ligada a este process_id.
+    # O Frontend (ProcessDetailsModal) mostra isto na tab "Observações e IA"
+    # para que o consultor veja a última interação registada.
+    # ============================================================
+    try:
+        latest_act = await db.activities.find_one(
+            {"process_id": process_id, "comment": {"$exists": True, "$ne": ""}},
+            {"_id": 0},
+            sort=[("created_at", -1)]
+        )
+        process["latest_activity"] = latest_act
+    except Exception as e:
+        logger.warning(f"[GET-PROCESS] Erro ao buscar latest_activity para {process_id}: {e}")
+        process["latest_activity"] = None
+
     try:
         return ProcessResponse(**process)
     except Exception as e:
@@ -3645,13 +3902,14 @@ async def mark_process_indexed(
         logger.warning(f"[INDEXACAO] Erro ao verificar fila de espera: {waitlist_err}")
 
     # ==================================================================
-    # DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo → Pipeline)
+    # DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo/Lead → Pipeline)
     # ==================================================================
-    # Se o processo transitou de pre_registo, dispara a dupla
-    # auto-atribuição (consultor + intermediário em simultâneo).
+    # Se o processo transitou de pre_registo (ou status vazio/Lead), dispara
+    # a dupla auto-atribuição (consultor + intermediário em simultâneo).
     # Caso contrário, usa a lógica de auto-atribuição de consultor apenas.
+    # PACOTE DB — aceita também current_status=None (novos registos).
     consultant_result = None
-    is_pre_registo_transition = (current_status == "pre_registo")
+    is_pre_registo_transition = (current_status in ("pre_registo", None))
 
     if is_pre_registo_transition:
         try:
@@ -4277,9 +4535,30 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
                 logger.error(f"  Suspeito root: update_data[{k}] = {type(v).__name__}: {repr(v)[:100]}")
         raise HTTPException(status_code=500, detail=f"TypeError em encrypt: {e} | {tb.split(chr(10))[-3] if tb else 'no traceback'}")
     inject_cdc_context(update_data, user)
+
+    # PACOTE CS — Data Provenance: aceitar field_metadata do frontend
+    # e fazer merge seguro (não apaga metadata de campos não atualizados).
+    # Formato: {"financial_data.salario_bruto": {"source": "ai", "updated_at": "...", "confidence": 0.95}}
+    try:
+        raw_body_cs = await request.json()
+    except Exception:
+        raw_body_cs = {}
+    field_metadata_cs = raw_body_cs.get("field_metadata")
+    if field_metadata_cs and isinstance(field_metadata_cs, dict):
+        existing_metadata_cs = process.get("field_metadata") or {}
+        merged_metadata_cs = {**existing_metadata_cs, **field_metadata_cs}
+        update_data["field_metadata"] = merged_metadata_cs
+
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    
+
+    # === PACOTE CW — Trello Mirror: atualizar cartão em background ===
+    # Se o status mudou, converte para 'move'; senão, 'update' (descrição com dados IA).
+    if data.status and data.status != process.get("status"):
+        asyncio.create_task(sync_process_to_trello(updated, action="move", new_status=data.status))
+    else:
+        asyncio.create_task(sync_process_to_trello(updated, action="update"))
+
     # === SINCRONIZAÇÃO FINANCEIRA RETROATIVA ===
     # Se o processo está num status de ganho (concluído/escritura), garantir que
     # o snapshot financeiro (process_finances) existe e está atualizado com os

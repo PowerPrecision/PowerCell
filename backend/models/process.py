@@ -202,6 +202,9 @@ class ProcessCreate(BaseModel):
     process_type: str
     client_id: str = Field(..., description="ID obrigatório do cliente ligado a este processo")
     second_client_id: Optional[str] = Field(None, description="ID do 2º titular/Fiador (cliente existente)")
+    # PACOTE CY — is_lead=True envia o processo para a caixa "Registos de Clientes"
+    # (status pre_registo) em vez do Kanban ativo (clientes_espera).
+    is_lead: Optional[bool] = Field(False, description="Se True, cria como Lead (pre_registo) em vez de processo ativo")
 
 class ProcessUpdate(BaseModel):
     real_estate_data: Optional[RealEstateData] = None

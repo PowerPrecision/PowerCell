@@ -29,6 +29,9 @@ INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
 # PACOTE BK — Estado pré_registo (cliente ainda a preencher no portal).
 # Não aparece nos quadros de trabalho da equipa para não gerar ruído.
 PRE_REGISTO_STATUS = "pre_registo"
+# PACOTE DB — Valores de status "Lead" (sem fase do Kanban ativo).
+# Inclui "pre_registo" (legacy) e None (novos registos do formulário público).
+LEAD_STATUS_VALUES = ["pre_registo", None]
 
 router = APIRouter(prefix="/my-clients", tags=["My Clients"])
 
@@ -57,11 +60,20 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     - Consultores e Intermediários: query sincronizada com my-processes
       (is_active=True, status ∉ INACTIVE_STATUSES, is_deleted≠True)
     - Leads (clientes sem processo) criados pelo utilizador são adicionados à lista
+
+    PACOTE CP — Suporte a view_mode="deleted" / status="eliminado":
+    Quando o utilizador pede eliminados, remove o filtro is_active e
+    INACTIVE_STATUSES, e aplica apenas is_deleted=True.
     """
     user_id = user["id"]
     user_email = user.get("email", "")
     role = get_effective_role(request, user)
-    
+
+    # PACOTE CP — Verificar se o utilizador quer ver eliminados
+    view_mode = request.query_params.get("view_mode", "active_only")
+    status_filter = request.query_params.get("status")
+    wants_deleted = (status_filter == "eliminado" or view_mode == "deleted")
+
     # Construir query baseada no papel do utilizador
     #
     # SINCRONIZAÇÃO COM "Os Meus Processos":
@@ -69,7 +81,44 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     # my-processes (assigned_consultor_ids + is_active + status), para que
     # os clientes listados correspondam aos processos visíveis.
     # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
-    if role == UserRole.CONSULTOR:
+    if wants_deleted:
+        # PACOTE CP — Modo eliminados: remover is_active e INACTIVE_STATUSES
+        if role == UserRole.CONSULTOR:
+            query = {
+                "$and": [
+                    {"$or": [
+                        {"assigned_consultor_ids": user_id},
+                        {"assigned_consultor_id": user_id}
+                    ]},
+                    {"is_deleted": True}
+                ]
+            }
+        elif role == UserRole.INTERMEDIARIO:
+            query = {
+                "$and": [
+                    {"$or": [
+                        {"assigned_mediador_ids": user_id},
+                        {"assigned_mediador_id": user_id},
+                        {"created_by": user_email}
+                    ]},
+                    {"is_deleted": True}
+                ]
+            }
+        elif role == UserRole.INDEXACAO:
+            query = {
+                "$and": [
+                    {"$or": [
+                        {"assigned_indexacao_id": user_id},
+                        {"created_by": user_email}
+                    ]},
+                    {"is_deleted": True}
+                ]
+            }
+        elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+            query = {"is_deleted": True}
+        else:
+            query = {"_id": None}
+    elif role == UserRole.CONSULTOR:
         query = {
             "$and": [
                 {"$or": [
@@ -122,7 +171,8 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     # não há nada a excluir — preserva-se para clareza.
     # ====================================================================
     if query != {"_id": None}:
-        pre_registo_filter = {"status": {"$ne": PRE_REGISTO_STATUS}}
+        # PACOTE DB — excluir pre_registo E None (Lead) dos Meus Clientes
+        pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
         if "$and" in query:
             query["$and"].append(pre_registo_filter)
         elif query:
@@ -270,6 +320,41 @@ async def get_my_clients(request: Request, user: dict = Depends(require_roles([
     for p in processes:
         p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
         p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
+
+    # ====================================================================
+    # PACOTE CG — BATCH ENRIQUECIMENTO: latest_activity_note
+    # Para cada processo, busca a atividade/comentário mais recente.
+    # O frontend (MyClientsPage) lê este campo para a coluna "Notas".
+    # ====================================================================
+    _cg_process_ids = [p["id"] for p in processes if p.get("id")]
+    _cg_notes_map = {}
+    if _cg_process_ids:
+        _cg_latest_notes = await db.activities.aggregate([
+            {"$match": {
+                "process_id": {"$in": _cg_process_ids},
+                "comment": {"$exists": True, "$ne": ""},
+            }},
+            {"$sort": {"created_at": -1}},
+            {"$group": {
+                "_id": "$process_id",
+                "latest_activity_note": {"$first": "$comment"},
+                "latest_activity_note_at": {"$first": "$created_at"},
+                "latest_activity_note_by": {"$first": "$user_name"},
+            }}
+        ]).to_list(1000)
+        _cg_notes_map = {r["_id"]: r for r in _cg_latest_notes}
+
+    for p in processes:
+        note_info = _cg_notes_map.get(p.get("id"), {})
+        p["latest_activity_note"] = note_info.get("latest_activity_note")
+        p["latest_activity_note_at"] = note_info.get("latest_activity_note_at")
+        p["latest_activity_note_by"] = note_info.get("latest_activity_note_by")
+        # PACOTE CZ — latest_activity_preview: alias explícito para o frontend
+        p["latest_activity_preview"] = note_info.get("latest_activity_note") if note_info else None
+
+    # PACOTE CZ — Removido o bloco PACOTE CJ (dead code): filtrava por "action"
+    # field inexistente na coleção activities. A enrichação real já é feita pelo
+    # batch aggregation PACOTE CG acima (latest_activity_note + alias).
 
     # Combinar processos + leads
     all_clients = leads + processes
