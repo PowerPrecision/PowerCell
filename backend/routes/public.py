@@ -396,6 +396,33 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
         magic_link = f"{frontend_url}/portal/{short_id}"
 
+        # PACOTE DC — Buscar o portal_access_code do cliente para incluir
+        # no email como "Código de Acesso" explícito (além do magic link).
+        _portal_access_code_dc = None
+        try:
+            _client_doc_dc = await db.clients.find_one(
+                {"id": client_id}, {"portal_access_code": 1, "_id": 0}
+            )
+            if _client_doc_dc:
+                _portal_access_code_dc = _client_doc_dc.get("portal_access_code")
+        except Exception as _e_dc:
+            logger.warning(f"[PUBLIC FORM] Erro ao obter portal_access_code para email: {_e_dc}")
+
+        # PACOTE DC — Bloco "Código de Acesso" explícito abaixo do botão.
+        _access_code_html_dc = ""
+        _access_code_text_dc = ""
+        if _portal_access_code_dc:
+            _access_code_html_dc = f"""
+                <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
+                    <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.powercell.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
+                    <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{_portal_access_code_dc}</strong></h3>
+                </div>
+            """
+            _access_code_text_dc = (
+                f"\nSe o link não funcionar, aceda a www.powercell.pt/portal e "
+                f"insira o seguinte Código de Acesso: {_portal_access_code_dc}\n"
+            )
+
         # Enviar email de convite para o Portal do Cliente usando o
         # email do sistema (force_system=True, system_purpose="NOTIFICATIONS")
         html_body = f"""
@@ -420,6 +447,7 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
                     Ou copie este link no seu navegador:<br>
                     <span style="color: #64748b;">{magic_link}</span>
                 </p>
+                {_access_code_html_dc}
                 <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
                     Este link é válido por 90 dias. Se precisar de ajuda, contacte-nos.
                 </p>
@@ -431,7 +459,8 @@ async def public_client_registration(request: Request, data: PublicClientRegistr
             f"Recebemos o seu registo através do formulário público. O seu processo "
             f"de crédito habitação foi criado e está em fase de pré-registo.\n\n"
             f"Aceda ao seu Portal do Cliente para acompanhar o seu processo:\n"
-            f"{magic_link}\n\n"
+            f"{magic_link}\n"
+            f"{_access_code_text_dc}\n"
             f"Este link é válido por 90 dias.\n\n"
             f"Power Precision · Crédito Habitação"
         )

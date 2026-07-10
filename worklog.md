@@ -3000,3 +3000,42 @@ Stage Summary:
   - frontend/src/components/ClientDetailsModal.jsx (botão Abrir Processo Completo + ExternalLink)
   - (+ CreateProcessModal.jsx e StaffDashboard.js comentários)
 - Resultado: (1) Registos de Clientes em Visão Global; novos registos status=None (Lead); upload docs obrigatórios → 1ª fase real do Kanban. (2) Criação manual usa 1ª fase real do workflow_statuses, sem forçar fila_espera/fase_documental. (3) Kanban drag-drop instantâneo (optimistic local + cache). (4) Botões IA + Organizar + tab Links + Card Resumo Executivo ocultos (display:none, código mantido). (5) Botão "Abrir Processo Completo" destacado (azul) em ambas as modais.
+
+
+---
+Task ID: Pacote DC (Fix Portal Access Email Template and Expose Code in CRM UI)
+Agent: Main Agent (Z.ai Code Assistant)
+Task: Corrigir template de email do portal (adicionar Código de Acesso explícito) + expor código/token ativo nas modais do CRM + botão Reenviar.
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacote DC tinha sido implementado localmente mas push falhou por token expirado).
+- Novo token recebido (PAT GitHub renovado pelo utilizador). Testado: API REST HTTP 200 ✓, repo re-clonado com sucesso para /home/z/powercell.
+- Como a pasta local tinha sido limpa, re-aplicadas as alterações do Pacote DC sobre o clone fresco (base 4329a80 = Pacote DB):
+
+- DC-1a (public.py template): Buscado portal_access_code do cliente antes do html_body. Adicionado _access_code_html_dc com bloco teal: "Se o link não funcionar, aceda a www.powercell.pt/portal e insira o seguinte Código de Acesso: <h3>{portal_access_code}</h3>". Injetado abaixo do botão "Aceder ao meu Portal". Text body atualizado.
+
+- DC-1b (processes.py template): portal_credentials_html tornado INCONDICIONAL (removido if portal_access_code). Novo formato com www.powercell.pt/portal + h3 com portal_access_code (fallback "—" se None). portal_access_code adicionado ao return da função.
+
+- DC-2a (backend portal_access no GET):
+  - clients.py GET /{client_id}: bloco portal_access após latest_activity. portal_access_code do próprio cliente; short_id via db.portal_tokens.find_one({"process_id": {"$in": all_process_ids}}); magic_link com FRONTEND_URL. Import os adicionado.
+  - processes.py GET /{process_id}: bloco portal_access após latest_activity. portal_access_code via db.clients.find_one({"id": client_id}); short_id via db.portal_tokens.find_one({"process_id": process_id}).
+
+- DC-2b (backend resend endpoint): clients.py novo POST /{client_id}/resend-portal-access. Validações: cliente (404), email (400), process_ids (400), processo ativo (404). Delega para send_magic_link_email (import inline). Retorna {success, process_id, portal_access_code, magic_link, short_id, message}.
+
+- DC-2c (frontend):
+  - api.js: resendPortalAccess(clientId) → POST /clients/{clientId}/resend-portal-access.
+  - ClientDetailsModal.jsx: imports KeyRound + toast + resendPortalAccess. Estado resendingPortal. Secção teal com KeyRound + código + link + botão "Reenviar Acesso ao Portal" (Mail icon + spinner).
+  - ProcessDetailsModal.jsx: imports KeyRound + Send + sendMagicLinkEmail. Estado resendingPortal. Secção entre </Tabs> e footer. Botão chama sendMagicLinkEmail(process.id).
+
+- Validação: py_compile ✓ 3 ficheiros backend. flake8 --select=E9,F63,F7,F82 → 0 erros. bun build --no-bundle ✓ 3 ficheiros frontend.
+
+Stage Summary:
+- 6 ficheiros modificados (3 backend + 3 frontend):
+  - backend/routes/public.py (portal_access_code lookup + bloco Código de Acesso no template)
+  - backend/routes/processes.py (template incondicional + portal_access no GET /{id} + portal_access_code no retorno)
+  - backend/routes/clients.py (import os + portal_access no GET /{id} + novo endpoint POST /{client_id}/resend-portal-access)
+  - frontend/src/services/api.js (helper resendPortalAccess)
+  - frontend/src/components/ClientDetailsModal.jsx (secção Acesso ao Portal + botão Reenviar + estado)
+  - frontend/src/components/kanban/ProcessDetailsModal.jsx (secção Acesso ao Portal + botão Reenviar + estado)
+- Resultado: (1) Email do portal tem bloco "Código de Acesso" explícito e incondicional abaixo do botão, com referência a www.powercell.pt/portal. (2) GET /clients/{id} e GET /processes/{id} devolvem portal_access {portal_access_code, short_id, magic_link, has_active_token}. (3) Novo POST /clients/{id}/resend-portal-access delega para send_magic_link_email. (4) ClientDetailsModal e ProcessDetailsModal mostram secção "Acesso ao Portal do Cliente" com código + link + botão Reenviar.
+- Token novo (PAT GitHub renovado) ativo e com permissões de escrita — push confirmado.

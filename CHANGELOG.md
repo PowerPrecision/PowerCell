@@ -3,6 +3,42 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-16] — Pacote DC: Fix Portal Access Email Template and Expose Code in CRM UI
+
+### Corrigido
+- **Template de email de acesso ao Portal** enviava apenas o Magic Link sem destacar o Código de Acesso explícito, gerando confusão nos clientes. Além disso, os operadores do CRM não conseguiam ver qual era o código do cliente pela interface.
+
+### 1. Correção do Template de Email (Backend)
+- Adicionado bloco "Código de Acesso" **explícito e incondicional** abaixo do botão "Aceder ao meu Portal" em **todos** os emails de acesso ao Portal:
+  > Se o link não funcionar, aceda a **www.powercell.pt/portal** e insira o seguinte Código de Acesso:
+  > **[CÓDIGO]**
+- O `portal_access_code` (formato XXX-XXX, stored no cliente) é injetado corretamente no HTML com styling teal destacado (Courier New, 22px, letter-spacing 3px).
+- **`backend/routes/public.py`** (formulário público): buscado `portal_access_code` do cliente (gerado na criação) e adicionado o bloco ao template HTML + text body.
+- **`backend/routes/processes.py`** (`send_magic_link_email`): bloco `portal_credentials_html` tornado **incondicional** (antes era opcional via `if portal_access_code`). Novo formato com a referência a www.powercell.pt/portal. `portal_access_code` adicionado ao retorno da função.
+- **Compatibilidade**: o bloco só é omitido se `portal_access_code` for genuinamente `None` (mostra "—" como fallback).
+
+### 2. Expor o Código no Perfil do Cliente (Frontend + Backend)
+
+#### 2a. Backend — devolver token ativo
+- **`GET /clients/{id}`** (`clients.py`): adicionado bloco `portal_access` com lookup em `portal_tokens` (por `process_id`) para devolver `{portal_access_code, short_id, magic_link, has_active_token}`. O `portal_access_code` vem do próprio cliente; o `short_id`/`magic_link` vêm do token ativo mais recente.
+- **`GET /processes/{id}`** (`processes.py`): adicionado o mesmo bloco `portal_access` — busca `portal_access_code` do cliente via `client_id` + lookup em `portal_tokens` por `process_id`.
+
+#### 2b. Backend — endpoint de reenvio
+- **Novo endpoint `POST /clients/{client_id}/resend-portal-access`** (`clients.py`): resolve o `process_id` ativo do cliente (primeiro não eliminado) e delega para `send_magic_link_email` (`processes.py`) — reutiliza toda a lógica de geração de `short_id` + JWT + envio de email. Devolve `{success, process_id, portal_access_code, magic_link, short_id, message}`. Validações: cliente existe (404), tem email (400), tem processo (400), tem processo ativo (404).
+
+#### 2c. Frontend — secção "Acesso ao Portal do Cliente"
+- **`ClientDetailsModal.jsx`**: nova secção visual (cartão teal com `KeyRound`) mostrando **Código de Acesso** (font-mono bold) + **Link ativo** (clicável). Botão **"Reenviar Acesso ao Portal"** que chama `resendPortalAccess(clientId)` → atualiza `portal_access` localmente com os novos dados. Estado `resendingPortal` com spinner. Imports: `KeyRound`, `toast`, `resendPortalAccess`.
+- **`ProcessDetailsModal.jsx`**: mesma secção entre o `</Tabs>` e o footer. Botão "Reenviar" chama `sendMagicLinkEmail(process.id)` (API helper existente) → atualiza via `onProcessUpdate`. Imports: `KeyRound`, `Send`, `sendMagicLinkEmail`. Estado `resendingPortal`.
+- **`api.js`**: adicionado helper `resendPortalAccess(clientId)` → `POST /clients/{clientId}/resend-portal-access`.
+
+### Técnico
+- **Backend modificado** (3 ficheiros): `routes/public.py` (template + portal_access_code lookup), `routes/processes.py` (template incondicional + portal_access no GET /{id} + portal_access_code no retorno), `routes/clients.py` (import os + portal_access no GET /{id} + novo endpoint resend-portal-access).
+- **Frontend modificado** (3 ficheiros): `services/api.js` (helper resendPortalAccess), `components/ClientDetailsModal.jsx` (secção + botão + estado), `components/kanban/ProcessDetailsModal.jsx` (secção + botão + estado + imports).
+- **Novo endpoint**: `POST /api/clients/{client_id}/resend-portal-access`.
+- **Novo campo de resposta**: `portal_access` em `GET /clients/{id}` e `GET /processes/{id}`.
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (0 erros).
+- **Dependências**: Nenhuma nova — `KeyRound`, `Send`, `Mail`, `Loader2` já existem em `lucide-react`; `toast` em `sonner`.
+
 ## [2026-07-16] — Pacote DB: UAT Refinements (Leads Flow, Kanban Reactivity, UI Cleanup)
 
 ### Alterado

@@ -801,27 +801,22 @@ async def send_magic_link_email(
     frontend_url = _get_frontend_url(request)
     magic_link = f"{frontend_url}/portal/{short_id}"
 
-    # Enviar email ao cliente
-    # Bloco opcional com credenciais de acesso ao portal
-    portal_credentials_html = ""
-    portal_credentials_text = ""
-    if portal_access_code:
-        portal_credentials_html = f"""
+    # PACOTE DC — Bloco "Código de Acesso" SEMPRE presente (incondicional).
+    # Garante que o cliente consegue aceder ao portal mesmo que o magic link
+    # não funcione, indo a www.powercell.pt/portal e inserindo o código.
+    # O portal_access_code já foi buscado/gerado acima (linhas 756-773).
+    portal_credentials_html = f"""
             <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <h3 style="color: #0f766e; margin: 0 0 12px 0; font-size: 15px;">As suas credenciais de acesso</h3>
-                <p style="margin: 5px 0; color: #1e293b;"><strong>Email:</strong> {client_email}</p>
-                <p style="margin: 5px 0; color: #1e293b;"><strong>Código de Acesso:</strong> <span style="font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: #0f766e; letter-spacing: 3px;">{portal_access_code}</span></p>
-                <p style="font-size: 12px; color: #64748b; margin-top: 10px;">Guarde este código em segurança. Precisará dele para aceder ao portal sempre que quiser consultar o seu processo.</p>
+                <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.powercell.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
+                <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{portal_access_code or '—'}</strong></h3>
+                <p style="margin: 5px 0; color: #1e293b; font-size: 13px;"><strong>Email:</strong> {client_email}</p>
             </div>
-        """
-        portal_credentials_text = f"""
-
-As suas credenciais de acesso ao Portal:
-- Email: {client_email}
-- Código de Acesso: {portal_access_code}
-
-Guarde este código em segurança. Precisará dele para aceder ao portal sempre que quiser consultar o seu processo.
-"""
+    """
+    portal_credentials_text = (
+        f"\nSe o link não funcionar, aceda a www.powercell.pt/portal e "
+        f"insira o seguinte Código de Acesso: {portal_access_code or '—'}\n"
+        f"Email: {client_email}\n"
+    )
 
     html_body = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
@@ -884,6 +879,9 @@ Guarde este código em segurança. Precisará dele para aceder ao portal sempre 
         "message": f"Email enviado para {client_email}",
         "magic_link": magic_link,
         "short_id": short_id,
+        # PACOTE DC — incluir portal_access_code no retorno para que o
+        # endpoint /clients/{id}/resend-portal-access o possa devolver.
+        "portal_access_code": portal_access_code,
     }
 
 
@@ -3586,6 +3584,41 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     except Exception as e:
         logger.warning(f"[GET-PROCESS] Erro ao buscar latest_activity para {process_id}: {e}")
         process["latest_activity"] = None
+
+    # ============================================================
+    # PACOTE DC — portal_access: Código de Acesso + magic link ativo
+    # ============================================================
+    try:
+        portal_access_code = None
+        _client_id_dc = process.get("client_id")
+        if _client_id_dc:
+            _client_doc_dc = await db.clients.find_one(
+                {"id": _client_id_dc}, {"portal_access_code": 1, "_id": 0}
+            )
+            if _client_doc_dc:
+                portal_access_code = _client_doc_dc.get("portal_access_code")
+
+        active_short_id = None
+        active_magic_link = None
+        token_doc = await db.portal_tokens.find_one(
+            {"process_id": process_id},
+            {"_id": 0, "short_id": 1, "created_at": 1}
+        )
+        if token_doc and token_doc.get("short_id"):
+            active_short_id = token_doc["short_id"]
+            _fe_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+            if _fe_url:
+                active_magic_link = f"{_fe_url}/portal/{active_short_id}"
+
+        process["portal_access"] = {
+            "portal_access_code": portal_access_code,
+            "short_id": active_short_id,
+            "magic_link": active_magic_link,
+            "has_active_token": active_short_id is not None,
+        }
+    except Exception as e:
+        logger.warning(f"[GET-PROCESS] Erro ao buscar portal_access para {process_id}: {e}")
+        process["portal_access"] = None
 
     try:
         return ProcessResponse(**process)
