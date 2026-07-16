@@ -43,10 +43,11 @@ import {
   User, Mail, Phone, Home, MapPin, Euro, Calendar, Users,
   AlertTriangle, Building2, CreditCard, FileText, ExternalLink,
   Loader2, Save, Pencil, X, CalendarClock, Inbox, CheckCircle2,
-  XCircle, ClipboardCheck, Sparkles, StickyNote, MessageSquare
+  XCircle, ClipboardCheck, Sparkles, StickyNote, MessageSquare,
+  KeyRound, Send
 } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
-import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits } from '../../services/api';
+import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits, sendMagicLinkEmail } from '../../services/api';
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { hasAnyRole } from '../../utils/roleUtils';
@@ -88,6 +89,8 @@ const ProcessDetailsModal = memo(({
   const [hasChanges, setHasChanges] = useState(false);
   const [markingIndexed, setMarkingIndexed] = useState(false);
   const [selectedVisit, setSelectedVisit] = useState(null);
+  // PACOTE DC — estado do botão "Reenviar Acesso ao Portal"
+  const [resendingPortal, setResendingPortal] = useState(false);
 
   // ── Estado editável do Cliente ───────────────────────────────────
   const [editClient, setEditClient] = useState({
@@ -1140,6 +1143,85 @@ const ProcessDetailsModal = memo(({
             </div>
           </TabsContent>
         </Tabs>
+
+        {/* ============================================================
+            PACOTE DC — Acesso ao Portal do Cliente
+            ============================================================ */}
+        {process?.portal_access && (
+          <div className="mt-3 p-4 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/20">
+            <div className="flex items-center gap-2 mb-3">
+              <KeyRound className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+              <h4 className="text-sm font-semibold text-teal-800 dark:text-teal-200">
+                Acesso ao Portal do Cliente
+              </h4>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Código de Acesso:</span>
+                <span className="font-mono font-bold text-base text-teal-700 dark:text-teal-300 tracking-wider">
+                  {safeString(process.portal_access.portal_access_code) || '—'}
+                </span>
+              </div>
+              {process.portal_access.magic_link && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Link ativo:</span>
+                  <a
+                    href={process.portal_access.magic_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 hover:underline text-xs truncate max-w-[280px]"
+                    title={process.portal_access.magic_link}
+                  >
+                    {process.portal_access.magic_link}
+                  </a>
+                </div>
+              )}
+              {!process.portal_access.has_active_token && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Sem link ativo — clique em "Reenviar" para gerar um novo.
+                </p>
+              )}
+            </div>
+            <div className="mt-3">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 border-teal-300 text-teal-700 hover:bg-teal-100 dark:border-teal-700 dark:text-teal-300"
+                disabled={resendingPortal}
+                onClick={async () => {
+                  setResendingPortal(true);
+                  try {
+                    const res = await sendMagicLinkEmail(process?.id);
+                    toast.success('Email de acesso ao Portal reenviado com sucesso.');
+                    const data = res.data;
+                    if (onProcessUpdate && data?.magic_link) {
+                      onProcessUpdate(process.id, {
+                        portal_access: {
+                          portal_access_code: data.portal_access_code || process.portal_access?.portal_access_code,
+                          short_id: data.short_id,
+                          magic_link: data.magic_link,
+                          has_active_token: !!data.short_id,
+                        },
+                      });
+                    }
+                  } catch (err) {
+                    const msg = err?.response?.data?.detail || err?.message || 'Erro ao reenviar email.';
+                    toast.error(msg, { duration: 6000 });
+                  } finally {
+                    setResendingPortal(false);
+                  }
+                }}
+              >
+                {resendingPortal ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Send className="h-3.5 w-3.5" />
+                )}
+                Reenviar Acesso ao Portal
+              </Button>
+            </div>
+          </div>
+        )}
 
         {/* ── Footer com Guardar (quando em edição) ──────────────── */}
         {isEditing && (

@@ -747,6 +747,8 @@ export const getRGPDTemplateVersion = (versionId) => api.get(`/rgpd/admin/templa
 // ===== MAGIC LINK (Client Portal) =====
 export const generateMagicLink = (processId) => api.post(`/processes/${processId}/generate-magic-link`);
 export const sendMagicLinkEmail = (processId) => api.post(`/processes/${processId}/generate-magic-link/send`);
+// PACOTE DC — Reenviar acesso ao Portal por client_id (resolve o process_id ativo internamente)
+export const resendPortalAccess = (clientId) => api.post(`/clients/${clientId}/resend-portal-access`);
 
 // ===== IMPERSONATE CLIENT (Ver como Cliente) =====
 // FIX (Pacote K): o ProcessDetails.js importa impersonateClient mas este export

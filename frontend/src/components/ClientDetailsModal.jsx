@@ -22,6 +22,7 @@
  * ====================================================================
  */
 import React, { useState, useEffect, useCallback } from "react";
+import { toast } from "sonner";
 import {
   Dialog,
   DialogContent,
@@ -52,9 +53,11 @@ import {
   Sparkles,
   MessageSquare,
   ExternalLink,
+  KeyRound,
 } from "lucide-react";
 import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
+import { resendPortalAccess } from "../services/api";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -66,6 +69,7 @@ const ClientDetailsModal = ({
 }) => {
   const [client, setClient] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [resendingPortal, setResendingPortal] = useState(false);
 
   // Carregar detalhes do cliente quando abre
   const fetchClient = useCallback(async (id) => {
@@ -398,6 +402,84 @@ const ClientDetailsModal = ({
             })()}
           </div>
         ) : null}
+
+        {/* ============================================================
+            PACOTE DC — Acesso ao Portal do Cliente
+            ============================================================ */}
+        {client?.portal_access && (
+          <div className="mt-4 p-4 rounded-lg border border-teal-200 dark:border-teal-800 bg-teal-50/50 dark:bg-teal-950/20">
+            <div className="flex items-center gap-2 mb-3">
+              <KeyRound className="h-4 w-4 text-teal-600 dark:text-teal-400" />
+              <h4 className="text-sm font-semibold text-teal-800 dark:text-teal-200">
+                Acesso ao Portal do Cliente
+              </h4>
+            </div>
+            <div className="space-y-2 text-sm">
+              <div className="flex items-center justify-between gap-2">
+                <span className="text-muted-foreground">Código de Acesso:</span>
+                <span className="font-mono font-bold text-base text-teal-700 dark:text-teal-300 tracking-wider">
+                  {client.portal_access.portal_access_code || "—"}
+                </span>
+              </div>
+              {client.portal_access.magic_link && (
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-muted-foreground">Link ativo:</span>
+                  <a
+                    href={client.portal_access.magic_link}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="text-blue-600 dark:text-blue-400 hover:underline text-xs truncate max-w-[280px]"
+                    title={client.portal_access.magic_link}
+                  >
+                    {client.portal_access.magic_link}
+                  </a>
+                </div>
+              )}
+              {!client.portal_access.has_active_token && (
+                <p className="text-xs text-amber-600 dark:text-amber-400">
+                  Sem link ativo — clique em "Reenviar" para gerar um novo.
+                </p>
+              )}
+            </div>
+            <div className="mt-3 flex gap-2">
+              <Button
+                size="sm"
+                variant="outline"
+                className="gap-1.5 border-teal-300 text-teal-700 hover:bg-teal-100 dark:border-teal-700 dark:text-teal-300"
+                disabled={resendingPortal}
+                onClick={async () => {
+                  setResendingPortal(true);
+                  try {
+                    const res = await resendPortalAccess(clientId);
+                    toast.success("Email de acesso ao Portal reenviado com sucesso.");
+                    const data = res.data;
+                    setClient(prev => prev ? {
+                      ...prev,
+                      portal_access: {
+                        portal_access_code: data.portal_access_code || prev.portal_access?.portal_access_code,
+                        short_id: data.short_id,
+                        magic_link: data.magic_link,
+                        has_active_token: !!data.short_id,
+                      },
+                    } : prev);
+                  } catch (err) {
+                    const msg = err?.response?.data?.detail || err?.message || "Erro ao reenviar email.";
+                    toast.error(msg, { duration: 6000 });
+                  } finally {
+                    setResendingPortal(false);
+                  }
+                }}
+              >
+                {resendingPortal ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <Mail className="h-3.5 w-3.5" />
+                )}
+                Reenviar Acesso ao Portal
+              </Button>
+            </div>
+          </div>
+        )}
 
         <DialogFooter>
           <Button variant="outline" onClick={onClose}>

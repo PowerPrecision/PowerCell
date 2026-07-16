@@ -18,6 +18,7 @@ import logging
 import asyncio
 import copy
 import re
+import os
 import unicodedata
 from typing import List, Optional
 from datetime import datetime, timezone
@@ -1456,6 +1457,33 @@ async def get_client(
         logger.warning(f"Erro ao buscar latest_activity para cliente {client_id}: {e}")
         client["latest_activity"] = None
 
+    # ============================================================
+    # PACOTE DC — portal_access: Código de Acesso + magic link ativo
+    # ============================================================
+    try:
+        portal_access_code = client.get("portal_access_code")
+        active_short_id = None
+        active_magic_link = None
+        if all_process_ids:
+            token_doc = await db.portal_tokens.find_one(
+                {"process_id": {"$in": all_process_ids}},
+                {"_id": 0, "short_id": 1, "process_id": 1, "created_at": 1}
+            )
+            if token_doc and token_doc.get("short_id"):
+                active_short_id = token_doc["short_id"]
+                _fe_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
+                if _fe_url:
+                    active_magic_link = f"{_fe_url}/portal/{active_short_id}"
+        client["portal_access"] = {
+            "portal_access_code": portal_access_code,
+            "short_id": active_short_id,
+            "magic_link": active_magic_link,
+            "has_active_token": active_short_id is not None,
+        }
+    except Exception as e:
+        logger.warning(f"Erro ao buscar portal_access para cliente {client_id}: {e}")
+        client["portal_access"] = None
+
     # Desencriptar dados sensíveis
     client = decrypt_client_data(client)
     
@@ -1975,12 +2003,85 @@ async def create_process_for_client(
         )
     
     logger.info(f"Novo processo {process_id} criado para cliente {client_id} por {user.get('email')}")
-    
+
     return {
         "success": True,
         "process_id": process_id,
         "process_number": next_number,
         "message": f"Processo #{next_number} criado para {client.get('nome')}"
+    }
+
+
+# ====================================================================
+# PACOTE DC — Reenviar Acesso ao Portal (por client_id)
+# ====================================================================
+@router.post("/{client_id}/resend-portal-access")
+async def resend_portal_access(
+    client_id: str,
+    request: Request,
+    user: dict = Depends(get_current_user)
+):
+    """
+    Reenvia o email de acesso ao Portal para o cliente.
+
+    Fluxo:
+    1. Valida que o cliente existe e tem email.
+    2. Encontra o primeiro processo ativo (não eliminado) do cliente.
+    3. Delega para send_magic_link_email (processes.py) que:
+       - Gera/refresh portal_access_code no cliente
+       - Gera novo short_id + JWT
+       - Envia email com magic link + Código de Acesso
+    4. Devolve {portal_access_code, magic_link, short_id, process_id}.
+    """
+    from routes.processes import send_magic_link_email
+
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    client_email = ""
+    contacto = client.get("contacto") or {}
+    if isinstance(contacto, dict):
+        client_email = contacto.get("email", "")
+    if not client_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Cliente não tem email associado — não é possível reenviar o acesso ao Portal."
+        )
+
+    process_ids = client.get("process_ids") or []
+    if not process_ids:
+        raise HTTPException(
+            status_code=400,
+            detail="Cliente não tem processo associado — crie um processo primeiro."
+        )
+
+    active_process = await db.processes.find_one(
+        {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
+        {"_id": 0, "id": 1}
+    )
+    if not active_process:
+        raise HTTPException(
+            status_code=404,
+            detail="Cliente não tem processo ativo — todos foram eliminados."
+        )
+
+    process_id = active_process["id"]
+
+    result = await send_magic_link_email(process_id=process_id, request=request, user=user)
+
+    logger.info(
+        f"[PACOTE-DC] Reenvio de acesso ao Portal para cliente {client_id} "
+        f"(processo {process_id}) por {user.get('email')}"
+    )
+
+    return {
+        "success": True,
+        "process_id": process_id,
+        "portal_access_code": result.get("portal_access_code") if isinstance(result, dict) else None,
+        "magic_link": result.get("magic_link") if isinstance(result, dict) else None,
+        "short_id": result.get("short_id") if isinstance(result, dict) else None,
+        "message": "Email de acesso ao Portal reenviado com sucesso.",
     }
 
 
