@@ -206,33 +206,43 @@ const UsersManagementPage = ({ embedded = false }) => {
   };
 
   const handleDeleteUser = async (userId, userName) => {
-    // O8 - Usar undo toast em vez de window.confirm para micro-ações
+    // O8 - Usar undo toast em vez de window.confirm para micro-ações.
+    //
+    // FIX: o commit da eliminação é agora controlado por um setTimeout próprio
+    // (não pelo onAutoClose do toast, que disparava mesmo após o "Desfazer" e
+    // eliminava o utilizador na mesma). O "Desfazer" limpa o timer, garantindo
+    // que a eliminação no backend NÃO acontece.
     const userToDelete = users.find(u => u.id === userId);
     if (!userToDelete) return;
 
+    const restoreUser = () =>
+      setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+
     // Remover otimisticamente da lista
     setUsers(prev => prev.filter(u => u.id !== userId));
+
+    const UNDO_WINDOW_MS = 8000;
+    const commitTimer = setTimeout(async () => {
+      // Commit: efetuar a eliminação real no backend (só se não houve undo)
+      try {
+        await deleteUser(userId);
+        queryClient.invalidateQueries({ queryKey: ["users"] });
+      } catch (error) {
+        restoreUser();
+        toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar utilizador"));
+      }
+    }, UNDO_WINDOW_MS);
 
     toast.success(`Utilizador "${userName}" eliminado`, {
       action: {
         label: 'Desfazer',
         onClick: () => {
-          // Restaurar na lista (undo)
-          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+          clearTimeout(commitTimer); // cancela a eliminação pendente
+          restoreUser();
           toast.success("Ação desfeita");
         },
       },
-      duration: 5000,
-      onAutoClose: async () => {
-        // Commit: efetuar a eliminação real no backend
-        try {
-          await deleteUser(userId);
-        } catch (error) {
-          // Se falhar, restaurar o utilizador
-          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
-          toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar utilizador"));
-        }
-      },
+      duration: UNDO_WINDOW_MS,
     });
   };
 
