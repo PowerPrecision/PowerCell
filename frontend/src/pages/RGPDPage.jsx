@@ -8,6 +8,7 @@
  * Step 2: Minuta de Exclusividade + Assinatura
  */
 import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { sanitizeHtml } from '../utils/sanitize';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -1039,7 +1040,7 @@ export default function RGPDPage() {
                     {formData?.rgpd_text ? (
                       <div
                         className="space-y-3 text-xs sm:text-sm text-foreground/90 leading-relaxed prose prose-sm dark:prose-invert max-w-none break-words"
-                        dangerouslySetInnerHTML={{ __html: formData.rgpd_text }}
+                        dangerouslySetInnerHTML={{ __html: sanitizeHtml(formData.rgpd_text) }}
                       />
                     ) : (
                       <div className="space-y-3 text-xs text-muted-foreground">

@@ -9,6 +9,7 @@
  */
 
 import 'react-quill-new/dist/quill.snow.css';
+import { sanitizeHtml } from '../utils/sanitize';
 /**
  * DocumentRecipientsManager — Gestão visual de destinatários para envio de documentação bancária.
  *
@@ -952,7 +953,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
           <div className="flex-1 overflow-y-auto border rounded-lg bg-white dark:bg-gray-950">
             <div
               className="p-6 break-words"
-              dangerouslySetInnerHTML={{ __html: previewHtml }}
+              dangerouslySetInnerHTML={{ __html: sanitizeHtml(previewHtml) }}
             />
           </div>
           <div className="flex items-center justify-between pt-2">
