@@ -398,6 +398,7 @@ const NotificationsDropdown = () => {
           size="icon" 
           className="relative"
           data-testid="notifications-trigger"
+          aria-label={unreadCount > 0 ? `Notificações - ${unreadCount} por ler` : "Notificações"}
         >
           {unreadCount > 0 ? (
             <>

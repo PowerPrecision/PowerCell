@@ -16,13 +16,15 @@ export const statusColors = {
   red: "bg-red-100 border-red-300 dark:bg-red-900/40 dark:border-red-700",
 };
 
+// Header backgrounds usam tons mais escuros para garantir contraste AA
+// (>= 4.5:1) com o texto branco dos cabeçalhos das colunas.
 export const statusHeaderColors = {
-  yellow: "bg-yellow-500 text-yellow-900",
-  blue: "bg-blue-500",
-  purple: "bg-purple-500",
-  orange: "bg-orange-500",
-  green: "bg-green-500",
-  red: "bg-red-500",
+  yellow: "bg-amber-700",
+  blue: "bg-blue-600",
+  purple: "bg-purple-600",
+  orange: "bg-orange-700",
+  green: "bg-green-700",
+  red: "bg-red-600",
 };
 
 /**

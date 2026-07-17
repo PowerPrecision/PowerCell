@@ -112,6 +112,7 @@ const ContextSwitcher = () => {
               size="sm"
               className="gap-1.5 h-8 text-xs font-medium border-primary/30 hover:bg-primary/5 transition-colors"
               title={`Empresa ativa: ${activeCompanyName}. Clique para trocar.`}
+              aria-label={`Empresa ativa: ${activeCompanyName}. Clique para trocar.`}
             >
               <Building2 className="h-3.5 w-3.5 text-primary" />
               <span className="hidden sm:inline max-w-[120px] truncate">{activeCompanyName}</span>
@@ -164,6 +165,7 @@ const ContextSwitcher = () => {
               size="sm"
               className="gap-1.5 h-8 text-xs font-medium border-primary/30 hover:bg-primary/5 transition-colors"
               title={`Modo atual: ${currentLabel}. Clique para trocar.`}
+              aria-label={`Modo atual: ${currentLabel}. Clique para trocar.`}
             >
               <Shield className="h-3.5 w-3.5 text-primary" />
               <span className="hidden sm:inline">{currentLabel}</span>

@@ -175,6 +175,8 @@ const KanbanHeader = memo(({
                 size="icon"
                 className="h-8 w-8"
                 onClick={() => onViewModeChange?.('kanban')}
+                aria-label="Ver como quadro Kanban"
+                aria-pressed={viewMode === 'kanban'}
               >
                 <LayoutGrid className="h-4 w-4" />
               </Button>
@@ -183,6 +185,8 @@ const KanbanHeader = memo(({
                 size="icon"
                 className="h-8 w-8"
                 onClick={() => onViewModeChange?.('list')}
+                aria-label="Ver como lista"
+                aria-pressed={viewMode === 'list'}
               >
                 <List className="h-4 w-4" />
               </Button>
