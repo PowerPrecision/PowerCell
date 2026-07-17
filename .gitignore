@@ -80,3 +80,10 @@ coverage.xml
 # Permitir templates de exemplo de env (têm de ser versionados)
 !.env.example
 !**/.env.example
+
+# Artefactos de teste/backup (não versionar)
+/test_reports/
+/test-*.png
+backend/backup_test/
+frontend/test-results/
+frontend/e2e-report/
