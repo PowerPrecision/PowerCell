@@ -11,6 +11,7 @@ Funcionalidades:
 - Gestão de links (listar, cancelar)
 ====================================================================
 """
+import asyncio
 import uuid
 import io
 import zipfile
@@ -563,7 +564,8 @@ async def download_all_via_temp_link(token: str):
     with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
         for s3_path in file_paths:
             try:
-                file_content = s3_service.get_file_content(s3_path)
+                # Offload de I/O bloqueante (leitura S3) para não bloquear o event loop.
+                file_content = await asyncio.to_thread(s3_service.get_file_content, s3_path)
                 if file_content:
                     filename = s3_path.split("/")[-1]
                     # Evitar duplicados no ZIP (caso hajam ficheiros com o mesmo nome)

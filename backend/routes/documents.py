@@ -610,7 +610,7 @@ async def upload_file_s3(
                 # Extrair texto do PDF para análise (se aplicável)
                 text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
                 if original_filename.lower().endswith('.pdf') and len(file_content) > 0:
-                    extracted = extract_text_from_pdf(file_content, max_chars=3000)
+                    extracted = await asyncio.to_thread(extract_text_from_pdf, file_content, max_chars=3000)
                     if extracted:
                         text_for_analysis = extracted
 
@@ -1020,12 +1020,12 @@ async def confirm_upload(
                 categorize_document_with_ai,
             )
             
-            # Obter conteúdo do ficheiro do S3 para análise
-            file_content = s3_service.get_file_content(file_key)
+            # Obter conteúdo do ficheiro do S3 para análise (offload de I/O bloqueante)
+            file_content = await asyncio.to_thread(s3_service.get_file_content, file_key)
             
             text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
             if file_content and original_filename.lower().endswith('.pdf'):
-                extracted = extract_text_from_pdf(file_content, max_chars=3000)
+                extracted = await asyncio.to_thread(extract_text_from_pdf, file_content, max_chars=3000)
                 if extracted:
                     text_for_analysis = extracted
             
