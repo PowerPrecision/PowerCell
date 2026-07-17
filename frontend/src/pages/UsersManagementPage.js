@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -40,8 +41,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 const UsersManagementPage = ({ embedded = false }) => {
   const { user: currentUser, impersonate } = useAuth();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [formLoading, setFormLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -66,21 +66,34 @@ const UsersManagementPage = ({ embedded = false }) => {
   const [selectedUserIds, setSelectedUserIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
+  // Server state via TanStack Query (substitui useState + useEffect + fetch manual).
+  // fetchUsers passa a ser o refetch da query, para os call-sites existentes
+  // (após criar/editar/eliminar) continuarem a funcionar sem alterações.
+  const {
+    data: users = [],
+    isLoading: loading,
+    isError: usersError,
+    refetch: fetchUsers,
+  } = useQuery({
+    queryKey: ["users"],
+    queryFn: async () => {
       const response = await getUsers();
-      setUsers(response.data);
-    } catch (error) {
+      return response.data;
+    },
+  });
+
+  useEffect(() => {
+    if (usersError) {
       toast.error("Erro ao carregar utilizadores");
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [usersError]);
+
+  // Shim de compatibilidade: mantém a API `setUsers(prev => ...)` usada nas
+  // atualizações otimistas (undo toast), agora escrevendo na cache da query.
+  const setUsers = (updater) =>
+    queryClient.setQueryData(["users"], (prev = []) =>
+      typeof updater === "function" ? updater(prev) : updater
+    );
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
