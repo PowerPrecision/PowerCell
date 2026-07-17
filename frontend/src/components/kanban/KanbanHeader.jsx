@@ -218,7 +218,7 @@ const KanbanHeader = memo(({
       {/* Filters Row */}
       <div className="flex flex-wrap items-center gap-2" data-testid="kanban-filters">
         <Select value={dateFilter} onValueChange={onDateFilterChange}>
-          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-date-filter">
+          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-date-filter" aria-label="Filtrar por data">
             <Calendar className="h-3 w-3 mr-1" />
             <SelectValue placeholder="Data" />
           </SelectTrigger>
@@ -231,7 +231,7 @@ const KanbanHeader = memo(({
         </Select>
         
         <Select value={urgencyFilter} onValueChange={onUrgencyFilterChange}>
-          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-urgency-filter">
+          <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-urgency-filter" aria-label="Filtrar por urgência">
             <AlertCircle className="h-3 w-3 mr-1" />
             <SelectValue placeholder="Urgência" />
           </SelectTrigger>
@@ -246,7 +246,7 @@ const KanbanHeader = memo(({
         {/* Filtro de Concluídos — período de datas (com indicador de loading isolado) */}
         <div className="relative">
           <Select value={String(completedDays)} onValueChange={(v) => onCompletedDaysChange?.(Number(v))}>
-            <SelectTrigger className="h-8 w-full sm:w-[160px] text-xs" data-testid="kanban-completed-filter">
+            <SelectTrigger className="h-8 w-full sm:w-[160px] text-xs" data-testid="kanban-completed-filter" aria-label="Filtrar concluídos por período">
               <Archive className="h-3 w-3 mr-1" />
               <SelectValue placeholder="Concluídos" />
             </SelectTrigger>
