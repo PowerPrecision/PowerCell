@@ -4,6 +4,7 @@ Script para popular a BD de dev via API REST existente.
 Não depende de acesso direto ao MongoDB - usa os endpoints do backend.
 """
 
+import os
 import requests
 import random
 import string
@@ -13,9 +14,12 @@ import sys
 from datetime import datetime, timezone, timedelta
 
 # Config
-BASE_URL = "https://powercell.onrender.com"
-ADMIN_EMAIL = "geral@powerealestate.pt"
-ADMIN_PASSWORD = "admin2026"
+BASE_URL = os.environ.get("SEED_API_BASE_URL", "https://powercell.onrender.com")
+ADMIN_EMAIL = os.environ.get("SEED_ADMIN_EMAIL", "geral@powerealestate.pt")
+ADMIN_PASSWORD = os.environ.get("SEED_ADMIN_PASSWORD")
+if not ADMIN_PASSWORD:
+    print("❌ ERRO: defina SEED_ADMIN_PASSWORD (password do admin usado para autenticar na API).", file=sys.stderr)
+    sys.exit(1)
 
 # Dados realistas
 PROFISSOES = [
