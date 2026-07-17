@@ -12,6 +12,7 @@ from database import db
 from services.auth import get_current_user
 from services.encryption import generate_nif_hash, generate_email_hash, generate_telefone_hash
 from utils.input_sanitization import (sanitize_string, sanitize_email, sanitize_phone, sanitize_url, log_sanitization_rejection)
+from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 
 logger = logging.getLogger(__name__)
 
@@ -32,91 +33,9 @@ def normalize_text(text: str) -> str:
     return result.lower()
 
 
-def create_accent_insensitive_regex(search_term: str) -> dict:
-    """
-    Cria um regex MongoDB que ignora acentos.
-    
-    Exemplo: pesquisar 'jose' encontra 'José', 'JOSE', 'josé', 'JÓSÉ'
-    
-    Funciona convertendo cada caractere numa classe que inclui todas as variantes acentuadas.
-    """
-    if not search_term:
-        return {"$regex": "", "$options": "i"}
-    
-    # Mapeamento de caracteres base para todas as suas variantes acentuadas
-    accent_map = {
-        'a': '[aàáâãäåAÀÁÂÃÄÅ]',
-        'e': '[eèéêëEÈÉÊË]',
-        'i': '[iìíîïIÌÍÎÏ]',
-        'o': '[oòóôõöOÒÓÔÕÖ]',
-        'u': '[uùúûüUÙÚÛÜ]',
-        'c': '[cçCÇ]',
-        'n': '[nñNÑ]',
-        'y': '[yýÿYÝŸ]',
-        's': '[sS]',  # Não há variante acentuada comum
-        'r': '[rR]',
-        'l': '[lL]',
-        't': '[tT]',
-        'd': '[dD]',
-        'm': '[mM]',
-        'p': '[pP]',
-        'b': '[bB]',
-        'f': '[fF]',
-        'g': '[gG]',
-        'h': '[hH]',
-        'j': '[jJ]',
-        'k': '[kK]',
-        'q': '[qQ]',
-        'v': '[vV]',
-        'w': '[wW]',
-        'x': '[xX]',
-        'z': '[zZ]',
-    }
-    
-    # Construir padrão regex caractere a caractere
-    pattern_parts = []
-    for char in search_term.lower():
-        if char in accent_map:
-            pattern_parts.append(accent_map[char])
-        elif char.isalnum():
-            # Outros caracteres alfanuméricos sem variantes acentuadas
-            pattern_parts.append(f'[{char}{char.upper()}]' if char.isalpha() else char)
-        else:
-            # Caracteres especiais - escapar
-            pattern_parts.append(re.escape(char))
-    
-    pattern = ''.join(pattern_parts)
-    return {"$regex": pattern, "$options": ""}  # Não precisa de 'i' porque já incluímos maiúsculas
-
-
-def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
-    """
-    Constrói filtro de pesquisa que suporta múltiplas palavras.
-    
-    Se o termo contém espaços, divide em palavras e exige que TODAS
-    apareçam em qualquer ordem no campo de nome (AND lógico).
-    
-    Exemplo: 'vera teixeira' encontra 'Vera Lucia Da Costa Teixeira'
-    porque 'vera' E 'teixeira' existem no nome.
-    """
-    if not search_term:
-        return {}
-    
-    words = search_term.strip().split()
-    
-    if len(words) <= 1:
-        return {name_field: create_accent_insensitive_regex(search_term.strip())}
-    
-    # Múltiplas palavras — AND: cada palavra deve aparecer no campo
-    word_filters = []
-    for word in words:
-        if len(word.strip()) >= 1:
-            word_filters.append({name_field: create_accent_insensitive_regex(word.strip())})
-    
-    if len(word_filters) == 1:
-        return word_filters[0]
-    
-    return {"$and": word_filters}
+# NOTA: create_accent_insensitive_regex e build_multiword_search_filter foram
+# movidas para utils/search_filters.py (importadas no topo) para eliminar
+# duplicação com routes/processes.py e routes/clients.py.
 
 
 @router.get("/global")
