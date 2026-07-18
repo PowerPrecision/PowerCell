@@ -287,6 +287,7 @@ const TasksDropdown = ({ compact = false }) => {
             totalNotifications > 0 && "text-primary"
           )}
           title="Tarefas em background"
+          aria-label={totalNotifications > 0 ? `Tarefas em background - ${totalNotifications} ativas` : "Tarefas em background"}
         >
           {activeCount > 0 ? (
             <Loader2 className="h-4 w-4 animate-spin" />

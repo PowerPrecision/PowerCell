@@ -48,6 +48,7 @@ from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, sanitize_url, log_sanitization_rejection
 )
+from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 
 router = APIRouter(prefix="/clients", tags=["Clients"])
 logger = logging.getLogger(__name__)
@@ -217,78 +218,9 @@ async def get_my_assigned_clients(
     }
 
 
-def _accent_map() -> dict:
-    """Mapeamento de caracteres base para todas as suas variantes acentuadas."""
-    return {
-        'a': '[aàáâãäåAÀÁÂÃÄÅ]',
-        'e': '[eèéêëEÈÉÊË]',
-        'i': '[iìíîïIÌÍÎÏ]',
-        'o': '[oòóôõöOÒÓÔÕÖ]',
-        'u': '[uùúûüUÙÚÛÜ]',
-        'c': '[cçCÇ]',
-        'n': '[nñNÑ]',
-        'y': '[yýÿYÝŸ]',
-    }
-
-
-def create_accent_insensitive_regex(search_term: str) -> dict:
-    """
-    Cria um regex MongoDB que ignora acentos.
-    
-    Exemplo: pesquisar 'jose' encontra 'José', 'JOSE', 'josé', 'JÓSÉ'
-    """
-    if not search_term:
-        return {"$regex": "", "$options": "i"}
-    
-    accent_map = _accent_map()
-    
-    # Construir padrão regex caractere a caractere
-    pattern_parts = []
-    for char in search_term.lower():
-        if char in accent_map:
-            pattern_parts.append(accent_map[char])
-        elif char.isalpha():
-            pattern_parts.append(f'[{char}{char.upper()}]')
-        elif char.isalnum():
-            pattern_parts.append(char)
-        else:
-            pattern_parts.append(re.escape(char))
-    
-    pattern = ''.join(pattern_parts)
-    return {"$regex": pattern, "$options": ""}
-
-
-def build_multiword_search_filter(search_term: str, name_field: str) -> dict:
-    """
-    Constrói filtro de pesquisa que suporta múltiplas palavras.
-    
-    Se o termo contém espaços, divide em palavras e exige que TODAS
-    apareçam em qualquer ordem no campo de nome (AND lógico).
-    
-    Exemplo: 'vera teixeira' encontra 'Vera Lucia Da Costa Teixeira'
-    porque 'vera' E 'teixeira' existem no nome.
-    
-    Se o termo não tem espaços, comporta-se como create_accent_insensitive_regex.
-    """
-    if not search_term:
-        return {}
-    
-    words = search_term.strip().split()
-    
-    if len(words) <= 1:
-        # Termo único — usar regex simples
-        return {name_field: create_accent_insensitive_regex(search_term.strip())}
-    
-    # Múltiplas palavras — AND: cada palavra deve aparecer no campo
-    word_filters = []
-    for word in words:
-        if len(word.strip()) >= 1:
-            word_filters.append({name_field: create_accent_insensitive_regex(word.strip())})
-    
-    if len(word_filters) == 1:
-        return word_filters[0]
-    
-    return {"$and": word_filters}
+# NOTA: create_accent_insensitive_regex e build_multiword_search_filter foram
+# movidas para utils/search_filters.py (importadas no topo) para eliminar
+# duplicação com routes/processes.py e routes/search.py.
 
 
 # As funções de encriptação/desencriptação de clientes estão agora em services/encryption.py

@@ -176,6 +176,63 @@ const MAX_RETRY_DELAY = 30000;    // 30 seconds
 // Track which URLs are currently retrying to avoid toast spam
 const retryingUrls = new Set();
 
+// ====================================================================
+// SILENT TOKEN REFRESH (single-flight)
+// ====================================================================
+// Quando um access token expira, um pedido devolve 401. Em vez de forçar
+// logout imediato, tentamos renovar o token com o refresh_token e repetir
+// o pedido original UMA vez. Várias respostas 401 concorrentes partilham a
+// mesma promessa de refresh (single-flight) para não gastar/rodar o
+// refresh_token múltiplas vezes.
+//
+// Usa axios "cru" (não a instância `api`) para o pedido de refresh, de forma
+// a não reentrar neste próprio interceptor.
+// ====================================================================
+let refreshPromise = null;
+
+async function performTokenRefresh() {
+  const currentRefreshToken = localStorage.getItem("refreshToken");
+  if (!currentRefreshToken) return null;
+
+  const currentToken = localStorage.getItem("token");
+  const headers = { "Content-Type": "application/json" };
+  if (currentToken) {
+    headers["Authorization"] = `Bearer ${currentToken}`;
+  }
+
+  try {
+    const resp = await axios.post(
+      `${API_URL}/auth/refresh`,
+      { refresh_token: currentRefreshToken },
+      { headers }
+    );
+    const data = resp?.data;
+    if (data?.access_token) {
+      localStorage.setItem("token", data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem("refreshToken", data.refresh_token);
+      }
+      return data.access_token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Retorna a promessa de refresh partilhada (single-flight).
+ * Se já houver um refresh em curso, devolve a mesma promessa.
+ */
+function getRefreshedToken() {
+  if (!refreshPromise) {
+    refreshPromise = performTokenRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 api.interceptors.response.use(
   // Sucesso - apenas retorna a response
   (response) => response,
@@ -229,7 +286,29 @@ api.interceptors.response.use(
         
         return Promise.reject(error);
       }
-      
+
+      // ============================================================
+      // REFRESH SILENCIOSO: tentar renovar o token e repetir o pedido
+      // original UMA vez antes de terminar a sessão. Evita logout
+      // desnecessário quando só o access token expirou mas o
+      // refresh_token ainda é válido.
+      // ============================================================
+      const isRefreshCall = config.url?.includes("/auth/refresh");
+      const isOnPortalForRefresh = window.location.pathname.startsWith("/portal");
+      const hasRefreshToken = !!localStorage.getItem("refreshToken");
+
+      if (!isLoginAttempt && !isRefreshCall && !isOnPortalForRefresh && hasRefreshToken && !config._retry) {
+        config._retry = true;
+        const newToken = await getRefreshedToken();
+        if (newToken) {
+          config.headers = config.headers || {};
+          config.headers.Authorization = `Bearer ${newToken}`;
+          // Repetir o pedido original com o novo token.
+          return api(config);
+        }
+        // Refresh falhou → cair no fluxo de logout abaixo.
+      }
+
       if (!isLoginAttempt) {
         // ============================================================
         // PORTAL: Não redirecionar utilizadores do portal para /login

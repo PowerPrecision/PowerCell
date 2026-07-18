@@ -1562,12 +1562,12 @@ async def confirm_portal_upload(
                 categorize_document_with_ai,
             )
 
-            # Tentar obter conteúdo do ficheiro do S3 para análise
-            file_content_for_ai = s3_service.get_file_content(file_key)
+            # Tentar obter conteúdo do ficheiro do S3 para análise (offload de I/O bloqueante)
+            file_content_for_ai = await asyncio.to_thread(s3_service.get_file_content, file_key)
 
             text_for_analysis = f"Ficheiro: {original_filename}"
             if file_content_for_ai and original_filename.lower().endswith('.pdf'):
-                extracted = extract_text_from_pdf(file_content_for_ai, max_chars=3000)
+                extracted = await asyncio.to_thread(extract_text_from_pdf, file_content_for_ai, max_chars=3000)
                 if extracted:
                     text_for_analysis = extracted
 

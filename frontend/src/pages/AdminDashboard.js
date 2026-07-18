@@ -621,7 +621,7 @@ const AdminDashboard = () => {
                   <div className="space-y-2">
                     <Label>Filtrar por Consultor</Label>
                     <Select value={consultorFilter} onValueChange={setConsultorFilter}>
-                      <SelectTrigger><SelectValue placeholder="Todos os consultores" /></SelectTrigger>
+                      <SelectTrigger aria-label="Filtrar por consultor"><SelectValue placeholder="Todos os consultores" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os consultores</SelectItem>
                         <SelectItem value="none">Nenhum (sem consultor)</SelectItem>
@@ -632,7 +632,7 @@ const AdminDashboard = () => {
                   <div className="space-y-2">
                     <Label>Filtrar por Intermediário</Label>
                     <Select value={mediadorFilter} onValueChange={setMediadorFilter}>
-                      <SelectTrigger><SelectValue placeholder="Todos os intermediários" /></SelectTrigger>
+                      <SelectTrigger aria-label="Filtrar por intermediário"><SelectValue placeholder="Todos os intermediários" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os intermediários</SelectItem>
                         <SelectItem value="none">Nenhum (sem intermediário)</SelectItem>
@@ -643,7 +643,7 @@ const AdminDashboard = () => {
                   <div className="space-y-2">
                     <Label>Filtrar por Indexação</Label>
                     <Select value={indexacaoFilter} onValueChange={setIndexacaoFilter}>
-                      <SelectTrigger><SelectValue placeholder="Todos os indexação" /></SelectTrigger>
+                      <SelectTrigger aria-label="Filtrar por indexação"><SelectValue placeholder="Todos os indexação" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os Indexação</SelectItem>
                         <SelectItem value="none">Nenhum (sem indexação)</SelectItem>

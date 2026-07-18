@@ -1211,7 +1211,8 @@ async def analyze_document_from_base64(base64_content: str, mime_type: str, docu
     # Se for PDF, tentar extrair texto primeiro
     if mime_type == "application/pdf":
         logger.info("Documento PDF detectado, tentando extrair texto...")
-        extracted_text = extract_text_from_pdf(content_bytes)
+        # Offload de trabalho síncrono/CPU-bound para não bloquear o event loop.
+        extracted_text = await asyncio.to_thread(extract_text_from_pdf, content_bytes)
         
         if len(extracted_text) >= MIN_TEXT_LENGTH:
             logger.info(f"Texto suficiente extraído ({len(extracted_text)} chars), usando análise de texto")
@@ -1222,7 +1223,7 @@ async def analyze_document_from_base64(base64_content: str, mime_type: str, docu
             
             # Para documentos de identificação (CC), usar DPI mais alto para melhor leitura de números
             conversion_dpi = 300 if document_type in ['cc', 'cpcv'] else 200
-            img_bytes, img_mime = convert_pdf_to_image(content_bytes, page_num=0, dpi=conversion_dpi)
+            img_bytes, img_mime = await asyncio.to_thread(convert_pdf_to_image, content_bytes, page_num=0, dpi=conversion_dpi)
             
             if img_bytes:
                 # Usar a imagem convertida para análise de visão

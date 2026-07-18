@@ -5,6 +5,7 @@ Cria utilizadores, configurações e dados de exemplo.
 """
 import asyncio
 import os
+import sys
 from datetime import datetime, timezone
 from passlib.context import CryptContext
 from motor.motor_asyncio import AsyncIOMotorClient
@@ -14,6 +15,17 @@ pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
 # Connection string — usar variáveis de ambiente
 MONGO_URL = os.environ.get("MONGO_URL", "mongodb://localhost:27017")
 DB_NAME = os.environ.get("DB_NAME", "powercell_dev")
+
+# Passwords obrigatórias via ambiente (sem defaults hardcoded).
+ADMIN_PASSWORD = os.environ.get("SEED_ADMIN_PASSWORD")
+DEFAULT_PASSWORD = os.environ.get("SEED_DEFAULT_PASSWORD")
+_missing = [n for n, v in (("SEED_ADMIN_PASSWORD", ADMIN_PASSWORD),
+                           ("SEED_DEFAULT_PASSWORD", DEFAULT_PASSWORD)) if not v]
+if _missing:
+    print(f"❌ ERRO: variáveis de ambiente em falta: {', '.join(_missing)}", file=sys.stderr)
+    print("   Ex.: SEED_ADMIN_PASSWORD=... SEED_DEFAULT_PASSWORD=... python seed_database.py", file=sys.stderr)
+    print("   Gere passwords fortes com: openssl rand -base64 24", file=sys.stderr)
+    sys.exit(1)
 
 
 def hash_password(password: str) -> str:
@@ -42,7 +54,7 @@ async def seed_database():
             {
                 "id": "user-admin-001",
                 "email": "admin@sistema.pt",
-                "password": hash_password("admin"),
+                "password": hash_password(ADMIN_PASSWORD),
                 "name": "Administrador",
                 "role": "admin",
                 "is_active": True,
@@ -52,7 +64,7 @@ async def seed_database():
             {
                 "id": "user-consultor-001",
                 "email": "consultor@sistema.pt",
-                "password": hash_password("consultor123"),
+                "password": hash_password(DEFAULT_PASSWORD),
                 "name": "João Consultor",
                 "role": "consultor",
                 "is_active": True,
@@ -218,10 +230,9 @@ async def seed_database():
         collections = await db.list_collection_names()
         print(f"\n📦 Total de colecções: {len(collections)}")
         
-        print("\n👤 Utilizadores criados:")
-        print("   • admin@sistema.pt / admin (Administrador)")
-        print("   • powerprecision@sistema.pt / PowerCell (Gestor)")
-        print("   • consultor@sistema.pt / consultor123 (Consultor)")
+        print("\n👤 Utilizadores criados (passwords definidas via SEED_* env vars):")
+        print("   • admin@sistema.pt (Administrador)")
+        print("   • consultor@sistema.pt (Consultor)")
         
         print("\n✅ Pronto a usar!")
         

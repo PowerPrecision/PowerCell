@@ -85,15 +85,18 @@ async def list_leads(
     # Busca leads e exclui o _id do mongo
     leads = await db.property_leads.find(query, {"_id": 0}).to_list(length=500)
     
-    # Enriquecer com nome do cliente (se existir)
-    for lead in leads:
-        if lead.get("client_id"):
-            process = await db.processes.find_one(
-                {"id": lead["client_id"]},
-                {"client_name": 1, "_id": 0}
-            )
-            if process:
-                lead["client_name"] = process.get("client_name")
+    # Enriquecer com nome do cliente (batch com $in — evita N+1)
+    client_ids = list({lead["client_id"] for lead in leads if lead.get("client_id")})
+    if client_ids:
+        procs = await db.processes.find(
+            {"id": {"$in": client_ids}},
+            {"id": 1, "client_name": 1, "_id": 0}
+        ).to_list(length=len(client_ids))
+        name_by_id = {p["id"]: p.get("client_name") for p in procs}
+        for lead in leads:
+            cid = lead.get("client_id")
+            if cid in name_by_id:
+                lead["client_name"] = name_by_id[cid]
     
     return leads
 
@@ -132,12 +135,21 @@ async def get_leads_by_status(
     # Inicializar grupos
     grouped = {status.value: [] for status in LeadStatus}
     
+    # Enriquecer nome do cliente (batch com $in — evita N+1)
+    client_ids = list({lead["client_id"] for lead in leads if lead.get("client_id")})
+    name_by_id = {}
+    if client_ids:
+        procs = await db.processes.find(
+            {"id": {"$in": client_ids}},
+            {"id": 1, "client_name": 1, "_id": 0}
+        ).to_list(length=len(client_ids))
+        name_by_id = {p["id"]: p.get("client_name") for p in procs}
+    
     for lead in leads:
         # Enriquecer nome do cliente
-        if lead.get("client_id"):
-            process = await db.processes.find_one({"id": lead["client_id"]}, {"client_name": 1})
-            if process:
-                lead["client_name"] = process.get("client_name")
+        cid = lead.get("client_id")
+        if cid in name_by_id:
+            lead["client_name"] = name_by_id[cid]
         
         # Calcular dias desde criação
         if lead.get("created_at"):

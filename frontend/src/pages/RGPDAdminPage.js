@@ -4,6 +4,7 @@
  * Inclui aba de edição do template legal RGPD
  */
 import React, { useState, useEffect, useCallback } from "react";
+import { sanitizeHtml } from "../utils/sanitize";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -630,7 +631,7 @@ const RGPDTemplateTab = () => {
                       .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate, Lda.</span>');
                     // Wrap numbered sections for better formatting
                     safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^<]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
-                    return safe;
+                    return sanitizeHtml(safe);
                   })()
                 }}
               />
@@ -1190,7 +1191,7 @@ const MinutaTemplateTab = () => {
                       .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate, Lda.</span>');
                     // Wrap numbered sections for better formatting
                     safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^<]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
-                    return safe;
+                    return sanitizeHtml(safe);
                   })()
                 }}
               />

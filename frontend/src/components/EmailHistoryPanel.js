@@ -61,7 +61,7 @@ import { isAfter, isBefore, subDays, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getProcessEmails, getEmailStats, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails, addMonitoredEmail, removeMonitoredEmail } from "../services/api";
 import EmailViewerModal from "./EmailViewerModal";
-import { safeFormat } from "../lib/utils";
+import { safeFormat, safeParseISO } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
