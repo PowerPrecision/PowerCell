@@ -57,6 +57,7 @@ from services.s3_storage import s3_service
 from services.redis_cache import invalidate_stats_cache, get_redis
 from services.notification_service import send_notification_with_preference_check
 from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.process_assignment import get_all_assigned_user_ids as _get_all_assigned_user_ids
 
 logger = logging.getLogger(__name__)
 
@@ -3505,45 +3506,6 @@ async def _notify_assigned_team_fetch(process: dict, source_name: str, docs_coun
                 )
         except Exception as e:
             logger.warning(f"Erro ao notificar {uid} sobre fetch {source_name}: {e}")
-
-
-def _get_all_assigned_user_ids(process: dict) -> list:
-    """Obtém lista deduplicada de TODOS os user_ids atribuídos ao processo.
-
-    Inclui consultores, mediadores, indexação e parceiro.
-    Usa os campos novos (_ids) com fallback para os antigos (_id).
-    """
-    ids = set()
-    
-    # Consultores (lista nova)
-    for uid in (process.get("assigned_consultor_ids") or []):
-        if uid:
-            ids.add(uid)
-    # Consultor singular (fallback)
-    uid = process.get("assigned_consultor_id")
-    if uid:
-        ids.add(uid)
-    
-    # Mediadores (lista nova)
-    for uid in (process.get("assigned_mediador_ids") or []):
-        if uid:
-            ids.add(uid)
-    # Mediador singular (fallback)
-    uid = process.get("assigned_mediador_id")
-    if uid:
-        ids.add(uid)
-    
-    # Indexação
-    uid = process.get("assigned_indexacao_id")
-    if uid:
-        ids.add(uid)
-    
-    # Parceiro
-    uid = process.get("assigned_parceiro_id")
-    if uid:
-        ids.add(uid)
-    
-    return list(ids)
 
 
 # ====================================================================

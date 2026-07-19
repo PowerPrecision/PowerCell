@@ -1325,3 +1325,38 @@ async def dual_auto_assign_on_pre_registo_transition(
     )
 
     return result_data
+
+
+# ==== HELPERS DE IDS ATRIBUÍDOS ====
+
+def get_all_assigned_user_ids(process: dict) -> List[str]:
+    """Obtém lista deduplicada de TODOS os user_ids atribuídos ao processo.
+
+    Inclui consultores, mediadores, indexação e parceiro.
+    Usa os campos novos (_ids) com fallback para os antigos (_id).
+    """
+    ids = set()
+
+    for uid in (process.get("assigned_consultor_ids") or []):
+        if uid:
+            ids.add(uid)
+    uid = process.get("assigned_consultor_id")
+    if uid:
+        ids.add(uid)
+
+    for uid in (process.get("assigned_mediador_ids") or []):
+        if uid:
+            ids.add(uid)
+    uid = process.get("assigned_mediador_id")
+    if uid:
+        ids.add(uid)
+
+    uid = process.get("assigned_indexacao_id")
+    if uid:
+        ids.add(uid)
+
+    uid = process.get("assigned_parceiro_id")
+    if uid:
+        ids.add(uid)
+
+    return list(ids)

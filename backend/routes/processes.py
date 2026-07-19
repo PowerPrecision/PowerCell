@@ -9,6 +9,10 @@ A lógica de negócio está separada em serviços:
 - services/process_service.py - Lógica principal
 - services/process_assignment.py - Atribuições
 - services/process_kanban.py - Kanban
+- services/process_finance.py - Snapshots financeiros
+- services/process_magic_link.py - Magic links / email portal
+- services/portal_messages.py - Mensagens portal (staff)
+- services/process_list_enrichment.py - Enrichment de listagens
 
 WORKFLOW DE 14 FASES:
 1. Clientes em Espera → 14. Desistências
@@ -98,300 +102,31 @@ from utils.search_filters import create_accent_insensitive_regex, build_multiwor
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
 
-# Portal imports
-from services.portal_security import create_client_magic_token, PORTAL_TOKEN_VALIDITY_DAYS
+# Serviços extraídos de processes.py
+from services.process_finance import (
+    create_finance_snapshot as _create_finance_snapshot,
+    ensure_finance_snapshot as _ensure_finance_snapshot,
+)
+from services.process_magic_link import (
+    send_portal_welcome_email_from_process as _send_portal_welcome_email_from_process,
+    create_magic_link,
+    send_magic_link_email_to_client,
+)
+from services.portal_messages import (
+    count_unread_for_staff,
+    list_messages_for_staff,
+    send_staff_message,
+)
+from services.process_list_enrichment import (
+    enrich_with_portal_flags,
+    enrich_with_latest_note,
+    enrich_with_latest_activity,
+    enrich_with_client_lookup,
+    get_portal_flags_maps,
+    get_latest_notes_map,
+)
 
 logger = logging.getLogger(__name__)
-
-
-# ====================================================================
-# FINANCE SNAPSHOT HELPER — Criar ProcessFinance ao fechar processo
-# ====================================================================
-
-async def _create_finance_snapshot(process: dict, user: dict):
-    """
-    Cria um snapshot financeiro (ProcessFinance) quando um processo é concluído.
-
-    Lê dados de real_estate_data (valor_imovel) e credit_data (loan_amount)
-    para calcular comissões duais (Imobiliária + Crédito) de forma independente.
-
-    Usa a FinanceConfig da empresa para determinar fee_type/fee_value.
-    Se a empresa tiver configs separadas para imobiliária e crédito, usa-as;
-    caso contrário, usa a mesma config para ambas.
-
-    Compatibilidade retroactiva:
-    - Se não houver FinanceConfig para a empresa, usa os campos legacy
-      (base_business_value + applied_fee_type/value) se disponíveis.
-    - Se já existir um registo financeiro para este processo, ignora silenciosamente.
-    """
-    from models.finance import FeeType, FinanceStatus
-
-    process_id = process.get("id", "")
-    company_id = process.get("company_id", "")
-    client_id = process.get("client_id", "")
-
-    # Evitar duplicados: se já existe registo, não criar outro
-    existing = await db.process_finances.find_one({
-        "process_id": process_id,
-        "company_id": company_id,
-    })
-    if existing:
-        logger.info(f"Snapshot financeiro já existe para processo {process_id}, a ignorar")
-        return
-
-    # Obter dados do processo
-    real_estate_data = process.get("real_estate_data") or {}
-    credit_data = process.get("credit_data") or {}
-    financial_data = process.get("financial_data") or {}
-
-    # Ler valores base
-    valor_imovel = real_estate_data.get("valor_imovel")
-    loan_amount = credit_data.get("loan_amount") or credit_data.get("requested_amount")
-
-    # Tentar obter FinanceConfig da empresa
-    # A config pode ter campos separados para imobiliária e crédito
-    config_doc = await db.finance_configs.find_one({"company_id": company_id})
-
-    # Defaults para campos legacy (compatibilidade)
-    base_business_value = 0.0
-    applied_fee_type = None
-    applied_fee_value = None
-
-    # Comissão imobiliária
-    re_base_value = float(valor_imovel) if valor_imovel else 0.0
-    re_fee_type = None
-    re_fee_value = None
-
-    # Comissão de crédito
-    cr_base_value = float(loan_amount) if loan_amount else 0.0
-    cr_fee_type = None
-    cr_fee_value = None
-
-    tax_rate = 23.0  # IVA português por defeito
-
-    if config_doc:
-        # FinanceConfig encontrada — usar para ambas as áreas
-        fee_type = config_doc.get("fee_type", "percentage")
-        default_value = config_doc.get("default_value", 0.0)
-        tax_rate = config_doc.get("tax_rate", 23.0)
-
-        # Verificar se existem configs separadas para imobiliária e crédito
-        re_fee_type = config_doc.get("real_estate_fee_type") or fee_type
-        re_fee_value = config_doc.get("real_estate_fee_value") or config_doc.get("real_estate_default_value") or default_value
-        cr_fee_type = config_doc.get("credit_fee_type") or fee_type
-        cr_fee_value = config_doc.get("credit_fee_value") or config_doc.get("credit_default_value") or default_value
-
-        # Campos legacy para compatibilidade
-        applied_fee_type = fee_type
-        applied_fee_value = default_value
-        base_business_value = cr_base_value or re_base_value
-    else:
-        # Sem FinanceConfig: tentar usar campos do processo (financial_data)
-        comissao_mediacao = financial_data.get("comissao_mediacao")
-        if comissao_mediacao:
-            # Se já temos comissão, usar como comissão total (credit_commission por defeito)
-            cr_base_value = float(comissao_mediacao)
-            cr_fee_type = "fixed"
-            cr_fee_value = float(comissao_mediacao)
-            applied_fee_type = "fixed"
-            applied_fee_value = float(comissao_mediacao)
-            base_business_value = float(comissao_mediacao)
-        else:
-            # Sem config e sem comissão: criar registo com zeros
-            logger.info(
-                f"Sem FinanceConfig nem comissão para processo {process_id}. "
-                f"Snapshot criado com valores zero."
-            )
-
-    # Calcular comissões
-    # Comissão imobiliária
-    if re_fee_type == FeeType.PERCENTAGE.value:
-        re_commission = round(re_base_value * (re_fee_value / 100), 2) if re_base_value and re_fee_value else 0.0
-    elif re_fee_type == FeeType.FIXED.value:
-        re_commission = re_fee_value or 0.0
-    else:
-        re_commission = 0.0
-
-    # Comissão de crédito
-    if cr_fee_type == FeeType.PERCENTAGE.value:
-        cr_commission = round(cr_base_value * (cr_fee_value / 100), 2) if cr_base_value and cr_fee_value else 0.0
-    elif cr_fee_type == FeeType.FIXED.value:
-        cr_commission = cr_fee_value or 0.0
-    else:
-        cr_commission = 0.0
-
-    # Comissão total
-    expected_commission = round(re_commission + cr_commission, 2)
-    tax_amount = round(expected_commission * (tax_rate / 100), 2)
-    total_with_tax = round(expected_commission + tax_amount, 2)
-
-    # Criar documento
-    finance_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-
-    doc = {
-        "id": finance_id,
-        "process_id": process_id,
-        "client_id": client_id,
-        "company_id": company_id,
-        # Campos legacy (compatibilidade retroactiva)
-        "base_business_value": base_business_value,
-        "applied_fee_type": applied_fee_type,
-        "applied_fee_value": applied_fee_value,
-        # Comissão Imobiliária (Real Estate)
-        "real_estate_base_value": re_base_value,
-        "real_estate_fee_type": re_fee_type,
-        "real_estate_fee_value": re_fee_value,
-        "real_estate_commission": re_commission,
-        # Comissão de Crédito (Credit)
-        "credit_base_value": cr_base_value,
-        "credit_fee_type": cr_fee_type,
-        "credit_fee_value": cr_fee_value,
-        "credit_commission": cr_commission,
-        # Totais
-        "expected_commission": expected_commission,
-        "tax_amount": tax_amount,
-        "total_with_tax": total_with_tax,
-        "status": FinanceStatus.PENDING.value,
-        "invoice_link": None,
-        "created_at": now,
-        "updated_at": now,
-    }
-
-    await db.process_finances.insert_one(doc)
-
-    logger.info(
-        f"Snapshot financeiro criado: id={finance_id}, process_id={process_id}, "
-        f"re_commission={re_commission}, cr_commission={cr_commission}, "
-        f"total={expected_commission}"
-    )
-
-
-async def _ensure_finance_snapshot(process: dict, user: dict):
-    """
-    Garante que existe um snapshot financeiro (ProcessFinance) para o processo,
-    criando um novo se não existir ou atualizando os valores base se já existir.
-
-    Usado na Sincronização Financeira Retroativa: quando um admin/CEO edita
-    um processo concluído/escritura, os valores financeiros (valor_imovel,
-    loan_amount) podem ter mudado, e o snapshot precisa de ser recalculado.
-
-    Lógica:
-    1. Procura registo existente em process_finances pelo process_id + company_id
-    2. Se NÃO existe → chama _create_finance_snapshot() para criar do zero
-    3. Se JÁ existe → recalcula as comissões com base nos novos valores do
-       processo e nas configurações atuais da empresa, e atualiza o registo
-    """
-    from models.finance import FeeType, FinanceStatus
-
-    process_id = process.get("id", "")
-    company_id = process.get("company_id", "")
-
-    existing = await db.process_finances.find_one({
-        "process_id": process_id,
-        "company_id": company_id,
-    })
-
-    # Se não existe, criar novo snapshot
-    if not existing:
-        logger.info(f"Nenhum snapshot financeiro encontrado para processo {process_id}. A criar novo.")
-        await _create_finance_snapshot(process, user)
-        return
-
-    # Já existe — recalcular comissões com base nos valores atualizados do processo
-    real_estate_data = process.get("real_estate_data") or {}
-    credit_data = process.get("credit_data") or {}
-    financial_data = process.get("financial_data") or {}
-
-    valor_imovel = real_estate_data.get("valor_imovel")
-    loan_amount = credit_data.get("loan_amount") or credit_data.get("requested_amount")
-
-    # Obter FinanceConfig da empresa
-    config_doc = await db.finance_configs.find_one({"company_id": company_id})
-
-    # Defaults
-    re_base_value = float(valor_imovel) if valor_imovel else 0.0
-    cr_base_value = float(loan_amount) if loan_amount else 0.0
-    re_fee_type = None
-    re_fee_value = None
-    cr_fee_type = None
-    cr_fee_value = None
-    base_business_value = 0.0
-    applied_fee_type = None
-    applied_fee_value = None
-    tax_rate = 23.0
-
-    if config_doc:
-        fee_type = config_doc.get("fee_type", "percentage")
-        default_value = config_doc.get("default_value", 0.0)
-        tax_rate = config_doc.get("tax_rate", 23.0)
-
-        re_fee_type = config_doc.get("real_estate_fee_type") or fee_type
-        re_fee_value = config_doc.get("real_estate_fee_value") or config_doc.get("real_estate_default_value") or default_value
-        cr_fee_type = config_doc.get("credit_fee_type") or fee_type
-        cr_fee_value = config_doc.get("credit_fee_value") or config_doc.get("credit_default_value") or default_value
-
-        applied_fee_type = fee_type
-        applied_fee_value = default_value
-        base_business_value = cr_base_value or re_base_value
-    else:
-        comissao_mediacao = financial_data.get("comissao_mediacao")
-        if comissao_mediacao:
-            cr_base_value = float(comissao_mediacao)
-            cr_fee_type = "fixed"
-            cr_fee_value = float(comissao_mediacao)
-            applied_fee_type = "fixed"
-            applied_fee_value = float(comissao_mediacao)
-            base_business_value = float(comissao_mediacao)
-
-    # Calcular comissões
-    if re_fee_type == FeeType.PERCENTAGE.value:
-        re_commission = round(re_base_value * (re_fee_value / 100), 2) if re_base_value and re_fee_value else 0.0
-    elif re_fee_type == FeeType.FIXED.value:
-        re_commission = re_fee_value or 0.0
-    else:
-        re_commission = 0.0
-
-    if cr_fee_type == FeeType.PERCENTAGE.value:
-        cr_commission = round(cr_base_value * (cr_fee_value / 100), 2) if cr_base_value and cr_fee_value else 0.0
-    elif cr_fee_type == FeeType.FIXED.value:
-        cr_commission = cr_fee_value or 0.0
-    else:
-        cr_commission = 0.0
-
-    expected_commission = round(re_commission + cr_commission, 2)
-    tax_amount = round(expected_commission * (tax_rate / 100), 2)
-    total_with_tax = round(expected_commission + tax_amount, 2)
-
-    # Atualizar registo existente
-    update_fields = {
-        "real_estate_base_value": re_base_value,
-        "real_estate_fee_type": re_fee_type,
-        "real_estate_fee_value": re_fee_value,
-        "real_estate_commission": re_commission,
-        "credit_base_value": cr_base_value,
-        "credit_fee_type": cr_fee_type,
-        "credit_fee_value": cr_fee_value,
-        "credit_commission": cr_commission,
-        "expected_commission": expected_commission,
-        "tax_amount": tax_amount,
-        "total_with_tax": total_with_tax,
-        "base_business_value": base_business_value,
-        "applied_fee_type": applied_fee_type,
-        "applied_fee_value": applied_fee_value,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
-
-    await db.process_finances.update_one(
-        {"id": existing["id"]},
-        {"$set": update_fields}
-    )
-
-    logger.info(
-        f"Snapshot financeiro atualizado retroativamente: process_id={process_id}, "
-        f"re_commission={re_commission}, cr_commission={cr_commission}, "
-        f"total={expected_commission}, updated_by={user.get('email', 'unknown')}"
-    )
 
 
 # ====================================================================
@@ -487,102 +222,9 @@ def _sanitize_dict_names(d: dict):
 router = APIRouter(prefix="/processes", tags=["Processes"])
 
 
-# ============================================================
-# PACOTE CY — Helper para enviar email do Portal em background
-# ============================================================
-# Fire-and-forget: busca/gera portal_access_code e envia email de
-# boas-vindas. Falhas são LOGADAS (logger.error) mas não propagadas.
-# ============================================================
-async def _send_portal_welcome_email_from_process(
-    client_id: str,
-    client_email: str,
-    client_name: str,
-) -> None:
-    """Envia email de boas-vindas do Portal após criar um processo."""
-    try:
-        # Buscar ou gerar portal_access_code
-        portal_access_code = None
-        try:
-            client_doc = await db.clients.find_one({"id": client_id}, {"portal_access_code": 1, "_id": 0})
-            if client_doc:
-                portal_access_code = client_doc.get("portal_access_code")
-                if not portal_access_code:
-                    from models.client import generate_portal_access_code as _gen_code
-                    portal_access_code = _gen_code()
-                    await db.clients.update_one(
-                        {"id": client_id},
-                        {"$set": {"portal_access_code": portal_access_code}}
-                    )
-        except Exception as e:
-            logger.warning(f"[PORTAL-EMAIL] Erro ao obter/gerar portal_access_code para {client_id}: {e}")
-
-        # Enviar email via task_queue (fallback: directo)
-        from services.task_queue import task_queue
-        from services.email import send_registration_confirmation
-
-        job_id = None
-        try:
-            job_id = await task_queue.send_registration_email(
-                client_email=client_email,
-                client_name=client_name,
-                portal_access_code=portal_access_code,
-            )
-        except Exception as tq_err:
-            logger.warning(f"[PORTAL-EMAIL] Task Queue indisponível para cliente {client_id}: {tq_err}")
-
-        if not job_id:
-            logger.info(f"[PORTAL-EMAIL] A enviar email diretamente para {client_email} (client_id={client_id})")
-            try:
-                await send_registration_confirmation(
-                    client_email=client_email,
-                    client_name=client_name,
-                    portal_access_code=portal_access_code,
-                )
-                logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
-            except Exception as direct_err:
-                logger.error(f"[PORTAL-EMAIL] Falha ao enviar email diretamente para {client_email} "
-                             f"(client_id={client_id}): {direct_err}", exc_info=True)
-    except Exception as e:
-        logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
-                     f"para {client_email} (client_id={client_id}): {e}", exc_info=True)
-
-
 # ====================================================================
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
-
-def _get_frontend_url(request: Request) -> str:
-    """
-    Obtém a URL base do frontend para construir links públicos.
-
-    Prioridade:
-    1. Header Referer (vem do browser do staff — é sempre o domínio correto)
-    2. Env var FRONTEND_URL (configurada no deploy)
-    3. Sem fallback hardcoded — levanta erro se não for possível determinar
-
-    Isto garante que os links do portal funcionem independentemente
-    do domínio onde a app está deployada (Vercel, Netlify, custom domain).
-    """
-    referer = request.headers.get("referer") or request.headers.get("origin")
-    if referer:
-        # Extrair scheme + host (ex: "https://app.powercell.pt" de "https://app.powercell.pt/processes/...")
-        from urllib.parse import urlparse
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-
-    # Fallback para env var (sem domínio hardcoded)
-    frontend_url = os.environ.get("FRONTEND_URL")
-    if frontend_url:
-        return frontend_url.rstrip("/")
-
-    # Último recurso: não podemos gerar links válidos sem saber o domínio
-    logger.warning(
-        "[MAGIC LINK] FRONTEND_URL não configurada e sem Referer header. "
-        "Configure a env var FRONTEND_URL no backend."
-    )
-    return ""
-
 
 @router.post("/{process_id}/generate-magic-link")
 async def generate_magic_link(
@@ -596,69 +238,8 @@ async def generate_magic_link(
     Permite que um consultor/admin gere um link seguro para o cliente
     acompanhar o seu processo e submeter documentos, sem necessidade
     de registo ou password.
-
-    O link usa um short_id (8 caracteres) guardado na BD que resolve
-    para o JWT completo. Exemplo:
-    {FRONTEND_URL}/portal/xK9mQ2pL
-
-    Returns:
-    - magic_link: URL curta para enviar ao cliente
-    - short_id: ID curto do token
-    - token: JWT token completo (para debug)
-    - expires_in_days: Validade do link
     """
-    import secrets
-
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    # Gerar magic link JWT
-    token = create_client_magic_token(process_id)
-
-    # Gerar short_id único (8 caracteres URL-safe)
-    short_id = secrets.token_urlsafe(6)[:8]
-
-    # Guardar short_id → JWT na BD (upsert por process_id)
-    await db.portal_tokens.update_one(
-        {"process_id": process_id},
-        {
-            "$set": {
-                "short_id": short_id,
-                "jwt_token": token,
-                "process_id": process_id,
-                "client_id": process.get("client_id", ""),
-                "created_by": user.get("email", ""),
-                "updated_at": datetime.now(timezone.utc),
-            },
-            "$setOnInsert": {
-                "created_at": datetime.now(timezone.utc),
-            },
-        },
-        upsert=True,
-    )
-
-    # Construir URL curta (usa Referer header ou FRONTEND_URL env var)
-    frontend_url = _get_frontend_url(request)
-    magic_link = f"{frontend_url}/portal/{short_id}"
-
-    logger.info(
-        f"Magic link gerado por {user.get('email')} para processo {process_id} "
-        f"(cliente: {process.get('client_name', 'N/A')}, short_id: {short_id})"
-    )
-
-    return {
-        "magic_link": magic_link,
-        "short_id": short_id,
-        "token": token,
-        "process_id": process_id,
-        "client_name": process.get("client_name", ""),
-        "client_email": process.get("client_email", ""),
-        "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
-    }
+    return await create_magic_link(process_id, request, user)
 
 
 @router.post("/{process_id}/generate-magic-link/send")
@@ -673,153 +254,7 @@ async def send_magic_link_email(
     O email contém o link curto (short_id) para o cliente aceder
     ao portal do seu processo.
     """
-    import secrets
-    from services.email_service import send_email
-
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    client_email = process.get("client_email", "")
-    client_name = process.get("client_name", "Cliente")
-    client_id = process.get("client_id", "")
-
-    if not client_email:
-        raise HTTPException(status_code=400, detail="Cliente não tem email associado")
-
-    # Buscar portal_access_code do cliente para incluir no email
-    portal_access_code = None
-    if client_id:
-        client_doc = await db.clients.find_one(
-            {"id": client_id},
-            {"_id": 0, "portal_access_code": 1}
-        )
-        if client_doc:
-            portal_access_code = client_doc.get("portal_access_code")
-    
-    # Se não tem access code, gerar um e guardar no cliente
-    if not portal_access_code and client_id:
-        from models.client import generate_portal_access_code
-        portal_access_code = generate_portal_access_code()
-        await db.clients.update_one(
-            {"id": client_id},
-            {"$set": {"portal_access_code": portal_access_code}}
-        )
-
-    # Gerar magic link JWT
-    token = create_client_magic_token(process_id)
-
-    # Gerar short_id
-    short_id = secrets.token_urlsafe(6)[:8]
-
-    # Guardar na BD
-    await db.portal_tokens.update_one(
-        {"process_id": process_id},
-        {
-            "$set": {
-                "short_id": short_id,
-                "jwt_token": token,
-                "process_id": process_id,
-                "client_id": process.get("client_id", ""),
-                "created_by": user.get("email", ""),
-                "updated_at": datetime.now(timezone.utc),
-            },
-            "$setOnInsert": {
-                "created_at": datetime.now(timezone.utc),
-            },
-        },
-        upsert=True,
-    )
-
-    # Construir URL curta (usa Referer header ou FRONTEND_URL env var)
-    frontend_url = _get_frontend_url(request)
-    magic_link = f"{frontend_url}/portal/{short_id}"
-
-    # PACOTE DC — Bloco "Código de Acesso" SEMPRE presente (incondicional).
-    # Garante que o cliente consegue aceder ao portal mesmo que o magic link
-    # não funcione, indo a www.powercell.pt/portal e inserindo o código.
-    # O portal_access_code já foi buscado/gerado acima (linhas 756-773).
-    portal_credentials_html = f"""
-            <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.powercell.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
-                <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{portal_access_code or '—'}</strong></h3>
-                <p style="margin: 5px 0; color: #1e293b; font-size: 13px;"><strong>Email:</strong> {client_email}</p>
-            </div>
-    """
-    portal_credentials_text = (
-        f"\nSe o link não funcionar, aceda a www.powercell.pt/portal e "
-        f"insira o seguinte Código de Acesso: {portal_access_code or '—'}\n"
-        f"Email: {client_email}\n"
-    )
-
-    html_body = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-            <h1 style="margin: 0; font-size: 20px;">Power Precision · Crédito Habitação</h1>
-        </div>
-        <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
-            <p style="font-size: 16px; color: #1e293b;">Olá {client_name},</p>
-            <p style="font-size: 14px; color: #475569;">
-                O seu consultor preparou o seu portal pessoal para acompanhar o seu processo de crédito habitação.
-            </p>
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="{magic_link}" style="display: inline-block; background: #0F766E; color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
-                    Aceder ao meu Portal
-                </a>
-            </div>
-            <p style="font-size: 12px; color: #94a3b8; text-align: center;">
-                Ou copie este link no seu navegador:<br>
-                <span style="color: #64748b;">{magic_link}</span>
-            </p>
-            {portal_credentials_html}
-            <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
-                Este link é válido por 90 dias. Se precisar de um novo link, contacte o seu consultor.
-            </p>
-        </div>
-    </div>
-    """
-
-    text_body = (
-        f"Olá {client_name},\n\n"
-        f"O seu consultor preparou o seu portal pessoal para acompanhar o seu processo de crédito habitação.\n\n"
-        f"Aceda ao portal através deste link:\n{magic_link}\n"
-        f"{portal_credentials_text}\n"
-        f"Este link é válido por 90 dias.\n"
-        f"Se precisar de um novo link, contacte o seu consultor.\n\n"
-        f"Power Precision · Crédito Habitação"
-    )
-
-    try:
-        await send_email(
-            account_name="power",
-            to_emails=[client_email],
-            subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
-            body=text_body,
-            body_html=html_body,
-            force_system=True,
-            system_purpose="NOTIFICATIONS",
-        )
-    except Exception as e:
-        logger.error(f"Erro ao enviar magic link email: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao enviar email. Tente copiar o link manualmente.")
-
-    logger.info(
-        f"Magic link enviado por email para {client_email} "
-        f"(processo {process_id}, short_id: {short_id})"
-    )
-
-    return {
-        "success": True,
-        "message": f"Email enviado para {client_email}",
-        "magic_link": magic_link,
-        "short_id": short_id,
-        # PACOTE DC — incluir portal_access_code no retorno para que o
-        # endpoint /clients/{id}/resend-portal-access o possa devolver.
-        "portal_access_code": portal_access_code,
-    }
+    return await send_magic_link_email_to_client(process_id, request, user)
 
 
 @router.post("", response_model=ProcessResponse)
@@ -1770,82 +1205,9 @@ async def get_processes(
     total = len(processes)
     processes = processes[skip:skip + size]
 
-    # ====================================================================
-    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
-    # Pistas visuais silenciosas (bolinhas) para interações do cliente no portal.
-    # Mesma lógica do Kanban (linhas 2122-2155), aplicada APÓS paginação para
-    # só buscar flags dos processos visíveis na página atual (eficiência).
-    # ====================================================================
-    if processes:
-        _bi_process_ids = [p["id"] for p in processes if p.get("id")]
-
-        # 1) Mensagens não lidas do cliente (portal_messages)
-        _bi_unread = await db.portal_messages.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "sender_type": "client",
-                "read_by_staff": False
-            }},
-            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
-
-        # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
-        _bi_new_docs = await db.documents.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "status": "uploaded"
-            }},
-            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
-
-        for p in processes:
-            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
-            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
-
-    # ====================================================================
-    # PACOTE BT (Fix 3): BATCH ENRIQUECIMENTO — latest_note
-    # Projeta a ÚLTIMA nota real inserida no histórico/atividades do processo
-    # para dentro do campo latest_note. O frontend (FilteredProcessList) lê
-    # este campo para a coluna "Notas do Consultor" (com fallback para
-    # process.notes para retrocompatibilidade).
-    #
-    # Procura na coleção activities (comentários do staff) o comentário mais
-    # recente de cada processo. Usa aggregation com $match + $sort + $group
-    # para obter o último por created_at.
-    # ====================================================================
-    if processes:
-        _bt_process_ids = [p["id"] for p in processes if p.get("id")]
-        _bt_latest_notes = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bt_process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "latest_note": {"$first": "$comment"},
-                "latest_note_at": {"$first": "$created_at"},
-                "latest_note_by": {"$first": "$user_name"},
-            }}
-        ]).to_list(1000)
-        _bt_notes_map = {r["_id"]: r for r in _bt_latest_notes}
-
-        for p in processes:
-            note_info = _bt_notes_map.get(p.get("id"))
-            if note_info:
-                p["latest_note"] = note_info.get("latest_note")
-                p["latest_note_at"] = note_info.get("latest_note_at")
-                p["latest_note_by"] = note_info.get("latest_note_by")
-            else:
-                p["latest_note"] = None
-                p["latest_note_at"] = None
-                p["latest_note_by"] = None
-            # PACOTE CZ — latest_activity_preview: alias explícito da última
-            # atividade/nota do consultor. O frontend lê este campo EM VEZ de
-            # process.notes (que é estático e pode estar desatualizado).
-            p["latest_activity_preview"] = p.get("latest_note")
+    # Batch enrichment (portal flags + latest note) — services/process_list_enrichment
+    await enrich_with_portal_flags(processes)
+    await enrich_with_latest_note(processes)
 
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
@@ -2023,72 +1385,9 @@ async def get_processes_paginated(
         fields_to_decrypt=["client_phone", "client_nif"]
     )
 
-    # ====================================================================
-    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
-    # Mesma lógica do Kanban e do GET /processes. A paginação cursor já foi
-    # aplicada, pelo que só enriquecemos os itens da página atual.
-    # ====================================================================
-    if result["items"]:
-        _bi_process_ids = [p["id"] for p in result["items"] if p.get("id")]
-
-        _bi_unread = await db.portal_messages.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "sender_type": "client",
-                "read_by_staff": False
-            }},
-            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
-
-        _bi_new_docs = await db.documents.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "status": "uploaded"
-            }},
-            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
-
-        for p in result["items"]:
-            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
-            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
-
-    # ============================================================
-    # PACOTE CZ — Batch enrichment: última nota do consultor
-    # ============================================================
-    # Antes este endpoint só tinha o bloco PACOTE CJ (dead code que filtrava
-    # por "action" field inexistente). Agora usa o mesmo pattern batch do
-    # PACOTE BT: aggregation $group por process_id, $first da mais recente.
-    # Adiciona latest_note + latest_activity_preview a cada processo.
-    # ============================================================
-    if result.get("items"):
-        _cz_process_ids = [p["id"] for p in result["items"] if p.get("id")]
-        _cz_latest_notes = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": _cz_process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "latest_note": {"$first": "$comment"},
-                "latest_note_at": {"$first": "$created_at"},
-                "latest_note_by": {"$first": "$user_name"},
-            }}
-        ]).to_list(1000)
-        _cz_notes_map = {r["_id"]: r for r in _cz_latest_notes}
-        for p in result["items"]:
-            note_info = _cz_notes_map.get(p.get("id"))
-            if note_info:
-                p["latest_note"] = note_info.get("latest_note")
-                p["latest_note_at"] = note_info.get("latest_note_at")
-                p["latest_note_by"] = note_info.get("latest_note_by")
-            else:
-                p["latest_note"] = None
-                p["latest_note_at"] = None
-                p["latest_note_by"] = None
-            p["latest_activity_preview"] = p.get("latest_note")
+    # Batch enrichment (portal flags + latest note)
+    await enrich_with_portal_flags(result["items"])
+    await enrich_with_latest_note(result["items"])
 
     return {
         "processes": result["items"],
@@ -2485,120 +1784,10 @@ async def get_kanban_board(
         fields_to_decrypt=["client_phone", "client_nif"]
     )
 
-    # ====================================================================
-    # ENRIQUECIMENTO BATCH: client_name/client_email/client_phone
-    # Processos criados no paradigma relacional (Fase 3) NÃO guardam
-    # dados pessoais no documento do processo — estão na coleção clients.
-    # Este passo preenche os campos em falta via batch lookup.
-    # ====================================================================
-    client_ids_to_fetch = set()
-    for p in processes:
-        if p.get("client_id") and not p.get("client_name"):
-            client_ids_to_fetch.add(p["client_id"])
-
-    client_map = {}
-    if client_ids_to_fetch:
-        client_docs = await db.clients.find(
-            {"id": {"$in": list(client_ids_to_fetch)}},
-            {"_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais": 1}
-        ).to_list(len(client_ids_to_fetch))
-        # Desencriptar dados dos clientes
-        try:
-            from services.encryption import decrypt_client_data
-            client_docs = [decrypt_client_data(c) for c in client_docs]
-        except Exception:
-            pass  # Se não houver encriptação, dados já estão legíveis
-        for c in client_docs:
-            contacto = c.get("contacto") or {}
-            dados_pessoais = c.get("dados_pessoais") or {}
-            client_map[c["id"]] = {
-                "nome": c.get("nome", ""),
-                "email": contacto.get("email", ""),
-                "telefone": contacto.get("telefone", ""),
-                "nif": dados_pessoais.get("nif", c.get("nif", "")),
-            }
-
-    # Preencher campos em falta com setdefault (não sobrescreve valores existentes)
-    for p in processes:
-        cid = p.get("client_id")
-        if cid and cid in client_map:
-            cinfo = client_map[cid]
-            p.setdefault("client_name", cinfo["nome"])
-            p.setdefault("client_email", cinfo["email"])
-            p.setdefault("client_phone", cinfo["telefone"])
-            p.setdefault("client_nif", cinfo["nif"])
-
-    # ====================================================================
-    # BATCH ENRIQUECIMENTO: has_unread_messages & has_new_documents
-    # Pistas visuais silenciosas para interações do cliente no portal.
-    # Evita fadiga de notificações — apenas dots coloridos no cartão.
-    # ====================================================================
-    process_ids = [p["id"] for p in processes]
-
-    # 1) Mensagens não lidas do cliente (portal_messages)
-    unread_pipeline = [
-        {"$match": {
-            "process_id": {"$in": process_ids},
-            "sender_type": "client",
-            "read_by_staff": False
-        }},
-        {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-    ]
-    unread_results = await db.portal_messages.aggregate(unread_pipeline).to_list(1000)
-    unread_map = {r["_id"]: r["unread_count"] > 0 for r in unread_results}
-
-    # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
-    new_docs_pipeline = [
-        {"$match": {
-            "process_id": {"$in": process_ids},
-            "status": "uploaded"
-        }},
-        {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-    ]
-    new_docs_results = await db.documents.aggregate(new_docs_pipeline).to_list(1000)
-    new_docs_map = {r["_id"]: r["new_count"] > 0 for r in new_docs_results}
-
-    # Inject computed boolean flags into each process
-    for p in processes:
-        p["has_unread_messages"] = unread_map.get(p["id"], False)
-        p["has_new_documents"] = new_docs_map.get(p["id"], False)
-
-    # ============================================================
-    # PACOTE DA — Batch enrichment: latest_activity (atividade mais recente)
-    # ============================================================
-    # O ProcessDetailsModal recebe o `process` do KanbanBoard (que chama
-    # /kanban). Sem este enrichment, a tab "Observações e IA" não teria
-    # a atividade recente. Usamos o mesmo pattern batch aggregation do
-    # PACOTE BT/CZ: $group por process_id, $first da mais recente.
-    # ============================================================
-    try:
-        _da_latest_acts = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "comment": {"$first": "$comment"},
-                "user_name": {"$first": "$user_name"},
-                "user_role": {"$first": "$user_role"},
-                "created_at": {"$first": "$created_at"},
-            }}
-        ]).to_list(1000)
-        _da_acts_map = {r["_id"]: r for r in _da_latest_acts}
-        for p in processes:
-            act = _da_acts_map.get(p.get("id"))
-            if act:
-                # Remover o _id do objeto antes de atribuir
-                act_clean = {k: v for k, v in act.items() if k != "_id"}
-                p["latest_activity"] = act_clean
-            else:
-                p["latest_activity"] = None
-    except Exception as e:
-        logger.warning(f"[KANBAN] Erro no batch enrichment latest_activity: {e}")
-        for p in processes:
-            p.setdefault("latest_activity", None)
+    # Batch enrichment: client lookup + portal flags + latest_activity
+    await enrich_with_client_lookup(processes)
+    await enrich_with_portal_flags(processes)
+    await enrich_with_latest_activity(processes)
 
     # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
@@ -2980,55 +2169,10 @@ async def get_my_clients(
     ).to_list(100)
     consultor_map = {c["id"]: c["name"] for c in consultores}
 
-    # ====================================================================
-    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
-    # Pistas visuais silenciosas para a tabela de "Os Meus Clientes".
-    # Só busca flags dos processos paginados (não dos leads).
-    # ====================================================================
+    # Batch enrichment maps (portal flags + latest activity note)
     _bi_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
-    _bi_unread_map = {}
-    _bi_new_docs_map = {}
-    if _bi_process_ids:
-        _bi_unread = await db.portal_messages.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "sender_type": "client",
-                "read_by_staff": False
-            }},
-            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
-
-        _bi_new_docs = await db.documents.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "status": "uploaded"
-            }},
-            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
-
-    # PACOTE CG — BATCH ENRIQUECIMENTO: latest_activity_note
-    # Para cada processo, busca a atividade/comentário mais recente na
-    # coleção activities. O frontend (MyClientsPage) lê este campo para
-    # a coluna "Notas" — mostra sempre a última interação real do consultor.
-    _cg_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
-    _cg_notes_map = {}
-    if _cg_process_ids:
-        _cg_latest_notes = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": _cg_process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "latest_activity_note": {"$first": "$comment"},
-                "latest_activity_note_at": {"$first": "$created_at"},
-                "latest_activity_note_by": {"$first": "$user_name"},
-            }}
-        ]).to_list(1000)
-        _cg_notes_map = {r["_id"]: r for r in _cg_latest_notes}
+    _bi_unread_map, _bi_new_docs_map = await get_portal_flags_maps(_bi_process_ids)
+    _cg_notes_map = await get_latest_notes_map(_bi_process_ids)
 
     # Construir lista de clientes com informações enriquecidas
     clients_list = []
@@ -5540,30 +4684,8 @@ async def get_portal_messages_unread_staff(
     process_id: str,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Conta mensagens não lidas do cliente para este processo (vista staff).
-
-    Retorna o número de mensagens enviadas pelo cliente que o staff
-    ainda não leu (read_by_staff=False).
-    """
-    # Validate process exists and user has access
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    try:
-        count = await db.portal_messages.count_documents({
-            "process_id": process_id,
-            "sender_type": "client",
-            "read_by_staff": False,
-        })
-        return {"unread_count": count}
-    except Exception as e:
-        logger.error(f"[PROCESS] Erro ao contar mensagens não lidas do portal: {e}")
-        return {"unread_count": 0}
+    """Conta mensagens não lidas do cliente para este processo (vista staff)."""
+    return await count_unread_for_staff(process_id)
 
 
 @router.get("/{process_id}/portal-messages")
@@ -5571,52 +4693,8 @@ async def get_portal_messages_staff(
     process_id: str,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Lista mensagens do portal para este processo (vista staff).
-
-    Retorna as últimas 100 mensagens ordenadas por data de criação
-    ascendente (mais antigas primeiro). Ao listar, marca automaticamente
-    as mensagens do cliente como lidas pelo staff (read_by_staff=True).
-    """
-    # Validate process exists
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    try:
-        # Buscar últimas 100 mensagens
-        messages = await db.portal_messages.find(
-            {"process_id": process_id},
-            {"_id": 0}
-        ).sort("created_at", 1).limit(100).to_list(100)
-
-        # Marcar mensagens do cliente como lidas pelo staff
-        try:
-            await db.portal_messages.update_many(
-                {
-                    "process_id": process_id,
-                    "sender_type": "client",
-                    "read_by_staff": False,
-                },
-                {"$set": {"read_by_staff": True}}
-            )
-        except Exception as e:
-            logger.warning(f"[PROCESS] Erro ao marcar mensagens do portal como lidas: {e}")
-
-        return {
-            "messages": messages,
-            "total": len(messages),
-            "process_id": process_id,
-        }
-    except Exception as e:
-        logger.error(f"[PROCESS] Erro ao listar mensagens do portal: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Erro ao carregar mensagens do portal."
-        )
+    """Lista mensagens do portal e marca as do cliente como lidas pelo staff."""
+    return await list_messages_for_staff(process_id)
 
 
 @router.post("/{process_id}/portal-messages")
@@ -5625,139 +4703,5 @@ async def send_portal_message_staff(
     data: dict,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Envia uma mensagem do staff para o cliente via portal.
-
-    Body:
-    - content: Texto da mensagem (obrigatório)
-    """
-    import uuid as _uuid
-
-    # Validate process exists
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    content = data.get("content", "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="A mensagem não pode estar vazia.")
-    if len(content) > 5000:
-        raise HTTPException(status_code=400, detail="A mensagem não pode exceder 5000 caracteres.")
-
-    now = datetime.now(timezone.utc).isoformat()
-    message_id = str(_uuid.uuid4())
-
-    message_doc = {
-        "id": message_id,
-        "process_id": process_id,
-        "sender_type": "staff",
-        "sender_id": user.get("id", ""),
-        "sender_name": user.get("name", "Staff"),
-        "content": content,
-        "created_at": now,
-        "read_by_client": False,
-        "read_by_staff": True,
-    }
-
-    try:
-        await db.portal_messages.insert_one(message_doc)
-        logger.info(
-            f"[PROCESS] Mensagem do portal enviada por {user.get('email')} "
-            f"para processo {process_id}"
-        )
-    except Exception as e:
-        logger.error(f"[PROCESS] Erro ao enviar mensagem do portal: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Erro ao enviar mensagem. Tente novamente."
-        )
-
-    # ── Notificar outros membros da equipa (excluindo o remetente) ──
-    await _notify_team_portal_message(process, user, process_id)
-
-    # ── In-app notification para membros da equipa atribuídos ──
-    try:
-        from routes.portal import _get_all_assigned_user_ids
-        assigned_ids = _get_all_assigned_user_ids(process)
-        sender_id = user.get("id", "")
-        process_number = process.get("process_number", "")
-        process_ref = f"#{process_number}" if process_number else process_id[:8]
-        
-        for uid in assigned_ids:
-            if uid == sender_id:
-                continue  # Não notificar o remetente
-            try:
-                from services.realtime_notifications import send_realtime_notification
-                await send_realtime_notification(
-                    user_id=uid,
-                    title="Nova Mensagem Interna",
-                    message=f"{user.get('name', 'Staff')} enviou uma mensagem no processo {process_ref}.",
-                    notification_type="portal_message",
-                    link=f"/processes/{process_id}",
-                    process_id=process_id,
-                )
-            except Exception as notif_err:
-                logger.debug(f"Erro ao notificar membro {uid} sobre mensagem interna: {notif_err}")
-    except Exception as e:
-        logger.warning(f"Erro ao notificar equipa sobre mensagem do portal: {e}")
-
-    # ── Broadcast para a sala WebSocket do processo ──
-    try:
-        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
-            "id": message_id,
-            "process_id": process_id,
-            "sender_type": "staff",
-            "sender_id": user.get("id", ""),
-            "sender_name": user.get("name", "Staff"),
-            "content": content[:200],
-            "created_at": now,
-        })
-        await manager.broadcast_to_room(f"process_{process_id}", ws_message, exclude_user=user.get("id"))
-    except Exception as ws_err:
-        logger.debug(f"Erro ao broadcast mensagem staff via WebSocket: {ws_err}")
-
-    # Return without MongoDB _id
-    return {
-        "id": message_id,
-        "process_id": process_id,
-        "sender_type": "staff",
-        "sender_id": user.get("id", ""),
-        "sender_name": user.get("name", "Staff"),
-        "content": content,
-        "created_at": now,
-        "read_by_client": False,
-        "read_by_staff": True,
-    }
-
-
-async def _notify_team_portal_message(process: dict, sender: dict, process_id: str):
-    """Notifica outros membros da equipa atribuída quando um membro envia mensagem ao cliente.
-    
-    O remetente NÃO recebe notificação. Apenas os outros utilizadores atribuídos.
-    """
-    from routes.portal import _get_all_assigned_user_ids
-    
-    assigned_ids = _get_all_assigned_user_ids(process)
-    sender_id = sender.get("id", "")
-    process_ref = process.get("process_number", process_id)
-    sender_name = sender.get("name", "Membro da equipa")
-    client_name = process.get("client_name", "Cliente")
-    
-    for uid in assigned_ids:
-        if uid == sender_id:
-            continue  # Não notificar o remetente
-        try:
-            team_user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
-            if team_user and team_user.get("email"):
-                await send_notification_with_preference_check(
-                    team_user["email"],
-                    "Nova Mensagem no Processo",
-                    f"{sender_name} enviou uma mensagem ao cliente {client_name} no processo #{process_ref}.",
-                    notification_type="portal_message"
-                )
-        except Exception as e:
-            logger.warning(f"Erro ao notificar membro {uid} sobre mensagem do portal: {e}")
-
+    """Envia uma mensagem do staff para o cliente via portal."""
+    return await send_staff_message(process_id, data.get("content", ""), user)
