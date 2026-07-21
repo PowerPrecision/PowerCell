@@ -156,7 +156,6 @@ import {
   Database,
   Calculator,
   TrendingUp,
-  Link2,
   Lock,
   Eye,
   EyeOff,
@@ -176,106 +175,28 @@ import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeDateStr, safeParseISO, safeFormat, safeDate } from "../lib/utils";
 
+import {
+  statusColors,
+  BANK_LIST,
+  getBankColor,
+  typeLabels,
+} from "./processDetails/processDetailsConstants";
+import {
+  formatDateForInput,
+  cleanPersonalDataForSubmit,
+  cleanTitular2DataForSubmit,
+  cleanRealEstateDataForSubmit,
+  cleanCreditDataForSubmit,
+  cleanFinancialDataForSubmit,
+} from "./processDetails/processFormCleaners";
+import { validateNIF } from "../utils/validateNIF";
+import VisitasTab from "../components/processDetails/VisitasTab";
+
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
-const statusColors = {
-  yellow: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  blue: "bg-blue-100 text-blue-800 border-blue-200",
-  orange: "bg-orange-100 text-orange-800 border-orange-200",
-  green: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  red: "bg-red-100 text-red-800 border-red-200",
-  purple: "bg-purple-100 text-purple-800 border-purple-200",
-};
+// Constantes/helpers: processDetailsConstants, processFormCleaners, validateNIF, VisitasTab
 
-const BANK_LIST = [
-  "ABANCA", "BBVA", "BEST", "BIG", "BPI", "CGD", "Crédito Agrícola",
-  "CTT", "Millennium bcp", "Novo Banco", "Popular", "Santander Totta", "Outro"
-];
-
-// Cores dos bancos portugueses para badges
-const BANK_COLORS = {
-  "ABANCA": "bg-red-500 text-white",
-  "BBVA": "bg-blue-600 text-white",
-  "BEST": "bg-green-600 text-white",
-  "BIG": "bg-orange-500 text-white",
-  "BPI": "bg-yellow-400 text-yellow-900",
-  "CGD": "bg-red-600 text-white",
-  "Crédito Agrícola": "bg-green-500 text-white",
-  "Credito Agricola": "bg-green-500 text-white",
-  "CTT": "bg-red-400 text-white",
-  "Millennium bcp": "bg-red-500 text-white",
-  "Millennium": "bg-red-500 text-white",
-  "bcp": "bg-red-500 text-white",
-  "Novo Banco": "bg-gray-700 text-white",
-  "NovoBanco": "bg-gray-700 text-white",
-  "Popular": "bg-blue-500 text-white",
-  "Santander Totta": "bg-red-600 text-white",
-  "Santander": "bg-red-600 text-white",
-  "Bankinter": "bg-blue-800 text-white",
-  "ActivoBank": "bg-teal-500 text-white",
-  "Eurobic": "bg-red-500 text-white",
-  "BIC": "bg-red-500 text-white",
-  "Caixa Geral": "bg-red-600 text-white",
-};
-
-// Função para obter cor do banco
-const getBankColor = (bankName) => {
-  if (!bankName) return "bg-gray-200 text-gray-800";
-  
-  // Garantir que bankName é uma string (pode vir como objecto {value, label})
-  const name = typeof bankName === 'string' ? bankName : (bankName?.label || bankName?.value || String(bankName));
-  
-  // Tentar match exato primeiro
-  if (BANK_COLORS[name]) {
-    return BANK_COLORS[name];
-  }
-  
-  // Tentar match parcial (case-insensitive)
-  const bankLower = name.toLowerCase();
-  for (const [bank, color] of Object.entries(BANK_COLORS)) {
-    if (bankLower.includes(bank.toLowerCase()) || bank.toLowerCase().includes(bankLower)) {
-      return color;
-    }
-  }
-  
-  // Cor padrão para bancos não mapeados
-  return "bg-gray-200 text-gray-800";
-};
-
-const typeLabels = {
-  credito: "Crédito",
-  imobiliaria: "Imobiliária",
-  ambos: "Crédito + Imobiliária",
-};
-
-// Função para validar NIF português
-const validateNIF = (nif) => {
-  if (!nif) return { valid: true, error: null };
-  
-  // Remover espaços e caracteres especiais
-  const nifClean = nif.replace(/[^\d]/g, '');
-  
-  if (nifClean.length !== 9) {
-    return { valid: false, error: `NIF deve ter 9 dígitos (tem ${nifClean.length})` };
-  }
-  
-  if (!/^\d+$/.test(nifClean)) {
-    return { valid: false, error: "NIF deve conter apenas dígitos" };
-  }
-  
-  // NIFs que começam com 5 são de empresas
-  if (nifClean.startsWith('5')) {
-    return { valid: false, error: "NIF de empresa (começa por 5) não é permitido para clientes particulares" };
-  }
-  
-  return { valid: true, error: null };
-};
-
-// ── Dynamic Form Fields Tab Component ───────────────────────────
-// Fetches form config from /api/admin/form-config/fields and displays
-// all fields that have a corresponding value in the process data.
-// Custom fields created in Form Manager appear here automatically.
 const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
@@ -387,17 +308,6 @@ const ProcessDetails = () => {
 
   // Estado para etiquetas (Fase 3)
   const [newLabel, setNewLabel] = useState("");
-  const LABEL_PRESETS = ["Urgente", "Refinanciamento", "Primeira Habitação", "Investimento", "Documentação Pendente", "Aguarda Banco", "Aguarda Cliente", "Jovem"];
-
-  // Estado para Visitas/Imóveis tab
-  const [visitasProperties, setVisitasProperties] = useState([]);
-  const [visitasLoading, setVisitasLoading] = useState(false);
-  const [showAssociatePropertyDialog, setShowAssociatePropertyDialog] = useState(false);
-  const [propertySearch, setPropertySearch] = useState("");
-  const [propertySearchResults, setPropertySearchResults] = useState([]);
-  const [propertySearchLoading, setPropertySearchLoading] = useState(false);
-  const [associatingProperty, setAssociatingProperty] = useState(false);
-
 
   // Estado para Mensagens do Portal (cliente ↔ staff)
   const [portalMessages, setPortalMessages] = useState([]);
@@ -867,99 +777,6 @@ const ProcessDetails = () => {
     return () => clearTimeout(timeoutId);
   }, [status]);
 
-  // ── VisitasTab: Hooks para gerir imóveis associados ao processo ──
-  // IMPORTANT: These hooks MUST be before any early returns (Rules of Hooks)
-  const fetchVisitasProperties = useCallback(async () => {
-    if (!id) return;
-    setVisitasLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/properties/by-process/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setVisitasProperties(Array.isArray(data) ? data : []);
-      } else {
-        // Non-OK response handled silently; error already surfaced via UI state
-      }
-    } catch (error) {
-      console.error("Erro ao carregar imóveis:", error);
-    } finally {
-      setVisitasLoading(false);
-    }
-  }, [id, token]);
-
-  const searchProperties = useCallback(async (query) => {
-    if (!query || query.length < 2) {
-      setPropertySearchResults([]);
-      return;
-    }
-    setPropertySearchLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/properties?search=${encodeURIComponent(query)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Filtrar imóveis que já estão associados a este processo
-        const associatedIds = visitasProperties.map((p) => p.id);
-        setPropertySearchResults(data.filter((p) => !associatedIds.includes(p.id)));
-      }
-    } catch (error) {
-      console.error("Erro ao pesquisar imóveis:", error);
-    } finally {
-      setPropertySearchLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  const handleAssociateProperty = useCallback(async (propertyId) => {
-    setAssociatingProperty(true);
-    try {
-      const response = await fetch(
-        `${API_URL}/api/properties/${propertyId}/interested-client?client_id=${id}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (response.ok) {
-        toast.success("Imóvel associado ao processo com sucesso");
-        setShowAssociatePropertyDialog(false);
-        setPropertySearch("");
-        setPropertySearchResults([]);
-        fetchVisitasProperties();
-      } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao associar imóvel"));
-      }
-    } catch (error) {
-      console.error("Erro ao associar imóvel:", error);
-      toast.error("Erro ao associar imóvel ao processo");
-    } finally {
-      setAssociatingProperty(false);
-    }
-  }, [id, token, fetchVisitasProperties]);
-
-  // Buscar imóveis quando o tab Visitas fica activo
-  useEffect(() => {
-    if (activeTab === "visitas") {
-      fetchVisitasProperties();
-    }
-  }, [activeTab, fetchVisitasProperties]);
-
-  // Debounce para pesquisa de imóveis
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (propertySearch.length >= 2) {
-        searchProperties(propertySearch);
-      } else {
-        setPropertySearchResults([]);
-      }
-    }, 400);
-    return () => clearTimeout(timeout);
-  }, [propertySearch, searchProperties]);
-
   // ── Portal Messages: Hooks para mensagens cliente ↔ staff ──
   const fetchPortalMessages = useCallback(async () => {
     if (!id) return;
@@ -1292,215 +1109,6 @@ const ProcessDetails = () => {
     } catch (e) {
       toast.error("Erro ao obter link de download");
     }
-  };
-
-  // Helper para converter data em formato português para ISO
-  const convertPortugueseDateToISO = (dateStr) => {
-    if (!dateStr) return dateStr;
-    
-    // Se já está em formato ISO (yyyy-MM-dd), retornar como está
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return dateStr;
-    }
-    
-    // Meses em português
-    const monthsMap = {
-      'janeiro': '01', 'fevereiro': '02', 'março': '03', 'abril': '04',
-      'maio': '05', 'junho': '06', 'julho': '07', 'agosto': '08',
-      'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12'
-    };
-    
-    // Tentar parsear formato "DD de MMMM de YYYY"
-    const match = dateStr.toLowerCase().match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/);
-    if (match) {
-      const day = match[1].padStart(2, '0');
-      const month = monthsMap[match[2]];
-      const year = match[3];
-      if (month) {
-        return `${year}-${month}-${day}`;
-      }
-    }
-    
-    // Tentar parsear formato "DD/MM/YYYY"
-    const shortMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (shortMatch) {
-      const day = shortMatch[1].padStart(2, '0');
-      const month = shortMatch[2].padStart(2, '0');
-      const year = shortMatch[3];
-      return `${year}-${month}-${day}`;
-    }
-    
-    // Se não conseguir parsear, retornar null para evitar erros
-    return null;
-  };
-
-  // Helper para formatar data para input type="date" (sempre retorna yyyy-MM-dd ou vazio)
-  const formatDateForInput = (dateStr) => {
-    if (!dateStr) return "";
-    const iso = convertPortugueseDateToISO(dateStr);
-    return iso || "";
-  };
-
-  // Helper para limpar dados pessoais antes de enviar
-  const cleanPersonalDataForSubmit = (data) => {
-    const cleaned = { ...data };
-    
-    // Converter datas para formato ISO
-    if (cleaned.data_nascimento) {
-      cleaned.data_nascimento = convertPortugueseDateToISO(cleaned.data_nascimento);
-    }
-    if (cleaned.data_validade_cc) {
-      cleaned.data_validade_cc = convertPortugueseDateToISO(cleaned.data_validade_cc);
-    }
-    
-    // Remover campos internos que não devem ser guardados no processo
-    delete cleaned.nif_hash;
-    delete cleaned.email_hash;
-    delete cleaned.telefone_hash;
-    delete cleaned.marital_status; // phantom field, usar estado_civil
-    
-    // Garantir que campos numéricos que o backend espera como string não sejam enviados como número
-    // Isto previne erros 422 quando dados antigos na BD têm tipos inesperados
-    const stringFields = ['nif', 'niss', 'documento_id', 'altura', 'codigo_postal', 'phone'];
-    for (const field of stringFields) {
-      if (cleaned[field] !== undefined && cleaned[field] !== null && cleaned[field] !== '') {
-        cleaned[field] = String(cleaned[field]);
-      }
-    }
-    
-    // Garantir que campos booleanos não são strings
-    if (cleaned.menor_35_anos !== undefined && cleaned.menor_35_anos !== null) {
-      cleaned.menor_35_anos = Boolean(cleaned.menor_35_anos);
-    }
-    
-    // Limpar NIF: remover espaços e caracteres não numéricos
-    if (cleaned.nif) {
-      cleaned.nif = cleaned.nif.replace(/[^\d]/g, '');
-      // Se após limpeza não tem 9 dígitos, não enviar (evita 422)
-      if (cleaned.nif.length !== 9) {
-        delete cleaned.nif;
-      }
-    }
-    
-    // Remover campos undefined ou vazios que podem causar problemas
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined || cleaned[key] === '') {
-        delete cleaned[key];
-      }
-    });
-    
-    return cleaned;
-  };
-
-  // Helper para limpar dados do 2º titular antes de enviar
-  const cleanTitular2DataForSubmit = (data) => {
-    const cleaned = { ...data };
-    // Converter data de nascimento para formato ISO
-    if (cleaned.birth_date) {
-      cleaned.birth_date = convertPortugueseDateToISO(cleaned.birth_date);
-    }
-    // Remover campos internos que não devem ser guardados no processo
-    delete cleaned.nif_hash;
-    
-    // Garantir que NIF é string limpa
-    if (cleaned.nif) {
-      cleaned.nif = String(cleaned.nif).replace(/[^\d]/g, '');
-      if (cleaned.nif.length !== 9) {
-        delete cleaned.nif;
-      }
-    }
-    
-    // Remover campos undefined ou vazios
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined || cleaned[key] === '') {
-        delete cleaned[key];
-      }
-    });
-    return cleaned;
-  };
-
-  // Helper para limpar dados do imóvel antes de enviar
-  const cleanRealEstateDataForSubmit = (data) => {
-    const cleaned = { ...data };
-    // Converter strings vazias → null (para permitir limpar campos no backend)
-    // Campos undefined são removidos (não foram alterados).
-    // Campos com "" significam que o utilizador limpou o campo → enviar null.
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined) {
-        delete cleaned[key];
-      } else if (cleaned[key] === '') {
-        cleaned[key] = null;
-      }
-    });
-    return cleaned;
-  };
-
-  // Helper para limpar dados de crédito antes de enviar
-  const cleanCreditDataForSubmit = (data) => {
-    const cleaned = { ...data };
-    // Converter datas para ISO
-    if (cleaned.valuation_date) {
-      cleaned.valuation_date = convertPortugueseDateToISO(cleaned.valuation_date);
-    }
-    if (cleaned.bank_approval_date) {
-      cleaned.bank_approval_date = convertPortugueseDateToISO(cleaned.bank_approval_date);
-    }
-    // Remover campos undefined; strings vazias → null (para permitir limpar campos)
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined) {
-        delete cleaned[key];
-      } else if (cleaned[key] === '') {
-        cleaned[key] = null;
-      }
-    });
-    return cleaned;
-  };
-
-  // Helper para limpar dados financeiros para envio
-  const cleanFinancialDataForSubmit = (data) => {
-    // Campos válidos do modelo FinancialData no backend
-    const validFields = [
-      'acesso_portal_financas', 'chave_movel_digital', 'renda_habitacao_atual',
-      'precisa_vender_casa', 'efetivo', 'fiador', 'bancos_creditos',
-      'capital_proprio', 'valor_financiado', 'valor_pretendido', 'valor_entrada',
-      'data_sinal', 'reforco_sinal', 'comissao_mediacao',
-      // Credenciais de portais oficiais
-      'portal_financas_utilizador', 'portal_financas_senha',
-      'seg_social_utilizador', 'seg_social_senha',
-      // Situação profissional e rendimentos
-      'monthly_income', 'employment_type', 'employment_duration', 'employer_name',
-      'employer_nif', 'trabalha_estrangeiro', 'bancos_simulacoes', 'tempo_restante_credito',
-      // Campos extraídos pela IA
-      'rendimento_mensal', 'rendimento_bruto', 'salario_liquido', 'salario_bruto',
-      'empresa', 'tipo_contrato', 'categoria_profissional', 'subsidiario_alimentacao',
-      'data_referencia',
-      // Créditos existentes e co-titular
-      'nr_dependentes', 'number_of_dependents', 'rendimento_co_titular',
-      'creditos_existentes', 'prestacao_creditos_mensal',
-      // Rendimento agregado
-      'rendimento_agregado',
-      // Rendimento anual (campo do modelo ClientFinancialData)
-      'rendimento_anual',
-      // Antiguidade no emprego (alias português)
-      'antiguidade_emprego',
-      // Outros rendimentos e despesas
-      'outros_rendimentos', 'despesas_mensais',
-      // Contas abertas (bancos)
-      'tem_creditos_activos',
-    ];
-    
-    const cleaned = {};
-    for (const key of validFields) {
-      if (data[key] !== undefined) {
-        if (data[key] === null || data[key] === '') {
-          // Utilizador limpou o campo → enviar null para o backend limpar
-          cleaned[key] = null;
-        } else {
-          cleaned[key] = data[key];
-        }
-      }
-    }
-    return cleaned;
   };
 
   // Função para executar o save após confirmação
@@ -2083,280 +1691,6 @@ const ProcessDetails = () => {
 
   const deadlineDates = deadlines.map((d) => safeParseISO(d.due_date)).filter(Boolean);
   const currentStatusInfo = getStatusInfo(process.status);
-
-  const propertyStatusColors = {
-    disponivel: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    reservado: "bg-amber-100 text-amber-800 border-amber-200",
-    vendido: "bg-red-100 text-red-800 border-red-200",
-    suspenso: "bg-gray-100 text-gray-800 border-gray-200",
-    em_analise: "bg-blue-100 text-blue-800 border-blue-200",
-  };
-
-  const propertyStatusLabels = {
-    disponivel: "Disponível",
-    reservado: "Reservado",
-    vendido: "Vendido",
-    suspenso: "Suspenso",
-    em_analise: "Em Análise",
-  };
-
-  const propertyTypeLabels = {
-    apartamento: "Apartamento",
-    moradia: "Moradia",
-    terreno: "Terreno",
-    loja: "Loja",
-    escritorio: "Escritório",
-    armazem: "Armazém",
-    garagem: "Garagem",
-    outro: "Outro",
-  };
-
-  const formatPrice = (value) => {
-    if (!value && value !== 0) return "—";
-    return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(value);
-  };
-
-  const VisitasTab = () => (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-emerald-100 dark:bg-emerald-900/40 rounded-lg">
-              <Home className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-emerald-800 dark:text-emerald-200">Visitas / Imóveis</h3>
-              <p className="text-sm text-emerald-600 dark:text-emerald-400">
-                Imóveis associados a este processo
-              </p>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-            onClick={() => {
-              setPropertySearch("");
-              setPropertySearchResults([]);
-              setShowAssociatePropertyDialog(true);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            Associar Imóvel
-          </Button>
-        </div>
-      </div>
-
-      {/* Loading state */}
-      {visitasLoading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-          <span className="ml-3 text-muted-foreground">A carregar imóveis...</span>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!visitasLoading && visitasProperties.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="py-12 flex flex-col items-center text-center">
-            <div className="p-3 bg-muted rounded-full mb-4">
-              <Building2 className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <h4 className="font-semibold text-lg mb-1">Nenhum imóvel associado</h4>
-            <p className="text-sm text-muted-foreground max-w-md">
-              Nenhum imóvel associado a este processo. Clique em "Associar Imóvel" para ligar um imóvel existente a este processo.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Properties list */}
-      {!visitasLoading && visitasProperties.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {visitasProperties.map((prop) => (
-            <Card key={prop.id} className="overflow-hidden hover:shadow-md transition-shadow">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {safeString(prop.internal_reference)}
-                      </span>
-                      <Badge
-                        className={`text-[10px] px-1.5 py-0 ${propertyStatusColors[prop.status] || "bg-gray-100 text-gray-800"}`}
-                        variant="outline"
-                      >
-                        {propertyStatusLabels[prop.status] || prop.status}
-                      </Badge>
-                    </div>
-                    <h5 className="font-semibold text-sm truncate">
-                      {safeString(prop.title)}
-                    </h5>
-                  </div>
-                  <Badge variant="outline" className="text-xs ml-2 shrink-0">
-                    {propertyTypeLabels[prop.property_type] || prop.property_type}
-                  </Badge>
-                </div>
-
-                {/* Price */}
-                <div className="text-lg font-bold text-emerald-700 dark:text-emerald-400 mb-2">
-                  {formatPrice(prop.asking_price)}
-                </div>
-
-                {/* Location */}
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
-                  <MapPin className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">
-                    {[prop.municipality, prop.district].filter(Boolean).join(", ")}
-                  </span>
-                </div>
-
-                {/* Features */}
-                {(prop.bedrooms != null || prop.useful_area != null) && (
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
-                    {prop.bedrooms != null && (
-                      <span>T{prop.bedrooms}</span>
-                    )}
-                    {prop.useful_area != null && (
-                      <span>{prop.useful_area} m²</span>
-                    )}
-                  </div>
-                )}
-
-                {/* Client name */}
-                {prop.client_name && (
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
-                    <User className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{prop.client_name}</span>
-                  </div>
-                )}
-
-                {/* Source URL */}
-                {prop.source_url && (
-                  <div className="flex items-center gap-1.5 text-xs mt-2 pt-2 border-t">
-                    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <a
-                      href={prop.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 hover:underline truncate"
-                    >
-                      Ver origem
-                    </a>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Dialog para associar imóvel */}
-      <Dialog open={showAssociatePropertyDialog} onOpenChange={setShowAssociatePropertyDialog}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Link2 className="h-5 w-5 text-emerald-600" />
-              Associar Imóvel
-            </DialogTitle>
-            <DialogDescription>
-              Pesquise e selecione um imóvel existente para associar a este processo.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Pesquisar imóveis por título, referência ou localidade..."
-                value={propertySearch}
-                onChange={(e) => setPropertySearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-
-            {propertySearchLoading && (
-              <div className="flex items-center justify-center py-6">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">A pesquisar...</span>
-              </div>
-            )}
-
-            {!propertySearchLoading && propertySearch.length >= 2 && propertySearchResults.length === 0 && (
-              <div className="text-center py-6 text-sm text-muted-foreground">
-                Nenhum imóvel encontrado para "{propertySearch}"
-              </div>
-            )}
-
-            {!propertySearchLoading && propertySearchResults.length > 0 && (
-              <ScrollArea className="max-h-72">
-                <div className="space-y-2 pr-3">
-                  {propertySearchResults.map((prop) => (
-                    <div
-                      key={prop.id}
-                      className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors"
-                    >
-                      <div className="flex-1 min-w-0 mr-3">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="text-xs text-muted-foreground font-mono">
-                            {safeString(prop.internal_reference)}
-                          </span>
-                          <Badge
-                            className={`text-[9px] px-1 py-0 ${propertyStatusColors[prop.status] || "bg-gray-100 text-gray-800"}`}
-                            variant="outline"
-                          >
-                            {propertyStatusLabels[prop.status] || prop.status}
-                          </Badge>
-                        </div>
-                        <p className="text-sm font-medium truncate">{prop.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {[prop.municipality, prop.district].filter(Boolean).join(", ")}
-                          {" · "}
-                          {formatPrice(prop.asking_price)}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0 gap-1 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                        onClick={() => handleAssociateProperty(prop.id)}
-                        disabled={associatingProperty}
-                      >
-                        {associatingProperty ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Link2 className="h-3.5 w-3.5" />
-                        )}
-                        Associar
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-
-            {propertySearch.length < 2 && (
-              <p className="text-xs text-center text-muted-foreground py-4">
-                Escreva pelo menos 2 caracteres para pesquisar
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowAssociatePropertyDialog(false);
-                setPropertySearch("");
-                setPropertySearchResults([]);
-              }}
-            >
-              Cancelar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-
 
   return (
     <DashboardLayout title="Detalhes do Processo">
@@ -5020,6 +4354,7 @@ const ProcessDetails = () => {
                       {/* PACOTE DB — AI Executive Summary temporariamente oculto (display: none).
                           O Card é mantido para reativação futura — não apagar.
                           Originalmente: só visível para admin e CEO. */}
+                      {/* eslint-disable-next-line no-constant-binary-expression -- feature flag off until AI summary is re-enabled */}
                       {hasAnyRole(user, ["admin", "ceo"]) && false && (
                       <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10" style={{ display: 'none' }}>
                         <CardContent className="pt-4">
@@ -5156,7 +4491,7 @@ const ProcessDetails = () => {
 
                   {/* Visitas / Imóveis Tab */}
                   <TabsContent value="visitas" className="mt-4">
-                    <VisitasTab />
+                    <VisitasTab processId={id} />
                   </TabsContent>
 
                   {/* Mensagens do Portal Tab */}
