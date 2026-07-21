@@ -115,6 +115,26 @@ from services.process_my_clients import (
     fetch_new_documents_map,
     fetch_latest_activity_notes_map,
 )
+from services.process_indexing import (
+    compute_next_workflow_status,
+    build_indexacao_update_set,
+    collect_assigned_user_ids,
+)
+from services.process_create import (
+    resolve_initial_workflow_status,
+    load_existing_client_for_process,
+    build_staff_process_doc,
+    apply_creator_role_assignment,
+    attach_second_client_on_create,
+    create_default_portal_documents,
+    link_clients_after_process_create,
+)
+from services.process_update import (
+    prepare_encrypted_client_updates,
+    apply_client_personal_updates_from_process_put,
+    merge_nested_process_section,
+    build_role_update_permissions,
+)
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
 
@@ -578,114 +598,42 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
             detail="É obrigatório associar um cliente existente para criar um processo. "
                    "Selecione um cliente na listagem antes de criar o processo."
         )
-    
-    # Obter o primeiro estado do workflow
-    # PACOTE DB — Se não houver workflow_statuses, deixa vazio (None) em vez
-    # de inventar "clientes_espera". Não inventar nomes de fases no código.
-    first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    default_status = first_status["name"] if first_status else None
 
-    # ============================================================
-    # PACOTE CY — Routing: Lead vs Processo Ativo
-    # ============================================================
-    # Se is_lead=True, o processo vai para a caixa "Registos de Clientes"
-    # (status vazio/Lead) — NÃO aparece no Kanban ativo, aparece na sala
-    # de triagem. lead_status do cliente mantém-se "new" (não "converted").
-    # Se is_lead=False (default), vai para a primeira coluna do Kanban ativo.
-    # PACOTE DB — is_lead usa status=None (Lead) em vez de "pre_registo".
-    # ============================================================
     is_lead = bool(getattr(data, 'is_lead', False))
-    if is_lead:
-        initial_status = None
-        logger.info("[CREATE-PROCESS] is_lead=True → status vazio (Lead / Registos de Clientes)")
-    else:
-        initial_status = default_status
-        if initial_status:
-            logger.info(f"[CREATE-PROCESS] status inicial = 1ª fase real do workflow: {initial_status}")
-        else:
-            logger.warning("[CREATE-PROCESS] workflow_statuses vazio — status inicial = None (sem fases configuradas)")
-    
-    # Gerar ID único e número sequencial
+    initial_status, _default_status = await resolve_initial_workflow_status(is_lead=is_lead)
+
     process_id = str(uuid.uuid4())
     process_number = await get_next_process_number()
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Inicializar dados do cliente (serão preenchidos a partir do registo do cliente)
-    client_name = ""
-    client_email = ""
-    client_phone = ""
-    client_nif = None
-    
-    # ============================================================
-    # VERIFICAR/CRIAR CLIENTE NA TABELA CLIENTS
-    # Usar blind indexes para pesquisa de dados encriptados
-    # ============================================================
+
+    client_fields = await load_existing_client_for_process(data.client_id)
+    client_id = client_fields["client_id"]
+    client_name = client_fields["client_name"]
+    client_email = client_fields["client_email"]
+    client_phone = client_fields["client_phone"]
+    client_nif = client_fields["client_nif"]
+
+    # Dead path preserved: NIF/email create-on-fly never runs after required client_id
     existing_client = None
-    client_id = None
-
-    # Se recebeu client_id, usar diretamente
-    if data.client_id:
-        existing_client = await db.clients.find_one({"id": data.client_id})
-        if not existing_client:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Cliente com ID '{data.client_id}' não encontrado. "
-                       "Verifique se o cliente existe na base de dados."
-            )
-        client_id = existing_client["id"]
-        # Desencriptar dados do cliente existente para usar no processo
-        decrypted = decrypt_client_data(existing_client)
-        client_name = decrypted.get("nome", client_name)
-        client_email = decrypted.get("contacto", {}).get("email", client_email) or client_email
-        client_phone = decrypted.get("contacto", {}).get("telefone", client_phone) or client_phone
-        nif_val = decrypted.get("dados_pessoais", {}).get("nif", "")
-        if nif_val:
-            client_nif = nif_val
-        
-        # VALIDAÇÃO: E-mail obrigatório para acesso ao Portal do Cliente
-        if not client_email or not client_email.strip():
-            raise HTTPException(
-                status_code=400,
-                detail="O e-mail é obrigatório para a criação do Portal do Cliente. "
-                       "Adicione um e-mail de contacto ao cliente antes de criar o processo."
-            )
-        
-        logger.info(f"Cliente existente usado via client_id: {client_id}")
-    else:
-        # Esta ramificação não deve ser alcançada devido à validação acima,
-        # mas mantemos como salvaguarda.
-        raise HTTPException(
-            status_code=400,
-            detail="É obrigatório associar um cliente existente para criar um processo."
-        )
-
-    # Se não encontrou por client_id, procurar por NIF ou email (deduplicação)
     if not client_id and (client_nif or client_email):
         query = []
         if client_nif:
             nif_hash = generate_nif_hash(client_nif)
             if nif_hash:
                 query.append({"dados_pessoais.nif_hash": nif_hash})
-            # Fallback para dados antigos não migrados
             query.append({"dados_pessoais.nif": client_nif})
         if client_email:
             email_hash = generate_email_hash(client_email)
             if email_hash:
                 query.append({"contacto.email_hash": email_hash})
-            # Fallback para dados antigos não migrados
             query.append({"contacto.email": client_email.lower()})
-
         existing_client = await db.clients.find_one({"$or": query})
-    
+
     if existing_client:
-        # Cliente já existe - usar o ID existente
         client_id = existing_client["id"]
         logger.info(f"Cliente existente encontrado: {client_id} - {existing_client.get('nome')}")
-    else:
-        # Criar novo cliente
-        # RGPD: Encriptar dados sensíveis ANTES de inserir
-        from models.client import Client, ClientContact, ClientPersonalData
-
+    elif not client_id:
+        from models.client import Client, ClientContact, ClientPersonalData  # noqa: F401
         client_id = str(uuid.uuid4())
         new_client = {
             "id": client_id,
@@ -698,225 +646,74 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
                 "nif": client_nif,
                 "nome_completo": sanitize_name(client_name),
             },
-            "process_ids": [],  # Será atualizado após criar o processo
+            "process_ids": [],
             "fonte": "staff_created",
             "created_at": now,
             "updated_at": now,
             "created_by": user.get("email")
         }
-
-        # RGPD: Encriptar dados sensíveis antes de inserir
         new_client = encrypt_client_data(new_client)
         await db.clients.insert_one(new_client)
         logger.info(f"Novo cliente criado: {client_id} - {client_name}")
-    
-    # ============================================================
-    # CONSTRUIR DOCUMENTO DO PROCESSO
-    # ============================================================
-    process_doc = {
-        "id": process_id,
-        "process_number": process_number,
-        # Suporte a múltiplos clientes (N:M)
-        "client_ids": [client_id] if client_id else [],
-        "client_id": client_id,  # Mantém compatibilidade
-        "client_name": client_name,
-        "client_email": client_email,
-        "client_phone": client_phone,
-        "client_nif": client_nif,
-        "process_type": data.process_type,
-        "status": initial_status,
-        "is_active": True,  # Novos processos são ativos por defeito
-        "real_estate_data": None,
-        "credit_data": None,
-        "created_at": now,
-        "updated_at": now,
-        "source": "lead" if is_lead else "staff_created"
-    }
 
-    # ============================================================
-    # PACOTE BP — 2º TITULAR (second_client_id) NA CRIAÇÃO
-    # ============================================================
-    # Se o processo for criado com um 2º titular (cliente existente),
-    # injetamos second_client_id/second_client_name no process_doc e
-    # adicionamos o client_id do 2º titular ao array client_ids (para
-    # que as queries de listagem que usam {"client_ids": cliente_id}
-    # apanhem processos em que ele é 1º OU 2º titular).
-    #
-    # Após a inserção, atualizamos o array process_ids do 2º titular
-    # com $addToSet — sem isto, o 2º titular não aparece nas listagens
-    # globais ("Os Meus Clientes" / "Processos") que confiam em
-    # client.process_ids.
-    # ============================================================
-    second_client_id_for_process = None
-    if data.second_client_id:
-        second_client_id_clean = data.second_client_id.strip()
-        if second_client_id_clean and second_client_id_clean != client_id:
-            second_client = await db.clients.find_one({"id": second_client_id_clean})
-            if second_client:
-                second_client_id_for_process = second_client_id_clean
-                process_doc["second_client_id"] = second_client_id_clean
-                process_doc["second_client_name"] = second_client.get("nome", "")
-                # Adicionar ao array client_ids (para queries de listagem)
-                if second_client_id_clean not in process_doc["client_ids"]:
-                    process_doc["client_ids"].append(second_client_id_clean)
-                logger.info(
-                    f"[CREATE-PROCESS] 2º titular associado na criação: "
-                    f"{second_client_id_clean} ({second_client.get('nome', '')})"
-                )
-            else:
-                logger.warning(
-                    f"[CREATE-PROCESS] second_client_id {second_client_id_clean} "
-                    f"não encontrado — a ignorar 2º titular na criação."
-                )
-    
-    # Atribuir automaticamente ao criador baseado no seu papel
-    # REGRA: consultor_id = quem cria o processo (consultor)
-    #         assigned_indexacao_id = atribuído pelo algoritmo de auto-atribuição (NÃO o consultor)
-    if user["role"] == UserRole.INTERMEDIARIO:
-        process_doc["assigned_mediador_id"] = user["id"]
-        process_doc["mediador_name"] = user["name"]
-    elif user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR]:
-        process_doc["assigned_consultor_id"] = user["id"]
-        process_doc["consultor_name"] = user["name"]
-        process_doc["consultor_id"] = user["id"]  # Consultor que criou o processo
-    
-    # Encriptar campos sensíveis antes de guardar
+    process_doc = build_staff_process_doc(
+        process_id=process_id,
+        process_number=process_number,
+        now=now,
+        client_id=client_id,
+        client_name=client_name,
+        client_email=client_email,
+        client_phone=client_phone,
+        client_nif=client_nif,
+        process_type=data.process_type,
+        initial_status=initial_status,
+        is_lead=is_lead,
+    )
+
+    second_client_id_for_process = await attach_second_client_on_create(
+        process_doc,
+        getattr(data, "second_client_id", None),
+        client_id,
+    )
+    apply_creator_role_assignment(process_doc, user)
+
     process_doc = encrypt_sensitive_data(process_doc)
-    
-    # Inserir na base de dados
     await db.processes.insert_one(process_doc)
-    
-    # ============================================================
-    # AUTO-ATRIBUIÇÃO DE INDEXADOR
-    # Após criar o processo, invocar assign_to_indexer() para:
-    # 1. Encontrar o indexador com menor carga (< 15 processos ativos)
-    # 2. Atribuir o processo ao indexador (assigned_indexacao_id)
-    # 3. Se nenhum indexador disponível → status = fila_espera
-    # ============================================================
-    # PACOTE CY: SKIPPED se is_lead=True — pre_registo não deve ser indexado
-    # (a auto-atribuição dispara na transição pre_registo → pipeline).
-    # ============================================================
+
     try:
         if is_lead:
             logger.info(f"[CREATE-PROCESS] is_lead=True — a saltar auto-atribuição de indexador para processo {process_id} (Lead)")
         else:
             from services.process_assignment import assign_to_indexer
-            # PACOTE DB — update_status=False: NÃO forçar fila_espera/fase_documental.
-            # O processo mantém o initial_status (1ª fase real do workflow_statuses).
-            # O indexador é atribuído se disponível, mas o status não é alterado.
             assign_success, assign_data, assign_msg = await assign_to_indexer(process_id, update_status=False)
             if assign_success and assign_data.get("assigned"):
                 logger.info(
                     f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
                     f"para processo {process_id} (status mantém: {initial_status})"
                 )
-                # Atualizar o process_doc local para a resposta
                 process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
                 process_doc["indexacao_name"] = assign_data.get("indexacao_name")
-                # PACOTE DB — status NÃO é sobrescrito pelo assign_to_indexer
             else:
                 logger.warning(
                     f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg} "
                     f"(status mantém: {initial_status})"
                 )
-                # PACOTE DB — status NÃO é sobrescrito (processo fica na 1ª fase real sem indexador)
     except Exception as e:
         logger.warning(f"[CREATE-PROCESS] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
-    
-    # === AUTO-CRIAR DOCUMENTOS PORTAL POR DEFEITO ===
-    # Criar pedidos de documentos padrão para o portal do cliente,
-    # garantindo consistência entre o que o cliente vê no portal
-    # e o que o staff vê nos detalhes do processo.
-    try:
-        from routes.portal import DEFAULT_PENDING_CATEGORIES, DOCUMENT_CATEGORY_MAP
-        now_iso = datetime.now(timezone.utc).isoformat()
-        default_docs = []
-        for cat_key in DEFAULT_PENDING_CATEGORIES:
-            default_docs.append({
-                "id": str(uuid.uuid4()),
-                "process_id": process_id,
-                "category": cat_key,
-                "label": DOCUMENT_CATEGORY_MAP.get(cat_key, {}).get("label", cat_key),
-                "filename": None,
-                "original_filename": None,
-                "s3_key": None,
-                "status": "REQUESTED",
-                "notes": "",
-                "source": "auto_default",
-                "requested_by": user["id"],
-                "requested_by_name": user.get("name", "Sistema"),
-                "created_at": now_iso,
-                "updated_at": now_iso,
-            })
-        if default_docs:
-            await db.documents.insert_many(default_docs)
-            logger.info(f"Criados {len(default_docs)} documentos padrão para processo {process_id}")
-    except Exception as e:
-        logger.warning(f"Erro ao criar documentos padrão para processo {process_id}: {e}")
-    
-    # === CACHE INVALIDATION: Novo processo criado por staff afecta KPIs ===
+
+    await create_default_portal_documents(process_id, user)
     await invalidate_stats_cache(user_id=user["id"])
-    
-    # Actualizar process_ids do cliente + marcar lead como convertido
-    # PACOTE CY: Se is_lead=True, NÃO marcar como "converted" — o cliente
-    # deve continuar a aparecer na página de Registos de Clientes (triagem).
-    if client_id:
-        client_set = {"updated_at": now}
-        if not is_lead:
-            client_set["lead_status"] = "converted"  # Lead já não aparece na página de Registos
-        else:
-            client_set["lead_status"] = "new"  # Mantém-se na triagem de Registos
-        await db.clients.update_one(
-            {"id": client_id},
-            {
-                "$addToSet": {"process_ids": process_id},
-                "$set": client_set
-            }
-        )
+    await link_clients_after_process_create(
+        process_id,
+        client_id,
+        second_client_id_for_process,
+        is_lead=is_lead,
+        now=now,
+    )
 
-    # ============================================================
-    # PACOTE BP — Atualizar process_ids do 2º TITULAR
-    # ============================================================
-    # Injeta o process_id no array process_ids do cliente que é 2º
-    # titular. Sem isto, o 2º titular não aparece nas listagens globais
-    # ("Os Meus Clientes" / "Processos") que confiam em client.process_ids.
-    # O lead_status NÃO é alterado (o 2º titular pode continuar a ser um
-    # lead pendente se não tiver processo próprio como 1º titular).
-    # ============================================================
-    if second_client_id_for_process:
-        try:
-            await db.clients.update_one(
-                {"id": second_client_id_for_process},
-                {
-                    "$addToSet": {"process_ids": process_id},
-                    "$set": {"updated_at": now}
-                }
-            )
-            logger.info(
-                f"[CREATE-PROCESS] process_ids do 2º titular "
-                f"{second_client_id_for_process} atualizado com processo {process_id}"
-            )
-        except Exception as e:
-            logger.warning(
-                f"[CREATE-PROCESS] Erro ao atualizar process_ids do 2º titular "
-                f"{second_client_id_for_process}: {e}"
-            )
-    
-    # Registar no histórico
     await log_history(process_id, user, f"Criou processo para cliente {client_name}")
-
-    # === PACOTE CW — Trello Mirror: criar cartão em background ===
-    # Disparado APÓS auto-atribuição de indexador (process_doc["status"] pode
-    # ser fila_espera) para que a coluna Trello reflita o status final.
     asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
 
-    # ============================================================
-    # PACOTE CY — Enviar email de boas-vindas do Portal em background
-    # ============================================================
-    # Dispara o email com o portal_access_code para o cliente. Busca o
-    # portal_access_code do cliente (gera se não existir) e envia via
-    # task_queue ou diretamente. Fire-and-forget com logs de erro.
-    # ============================================================
     if client_email:
         asyncio.create_task(_send_portal_welcome_email_from_process(
             client_id=client_id,
@@ -924,7 +721,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
             client_name=client_name,
         ))
 
-    # === WEBSOCKET BROADCAST: Novo processo criado por staff ===
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_CREATED,
         process_id=process_id,
@@ -938,8 +734,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         mediador_names=[user["name"]] if user["role"] == UserRole.INTERMEDIARIO else [],
         updated_at=now
     )
-    
-    # Desencriptar para a resposta
+
     response_doc = decrypt_sensitive_data(process_doc)
     return ProcessResponse(**{k: v for k, v in response_doc.items() if k != "_id"})
 
@@ -2526,75 +2321,15 @@ async def mark_process_indexed(
             "is_indexed": True,
         }
     
-    # ==================================================================
-    # SALTO DINÂMICO DE ESTADO — Consultar pipeline de workflow_statuses
-    # ==================================================================
-    # Em vez de hardcode do ID do estado seguinte (ex: status_id = 4),
-    # consultamos a ordem dos estados configurados na BD, identificamos
-    # a posição actual do processo e fazemos next_status = current + 1.
     current_status = process.get("status", "clientes_espera")
-    next_status = None  # Inicializar — pode ficar None se for o último estado
-
-    # Buscar todos os workflow_statuses ordenados por 'order'
     all_statuses = await db.workflow_statuses.find(
         {}, {"_id": 0}
     ).sort("order", 1).to_list(100)
-
-    # Montar lista ordenada de nomes de estado
     status_pipeline = [s["name"] for s in all_statuses]
+    next_status = compute_next_workflow_status(current_status, status_pipeline)
 
-    # Encontrar a posição actual e calcular o próximo estado
-    if current_status in status_pipeline:
-        current_idx = status_pipeline.index(current_status)
-        if current_idx < len(status_pipeline) - 1:
-            next_status = status_pipeline[current_idx + 1]
-            logger.info(
-                f"[INDEXACAO-DYNAMIC] Salto dinâmico: '{current_status}' (pos {current_idx}) "
-                f"→ '{next_status}' (pos {current_idx + 1})"
-            )
-        else:
-            logger.info(
-                f"[INDEXACAO-DYNAMIC] Processo já está no último estado da pipeline "
-                f"('{current_status}'). Sem salto automático."
-            )
-    else:
-        # Status actual não está na pipeline — avançar para o 1º estado
-        # (fallback seguro — processo não fica órfão)
-        if status_pipeline:
-            next_status = status_pipeline[0]
-            logger.warning(
-                f"[INDEXACAO-DYNAMIC] Status actual '{current_status}' não encontrado "
-                f"na pipeline. Fallback para o 1º estado: '{next_status}'"
-            )
-
-    # ==================================================================
-    # LIMPEZA E TRANSIÇÃO DE RESPONSABILIDADE
-    # ==================================================================
-    # Após calcular o próximo estado, o campo assigned_indexacao_id é limpo
-    # (null), pois o trabalho de indexação/triagem acabou.
     now = datetime.now(timezone.utc).isoformat()
-    update_set = {
-        "is_indexed": True,
-        "indexed_at": now,
-        "indexed_by": user.get("id"),
-        "indexed_by_name": user.get("name", ""),
-        "assigned_indexacao_id": None,   # Limpar — trabalho de indexação concluído
-        "indexacao_name": None,          # Limpar nome do indexador
-        "updated_at": now,
-        # PACOTE BM — Bloqueio do Perfil do Cliente após Indexação.
-        # Assinala que os dados foram validados e congelados pela Indexação.
-        # O Portal do Cliente lê esta flag (GET /portal/me) e desativa todos
-        # os campos de input do perfil + mostra um Alert a informar que os
-        # dados estão bloqueados para análise da equipa de crédito.
-        "is_data_confirmed": True,
-        "data_confirmed_at": now,
-        "data_confirmed_by": user.get("id"),
-        "data_confirmed_by_name": user.get("name", ""),
-    }
-
-    # Se conseguimos calcular o próximo estado, adicioná-lo ao update
-    if next_status:
-        update_set["status"] = next_status
+    update_set = build_indexacao_update_set(user, now, next_status)
 
     result = await db.processes.update_one(
         {"id": process_id},
@@ -2669,13 +2404,7 @@ async def mark_process_indexed(
     process_ref = f"#{process_number}" if process_number else process_id[:8]
     
     # Recolher todos os IDs de utilizadores atribuídos
-    assigned_ids = list(set(filter(None, (
-        (process.get("assigned_consultor_ids") or []) +
-        ([process["assigned_consultor_id"]] if process.get("assigned_consultor_id") else []) +
-        (process.get("assigned_mediador_ids") or []) +
-        ([process["assigned_mediador_id"]] if process.get("assigned_mediador_id") else []) +
-        ([process["assigned_indexacao_id"]] if process.get("assigned_indexacao_id") else [])
-    ))))
+    assigned_ids = collect_assigned_user_ids(process)
     
     notification_message = f"A Indexação concluiu o tratamento documental do processo {process_ref} — {client_name}"
     
@@ -2981,96 +2710,10 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     raw_client_phone = raw_body.get("client_phone")
     
     if client_updates and client_id:
-        # Gerar blind indexes para NIF/email se foram atualizados
-        if "dados_pessoais.nif" in client_updates:
-            nif_val = client_updates["dados_pessoais.nif"]
-            nif_hash = generate_nif_hash(nif_val)
-            if nif_hash:
-                client_updates["dados_pessoais.nif_hash"] = nif_hash
-        if "contacto.email" in client_updates:
-            email_val = client_updates["contacto.email"]
-            email_hash = generate_email_hash(email_val)
-            if email_hash:
-                client_updates["contacto.email_hash"] = email_hash
-        
-        # Encriptar dados sensíveis do cliente antes de guardar
-        try:
-            from services.encryption import encrypt_client_data
-            # Construir doc temporário para encriptação seletiva
-            temp_client_update = {}
-            for k, v in client_updates.items():
-                if k.startswith("dados_pessoais."):
-                    if "dados_pessoais" not in temp_client_update:
-                        temp_client_update["dados_pessoais"] = {}
-                    temp_client_update["dados_pessoais"][k.replace("dados_pessoais.", "")] = v
-                elif k.startswith("contacto."):
-                    if "contacto" not in temp_client_update:
-                        temp_client_update["contacto"] = {}
-                    temp_client_update["contacto"][k.replace("contacto.", "")] = v
-                else:
-                    temp_client_update[k] = v
-            
-            encrypted = encrypt_client_data(temp_client_update)
-            # Reconverter para formato dot-notation
-            final_client_updates = {}
-            for k, v in client_updates.items():
-                if k.startswith("dados_pessoais.") and "dados_pessoais" in encrypted:
-                    field = k.replace("dados_pessoais.", "")
-                    if field in encrypted["dados_pessoais"]:
-                        final_client_updates[k] = encrypted["dados_pessoais"][field]
-                    else:
-                        final_client_updates[k] = v
-                elif k.startswith("contacto.") and "contacto" in encrypted:
-                    field = k.replace("contacto.", "")
-                    if field in encrypted["contacto"]:
-                        final_client_updates[k] = encrypted["contacto"][field]
-                    else:
-                        final_client_updates[k] = v
-                elif k in encrypted:
-                    final_client_updates[k] = encrypted[k]
-                else:
-                    final_client_updates[k] = v
-            
-            # Adicionar hash indexes que não precisam de encriptação
-            if "dados_pessoais.nif_hash" in client_updates:
-                final_client_updates["dados_pessoais.nif_hash"] = client_updates["dados_pessoais.nif_hash"]
-            if "contacto.email_hash" in client_updates:
-                final_client_updates["contacto.email_hash"] = client_updates["contacto.email_hash"]
-            
-            client_updates = final_client_updates
-        except Exception as e:
-            logger.warning(f"Erro ao encriptar dados do cliente: {e}")
-        
-        now_iso = datetime.now(timezone.utc).isoformat()
-        client_updates["updated_at"] = now_iso
-        await db.clients.update_one(
-            {"id": client_id},
-            {"$set": client_updates}
+        client_updates = prepare_encrypted_client_updates(client_updates)
+        await apply_client_personal_updates_from_process_put(
+            client_id, client_updates, process_id,
         )
-        logger.info(f"Dados pessoais do cliente {client_id} atualizados via PUT processo: {list(client_updates.keys())}")
-
-        # ── SINCRONIZAÇÃO INVERSA: Se o nome do cliente mudou, propagar para todos os processos ──
-        # Quando o utilizador edita o nome dentro do processo, atualizamos o cliente
-        # e precisamos de propagar o novo nome para os restantes processos desse cliente.
-        updated_client_name = client_updates.get("nome")
-        if updated_client_name:
-            # Obter todos os process_ids do cliente
-            updated_client = await db.clients.find_one({"id": client_id}, {"process_ids": 1})
-            all_process_ids = updated_client.get("process_ids", []) if updated_client else []
-            # Filtrar o processo atual para não fazer update desnecessário
-            other_process_ids = [pid for pid in all_process_ids if pid != process_id]
-            if other_process_ids:
-                cascade_sync = {
-                    "client_name": updated_client_name,
-                    "personal_data.nome": updated_client_name,
-                    "personal_data.name": updated_client_name,
-                }
-                await db.processes.update_many(
-                    {"id": {"$in": other_process_ids}},
-                    {"$set": cascade_sync}
-                )
-                logger.info(f"Sincronização inversa: nome '{updated_client_name}' propagado para {len(other_process_ids)} processos do cliente {client_id}")
-    
     # ── REATRIBUIÇÃO DE CLIENTE: Se o body inclui client_id diferente do actual ──
     new_client_id = raw_body.get("client_id")
     if new_client_id and new_client_id != process.get("client_id"):
@@ -3186,14 +2829,14 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         update_data["client_ids"] = process["client_ids"]
     
     valid_statuses = [s["name"] for s in await db.workflow_statuses.find({}, {"name": 1, "_id": 0}).to_list(100)]
-    
-    # Check role-based permissions
-    can_update_personal = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
-    can_update_financial = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO, UserRole.INDEXACAO]
-    can_update_real_estate = UserRole.can_act_as_consultor(role)
-    can_update_credit = UserRole.can_act_as_intermediario(role)
-    can_update_status = role in [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
-    
+
+    perms = build_role_update_permissions(role)
+    can_update_personal = perms["can_update_personal"]
+    can_update_financial = perms["can_update_financial"]
+    can_update_real_estate = perms["can_update_real_estate"]
+    can_update_credit = perms["can_update_credit"]
+    can_update_status = perms["can_update_status"]
+
     if role == UserRole.CLIENTE:
         if process.get("client_id") != user["id"]:
             raise HTTPException(status_code=403, detail="Acesso negado")
@@ -3203,9 +2846,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             incoming_re = data.real_estate_data.model_dump(exclude_unset=True)
             _re = process.get("real_estate_data")
             existing_re = _re if isinstance(_re, dict) else {}
-            merged_re = {**existing_re, **incoming_re}
-            # Remover campos com valor None (utilizador limpou o campo)
-            merged_re = {k: v for k, v in merged_re.items() if v is not None}
+            merged_re = merge_nested_process_section(existing_re, incoming_re)
             await log_data_changes(process_id, user, existing_re, incoming_re, "dados imobiliários")
             await log_audit_event(process_id, user, "Alterou dados imobiliários", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["real_estate_data"] = merged_re
@@ -3228,9 +2869,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             incoming_credit = data.credit_data.model_dump(exclude_unset=True)
             _cd = process.get("credit_data")
             existing_credit = _cd if isinstance(_cd, dict) else {}
-            merged_credit = {**existing_credit, **incoming_credit}
-            # Remover campos com valor None (utilizador limpou o campo)
-            merged_credit = {k: v for k, v in merged_credit.items() if v is not None}
+            merged_credit = merge_nested_process_section(existing_credit, incoming_credit)
             await log_data_changes(process_id, user, existing_credit, incoming_credit, "dados de crédito")
             await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
             update_data["credit_data"] = merged_credit
@@ -3244,9 +2883,9 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             if isinstance(incoming_fd, dict):
                 _fd = process.get("financial_data")
                 existing_fd = _fd if isinstance(_fd, dict) else {}
-                merged_fd = {**existing_fd, **incoming_fd}
-                # Remover campos com valor None (utilizador limpou o campo)
-                merged_fd = {k: v for k, v in merged_fd.items() if v is not None and v != ""}
+                merged_fd = merge_nested_process_section(
+                    existing_fd, incoming_fd, drop_empty_strings=True,
+                )
                 await log_data_changes(process_id, user, existing_fd, incoming_fd, "dados financeiros")
                 await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
                 update_data["financial_data"] = merged_fd
