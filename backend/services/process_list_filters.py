@@ -420,3 +420,76 @@ def build_kanban_query(
     # Pré-registo sempre excluído do Kanban (todos os roles)
     query = merge_query_and(query, {"status": {"$nin": LEAD_STATUS_VALUES}})
     return query
+
+
+# ====================================================================
+# MY-CLIENTS QUERY BUILDERS
+# ====================================================================
+
+def build_my_clients_process_query(
+    user_id: str,
+    user_email: str,
+    role: str,
+) -> dict:
+    """
+    Query de processos para GET /processes/my-clients.
+
+    SINCRONIZAÇÃO COM "Os Meus Processos":
+    Consultor/intermediário usam o mesmo critério base (assigned_* + is_active
+    + status activo). Pré-registo é sempre excluído nesta vista.
+    """
+    if role == UserRole.CONSULTOR:
+        query: dict[str, Any] = {
+            "$and": [
+                {"$or": [
+                    {"assigned_consultor_ids": user_id},
+                    {"assigned_consultor_id": user_id},
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}},
+            ]
+        }
+    elif role == UserRole.INTERMEDIARIO:
+        query = {
+            "$and": [
+                {"$or": [
+                    {"assigned_mediador_ids": user_id},
+                    {"assigned_mediador_id": user_id},
+                    {"created_by": user_email},
+                ]},
+                {"is_active": {"$ne": False}},
+                {"status": {"$nin": INACTIVE_STATUSES}},
+                {"is_deleted": {"$ne": True}},
+            ]
+        }
+    elif role == UserRole.INDEXACAO:
+        query = {
+            "$or": [
+                {"assigned_indexacao_id": user_id},
+                {"created_by": user_email},
+            ]
+        }
+    else:
+        query = {}
+
+    return merge_query_and(query, {"status": {"$nin": LEAD_STATUS_VALUES}})
+
+
+def build_my_clients_leads_query(user_id: str) -> dict:
+    """Leads órfãos (sem processo) criados pelo utilizador, ainda pendentes."""
+    return {
+        "$and": [
+            {"created_by": user_id},
+            {"is_deleted": {"$ne": True}},
+            {"$or": [
+                {"process_ids": {"$exists": False}},
+                {"process_ids": []},
+                {"process_ids": None},
+            ]},
+            {"$or": [
+                {"lead_status": {"$exists": False}},
+                {"lead_status": "new"},
+            ]},
+        ]
+    }

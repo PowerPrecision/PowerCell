@@ -200,3 +200,32 @@ class TestKanbanQuery:
         assert {"updated_at": {"$gte": "2026-06-21T00:00:00+00:00"}} in f["$or"][1]["$and"] or True
         # cutoff is now - 30 days
         assert "2026-06-21" in str(f)
+
+
+class TestMyClientsQuery:
+    def test_consultor_active_and_hides_leads(self):
+        from services.process_list_filters import build_my_clients_process_query
+        q = build_my_clients_process_query("c1", "c@x.com", UserRole.CONSULTOR)
+        assert "$and" in q
+        blob = str(q)
+        assert "assigned_consultor_ids" in blob
+        assert {"status": {"$nin": INACTIVE_STATUSES}} in q["$and"]
+        assert {"status": {"$nin": LEAD_STATUS_VALUES}} in q["$and"]
+
+    def test_admin_only_hides_pre_registo(self):
+        from services.process_list_filters import build_my_clients_process_query
+        q = build_my_clients_process_query("a1", "a@x.com", UserRole.ADMIN)
+        assert q == {"status": {"$nin": LEAD_STATUS_VALUES}}
+
+    def test_intermediario_includes_created_by_email(self):
+        from services.process_list_filters import build_my_clients_process_query
+        q = build_my_clients_process_query("m1", "m@x.com", UserRole.INTERMEDIARIO)
+        blob = str(q)
+        assert "assigned_mediador_ids" in blob
+        assert "m@x.com" in blob
+
+    def test_leads_query_orphan_new(self):
+        from services.process_list_filters import build_my_clients_leads_query
+        q = build_my_clients_leads_query("u1")
+        assert q["$and"][0] == {"created_by": "u1"}
+        assert {"lead_status": "new"} in q["$and"][3]["$or"]

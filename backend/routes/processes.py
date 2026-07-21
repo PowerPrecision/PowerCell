@@ -94,14 +94,27 @@ from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, sanitize_url, log_sanitization_rejection
 )
-from services.process_status import (
-    INACTIVE_STATUSES, LEAD_STATUS_VALUES,
-)
 from services.process_finance import (
     create_finance_snapshot as _create_finance_snapshot,
     ensure_finance_snapshot as _ensure_finance_snapshot,
 )
-from services.process_list_filters import build_process_list_query, build_kanban_query
+from services.process_list_filters import (
+    build_process_list_query,
+    build_kanban_query,
+    build_my_clients_process_query,
+    build_my_clients_leads_query,
+)
+from services.process_my_clients import (
+    LEAD_CLIENTS_PROJECTION,
+    format_lead_as_my_client_row,
+    finalize_lead_row,
+    my_clients_sort_key,
+    group_tasks_by_process,
+    build_my_clients_process_row,
+    fetch_unread_messages_map,
+    fetch_new_documents_map,
+    fetch_latest_activity_notes_map,
+)
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
 
@@ -1900,325 +1913,78 @@ async def get_my_clients(
     user_id = user["id"]
     user_email = user.get("email", "")
     role = get_effective_role(request, user)
-    
-    # Construir query baseada no papel do utilizador
-    #
-    # SINCRONIZAÇÃO COM "OS Meus Processos":
-    # A query de my-clients deve usar EXATAMENTE o mesmo critério base que
-    # my-processes (assigned_consultor_ids + is_active + status), para que
-    # os clientes listados correspondam aos processos visíveis.
-    # A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
-    if role == UserRole.CONSULTOR:
-        query = {
-            "$and": [
-                {"$or": [
-                    {"assigned_consultor_ids": user_id},
-                    {"assigned_consultor_id": user_id}
-                ]},
-                # Mesmo filtro de activos que my-processes (view_mode="active_only")
-                {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
-                {"is_deleted": {"$ne": True}}
-            ]
-        }
-    elif role == UserRole.INTERMEDIARIO:
-        query = {
-            "$and": [
-                {"$or": [
-                    {"assigned_mediador_ids": user_id},
-                    {"assigned_mediador_id": user_id},
-                    {"created_by": user_email}
-                ]},
-                {"is_active": {"$ne": False}},
-                {"status": {"$nin": INACTIVE_STATUSES}},
-                {"is_deleted": {"$ne": True}}
-            ]
-        }
-    elif role == UserRole.INDEXACAO:
-        query = {
-            "$or": [
-                {"assigned_indexacao_id": user_id},
-                {"created_by": user_email}
-            ]
-        }
-    else:
-        query = {}
 
-    # ====================================================================
-    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
-    # ====================================================================
-    # Consultores/intermediários/indexação nunca veem pré-registos nos seus
-    # clientes. Admin/CEO/diretor/administrativo também não os veem na vista
-    # normal de "Os Meus Clientes" (ruído desnecessário). Nota: este endpoint
-    # não tem parâmetro search, pelo que o bypass para admin faz-se através
-    # da listagem tabular (GET /processes com search) ou do Kanban diagnose.
-    # ====================================================================
-    pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
-    if "$and" in query:
-        query["$and"].append(pre_registo_filter)
-    elif query:
-        query = {"$and": [query, pre_registo_filter]}
-    else:
-        query = pre_registo_filter
-
-    # Calcular offset
+    query = build_my_clients_process_query(user_id, user_email, role)
     skip = (page - 1) * size
-    
-    # Buscar processos COM PROJEÇÃO OTIMIZADA (até 5000 para ordenação Python-side)
+
     processes = await db.processes.find(
         query,
-        PROCESS_MY_CLIENTS_PROJECTION
+        PROCESS_MY_CLIENTS_PROJECTION,
     ).to_list(5000)
-    
-    # Desencriptar APENAS campos sensíveis projetados
     processes = decrypt_processes_list(
-        processes, 
-        fields_to_decrypt=["client_phone", "client_nif"]
+        processes,
+        fields_to_decrypt=["client_phone", "client_nif"],
     )
-    
-    # ── BUSCAR LEADS (clientes sem processo) criados pelo utilizador ──
-    # Leads são clientes na tabela 'clients' que NÃO têm processo associado
-    # e foram criados pelo utilizador actual. Estes devem aparecer em
-    # "Os Meus Clientes" juntamente com os clientes dos processos activos.
+
+    # Leads órfãos criados pelo utilizador (só consultor/intermediário)
     leads = []
     if role in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
-        leads_query = {
-            "$and": [
-                {"created_by": user_id},
-                {"is_deleted": {"$ne": True}},
-                # Sem processo associado (Lead puro)
-                {"$or": [
-                    {"process_ids": {"$exists": False}},
-                    {"process_ids": []},
-                    {"process_ids": None}
-                ]},
-                # Apenas leads pendentes (não convertidos)
-                {"$or": [
-                    {"lead_status": {"$exists": False}},
-                    {"lead_status": "new"}
-                ]}
-            ]
-        }
-        leads_cursor = await db.clients.find(
-            leads_query,
-            {
-                "_id": 0, "id": 1, "nome": 1, "contacto": 1,
-                "created_at": 1, "updated_at": 1, "fonte": 1,
-                "assigned_to": 1, "lead_status": 1
-            }
-        ).to_list(500)
-        
-        # Desencriptar dados sensíveis dos leads
         from services.encryption import decrypt_clients_list
+        leads_cursor = await db.clients.find(
+            build_my_clients_leads_query(user_id),
+            LEAD_CLIENTS_PROJECTION,
+        ).to_list(500)
         leads_cursor = decrypt_clients_list(leads_cursor)
-        
-        # Converter leads para o mesmo formato dos clientes de processo
-        for lead in leads_cursor:
-            contacto = lead.get("contacto", {})
-            leads.append({
-                "id": lead.get("id"),
-                "client_id": lead.get("id"),
-                "process_number": None,
-                "client_name": lead.get("nome", "Sem nome"),
-                "client_email": contacto.get("email", ""),
-                "client_phone": contacto.get("telefone", ""),
-                "status": "lead",
-                "status_label": "Lead",
-                "status_color": "#8B5CF6",  # Roxo para distinguir leads
-                "process_type": "lead",
-                "consultor_name": "",
-                "pending_actions": [],
-                "pending_count": 0,
-                "created_at": lead.get("created_at"),
-                "updated_at": lead.get("updated_at"),
-                "deed_date": None,
-                "has_property": False,
-                "is_lead": True  # Flag para identificar leads no frontend
-            })
-    
-    # Obter labels das fases do workflow ordenadas
+        leads = [format_lead_as_my_client_row(lead) for lead in leads_cursor]
+
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
     status_map = {s["name"]: s for s in statuses}
-    
-    # Ordenar processos por fase (order do status) e depois por nome
-    def get_sort_key(p):
-        """Gera chave de ordenação para processos e leads.
 
-        Ordena primeiro pela ordem da fase no workflow (phase_order),
-        depois por nome do cliente em ordem alfabética. Leads ficam no
-        início (order=0) para destaque.
-
-        Args:
-            p: Dicionário do processo ou lead.
-
-        Returns:
-            tuple: (phase_order, client_name_lower).
-        """
-        if p.get("is_lead"):
-            return (0, p.get("client_name", "").lower())  # Leads no topo
-        status_info = status_map.get(p.get("status"), {})
-        phase_order = status_info.get("order", 999)
-        client_name = p.get("client_name", "").lower()
-        return (phase_order, client_name)
-    
-    # Combinar processos + leads, ordenar e paginar
-    all_items = processes + leads
-    all_items = sorted(all_items, key=get_sort_key)
-    
-    # Total e paginação (após ordenação)
+    all_items = sorted(processes + leads, key=my_clients_sort_key(status_map))
     total = len(all_items)
     paginated_items = all_items[skip:skip + size]
-    
-    # Obter tarefas pendentes por processo (apenas IDs necessários)
-    # Leads não têm tarefas, pelo que apenas processos com id são pesquisados
+
     process_ids = [p["id"] for p in paginated_items if not p.get("is_lead")]
     tasks = await db.tasks.find(
-        {
-            "process_id": {"$in": process_ids},
-            "completed": {"$ne": True}
-        },
-        {"_id": 0, "id": 1, "process_id": 1, "title": 1, "priority": 1, "due_date": 1}
-    ).to_list(500)  # Reduzido de 1000 para 500
-    
-    # Agrupar tarefas por processo
-    tasks_by_process = {}
-    for task in tasks:
-        pid = task["process_id"]
-        if pid not in tasks_by_process:
-            tasks_by_process[pid] = []
-        tasks_by_process[pid].append(task)
-    
-    # Buscar nomes dos consultores
-    consultor_ids = list(set(p.get("assigned_consultor_id") for p in paginated_items if p.get("assigned_consultor_id")))
+        {"process_id": {"$in": process_ids}, "completed": {"$ne": True}},
+        {"_id": 0, "id": 1, "process_id": 1, "title": 1, "priority": 1, "due_date": 1},
+    ).to_list(500)
+    tasks_by_process = group_tasks_by_process(tasks)
+
+    consultor_ids = list({
+        p.get("assigned_consultor_id")
+        for p in paginated_items
+        if p.get("assigned_consultor_id")
+    })
     consultores = await db.users.find(
         {"id": {"$in": consultor_ids}},
-        {"_id": 0, "id": 1, "name": 1}
+        {"_id": 0, "id": 1, "name": 1},
     ).to_list(100)
     consultor_map = {c["id"]: c["name"] for c in consultores}
 
-    # ====================================================================
-    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
-    # Pistas visuais silenciosas para a tabela de "Os Meus Clientes".
-    # Só busca flags dos processos paginados (não dos leads).
-    # ====================================================================
-    _bi_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
-    _bi_unread_map = {}
-    _bi_new_docs_map = {}
-    if _bi_process_ids:
-        _bi_unread = await db.portal_messages.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "sender_type": "client",
-                "read_by_staff": False
-            }},
-            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
+    bi_process_ids = [
+        p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")
+    ]
+    unread_map = await fetch_unread_messages_map(db, bi_process_ids)
+    new_docs_map = await fetch_new_documents_map(db, bi_process_ids)
+    notes_map = await fetch_latest_activity_notes_map(db, bi_process_ids)
 
-        _bi_new_docs = await db.documents.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "status": "uploaded"
-            }},
-            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
-
-    # PACOTE CG — BATCH ENRIQUECIMENTO: latest_activity_note
-    # Para cada processo, busca a atividade/comentário mais recente na
-    # coleção activities. O frontend (MyClientsPage) lê este campo para
-    # a coluna "Notas" — mostra sempre a última interação real do consultor.
-    _cg_process_ids = [p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")]
-    _cg_notes_map = {}
-    if _cg_process_ids:
-        _cg_latest_notes = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": _cg_process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "latest_activity_note": {"$first": "$comment"},
-                "latest_activity_note_at": {"$first": "$created_at"},
-                "latest_activity_note_by": {"$first": "$user_name"},
-            }}
-        ]).to_list(1000)
-        _cg_notes_map = {r["_id"]: r for r in _cg_latest_notes}
-
-    # Construir lista de clientes com informações enriquecidas
     clients_list = []
     for p in paginated_items:
-        # Leads já vêm formatados — adicionar directamente
         if p.get("is_lead"):
-            # Leads não têm mensagens/documentos do portal
-            p["has_unread_messages"] = False
-            p["has_new_documents"] = False
-            p["latest_activity_note"] = None
-            clients_list.append(p)
+            clients_list.append(finalize_lead_row(p))
             continue
-        
-        status_info = status_map.get(p.get("status"), {})
-        pending_tasks = tasks_by_process.get(p["id"], [])
-        
-        # Determinar ações pendentes
-        pending_actions = []
-        
-        # Adicionar tarefas pendentes
-        for task in pending_tasks[:3]:  # Limitar a 3 tarefas
-            pending_actions.append({
-                "type": "task",
-                "title": task.get("title", "Tarefa"),
-                "priority": task.get("priority", "normal"),
-                "due_date": task.get("due_date")
-            })
-        
-        # Verificar se há mais tarefas
-        if len(pending_tasks) > 3:
-            pending_actions.append({
-                "type": "info",
-                "title": f"+{len(pending_tasks) - 3} tarefas adicionais",
-                "priority": "normal"
-            })
-        
-        # Verificar documentos em falta baseado na fase
-        fase = p.get("status", "")
-        if fase in ["fase_documental", "fase_documental_ii"]:
-            pending_actions.append({
-                "type": "document",
-                "title": "Verificar documentos em falta",
-                "priority": "high"
-            })
-        
-        clients_list.append({
-            "id": p["id"],
-            "client_id": p.get("client_id"),
-            "process_number": p.get("process_number"),
-            "client_name": p.get("client_name", "Sem nome"),
-            "client_email": p.get("client_email"),
-            "client_phone": p.get("client_phone"),
-            "status": p.get("status"),
-            "status_label": status_info.get("label", p.get("status", "Desconhecido")),
-            "status_color": status_info.get("color", "#6B7280"),
-            "process_type": p.get("process_type"),
-            "consultor_name": consultor_map.get(p.get("assigned_consultor_id"), ""),
-            "pending_actions": pending_actions,
-            "pending_count": len(pending_tasks),
-            "created_at": p.get("created_at"),
-            "updated_at": p.get("updated_at"),
-            "deed_date": p.get("deed_date"),
-            "has_property": bool(p.get("property_id")),
-            "has_unread_messages": _bi_unread_map.get(p.get("id"), False),
-            "has_new_documents": _bi_new_docs_map.get(p.get("id"), False),
-            # PACOTE CG — última nota real do consultor (da coleção activities)
-            "latest_activity_note": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note"),
-            "latest_activity_note_at": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note_at"),
-            "latest_activity_note_by": _cg_notes_map.get(p.get("id"), {}).get("latest_activity_note_by"),
-        })
-    
-    # Calcular total de páginas
+        clients_list.append(build_my_clients_process_row(
+            p,
+            status_map=status_map,
+            tasks_by_process=tasks_by_process,
+            consultor_map=consultor_map,
+            unread_map=unread_map,
+            new_docs_map=new_docs_map,
+            notes_map=notes_map,
+        ))
+
     pages = (total + size - 1) // size if size > 0 else 0
-    
     return {
         "clients": clients_list,
         "total": total,
@@ -2227,7 +1993,7 @@ async def get_my_clients(
         "pages": pages,
         "user_id": user_id,
         "user_role": role,
-        "leads_count": len(leads)
+        "leads_count": len(leads),
     }
 
 
