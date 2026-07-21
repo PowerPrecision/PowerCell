@@ -386,6 +386,81 @@ async def link_single_client_to_process(
     )
 
 
+async def send_portal_welcome_email_from_process(
+    client_id: str,
+    client_email: str,
+    client_name: str,
+) -> None:
+    """
+    PACOTE CY — email de boas-vindas após create-client (fire-and-forget).
+    Falhas são logadas, não propagadas.
+    """
+    try:
+        portal_access_code = None
+        try:
+            client_doc = await db.clients.find_one(
+                {"id": client_id}, {"portal_access_code": 1, "_id": 0},
+            )
+            if client_doc:
+                portal_access_code = client_doc.get("portal_access_code")
+                if not portal_access_code:
+                    from models.client import generate_portal_access_code as _gen_code
+                    portal_access_code = _gen_code()
+                    await db.clients.update_one(
+                        {"id": client_id},
+                        {"$set": {"portal_access_code": portal_access_code}},
+                    )
+        except Exception as e:
+            logger.warning(
+                f"[PORTAL-EMAIL] Erro ao obter/gerar portal_access_code "
+                f"para {client_id}: {e}"
+            )
+
+        from services.task_queue import task_queue
+        from services.email import send_registration_confirmation
+
+        job_id = None
+        try:
+            job_id = await task_queue.send_registration_email(
+                client_email=client_email,
+                client_name=client_name,
+                portal_access_code=portal_access_code,
+            )
+        except Exception as tq_err:
+            logger.warning(
+                f"[PORTAL-EMAIL] Task Queue indisponível para cliente "
+                f"{client_id}: {tq_err}"
+            )
+
+        if not job_id:
+            logger.info(
+                f"[PORTAL-EMAIL] A enviar email diretamente para "
+                f"{client_email} (client_id={client_id})"
+            )
+            try:
+                await send_registration_confirmation(
+                    client_email=client_email,
+                    client_name=client_name,
+                    portal_access_code=portal_access_code,
+                )
+                logger.info(
+                    f"[PORTAL-EMAIL] Email enviado com sucesso para "
+                    f"{client_email} (client_id={client_id})"
+                )
+            except Exception as direct_err:
+                logger.error(
+                    f"[PORTAL-EMAIL] Falha ao enviar email diretamente para "
+                    f"{client_email} (client_id={client_id}): {direct_err}",
+                    exc_info=True,
+                )
+    except Exception as e:
+        logger.error(
+            f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
+            f"para {client_email} (client_id={client_id}): {e}",
+            exc_info=True,
+        )
+
+
 async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
     """
     Valida role/client_id, resolve status, carrega cliente e monta process_doc

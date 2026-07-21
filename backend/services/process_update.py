@@ -766,3 +766,66 @@ def build_process_response_or_500(updated: dict, process_id: str):
             status_code=500,
             detail=f"Erro interno ao serializar dados do processo: {str(e)[:200]}",
         )
+
+
+async def load_valid_workflow_status_names() -> list[str]:
+    statuses = await db.workflow_statuses.find(
+        {}, {"name": 1, "_id": 0},
+    ).to_list(100)
+    return [s["name"] for s in statuses]
+
+
+async def maybe_reassign_primary_client_with_audit(
+    *,
+    process: dict,
+    process_id: str,
+    new_client_id: Optional[str],
+    role: str,
+    user: dict,
+    request: Any,
+    log_history_fn,
+    log_audit_event_fn,
+) -> None:
+    """
+    Se new_client_id difere do actual: valida role, reatribui e regista histórico.
+    """
+    if not new_client_id or new_client_id == process.get("client_id"):
+        return
+    assert_can_reassign_primary_client(role)
+    reassign_info = await reassign_process_primary_client(
+        process, process_id, new_client_id,
+    )
+    msg = (
+        f"Reatribuiu cliente de '{reassign_info['old_client_name']}' "
+        f"para '{reassign_info['new_client_name']}'"
+    )
+    await log_history_fn(process_id, user, msg)
+    await log_audit_event_fn(
+        process_id, user, msg, request=request, source="web",
+    )
+    logger.info(
+        f"Processo {process_id} reatribuído de cliente "
+        f"{reassign_info['old_client_id']} ({reassign_info['old_client_name']}) "
+        f"para cliente {reassign_info['new_client_id']} "
+        f"({reassign_info['new_client_name']}) por {user.get('email')}"
+    )
+
+
+async def decrypt_and_populate_updated_process(
+    updated: dict,
+    process_id: str,
+    *,
+    decrypt_fn,
+    populate_fn,
+) -> dict:
+    """Desencripta + popula cliente após PUT (ou 500)."""
+    from fastapi import HTTPException
+    try:
+        updated = decrypt_fn(updated)
+    except Exception as e:
+        logger.error(f"Erro ao desencriptar dados do processo {process_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno ao desencriptar dados do processo",
+        )
+    return await populate_fn(updated)

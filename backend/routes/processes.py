@@ -85,10 +85,6 @@ from services.process_kanban import (
     KANBAN_COLUMNS,
     is_valid_status
 )
-from utils.input_sanitization import (
-    sanitize_email, sanitize_name, sanitize_phone,
-    sanitize_string, sanitize_url,
-)
 from services.process_finance import (
     create_finance_snapshot as _create_finance_snapshot,
     ensure_finance_snapshot as _ensure_finance_snapshot,
@@ -129,6 +125,7 @@ from services.process_create import (
     build_client_self_process_doc,
     link_single_client_to_process,
     assemble_staff_create_bundle,
+    send_portal_welcome_email_from_process,
 )
 from services.process_detail import (
     load_process_doc_or_404,
@@ -161,7 +158,6 @@ from services.process_update import (
     prepare_encrypted_client_updates,
     apply_client_personal_updates_from_process_put,
     build_role_update_permissions,
-    reassign_process_primary_client,
     assert_process_editable_for_role,
     seed_update_data,
     apply_staff_business_updates,
@@ -169,11 +165,14 @@ from services.process_update import (
     attach_field_metadata_if_present,
     run_process_update_side_effects,
     parse_update_request_meta,
-    assert_can_reassign_primary_client,
     assert_cliente_owns_process,
     decrypt_process_doc_or_500,
     build_process_response_or_500,
+    load_valid_workflow_status_names,
+    maybe_reassign_primary_client_with_audit,
+    decrypt_and_populate_updated_process,
 )
+from services.process_broadcast import broadcast_process_delta
 from services.process_kanban_enrichment import (
     group_processes_by_status,
     sort_all_kanban_columns,
@@ -206,171 +205,25 @@ from services.process_staff_assignment import (
     build_unassign_me_update,
     schedule_assignment_emails,
 )
-from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.websocket_manager import WSEventType
 from services.redis_cache import invalidate_stats_cache
 
 # Portal imports
 from services.portal_security import PORTAL_TOKEN_VALIDITY_DAYS
 from services.portal_magic_link import (
     issue_portal_magic_link,
-    ensure_portal_access_code,
-    build_magic_link_email_bodies,
+    load_active_process_or_404,
+    build_generate_magic_link_response,
+    send_magic_link_to_client,
 )
 
 logger = logging.getLogger(__name__)
 
 
 # ====================================================================
-# WEBSOCKET BROADCAST HELPERS
-# ====================================================================
-
-async def broadcast_process_delta(
-    event_type: str,
-    process_id: str,
-    process_number: int = None,
-    client_name: str = None,
-    status: str = None,
-    old_status: str = None,
-    assigned_consultor_ids: list = None,
-    assigned_mediador_ids: list = None,
-    consultor_names: list = None,
-    mediador_names: list = None,
-    priority: str = None,
-    prioridade: str = None,
-    process_type: str = None,
-    updated_at: str = None
-):
-    """
-    Broadcast a lightweight process delta to all connected WebSocket clients.
-    
-    Only sends essential fields needed for Kanban update - no heavy arrays or sensitive data.
-    """
-    try:
-        delta = {
-            "process_id": process_id,
-        }
-        
-        # Only include non-None fields
-        if process_number is not None:
-            delta["process_number"] = process_number
-        if client_name is not None:
-            delta["client_name"] = client_name
-        if status is not None:
-            delta["status"] = status
-        if old_status is not None:
-            delta["old_status"] = old_status
-        if assigned_consultor_ids is not None:
-            delta["assigned_consultor_ids"] = assigned_consultor_ids
-        if assigned_mediador_ids is not None:
-            delta["assigned_mediador_ids"] = assigned_mediador_ids
-        if consultor_names is not None:
-            delta["consultor_names"] = consultor_names
-        if mediador_names is not None:
-            delta["mediador_names"] = mediador_names
-        if priority is not None:
-            delta["priority"] = priority
-        if prioridade is not None:
-            delta["prioridade"] = prioridade
-        if process_type is not None:
-            delta["process_type"] = process_type
-        if updated_at is not None:
-            delta["updated_at"] = updated_at
-        
-        message = create_ws_message(event_type, delta)
-        await manager.broadcast(message)
-        logger.debug(f"Broadcast {event_type} for process {process_id}")
-    except Exception as e:
-        logger.error(f"Error broadcasting process delta: {e}")
-
-
-def _sanitize_dict_names(d: dict):
-    """Sanitiza campos de nome/email/telefone num dicionário genérico (vendedor, mediador, etc.)."""
-    name_fields = ["nome", "name", "nome_completo", "full_name"]
-    email_fields = ["email", "e_mail"]
-    phone_fields = ["telefone", "phone", "telemovel", "mobile"]
-    url_fields = ["url", "website", "link"]
-    for key in list(d.keys()):
-        if key in name_fields and d[key] is not None:
-            d[key] = sanitize_name(str(d[key]))
-        elif key in email_fields and d[key] is not None:
-            d[key] = sanitize_email(str(d[key]))
-        elif key in phone_fields and d[key] is not None:
-            d[key] = sanitize_phone(str(d[key]))
-        elif key in url_fields and d[key] is not None:
-            d[key] = sanitize_url(str(d[key]))
-        elif isinstance(d[key], str) and d[key]:
-            d[key] = sanitize_string(d[key], max_length=500)
-
-
-# NOTA: create_accent_insensitive_regex e build_multiword_search_filter foram
-# movidas para utils/search_filters.py (importadas no topo deste módulo) para
-# eliminar duplicação com routes/clients.py e routes/search.py.
-
-
-# ====================================================================
 # CONFIGURAÇÃO DO ROUTER
 # ====================================================================
 router = APIRouter(prefix="/processes", tags=["Processes"])
-
-
-# ============================================================
-# PACOTE CY — Helper para enviar email do Portal em background
-# ============================================================
-# Fire-and-forget: busca/gera portal_access_code e envia email de
-# boas-vindas. Falhas são LOGADAS (logger.error) mas não propagadas.
-# ============================================================
-async def _send_portal_welcome_email_from_process(
-    client_id: str,
-    client_email: str,
-    client_name: str,
-) -> None:
-    """Envia email de boas-vindas do Portal após criar um processo."""
-    try:
-        # Buscar ou gerar portal_access_code
-        portal_access_code = None
-        try:
-            client_doc = await db.clients.find_one({"id": client_id}, {"portal_access_code": 1, "_id": 0})
-            if client_doc:
-                portal_access_code = client_doc.get("portal_access_code")
-                if not portal_access_code:
-                    from models.client import generate_portal_access_code as _gen_code
-                    portal_access_code = _gen_code()
-                    await db.clients.update_one(
-                        {"id": client_id},
-                        {"$set": {"portal_access_code": portal_access_code}}
-                    )
-        except Exception as e:
-            logger.warning(f"[PORTAL-EMAIL] Erro ao obter/gerar portal_access_code para {client_id}: {e}")
-
-        # Enviar email via task_queue (fallback: directo)
-        from services.task_queue import task_queue
-        from services.email import send_registration_confirmation
-
-        job_id = None
-        try:
-            job_id = await task_queue.send_registration_email(
-                client_email=client_email,
-                client_name=client_name,
-                portal_access_code=portal_access_code,
-            )
-        except Exception as tq_err:
-            logger.warning(f"[PORTAL-EMAIL] Task Queue indisponível para cliente {client_id}: {tq_err}")
-
-        if not job_id:
-            logger.info(f"[PORTAL-EMAIL] A enviar email diretamente para {client_email} (client_id={client_id})")
-            try:
-                await send_registration_confirmation(
-                    client_email=client_email,
-                    client_name=client_name,
-                    portal_access_code=portal_access_code,
-                )
-                logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
-            except Exception as direct_err:
-                logger.error(f"[PORTAL-EMAIL] Falha ao enviar email diretamente para {client_email} "
-                             f"(client_id={client_id}): {direct_err}", exc_info=True)
-    except Exception as e:
-        logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
-                     f"para {client_email} (client_id={client_id}): {e}", exc_info=True)
 
 
 # ====================================================================
@@ -400,34 +253,23 @@ async def generate_magic_link(
     - token: JWT token completo (para debug)
     - expires_in_days: Validade do link
     """
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
+    process = await load_active_process_or_404(process_id)
     issued = await issue_portal_magic_link(
         process_id=process_id,
         process=process,
         user=user,
         request=request,
     )
-
     logger.info(
         f"Magic link gerado por {user.get('email')} para processo {process_id} "
         f"(cliente: {process.get('client_name', 'N/A')}, short_id: {issued['short_id']})"
     )
-
-    return {
-        "magic_link": issued["magic_link"],
-        "short_id": issued["short_id"],
-        "token": issued["token"],
-        "process_id": process_id,
-        "client_name": process.get("client_name", ""),
-        "client_email": process.get("client_email", ""),
-        "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
-    }
+    return build_generate_magic_link_response(
+        process_id=process_id,
+        process=process,
+        issued=issued,
+        expires_in_days=PORTAL_TOKEN_VALIDITY_DAYS,
+    )
 
 
 @router.post("/{process_id}/generate-magic-link/send")
@@ -442,68 +284,13 @@ async def send_magic_link_email(
     O email contém o link curto (short_id) para o cliente aceder
     ao portal do seu processo.
     """
-    from services.email_service import send_email
-
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    client_email = process.get("client_email", "")
-    client_name = process.get("client_name", "Cliente")
-    client_id = process.get("client_id", "")
-
-    if not client_email:
-        raise HTTPException(status_code=400, detail="Cliente não tem email associado")
-
-    portal_access_code = await ensure_portal_access_code(client_id)
-
-    issued = await issue_portal_magic_link(
+    process = await load_active_process_or_404(process_id)
+    return await send_magic_link_to_client(
         process_id=process_id,
         process=process,
         user=user,
         request=request,
     )
-    magic_link = issued["magic_link"]
-    short_id = issued["short_id"]
-
-    text_body, html_body = build_magic_link_email_bodies(
-        client_name=client_name,
-        client_email=client_email,
-        magic_link=magic_link,
-        portal_access_code=portal_access_code,
-    )
-
-    try:
-        await send_email(
-            account_name="power",
-            to_emails=[client_email],
-            subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
-            body=text_body,
-            body_html=html_body,
-            force_system=True,
-            system_purpose="NOTIFICATIONS",
-        )
-    except Exception as e:
-        logger.error(f"Erro ao enviar magic link email: {e}")
-        raise HTTPException(status_code=500, detail="Erro ao enviar email. Tente copiar o link manualmente.")
-
-    logger.info(
-        f"Magic link enviado por email para {client_email} "
-        f"(processo {process_id}, short_id: {short_id})"
-    )
-
-    return {
-        "success": True,
-        "message": f"Email enviado para {client_email}",
-        "magic_link": magic_link,
-        "short_id": short_id,
-        # PACOTE DC — incluir portal_access_code no retorno para que o
-        # endpoint /clients/{id}/resend-portal-access o possa devolver.
-        "portal_access_code": portal_access_code,
-    }
 
 
 @router.post("", response_model=ProcessResponse)
@@ -643,7 +430,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
 
     if client_email:
-        asyncio.create_task(_send_portal_welcome_email_from_process(
+        asyncio.create_task(send_portal_welcome_email_from_process(
             client_id=client_id,
             client_email=client_email,
             client_name=client_name,
@@ -1463,31 +1250,18 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         )
 
     new_client_id = raw_body.get("client_id")
-    if new_client_id and new_client_id != process.get("client_id"):
-        assert_can_reassign_primary_client(role)
-        reassign_info = await reassign_process_primary_client(
-            process, process_id, new_client_id,
-        )
-        await log_history(
-            process_id, user,
-            f"Reatribuiu cliente de '{reassign_info['old_client_name']}' "
-            f"para '{reassign_info['new_client_name']}'",
-        )
-        await log_audit_event(
-            process_id, user,
-            f"Reatribuiu cliente de '{reassign_info['old_client_name']}' "
-            f"para '{reassign_info['new_client_name']}'",
-            request=request, source="web",
-        )
-        logger.info(
-            f"Processo {process_id} reatribuído de cliente "
-            f"{reassign_info['old_client_id']} ({reassign_info['old_client_name']}) "
-            f"para cliente {reassign_info['new_client_id']} "
-            f"({reassign_info['new_client_name']}) por {user.get('email')}"
-        )
+    await maybe_reassign_primary_client_with_audit(
+        process=process,
+        process_id=process_id,
+        new_client_id=new_client_id,
+        role=role,
+        user=user,
+        request=request,
+        log_history_fn=log_history,
+        log_audit_event_fn=log_audit_event,
+    )
 
     assert_process_editable_for_role(process.get("status"), role)
-
     update_data = seed_update_data(
         process=process,
         client_id_before=client_id,
@@ -1496,10 +1270,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         raw_client_phone=raw_client_phone,
     )
 
-    valid_statuses = [
-        s["name"]
-        for s in await db.workflow_statuses.find({}, {"name": 1, "_id": 0}).to_list(100)
-    ]
+    valid_statuses = await load_valid_workflow_status_names()
     perms = build_role_update_permissions(role)
     can_update_status = perms["can_update_status"]
 
@@ -1538,16 +1309,12 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         decrypt_fn=decrypt_sensitive_data,
     )
 
-    try:
-        updated = decrypt_sensitive_data(updated)
-    except Exception as e:
-        logger.error(f"Erro ao desencriptar dados do processo {process_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Erro interno ao desencriptar dados do processo",
-        )
-
-    updated = await populate_client_data(updated)
+    updated = await decrypt_and_populate_updated_process(
+        updated,
+        process_id,
+        decrypt_fn=decrypt_sensitive_data,
+        populate_fn=populate_client_data,
+    )
     return build_process_response_or_500(updated, process_id)
 
 

@@ -752,6 +752,43 @@ class TestProcessDetailAndAssignEmail:
         assert "Abrir Processo" not in html2
 
 
+class TestBroadcastAndMagicLinkResponses:
+    def test_build_process_delta_payload(self):
+        from services.process_broadcast import build_process_delta_payload
+        delta = build_process_delta_payload(
+            process_id="p1",
+            status="fase_1",
+            client_name="Ana",
+            priority=None,
+        )
+        assert delta == {
+            "process_id": "p1",
+            "status": "fase_1",
+            "client_name": "Ana",
+        }
+        assert "priority" not in delta
+
+    def test_magic_link_response_builders(self):
+        from services.portal_magic_link import (
+            build_generate_magic_link_response,
+            build_send_magic_link_response,
+        )
+        gen = build_generate_magic_link_response(
+            process_id="p1",
+            process={"client_name": "Ana", "client_email": "a@x.com"},
+            issued={"magic_link": "http://x/portal/abc", "short_id": "abc", "token": "t"},
+            expires_in_days=90,
+        )
+        assert gen["short_id"] == "abc" and gen["expires_in_days"] == 90
+        sent = build_send_magic_link_response(
+            client_email="a@x.com",
+            magic_link="http://x/portal/abc",
+            short_id="abc",
+            portal_access_code="ZZ",
+        )
+        assert sent["success"] is True and sent["portal_access_code"] == "ZZ"
+
+
 
 class TestListEnrichmentSort:
     def test_default_sort_priority_then_status(self):

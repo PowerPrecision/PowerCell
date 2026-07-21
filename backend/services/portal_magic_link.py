@@ -172,3 +172,119 @@ def build_magic_link_email_bodies(
         f"Power Precision · Crédito Habitação"
     )
     return text_body, html_body
+
+
+async def load_active_process_or_404(process_id: str) -> dict:
+    """Processo não eliminado ou HTTP 404."""
+    from fastapi import HTTPException
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    return process
+
+
+def build_generate_magic_link_response(
+    *,
+    process_id: str,
+    process: dict,
+    issued: dict,
+    expires_in_days: int,
+) -> dict[str, Any]:
+    return {
+        "magic_link": issued["magic_link"],
+        "short_id": issued["short_id"],
+        "token": issued["token"],
+        "process_id": process_id,
+        "client_name": process.get("client_name", ""),
+        "client_email": process.get("client_email", ""),
+        "expires_in_days": expires_in_days,
+    }
+
+
+def build_send_magic_link_response(
+    *,
+    client_email: str,
+    magic_link: str,
+    short_id: str,
+    portal_access_code: Optional[str],
+) -> dict[str, Any]:
+    return {
+        "success": True,
+        "message": f"Email enviado para {client_email}",
+        "magic_link": magic_link,
+        "short_id": short_id,
+        "portal_access_code": portal_access_code,
+    }
+
+
+async def send_magic_link_to_client(
+    *,
+    process_id: str,
+    process: dict,
+    user: dict,
+    request: Request,
+) -> dict[str, Any]:
+    """
+    Garante access code, emite link e envia email.
+    Raises HTTPException 400/500.
+    """
+    from fastapi import HTTPException
+    from services.email_service import send_email
+
+    client_email = process.get("client_email", "")
+    client_name = process.get("client_name", "Cliente")
+    client_id = process.get("client_id", "")
+
+    if not client_email:
+        raise HTTPException(
+            status_code=400,
+            detail="Cliente não tem email associado",
+        )
+
+    portal_access_code = await ensure_portal_access_code(client_id)
+    issued = await issue_portal_magic_link(
+        process_id=process_id,
+        process=process,
+        user=user,
+        request=request,
+    )
+    magic_link = issued["magic_link"]
+    short_id = issued["short_id"]
+
+    text_body, html_body = build_magic_link_email_bodies(
+        client_name=client_name,
+        client_email=client_email,
+        magic_link=magic_link,
+        portal_access_code=portal_access_code,
+    )
+
+    try:
+        await send_email(
+            account_name="power",
+            to_emails=[client_email],
+            subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
+            body=text_body,
+            body_html=html_body,
+            force_system=True,
+            system_purpose="NOTIFICATIONS",
+        )
+    except Exception as e:
+        logger.error(f"Erro ao enviar magic link email: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail="Erro ao enviar email. Tente copiar o link manualmente.",
+        )
+
+    logger.info(
+        f"Magic link enviado por email para {client_email} "
+        f"(processo {process_id}, short_id: {short_id})"
+    )
+    return build_send_magic_link_response(
+        client_email=client_email,
+        magic_link=magic_link,
+        short_id=short_id,
+        portal_access_code=portal_access_code,
+    )
