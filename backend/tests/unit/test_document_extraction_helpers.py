@@ -16,6 +16,18 @@ from services.document_expiring_dashboard import (
     sort_clients_by_urgency,
 )
 from services.document_constants import DOCUMENT_CATEGORY_MAP, ERROR_CLIENT_NOT_FOUND
+from services.document_portal_request import (
+    normalize_portal_category,
+    coerce_optional_str,
+    build_portal_duplicate_query,
+    build_portal_document_record,
+)
+from services.document_process_resolve import (
+    build_s3_valid_prefixes,
+    assert_s3_file_belongs_to_process,
+)
+import pytest
+from fastapi import HTTPException
 
 
 class TestDocumentFilenames:
@@ -100,3 +112,41 @@ class TestDocumentConstants:
     def test_category_map_and_errors(self):
         assert "Cartao_Cidadao" in DOCUMENT_CATEGORY_MAP
         assert ERROR_CLIENT_NOT_FOUND
+
+
+class TestPortalRequestHelpers:
+    def test_normalize_and_coerce(self):
+        assert normalize_portal_category({"value": "IRS"}) == "IRS"
+        assert normalize_portal_category("UnknownCat") == "Outros"
+        assert coerce_optional_str({"label": "x"}) == "x"
+        assert coerce_optional_str(None) is None
+
+    def test_build_duplicate_query_and_record(self):
+        q = build_portal_duplicate_query("p1", "IRS")
+        assert q["process_id"] == "p1"
+        assert "REQUESTED" in q["status"]["$in"]
+        doc = build_portal_document_record(
+            process_id="p1",
+            category="IRS",
+            notes="n",
+            custom_label=None,
+            user={"id": "u1", "name": "Ana"},
+        )
+        assert doc["status"] == "REQUESTED"
+        assert doc["source"] == "admin_request"
+        assert doc["requested_by"] == "u1"
+
+
+class TestS3AccessHelpers:
+    def test_build_prefixes_with_s3_folder(self):
+        prefixes = build_s3_valid_prefixes({"s3_folder": "Documentação Clientes/Foo/"})
+        assert prefixes == ["Documentação Clientes/Foo/"]
+
+    def test_assert_belongs_ok_and_denied(self):
+        process = {"s3_folder": "Documentação Clientes/Foo"}
+        assert_s3_file_belongs_to_process(
+            "Documentação Clientes/Foo/a.pdf", process
+        )
+        with pytest.raises(HTTPException) as exc:
+            assert_s3_file_belongs_to_process("other/a.pdf", process)
+        assert exc.value.status_code == 403

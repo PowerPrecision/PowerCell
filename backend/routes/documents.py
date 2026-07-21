@@ -86,8 +86,11 @@ from services.document_filenames import (
 from services.document_process_resolve import (
     resolve_process_from_flexible_id,
     extract_second_client_name,
+    assert_s3_file_belongs_to_process,
+    build_s3_valid_prefixes,
 )
 from services.document_expiring_dashboard import run_get_expiring_documents_dashboard
+from services.document_portal_request import run_create_portal_document_request
 
 
 # ====================================================================
@@ -1027,44 +1030,15 @@ async def check_file_upload(
 @router.post("/client/{client_id}/init-folders", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def initialize_folders(client_id: str, user: dict = Depends(get_current_user)):
     """Cria a estrutura de pastas inicial no S3 (se não existir)."""
-    process = await db.processes.find_one({"id": client_id})
-    effective_id = client_id
-    
-    # Se não encontrado como processo, tentar como ID de cliente
-    if not process:
-        client = await db.clients.find_one({"id": client_id})
-        if client:
-            logger.debug(f"[INIT-FOLDERS] Encontrado cliente por ID: {client_id}")
-            process_ids = client.get("process_ids", [])
-            if process_ids:
-                process = await db.processes.find_one({"id": process_ids[0]})
-                if process:
-                    effective_id = process["id"]
-                    logger.debug(f"[INIT-FOLDERS] Processo encontrado via process_ids: {effective_id}")
-            
-            # Fallback: procurar processo por client_id
-            if not process:
-                process = await db.processes.find_one({"client_id": client_id})
-                if process:
-                    effective_id = process["id"]
-                    logger.debug(f"[INIT-FOLDERS] Processo encontrado via client_id: {effective_id}")
-            
-            # Cliente existe mas sem processo
-            if not process:
-                logger.info(f"[INIT-FOLDERS] Cliente {client_id} existe mas sem processo associado")
-                raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível inicializar pastas.")
-    
-    # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
-    if not process:
-        process = await db.processes.find_one({"client_id": client_id})
-        if process:
-            effective_id = process["id"]
-            logger.debug(f"[INIT-FOLDERS] Processo encontrado via client_id (fallback): {effective_id}")
-    
-    if not process:
-        logger.warning(f"[INIT-FOLDERS] Nenhum processo ou cliente encontrado para ID: {client_id}")
-        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-    
+    process, effective_id = await resolve_process_from_flexible_id(
+        client_id,
+        log_prefix="[INIT-FOLDERS]",
+        client_without_process_detail=(
+            "Cliente encontrado mas sem processo associado. "
+            "Não é possível inicializar pastas."
+        ),
+    )
+
     # Verificar se já existe mapeamento S3 - NÃO criar duplicados
     existing_s3_folder = process.get("s3_folder")
     if existing_s3_folder:
@@ -1075,9 +1049,7 @@ async def initialize_folders(client_id: str, user: dict = Depends(get_current_us
         # Se não existe, continuar para criar nova
     
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    # Obter segundo titular se existir (com verificação de None)
-    titular2_init = process.get("titular2_data") or {}
-    second_client_name = process.get("second_client_name") or titular2_init.get("nome") or titular2_init.get("name")
+    second_client_name = extract_second_client_name(process)
     
     success, s3_folder_path = s3_service.initialize_client_folders(
         effective_id, 
@@ -1102,59 +1074,15 @@ async def get_download_url(
     user: dict = Depends(get_current_user)
 ):
     """Gera um URL temporário para download de um ficheiro."""
-    process = await db.processes.find_one({"id": client_id})
-    
-    # Se não encontrado como processo, tentar como ID de cliente
-    if not process:
-        client = await db.clients.find_one({"id": client_id})
-        if client:
-            logger.debug(f"[DOWNLOAD] Encontrado cliente por ID: {client_id}")
-            process_ids = client.get("process_ids", [])
-            if process_ids:
-                process = await db.processes.find_one({"id": process_ids[0]})
-                if process:
-                    logger.debug(f"[DOWNLOAD] Processo encontrado via process_ids: {process['id']}")
-            
-            # Fallback: procurar processo por client_id
-            if not process:
-                process = await db.processes.find_one({"client_id": client_id})
-                if process:
-                    logger.debug(f"[DOWNLOAD] Processo encontrado via client_id: {process['id']}")
-            
-            # Cliente existe mas sem processo
-            if not process:
-                logger.info(f"[DOWNLOAD] Cliente {client_id} existe mas sem processo associado")
-                raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível gerar link de download.")
-    
-    # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
-    if not process:
-        process = await db.processes.find_one({"client_id": client_id})
-        if process:
-            logger.debug(f"[DOWNLOAD] Processo encontrado via client_id (fallback): {process['id']}")
-    
-    if not process:
-        logger.warning(f"[DOWNLOAD] Nenhum processo ou cliente encontrado para ID: {client_id}")
-        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-    
-    # Verificar se o ficheiro pertence ao cliente (segurança)
-    # PRIORIDADE: se o processo tem s3_folder, usar APENAS esse prefixo
-    s3_folder = process.get("s3_folder")
-    if s3_folder:
-        s3_prefix = s3_folder.rstrip('/')
-        if not file_path.startswith(f"{s3_prefix}/"):
-            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
-    else:
-        client_name = process.get("client_name", "")
-        safe_name = sanitize_folder_name(client_name) if client_name else ""
-        clean_name = client_name.strip() if client_name else ""
-        
-        valid_prefixes = [
-            f"Documentação Clientes/{clean_name}",  # Com espaços
-            f"Documentação Clientes/{safe_name}",   # Com underscores
-        ]
-        
-        if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
-            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+    process, _effective_id = await resolve_process_from_flexible_id(
+        client_id,
+        log_prefix="[DOWNLOAD]",
+        client_without_process_detail=(
+            "Cliente encontrado mas sem processo associado. "
+            "Não é possível gerar link de download."
+        ),
+    )
+    assert_s3_file_belongs_to_process(file_path, process)
     
     url = s3_service.get_presigned_url(file_path)
     if not url:
@@ -1391,70 +1319,23 @@ async def delete_file_s3(
     Returns:
         JSONResponse: Sucesso ou erro 409 com detalhes do conflito.
     """
-    process = await db.processes.find_one({"id": client_id})
-    effective_id = client_id
-    
-    # Se não encontrado como processo, tentar como ID de cliente
-    if not process:
-        client = await db.clients.find_one({"id": client_id})
-        if client:
-            logger.debug(f"[DELETE] Encontrado cliente por ID: {client_id}")
-            process_ids = client.get("process_ids", [])
-            if process_ids:
-                process = await db.processes.find_one({"id": process_ids[0]})
-                if process:
-                    effective_id = process["id"]
-                    logger.debug(f"[DELETE] Processo encontrado via process_ids: {effective_id}")
-            
-            # Fallback: procurar processo por client_id
-            if not process:
-                process = await db.processes.find_one({"client_id": client_id})
-                if process:
-                    effective_id = process["id"]
-                    logger.debug(f"[DELETE] Processo encontrado via client_id: {effective_id}")
-            
-            # Cliente existe mas sem processo
-            if not process:
-                logger.info(f"[DELETE] Cliente {client_id} existe mas sem processo associado")
-                raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível eliminar ficheiros.")
-    
-    # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
-    if not process:
-        process = await db.processes.find_one({"client_id": client_id})
-        if process:
-            effective_id = process["id"]
-            logger.debug(f"[DELETE] Processo encontrado via client_id (fallback): {effective_id}")
-    
-    if not process:
-        logger.warning(f"[DELETE] Nenhum processo ou cliente encontrado para ID: {client_id}")
-        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-    
+    process, _effective_id = await resolve_process_from_flexible_id(
+        client_id,
+        log_prefix="[DELETE]",
+        client_without_process_detail=(
+            "Cliente encontrado mas sem processo associado. "
+            "Não é possível eliminar ficheiros."
+        ),
+    )
+
     # Verificar se é um caminho de ficheiro válido (não pode terminar com /)
     if file_path.endswith('/'):
         raise HTTPException(
             status_code=400, 
             detail="Caminho inválido: não pode eliminar pastas. Selecione um ficheiro específico."
         )
-    
-    # Verificar se o ficheiro pertence ao cliente (segurança)
-    # PRIORIDADE: se o processo tem s3_folder, usar APENAS esse prefixo
-    s3_folder = process.get("s3_folder")
-    if s3_folder:
-        s3_prefix = s3_folder.rstrip('/')
-        if not file_path.startswith(f"{s3_prefix}/"):
-            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
-    else:
-        client_name = process.get("client_name", "")
-        safe_name = sanitize_folder_name(client_name) if client_name else ""
-        clean_name = client_name.strip() if client_name else ""
-        
-        valid_prefixes = [
-            f"Documentação Clientes/{clean_name}",  # Com espaços
-            f"Documentação Clientes/{safe_name}",   # Com underscores
-        ]
-        
-        if not any(file_path.startswith(prefix) for prefix in valid_prefixes):
-            raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+
+    assert_s3_file_belongs_to_process(file_path, process)
     
     # ====================================================================
     # PROTECÇÃO DE ELIMINAÇÃO SEGURA — Scope Global
@@ -1585,25 +1466,11 @@ async def bulk_delete_files(
             detail="Lista de ficheiros vazia ou inválida"
         )
     
-    process = await db.processes.find_one({"id": client_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-    
-    # Verificar se os ficheiros pertencem ao cliente (segurança)
-    # PRIORIDADE: se o processo tem s3_folder, usar APENAS esse prefixo
-    s3_folder = process.get("s3_folder")
-    if s3_folder:
-        s3_prefix = s3_folder.rstrip('/')
-        valid_prefixes = [f"{s3_prefix}/"]
-    else:
-        client_name = process.get("client_name", "")
-        safe_name = sanitize_folder_name(client_name) if client_name else ""
-        clean_name = client_name.strip() if client_name else ""
-        
-        valid_prefixes = [
-            f"Documentação Clientes/{clean_name}",
-            f"Documentação Clientes/{safe_name}",
-        ]
+    process, _effective_id = await resolve_process_from_flexible_id(
+        client_id,
+        log_prefix="[DELETE-BATCH]",
+    )
+    valid_prefixes = build_s3_valid_prefixes(process)
     
     deleted_count = 0
     failed_files = []
@@ -3711,197 +3578,14 @@ async def create_portal_document_request(
     Solicita um documento ao cliente via portal.
     Cria um registo com status REQUESTED que aparece no portal do cliente.
     """
-    # ── 0. Log incoming request data for debugging ──
-    logger.info(
-        f"[PORTAL-REQUESTS] Creating request for process_id={process_id}, "
-        f"category={data.category!r}, notes={data.notes!r}, custom_label={data.custom_label!r}, "
-        f"user={user.get('id', '?')}"
-    )
-
-    # ── 0b. Validate process_id is not empty / obviously invalid ──
-    if not process_id or not process_id.strip():
-        raise HTTPException(status_code=400, detail="ID do processo inválido")
-
     try:
-        # ── 1. Verify process exists (wrapped in own try/except) ──
-        try:
-            process = await db.processes.find_one({"id": process_id})
-        except Exception as db_err:
-            logger.error(
-                f"[PORTAL-REQUESTS] MongoDB find process failed for {process_id}: "
-                f"{type(db_err).__name__}: {db_err}", exc_info=True
-            )
-            raise HTTPException(
-                status_code=503,
-                detail=f"Erro ao aceder à base de dados: {type(db_err).__name__}"
-            )
-        if not process:
-            raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-        # ── 2. Ensure category is a string (defensive) ──
-        category = data.category
-        if isinstance(category, dict):
-            category = category.get("value", category.get("label", "Outros"))
-        if not isinstance(category, str):
-            category = str(category) if category is not None else "Outros"
-        if category not in DOCUMENT_CATEGORY_MAP:
-            category = "Outros"
-
-        # ── 3. Duplicate check (wrapped in own try/except) ──
-        # Include source filter to avoid confusion with auto_default docs.
-        # Also check for object-valued categories that may match.
-        # Include all active statuses — if a doc was already received,
-        # no need to request it again.
-        try:
-            existing = await db.documents.find_one(
-                {
-                    "process_id": process_id,
-                    "$and": [
-                        {
-                            "$or": [
-                                {"category": category},
-                                {"category.value": category},
-                                {"category.label": category},
-                            ]
-                        },
-                        {
-                            "$or": [
-                                {"source": {"$in": ["admin_request", "client_portal"]}},
-                                {"source": {"$exists": False}},
-                            ]
-                        },
-                    ],
-                    "status": {"$in": [
-                        "REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED",
-                        "requested", "pending", "uploaded", "submitted", "received",
-                    ]},
-                }
-            )
-        except Exception as db_err:
-            logger.warning(
-                f"[PORTAL-REQUESTS] Duplicate check query failed, "
-                f"proceeding without check: {type(db_err).__name__}: {db_err}"
-            )
-            existing = None
-
-        if existing:
-            # PACOTE AN: Para categoria "Outros", permitir múltiplos pedidos
-            # desde que tenham custom_label diferente. Isto permite pedir
-            # vários "Outros Documentos" com descrições diferentes em simultâneo.
-            is_outros = category in ("Outros", "outro", "other", "outros")
-            if is_outros and data.custom_label:
-                # Verificar se já existe um "Outros" com o MESMO custom_label
-                existing_same_label = await db.documents.find_one({
-                    "process_id": process_id,
-                    "category": {"$in": [category, "Outros", "outro", "other", "outros"]},
-                    "custom_label": data.custom_label,
-                    "status": {"$in": [
-                        "REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED",
-                        "requested", "pending", "uploaded", "submitted", "received",
-                    ]},
-                })
-                if not existing_same_label:
-                    # Mesmo cat "Outros" mas custom_label diferente → permitir
-                    existing = None
-                else:
-                    raise HTTPException(
-                        status_code=409,
-                        detail=f"Já existe um pedido de '{data.custom_label}' pendente para este processo."
-                    )
-            else:
-                cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
-                raise HTTPException(
-                    status_code=409,
-                    detail=f"Já existe um pedido de '{cat_info.get('label', category)}' pendente para este processo."
-                )
-
-        # ── 4. Build document record ──
-        doc_id = str(uuid.uuid4())
-        now = datetime.now(timezone.utc).isoformat()
-
-        user_id = user.get("id", "") or ""
-        user_name = user.get("name", "") or ""
-
-        # Ensure notes is always a string (never an object)
-        notes_val = data.notes
-        if isinstance(notes_val, dict):
-            notes_val = notes_val.get("label", notes_val.get("value", str(notes_val)))
-        notes_val = str(notes_val) if notes_val is not None else ""
-
-        # Ensure custom_label is always a string or None (never an object)
-        custom_label_val = data.custom_label
-        if isinstance(custom_label_val, dict):
-            custom_label_val = custom_label_val.get("label", custom_label_val.get("value", str(custom_label_val)))
-
-        doc = {
-            "id": doc_id,
-            "process_id": process_id,
-            "category": category,
-            "filename": None,
-            "original_filename": None,
-            "status": "REQUESTED",
-            "notes": notes_val,
-            "custom_label": custom_label_val,
-            "requested_by": user_id,
-            "requested_by_name": user_name,
-            "source": "admin_request",
-            "file_size": None,
-            "content_type": None,
-            "uploaded_at": None,
-            "created_at": now,
-            "updated_at": now,
-        }
-
-        # ── 5. Insert document (wrapped in own try/except) ──
-        try:
-            insert_result = await db.documents.insert_one(doc)
-        except Exception as insert_err:
-            logger.error(
-                f"[PORTAL-REQUESTS] MongoDB insert failed for process {process_id}: "
-                f"{type(insert_err).__name__}: {insert_err}", exc_info=True
-            )
-            raise HTTPException(
-                status_code=500,
-                detail=f"Erro ao inserir documento: {type(insert_err).__name__}"
-            )
-        if not insert_result.inserted_id:
-            raise HTTPException(
-                status_code=500,
-                detail="Erro ao inserir documento na base de dados"
-            )
-
-        # ── 6. Audit log (fire-and-forget) ──
-        # Pacote D — Indexador silencioso: NÃO regista no histórico se o
-        # utilizador for indexacao (atua de forma totalmente silenciosa
-        # no mural do processo). Os 3 sítios com db.history.insert_one
-        # direto em documents.py NÃO passam por log_history(), pelo que
-        # precisam da mesma barra de bloqueio explícita.
-        try:
-            if user and user.get("role") != "indexacao":
-                await db.history.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "process_id": process_id,
-                    "user_id": user_id,
-                    "user_name": user_name,
-                    "action": f"Documento solicitado via portal: {category}",
-                    "field": "portal_document_requested",
-                    "old_value": None,
-                    "new_value": category,
-                    "created_at": now,
-                })
-        except Exception as hist_err:
-            logging.getLogger(__name__).warning(f"Failed to write audit log: {hist_err}")
-
-        cat_info = DOCUMENT_CATEGORY_MAP.get(category, {"label": category, "icon": "📎"})
-
-        return {
-            "success": True,
-            "document": {
-                **doc,
-                "category_label": cat_info.get("label", category),
-                "category_icon": cat_info.get("icon", "📎"),
-            }
-        }
+        return await run_create_portal_document_request(
+            process_id,
+            category=data.category,
+            notes=data.notes,
+            custom_label=data.custom_label,
+            user=user,
+        )
     except HTTPException:
         raise
     except Exception as e:
