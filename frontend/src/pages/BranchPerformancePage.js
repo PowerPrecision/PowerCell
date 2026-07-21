@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Building2,
   TrendingUp,
@@ -120,33 +121,28 @@ function ApprovalBar({ rate }) {
 
 export default function BranchPerformancePage() {
   const { isDark } = useTheme();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: "total_volume", direction: "desc" });
 
-  // ── Fetch ──
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  // ── Server state via TanStack Query ──
+  // fetchData é o refetch da query (usado no botão "Atualizar" e no retry).
+  const {
+    data,
+    isFetching: loading,
+    error: queryError,
+    refetch: fetchData,
+  } = useQuery({
+    queryKey: ["stats-branches"],
+    queryFn: async () => {
       const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/stats/branches`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`Erro ${res.status}: ${res.statusText}`);
-      const json = await res.json();
-      setData(json);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      return res.json();
+    },
+  });
+  // Manter `error` como string (o JSX renderiza-o diretamente).
+  const error = queryError ? queryError.message : null;
 
   // ── Sort handler ──
   const handleSort = useCallback((key) => {
