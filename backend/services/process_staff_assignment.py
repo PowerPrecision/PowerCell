@@ -438,3 +438,157 @@ def build_unassign_me_update(process: dict, user: dict) -> tuple[dict, list[str]
         raise HTTPException(status_code=400, detail="Não está atribuído a este processo")
 
     return update_data, removed_from
+
+
+ASSIGNMENT_EMAIL_ROLE_LABELS = (
+    ("consultores", "Consultor"),
+    ("mediadores", "Intermediário"),
+    ("indexacao", "Indexação"),
+    ("parceiro", "Parceiro"),
+)
+
+
+def build_assignment_email_bodies(
+    *,
+    user_name: str,
+    role_label: str,
+    client_name: str,
+    process_number: str,
+    process_id: str,
+    process_link: str,
+) -> tuple[str, str, str]:
+    """
+    Returns (subject, body_text, content_html) — HTML parcial antes do template base.
+    """
+    subject = f"Novo Processo Atribuído: {client_name}"
+    process_ref = process_number or process_id[:8]
+
+    body_text = (
+        f"Olá {user_name},\n\n"
+        f"Foi-lhe atribuído um novo processo como {role_label}.\n\n"
+        f"Cliente: {client_name}\n"
+        f"Processo: {process_ref}\n"
+    )
+    if process_link:
+        body_text += f"\nAceda ao processo em: {process_link}\n"
+
+    link_html = ""
+    if process_link:
+        link_html = f"""
+                <tr>
+                    <td style="padding: 15px 30px; text-align: center;">
+                        <a href="{process_link}" style="
+                            display: inline-block;
+                            background: linear-gradient(135deg, #1e3a5f, #2d5a87);
+                            color: #ffffff;
+                            padding: 12px 30px;
+                            border-radius: 8px;
+                            text-decoration: none;
+                            font-weight: 600;
+                            font-size: 14px;
+                        ">Abrir Processo no CRM</a>
+                    </td>
+                </tr>"""
+
+    content_html = f"""
+            <table width="100%" cellpadding="0" cellspacing="0" style="padding: 20px 0;">
+                <tr>
+                    <td style="padding: 10px 30px;">
+                        <p style="margin: 0 0 10px 0; font-size: 16px;">Olá <strong>{user_name}</strong>,</p>
+                        <p style="margin: 0 0 20px 0; font-size: 15px; color: #555;">
+                            Foi-lhe atribuído um novo processo como <strong>{role_label}</strong>.
+                        </p>
+                    </td>
+                </tr>
+                <tr>
+                    <td style="padding: 15px 30px; background: #f8f9fa; border-radius: 8px;">
+                        <table width="100%" cellpadding="0" cellspacing="0">
+                            <tr>
+                                <td style="padding: 8px 0; font-size: 14px; color: #666; width: 120px;"><strong>Cliente:</strong></td>
+                                <td style="padding: 8px 0; font-size: 14px;">{client_name}</td>
+                            </tr>
+                            <tr>
+                                <td style="padding: 8px 0; font-size: 14px; color: #666;"><strong>Processo:</strong></td>
+                                <td style="padding: 8px 0; font-size: 14px;">{process_ref}</td>
+                            </tr>
+                        </table>
+                    </td>
+                </tr>
+                {link_html}
+            </table>"""
+    return subject, body_text, content_html
+
+
+async def send_assignment_email(
+    newly_assigned_ids: list,
+    process_id: str,
+    client_name: str,
+    process_number: str,
+    role_label: str,
+) -> None:
+    """
+    Email de notificação aos utilizadores recém-atribuídos.
+    Silencioso (não propaga erros para a API).
+    """
+    import os
+    from services.email import get_base_template
+    from services.notification_service import send_notification_with_preference_check
+
+    frontend_url = os.environ.get("FRONTEND_URL", "")
+    process_link = f"{frontend_url}/processo/{process_id}" if frontend_url else ""
+
+    for uid in newly_assigned_ids:
+        try:
+            target_user = await db.users.find_one(
+                {"id": uid}, {"email": 1, "name": 1},
+            )
+            if not target_user or not target_user.get("email"):
+                continue
+
+            user_email = target_user["email"]
+            user_name = target_user.get("name", "Utilizador")
+            subject, body_text, content_html = build_assignment_email_bodies(
+                user_name=user_name,
+                role_label=role_label,
+                client_name=client_name,
+                process_number=process_number,
+                process_id=process_id,
+                process_link=process_link,
+            )
+            html_body = get_base_template(content_html, title=subject)
+
+            await send_notification_with_preference_check(
+                to_email=user_email,
+                subject=subject,
+                body=body_text,
+                html_body=html_body,
+                notification_type="process_assigned",
+            )
+            logger.info(
+                f"[ASSIGN-EMAIL] Email enviado para {user_email} ({role_label}) "
+                f"— processo {process_id}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[ASSIGN-EMAIL] Erro ao enviar email de atribuição para {uid}: {e}"
+            )
+
+
+def schedule_assignment_emails(
+    newly: dict,
+    *,
+    process_id: str,
+    client_name: str,
+    process_number: str,
+) -> None:
+    """Dispara create_task por cada role com novos assignees."""
+    import asyncio
+
+    for key, label in ASSIGNMENT_EMAIL_ROLE_LABELS:
+        ids = newly.get(key) or []
+        if ids:
+            asyncio.create_task(
+                send_assignment_email(
+                    ids, process_id, client_name, process_number, label,
+                )
+            )

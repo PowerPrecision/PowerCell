@@ -384,3 +384,58 @@ async def link_single_client_to_process(
     logger.info(
         f"Processo {process_id} criado e associado ao cliente {client_id}"
     )
+
+
+async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
+    """
+    Valida role/client_id, resolve status, carrega cliente e monta process_doc
+    (ainda sem encriptar / inserir).
+
+    Returns dict com keys usadas pela rota create-client.
+    """
+    from services.process_service import get_next_process_number
+
+    assert_can_create_staff_process(user["role"])
+    assert_client_id_required(getattr(data, "client_id", None))
+
+    is_lead = bool(getattr(data, "is_lead", False))
+    initial_status, _ = await resolve_initial_workflow_status(is_lead=is_lead)
+
+    process_id = str(uuid.uuid4())
+    process_number = await get_next_process_number()
+    now = datetime.now(timezone.utc).isoformat()
+
+    client_fields = await load_existing_client_for_process(data.client_id)
+    process_doc = build_staff_process_doc(
+        process_id=process_id,
+        process_number=process_number,
+        now=now,
+        client_id=client_fields["client_id"],
+        client_name=client_fields["client_name"],
+        client_email=client_fields["client_email"],
+        client_phone=client_fields["client_phone"],
+        client_nif=client_fields["client_nif"],
+        process_type=data.process_type,
+        initial_status=initial_status,
+        is_lead=is_lead,
+    )
+    second_client_id = await attach_second_client_on_create(
+        process_doc,
+        getattr(data, "second_client_id", None),
+        client_fields["client_id"],
+    )
+    apply_creator_role_assignment(process_doc, user)
+
+    return {
+        "process_id": process_id,
+        "process_number": process_number,
+        "now": now,
+        "is_lead": is_lead,
+        "initial_status": initial_status,
+        "client_id": client_fields["client_id"],
+        "client_name": client_fields["client_name"],
+        "client_email": client_fields["client_email"],
+        "process_doc": process_doc,
+        "second_client_id": second_client_id,
+        "process_type": data.process_type,
+    }

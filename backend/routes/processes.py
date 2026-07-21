@@ -120,20 +120,23 @@ from services.process_indexing import (
 )
 from services.process_create import (
     resolve_initial_workflow_status,
-    load_existing_client_for_process,
-    build_staff_process_doc,
-    apply_creator_role_assignment,
-    attach_second_client_on_create,
     create_default_portal_documents,
     link_clients_after_process_create,
-    assert_can_create_staff_process,
-    assert_client_id_required,
     maybe_auto_assign_indexer_on_create,
     build_create_broadcast_names,
     assert_is_cliente_role,
     load_client_doc_or_404,
     build_client_self_process_doc,
     link_single_client_to_process,
+    assemble_staff_create_bundle,
+)
+from services.process_detail import (
+    load_process_doc_or_404,
+    assert_can_view_process_or_403,
+    attach_latest_activity,
+    attach_portal_access,
+    ensure_client_id_default,
+    serialize_process_detail_response,
 )
 from services.process_clients_nm import (
     build_add_client_update,
@@ -201,6 +204,7 @@ from services.process_staff_assignment import (
     build_staff_assign_update,
     build_assign_me_update,
     build_unassign_me_update,
+    schedule_assignment_emails,
 )
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
@@ -603,43 +607,17 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     Returns:
         ProcessResponse: Processo criado
     """
-    assert_can_create_staff_process(user["role"])
-    assert_client_id_required(data.client_id)
-
-    is_lead = bool(getattr(data, "is_lead", False))
-    initial_status, _default_status = await resolve_initial_workflow_status(is_lead=is_lead)
-
-    process_id = str(uuid.uuid4())
-    process_number = await get_next_process_number()
-    now = datetime.now(timezone.utc).isoformat()
-
-    client_fields = await load_existing_client_for_process(data.client_id)
-    client_id = client_fields["client_id"]
-    client_name = client_fields["client_name"]
-    client_email = client_fields["client_email"]
-    client_phone = client_fields["client_phone"]
-    client_nif = client_fields["client_nif"]
-
-    process_doc = build_staff_process_doc(
-        process_id=process_id,
-        process_number=process_number,
-        now=now,
-        client_id=client_id,
-        client_name=client_name,
-        client_email=client_email,
-        client_phone=client_phone,
-        client_nif=client_nif,
-        process_type=data.process_type,
-        initial_status=initial_status,
-        is_lead=is_lead,
-    )
-
-    second_client_id_for_process = await attach_second_client_on_create(
-        process_doc,
-        getattr(data, "second_client_id", None),
-        client_id,
-    )
-    apply_creator_role_assignment(process_doc, user)
+    bundle = await assemble_staff_create_bundle(data, user)
+    process_id = bundle["process_id"]
+    process_number = bundle["process_number"]
+    now = bundle["now"]
+    is_lead = bundle["is_lead"]
+    initial_status = bundle["initial_status"]
+    client_id = bundle["client_id"]
+    client_name = bundle["client_name"]
+    client_email = bundle["client_email"]
+    process_doc = bundle["process_doc"]
+    second_client_id_for_process = bundle["second_client_id"]
 
     process_doc = encrypt_sensitive_data(process_doc)
     await db.processes.insert_one(process_doc)
@@ -678,7 +656,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         process_number=process_number,
         client_name=client_name,
         status=initial_status,
-        process_type=data.process_type,
+        process_type=bundle["process_type"],
         assigned_consultor_ids=process_doc.get("assigned_consultor_ids", []),
         assigned_mediador_ids=process_doc.get("assigned_mediador_ids", []),
         consultor_names=consultor_names,
@@ -1233,84 +1211,15 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
         HTTPException(404): Se processo não encontrado.
         HTTPException(403): Se utilizador não tem permissão para ver.
     """
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    if not can_view_process(user, process):
-        raise HTTPException(status_code=403, detail="Acesso negado")
-    
-    # Desencriptar dados sensíveis do processo
+    process = await load_process_doc_or_404(process_id)
+    assert_can_view_process_or_403(user, process, can_view_process)
+
     process = decrypt_sensitive_data(process)
-    
-    # ── FASE 2: Popular dados do cliente (retrocompatibilidade) ──────────
-    # Buscar cliente na coleção clients via client_id e injetar
-    # personal_data, titular2_data, financial_data na resposta
     process = await populate_client_data(process)
-    
-    # Garantir campos obrigatórios para ProcessResponse (processos antigos
-    # podem não ter client_id após a refatoração Fase 1→2)
-    process.setdefault("client_id", process.get("client_id") or "")
-
-    # ============================================================
-    # PACOTE DA —latest_activity: atividade/nota mais recente do processo
-    # ============================================================
-    # Busca a última entrada da coleção activities ligada a este process_id.
-    # O Frontend (ProcessDetailsModal) mostra isto na tab "Observações e IA"
-    # para que o consultor veja a última interação registada.
-    # ============================================================
-    try:
-        latest_act = await db.activities.find_one(
-            {"process_id": process_id, "comment": {"$exists": True, "$ne": ""}},
-            {"_id": 0},
-            sort=[("created_at", -1)]
-        )
-        process["latest_activity"] = latest_act
-    except Exception as e:
-        logger.warning(f"[GET-PROCESS] Erro ao buscar latest_activity para {process_id}: {e}")
-        process["latest_activity"] = None
-
-    # ============================================================
-    # PACOTE DC — portal_access: Código de Acesso + magic link ativo
-    # ============================================================
-    try:
-        portal_access_code = None
-        _client_id_dc = process.get("client_id")
-        if _client_id_dc:
-            _client_doc_dc = await db.clients.find_one(
-                {"id": _client_id_dc}, {"portal_access_code": 1, "_id": 0}
-            )
-            if _client_doc_dc:
-                portal_access_code = _client_doc_dc.get("portal_access_code")
-
-        active_short_id = None
-        active_magic_link = None
-        token_doc = await db.portal_tokens.find_one(
-            {"process_id": process_id},
-            {"_id": 0, "short_id": 1, "created_at": 1}
-        )
-        if token_doc and token_doc.get("short_id"):
-            active_short_id = token_doc["short_id"]
-            _fe_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
-            if _fe_url:
-                active_magic_link = f"{_fe_url}/portal/{active_short_id}"
-
-        process["portal_access"] = {
-            "portal_access_code": portal_access_code,
-            "short_id": active_short_id,
-            "magic_link": active_magic_link,
-            "has_active_token": active_short_id is not None,
-        }
-    except Exception as e:
-        logger.warning(f"[GET-PROCESS] Erro ao buscar portal_access para {process_id}: {e}")
-        process["portal_access"] = None
-
-    try:
-        return ProcessResponse(**process)
-    except Exception as e:
-        logger.warning(f"Erro de validação ProcessResponse para processo {process_id}: {e}")
-        # Fallback: retornar o dict diretamente (ignora response_model)
-        return process
+    ensure_client_id_default(process)
+    await attach_latest_activity(process, process_id)
+    await attach_portal_access(process, process_id)
+    return serialize_process_detail_response(process, process_id)
 
 
 @router.get("/{process_id}/alerts")
@@ -1644,106 +1553,8 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
 
 # ====================================================================
 # EMAIL AUTOMÁTICO — Atribuição de Processos
+# (implementação em services/process_staff_assignment.send_assignment_email)
 # ====================================================================
-
-async def _send_assignment_email(
-    newly_assigned_ids: list,
-    process_id: str,
-    client_name: str,
-    process_number: str,
-    role_label: str,
-):
-    """
-    Envia email de notificação aos utilizadores recém-atribuídos a um processo.
-    Executa de forma assíncrona e silenciosa (não bloqueia a resposta da API).
-    """
-    from services.email import get_base_template
-
-    frontend_url = os.environ.get("FRONTEND_URL", "")
-    process_link = f"{frontend_url}/processo/{process_id}" if frontend_url else ""
-
-    for uid in newly_assigned_ids:
-        try:
-            target_user = await db.users.find_one({"id": uid}, {"email": 1, "name": 1})
-            if not target_user or not target_user.get("email"):
-                continue
-
-            user_email = target_user["email"]
-            user_name = target_user.get("name", "Utilizador")
-
-            subject = f"Novo Processo Atribuído: {client_name}"
-
-            # Corpo em texto simples (fallback)
-            body_text = (
-                f"Olá {user_name},\n\n"
-                f"Foi-lhe atribuído um novo processo como {role_label}.\n\n"
-                f"Cliente: {client_name}\n"
-                f"Processo: {process_number or process_id[:8]}\n"
-            )
-            if process_link:
-                body_text += f"\nAceda ao processo em: {process_link}\n"
-
-            # Corpo em HTML
-            link_html = ""
-            if process_link:
-                link_html = f"""
-                <tr>
-                    <td style="padding: 15px 30px; text-align: center;">
-                        <a href="{process_link}" style="
-                            display: inline-block;
-                            background: linear-gradient(135deg, #1e3a5f, #2d5a87);
-                            color: #ffffff;
-                            padding: 12px 30px;
-                            border-radius: 8px;
-                            text-decoration: none;
-                            font-weight: 600;
-                            font-size: 14px;
-                        ">Abrir Processo no CRM</a>
-                    </td>
-                </tr>"""
-
-            content_html = f"""
-            <table width="100%" cellpadding="0" cellspacing="0" style="padding: 20px 0;">
-                <tr>
-                    <td style="padding: 10px 30px;">
-                        <p style="margin: 0 0 10px 0; font-size: 16px;">Olá <strong>{user_name}</strong>,</p>
-                        <p style="margin: 0 0 20px 0; font-size: 15px; color: #555;">
-                            Foi-lhe atribuído um novo processo como <strong>{role_label}</strong>.
-                        </p>
-                    </td>
-                </tr>
-                <tr>
-                    <td style="padding: 15px 30px; background: #f8f9fa; border-radius: 8px;">
-                        <table width="100%" cellpadding="0" cellspacing="0">
-                            <tr>
-                                <td style="padding: 8px 0; font-size: 14px; color: #666; width: 120px;"><strong>Cliente:</strong></td>
-                                <td style="padding: 8px 0; font-size: 14px;">{client_name}</td>
-                            </tr>
-                            <tr>
-                                <td style="padding: 8px 0; font-size: 14px; color: #666;"><strong>Processo:</strong></td>
-                                <td style="padding: 8px 0; font-size: 14px;">{process_number or process_id[:8]}</td>
-                            </tr>
-                        </table>
-                    </td>
-                </tr>
-                {link_html}
-            </table>"""
-
-            html_body = get_base_template(content_html, title=subject)
-
-            await send_notification_with_preference_check(
-                to_email=user_email,
-                subject=subject,
-                body=body_text,
-                html_body=html_body,
-                notification_type="process_assigned",
-            )
-
-            logger.info(f"[ASSIGN-EMAIL] Email enviado para {user_email} ({role_label}) — processo {process_id}")
-
-        except Exception as e:
-            logger.warning(f"[ASSIGN-EMAIL] Erro ao enviar email de atribuição para {uid}: {e}")
-
 
 @router.post("/{process_id}/assign")
 async def assign_process(
@@ -1807,22 +1618,12 @@ async def assign_process(
 
     client_name = process.get("client_name", "Cliente")
     process_number = process.get("process_number", "")
-    if newly["consultores"]:
-        asyncio.create_task(_send_assignment_email(
-            newly["consultores"], process_id, client_name, process_number, "Consultor"
-        ))
-    if newly["mediadores"]:
-        asyncio.create_task(_send_assignment_email(
-            newly["mediadores"], process_id, client_name, process_number, "Intermediário"
-        ))
-    if newly["indexacao"]:
-        asyncio.create_task(_send_assignment_email(
-            newly["indexacao"], process_id, client_name, process_number, "Indexação"
-        ))
-    if newly["parceiro"]:
-        asyncio.create_task(_send_assignment_email(
-            newly["parceiro"], process_id, client_name, process_number, "Parceiro"
-        ))
+    schedule_assignment_emails(
+        newly,
+        process_id=process_id,
+        client_name=client_name,
+        process_number=process_number,
+    )
 
     return {"success": True, "message": "Atribuições actualizadas com sucesso"}
 

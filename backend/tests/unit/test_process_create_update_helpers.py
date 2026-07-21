@@ -714,6 +714,44 @@ class TestListAndMyClientsOrchestration:
         assert out["leads_count"] == 1 and out["total"] == 2
 
 
+class TestProcessDetailAndAssignEmail:
+    def test_portal_access_payload(self):
+        from services.process_detail import (
+            build_portal_access_payload,
+            ensure_client_id_default,
+        )
+        payload = build_portal_access_payload(
+            portal_access_code="AB12",
+            short_id="xyz",
+            frontend_url="https://app.example.com/",
+        )
+        assert payload["magic_link"] == "https://app.example.com/portal/xyz"
+        assert payload["has_active_token"] is True
+        p = {}
+        ensure_client_id_default(p)
+        assert p["client_id"] == ""
+
+    def test_assignment_email_bodies(self):
+        from services.process_staff_assignment import build_assignment_email_bodies
+        subject, text, html = build_assignment_email_bodies(
+            user_name="Ana",
+            role_label="Consultor",
+            client_name="Cliente X",
+            process_number="42",
+            process_id="pid",
+            process_link="https://app/processo/pid",
+        )
+        assert "Cliente X" in subject
+        assert "Consultor" in text and "https://app/processo/pid" in text
+        assert "Abrir Processo no CRM" in html
+        subject2, text2, html2 = build_assignment_email_bodies(
+            user_name="Ana", role_label="Consultor", client_name="C",
+            process_number="", process_id="abcdefghij", process_link="",
+        )
+        assert "abcdefgh" in text2
+        assert "Abrir Processo" not in html2
+
+
 
 class TestListEnrichmentSort:
     def test_default_sort_priority_then_status(self):
