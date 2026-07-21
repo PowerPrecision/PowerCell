@@ -4,7 +4,8 @@
  * Suporta: Cancelar, Pausar e Retomar jobs
  * Inclui: Dashboard de métricas, notificações de jobs stuck, logs detalhados
  */
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -534,99 +535,84 @@ const JobLogSheet = ({ job, open, onOpenChange }) => {
 // ════════════════════════════════════════════════════════════
 const BackgroundJobsPage = ({ embedded = false }) => {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
-  const [jobs, setJobs] = useState([]);
-  const [counts, setCounts] = useState({ running: 0, success: 0, failed: 0, paused: 0, total: 0 });
-  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [stuckNotifications, setStuckNotifications] = useState([]);
-  const [metrics, setMetrics] = useState(null);
   const [showMetrics, setShowMetrics] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
 
-  const fetchJobs = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const url = statusFilter 
+  const authHeaders = () => ({
+    Authorization: `Bearer ${localStorage.getItem("token")}`,
+  });
+
+  const {
+    data: jobsData,
+    isLoading: loading,
+    refetch: fetchJobs,
+  } = useQuery({
+    queryKey: ["background-jobs", statusFilter],
+    queryFn: async () => {
+      const url = statusFilter
         ? `${API_URL}/api/ai/bulk/background-jobs?status=${statusFilter}`
         : `${API_URL}/api/ai/bulk/background-jobs`;
-      
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setJobs(data.jobs || []);
-        setCounts(data.counts || { running: 0, success: 0, failed: 0, paused: 0, total: 0 });
-      }
-    } catch (error) {
-      console.error("Erro ao carregar jobs:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter]);
+      const response = await fetch(url, { headers: authHeaders() });
+      if (!response.ok) throw new Error("Erro ao carregar jobs");
+      const data = await response.json();
+      return {
+        jobs: data.jobs || [],
+        counts: data.counts || { running: 0, success: 0, failed: 0, paused: 0, total: 0 },
+      };
+    },
+    refetchInterval: autoRefresh ? 5000 : false,
+  });
 
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/notifications?unread_only=true`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setStuckNotifications(data.notifications || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar notificações:", error);
-    }
-  }, []);
+  const {
+    data: stuckNotifications = [],
+    refetch: fetchNotifications,
+  } = useQuery({
+    queryKey: ["background-jobs-notifications"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${API_URL}/api/ai/bulk/background-jobs/notifications?unread_only=true`,
+        { headers: authHeaders() }
+      );
+      if (!response.ok) return [];
+      const data = await response.json();
+      return data.notifications || [];
+    },
+    refetchInterval: autoRefresh ? 5000 : false,
+  });
 
-  const fetchMetrics = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/metrics?days=7`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setMetrics(data);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar métricas:", error);
-    }
-  }, []);
+  const {
+    data: metrics = null,
+    refetch: fetchMetrics,
+  } = useQuery({
+    queryKey: ["background-jobs-metrics"],
+    queryFn: async () => {
+      const response = await fetch(
+        `${API_URL}/api/ai/bulk/background-jobs/metrics?days=7`,
+        { headers: authHeaders() }
+      );
+      if (!response.ok) return null;
+      return response.json();
+    },
+  });
+
+  const jobs = jobsData?.jobs || [];
+  const counts = jobsData?.counts || { running: 0, success: 0, failed: 0, paused: 0, total: 0 };
 
   const handleClearNotifications = async () => {
     try {
-      const token = localStorage.getItem("token");
       await fetch(`${API_URL}/api/ai/bulk/background-jobs/notifications/clear`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` }
+        headers: authHeaders(),
       });
-      setStuckNotifications([]);
+      fetchNotifications();
       toast.success("Notificações limpas");
     } catch (error) {
       toast.error("Erro ao limpar notificações");
     }
   };
-
-  useEffect(() => {
-    fetchJobs();
-    fetchNotifications();
-    fetchMetrics();
-    
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        fetchJobs();
-        fetchNotifications();
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [fetchJobs, fetchNotifications, fetchMetrics, autoRefresh]);
 
   const handleDelete = async (jobId) => {
     try {
