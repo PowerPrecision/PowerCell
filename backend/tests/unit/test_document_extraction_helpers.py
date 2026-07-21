@@ -273,3 +273,43 @@ class TestAiAnalyzeHelpers:
 
         assert DOCUMENT_TYPE_FOLDERS["irs"] == "Financeiros"
         assert DOCUMENT_TYPE_FOLDERS["default"] == "Outros"
+
+
+class TestBatch6Helpers:
+    def test_s3_path_variations(self):
+        from services.document_s3_paths import s3_path_variations
+
+        vars_ = s3_path_variations("Documentação Clientes/Foo_Bar/a.pdf")
+        assert "Documentação Clientes/Foo_Bar/a.pdf" in vars_
+        assert any("Foo Bar" in v for v in vars_)
+        assert any("Documentação_Clientes/" in v for v in vars_)
+
+    def test_process_references_document(self):
+        from services.document_delete import process_references_document
+
+        assert process_references_document(
+            {"document_ids": ["p/a.pdf"]},
+            file_path="p/a.pdf",
+            doc_id=None,
+        )
+        assert not process_references_document(
+            {"document_ids": []},
+            file_path="p/a.pdf",
+            doc_id="d1",
+        )
+
+    def test_resolve_smart_new_filename_manual(self):
+        from services.document_rename_smart import (
+            resolve_smart_new_filename,
+            build_renamed_s3_path,
+        )
+
+        name = resolve_smart_new_filename(
+            old_filename="old.pdf",
+            apply_ai_name=False,
+            novo_nome="novo",
+            metadata=None,
+            client_name="Ana",
+        )
+        assert name == "novo.pdf"
+        assert build_renamed_s3_path("a/b/old.pdf", "novo.pdf") == "a/b/novo.pdf"
