@@ -7,6 +7,7 @@
  * @prop {boolean} embedded — Se true, não renderiza wrapper de layout.
  */
 import { useState, useEffect, useRef, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   getCompanies,
   createCompany,
@@ -63,11 +64,21 @@ const EMPTY_FORM = {
   smtp_port: 465,
 };
 
+/** Normaliza a resposta do endpoint de empresas para um array. */
+function normalizeCompaniesPayload(payload) {
+  // O endpoint pode devolver: Array puro, { data: [...] }, { items: [...] },
+  // { companies: [...] }, ou { data: { companies: [...] } }.
+  let rawData = payload?.data ?? payload;
+  if (!Array.isArray(rawData)) {
+    rawData = rawData?.items || rawData?.companies || rawData?.results || [];
+  }
+  return Array.isArray(rawData) ? rawData : [];
+}
+
 const CompaniesManagementPage = ({ embedded = false }) => {
   // ── State ──────────────────────────────────────────────────────
-  const [companies, setCompanies] = useState([]);
-  const [search, setSearch] = useState("");
-  const [loading, setLoading] = useState(false);
+  const [searchInput, setSearchInput] = useState("");
+  const [debouncedSearch, setDebouncedSearch] = useState("");
   const [saving, setSaving] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [isCreating, setIsCreating] = useState(false);
@@ -78,45 +89,48 @@ const CompaniesManagementPage = ({ embedded = false }) => {
   const [emailConfigSaving, setEmailConfigSaving] = useState(false);
 
   const fileInputRef = useRef(null);
-  const searchTimeoutRef = useRef(null);
 
-  // ── Fetch companies ────────────────────────────────────────────
-  const fetchCompanies = useCallback(async (searchTerm) => {
-    setLoading(true);
-    try {
-      const res = await getCompanies(searchTerm || undefined);
-      // CORREÇÃO (Pacote AF): extração segura do array.
-      // O endpoint pode devolver: Array puro, { data: [...] }, { items: [...] },
-      // { companies: [...] }, ou { data: { companies: [...] } }.
-      // Sem isto, se vier um objeto paginado, o state fica um objeto e
-      // o .find()/.map() partem com "t.find is not a function".
-      let rawData = res.data?.data ?? res.data;
-      if (!Array.isArray(rawData)) {
-        // Tentar propriedades comuns de listas paginadas
-        rawData = rawData?.items || rawData?.companies || rawData?.results || [];
-      }
-      setCompanies(Array.isArray(rawData) ? rawData : []);
-    } catch (err) {
-      console.error("Erro ao carregar empresas:", err);
-      toast.error("Erro ao carregar a lista de empresas.");
-    } finally {
-      setLoading(false);
-    }
-  }, []);
+  // Server state via TanStack Query (substitui useState + useEffect + fetch manual).
+  const {
+    data: companies = [],
+    isLoading: loading,
+    isError: companiesError,
+    refetch: refetchCompanies,
+  } = useQuery({
+    queryKey: ["companies", debouncedSearch],
+    queryFn: async () => {
+      const res = await getCompanies(debouncedSearch || undefined);
+      return normalizeCompaniesPayload(res.data);
+    },
+  });
 
   useEffect(() => {
-    fetchCompanies();
-  }, [fetchCompanies]);
+    if (companiesError) {
+      toast.error("Erro ao carregar a lista de empresas.");
+    }
+  }, [companiesError]);
+
+  // Compat: call-sites antigos usavam fetchCompanies(search).
+  const search = debouncedSearch;
+  const fetchCompanies = useCallback(
+    async (_searchTerm) => {
+      await refetchCompanies();
+    },
+    [refetchCompanies]
+  );
 
   // ── Search debounce ────────────────────────────────────────────
   const handleSearchChange = (e) => {
     const value = e.target.value;
-    setSearch(value);
-    if (searchTimeoutRef.current) clearTimeout(searchTimeoutRef.current);
-    searchTimeoutRef.current = setTimeout(() => {
-      fetchCompanies(value);
-    }, 300);
+    setSearchInput(value);
   };
+
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      setDebouncedSearch(searchInput);
+    }, 300);
+    return () => clearTimeout(timer);
+  }, [searchInput]);
 
   // ── Select company ─────────────────────────────────────────────
   const handleSelectCompany = (company) => {
@@ -330,7 +344,7 @@ const CompaniesManagementPage = ({ embedded = false }) => {
             <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
             <Input
               placeholder="Pesquisar por nome ou NIF..."
-              value={search}
+              value={searchInput}
               onChange={handleSearchChange}
               className="pl-9"
             />
