@@ -105,3 +105,48 @@ class TestMergeAndPermissions:
         assert p["can_update_personal"] is False
         assert p["can_update_status"] is False
         assert p["can_update_real_estate"] is False
+
+
+class TestClientIdsRebuild:
+    def test_primary_reassign_inserts_front(self):
+        from services.process_update import rebuild_client_ids_on_primary_reassign
+        assert rebuild_client_ids_on_primary_reassign(["a", "b"], "a", "c") == ["c", "b"]
+
+    def test_primary_reassign_keeps_if_already_present(self):
+        from services.process_update import rebuild_client_ids_on_primary_reassign
+        assert rebuild_client_ids_on_primary_reassign(["c", "b"], "a", "c") == ["c", "b"]
+
+    def test_second_titular_add_and_remove(self):
+        from services.process_update import rebuild_client_ids_on_second_titular
+        assert rebuild_client_ids_on_second_titular(["p"], None, "s") == ["p", "s"]
+        assert rebuild_client_ids_on_second_titular(["p", "s"], "s", None) == ["p"]
+        assert rebuild_client_ids_on_second_titular(["p", "s1"], "s1", "s2") == ["p", "s2"]
+
+    def test_merge_field_metadata(self):
+        from services.process_update import merge_field_metadata
+        assert merge_field_metadata({"a": 1}, {"b": 2}) == {"a": 1, "b": 2}
+        assert merge_field_metadata(None, {"x": 1}) == {"x": 1}
+
+
+class TestKanbanEnrichment:
+    def test_group_and_sort(self):
+        from services.process_kanban_enrichment import (
+            group_processes_by_status,
+            sort_kanban_column_processes,
+        )
+        procs = [
+            {"status": "a", "prioridade": "baixa", "updated_at": "2026-01-02"},
+            {"status": "a", "prioridade": "alta", "updated_at": "2026-01-01"},
+            {"status": "b", "prioridade": "media", "updated_at": "2026-01-03"},
+        ]
+        grouped = group_processes_by_status(procs)
+        assert set(grouped) == {"a", "b"}
+        sorted_a = sort_kanban_column_processes(list(grouped["a"]))
+        assert sorted_a[0]["prioridade"] == "alta"
+        # same priority → updated_at DESC
+        same = [
+            {"prioridade": "alta", "updated_at": "2026-01-01"},
+            {"prioridade": "alta", "updated_at": "2026-01-03"},
+        ]
+        sort_kanban_column_processes(same)
+        assert same[0]["updated_at"] == "2026-01-03"

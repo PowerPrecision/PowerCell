@@ -134,6 +134,13 @@ from services.process_update import (
     apply_client_personal_updates_from_process_put,
     merge_nested_process_section,
     build_role_update_permissions,
+    reassign_process_primary_client,
+    sync_second_client_on_update,
+    merge_field_metadata,
+)
+from services.process_kanban_enrichment import (
+    group_processes_by_status,
+    sort_all_kanban_columns,
 )
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
@@ -1537,14 +1544,8 @@ async def get_kanban_board(
         logger.info(f"[Kanban Export] Sample indexacao IDs: {sample_ids}")
         logger.info(f"[Kanban Export] User map has keys: {list(user_map.keys())[:5]}...")
     
-    # Organize by status - usando dict para lookup O(1) em vez de O(n) por coluna
-    processes_by_status = {}
-    for p in processes:
-        s = p.get("status", "")
-        if s not in processes_by_status:
-            processes_by_status[s] = []
-        processes_by_status[s].append(p)
-    
+    processes_by_status = group_processes_by_status(processes)
+
     # Contagens otimizadas com count_documents em vez de len(list)
     concluded_statuses = ["concluidos"]
     dropped_statuses = ["desistencias"]
@@ -1552,20 +1553,14 @@ async def get_kanban_board(
     active_count_query["status"] = {"$nin": concluded_statuses + dropped_statuses}
     inactive_count_query = dict(query) if query else {}
     inactive_count_query["status"] = {"$in": concluded_statuses + dropped_statuses}
-    
+
     import asyncio
     active_count, inactive_count = await asyncio.gather(
         db.processes.count_documents(active_count_query),
         db.processes.count_documents(inactive_count_query),
     )
-    
-    # Ordenar processos dentro de cada coluna: 1ª por prioridade (Alta>Média>Baixa), 2ª por updated_at
-    PRIORITY_WEIGHT = {"alta": 3, "media": 2, "baixa": 1}
-    for status_key in processes_by_status:
-        # Two-step stable sort: first by updated_at DESC, then by priority DESC
-        # This ensures processes with same priority are sorted by most recent first
-        processes_by_status[status_key].sort(key=lambda p: p.get("updated_at") or "", reverse=True)
-        processes_by_status[status_key].sort(key=lambda p: -PRIORITY_WEIGHT.get(p.get("prioridade") or p.get("priority"), 0))
+
+    sort_all_kanban_columns(processes_by_status)
     
     kanban = []
     try:
@@ -2717,80 +2712,31 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     # ── REATRIBUIÇÃO DE CLIENTE: Se o body inclui client_id diferente do actual ──
     new_client_id = raw_body.get("client_id")
     if new_client_id and new_client_id != process.get("client_id"):
-        # Apenas admin, ceo e diretor podem reatribuir clientes
         if role not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
             raise HTTPException(
                 status_code=403,
                 detail="Apenas administradores, CEO ou directores podem reatribuir o cliente de um processo."
             )
-        
-        # Validar que o novo cliente existe
-        new_client_doc = await db.clients.find_one({"id": new_client_id})
-        if not new_client_doc:
-            raise HTTPException(
-                status_code=404,
-                detail=f"Cliente com ID '{new_client_id}' não encontrado."
-            )
-        
-        # Desencriptar dados do novo cliente
-        decrypted_new_client = decrypt_client_data(new_client_doc)
-        new_client_name = decrypted_new_client.get("nome", "")
-        new_client_email = decrypted_new_client.get("contacto", {}).get("email", "")
-        new_client_phone = decrypted_new_client.get("contacto", {}).get("telefone", "")
-        
-        old_client_id = process.get("client_id")
-        old_client_name = process.get("client_name", "")
-        
-        now_reassign = datetime.now(timezone.utc).isoformat()
-        
-        # Remover processo do cliente antigo (process_ids)
-        if old_client_id:
-            await db.clients.update_one(
-                {"id": old_client_id},
-                {
-                    "$pull": {"process_ids": process_id},
-                    "$set": {"updated_at": now_reassign}
-                }
-            )
-        
-        # Adicionar processo ao novo cliente (process_ids)
-        await db.clients.update_one(
-            {"id": new_client_id},
-            {
-                "$addToSet": {"process_ids": process_id},
-                "$set": {"updated_at": now_reassign}
-            }
+
+        reassign_info = await reassign_process_primary_client(
+            process, process_id, new_client_id,
         )
-        
-        # Actualizar dados do processo com novo cliente
-        # Actualizar client_ids também (suporte N:M)
-        current_client_ids = process.get("client_ids", [])
-        if old_client_id and old_client_id in current_client_ids:
-            current_client_ids = [cid for cid in current_client_ids if cid != old_client_id]
-        if new_client_id not in current_client_ids:
-            current_client_ids.insert(0, new_client_id)  # Novo cliente principal no início
-        
-        # Os campos client_name, client_email, client_phone serão adicionados ao update_data
-        # Mas como serão encriptados mais abaixo, adicionamos ao raw update
-        process["client_id"] = new_client_id
-        process["client_name"] = new_client_name
-        process["client_email"] = new_client_email
-        process["client_phone"] = new_client_phone
-        process["client_ids"] = current_client_ids
-        
-        # Registar no histórico
         await log_history(
             process_id, user,
-            f"Reatribuiu cliente de '{old_client_name}' para '{new_client_name}'"
+            f"Reatribuiu cliente de '{reassign_info['old_client_name']}' "
+            f"para '{reassign_info['new_client_name']}'"
         )
         await log_audit_event(
             process_id, user,
-            f"Reatribuiu cliente de '{old_client_name}' para '{new_client_name}'",
+            f"Reatribuiu cliente de '{reassign_info['old_client_name']}' "
+            f"para '{reassign_info['new_client_name']}'",
             request=request, source="web"
         )
         logger.info(
-            f"Processo {process_id} reatribuído de cliente {old_client_id} ({old_client_name}) "
-            f"para cliente {new_client_id} ({new_client_name}) por {user.get('email')}"
+            f"Processo {process_id} reatribuído de cliente "
+            f"{reassign_info['old_client_id']} ({reassign_info['old_client_name']}) "
+            f"para cliente {reassign_info['new_client_id']} "
+            f"({reassign_info['new_client_name']}) por {user.get('email')}"
         )
     
     # Indexação só pode actualizar dados financeiros (restante é bloqueado mais abaixo)
@@ -2900,77 +2846,10 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         # {"client_ids": cliente_id}.
         if data.second_client_id is not None:
             new_second_id = data.second_client_id.strip() if data.second_client_id else None
-            # Validar que o cliente existe (se foi fornecido um ID)
-            if new_second_id:
-                second_client = await db.clients.find_one({"id": new_second_id})
-                if not second_client:
-                    raise HTTPException(status_code=400, detail=f"Cliente com ID {new_second_id} não encontrado")
-                # Não permitir que o 2º titular seja o mesmo que o titular principal
-                if new_second_id == process.get("client_id"):
-                    raise HTTPException(status_code=400, detail="O 2º titular não pode ser o mesmo cliente que o titular principal")
-            update_data["second_client_id"] = new_second_id
-
-            # ── Determinar o 2º titular ANTIGO (para sincronização) ──
-            old_second_id = process.get("second_client_id")
-
-            # Se removeu o 2º titular, limpar dados associados
-            if not new_second_id:
-                update_data["second_client_name"] = None
-                # Não limpar titular2_data — pode ter dados preenchidos manualmente
-            else:
-                update_data["second_client_name"] = second_client.get("nome", "")
-
-            # ── PACOTE BP: Sincronizar client_ids do processo ──
-            # Adicionar o novo 2º titular ao array client_ids do processo
-            # e remover o antigo (se diferente). Isto garante que queries
-            # {"client_ids": cliente_id} apanham processos em que o cliente
-            # é 1º OU 2º titular.
-            current_client_ids = list(process.get("client_ids") or [])
-            # Se há 2º titular antigo E é diferente do novo, remover do client_ids
-            if old_second_id and old_second_id != new_second_id:
-                current_client_ids = [cid for cid in current_client_ids if cid != old_second_id]
-            # Se há novo 2º titular, adicionar ao client_ids (se ainda não está)
-            if new_second_id and new_second_id not in current_client_ids:
-                current_client_ids.append(new_second_id)
-            update_data["client_ids"] = current_client_ids
-
-            # ── PACOTE BP: Sincronizar process_ids do 2º titular ──
-            # Adicionar o process_id ao array process_ids do NOVO 2º titular
-            # e remover do 2º titular ANTIGO (se diferente).
-            now_iso_sync = datetime.now(timezone.utc).isoformat()
-            if old_second_id and old_second_id != new_second_id:
-                # Remover process_id do 2º titular antigo
-                try:
-                    await db.clients.update_one(
-                        {"id": old_second_id},
-                        {
-                            "$pull": {"process_ids": process_id},
-                            "$set": {"updated_at": now_iso_sync}
-                        }
-                    )
-                    logger.info(
-                        f"[PACOTE-BP] Processo {process_id} removido do process_ids "
-                        f"do 2º titular antigo {old_second_id}"
-                    )
-                except Exception as e:
-                    logger.warning(f"[PACOTE-BP] Erro ao remover process_ids do 2º titular antigo: {e}")
-
-            if new_second_id:
-                # Adicionar process_id ao novo 2º titular
-                try:
-                    await db.clients.update_one(
-                        {"id": new_second_id},
-                        {
-                            "$addToSet": {"process_ids": process_id},
-                            "$set": {"updated_at": now_iso_sync}
-                        }
-                    )
-                    logger.info(
-                        f"[PACOTE-BP] Processo {process_id} adicionado ao process_ids "
-                        f"do 2º titular {new_second_id}"
-                    )
-                except Exception as e:
-                    logger.warning(f"[PACOTE-BP] Erro ao adicionar process_ids ao 2º titular: {e}")
+            second_fields = await sync_second_client_on_update(
+                process, process_id, new_second_id,
+            )
+            update_data.update(second_fields)
 
         if data.co_buyers is not None:
             update_data["co_buyers"] = data.co_buyers
@@ -3027,18 +2906,11 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         raise HTTPException(status_code=500, detail=f"TypeError em encrypt: {e} | {tb.split(chr(10))[-3] if tb else 'no traceback'}")
     inject_cdc_context(update_data, user)
 
-    # PACOTE CS — Data Provenance: aceitar field_metadata do frontend
-    # e fazer merge seguro (não apaga metadata de campos não atualizados).
-    # Formato: {"financial_data.salario_bruto": {"source": "ai", "updated_at": "...", "confidence": 0.95}}
-    try:
-        raw_body_cs = await request.json()
-    except Exception:
-        raw_body_cs = {}
-    field_metadata_cs = raw_body_cs.get("field_metadata")
+    field_metadata_cs = raw_body.get("field_metadata")
     if field_metadata_cs and isinstance(field_metadata_cs, dict):
-        existing_metadata_cs = process.get("field_metadata") or {}
-        merged_metadata_cs = {**existing_metadata_cs, **field_metadata_cs}
-        update_data["field_metadata"] = merged_metadata_cs
+        update_data["field_metadata"] = merge_field_metadata(
+            process.get("field_metadata"), field_metadata_cs,
+        )
 
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
