@@ -25,7 +25,6 @@ Autor: PowerCell Development Team
 ====================================================================
 """
 import os
-import secrets
 import logging
 from datetime import datetime, timezone
 
@@ -33,21 +32,14 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 
 from database import db
 from services.auth import require_staff
-from services.portal_security import (
-    create_client_magic_token,
-    PORTAL_TOKEN_VALIDITY_DAYS,
-)
+from services.portal_security import PORTAL_TOKEN_VALIDITY_DAYS
+from services.portal_magic_link import issue_portal_magic_link
 from services.history import log_history
 from services.audit_trail_service import log_audit_event
-from utils.frontend_url import get_frontend_url as _get_frontend_url
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal", tags=["Portal Admin (Impersonation)"])
-
-
-# NOTA: _get_frontend_url foi movida para utils/frontend_url.py (importada no
-# topo como get_frontend_url) para eliminar a duplicação com processes.py.
 
 
 @router.post("/impersonate/{process_id}")
@@ -108,42 +100,25 @@ async def impersonate_client_portal(
     client_email = process.get("client_email", "")
     client_id = process.get("client_id", "")
 
-    # 3. Gerar JWT idêntico ao do Portal do Cliente
-    token = create_client_magic_token(process_id)
-
-    # 4. Gerar short_id e guardar em portal_tokens COM metadados de impersonate
-    short_id = secrets.token_urlsafe(6)[:8]
+    # 3–5. Gerar JWT + short_id + URL (com metadados de impersonate)
     now = datetime.now(timezone.utc)
-
-    await db.portal_tokens.update_one(
-        {"process_id": process_id, "impersonated_by": user.get("id")},
-        {
-            "$set": {
-                "short_id": short_id,
-                "jwt_token": token,
-                "process_id": process_id,
-                "client_id": client_id,
-                "created_by": user.get("email", ""),
-                # Metadados de impersonate (permitem distinguir de magic
-                # links "reais" nas queries de auditoria)
-                "impersonated_by": user.get("id"),
-                "impersonated_by_email": user.get("email"),
-                "impersonated_by_name": user.get("name"),
-                "impersonated_by_role": user.get("role"),
-                "impersonated_at": now,
-                "token_type": "staff_impersonate",
-                "updated_at": now,
-            },
-            "$setOnInsert": {
-                "created_at": now,
-            },
+    issued = await issue_portal_magic_link(
+        process_id=process_id,
+        process=process,
+        user=user,
+        request=request,
+        token_filter={"process_id": process_id, "impersonated_by": user.get("id")},
+        extra_token_fields={
+            "impersonated_by": user.get("id"),
+            "impersonated_by_email": user.get("email"),
+            "impersonated_by_name": user.get("name"),
+            "impersonated_by_role": user.get("role"),
+            "impersonated_at": now,
+            "token_type": "staff_impersonate",
         },
-        upsert=True,
     )
-
-    # 5. Construir URL (mesmo formato do magic link)
-    frontend_url = _get_frontend_url(request)
-    impersonate_url = f"{frontend_url}/portal/{short_id}"
+    short_id = issued["short_id"]
+    impersonate_url = issued["magic_link"]
 
     # 6. Logs de segurança (audit_trail + history + logger)
     audit_msg = (

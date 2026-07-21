@@ -108,7 +108,12 @@ from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
 
 # Portal imports
-from services.portal_security import create_client_magic_token, PORTAL_TOKEN_VALIDITY_DAYS
+from services.portal_security import PORTAL_TOKEN_VALIDITY_DAYS
+from services.portal_magic_link import (
+    issue_portal_magic_link,
+    ensure_portal_access_code,
+    build_magic_link_email_bodies,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -270,10 +275,6 @@ async def _send_portal_welcome_email_from_process(
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
 
-# NOTA: _get_frontend_url foi movida para utils/frontend_url.py (importada no
-# topo como get_frontend_url) para eliminar a duplicação com portal_admin.py.
-
-
 @router.post("/{process_id}/generate-magic-link")
 async def generate_magic_link(
     process_id: str,
@@ -297,8 +298,6 @@ async def generate_magic_link(
     - token: JWT token completo (para debug)
     - expires_in_days: Validade do link
     """
-    import secrets
-
     process = await db.processes.find_one(
         {"id": process_id, "is_deleted": {"$ne": True}},
         {"_id": 0}
@@ -306,44 +305,22 @@ async def generate_magic_link(
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
-    # Gerar magic link JWT
-    token = create_client_magic_token(process_id)
-
-    # Gerar short_id único (8 caracteres URL-safe)
-    short_id = secrets.token_urlsafe(6)[:8]
-
-    # Guardar short_id → JWT na BD (upsert por process_id)
-    await db.portal_tokens.update_one(
-        {"process_id": process_id},
-        {
-            "$set": {
-                "short_id": short_id,
-                "jwt_token": token,
-                "process_id": process_id,
-                "client_id": process.get("client_id", ""),
-                "created_by": user.get("email", ""),
-                "updated_at": datetime.now(timezone.utc),
-            },
-            "$setOnInsert": {
-                "created_at": datetime.now(timezone.utc),
-            },
-        },
-        upsert=True,
+    issued = await issue_portal_magic_link(
+        process_id=process_id,
+        process=process,
+        user=user,
+        request=request,
     )
-
-    # Construir URL curta (usa Referer header ou FRONTEND_URL env var)
-    frontend_url = _get_frontend_url(request)
-    magic_link = f"{frontend_url}/portal/{short_id}"
 
     logger.info(
         f"Magic link gerado por {user.get('email')} para processo {process_id} "
-        f"(cliente: {process.get('client_name', 'N/A')}, short_id: {short_id})"
+        f"(cliente: {process.get('client_name', 'N/A')}, short_id: {issued['short_id']})"
     )
 
     return {
-        "magic_link": magic_link,
-        "short_id": short_id,
-        "token": token,
+        "magic_link": issued["magic_link"],
+        "short_id": issued["short_id"],
+        "token": issued["token"],
         "process_id": process_id,
         "client_name": process.get("client_name", ""),
         "client_email": process.get("client_email", ""),
@@ -363,7 +340,6 @@ async def send_magic_link_email(
     O email contém o link curto (short_id) para o cliente aceder
     ao portal do seu processo.
     """
-    import secrets
     from services.email_service import send_email
 
     process = await db.processes.find_one(
@@ -380,106 +356,22 @@ async def send_magic_link_email(
     if not client_email:
         raise HTTPException(status_code=400, detail="Cliente não tem email associado")
 
-    # Buscar portal_access_code do cliente para incluir no email
-    portal_access_code = None
-    if client_id:
-        client_doc = await db.clients.find_one(
-            {"id": client_id},
-            {"_id": 0, "portal_access_code": 1}
-        )
-        if client_doc:
-            portal_access_code = client_doc.get("portal_access_code")
-    
-    # Se não tem access code, gerar um e guardar no cliente
-    if not portal_access_code and client_id:
-        from models.client import generate_portal_access_code
-        portal_access_code = generate_portal_access_code()
-        await db.clients.update_one(
-            {"id": client_id},
-            {"$set": {"portal_access_code": portal_access_code}}
-        )
+    portal_access_code = await ensure_portal_access_code(client_id)
 
-    # Gerar magic link JWT
-    token = create_client_magic_token(process_id)
-
-    # Gerar short_id
-    short_id = secrets.token_urlsafe(6)[:8]
-
-    # Guardar na BD
-    await db.portal_tokens.update_one(
-        {"process_id": process_id},
-        {
-            "$set": {
-                "short_id": short_id,
-                "jwt_token": token,
-                "process_id": process_id,
-                "client_id": process.get("client_id", ""),
-                "created_by": user.get("email", ""),
-                "updated_at": datetime.now(timezone.utc),
-            },
-            "$setOnInsert": {
-                "created_at": datetime.now(timezone.utc),
-            },
-        },
-        upsert=True,
+    issued = await issue_portal_magic_link(
+        process_id=process_id,
+        process=process,
+        user=user,
+        request=request,
     )
+    magic_link = issued["magic_link"]
+    short_id = issued["short_id"]
 
-    # Construir URL curta (usa Referer header ou FRONTEND_URL env var)
-    frontend_url = _get_frontend_url(request)
-    magic_link = f"{frontend_url}/portal/{short_id}"
-
-    # PACOTE DC — Bloco "Código de Acesso" SEMPRE presente (incondicional).
-    # Garante que o cliente consegue aceder ao portal mesmo que o magic link
-    # não funcione, indo a www.powercell.pt/portal e inserindo o código.
-    # O portal_access_code já foi buscado/gerado acima (linhas 756-773).
-    portal_credentials_html = f"""
-            <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.powercell.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
-                <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{portal_access_code or '—'}</strong></h3>
-                <p style="margin: 5px 0; color: #1e293b; font-size: 13px;"><strong>Email:</strong> {client_email}</p>
-            </div>
-    """
-    portal_credentials_text = (
-        f"\nSe o link não funcionar, aceda a www.powercell.pt/portal e "
-        f"insira o seguinte Código de Acesso: {portal_access_code or '—'}\n"
-        f"Email: {client_email}\n"
-    )
-
-    html_body = f"""
-    <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-            <h1 style="margin: 0; font-size: 20px;">Power Precision · Crédito Habitação</h1>
-        </div>
-        <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
-            <p style="font-size: 16px; color: #1e293b;">Olá {client_name},</p>
-            <p style="font-size: 14px; color: #475569;">
-                O seu consultor preparou o seu portal pessoal para acompanhar o seu processo de crédito habitação.
-            </p>
-            <div style="text-align: center; margin: 30px 0;">
-                <a href="{magic_link}" style="display: inline-block; background: #0F766E; color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
-                    Aceder ao meu Portal
-                </a>
-            </div>
-            <p style="font-size: 12px; color: #94a3b8; text-align: center;">
-                Ou copie este link no seu navegador:<br>
-                <span style="color: #64748b;">{magic_link}</span>
-            </p>
-            {portal_credentials_html}
-            <p style="font-size: 12px; color: #94a3b8; margin-top: 20px;">
-                Este link é válido por 90 dias. Se precisar de um novo link, contacte o seu consultor.
-            </p>
-        </div>
-    </div>
-    """
-
-    text_body = (
-        f"Olá {client_name},\n\n"
-        f"O seu consultor preparou o seu portal pessoal para acompanhar o seu processo de crédito habitação.\n\n"
-        f"Aceda ao portal através deste link:\n{magic_link}\n"
-        f"{portal_credentials_text}\n"
-        f"Este link é válido por 90 dias.\n"
-        f"Se precisar de um novo link, contacte o seu consultor.\n\n"
-        f"Power Precision · Crédito Habitação"
+    text_body, html_body = build_magic_link_email_bodies(
+        client_name=client_name,
+        client_email=client_email,
+        magic_link=magic_link,
+        portal_access_code=portal_access_code,
     )
 
     try:
