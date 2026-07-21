@@ -6,7 +6,7 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 
 ## Tecnologias
 
-- **Backend**: FastAPI (Python 3.11) + Motor (async MongoDB)
+- **Backend**: FastAPI (Python 3.12) + Motor (async MongoDB)
 - **Frontend**: React 19 + Vite + Tailwind CSS 4 + Shadcn UI (New York style) + @hello-pangea/dnd
 - **Base de dados**: MongoDB Atlas (via Motor async driver)
 - **Armazenamento**: AWS S3 (pre-signed URLs)
@@ -17,7 +17,7 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 - **Email**: SMTP transacional (SystemConfig) + IMAP sync (per-user + shared Google OAuth)
 - **Monitorização**: Sentry (frontend + backend)
 - **Acessibilidade**: axe-core (testes automáticos em dev)
-- **CI/CD**: GitHub Actions (Node.js 24 + Python 3.11)
+- **CI/CD**: GitHub Actions (Node.js 24 + Python 3.12)
 - **Deploy**: Render (backend) + Vercel (frontend)
 
 ## Estrutura do Projeto
