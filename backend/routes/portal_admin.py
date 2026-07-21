@@ -24,7 +24,6 @@ SEGURANÇA:
 Autor: PowerCell Development Team
 ====================================================================
 """
-import os
 import logging
 from datetime import datetime, timezone
 

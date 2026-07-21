@@ -99,7 +99,6 @@ from services.process_status import (
     INACTIVE_STATUSES, ARCHIVED_STATUSES, PRE_REGISTO_STATUS,
     LEAD_STATUS_VALUES, PRE_REGISTO_BYPASS_ROLES, _should_hide_pre_registo,
 )
-from utils.frontend_url import get_frontend_url as _get_frontend_url
 from services.process_finance import (
     create_finance_snapshot as _create_finance_snapshot,
     ensure_finance_snapshot as _ensure_finance_snapshot,
