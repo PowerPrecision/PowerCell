@@ -14,7 +14,14 @@
 
 import { useQuery, useInfiniteQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
-import { getProcess, getHistory, getActivities, getProcessTasks } from '../../services/api';
+import {
+  getProcess,
+  getHistory,
+  getActivities,
+  getProcessTasks,
+  getDeadlines,
+  getWorkflowStatuses,
+} from '../../services/api';
 
 /**
  * Hook para detalhes de um processo específico
@@ -146,6 +153,62 @@ export function useProcessTasksQuery(processId, options = {}) {
 }
 
 /**
+ * Hook para prazos/deadlines de um processo
+ */
+export function useProcessDeadlinesQuery(processId, options = {}) {
+  const { enabled = true } = options;
+
+  const query = useQuery({
+    queryKey: queryKeys.deadlines.byProcess(processId),
+    queryFn: async () => {
+      const response = await getDeadlines(processId);
+      return Array.isArray(response.data) ? response.data : [];
+    },
+    enabled: !!processId && enabled,
+    staleTime: 30 * 1000,
+  });
+
+  return {
+    deadlines: query.data || [],
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    error: query.error,
+    isSuccess: query.isSuccess,
+    refetch: query.refetch,
+    query,
+  };
+}
+
+/**
+ * Hook para lista de workflow statuses (global)
+ */
+export function useWorkflowStatusesQuery(options = {}) {
+  const { enabled = true } = options;
+
+  const query = useQuery({
+    queryKey: queryKeys.workflowStatuses.list(),
+    queryFn: async () => {
+      const response = await getWorkflowStatuses();
+      return Array.isArray(response.data) ? response.data : [];
+    },
+    enabled,
+    staleTime: 5 * 60 * 1000,
+  });
+
+  return {
+    workflowStatuses: query.data || [],
+    isLoading: query.isLoading,
+    isFetching: query.isFetching,
+    isError: query.isError,
+    error: query.error,
+    isSuccess: query.isSuccess,
+    refetch: query.refetch,
+    query,
+  };
+}
+
+/**
  * Hook combinado para todos os dados de um processo
  * Inclui: detalhes, histórico, atividades, tarefas
  * 
@@ -160,6 +223,8 @@ export function useProcessFullData(processId, options = {}) {
   const historyQuery = useProcessHistoryQuery(processId, { enabled });
   const activitiesQuery = useProcessActivitiesQuery(processId, { enabled });
   const tasksQuery = useProcessTasksQuery(processId, { enabled });
+  const deadlinesQuery = useProcessDeadlinesQuery(processId, { enabled });
+  const statusesQuery = useWorkflowStatusesQuery({ enabled });
 
   return {
     // Dados
@@ -167,6 +232,8 @@ export function useProcessFullData(processId, options = {}) {
     history: historyQuery.history,
     activities: activitiesQuery.activities,
     tasks: tasksQuery.tasks,
+    deadlines: deadlinesQuery.deadlines,
+    workflowStatuses: statusesQuery.workflowStatuses,
     
     // Estados combinados
     isLoading: processQuery.isLoading || historyQuery.isLoading || activitiesQuery.isLoading,
@@ -178,11 +245,15 @@ export function useProcessFullData(processId, options = {}) {
     error: processQuery.error || historyQuery.error || activitiesQuery.error,
     
     // Funções
-    refetchAll: () => {
-      processQuery.refetch();
-      historyQuery.refetch();
-      activitiesQuery.refetch();
-      tasksQuery.refetch();
+    refetchAll: async () => {
+      await Promise.all([
+        processQuery.refetch(),
+        historyQuery.refetch(),
+        activitiesQuery.refetch(),
+        tasksQuery.refetch(),
+        deadlinesQuery.refetch(),
+        statusesQuery.refetch(),
+      ]);
     },
     
     // Queries individuais (para uso avançado)
@@ -190,6 +261,8 @@ export function useProcessFullData(processId, options = {}) {
     historyQuery,
     activitiesQuery,
     tasksQuery,
+    deadlinesQuery,
+    statusesQuery,
   };
 }
 

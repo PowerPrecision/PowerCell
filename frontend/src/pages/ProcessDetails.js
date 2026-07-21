@@ -193,6 +193,9 @@ import VisitasTab from "../components/processDetails/VisitasTab";
 import ProcessPortalMessagesTab from "../components/processDetails/ProcessPortalMessagesTab";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../lib/queryClient";
+import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
 import ProcessPersonalTab from "../components/processDetails/ProcessPersonalTab";
 import ProcessFinancialTab from "../components/processDetails/ProcessFinancialTab";
 import ProcessRealEstateTab from "../components/processDetails/ProcessRealEstateTab";
@@ -207,6 +210,7 @@ const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, token } = useAuth();
+  const queryClient = useQueryClient();
   
   // ── WebSocket: juntar-se à room do processo para mensagens em tempo real ──
   // portalRefreshRef aponta para o refresh do hook useProcessPortalMessages
@@ -796,182 +800,92 @@ const ProcessDetails = () => {
 
   const fetchData = async () => {
     try {
-      // Use Promise.allSettled so that a failure in one request (e.g. history/activities)
-      // doesn't prevent the page from loading. The main getProcess call determines
-      // whether the process exists; the others are supplementary.
-      const [processRes, deadlinesRes, activitiesRes, historyRes, statusesRes] = await Promise.all([
-        getProcess(id).catch(err => { throw err; }), // Re-throw: this is the critical call
-        getDeadlines(id).catch(() => ({ data: [] })),
-        getActivities(id).catch(() => ({ data: [] })),
-        getHistory(id).catch(() => ({ data: [] })),
-        getWorkflowStatuses().catch(() => ({ data: [] })),
+      // TanStack Query cache (same keys as useProcessQuery / useProcessFullData)
+      const [processData, deadlinesData, activitiesData, historyData, statusesData] = await Promise.all([
+        queryClient.fetchQuery({
+          queryKey: queryKeys.processes.detail(id),
+          queryFn: async () => {
+            const response = await getProcess(id);
+            return response.data;
+          },
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.deadlines.byProcess(id),
+          queryFn: async () => {
+            try {
+              const response = await getDeadlines(id);
+              return Array.isArray(response.data) ? response.data : [];
+            } catch {
+              return [];
+            }
+          },
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.activities.byProcess(id),
+          queryFn: async () => {
+            try {
+              const response = await getActivities(id);
+              return Array.isArray(response.data) ? response.data : [];
+            } catch {
+              return [];
+            }
+          },
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.history.byProcess(id),
+          queryFn: async () => {
+            try {
+              const response = await getHistory(id);
+              return Array.isArray(response.data) ? response.data : [];
+            } catch {
+              return [];
+            }
+          },
+        }),
+        queryClient.fetchQuery({
+          queryKey: queryKeys.workflowStatuses.list(),
+          queryFn: async () => {
+            try {
+              const response = await getWorkflowStatuses();
+              return Array.isArray(response.data) ? response.data : [];
+            } catch {
+              return [];
+            }
+          },
+        }),
       ]);
-      const processData = processRes.data;
-      setProcess(processData);
-      savedProcessRef.current = processData;
-      setDeadlines(Array.isArray(deadlinesRes.data) ? deadlinesRes.data : []);
-      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
-      setHistory(Array.isArray(historyRes.data) ? historyRes.data : []);
-      setWorkflowStatuses(Array.isArray(statusesRes.data) ? statusesRes.data : []);
-      setStatus(processData.status);
 
-      // ── FASE 3: Carregar dados do Cliente via client_id ──
-      // O processo tem uma FK (client_id) para a coleção clients.
-      // Os dados pessoais (nome, email, telefone, NIF, estado civil) pertencem ao Cliente.
+      setDeadlines(deadlinesData);
+      setActivities(activitiesData);
+      setHistory(historyData);
+      setWorkflowStatuses(statusesData);
+
+      let clientData = null;
       if (processData.client_id) {
         setClientId(processData.client_id);
         try {
           const clientRes = await getClient(processData.client_id);
-          const cData = clientRes.data;
-          setClientData(cData);
-          
-          // Preencher personalData a partir dos dados do Cliente (fonte de verdade)
-          const clientPersonal = { ...(cData.dados_pessoais || {}) };
-          // Limpar blind indexes
-          delete clientPersonal.nif_hash;
-          delete clientPersonal.email_hash;
-          delete clientPersonal.telefone_hash;
-          // Adicionar nome e contacto do cliente
-          clientPersonal.nome_completo = cData.nome || processData.client_name || '';
-          const resolvedEmail = cData.contacto?.email || processData.client_email || '';
-          const resolvedPhone = cData.contacto?.telefone || processData.client_phone || '';
-          clientPersonal.email = resolvedEmail;
-          clientPersonal.telefone = resolvedPhone;
-          // Manover NIF do cliente se existir
-          if (cData.dados_pessoais?.nif) {
-            clientPersonal.nif = cData.dados_pessoais.nif;
-          }
-          setPersonalData(clientPersonal);
-
-          // ── Sincronizar contactos do Cliente para o estado do Processo ──
-          // O cartão "Contactos" no separador "Dados do Processo" está ligado a
-          // process.client_email / process.client_phone. Se o processo ainda não
-          // tem esses campos populados mas o cliente já os tem (cenário comum em
-          // processos antigos ou recém-criados), copiamos do cliente para o
-          // estado local — garantindo que o utilizador vê os dados existentes.
-          if (resolvedEmail || resolvedPhone) {
-            setProcess(prev => ({
-              ...(prev || processData),
-              client_email: prev?.client_email || resolvedEmail || '',
-              client_phone: prev?.client_phone || resolvedPhone || '',
-            }));
-          }
+          clientData = clientRes.data;
         } catch (clientErr) {
-          console.warn('Não foi possível carregar dados do cliente via client_id:', clientErr);
-          // Fallback: usar dados antigos do processo (personal_data no documento do processo)
-          const fallbackPersonal = { ...(processData.personal_data || {}) };
-          delete fallbackPersonal.nif_hash;
-          delete fallbackPersonal.email_hash;
-          delete fallbackPersonal.telefone_hash;
-          setPersonalData(fallbackPersonal);
+          console.warn("Não foi possível carregar dados do cliente via client_id:", clientErr);
         }
-      } else {
-        // Sem client_id (processo antigo) — usar dados embutidos no processo
-        const cleanPersonalData = { ...(processData.personal_data || {}) };
-        delete cleanPersonalData.nif_hash;
-        delete cleanPersonalData.email_hash;
-        delete cleanPersonalData.telefone_hash;
-        setPersonalData(cleanPersonalData);
       }
-      
-      const cleanTitular2Data = { ...(processData.titular2_data || {}) };
-      delete cleanTitular2Data.nif_hash;
-      setTitular2Data(cleanTitular2Data);  // Carregar dados do 2º titular
-      setFinancialData(processData.financial_data || {});
-      setRealEstateData(processData.real_estate_data || {});
-      setCreditData(processData.credit_data || {});
-      
-      // AI Executive Summary — load existing summary
-      setAiSummary(processData.ai_executive_summary || null);
-      setAiAnalysisDate(processData.ai_analysis_date || null);
-      
-      // UNIFICAÇÃO backward-compat: se personal_data tem morada/address mas não morada_fiscal, migrar
-      const pd = processData.personal_data || {};
-      if ((pd.morada || pd.address) && !pd.morada_fiscal) {
-        setPersonalData(prev => ({ ...prev, morada_fiscal: prev.morada || prev.address || "" }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem rendimento_mensal mas não monthly_income, migrar
-      const fd = processData.financial_data || {};
-      if ((fd.rendimento_mensal || fd.salario_liquido) && !fd.monthly_income) {
-        setFinancialData(prev => ({ ...prev, monthly_income: prev.rendimento_mensal || prev.salario_liquido }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem empresa mas não employer_name, migrar
-      if ((fd.empresa || fd.entidade_patronal) && !fd.employer_name) {
-        setFinancialData(prev => ({ ...prev, employer_name: prev.empresa || prev.entidade_patronal }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem tipo_contrato mas não employment_type, migrar
-      if (fd.tipo_contrato && !fd.employment_type) {
-        setFinancialData(prev => ({ ...prev, employment_type: prev.tipo_contrato }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem antiguidade_emprego mas não employment_duration, migrar
-      if (fd.antiguidade_emprego && !fd.employment_duration) {
-        setFinancialData(prev => ({ ...prev, employment_duration: prev.antiguidade_emprego }));
-      }
-      // UNIFICAÇÃO backward-compat: normalizar valores de display labels para internal keys
-      // sexo: "Masculino"/"Feminino" → "M"/"F"
-      if (pd.sexo === "Masculino") {
-        setPersonalData(prev => ({ ...prev, sexo: "M" }));
-      } else if (pd.sexo === "Feminino") {
-        setPersonalData(prev => ({ ...prev, sexo: "F" }));
-      }
-      // estado_civil: display labels → internal keys (e.g. "Solteiro(a)" → "solteiro")
-      const estadoCivilMap = {
-        "Solteiro(a)": "solteiro", "Solteiro": "solteiro",
-        "Casado(a)": "casado", "Casado": "casado",
-        "Casado(a) - Comunhão de Bens": "casado_geral",
-        "Casado(a) - Comunhão de Aquiridos": "casado_adquiridos",
-        "Casado(a) - Comunhão de Adquiridos": "casado_adquiridos",
-        "Casado(a) - Separação de Bens": "casado_separacao",
-        "Divorciado(a)": "divorciado", "Divorciado": "divorciado",
-        "Viúvo(a)": "viuvo", "Viúvo": "viuvo",
-        "União de Facto": "uniao_facto",
-      };
-      if (pd.estado_civil && estadoCivilMap[pd.estado_civil]) {
-        const mappedEC = estadoCivilMap[pd.estado_civil];
-        setPersonalData(prev => ({ ...prev, estado_civil: mappedEC }));
-      }
-      // tipo_imovel: Title Case → lowercase (e.g. "Apartamento" → "apartamento")
-      const tipoImovelMap = {
-        "Apartamento": "apartamento", "Moradia": "moradia",
-        "Terreno": "terreno", "Outro": "outro",
-      };
-      const rd = processData.real_estate_data || {};
-      if (rd.tipo_imovel && tipoImovelMap[rd.tipo_imovel]) {
-        const mappedTI = tipoImovelMap[rd.tipo_imovel];
-        setRealEstateData(prev => ({ ...prev, tipo_imovel: mappedTI }));
-      }
-      // employment_type: Title Case → lowercase (e.g. "Efetivo" → "efetivo")
-      const employmentTypeMap = {
-        "Efetivo": "efetivo", "Termo Certo": "termo_certo",
-        "Termo Incerto": "termo_incerto", "Independente": "independente",
-        "Empresário": "empresario", "Empresário em Nome Individual": "empresario",
-        "Reformado": "reformado", "Desempregado": "desempregado",
-      };
-      if (fd.employment_type && employmentTypeMap[fd.employment_type]) {
-        const mappedET = employmentTypeMap[fd.employment_type];
-        setFinancialData(prev => ({ ...prev, employment_type: mappedET }));
-      }
-      // Titular2 backward-compat: normalizar estado_civil (Title Case → lowercase)
-      const t2 = processData.titular2_data || {};
-      if (t2.estado_civil && estadoCivilMap[t2.estado_civil]) {
-        const mappedT2EC = estadoCivilMap[t2.estado_civil];
-        setTitular2Data(prev => ({ ...prev, estado_civil: mappedT2EC }));
-      }
-      // Note: nif_hash is already cleaned synchronously above when setting initial state
-      // UNIFICAÇÃO: se personal_data tem email/phone, sincronizar com campos de topo
-      if (pd.email && !processData.client_email) {
-        setProcess(prev => ({ ...prev, client_email: pd.email }));
-      }
-      if ((pd.phone || pd.telefone) && !processData.client_phone) {
-        setProcess(prev => ({ ...prev, client_phone: pd.phone || pd.telefone }));
-      }
-      
-      // TAREFA 2: Carregar estado de conflitos e confirmação de dados
-      setAiSuggestions(processData.ai_suggestions || []);
-      setIsDataConfirmed(processData.is_data_confirmed || false);
 
-      // S3 files are loaded by S3FileManager component automatically
-      // No need to load them here
+      const vm = deriveProcessDetailsViewModel(processData, clientData);
+      setProcess(vm.process);
+      savedProcessRef.current = vm.process;
+      setClientId(vm.clientId);
+      setClientData(vm.clientData);
+      setPersonalData(vm.personalData);
+      setTitular2Data(vm.titular2Data);
+      setFinancialData(vm.financialData);
+      setRealEstateData(vm.realEstateData);
+      setCreditData(vm.creditData);
+      setStatus(vm.status);
+      setAiSummary(vm.aiSummary);
+      setAiAnalysisDate(vm.aiAnalysisDate);
+      setAiSuggestions(vm.aiSuggestions);
+      setIsDataConfirmed(vm.isDataConfirmed);
     } catch (error) {
       console.error("Error fetching data:", error);
       if (error.response?.status === 404) {
