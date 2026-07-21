@@ -141,6 +141,14 @@ from services.process_update import (
 from services.process_kanban_enrichment import (
     group_processes_by_status,
     sort_all_kanban_columns,
+    build_kanban_columns,
+)
+from services.process_list_enrichment import (
+    enrich_processes_assignee_names,
+    enrich_processes_portal_flags,
+    enrich_processes_latest_notes,
+    enrich_processes_latest_activity,
+    sort_process_list,
 )
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
@@ -836,198 +844,20 @@ async def get_processes(
     # NOTA: personal_data e financial_data NÃO são projetados, então não precisam de desencriptação
     processes = decrypt_processes_list(processes, fields_to_decrypt=["client_phone", "client_nif"])
 
-    # Enriquecer com nomes de utilizadores (consultor, mediador, indexacao, parceiro)
-    # Coletar todos os IDs únicos de utilizadores atribuídos (incluindo arrays)
-    user_ids_to_resolve = set()
-    for p in processes:
-        # Single IDs
-        if p.get("assigned_consultor_id"):
-            user_ids_to_resolve.add(p["assigned_consultor_id"])
-        if p.get("assigned_mediador_id"):
-            user_ids_to_resolve.add(p["assigned_mediador_id"])
-        if p.get("assigned_indexacao_id"):
-            user_ids_to_resolve.add(p["assigned_indexacao_id"])
-        if p.get("assigned_parceiro_id"):
-            user_ids_to_resolve.add(p["assigned_parceiro_id"])
-        # Array IDs (multiple consultants, mediadores)
-        for cid in (p.get("assigned_consultor_ids") or []):
-            user_ids_to_resolve.add(cid)
-        for mid in (p.get("assigned_mediador_ids") or []):
-            user_ids_to_resolve.add(mid)
-    
-    if user_ids_to_resolve:
-        user_docs = await db.users.find(
-            {"id": {"$in": list(user_ids_to_resolve)}},
-            {"_id": 0, "id": 1, "name": 1}
-        ).to_list(len(user_ids_to_resolve))
-        user_map = {u["id"]: u.get("name", "") for u in user_docs}
-        
-        for p in processes:
-            # Resolve consultor names — single or multiple
-            if not p.get("consultor_name"):
-                c_ids = list(set(
-                    ([p["assigned_consultor_id"]] if p.get("assigned_consultor_id") else []) + 
-                    (p.get("assigned_consultor_ids") or [])
-                ))
-                names = [user_map[cid] for cid in c_ids if user_map.get(cid)]
-                if names:
-                    p["consultor_name"] = ", ".join(names)
-            
-            # Resolve mediador names — single or multiple
-            if not p.get("mediador_name"):
-                m_ids = list(set(
-                    ([p["assigned_mediador_id"]] if p.get("assigned_mediador_id") else []) + 
-                    (p.get("assigned_mediador_ids") or [])
-                ))
-                names = [user_map[mid] for mid in m_ids if user_map.get(mid)]
-                if names:
-                    p["mediador_name"] = ", ".join(names)
-            
-            # Resolve indexacao (single only)
-            if not p.get("indexacao_name") and p.get("assigned_indexacao_id"):
-                p["indexacao_name"] = user_map.get(p["assigned_indexacao_id"], "")
-            
-            # Resolve parceiro (single only)
-            if not p.get("parceiro_name") and p.get("assigned_parceiro_id"):
-                p["parceiro_name"] = user_map.get(p["assigned_parceiro_id"], "")
-    
-    # Ordenação: usar sort_field/sort_order se fornecidos, senão ordenação padrão por workflow
-    # Mapear pesos de prioridade — suporta ambos os campos (prioridade PT + priority EN)
-    _priority_map = {
-        "alta": 3, "high": 3,
-        "media": 2, "medium": 2,
-        "baixa": 1, "low": 1,
-    }
+    await enrich_processes_assignee_names(processes)
+    sort_process_list(
+        processes,
+        sort_field=sort_field,
+        sort_order=sort_order or "asc",
+        status_order=status_order,
+    )
 
-    def _get_priority_weight(p):
-        """Obtém o peso de prioridade de um processo (suporta campo PT e EN)."""
-        return _priority_map.get(p.get("prioridade") or p.get("priority"), 0)
-
-    if sort_field and sort_field in ("client_name", "status", "created_at", "updated_at",
-                                       "priority", "property_value", "property_location",
-                                       "contacto"):
-        reverse = sort_order.lower() == "desc"
-
-        if sort_field == "priority":
-            # Ordenação por prioridade: apenas por peso de prioridade
-            def _sort_key(p):
-                return _get_priority_weight(p)
-            try:
-                processes.sort(key=_sort_key, reverse=reverse)
-            except TypeError:
-                processes.sort(key=lambda p: str(_sort_key(p)), reverse=reverse)
-        else:
-            # Qualquer outro campo: prioridade alta SEMPRE no topo como ordenação secundária
-            # Usa ordenação estável (2 passes): 1º pelo campo principal, 2º por prioridade
-            def _primary_key(p):
-                if sort_field == "client_name":
-                    return (p.get("client_name") or "").lower()
-                elif sort_field == "status":
-                    return (p.get("status") or "").lower()
-                elif sort_field in ("created_at", "updated_at"):
-                    return p.get(sort_field) or ""
-                elif sort_field == "contacto":
-                    return (p.get("client_email") or p.get("client_phone") or "").lower()
-                else:
-                    return p.get(sort_field) or ""
-
-            # Passo 1: ordenar pelo campo principal (sort estável preserva ordem relativa)
-            try:
-                processes.sort(key=_primary_key, reverse=reverse)
-            except TypeError:
-                processes.sort(key=lambda p: str(_primary_key(p)), reverse=reverse)
-
-            # Passo 2: ordenar por prioridade descendente (alta primeiro)
-            # Como sort é estável, processos com mesma prioridade mantêm a ordem do passo 1
-            processes.sort(key=lambda p: -_get_priority_weight(p))
-    else:
-        # Ordenação padrão: 1ª por prioridade (Alta>Média>Baixa), 2ª por fase do workflow, 3ª por nome
-        processes.sort(key=lambda p: (
-            -_get_priority_weight(p),
-            status_order.get(p.get("status"), 999),
-            (p.get("client_name") or "").lower()
-        ))
-    
     # Total e paginação (após ordenação)
     total = len(processes)
     processes = processes[skip:skip + size]
 
-    # ====================================================================
-    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
-    # Pistas visuais silenciosas (bolinhas) para interações do cliente no portal.
-    # Mesma lógica do Kanban (linhas 2122-2155), aplicada APÓS paginação para
-    # só buscar flags dos processos visíveis na página atual (eficiência).
-    # ====================================================================
-    if processes:
-        _bi_process_ids = [p["id"] for p in processes if p.get("id")]
-
-        # 1) Mensagens não lidas do cliente (portal_messages)
-        _bi_unread = await db.portal_messages.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "sender_type": "client",
-                "read_by_staff": False
-            }},
-            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
-
-        # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
-        _bi_new_docs = await db.documents.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "status": "uploaded"
-            }},
-            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
-
-        for p in processes:
-            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
-            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
-
-    # ====================================================================
-    # PACOTE BT (Fix 3): BATCH ENRIQUECIMENTO — latest_note
-    # Projeta a ÚLTIMA nota real inserida no histórico/atividades do processo
-    # para dentro do campo latest_note. O frontend (FilteredProcessList) lê
-    # este campo para a coluna "Notas do Consultor" (com fallback para
-    # process.notes para retrocompatibilidade).
-    #
-    # Procura na coleção activities (comentários do staff) o comentário mais
-    # recente de cada processo. Usa aggregation com $match + $sort + $group
-    # para obter o último por created_at.
-    # ====================================================================
-    if processes:
-        _bt_process_ids = [p["id"] for p in processes if p.get("id")]
-        _bt_latest_notes = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bt_process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "latest_note": {"$first": "$comment"},
-                "latest_note_at": {"$first": "$created_at"},
-                "latest_note_by": {"$first": "$user_name"},
-            }}
-        ]).to_list(1000)
-        _bt_notes_map = {r["_id"]: r for r in _bt_latest_notes}
-
-        for p in processes:
-            note_info = _bt_notes_map.get(p.get("id"))
-            if note_info:
-                p["latest_note"] = note_info.get("latest_note")
-                p["latest_note_at"] = note_info.get("latest_note_at")
-                p["latest_note_by"] = note_info.get("latest_note_by")
-            else:
-                p["latest_note"] = None
-                p["latest_note_at"] = None
-                p["latest_note_by"] = None
-            # PACOTE CZ — latest_activity_preview: alias explícito da última
-            # atividade/nota do consultor. O frontend lê este campo EM VEZ de
-            # process.notes (que é estático e pode estar desatualizado).
-            p["latest_activity_preview"] = p.get("latest_note")
+    await enrich_processes_portal_flags(processes)
+    await enrich_processes_latest_notes(processes)
 
     # Calcular total de páginas
     pages = (total + size - 1) // size if size > 0 else 0
@@ -1124,72 +954,8 @@ async def get_processes_paginated(
         fields_to_decrypt=["client_phone", "client_nif"]
     )
 
-    # ====================================================================
-    # PACOTE BI: BATCH ENRIQUECIMENTO — has_unread_messages & has_new_documents
-    # Mesma lógica do Kanban e do GET /processes. A paginação cursor já foi
-    # aplicada, pelo que só enriquecemos os itens da página atual.
-    # ====================================================================
-    if result["items"]:
-        _bi_process_ids = [p["id"] for p in result["items"] if p.get("id")]
-
-        _bi_unread = await db.portal_messages.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "sender_type": "client",
-                "read_by_staff": False
-            }},
-            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_unread_map = {r["_id"]: r["unread_count"] > 0 for r in _bi_unread}
-
-        _bi_new_docs = await db.documents.aggregate([
-            {"$match": {
-                "process_id": {"$in": _bi_process_ids},
-                "status": "uploaded"
-            }},
-            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-        ]).to_list(1000)
-        _bi_new_docs_map = {r["_id"]: r["new_count"] > 0 for r in _bi_new_docs}
-
-        for p in result["items"]:
-            p["has_unread_messages"] = _bi_unread_map.get(p.get("id"), False)
-            p["has_new_documents"] = _bi_new_docs_map.get(p.get("id"), False)
-
-    # ============================================================
-    # PACOTE CZ — Batch enrichment: última nota do consultor
-    # ============================================================
-    # Antes este endpoint só tinha o bloco PACOTE CJ (dead code que filtrava
-    # por "action" field inexistente). Agora usa o mesmo pattern batch do
-    # PACOTE BT: aggregation $group por process_id, $first da mais recente.
-    # Adiciona latest_note + latest_activity_preview a cada processo.
-    # ============================================================
-    if result.get("items"):
-        _cz_process_ids = [p["id"] for p in result["items"] if p.get("id")]
-        _cz_latest_notes = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": _cz_process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "latest_note": {"$first": "$comment"},
-                "latest_note_at": {"$first": "$created_at"},
-                "latest_note_by": {"$first": "$user_name"},
-            }}
-        ]).to_list(1000)
-        _cz_notes_map = {r["_id"]: r for r in _cz_latest_notes}
-        for p in result["items"]:
-            note_info = _cz_notes_map.get(p.get("id"))
-            if note_info:
-                p["latest_note"] = note_info.get("latest_note")
-                p["latest_note_at"] = note_info.get("latest_note_at")
-                p["latest_note_by"] = note_info.get("latest_note_by")
-            else:
-                p["latest_note"] = None
-                p["latest_note_at"] = None
-                p["latest_note_by"] = None
-            p["latest_activity_preview"] = p.get("latest_note")
+    await enrich_processes_portal_flags(result["items"])
+    await enrich_processes_latest_notes(result["items"])
 
     return {
         "processes": result["items"],
@@ -1459,94 +1225,18 @@ async def get_kanban_board(
             p.setdefault("client_phone", cinfo["telefone"])
             p.setdefault("client_nif", cinfo["nif"])
 
-    # ====================================================================
-    # BATCH ENRIQUECIMENTO: has_unread_messages & has_new_documents
-    # Pistas visuais silenciosas para interações do cliente no portal.
-    # Evita fadiga de notificações — apenas dots coloridos no cartão.
-    # ====================================================================
-    process_ids = [p["id"] for p in processes]
+    await enrich_processes_portal_flags(processes)
+    await enrich_processes_latest_activity(processes)
 
-    # 1) Mensagens não lidas do cliente (portal_messages)
-    unread_pipeline = [
-        {"$match": {
-            "process_id": {"$in": process_ids},
-            "sender_type": "client",
-            "read_by_staff": False
-        }},
-        {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-    ]
-    unread_results = await db.portal_messages.aggregate(unread_pipeline).to_list(1000)
-    unread_map = {r["_id"]: r["unread_count"] > 0 for r in unread_results}
-
-    # 2) Novos documentos enviados pelo cliente (status "uploaded" = pendente de revisão)
-    new_docs_pipeline = [
-        {"$match": {
-            "process_id": {"$in": process_ids},
-            "status": "uploaded"
-        }},
-        {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-    ]
-    new_docs_results = await db.documents.aggregate(new_docs_pipeline).to_list(1000)
-    new_docs_map = {r["_id"]: r["new_count"] > 0 for r in new_docs_results}
-
-    # Inject computed boolean flags into each process
-    for p in processes:
-        p["has_unread_messages"] = unread_map.get(p["id"], False)
-        p["has_new_documents"] = new_docs_map.get(p["id"], False)
-
-    # ============================================================
-    # PACOTE DA — Batch enrichment: latest_activity (atividade mais recente)
-    # ============================================================
-    # O ProcessDetailsModal recebe o `process` do KanbanBoard (que chama
-    # /kanban). Sem este enrichment, a tab "Observações e IA" não teria
-    # a atividade recente. Usamos o mesmo pattern batch aggregation do
-    # PACOTE BT/CZ: $group por process_id, $first da mais recente.
-    # ============================================================
-    try:
-        _da_latest_acts = await db.activities.aggregate([
-            {"$match": {
-                "process_id": {"$in": process_ids},
-                "comment": {"$exists": True, "$ne": ""},
-            }},
-            {"$sort": {"created_at": -1}},
-            {"$group": {
-                "_id": "$process_id",
-                "comment": {"$first": "$comment"},
-                "user_name": {"$first": "$user_name"},
-                "user_role": {"$first": "$user_role"},
-                "created_at": {"$first": "$created_at"},
-            }}
-        ]).to_list(1000)
-        _da_acts_map = {r["_id"]: r for r in _da_latest_acts}
-        for p in processes:
-            act = _da_acts_map.get(p.get("id"))
-            if act:
-                # Remover o _id do objeto antes de atribuir
-                act_clean = {k: v for k, v in act.items() if k != "_id"}
-                p["latest_activity"] = act_clean
-            else:
-                p["latest_activity"] = None
-    except Exception as e:
-        logger.warning(f"[KANBAN] Erro no batch enrichment latest_activity: {e}")
-        for p in processes:
-            p.setdefault("latest_activity", None)
-
-    # Get all users for name lookup (projection mínima)
     users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
     user_map = {u["id"]: u for u in users}
-    
-    # Debug: verificar se há processos com indexação/parceiro atribuído
+
     indexacao_count = sum(1 for p in processes if p.get("assigned_indexacao_id"))
     parceiro_count = sum(1 for p in processes if p.get("assigned_parceiro_id"))
     logger.info(f"[Kanban Export] {len(processes)} processos: {indexacao_count} com indexação, {parceiro_count} com parceiro")
-    if indexacao_count > 0:
-        sample_ids = [p.get("assigned_indexacao_id") for p in processes if p.get("assigned_indexacao_id")][:3]
-        logger.info(f"[Kanban Export] Sample indexacao IDs: {sample_ids}")
-        logger.info(f"[Kanban Export] User map has keys: {list(user_map.keys())[:5]}...")
-    
+
     processes_by_status = group_processes_by_status(processes)
 
-    # Contagens otimizadas com count_documents em vez de len(list)
     concluded_statuses = ["concluidos"]
     dropped_statuses = ["desistencias"]
     active_count_query = dict(query) if query else {}
@@ -1561,96 +1251,9 @@ async def get_kanban_board(
     )
 
     sort_all_kanban_columns(processes_by_status)
-    
-    kanban = []
+
     try:
-        for status in statuses:
-            # PACOTE AV: .get() com defaults robustos contra KeyError/TypeError
-            if not isinstance(status, dict):
-                logger.warning(f"[KANBAN] workflow_status não é dict: {type(status)} — skip")
-                continue
-            status_name = status.get("name") or ""
-            status_processes = processes_by_status.get(status_name, [])
-
-            # Enrich with user names and assignment info
-            enriched_processes = []
-            for p in status_processes:
-                if not isinstance(p, dict):
-                    continue
-
-                # === Múltiplos Consultores ===
-                consultor_ids = p.get("assigned_consultor_ids") or []
-                if not isinstance(consultor_ids, list):
-                    consultor_ids = []
-                primary_consultor = p.get("assigned_consultor_id")
-                if primary_consultor and primary_consultor not in consultor_ids:
-                    consultor_ids.append(primary_consultor)
-                consultor_names = [
-                    user_map.get(cid, {}).get("name", "")
-                    for cid in consultor_ids
-                    if cid and isinstance(cid, str) and user_map.get(cid)
-                ]
-
-                # === Múltiplos Mediadores ===
-                mediador_ids = p.get("assigned_mediador_ids") or []
-                if not isinstance(mediador_ids, list):
-                    mediador_ids = []
-                primary_mediador = p.get("assigned_mediador_id")
-                if primary_mediador and primary_mediador not in mediador_ids:
-                    mediador_ids.append(primary_mediador)
-                mediador_names = [
-                    user_map.get(mid, {}).get("name", "")
-                    for mid in mediador_ids
-                    if mid and isinstance(mid, str) and user_map.get(mid)
-                ]
-
-                # === Indexação (safe navigation contra None keys) ===
-                idx_id = p.get("assigned_indexacao_id")
-                indexacao_name = p.get("indexacao_name") or ""
-                if not indexacao_name and idx_id and isinstance(idx_id, str):
-                    indexacao_name = user_map.get(idx_id, {}).get("name", "")
-
-                # === Parceiro (safe navigation contra None keys) ===
-                par_id = p.get("assigned_parceiro_id")
-                parceiro_name = p.get("parceiro_name") or ""
-                if not parceiro_name and par_id and isinstance(par_id, str):
-                    parceiro_name = user_map.get(par_id, {}).get("name", "")
-
-                # Verificar se o utilizador actual está atribuído
-                assigned_consultor_ids_list = p.get("assigned_consultor_ids") or []
-                if not isinstance(assigned_consultor_ids_list, list):
-                    assigned_consultor_ids_list = []
-                assigned_mediador_ids_list = p.get("assigned_mediador_ids") or []
-                if not isinstance(assigned_mediador_ids_list, list):
-                    assigned_mediador_ids_list = []
-                is_my_consultor = (
-                    p.get("assigned_consultor_id") == user_id
-                    or user_id in assigned_consultor_ids_list
-                )
-                is_my_mediador = (
-                    p.get("assigned_mediador_id") == user_id
-                    or user_id in assigned_mediador_ids_list
-                )
-
-                enriched_processes.append({
-                    **p,
-                    "consultor_name": ", ".join(consultor_names) if consultor_names else (p.get("consultor_name") or ""),
-                    "mediador_name": ", ".join(mediador_names) if mediador_names else (p.get("mediador_name") or ""),
-                    "indexacao_name": indexacao_name,
-                    "parceiro_name": parceiro_name,
-                    "is_assigned_to_me": is_my_consultor or is_my_mediador,
-                    "my_role_in_process": "consultor" if is_my_consultor else ("intermediario" if is_my_mediador else None)
-                })
-
-            kanban.append({
-                "id": status.get("id") or status_name,
-                "name": status_name,
-                "label": status.get("label") or status_name.replace("_", " ").title(),
-                "color": status.get("color") or "#6B7280",
-                "order": status.get("order", 0),
-                "processes": enriched_processes,
-                "count": len(enriched_processes)
-            })
+        kanban = build_kanban_columns(statuses, processes_by_status, user_map, user_id)
     except Exception as e:
         # PACOTE AY: NUCLEAR FAILSAFE — a rota do Kanban NUNCA devolve 500.
         # Em caso de qualquer exceção (KeyError, TypeError, AttributeError, etc.),

@@ -150,3 +150,62 @@ class TestKanbanEnrichment:
         ]
         sort_kanban_column_processes(same)
         assert same[0]["updated_at"] == "2026-01-03"
+
+    def test_enrich_card_and_columns(self):
+        from services.process_kanban_enrichment import (
+            enrich_kanban_process_card,
+            build_kanban_columns,
+            group_processes_by_status,
+        )
+        user_map = {
+            "c1": {"id": "c1", "name": "Ana"},
+            "m1": {"id": "m1", "name": "Bruno"},
+        }
+        p = {
+            "id": "p1",
+            "status": "fase_1",
+            "assigned_consultor_id": "c1",
+            "assigned_mediador_ids": ["m1"],
+        }
+        card = enrich_kanban_process_card(p, user_map, "c1")
+        assert card["consultor_name"] == "Ana"
+        assert card["mediador_name"] == "Bruno"
+        assert card["is_assigned_to_me"] is True
+        assert card["my_role_in_process"] == "consultor"
+
+        cols = build_kanban_columns(
+            [{"name": "fase_1", "label": "Fase 1", "color": "#111", "order": 1}],
+            group_processes_by_status([p]),
+            user_map,
+            "c1",
+        )
+        assert cols[0]["count"] == 1
+        assert cols[0]["processes"][0]["consultor_name"] == "Ana"
+
+
+class TestListEnrichmentSort:
+    def test_default_sort_priority_then_status(self):
+        from services.process_list_enrichment import sort_process_list, get_priority_weight
+        procs = [
+            {"client_name": "B", "status": "z", "prioridade": "baixa"},
+            {"client_name": "A", "status": "a", "prioridade": "alta"},
+            {"client_name": "C", "status": "a", "prioridade": "alta"},
+        ]
+        sort_process_list(procs, status_order={"a": 1, "z": 2})
+        assert procs[0]["prioridade"] == "alta"
+        assert procs[0]["client_name"] == "A"
+        assert get_priority_weight({"priority": "high"}) == 3
+
+    def test_apply_assignee_names(self):
+        from services.process_list_enrichment import (
+            collect_assignee_user_ids,
+            apply_assignee_names,
+        )
+        procs = [{
+            "assigned_consultor_ids": ["c1"],
+            "assigned_indexacao_id": "i1",
+        }]
+        assert collect_assignee_user_ids(procs) == {"c1", "i1"}
+        apply_assignee_names(procs, {"c1": "Ana", "i1": "Inês"})
+        assert procs[0]["consultor_name"] == "Ana"
+        assert procs[0]["indexacao_name"] == "Inês"
