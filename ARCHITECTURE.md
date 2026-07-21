@@ -658,6 +658,7 @@ O script `backend/scripts/migrate_clients_to_processes.py` executa a migração 
 | **Strategy (Email)** | `send_email(force_system=True)` — tenta contas nomeadas, depois SystemSMTP (Bloco A), depois erro |
 | **Fallback Chain (Webmail)** | `sync_shared_role_emails()` — tenta `shared_role_email_configs`, depois `system_webmail` (Bloco C), depois erro |
 | **Provider-Agnostic** | Storage, Email, Webmail configuráveis via Admin Settings sem alteração de código |
+| **Thin Route + Service** | `routes/documents.py` / `routes/processes.py` — stubs FastAPI; lógica em `services/document_*.py` e `services/process_*.py` (ver `AGENTS.md`) |
 
 ---
 

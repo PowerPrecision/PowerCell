@@ -33,7 +33,7 @@ PowerCell/
 │   │   ├── auth.py            # Login, refresh token, registo
 │   │   ├── automation.py      # Motor de automação (regras)
 │   │   ├── clients.py         # CRUD clientes, cursor pagination
-│   │   ├── documents.py       # Upload/download docs, rate limiting, S3 proxy
+│   │   ├── documents.py       # Thin stubs: upload/download/portal/S3 (lógica em services/document_*.py)
 │   │   ├── emails.py          # Gmail sync, send-to-banks, rascunhos IA
 │   │   ├── finance.py         # Dashboard financeiro, comissões
 │   │   ├── form_config.py     # Config formulário + templates
@@ -41,13 +41,15 @@ PowerCell/
 │   │   ├── rgpd.py            # Consentimento RGPD, anonimização
 │   │   ├── stats.py           # Estatísticas (com Redis cache)
 │   │   └── ...
-│   ├── services/              # ~60 ficheiros de lógica de negócio
+│   ├── services/              # Lógica de negócio (preferir editar aqui vs. routes/)
 │   │   ├── auth.py            # JWT, password hashing (passlib)
 │   │   ├── encryption.py      # Encriptação AES (Fernet) + Blind Indexing
 │   │   ├── redis_cache.py     # Cache Redis com fallback
 │   │   ├── workflow_engine.py # Motor de regras de automação
 │   │   ├── s3_storage.py      # Pre-signed URLs, organização automática
 │   │   ├── storage_service.py  # Factory Pattern: Local/S3/OneDrive adapters
+│   │   ├── document_*.py      # Documents: resolve, portal, upload, move, OCR, auto-cat…
+│   │   ├── process_*.py       # Processes: list, kanban, update, assignment, DSTI…
 │   │   ├── ai_document_analyzer.py  # Análise de documentos com confiança
 │   │   └── ...
 │   ├── models/                # Esquemas Pydantic + modelos de dados

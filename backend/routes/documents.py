@@ -100,6 +100,20 @@ from services.document_upload_conflict import run_check_upload_conflict
 from services.document_auto_categorize import (
     auto_categorize_document_background,
 )
+from services.document_direct_upload import (
+    run_generate_upload_url,
+    run_confirm_upload,
+)
+from services.document_move import (
+    run_check_move_conflict,
+    run_move_file_to_category,
+)
+from services.document_ocr_data import (
+    run_get_document_ocr_status,
+    run_get_data_suggestions,
+    run_resolve_data_conflict,
+    run_confirm_process_data,
+)
 
 
 # ====================================================================
@@ -536,76 +550,7 @@ async def generate_upload_url(
     - expires_at: Timestamp de expiração da URL
     - expires_in_seconds: Segundos até a URL expirar
     """
-    process_id = data.get("process_id")
-    filename = data.get("filename")
-    content_type = data.get("content_type")
-    category = data.get("category", "Outros")
-    custom_filename = data.get("custom_filename")
-    
-    # Validações
-    if not process_id:
-        raise HTTPException(status_code=400, detail="process_id é obrigatório")
-    if not filename:
-        raise HTTPException(status_code=400, detail="filename é obrigatório")
-    if not content_type:
-        raise HTTPException(status_code=400, detail="content_type é obrigatório")
-    
-    # Verificar se S3 está configurado
-    if not s3_service.is_configured():
-        raise HTTPException(
-            status_code=503, 
-            detail="Serviço de armazenamento S3 não configurado. Contacte o administrador."
-        )
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    titular2 = process.get("titular2_data") or {}
-    second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
-    s3_folder = process.get("s3_folder")
-    
-    # Usar nome personalizado ou normalizar o original
-    if custom_filename:
-        normalized_filename = normalize_filename(custom_filename, category)
-    else:
-        normalized_filename = normalize_filename(filename, category)
-    
-    # Gerar pre-signed URL
-    result = s3_service.generate_upload_presigned_url(
-        client_id=process_id,
-        client_name=client_name,
-        category=category,
-        filename=normalized_filename,
-        content_type=content_type,
-        second_client_name=second_client_name,
-        s3_folder=s3_folder,
-        expiration=300  # 5 minutos
-    )
-    
-    if not result:
-        raise HTTPException(
-            status_code=500, 
-            detail="Erro ao gerar URL de upload. Por favor tente novamente."
-        )
-    
-    logger.info(f"[DIRECT-UPLOAD] URL gerada para {normalized_filename} por {user.get('email')}")
-    
-    return {
-        "success": True,
-        "upload_url": result["upload_url"],
-        "file_key": result["file_key"],
-        "normalized_filename": normalized_filename,
-        "original_filename": filename,
-        "expires_at": result["expires_at"],
-        "expires_in_seconds": result["expires_in_seconds"],
-        "method": "PUT",
-        "headers": {
-            "Content-Type": content_type
-        }
-    }
+    return await run_generate_upload_url(data, user=user)
 
 
 @router.post("/confirm-upload", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -633,140 +578,9 @@ async def confirm_upload(
     - s3_path: Caminho S3 do ficheiro
     - temporary_url: URL temporário para acesso imediato
     """
-    process_id = data.get("process_id")
-    file_key = data.get("file_key")
-    original_filename = data.get("original_filename")
-    category = data.get("category", "Outros")
-    file_size = data.get("file_size")
-    content_type = data.get("content_type", "application/octet-stream")
-    
-    # Validações
-    if not process_id:
-        raise HTTPException(status_code=400, detail="process_id é obrigatório")
-    if not file_key:
-        raise HTTPException(status_code=400, detail="file_key é obrigatório")
-    if not original_filename:
-        raise HTTPException(status_code=400, detail="original_filename é obrigatório")
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    
-    # Verificar se o ficheiro existe no S3
-    if not s3_service.file_exists(file_key):
-        raise HTTPException(
-            status_code=400, 
-            detail="Ficheiro não encontrado no S3. O upload pode ter falhado."
-        )
-    
-    # Extrair nome do ficheiro do path
-    normalized_filename = file_key.split("/")[-1] if "/" in file_key else file_key
-    
-    # Gerar URL temporário para acesso imediato
-    temporary_url = s3_service.get_presigned_url(file_key) or ""
-    
-    # ====================================================================
-    # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
-    # invocar IA para determinar a categoria correta.
-    # Nota: Para uploads diretos, o S3 path já está definido, mas a IA
-    # determina a categoria para os metadados do documento.
-    # ====================================================================
-    ai_categorization_detail = None
-    file_content = None
-    
-    if category.lower().strip() in ("outros", "auto", "", "other"):
-        try:
-            from services.document_categorization import (
-                extract_text_from_pdf,
-                categorize_document_with_ai,
-            )
-            
-            # Obter conteúdo do ficheiro do S3 para análise (offload de I/O bloqueante)
-            file_content = await asyncio.to_thread(s3_service.get_file_content, file_key)
-            
-            text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
-            if file_content and original_filename.lower().endswith('.pdf'):
-                extracted = await asyncio.to_thread(extract_text_from_pdf, file_content, max_chars=3000)
-                if extracted:
-                    text_for_analysis = extracted
-            
-            existing_categories = await db.document_metadata.distinct("ai_category")
-            
-            ai_result = await categorize_document_with_ai(
-                text_content=text_for_analysis,
-                filename=original_filename,
-                existing_categories=existing_categories,
-            )
-            
-            if ai_result.get("success") and ai_result.get("category"):
-                ai_suggested = ai_result["category"]
-                ai_categorization_detail = {
-                    "original_category": category or "Outros",
-                    "ai_category": ai_suggested,
-                    "ai_subcategory": ai_result.get("subcategory"),
-                    "ai_confidence": ai_result.get("confidence"),
-                }
-                category = ai_suggested
-                logger.info(
-                    f"[CONFIRM-UPLOAD-IA] Categoria IA: {ai_suggested} "
-                    f"para {sanitize_for_log(original_filename)}"
-                )
-        except Exception as ai_err:
-            logger.warning(
-                f"[CONFIRM-UPLOAD-IA] Erro na triagem IA: {ai_err}"
-            )
-    
-    # Agendar categorização automática em background (OCR + metadados completos)
-    if not file_content:
-        try:
-            file_content = s3_service.get_file_content(file_key)
-        except Exception:
-            pass
-    
-    try:
-        if file_content:
-            background_tasks.add_task(
-                auto_categorize_document_background,
-                process_id=process_id,
-                client_name=client_name,
-                s3_path=file_key,
-                filename=normalized_filename,
-                file_content=file_content
-            )
-    except Exception as e:
-        logger.warning(f"[CONFIRM-UPLOAD] Erro ao agendar categorização: {e}")
-    
-    # Registar no histórico
-    try:
-        await log_history(
-            process_id=process_id,
-            user=user,
-            action="Carregou documento (upload direto)",
-            field="documento",
-            new_value=f"{normalized_filename} ({category})"
-        )
-    except Exception as e:
-        logger.warning(f"[CONFIRM-UPLOAD] Erro ao registar histórico: {e}")
-    
-    logger.info(f"[CONFIRM-UPLOAD] Upload confirmado: {normalized_filename}")
-    
-    response_data = {
-        "success": True,
-        "s3_path": file_key,
-        "normalized_filename": normalized_filename,
-        "original_filename": original_filename,
-        "category": category,
-        "temporary_url": temporary_url,
-        "message": "Upload registado com sucesso",
-        "auto_categorization": "iniciada" if file_content else " indisponível"
-    }
-    if ai_categorization_detail:
-        response_data["ai_categorization"] = ai_categorization_detail
-    
-    return response_data
+    return await run_confirm_upload(
+        data, background_tasks=background_tasks, user=user
+    )
 
 
 @router.post("/check-file", responses={400: HTTP_400_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -1337,91 +1151,7 @@ async def check_move_conflict(
     - conflict_path: Caminho do ficheiro existente (se houver conflito)
     - suggested_names: Lista de nomes alternativos (se houver conflito)
     """
-    process_id = data.get("process_id")
-    source_path = data.get("source_path")
-    target_category = data.get("target_category")
-    target_filename = data.get("target_filename")
-    
-    if not process_id or not source_path:
-        raise HTTPException(status_code=400, detail="process_id e source_path são obrigatórios")
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    second_client_name = process.get("second_client_name") or process.get("titular2", {}).get("nome")
-    s3_folder = process.get("s3_folder")
-    
-    # Determinar o caminho base
-    if s3_folder:
-        base_path = s3_folder.rstrip('/')
-    else:
-        base_path = s3_service._get_client_base_path_for_upload(
-            process_id, 
-            client_name, 
-            second_client_name
-        )
-    
-    # Extrair nome e categoria atuais
-    current_filename = source_path.split('/')[-1] if '/' in source_path else source_path
-    current_category_part = source_path.split('/')[-2] if '/' in source_path else ""
-    
-    # Determinar categoria destino
-    if target_category:
-        safe_category = sanitize_folder_name(target_category)
-    elif current_category_part:
-        safe_category = current_category_part
-    else:
-        safe_category = "Outros"
-    
-    # Determinar nome do ficheiro destino
-    final_filename = target_filename if target_filename else current_filename
-    
-    # Construir caminho destino
-    target_path = f"{base_path}/{safe_category}/{final_filename}"
-    
-    # Verificar se é o mesmo caminho (sem conflito)
-    if target_path == source_path:
-        return {
-            "has_conflict": False,
-            "target_path": target_path,
-            "message": "O ficheiro já está no destino pretendido"
-        }
-    
-    # Verificar se existe ficheiro no destino
-    conflict_exists = s3_service.file_exists(target_path)
-    
-    # Gerar nomes alternativos se houver conflito
-    suggested_names = []
-    if conflict_exists:
-        name_part, ext = final_filename.rsplit('.', 1) if '.' in final_filename else (final_filename, 'pdf')
-        
-        # Gerar 3 nomes alternativos
-        for i in range(1, 4):
-            new_name = f"{name_part}_{i+1}.{ext}"
-            new_path = f"{base_path}/{safe_category}/{new_name}"
-            if not s3_service.file_exists(new_path):
-                suggested_names.append({
-                    "filename": new_name,
-                    "path": new_path
-                })
-        
-        return {
-            "has_conflict": True,
-            "source_path": source_path,
-            "conflict_path": target_path,
-            "conflict_filename": final_filename,
-            "suggested_names": suggested_names,
-            "message": f"Já existe um ficheiro chamado '{final_filename}' no destino"
-        }
-    
-    return {
-        "has_conflict": False,
-        "target_path": target_path,
-        "message": "Nenhum conflito detectado"
-    }
+    return await run_check_move_conflict(data)
 
 
 @router.post("/move-file/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -1445,133 +1175,7 @@ async def move_file_to_category(
     - new_path: Novo caminho no S3
     - was_renamed: Se o nome foi alterado automaticamente devido a conflito
     """
-    source_path = data.get("source_path")
-    target_category = data.get("target_category")
-    target_filename = data.get("target_filename")
-    overwrite = data.get("overwrite", False)
-    auto_rename = data.get("auto_rename", False)
-    
-    if not source_path or not target_category:
-        raise HTTPException(status_code=400, detail="source_path e target_category são obrigatórios")
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    second_client_name = process.get("second_client_name") or process.get("titular2", {}).get("nome")
-    s3_folder = process.get("s3_folder")  # Pasta S3 configurada manualmente
-    
-    # Extrair nome do ficheiro
-    current_filename = source_path.split('/')[-1] if '/' in source_path else source_path
-    final_filename = target_filename if target_filename else current_filename
-    
-    # Determinar o caminho base CORRETO para o cliente
-    # Prioridade: s3_folder configurado > encontrar pasta existente > criar nova
-    if s3_folder:
-        base_path = s3_folder.rstrip('/')
-    else:
-        # Usar a função do S3 que respeita pastas existentes
-        base_path = s3_service._get_client_base_path_for_upload(
-            process_id, 
-            client_name, 
-            second_client_name
-        )
-    
-    # Construir novo caminho
-    safe_category = sanitize_folder_name(target_category)
-    new_path = f"{base_path}/{safe_category}/{final_filename}"
-    
-    # Verificar se o caminho mudou
-    if new_path == source_path:
-        return {
-            "success": True,
-            "message": "Ficheiro já está na categoria correta",
-            "new_path": new_path,
-            "was_renamed": False
-        }
-    
-    # Verificar se existe conflito
-    conflict_exists = s3_service.file_exists(new_path)
-    was_renamed = False
-    
-    if conflict_exists and not overwrite:
-        if auto_rename:
-            # Gerar nome automático
-            name_part, ext = final_filename.rsplit('.', 1) if '.' in final_filename else (final_filename, 'pdf')
-            counter = 2
-            while s3_service.file_exists(f"{base_path}/{safe_category}/{name_part}_{counter}.{ext}"):
-                counter += 1
-                if counter > 100:  # Limite de segurança
-                    raise HTTPException(status_code=409, detail="Não foi possível gerar um nome único para o ficheiro")
-            
-            final_filename = f"{name_part}_{counter}.{ext}"
-            new_path = f"{base_path}/{safe_category}/{final_filename}"
-            was_renamed = True
-            logger.info(f"Ficheiro renomeado automaticamente para evitar conflito: {final_filename}")
-        else:
-            # Retornar erro com informações do conflito
-            # Gerar sugestões de nomes alternativos
-            suggested_names = []
-            name_part, ext = final_filename.rsplit('.', 1) if '.' in final_filename else (final_filename, 'pdf')
-            for i in range(1, 4):
-                new_name = f"{name_part}_{i+1}.{ext}"
-                suggested_path = f"{base_path}/{safe_category}/{new_name}"
-                if not s3_service.file_exists(suggested_path):
-                    suggested_names.append(new_name)
-            
-            raise HTTPException(
-                status_code=409,
-                detail={
-                    "code": "FILE_EXISTS",
-                    "message": f"Já existe um ficheiro chamado '{final_filename}' no destino",
-                    "conflict_path": new_path,
-                    "suggested_names": suggested_names
-                }
-            )
-    
-    # Mover ficheiro no S3
-    success = s3_service.rename_file(source_path, new_path)
-    
-    if success:
-        # Actualizar metadados se existirem
-        await db.document_metadata.update_one(
-            {"s3_path": source_path},
-            {"$set": {
-                "s3_path": new_path,
-                "ai_category": target_category,
-                "filename": final_filename,
-                "updated_at": datetime.now(timezone.utc).isoformat()
-            }}
-        )
-        
-        # Registar no histórico
-        action_msg = f"Moveu documento para {target_category}"
-        if was_renamed:
-            action_msg += f" (renomeado para {final_filename})"
-        
-        await log_history(
-            process_id=process_id,
-            user=user,
-            action=action_msg,
-            field="documento",
-            old_value=current_filename,
-            new_value=final_filename
-        )
-        
-        logger.info(f"Ficheiro movido: {source_path} -> {new_path}")
-        
-        return {
-            "success": True,
-            "message": f"Ficheiro movido para {target_category}",
-            "new_path": new_path,
-            "old_path": source_path,
-            "new_filename": final_filename,
-            "was_renamed": was_renamed
-        }
-    else:
-        raise HTTPException(status_code=500, detail="Erro ao mover ficheiro")
+    return await run_move_file_to_category(process_id, data, user=user)
 
 
 # ====================================================================
@@ -3415,24 +3019,7 @@ async def get_document_ocr_status(
     Returns:
         Lista de documentos com extracted_data (se disponível).
     """
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    docs = await db.document_metadata.find(
-        {"process_id": process_id},
-        {"_id": 0, "id": 1, "filename": 1, "ai_category": 1, "extracted_data": 1, "is_categorized": 1, "categorized_at": 1}
-    ).to_list(100)
-    
-    # Filtrar apenas documentos com extracted_data
-    docs_with_ocr = [d for d in docs if d.get("extracted_data")]
-    
-    return {
-        "success": True,
-        "total_documents": len(docs),
-        "documents_with_ocr": len(docs_with_ocr),
-        "documents": docs_with_ocr,
-    }
+    return await run_get_document_ocr_status(process_id)
 
 
 @router.get("/process/{process_id}/data-suggestions", responses={404: HTTP_404_RESPONSE})
@@ -3452,21 +3039,7 @@ async def get_data_suggestions(
     Returns:
         Lista de sugestões pendentes com campo, valor atual e valor sugerido.
     """
-    from services.data_conflict import get_pending_suggestions
-    
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    suggestions = await get_pending_suggestions(process_id)
-    
-    return {
-        "success": True,
-        "process_id": process_id,
-        "is_data_confirmed": process.get("is_data_confirmed", False),
-        "suggestions": suggestions,
-        "count": len(suggestions),
-    }
+    return await run_get_data_suggestions(process_id)
 
 
 @router.post("/process/{process_id}/resolve-conflict", responses={404: HTTP_404_RESPONSE})
@@ -3486,33 +3059,7 @@ async def resolve_data_conflict(
     Returns:
         Resultado da resolução.
     """
-    from services.data_conflict import resolve_suggestion
-    
-    suggestion_id = data.get("suggestion_id")
-    field = data.get("field")
-    choice = data.get("choice", "current")
-    
-    if not suggestion_id and not field:
-        raise HTTPException(status_code=400, detail="suggestion_id ou field é obrigatório")
-    
-    if choice not in ("current", "ai"):
-        raise HTTPException(status_code=400, detail="choice deve ser 'current' ou 'ai'")
-    
-    # Se não tem suggestion_id, procurar por field
-    if not suggestion_id:
-        suggestion = await db.data_suggestions.find_one(
-            {"process_id": process_id, "field": field, "resolved": False}
-        )
-        if not suggestion:
-            raise HTTPException(status_code=404, detail="Sugestão não encontrada para este campo")
-        suggestion_id = suggestion["id"]
-    
-    result = await resolve_suggestion(suggestion_id, choice, user.get("id"))
-    
-    if not result["success"]:
-        raise HTTPException(status_code=404, detail=result["message"])
-    
-    return result
+    return await run_resolve_data_conflict(process_id, data, user=user)
 
 
 @router.post("/process/{process_id}/confirm-data", responses={404: HTTP_404_RESPONSE})
@@ -3530,26 +3077,4 @@ async def confirm_process_data(
     Body:
         - confirmed: true para confirmar, false para desbloquear
     """
-    confirmed = data.get("confirmed", True)
-    
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    now = datetime.now(timezone.utc).isoformat()
-    
-    await db.processes.update_one(
-        {"id": process_id},
-        {"$set": {
-            "is_data_confirmed": confirmed,
-            "data_confirmed_at": now if confirmed else None,
-            "data_confirmed_by": user.get("id") if confirmed else None,
-            "updated_at": now,
-        }}
-    )
-    
-    return {
-        "success": True,
-        "message": "Dados confirmados com sucesso" if confirmed else "Dados desbloqueados",
-        "is_data_confirmed": confirmed,
-    }
+    return await run_confirm_process_data(process_id, data, user=user)

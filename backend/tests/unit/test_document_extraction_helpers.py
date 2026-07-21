@@ -209,3 +209,18 @@ class TestPortalSerializeAndConflictSuggest:
             )
         assert suggested
         assert suggested[0]["filename"] == "doc_3.pdf"
+
+
+class TestMoveHelpers:
+    def test_build_move_target_path(self):
+        from services.document_move import build_move_target_path
+
+        path, cat, name = build_move_target_path(
+            base_path="base",
+            source_path="base/Old/a.pdf",
+            target_category="Financeiros",
+            target_filename=None,
+        )
+        assert path == "base/Financeiros/a.pdf"
+        assert cat == "Financeiros"
+        assert name == "a.pdf"

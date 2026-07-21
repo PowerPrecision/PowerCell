@@ -25,3 +25,33 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - **Credentials in `backend/.env` are DEV-only** (owner clarification): production does not use this file — it injects secrets via the platform's secret manager. So the values present here are not production secrets; no need to treat them as a production leak or block on rotating them. Use `.env.example` as the template for required vars.
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
+
+### Route thinning (documents / processes)
+
+Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
+
+| Area | Route file | Services pattern | Notes |
+|---|---|---|---|
+| Processes | `routes/processes.py` (~664) | `services/process_*.py` | Mostly done |
+| Documents | `routes/documents.py` (~3080; was ~4623) | `services/document_*.py` | See map below |
+
+**`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
+
+| Service | Responsibility |
+|---|---|
+| `document_constants.py` | Error strings, HTTP response docs, `DOCUMENT_CATEGORY_MAP` |
+| `document_filenames.py` | `normalize_filename`, `generate_smart_filename`, log sanitize |
+| `document_process_resolve.py` | Flexible process/client ID resolve + S3 path ownership checks |
+| `document_expiring_dashboard.py` | Expiring-docs dashboard query/grouping |
+| `document_portal_request.py` | Portal request CRUD (staff → client) |
+| `document_auto_categorize.py` | Background IA categorize + OCR entities (**re-exported** from `routes.documents` for tests) |
+| `document_upload_conflict.py` | Pre-upload filename conflict check |
+| `document_direct_upload.py` | Pre-signed URL generate + confirm-upload |
+| `document_move.py` | Move/rename conflict check + move-to-category |
+| `document_ocr_data.py` | OCR status, data suggestions, resolve/confirm conflicts |
+
+**Gotchas**
+- After changing route modules without `--reload`, restart uvicorn (cloud agents often run without reload).
+- `auto_categorize_document_background` must remain importable as `from routes.documents import auto_categorize_document_background`.
+- Motor `insert_one` mutates dicts with ObjectId `_id` — strip before JSON responses (portal create already does).
+- Unit helpers: `backend/tests/unit/test_document_extraction_helpers.py`.
