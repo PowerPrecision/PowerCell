@@ -233,3 +233,80 @@ async def link_clients_after_process_create(
             f"[CREATE-PROCESS] Erro ao atualizar process_ids do 2º titular "
             f"{second_client_id}: {e}"
         )
+
+
+def assert_can_create_staff_process(role: str) -> None:
+    """Roles permitidos em POST /create-client."""
+    allowed = [
+        UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
+        UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR,
+    ]
+    if role not in allowed:
+        raise HTTPException(
+            status_code=403,
+            detail="Não tem permissão para criar clientes/processos.",
+        )
+
+
+def assert_client_id_required(client_id: Optional[str]) -> None:
+    """client_id obrigatório para criar processo staff."""
+    if not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "É obrigatório associar um cliente existente para criar um processo. "
+                "Selecione um cliente na listagem antes de criar o processo."
+            ),
+        )
+
+
+async def maybe_auto_assign_indexer_on_create(
+    process_id: str,
+    process_doc: dict,
+    *,
+    is_lead: bool,
+    initial_status: Optional[str],
+) -> None:
+    """Auto-atribui indexador (excepto leads). Mutação opcional de process_doc."""
+    try:
+        if is_lead:
+            logger.info(
+                f"[CREATE-PROCESS] is_lead=True — a saltar auto-atribuição de "
+                f"indexador para processo {process_id} (Lead)"
+            )
+            return
+        from services.process_assignment import assign_to_indexer
+        assign_success, assign_data, assign_msg = await assign_to_indexer(
+            process_id, update_status=False,
+        )
+        if assign_success and assign_data.get("assigned"):
+            logger.info(
+                f"[CREATE-PROCESS] Indexador auto-atribuído: "
+                f"{assign_data.get('indexacao_name')} para processo {process_id} "
+                f"(status mantém: {initial_status})"
+            )
+            process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
+            process_doc["indexacao_name"] = assign_data.get("indexacao_name")
+        else:
+            logger.warning(
+                f"[CREATE-PROCESS] Sem indexador disponível para processo "
+                f"{process_id}: {assign_msg} (status mantém: {initial_status})"
+            )
+    except Exception as e:
+        logger.warning(
+            f"[CREATE-PROCESS] Erro na auto-atribuição de indexador "
+            f"para processo {process_id}: {e}"
+        )
+
+
+def build_create_broadcast_names(user: dict) -> tuple[list, list]:
+    """Nomes consultor/mediador para broadcast PROCESS_CREATED."""
+    consultor_names = (
+        [user["name"]]
+        if user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR]
+        else []
+    )
+    mediador_names = (
+        [user["name"]] if user["role"] == UserRole.INTERMEDIARIO else []
+    )
+    return consultor_names, mediador_names

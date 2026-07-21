@@ -8,6 +8,15 @@ from services.process_indexing import (
 from services.process_create import (
     build_staff_process_doc,
     apply_creator_role_assignment,
+    assert_can_create_staff_process,
+    assert_client_id_required,
+    build_create_broadcast_names,
+)
+from services.process_ai_conflict import (
+    find_ai_suggestion,
+    sanitize_ai_suggested_value,
+    build_ai_accept_update_fields,
+    apply_ai_conflict_choice,
 )
 from services.process_update import (
     merge_nested_process_section,
@@ -136,6 +145,109 @@ class TestBuildStaffProcessDoc:
         })
         assert doc["assigned_consultor_id"] == "u1"
         assert doc["consultor_name"] == "João"
+
+
+class TestCreateClientGuards:
+    def test_role_blocks_indexacao(self):
+        from fastapi import HTTPException
+        try:
+            assert_can_create_staff_process(UserRole.INDEXACAO)
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 403
+
+    def test_role_allows_admin(self):
+        assert_can_create_staff_process(UserRole.ADMIN)
+
+    def test_client_id_required(self):
+        from fastapi import HTTPException
+        try:
+            assert_client_id_required(None)
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+        assert_client_id_required("c1")
+
+    def test_broadcast_names(self):
+        c, m = build_create_broadcast_names({
+            "name": "Ana", "role": UserRole.CONSULTOR,
+        })
+        assert c == ["Ana"] and m == []
+        c, m = build_create_broadcast_names({
+            "name": "Bruno", "role": UserRole.INTERMEDIARIO,
+        })
+        assert c == [] and m == ["Bruno"]
+
+
+class TestAiConflictHelpers:
+    def test_find_by_field_and_id(self):
+        from fastapi import HTTPException
+        suggestions = [
+            {"id": "s1", "field": "nif", "suggested": "1"},
+            {"id": "s2", "field": "nif", "suggested": "2"},
+            {"id": "s3", "field": "email", "suggested": "a@x.com"},
+        ]
+        s, i = find_ai_suggestion(suggestions, "nif", "s2")
+        assert s["suggested"] == "2" and i == 1
+        try:
+            find_ai_suggestion(suggestions, "telefone")
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 404
+
+    def test_sanitize_and_accept_fields(self):
+        assert sanitize_ai_suggested_value("nome", "  Ana  ") == "Ana"
+        assert build_ai_accept_update_fields(
+            "nif", "personal_data.nif", "123",
+        ) == {"personal_data.nif": "123"}
+        assert build_ai_accept_update_fields(
+            "salario_bruto", "salario_bruto", 1000,
+        ) == {"financial_data.salario_bruto": 1000}
+        assert build_ai_accept_update_fields(
+            "notes", "notes", "x",
+        ) == {"notes": "x"}
+
+    def test_apply_choice_ai_and_current(self):
+        suggestions = [
+            {
+                "id": "s1",
+                "field": "nome",
+                "field_path": "personal_data.nome",
+                "current": "Old",
+                "suggested": "  Nova  ",
+            },
+            {
+                "id": "s2",
+                "field": "email",
+                "suggested": "b@x.com",
+                "current": "a@x.com",
+            },
+        ]
+        update, sug, resolved = apply_ai_conflict_choice(
+            ai_suggestions=suggestions,
+            field="nome",
+            choice="ai",
+            suggestion_id="s1",
+            now="t0",
+        )
+        assert resolved == "Nova"
+        assert update["personal_data.nome"] == "Nova"
+        assert len(update["ai_suggestions"]) == 1
+        assert update["ai_suggestions"][0]["id"] == "s2"
+        # original list untouched
+        assert len(suggestions) == 2
+
+        update2, sug2, resolved2 = apply_ai_conflict_choice(
+            ai_suggestions=suggestions,
+            field="email",
+            choice="current",
+            suggestion_id=None,
+            now="t1",
+        )
+        assert resolved2 is None
+        assert "email" not in update2
+        assert len(update2["ai_suggestions"]) == 1
+        assert sug2["field"] == "email"
 
 
 class TestMergeAndPermissions:

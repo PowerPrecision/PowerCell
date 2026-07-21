@@ -73,11 +73,6 @@ from services.process_service import (
     PROCESS_KANBAN_PROJECTION,
     PROCESS_MY_CLIENTS_PROJECTION,
 )
-from services.encryption import (
-    encrypt_client_data,
-    generate_nif_hash,
-    generate_email_hash,
-)
 from services.process_assignment import (
     assign_both_to_process,
     assign_self_to_process,
@@ -91,8 +86,8 @@ from services.process_kanban import (
     is_valid_status
 )
 from utils.input_sanitization import (
-    sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
-    sanitize_string, sanitize_url, log_sanitization_rejection
+    sanitize_email, sanitize_name, sanitize_phone,
+    sanitize_string, sanitize_url,
 )
 from services.process_finance import (
     create_finance_snapshot as _create_finance_snapshot,
@@ -130,7 +125,12 @@ from services.process_create import (
     attach_second_client_on_create,
     create_default_portal_documents,
     link_clients_after_process_create,
+    assert_can_create_staff_process,
+    assert_client_id_required,
+    maybe_auto_assign_indexer_on_create,
+    build_create_broadcast_names,
 )
+from services.process_ai_conflict import apply_ai_conflict_choice
 from services.process_update import (
     prepare_encrypted_client_updates,
     apply_client_personal_updates_from_process_put,
@@ -610,26 +610,10 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     Returns:
         ProcessResponse: Processo criado
     """
-    allowed_roles = [UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]
-    
-    if user["role"] not in allowed_roles:
-        raise HTTPException(
-            status_code=403, 
-            detail="Não tem permissão para criar clientes/processos."
-        )
-    
-    # ====================================================================
-    # REGRA DE NEGÓCIO: client_id é OBRIGATÓRIO
-    # É proibido criar um processo sem associar a um cliente existente.
-    # ====================================================================
-    if not data.client_id:
-        raise HTTPException(
-            status_code=400,
-            detail="É obrigatório associar um cliente existente para criar um processo. "
-                   "Selecione um cliente na listagem antes de criar o processo."
-        )
+    assert_can_create_staff_process(user["role"])
+    assert_client_id_required(data.client_id)
 
-    is_lead = bool(getattr(data, 'is_lead', False))
+    is_lead = bool(getattr(data, "is_lead", False))
     initial_status, _default_status = await resolve_initial_workflow_status(is_lead=is_lead)
 
     process_id = str(uuid.uuid4())
@@ -642,49 +626,6 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     client_email = client_fields["client_email"]
     client_phone = client_fields["client_phone"]
     client_nif = client_fields["client_nif"]
-
-    # Dead path preserved: NIF/email create-on-fly never runs after required client_id
-    existing_client = None
-    if not client_id and (client_nif or client_email):
-        query = []
-        if client_nif:
-            nif_hash = generate_nif_hash(client_nif)
-            if nif_hash:
-                query.append({"dados_pessoais.nif_hash": nif_hash})
-            query.append({"dados_pessoais.nif": client_nif})
-        if client_email:
-            email_hash = generate_email_hash(client_email)
-            if email_hash:
-                query.append({"contacto.email_hash": email_hash})
-            query.append({"contacto.email": client_email.lower()})
-        existing_client = await db.clients.find_one({"$or": query})
-
-    if existing_client:
-        client_id = existing_client["id"]
-        logger.info(f"Cliente existente encontrado: {client_id} - {existing_client.get('nome')}")
-    elif not client_id:
-        from models.client import Client, ClientContact, ClientPersonalData  # noqa: F401
-        client_id = str(uuid.uuid4())
-        new_client = {
-            "id": client_id,
-            "nome": client_name,
-            "contacto": {
-                "email": client_email.lower() if client_email else None,
-                "telefone": client_phone
-            },
-            "dados_pessoais": {
-                "nif": client_nif,
-                "nome_completo": sanitize_name(client_name),
-            },
-            "process_ids": [],
-            "fonte": "staff_created",
-            "created_at": now,
-            "updated_at": now,
-            "created_by": user.get("email")
-        }
-        new_client = encrypt_client_data(new_client)
-        await db.clients.insert_one(new_client)
-        logger.info(f"Novo cliente criado: {client_id} - {client_name}")
 
     process_doc = build_staff_process_doc(
         process_id=process_id,
@@ -710,26 +651,12 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
     process_doc = encrypt_sensitive_data(process_doc)
     await db.processes.insert_one(process_doc)
 
-    try:
-        if is_lead:
-            logger.info(f"[CREATE-PROCESS] is_lead=True — a saltar auto-atribuição de indexador para processo {process_id} (Lead)")
-        else:
-            from services.process_assignment import assign_to_indexer
-            assign_success, assign_data, assign_msg = await assign_to_indexer(process_id, update_status=False)
-            if assign_success and assign_data.get("assigned"):
-                logger.info(
-                    f"[CREATE-PROCESS] Indexador auto-atribuído: {assign_data.get('indexacao_name')} "
-                    f"para processo {process_id} (status mantém: {initial_status})"
-                )
-                process_doc["assigned_indexacao_id"] = assign_data.get("assigned_indexacao_id")
-                process_doc["indexacao_name"] = assign_data.get("indexacao_name")
-            else:
-                logger.warning(
-                    f"[CREATE-PROCESS] Sem indexador disponível para processo {process_id}: {assign_msg} "
-                    f"(status mantém: {initial_status})"
-                )
-    except Exception as e:
-        logger.warning(f"[CREATE-PROCESS] Erro na auto-atribuição de indexador para processo {process_id}: {e}")
+    await maybe_auto_assign_indexer_on_create(
+        process_id,
+        process_doc,
+        is_lead=is_lead,
+        initial_status=initial_status,
+    )
 
     await create_default_portal_documents(process_id, user)
     await invalidate_stats_cache(user_id=user["id"])
@@ -751,6 +678,7 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
             client_name=client_name,
         ))
 
+    consultor_names, mediador_names = build_create_broadcast_names(user)
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_CREATED,
         process_id=process_id,
@@ -760,9 +688,9 @@ async def create_client_process(data: ProcessCreate, user: dict = Depends(get_cu
         process_type=data.process_type,
         assigned_consultor_ids=process_doc.get("assigned_consultor_ids", []),
         assigned_mediador_ids=process_doc.get("assigned_mediador_ids", []),
-        consultor_names=[user["name"]] if user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR] else [],
-        mediador_names=[user["name"]] if user["role"] == UserRole.INTERMEDIARIO else [],
-        updated_at=now
+        consultor_names=consultor_names,
+        mediador_names=mediador_names,
+        updated_at=now,
     )
 
     response_doc = decrypt_sensitive_data(process_doc)
@@ -2301,105 +2229,62 @@ async def resolve_data_conflict(
     field = data.get("field")
     choice = data.get("choice")
     suggestion_id = data.get("suggestion_id")
-    
+
     if not field or choice not in ["ai", "current"]:
-        raise HTTPException(status_code=400, detail="field e choice ('ai' ou 'current') são obrigatórios")
-    
+        raise HTTPException(
+            status_code=400,
+            detail="field e choice ('ai' ou 'current') são obrigatórios",
+        )
+
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    # SECURITY: Verificar permissão de edição antes de processar
+
     can_edit, reason = can_edit_process_data(user, process)
     if not can_edit:
-        logger.warning(f"IDOR attempt: User {user.get('id')} ({user.get('role')}) tried to resolve conflict on process {process_id}: {reason}")
-        raise HTTPException(status_code=403, detail=f"Não tem permissões para alterar este processo. {reason}")
-    
-    ai_suggestions = process.get("ai_suggestions", [])
-    
-    # Encontrar a sugestão para este campo
-    suggestion = None
-    suggestion_index = -1
-    
-    for i, s in enumerate(ai_suggestions):
-        if s.get("field") == field:
-            if suggestion_id and s.get("id") != suggestion_id:
-                continue
-            suggestion = s
-            suggestion_index = i
-            break
-    
-    if not suggestion:
-        raise HTTPException(status_code=404, detail=f"Nenhuma sugestão encontrada para o campo '{field}'")
-    
+        logger.warning(
+            f"IDOR attempt: User {user.get('id')} ({user.get('role')}) "
+            f"tried to resolve conflict on process {process_id}: {reason}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Não tem permissões para alterar este processo. {reason}",
+        )
+
     now = datetime.now(timezone.utc).isoformat()
-    update_data = {"updated_at": now}
-    
+    update_data, suggestion, resolved_value = apply_ai_conflict_choice(
+        ai_suggestions=process.get("ai_suggestions", []),
+        field=field,
+        choice=choice,
+        suggestion_id=suggestion_id,
+        now=now,
+    )
+
     if choice == "ai":
-        # Aceitar valor sugerido pela IA
-        suggested_value = suggestion.get("suggested")
-        field_path = suggestion.get("field_path", field)
-        
-        # Sanitizar o valor sugerido antes de guardar
-        if suggested_value is not None and isinstance(suggested_value, str):
-            if field in ["nif", "documento_id"]:
-                sanitized_val = sanitize_nif(suggested_value)
-                if sanitized_val is None and suggested_value:
-                    log_sanitization_rejection(field, str(suggested_value), "NIF inválido")
-                suggested_value = sanitized_val
-            elif field in ["email", "client_email"]:
-                suggested_value = sanitize_email(suggested_value)
-            elif field in ["telefone", "phone", "client_phone"]:
-                suggested_value = sanitize_phone(suggested_value)
-            elif field in ["nome_completo", "nome", "name", "nome_pai", "nome_mae"]:
-                suggested_value = sanitize_name(suggested_value)
-            elif field in ["morada_fiscal"]:
-                suggested_value = sanitize_string(suggested_value, max_length=500)
-            else:
-                suggested_value = sanitize_string(suggested_value, max_length=500)
-        
-        # Determinar onde actualizar (personal_data, financial_data, etc.)
-        if "." in field_path:
-            section, actual_field = field_path.split(".", 1)
-            update_data[f"{section}.{actual_field}"] = suggested_value
-        else:
-            # Tentar determinar a secção automaticamente
-            if field in ["nif", "documento_id", "naturalidade", "nacionalidade", "morada_fiscal", 
-                        "birth_date", "data_nascimento", "estado_civil", "data_validade_cc", 
-                        "sexo", "altura", "nome_pai", "nome_mae"]:
-                update_data[f"personal_data.{field}"] = suggested_value
-            elif field in ["salario_bruto", "salario_liquido", "rendimento_anual", 
-                          "acesso_portal_financas", "capital_proprio"]:
-                update_data[f"financial_data.{field}"] = suggested_value
-            else:
-                update_data[field] = suggested_value
-        
-        # Registar no histórico
         await log_history(
             process_id, user,
             f"Aceitou sugestão IA para '{field}'",
-            field, suggestion.get("current"), suggested_value
+            field, suggestion.get("current"), resolved_value,
         )
     else:
-        # Manter valor actual - apenas registar no histórico
         await log_history(
             process_id, user,
             f"Manteve valor actual para '{field}'",
-            field, suggestion.get("suggested"), suggestion.get("current")
+            field, suggestion.get("suggested"), suggestion.get("current"),
         )
-    
-    # Remover a sugestão resolvida da lista
-    ai_suggestions.pop(suggestion_index)
-    update_data["ai_suggestions"] = ai_suggestions
-    
+
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
-    
+
+    remaining = update_data.get("ai_suggestions", [])
     return {
         "success": True,
-        "message": f"Conflito resolvido: {'valor IA aceite' if choice == 'ai' else 'valor actual mantido'}",
+        "message": (
+            f"Conflito resolvido: "
+            f"{'valor IA aceite' if choice == 'ai' else 'valor actual mantido'}"
+        ),
         "field": field,
-        "remaining_conflicts": len(ai_suggestions)
+        "remaining_conflicts": len(remaining),
     }
 
 
