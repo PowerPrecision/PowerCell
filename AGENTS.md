@@ -34,9 +34,9 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 |---|---|---|---|
 | Processes | `routes/processes.py` (~664) | `services/process_*.py` | Mostly done |
 | Documents | `routes/documents.py` (~1072; was ~4623) | `services/document_*.py` | Thin stubs only — see map |
-| Emails | `routes/emails.py` (~2560; thinning in progress) | `services/email_*.py` (see map) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
+| Emails | `routes/emails.py` (~654; **done**) | `services/email_*.py` (see map) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
 
-**`email_*` thinning so far:**
+**`email_*` thinning (complete):**
 
 | Service | Responsibility |
 |---|---|
@@ -45,13 +45,13 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | `email_labels_folders.py` | Labels/folders CRUD + `validate_hex_color` + move-to-folder |
 | `email_documentation.py` | document-recipients, preview-template, preview/send-documentation |
 | `email_mailbox_ops.py` | Attachments upload/download/preview + mark/unmark + per-email labels |
-
-**Still in `routes/emails.py` (next batches):**
-- Templates + drafts + notifications (~templates/drafts)
-- Webmail list/stats/sync + accounts/test-connection (largest)
-- Process emails/stats/sync, search, send, CRUD, monitored
+| `email_templates_drafts.py` | Reply templates, unread notifications, auto-drafts |
+| `email_webmail.py` | Webmail list/stats/sync, accounts, test-connection, jobs |
+| `email_process_crud.py` | Search/timeline, process emails/sync, send, CRUD, monitored (`_sync_status` lives here) |
 
 Unit helpers: `backend/tests/unit/test_email_extraction_helpers.py`.
+
+**Next fat routes (not started):** `portal.py` (~4050), `admin.py` (~4037).
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 

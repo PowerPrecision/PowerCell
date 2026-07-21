@@ -108,3 +108,43 @@ def test_email_mailbox_ops_module_exports():
         "run_preview_attachment",
     ):
         assert callable(getattr(mod, name))
+
+
+def test_email_remaining_modules_export_run_entrypoints():
+    from services import email_templates_drafts as td
+    from services import email_webmail as wm
+    from services import email_process_crud as pc
+
+    for name in (
+        "run_get_email_templates",
+        "run_list_auto_drafts",
+        "run_get_unread_notifications",
+    ):
+        assert callable(getattr(td, name))
+    for name in (
+        "run_webmail_list",
+        "run_webmail_stats",
+        "run_webmail_sync",
+        "run_get_configured_accounts",
+    ):
+        assert callable(getattr(wm, name))
+    for name in (
+        "run_send_email",
+        "run_get_process_emails",
+        "run_advanced_email_search",
+        "run_create_email_record",
+    ):
+        assert callable(getattr(pc, name))
+    assert isinstance(pc._sync_status, dict)
+
+
+def test_emails_router_is_thin_stubs_only():
+    """Route module should stay small; logic lives in services."""
+    from pathlib import Path
+
+    routes_path = Path(__file__).resolve().parents[2] / "routes" / "emails.py"
+    text = routes_path.read_text()
+    assert text.count("return await run_") >= 40
+    # No fat IMAP/webmail bodies left in the route file
+    assert "ISOLAMENTO DE DADOS (Segurança)" not in text
+    assert len(text.splitlines()) < 800
