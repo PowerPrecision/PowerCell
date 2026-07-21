@@ -24,7 +24,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { getMyClients, getWorkflowStatuses } from "../services/api";
+import { getMyClients, getWorkflowStatuses, getExportPermission } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText,
   Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download,
@@ -38,7 +38,6 @@ import * as XLSX from 'xlsx';
 import { pt } from "date-fns/locale";
 import { safeFormat } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
-import { getExportPermission } from "../services/api";
 import { hasAnyRole } from "../utils/roleUtils";
 
 /**

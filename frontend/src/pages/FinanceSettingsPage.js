@@ -14,7 +14,8 @@
  * @context {AuthContext} — user.company como company_id (multi-tenant)
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Percent,
   DollarSign,
@@ -104,56 +105,69 @@ const FinanceSettingsPage = () => {
   });
 
   // --- Estado: UI ---
-  const [loading, setLoading] = useState(true);
   const [savingHonorarios, setSavingHonorarios] = useState(false);
   const [savingDashboard, setSavingDashboard] = useState(false);
   const [successHonorarios, setSuccessHonorarios] = useState(false);
   const [successDashboard, setSuccessDashboard] = useState(false);
   const [error, setError] = useState(null);
+  const hydratedRef = useRef(false);
 
   // ====================================================================
   // LOAD CONFIG
   // ====================================================================
-  const fetchConfig = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  const {
+    data: financeBundle,
+    isLoading: loading,
+    isError: loadError,
+    error: loadErrorObj,
+  } = useQuery({
+    queryKey: ["finance-settings", companyId],
+    enabled: Boolean(companyId),
+    queryFn: async () => {
       const [configRes, financeConfigsRes] = await Promise.all([
         getFinanceConfig(),
         getFinanceConfigs({ company_id: companyId }),
       ]);
-
-      // Legacy dashboard config
-      if (configRes.data?.config) {
-        setDashboardConfig({
-          imobiliaria: { ...configRes.data.config.imobiliaria },
-          credito: { ...configRes.data.config.credito },
-        });
-      }
-
-      // Fase 2 FinanceConfig
-      const cfgs = financeConfigsRes.data?.configs || [];
-      if (cfgs.length > 0) {
-        const cfg = cfgs[0];
-        setFeeType(cfg.fee_type || "percentage");
-        setDefaultValue(String(cfg.default_value ?? ""));
-        setTaxRate(String(cfg.tax_rate ?? "23"));
-        setExistingConfigId(cfg.id);
-        setDistributionModel(cfg.distribution_model || "individual_split");
-      }
-    } catch (err) {
-      console.error("Erro ao carregar configuração:", err);
-      const rawDetail = err.response?.data?.detail;
-      const msg = typeof rawDetail === 'string' ? rawDetail : (Array.isArray(rawDetail) ? rawDetail.map(e => e.msg || String(e)).join(' • ') : "Erro ao carregar configuração financeira.");
-      setError(msg);
-    } finally {
-      setLoading(false);
-    }
-  }, [companyId]);
+      return {
+        dashboard: configRes.data?.config || null,
+        configs: financeConfigsRes.data?.configs || [],
+      };
+    },
+  });
 
   useEffect(() => {
-    fetchConfig();
-  }, [fetchConfig]);
+    if (!financeBundle || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setError(null);
+
+    if (financeBundle.dashboard) {
+      setDashboardConfig({
+        imobiliaria: { ...financeBundle.dashboard.imobiliaria },
+        credito: { ...financeBundle.dashboard.credito },
+      });
+    }
+
+    const cfgs = financeBundle.configs || [];
+    if (cfgs.length > 0) {
+      const cfg = cfgs[0];
+      setFeeType(cfg.fee_type || "percentage");
+      setDefaultValue(String(cfg.default_value ?? ""));
+      setTaxRate(String(cfg.tax_rate ?? "23"));
+      setExistingConfigId(cfg.id);
+      setDistributionModel(cfg.distribution_model || "individual_split");
+    }
+  }, [financeBundle]);
+
+  useEffect(() => {
+    if (!loadError) return;
+    const rawDetail = loadErrorObj?.response?.data?.detail;
+    const msg = typeof rawDetail === "string"
+      ? rawDetail
+      : (Array.isArray(rawDetail)
+        ? rawDetail.map((e) => e.msg || String(e)).join(" • ")
+        : "Erro ao carregar configuração financeira.");
+    setError(msg);
+  }, [loadError, loadErrorObj]);
 
   // ====================================================================
   // SAVE: Honorários (Fase 2 — FinanceConfig)

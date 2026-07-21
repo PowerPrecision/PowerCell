@@ -15,7 +15,16 @@
 import { useMutation, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
 import { toast } from 'sonner';
-import { moveProcessKanban, updateProcess, assignProcess, createActivity } from '../../services/api';
+import {
+  moveProcessKanban,
+  updateProcess,
+  assignProcess,
+  createActivity,
+  deleteActivity,
+  createDeadline,
+  updateDeadline,
+  deleteDeadline,
+} from '../../services/api';
 
 /**
  * Hook para mover processo no Kanban (Drag & Drop)
@@ -230,6 +239,93 @@ export function useAddActivityMutation(processId, options = {}) {
 }
 
 /**
+ * Hook para eliminar atividade/comentário
+ */
+export function useDeleteActivityMutation(processId, options = {}) {
+  const queryClient = useQueryClient();
+  const { onSuccess, onError } = options;
+
+  return useMutation({
+    mutationFn: async (activityId) => {
+      const response = await deleteActivity(activityId);
+      return response.data;
+    },
+    onSuccess: (data, variables, context) => {
+      toast.success('Comentário eliminado');
+      queryClient.invalidateQueries({ queryKey: queryKeys.history.byProcess(processId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.activities.byProcess(processId) });
+      onSuccess?.(data, variables, context);
+    },
+    onError: (error, variables, context) => {
+      toast.error('Erro ao eliminar comentário');
+      onError?.(error, variables, context);
+    },
+  });
+}
+
+/**
+ * Hook para criar/actualizar/eliminar deadlines do processo
+ */
+export function useProcessDeadlineMutations(processId, options = {}) {
+  const queryClient = useQueryClient();
+  const { onSuccess, onError } = options;
+
+  const invalidate = () => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.deadlines.byProcess(processId) });
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.detail(processId) });
+  };
+
+  const create = useMutation({
+    mutationFn: async (data) => {
+      const response = await createDeadline({ ...data, process_id: processId });
+      return response.data;
+    },
+    onSuccess: (data, variables, context) => {
+      toast.success('Prazo criado com sucesso!');
+      invalidate();
+      onSuccess?.(data, variables, context);
+    },
+    onError: (error, variables, context) => {
+      toast.error('Erro ao criar prazo');
+      onError?.(error, variables, context);
+    },
+  });
+
+  const update = useMutation({
+    mutationFn: async ({ deadlineId, data }) => {
+      const response = await updateDeadline(deadlineId, data);
+      return response.data;
+    },
+    onSuccess: (data, variables, context) => {
+      invalidate();
+      onSuccess?.(data, variables, context);
+    },
+    onError: (error, variables, context) => {
+      toast.error('Erro ao atualizar prazo');
+      onError?.(error, variables, context);
+    },
+  });
+
+  const remove = useMutation({
+    mutationFn: async (deadlineId) => {
+      const response = await deleteDeadline(deadlineId);
+      return response.data;
+    },
+    onSuccess: (data, variables, context) => {
+      toast.success('Prazo eliminado');
+      invalidate();
+      onSuccess?.(data, variables, context);
+    },
+    onError: (error, variables, context) => {
+      toast.error('Erro ao eliminar prazo');
+      onError?.(error, variables, context);
+    },
+  });
+
+  return { create, update, remove };
+}
+
+/**
  * Hook combinado com todas as mutations de processo
  * 
  * @param {string|number} processId - ID do processo
@@ -241,19 +337,27 @@ export function useProcessMutations(processId, options = {}) {
   const updateProcess = useUpdateProcessMutation(processId);
   const assignProcess = useAssignProcessMutation(processId);
   const addActivity = useAddActivityMutation(processId);
+  const deleteActivityMut = useDeleteActivityMutation(processId);
+  const deadlines = useProcessDeadlineMutations(processId);
 
   return {
     moveProcess,
     updateProcess,
     assignProcess,
     addActivity,
+    deleteActivity: deleteActivityMut,
+    deadlines,
     
     // Loading state combinado
     isAnyPending: 
       moveProcess.isPending ||
       updateProcess.isPending ||
       assignProcess.isPending ||
-      addActivity.isPending,
+      addActivity.isPending ||
+      deleteActivityMut.isPending ||
+      deadlines.create.isPending ||
+      deadlines.update.isPending ||
+      deadlines.remove.isPending,
   };
 }
 

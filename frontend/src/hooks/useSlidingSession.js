@@ -68,11 +68,11 @@ export default function useSlidingSession({
   const logout = useCallback((showMessage = false) => {
     // Limpar localStorage
     PORTAL_STORAGE_KEYS.forEach(key => {
-      try { localStorage.removeItem(key); } catch {}
+      try { localStorage.removeItem(key); } catch { /* private mode / quota */ }
     });
     // Limpar sessionStorage
     PORTAL_SESSION_KEYS.forEach(key => {
-      try { sessionStorage.removeItem(key); } catch {}
+      try { sessionStorage.removeItem(key); } catch { /* private mode / quota */ }
     });
 
     if (showMessage) {
@@ -97,7 +97,7 @@ export default function useSlidingSession({
       lastUpdateRef.current = now;
       try {
         localStorage.setItem('portalLastActivity', String(now));
-      } catch {}
+      } catch { /* private mode / quota */ }
     };
 
     // Eventos que indicam actividade do utilizador
@@ -147,10 +147,10 @@ export default function useSlidingSession({
     const handleUnload = () => {
       // Limpar tudo imediatamente — obrigar novo login na próxima visita
       PORTAL_STORAGE_KEYS.forEach(key => {
-        try { localStorage.removeItem(key); } catch {}
+        try { localStorage.removeItem(key); } catch { /* private mode / quota */ }
       });
       PORTAL_SESSION_KEYS.forEach(key => {
-        try { sessionStorage.removeItem(key); } catch {}
+        try { sessionStorage.removeItem(key); } catch { /* private mode / quota */ }
       });
     };
 

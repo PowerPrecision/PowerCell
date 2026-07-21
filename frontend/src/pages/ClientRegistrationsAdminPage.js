@@ -2,7 +2,8 @@
  * ClientRegistrationsAdminPage - Página de Administração de Registos de Clientes
  * Permite ao admin visualizar e editar os dados dos formulários de registo público
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -562,14 +563,10 @@ const ViewModal = ({ open, onClose, registration }) => {
 
 const ClientRegistrationsAdminPage = () => {
   const { token, user } = useAuth();
-  const [loading, setLoading] = useState(true);
-  const [registrations, setRegistrations] = useState([]);
-  const [stats, setStats] = useState(null);
+  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
-  const [total, setTotal] = useState(0);
 
   // Modals
   const [editModal, setEditModal] = useState({ open: false, registration: null });
@@ -577,54 +574,69 @@ const ClientRegistrationsAdminPage = () => {
   const [deleteModal, setDeleteModal] = useState({ open: false, registration: null });
   const [actionLoading, setActionLoading] = useState(false);
 
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    try {
+  const listParams = { search, statusFilter, page };
+
+  const {
+    data: listData,
+    isLoading: loading,
+    isError: listError,
+    refetch: fetchData,
+  } = useQuery({
+    queryKey: ["client-registrations", listParams],
+    enabled: Boolean(token),
+    queryFn: async () => {
       const params = new URLSearchParams();
       if (search) params.append("search", search);
       if (statusFilter) params.append("status", statusFilter);
-      params.append("page", page);
-      params.append("limit", 15);
+      params.append("page", String(page));
+      params.append("limit", "15");
 
       const response = await fetch(`${API_URL}/api/admin/client-registrations?${params}`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setRegistrations(data.registrations || []);
-        setTotal(data.total || 0);
-        setTotalPages(data.pages || 1);
-      } else {
-        toast.error("Erro ao carregar dados");
+      if (!response.ok) {
+        throw new Error("Erro ao carregar dados");
       }
-    } catch (error) {
-      console.error("Erro:", error);
-      toast.error("Erro ao carregar dados");
-    } finally {
-      setLoading(false);
-    }
-  }, [token, search, statusFilter, page]);
+      const data = await response.json();
+      return {
+        registrations: data.registrations || [],
+        total: data.total || 0,
+        totalPages: data.pages || 1,
+      };
+    },
+  });
 
-  const fetchStats = useCallback(async () => {
-    try {
+  const {
+    data: stats = null,
+    refetch: fetchStats,
+  } = useQuery({
+    queryKey: ["client-registrations-stats"],
+    enabled: Boolean(token),
+    queryFn: async () => {
       const response = await fetch(`${API_URL}/api/admin/client-registrations/stats/summary`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-
-      if (response.ok) {
-        const data = await response.json();
-        setStats(data);
+      if (!response.ok) {
+        throw new Error("Erro ao carregar estatísticas");
       }
-    } catch (error) {
-      console.error("Erro ao carregar estatísticas:", error);
-    }
-  }, [token]);
+      return response.json();
+    },
+  });
+
+  const registrations = listData?.registrations || [];
+  const total = listData?.total || 0;
+  const totalPages = listData?.totalPages || 1;
 
   useEffect(() => {
-    fetchData();
-    fetchStats();
-  }, [fetchData, fetchStats]);
+    if (listError) {
+      toast.error("Erro ao carregar dados");
+    }
+  }, [listError]);
+
+  const invalidateRegistrations = () => {
+    queryClient.invalidateQueries({ queryKey: ["client-registrations"] });
+    queryClient.invalidateQueries({ queryKey: ["client-registrations-stats"] });
+  };
 
   const handleEdit = (registration) => setEditModal({ open: true, registration });
   const handleView = (registration) => setViewModal({ open: true, registration });
@@ -639,7 +651,7 @@ const ClientRegistrationsAdminPage = () => {
 
       if (response.ok) {
         toast.success("Registo atualizado com sucesso");
-        fetchData();
+        invalidateRegistrations();
       } else {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao atualizar"));
@@ -664,8 +676,7 @@ const ClientRegistrationsAdminPage = () => {
       if (response.ok) {
         toast.success("Registo eliminado com sucesso");
         setDeleteModal({ open: false, registration: null });
-        fetchData();
-        fetchStats();
+        invalidateRegistrations();
       } else {
         toast.error("Erro ao eliminar");
       }

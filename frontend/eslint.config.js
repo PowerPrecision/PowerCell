@@ -17,6 +17,12 @@ export default [
       'coverage/**',
       'public/**',
       'craco.config.js',
+      // Tooling / Playwright (CommonJS plugins + Playwright fixtures named `use`)
+      'plugins/**',
+      'e2e/**',
+      'e2e-report/**',
+      'playwright-report/**',
+      'test-results/**',
     ],
   },
 
