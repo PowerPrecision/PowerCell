@@ -62,7 +62,7 @@ function markdownToHtml(md) {
     // Italic *text* → <em> (avoid matching **)
     .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
     // Bullet list items: - or * at line start → <li>
-    .replace(/^[\-\*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
+    .replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     // Line breaks: double newline → paragraph break
     .replace(/\n\n/g, '</p><p class="mb-2">')
     // Single newline → <br>

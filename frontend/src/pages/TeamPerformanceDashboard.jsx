@@ -29,7 +29,6 @@ import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
   Legend, Cell,
 } from "recharts";
-import { toast } from "sonner";
 import { format, subDays, startOfWeek, startOfMonth, endOfWeek, endOfMonth } from "date-fns";
 import { pt } from "date-fns/locale";
 

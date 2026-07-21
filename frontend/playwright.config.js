@@ -36,8 +36,7 @@ export default defineConfig({
   
   /* Configuração global */
   use: {
-    /* URL base da aplicação */
-    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'https://auto-doc-fetch.preview.emergentagent.com',
+    baseURL: process.env.PLAYWRIGHT_BASE_URL || 'http://localhost:3000',
     
     /* Recolher trace em caso de falha */
     trace: 'on-first-retry',
@@ -57,10 +56,13 @@ export default defineConfig({
     },
   ],
 
-  /* Web server para desenvolvimento local */
-  // webServer: {
-  //   command: 'yarn dev',
-  //   url: 'http://localhost:3000',
-  //   reuseExistingServer: !process.env.CI,
-  // },
+  /* Em CI o workflow sobe backend+frontend; localmente reutiliza yarn dev se já estiver a correr */
+  webServer: process.env.PLAYWRIGHT_SKIP_WEBSERVER
+    ? undefined
+    : {
+        command: 'yarn dev',
+        url: 'http://localhost:3000',
+        reuseExistingServer: !process.env.CI,
+        timeout: 120 * 1000,
+      },
 });

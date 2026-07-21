@@ -631,7 +631,7 @@ const DashboardLayout = ({ children, title }) => {
                       <group.icon className="h-5 w-5" />
                       {group.label}
                     </div>
-                    {!!openSections[group.id] ? (
+                    {openSections[group.id] ? (
                       <ChevronDown className="h-4 w-4" />
                     ) : (
                       <ChevronRight className="h-4 w-4" />
