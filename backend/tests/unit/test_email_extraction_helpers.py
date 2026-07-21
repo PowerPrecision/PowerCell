@@ -91,3 +91,20 @@ def test_email_documentation_module_exports():
         "run_send_documentation_email",
     ):
         assert callable(getattr(mod, name))
+
+
+def test_email_mailbox_ops_module_exports():
+    from services import email_mailbox_ops as mod
+
+    for name in (
+        "run_upload_attachments",
+        "run_download_email_attachment",
+        "run_mark_email",
+        "run_unmark_email",
+        "run_add_email_label",
+        "run_remove_email_label",
+        "run_get_email_attachments",
+        "run_download_attachment",
+        "run_preview_attachment",
+    ):
+        assert callable(getattr(mod, name))
