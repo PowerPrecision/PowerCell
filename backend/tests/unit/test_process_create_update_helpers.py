@@ -431,6 +431,89 @@ class TestKanbanEnrichment:
         assert cols[0]["count"] == 1
         assert cols[0]["processes"][0]["consultor_name"] == "Ana"
 
+    def test_apply_client_contacts_setdefault(self):
+        from services.process_kanban_enrichment import (
+            apply_client_contacts_to_processes,
+            client_contact_summary,
+            build_active_inactive_count_queries,
+            build_kanban_board_payload,
+            safe_build_kanban_columns,
+        )
+        assert client_contact_summary({
+            "nome": "Ana",
+            "contacto": {"email": "a@x.com", "telefone": "91"},
+            "dados_pessoais": {"nif": "1"},
+        })["email"] == "a@x.com"
+
+        procs = [
+            {"client_id": "c1", "client_name": "Keep"},
+            {"client_id": "c1"},
+            {"client_id": "missing"},
+        ]
+        apply_client_contacts_to_processes(procs, {
+            "c1": {"nome": "Nova", "email": "n@x.com", "telefone": "9", "nif": "2"},
+        })
+        assert procs[0]["client_name"] == "Keep"
+        assert procs[1]["client_name"] == "Nova"
+        assert procs[1]["client_email"] == "n@x.com"
+        assert "client_name" not in procs[2]
+
+        active, inactive = build_active_inactive_count_queries({"is_deleted": {"$ne": True}})
+        assert active["status"]["$nin"] == ["concluidos", "desistencias"]
+        assert inactive["status"]["$in"] == ["concluidos", "desistencias"]
+
+        payload = build_kanban_board_payload(
+            columns=[],
+            active_count=3,
+            inactive_count=1,
+            role="admin",
+            user_id="u1",
+            view_mode="all",
+            completed_days=30,
+        )
+        assert payload["total_processes"] == 3
+        assert payload["columns"] == []
+
+        # failsafe: bad status entry that would break enrich still yields list
+        cols = safe_build_kanban_columns(
+            [{"name": "ok", "label": "OK", "color": "#000", "order": 1}],
+            {"ok": [{"id": "p1", "status": "ok"}]},
+            {},
+            "u1",
+        )
+        assert isinstance(cols, list) and cols[0]["count"] == 1
+
+
+class TestKanbanDiagnoseFinalize:
+    def test_can_load_when_checks_ok(self):
+        from services.process_kanban_diagnose import finalize_kanban_diagnose_report
+        report = {
+            "checks": {
+                "workflow_statuses": {"count": 2},
+                "processes": {"total": 1},
+                "kanban_query": {"works": True},
+            },
+            "can_load": False,
+            "blocking_issue": None,
+        }
+        out = finalize_kanban_diagnose_report(report)
+        assert out["can_load"] is True
+
+    def test_blocking_when_empty_statuses(self):
+        from services.process_kanban_diagnose import finalize_kanban_diagnose_report
+        report = {
+            "checks": {
+                "workflow_statuses": {"count": 0},
+                "processes": {"total": 1},
+                "kanban_query": {"works": True},
+            },
+            "can_load": False,
+            "blocking_issue": None,
+        }
+        out = finalize_kanban_diagnose_report(report)
+        assert out["can_load"] is False
+        assert out["blocking_issue"]
+
 
 class TestListEnrichmentSort:
     def test_default_sort_priority_then_status(self):

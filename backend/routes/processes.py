@@ -146,8 +146,12 @@ from services.process_update import (
 from services.process_kanban_enrichment import (
     group_processes_by_status,
     sort_all_kanban_columns,
-    build_kanban_columns,
+    fill_missing_process_client_contacts,
+    count_kanban_active_inactive,
+    safe_build_kanban_columns,
+    build_kanban_board_payload,
 )
+from services.process_kanban_diagnose import run_kanban_diagnose
 from services.process_kanban_move import (
     resolve_workflow_purpose_flags,
     build_kanban_move_update,
@@ -925,111 +929,7 @@ async def diagnose_kanban(
 
     Retorna um relatório estruturado para diagnóstico.
     """
-    import traceback
-    report = {"checks": {}, "can_load": False, "blocking_issue": None}
-
-    # ── 1. workflow_statuses ──
-    try:
-        statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-        report["checks"]["workflow_statuses"] = {
-            "count": len(statuses),
-            "items": [],
-        }
-        required_fields = ["name", "id", "label", "color", "order"]
-        for s in statuses:
-            missing = [f for f in required_fields if f not in s or s.get(f) is None]
-            report["checks"]["workflow_statuses"]["items"].append({
-                "name": s.get("name"),
-                "id": s.get("id"),
-                "has_all_fields": len(missing) == 0,
-                "missing_fields": missing,
-            })
-        if not statuses:
-            report["blocking_issue"] = "workflow_statuses está vazia — o kanban não tem colunas."
-    except Exception as e:
-        report["checks"]["workflow_statuses"] = {"error": str(e), "traceback": traceback.format_exc()}
-        report["blocking_issue"] = f"Erro ao ler workflow_statuses: {e}"
-
-    # ── 2. processes (contagem básica) ──
-    try:
-        total_processes = await db.processes.count_documents({"is_deleted": {"$ne": True}})
-        active_processes = await db.processes.count_documents({
-            "is_deleted": {"$ne": True},
-            "status": {"$nin": ["concluidos", "desistencias", "eliminados"]},
-        })
-        report["checks"]["processes"] = {
-            "total": total_processes,
-            "active": active_processes,
-        }
-    except Exception as e:
-        report["checks"]["processes"] = {"error": str(e)}
-        if not report["blocking_issue"]:
-            report["blocking_issue"] = f"Erro ao ler processes: {e}"
-
-    # ── 3. users ──
-    try:
-        total_users = await db.users.count_documents({})
-        report["checks"]["users"] = {"total": total_users}
-    except Exception as e:
-        report["checks"]["users"] = {"error": str(e)}
-
-    # ── 4. portal_messages (testar agregação) ──
-    try:
-        unread_pipeline = [
-            {"$match": {"sender_type": "client", "read_by_staff": False}},
-            {"$group": {"_id": "$process_id", "unread_count": {"$sum": 1}}}
-        ]
-        unread_results = await db.portal_messages.aggregate(unread_pipeline).to_list(10)
-        report["checks"]["portal_messages"] = {
-            "aggregation_works": True,
-            "sample_count": len(unread_results),
-        }
-    except Exception as e:
-        report["checks"]["portal_messages"] = {"error": str(e)}
-
-    # ── 5. documents (testar agregação) ──
-    try:
-        new_docs_pipeline = [
-            {"$match": {"status": "uploaded"}},
-            {"$group": {"_id": "$process_id", "new_count": {"$sum": 1}}}
-        ]
-        new_docs_results = await db.documents.aggregate(new_docs_pipeline).to_list(10)
-        report["checks"]["documents"] = {
-            "aggregation_works": True,
-            "sample_count": len(new_docs_results),
-        }
-    except Exception as e:
-        report["checks"]["documents"] = {"error": str(e)}
-
-    # ── 6. Tentar executar a query do kanban isoladamente ──
-    try:
-        query = {"is_deleted": {"$ne": True}}
-        kanban_projection = {
-            "_id": 0, "id": 1, "status": 1, "client_name": 1,
-            "assigned_consultor_id": 1, "updated_at": 1,
-        }
-        sample = await db.processes.find(query, kanban_projection).to_list(5)
-        report["checks"]["kanban_query"] = {
-            "works": True,
-            "sample_count": len(sample),
-            "sample_statuses": [p.get("status") for p in sample],
-        }
-    except Exception as e:
-        report["checks"]["kanban_query"] = {"error": str(e), "traceback": traceback.format_exc()}
-        if not report["blocking_issue"]:
-            report["blocking_issue"] = f"Erro na query do kanban: {e}"
-
-    # ── Determinar can_load ──
-    ws_ok = report["checks"].get("workflow_statuses", {}).get("count", 0) > 0
-    proc_ok = "error" not in report["checks"].get("processes", {})
-    query_ok = report["checks"].get("kanban_query", {}).get("works", False)
-
-    if ws_ok and proc_ok and query_ok and not report["blocking_issue"]:
-        report["can_load"] = True
-    elif not report["blocking_issue"]:
-        report["blocking_issue"] = "Problema desconhecido — verifique os checks individuais."
-
-    return report
+    return await run_kanban_diagnose()
 
 
 @router.get("/kanban")
@@ -1077,97 +977,14 @@ async def get_kanban_board(
             f"atribuídos a si OU em fila_espera"
         )
 
-    # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-    
-    # PROJEÇÃO OTIMIZADA: apenas campos necessários para o Kanban
-    # Evita transferir documentos inteiros, histórico, dados financeiros, etc.
-    kanban_projection = {
-        "_id": 0,
-        "id": 1,
-        "process_number": 1,
-        "client_id": 1,
-        "client_name": 1,
-        "client_email": 1,
-        "client_phone": 1,
-        "client_nif": 1,
-        "status": 1,
-        "priority": 1,
-        "prioridade": 1,
-        "under_35": 1,
-        "process_type": 1,
-        "property_value": 1,
-        "is_indexed": 1,
-        "assigned_consultor_id": 1,
-        "assigned_consultor_ids": 1,
-        "assigned_mediador_id": 1,
-        "assigned_mediador_ids": 1,
-        "assigned_indexacao_id": 1,
-        "assigned_parceiro_id": 1,
-        "indexacao_name": 1,
-        "parceiro_name": 1,
-        "consultor_name": 1,
-        "mediador_name": 1,
-        "created_at": 1,
-        "updated_at": 1,
-        "notes": 1,
-        "tags": 1,
-        "labels": 1,
-        "co_buyers": 1,
-        "compradores": 1,
-    }
-    processes = await db.processes.find(query, kanban_projection).to_list(1000)
-    
-    # Desencriptar campos sensíveis que estão na projeção (client_phone)
-    # A projeção exclui personal_data, financial_data, etc. mas inclui client_phone
+    processes = await db.processes.find(query, PROCESS_KANBAN_PROJECTION).to_list(1000)
     processes = decrypt_processes_list(
-        processes, 
-        fields_to_decrypt=["client_phone", "client_nif"]
+        processes,
+        fields_to_decrypt=["client_phone", "client_nif"],
     )
 
-    # ====================================================================
-    # ENRIQUECIMENTO BATCH: client_name/client_email/client_phone
-    # Processos criados no paradigma relacional (Fase 3) NÃO guardam
-    # dados pessoais no documento do processo — estão na coleção clients.
-    # Este passo preenche os campos em falta via batch lookup.
-    # ====================================================================
-    client_ids_to_fetch = set()
-    for p in processes:
-        if p.get("client_id") and not p.get("client_name"):
-            client_ids_to_fetch.add(p["client_id"])
-
-    client_map = {}
-    if client_ids_to_fetch:
-        client_docs = await db.clients.find(
-            {"id": {"$in": list(client_ids_to_fetch)}},
-            {"_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais": 1}
-        ).to_list(len(client_ids_to_fetch))
-        # Desencriptar dados dos clientes
-        try:
-            from services.encryption import decrypt_client_data
-            client_docs = [decrypt_client_data(c) for c in client_docs]
-        except Exception:
-            pass  # Se não houver encriptação, dados já estão legíveis
-        for c in client_docs:
-            contacto = c.get("contacto") or {}
-            dados_pessoais = c.get("dados_pessoais") or {}
-            client_map[c["id"]] = {
-                "nome": c.get("nome", ""),
-                "email": contacto.get("email", ""),
-                "telefone": contacto.get("telefone", ""),
-                "nif": dados_pessoais.get("nif", c.get("nif", "")),
-            }
-
-    # Preencher campos em falta com setdefault (não sobrescreve valores existentes)
-    for p in processes:
-        cid = p.get("client_id")
-        if cid and cid in client_map:
-            cinfo = client_map[cid]
-            p.setdefault("client_name", cinfo["nome"])
-            p.setdefault("client_email", cinfo["email"])
-            p.setdefault("client_phone", cinfo["telefone"])
-            p.setdefault("client_nif", cinfo["nif"])
-
+    await fill_missing_process_client_contacts(processes)
     await enrich_processes_portal_flags(processes)
     await enrich_processes_latest_activity(processes)
 
@@ -1176,44 +993,25 @@ async def get_kanban_board(
 
     indexacao_count = sum(1 for p in processes if p.get("assigned_indexacao_id"))
     parceiro_count = sum(1 for p in processes if p.get("assigned_parceiro_id"))
-    logger.info(f"[Kanban Export] {len(processes)} processos: {indexacao_count} com indexação, {parceiro_count} com parceiro")
-
-    processes_by_status = group_processes_by_status(processes)
-
-    concluded_statuses = ["concluidos"]
-    dropped_statuses = ["desistencias"]
-    active_count_query = dict(query) if query else {}
-    active_count_query["status"] = {"$nin": concluded_statuses + dropped_statuses}
-    inactive_count_query = dict(query) if query else {}
-    inactive_count_query["status"] = {"$in": concluded_statuses + dropped_statuses}
-
-    import asyncio
-    active_count, inactive_count = await asyncio.gather(
-        db.processes.count_documents(active_count_query),
-        db.processes.count_documents(inactive_count_query),
+    logger.info(
+        f"[Kanban Export] {len(processes)} processos: "
+        f"{indexacao_count} com indexação, {parceiro_count} com parceiro"
     )
 
+    processes_by_status = group_processes_by_status(processes)
+    active_count, inactive_count = await count_kanban_active_inactive(query)
     sort_all_kanban_columns(processes_by_status)
+    kanban = safe_build_kanban_columns(statuses, processes_by_status, user_map, user_id)
 
-    try:
-        kanban = build_kanban_columns(statuses, processes_by_status, user_map, user_id)
-    except Exception as e:
-        # PACOTE AY: NUCLEAR FAILSAFE — a rota do Kanban NUNCA devolve 500.
-        # Em caso de qualquer exceção (KeyError, TypeError, AttributeError, etc.),
-        # logar o erro mas devolver o que já foi processado (kanban parcial)
-        # ou um array vazio. O frontend mostra colunas vazias em vez de erro.
-        logger.exception(f"[KANBAN] Exceção capturada (failsafe): {type(e).__name__}: {e}. Devolvendo {len(kanban)} colunas processadas.")
-        # NÃO fazer raise HTTPException — devolver silenciosamente
-
-    return {
-        "columns": kanban if kanban else [],
-        "total_processes": active_count if 'active_count' in dir() else 0,
-        "total_inactive": inactive_count if 'inactive_count' in dir() else 0,
-        "user_role": role,
-        "current_user_id": user_id,
-        "view_mode": view_mode,
-        "completed_days": completed_days
-    }
+    return build_kanban_board_payload(
+        columns=kanban,
+        active_count=active_count,
+        inactive_count=inactive_count,
+        role=role,
+        user_id=user_id,
+        view_mode=view_mode,
+        completed_days=completed_days,
+    )
 
 
 @router.get("/my-clients")
