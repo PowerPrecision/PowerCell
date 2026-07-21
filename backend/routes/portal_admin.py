@@ -39,37 +39,15 @@ from services.portal_security import (
 )
 from services.history import log_history
 from services.audit_trail_service import log_audit_event
+from utils.frontend_url import get_frontend_url as _get_frontend_url
 
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/portal", tags=["Portal Admin (Impersonation)"])
 
 
-def _get_frontend_url(request: Request) -> str:
-    """
-    Obtém a URL base do frontend (igual ao helper em processes.py).
-
-    Prioridade:
-    1. Header Referer/Origin (vem do browser do staff)
-    2. Env var FRONTEND_URL
-    3. String vazia (o chamador decide o que fazer)
-    """
-    referer = request.headers.get("referer") or request.headers.get("origin")
-    if referer:
-        from urllib.parse import urlparse
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-
-    frontend_url = os.environ.get("FRONTEND_URL")
-    if frontend_url:
-        return frontend_url.rstrip("/")
-
-    logger.warning(
-        "[IMPERSONATE] FRONTEND_URL não configurada e sem Referer header. "
-        "O URL devolvido ficará incompleto — configure a env var FRONTEND_URL."
-    )
-    return ""
+# NOTA: _get_frontend_url foi movida para utils/frontend_url.py (importada no
+# topo como get_frontend_url) para eliminar a duplicação com processes.py.
 
 
 @router.post("/impersonate/{process_id}")

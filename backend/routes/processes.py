@@ -99,6 +99,7 @@ from services.process_status import (
     INACTIVE_STATUSES, ARCHIVED_STATUSES, PRE_REGISTO_STATUS,
     LEAD_STATUS_VALUES, PRE_REGISTO_BYPASS_ROLES, _should_hide_pre_registo,
 )
+from utils.frontend_url import get_frontend_url as _get_frontend_url
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
 
@@ -555,37 +556,8 @@ async def _send_portal_welcome_email_from_process(
 # ENDPOINTS DE CRIAÇÃO
 # ====================================================================
 
-def _get_frontend_url(request: Request) -> str:
-    """
-    Obtém a URL base do frontend para construir links públicos.
-
-    Prioridade:
-    1. Header Referer (vem do browser do staff — é sempre o domínio correto)
-    2. Env var FRONTEND_URL (configurada no deploy)
-    3. Sem fallback hardcoded — levanta erro se não for possível determinar
-
-    Isto garante que os links do portal funcionem independentemente
-    do domínio onde a app está deployada (Vercel, Netlify, custom domain).
-    """
-    referer = request.headers.get("referer") or request.headers.get("origin")
-    if referer:
-        # Extrair scheme + host (ex: "https://app.powercell.pt" de "https://app.powercell.pt/processes/...")
-        from urllib.parse import urlparse
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-
-    # Fallback para env var (sem domínio hardcoded)
-    frontend_url = os.environ.get("FRONTEND_URL")
-    if frontend_url:
-        return frontend_url.rstrip("/")
-
-    # Último recurso: não podemos gerar links válidos sem saber o domínio
-    logger.warning(
-        "[MAGIC LINK] FRONTEND_URL não configurada e sem Referer header. "
-        "Configure a env var FRONTEND_URL no backend."
-    )
-    return ""
+# NOTA: _get_frontend_url foi movida para utils/frontend_url.py (importada no
+# topo como get_frontend_url) para eliminar a duplicação com portal_admin.py.
 
 
 @router.post("/{process_id}/generate-magic-link")
