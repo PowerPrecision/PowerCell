@@ -128,6 +128,93 @@ class TestClientIdsRebuild:
         assert merge_field_metadata(None, {"x": 1}) == {"x": 1}
 
 
+class TestUpdateProcessLeftovers:
+    def test_terminal_guard_blocks_staff(self):
+        from fastapi import HTTPException
+        from services.process_update import assert_process_editable_for_role
+        try:
+            assert_process_editable_for_role("concluidos", UserRole.CONSULTOR)
+            assert False, "expected HTTPException"
+        except HTTPException as e:
+            assert e.status_code == 403
+
+    def test_terminal_guard_allows_admin(self):
+        from services.process_update import assert_process_editable_for_role
+        assert_process_editable_for_role("concluidos", UserRole.ADMIN)
+
+    def test_seed_update_data_contacts_and_reassign(self):
+        from services.process_update import seed_update_data
+        process = {
+            "client_id": "c2",
+            "client_name": "Nova",
+            "client_email": "n@x.com",
+            "client_phone": "900",
+            "client_ids": ["c2"],
+        }
+        data = seed_update_data(
+            process=process,
+            client_id_before="c1",
+            new_client_id="c2",
+            raw_client_email="ignored-if-reassign",
+            raw_client_phone=None,
+        )
+        assert data["client_id"] == "c2"
+        assert data["client_name"] == "Nova"
+        assert "updated_at" in data
+
+    def test_maybe_copy_owner_to_vendedor(self):
+        from services.process_update import maybe_copy_owner_to_vendedor
+        out = maybe_copy_owner_to_vendedor(
+            {"proprietario_nome": "João", "proprietario_contacto": "91"},
+            {},
+            vendedor_explicit=False,
+        )
+        assert out == {"nome": "João", "contacto": "91"}
+        assert maybe_copy_owner_to_vendedor(
+            {"proprietario_nome": "João"}, {"nome": "Já tem"}, vendedor_explicit=False,
+        ) is None
+        assert maybe_copy_owner_to_vendedor(
+            {"proprietario_nome": "João"}, {}, vendedor_explicit=True,
+        ) is None
+
+    def test_apply_cpcv_and_metadata_fields(self):
+        from types import SimpleNamespace
+        from fastapi import HTTPException
+        from services.process_update import apply_cpcv_and_metadata_fields
+        update = {}
+        data = SimpleNamespace(
+            co_buyers=[{"nome": "A"}],
+            co_applicants=None,
+            vendedor=None,
+            mediador=None,
+            monitored_emails=["a@x.com"],
+            notes="nota",
+            prioridade="alta",
+            labels=["x"],
+        )
+        apply_cpcv_and_metadata_fields(update, data)
+        assert update["prioridade"] == "alta"
+        assert update["notes"] == "nota"
+        assert update["monitored_emails"] == ["a@x.com"]
+        bad = SimpleNamespace(
+            co_buyers=None, co_applicants=None, vendedor=None, mediador=None,
+            monitored_emails=None, notes=None, prioridade="urgente", labels=None,
+        )
+        try:
+            apply_cpcv_and_metadata_fields({}, bad)
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+
+    def test_attach_field_metadata(self):
+        from services.process_update import attach_field_metadata_if_present
+        update = {}
+        attach_field_metadata_if_present(
+            update, {"field_metadata": {"a": 1}}, {"field_metadata": {"b": 2}},
+        )
+        assert update["field_metadata"] == {"a": 1, "b": 2}
+
+
 class TestKanbanEnrichment:
     def test_group_and_sort(self):
         from services.process_kanban_enrichment import (

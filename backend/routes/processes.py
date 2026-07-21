@@ -132,11 +132,14 @@ from services.process_create import (
 from services.process_update import (
     prepare_encrypted_client_updates,
     apply_client_personal_updates_from_process_put,
-    merge_nested_process_section,
     build_role_update_permissions,
     reassign_process_primary_client,
-    sync_second_client_on_update,
-    merge_field_metadata,
+    assert_process_editable_for_role,
+    seed_update_data,
+    apply_staff_business_updates,
+    encrypt_process_update_payload,
+    attach_field_metadata_if_present,
+    run_process_update_side_effects,
 )
 from services.process_kanban_enrichment import (
     group_processes_by_status,
@@ -2342,256 +2345,80 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             f"({reassign_info['new_client_name']}) por {user.get('email')}"
         )
     
-    # Indexação só pode actualizar dados financeiros (restante é bloqueado mais abaixo)
-    is_indexacao = role == UserRole.INDEXACAO
-    
-    # Bloquear edição de processos em status terminal (eliminados, desistências, concluídos)
-    # EXCEPÇÃO: admin e CEO podem editar processos concluídos para correção retroativa
-    # de valores financeiros (sincronização financeira retroativa).
-    BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"]
-    is_admin_or_ceo = role in [UserRole.ADMIN, UserRole.CEO]
-    if process.get("status") in BLOCKED_STATUSES and not is_admin_or_ceo:
-        raise HTTPException(
-            status_code=403,
-            detail=f"Não é possível editar um processo em estado terminal ({process.get('status')})."
-        )
-    
-    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
-    
-    # ── Incluir client_email/client_phone do raw body (enviados pelo Frontend) ──
-    # Estes campos são guardados directamente no documento do processo.
-    # A sincronização para o cliente e para personal_data.email é feita
-    # pelo mecanismo de client_updates (extract_client_updates_from_body)
-    # e pelo sync do client update (clients.py:1295-1314).
-    if raw_client_email is not None:
-        update_data["client_email"] = raw_client_email
-    if raw_client_phone is not None:
-        update_data["client_phone"] = raw_client_phone
-    
-    # ── Incluir dados de reatribuição no update_data (se houve reatribuição) ──
-    if new_client_id and new_client_id != client_id:
-        # client_id já foi actualizado no process dict acima
-        update_data["client_id"] = process["client_id"]
-        update_data["client_name"] = process["client_name"]
-        update_data["client_email"] = process["client_email"]
-        update_data["client_phone"] = process["client_phone"]
-        update_data["client_ids"] = process["client_ids"]
-    
-    valid_statuses = [s["name"] for s in await db.workflow_statuses.find({}, {"name": 1, "_id": 0}).to_list(100)]
+    # Bloquear edição em estados terminais (admin/CEO podem corrigir concluídos).
+    assert_process_editable_for_role(process.get("status"), role)
 
+    update_data = seed_update_data(
+        process=process,
+        client_id_before=client_id,
+        new_client_id=new_client_id,
+        raw_client_email=raw_client_email,
+        raw_client_phone=raw_client_phone,
+    )
+
+    valid_statuses = [
+        s["name"]
+        for s in await db.workflow_statuses.find({}, {"name": 1, "_id": 0}).to_list(100)
+    ]
     perms = build_role_update_permissions(role)
-    can_update_personal = perms["can_update_personal"]
-    can_update_financial = perms["can_update_financial"]
-    can_update_real_estate = perms["can_update_real_estate"]
-    can_update_credit = perms["can_update_credit"]
     can_update_status = perms["can_update_status"]
 
     if role == UserRole.CLIENTE:
         if process.get("client_id") != user["id"]:
             raise HTTPException(status_code=403, detail="Acesso negado")
     else:
-        # Staff updates — APENAS dados de negócio (não dados pessoais)
-        if data.real_estate_data and can_update_real_estate:
-            incoming_re = data.real_estate_data.model_dump(exclude_unset=True)
-            _re = process.get("real_estate_data")
-            existing_re = _re if isinstance(_re, dict) else {}
-            merged_re = merge_nested_process_section(existing_re, incoming_re)
-            await log_data_changes(process_id, user, existing_re, incoming_re, "dados imobiliários")
-            await log_audit_event(process_id, user, "Alterou dados imobiliários", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["real_estate_data"] = merged_re
-        
-        # Sync proprietario/owner -> vendedor if vendedor.nome is empty AND no explicit vendedor update
-        merged_re = update_data.get("real_estate_data")
-        _vd = process.get("vendedor")
-        existing_vendedor = _vd if isinstance(_vd, dict) else {}
-        if merged_re and not existing_vendedor.get("nome") and data.vendedor is None:
-            owner_name = merged_re.get("proprietario_nome") or merged_re.get("owner_name") or ""
-            owner_contact = merged_re.get("proprietario_contacto") or merged_re.get("owner_phone") or ""
-            if owner_name:
-                update_data["vendedor"] = {
-                    **existing_vendedor,
-                    "nome": owner_name,
-                    "contacto": owner_contact,
-                }
-        
-        if data.credit_data and can_update_credit:
-            incoming_credit = data.credit_data.model_dump(exclude_unset=True)
-            _cd = process.get("credit_data")
-            existing_credit = _cd if isinstance(_cd, dict) else {}
-            merged_credit = merge_nested_process_section(existing_credit, incoming_credit)
-            await log_data_changes(process_id, user, existing_credit, incoming_credit, "dados de crédito")
-            await log_audit_event(process_id, user, "Alterou dados de crédito", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["credit_data"] = merged_credit
-
-        # ── Dados financeiros (financial_data) ──
-        # O frontend envia financial_data no body do PUT, mas ProcessUpdate
-        # não inclui este campo (é schemaless dict no MongoDB).
-        # Extraímos do raw_body e fazemos merge com os dados existentes.
-        if can_update_financial:
-            incoming_fd = raw_body.get("financial_data")
-            if isinstance(incoming_fd, dict):
-                _fd = process.get("financial_data")
-                existing_fd = _fd if isinstance(_fd, dict) else {}
-                merged_fd = merge_nested_process_section(
-                    existing_fd, incoming_fd, drop_empty_strings=True,
-                )
-                await log_data_changes(process_id, user, existing_fd, incoming_fd, "dados financeiros")
-                await log_audit_event(process_id, user, "Alterou dados financeiros", request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-                update_data["financial_data"] = merged_fd
-
-        # Campos adicionais do CPCV
-        # ── second_client_id (2º titular ligado a cliente existente) ──
-        # PACOTE BP — Sincronização do process_ids e client_ids:
-        # Quando se adiciona/remove o 2º titular, atualizamos o array
-        # process_ids do cliente 2º titular ($addToSet/$pull) E o array
-        # client_ids do processo. Sem isto, o 2º titular não aparece nas
-        # listagens globais que confiam em client.process_ids ou em
-        # {"client_ids": cliente_id}.
-        if data.second_client_id is not None:
-            new_second_id = data.second_client_id.strip() if data.second_client_id else None
-            second_fields = await sync_second_client_on_update(
-                process, process_id, new_second_id,
-            )
-            update_data.update(second_fields)
-
-        if data.co_buyers is not None:
-            update_data["co_buyers"] = data.co_buyers
-        if data.co_applicants is not None:
-            update_data["co_applicants"] = data.co_applicants
-        if data.vendedor is not None:
-            _sanitize_dict_names(data.vendedor)
-            update_data["vendedor"] = data.vendedor
-        if data.mediador is not None:
-            _sanitize_dict_names(data.mediador)
-            update_data["mediador"] = data.mediador
-        if data.monitored_emails is not None:
-            update_data["monitored_emails"] = data.monitored_emails
-        
-        # Metadados do processo
-        if data.notes is not None:
-            update_data["notes"] = data.notes
-        if data.prioridade is not None:
-            if data.prioridade not in ["baixa", "media", "alta"]:
-                raise HTTPException(status_code=400, detail="Prioridade inválida. Valores aceites: baixa, media, alta")
-            update_data["prioridade"] = data.prioridade
-        if data.labels is not None:
-            update_data["labels"] = data.labels
-        
-        if data.status and can_update_status and (data.status in valid_statuses or not valid_statuses):
-            await log_history(process_id, user, "Alterou estado", "status", process["status"], data.status)
-            await log_audit_event(process_id, user, "Alterou estado", field="status", old_value=process["status"], new_value=data.status, request=request, source="web", audit_reason=audit_reason, ai_suggested=ai_suggested, ai_approved_by=user.get("id") if ai_suggested else None)
-            update_data["status"] = data.status
-            
-            # Send email notification (com verificação de preferências)
-            if process.get("client_email"):
-                await send_notification_with_preference_check(
-                    process["client_email"],
-                    "Estado do Processo Atualizado",
-                    f"O estado do seu processo foi atualizado para: {data.status}",
-                    notification_type="status_change"
-                )
-    
-    # Encriptar campos sensíveis antes de guardar
-    try:
-        update_data = encrypt_sensitive_data(update_data)
-    except TypeError as e:
-        import traceback
-        tb = traceback.format_exc()
-        logger.error(f"TypeError em encrypt_sensitive_data para processo {process_id}: {e}\n{tb}")
-        # Diagnóstico: log das chaves/tipos em update_data que podem causar o erro
-        for k, v in update_data.items():
-            if isinstance(v, dict):
-                for sk, sv in v.items():
-                    if not isinstance(sv, (str, int, float, bool, type(None), list)):
-                        logger.error(f"  Suspeito: update_data[{k}][{sk}] = {type(sv).__name__}: {repr(sv)[:100]}")
-            elif not isinstance(v, (str, int, float, bool, type(None), list, dict)):
-                logger.error(f"  Suspeito root: update_data[{k}] = {type(v).__name__}: {repr(v)[:100]}")
-        raise HTTPException(status_code=500, detail=f"TypeError em encrypt: {e} | {tb.split(chr(10))[-3] if tb else 'no traceback'}")
-    inject_cdc_context(update_data, user)
-
-    field_metadata_cs = raw_body.get("field_metadata")
-    if field_metadata_cs and isinstance(field_metadata_cs, dict):
-        update_data["field_metadata"] = merge_field_metadata(
-            process.get("field_metadata"), field_metadata_cs,
+        await apply_staff_business_updates(
+            process=process,
+            process_id=process_id,
+            data=data,
+            raw_body=raw_body,
+            update_data=update_data,
+            user=user,
+            request=request,
+            audit_reason=audit_reason,
+            ai_suggested=ai_suggested,
+            perms=perms,
+            valid_statuses=valid_statuses,
         )
+
+    update_data = encrypt_process_update_payload(update_data, process_id)
+    inject_cdc_context(update_data, user)
+    attach_field_metadata_if_present(update_data, process, raw_body)
 
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
 
-    # === PACOTE CW — Trello Mirror: atualizar cartão em background ===
-    # Se o status mudou, converte para 'move'; senão, 'update' (descrição com dados IA).
-    if data.status and data.status != process.get("status"):
-        asyncio.create_task(sync_process_to_trello(updated, action="move", new_status=data.status))
-    else:
-        asyncio.create_task(sync_process_to_trello(updated, action="update"))
-
-    # === SINCRONIZAÇÃO FINANCEIRA RETROATIVA ===
-    # Se o processo está num status de ganho (concluído/escritura), garantir que
-    # o snapshot financeiro (process_finances) existe e está atualizado com os
-    # valores mais recentes de real_estate_data e credit_data.
-    # Isto assegura que expected_commission, real_estate_base_value e
-    # credit_base_value refletem sempre os dados submetidos pelo utilizador.
-    current_status = updated.get("status", "")
-    finance_relevant_statuses = ["concluidos", "escritura", "escritura_agendada"]
-    if current_status in finance_relevant_statuses:
-        # Desencriptar updated para obter valores reais antes do snapshot
-        try:
-            decrypted_for_finance = decrypt_sensitive_data(updated)
-        except Exception:
-            decrypted_for_finance = updated
-        try:
-            await _ensure_finance_snapshot(decrypted_for_finance, user)
-        except Exception as snap_err:
-            logger.warning(
-                f"Falha na sincronização financeira retroativa para processo {process_id}: {snap_err}"
-            )
-    
-    # === CACHE INVALIDATION: Actualização de processo pode alterar KPIs ===
-    # Invalidar apenas se houve mudança de status (afeta contadores)
-    if data.status:
-        await invalidate_stats_cache(user_id=user.get("id"))
-    
-    # === WEBSOCKET BROADCAST: Processo actualizado ===
-    await broadcast_process_delta(
-        event_type=WSEventType.PROCESS_UPDATED,
+    await run_process_update_side_effects(
+        process=process,
         process_id=process_id,
-        process_number=updated.get("process_number"),
-        client_name=updated.get("client_name"),
-        status=updated.get("status"),
-        old_status=process.get("status") if data.status else None,
-        priority=updated.get("prioridade") or updated.get("priority"),
-        prioridade=updated.get("prioridade"),
-        updated_at=updated.get("updated_at")
+        data=data,
+        updated=updated,
+        user=user,
+        can_update_status=can_update_status,
+        broadcast_fn=broadcast_process_delta,
+        ensure_finance_snapshot_fn=_ensure_finance_snapshot,
+        decrypt_fn=decrypt_sensitive_data,
     )
-    
-    # O22 - Executar regras de automação após actualização
-    if data.status and can_update_status:
-        try:
-            from services.workflow_engine import process_trigger
-            await process_trigger("process_status_changed", {
-                "process_id": process_id,
-                "old_status": process.get("status"),
-                "new_status": data.status,
-                "client_name": process.get("client_name", ""),
-            })
-        except Exception as e:
-            logger.warning(f"Erro ao processar automações: {e}")
-    
-    # Desencriptar dados para a resposta
+
     try:
         updated = decrypt_sensitive_data(updated)
     except Exception as e:
         logger.error(f"Erro ao desencriptar dados do processo {process_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro interno ao desencriptar dados do processo")
-    
-    # ── FASE 2: Popular dados do cliente na resposta (retrocompatibilidade) ──
+        raise HTTPException(
+            status_code=500,
+            detail="Erro interno ao desencriptar dados do processo",
+        )
+
     updated = await populate_client_data(updated)
-    
+
     try:
         return ProcessResponse(**updated)
     except Exception as e:
         logger.error(f"Erro ao serializar resposta do processo {process_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro interno ao serializar dados do processo: {str(e)[:200]}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno ao serializar dados do processo: {str(e)[:200]}",
+        )
 
 
 # ====================================================================

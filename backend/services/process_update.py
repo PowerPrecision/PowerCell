@@ -337,3 +337,376 @@ def merge_field_metadata(existing: Optional[dict], incoming: dict) -> dict:
     """Merge seguro de field_metadata (não apaga keys não atualizadas)."""
     base = existing if isinstance(existing, dict) else {}
     return {**base, **incoming}
+
+
+TERMINAL_PROCESS_STATUSES = ("eliminados", "desistencias", "concluidos")
+FINANCE_RELEVANT_STATUSES = ("concluidos", "escritura", "escritura_agendada")
+VALID_PRIORIDADES = ("baixa", "media", "alta")
+
+
+def assert_process_editable_for_role(status: Optional[str], role: str) -> None:
+    """
+    Bloqueia edição em estados terminais (exceto admin/CEO).
+
+    Raises:
+        HTTPException(403)
+    """
+    from fastapi import HTTPException
+
+    is_admin_or_ceo = role in [UserRole.ADMIN, UserRole.CEO]
+    if status in TERMINAL_PROCESS_STATUSES and not is_admin_or_ceo:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                f"Não é possível editar um processo em estado terminal ({status})."
+            ),
+        )
+
+
+def seed_update_data(
+    *,
+    process: dict,
+    client_id_before: Optional[str],
+    new_client_id: Optional[str],
+    raw_client_email: Any,
+    raw_client_phone: Any,
+) -> dict:
+    """Monta o `$set` base: timestamp + contactos + campos de reatribuição."""
+    update_data: dict[str, Any] = {
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+    if raw_client_email is not None:
+        update_data["client_email"] = raw_client_email
+    if raw_client_phone is not None:
+        update_data["client_phone"] = raw_client_phone
+
+    if new_client_id and new_client_id != client_id_before:
+        update_data["client_id"] = process["client_id"]
+        update_data["client_name"] = process["client_name"]
+        update_data["client_email"] = process["client_email"]
+        update_data["client_phone"] = process["client_phone"]
+        update_data["client_ids"] = process["client_ids"]
+    return update_data
+
+
+def maybe_copy_owner_to_vendedor(
+    merged_re: Optional[dict],
+    existing_vendedor: Optional[dict],
+    *,
+    vendedor_explicit: bool,
+) -> Optional[dict]:
+    """
+    Se vendedor.nome vazio e sem update explícito, copia proprietário/owner.
+    """
+    existing = existing_vendedor if isinstance(existing_vendedor, dict) else {}
+    if not merged_re or existing.get("nome") or vendedor_explicit:
+        return None
+    owner_name = merged_re.get("proprietario_nome") or merged_re.get("owner_name") or ""
+    owner_contact = (
+        merged_re.get("proprietario_contacto") or merged_re.get("owner_phone") or ""
+    )
+    if not owner_name:
+        return None
+    return {**existing, "nome": owner_name, "contacto": owner_contact}
+
+
+def sanitize_party_dict_names(d: dict) -> None:
+    """Sanitiza nome/email/telefone/url em dicts de vendedor/mediador (in-place)."""
+    from utils.input_sanitization import (
+        sanitize_email, sanitize_name, sanitize_phone,
+        sanitize_string, sanitize_url,
+    )
+    name_fields = ["nome", "name", "nome_completo", "full_name"]
+    email_fields = ["email", "e_mail"]
+    phone_fields = ["telefone", "phone", "telemovel", "mobile"]
+    url_fields = ["url", "website", "link"]
+    for key in list(d.keys()):
+        if key in name_fields and d[key] is not None:
+            d[key] = sanitize_name(str(d[key]))
+        elif key in email_fields and d[key] is not None:
+            d[key] = sanitize_email(str(d[key]))
+        elif key in phone_fields and d[key] is not None:
+            d[key] = sanitize_phone(str(d[key]))
+        elif key in url_fields and d[key] is not None:
+            d[key] = sanitize_url(str(d[key]))
+        elif isinstance(d[key], str) and d[key]:
+            d[key] = sanitize_string(d[key], max_length=500)
+
+
+def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
+    """
+    Aplica co_buyers / vendedor / mediador / notes / prioridade / labels.
+
+    Raises:
+        HTTPException(400): prioridade inválida.
+    """
+    from fastapi import HTTPException
+
+    if data.co_buyers is not None:
+        update_data["co_buyers"] = data.co_buyers
+    if data.co_applicants is not None:
+        update_data["co_applicants"] = data.co_applicants
+    if data.vendedor is not None:
+        sanitize_party_dict_names(data.vendedor)
+        update_data["vendedor"] = data.vendedor
+    if data.mediador is not None:
+        sanitize_party_dict_names(data.mediador)
+        update_data["mediador"] = data.mediador
+    if data.monitored_emails is not None:
+        update_data["monitored_emails"] = data.monitored_emails
+    if data.notes is not None:
+        update_data["notes"] = data.notes
+    if data.prioridade is not None:
+        if data.prioridade not in VALID_PRIORIDADES:
+            raise HTTPException(
+                status_code=400,
+                detail="Prioridade inválida. Valores aceites: baixa, media, alta",
+            )
+        update_data["prioridade"] = data.prioridade
+    if data.labels is not None:
+        update_data["labels"] = data.labels
+
+
+async def apply_staff_business_updates(
+    *,
+    process: dict,
+    process_id: str,
+    data: Any,
+    raw_body: dict,
+    update_data: dict,
+    user: dict,
+    request: Any,
+    audit_reason: Optional[str],
+    ai_suggested: bool,
+    perms: dict[str, bool],
+    valid_statuses: list,
+) -> None:
+    """
+    Merge de secções de negócio (RE/crédito/financeiro/2º titular/CPCV/status).
+
+    Mutação in-place de `update_data`. Side-effects de histórico/audit/email
+    ficam aqui para a rota permanecer fina.
+    """
+    from services.history import log_history, log_data_changes
+    from services.audit_trail_service import log_audit_event
+    from services.notification_service import send_notification_with_preference_check
+
+    can_update_financial = perms["can_update_financial"]
+    can_update_real_estate = perms["can_update_real_estate"]
+    can_update_credit = perms["can_update_credit"]
+    can_update_status = perms["can_update_status"]
+    ai_approved_by = user.get("id") if ai_suggested else None
+
+    if data.real_estate_data and can_update_real_estate:
+        incoming_re = data.real_estate_data.model_dump(exclude_unset=True)
+        _re = process.get("real_estate_data")
+        existing_re = _re if isinstance(_re, dict) else {}
+        merged_re = merge_nested_process_section(existing_re, incoming_re)
+        await log_data_changes(
+            process_id, user, existing_re, incoming_re, "dados imobiliários",
+        )
+        await log_audit_event(
+            process_id, user, "Alterou dados imobiliários",
+            request=request, source="web",
+            audit_reason=audit_reason, ai_suggested=ai_suggested,
+            ai_approved_by=ai_approved_by,
+        )
+        update_data["real_estate_data"] = merged_re
+
+    merged_re = update_data.get("real_estate_data")
+    _vd = process.get("vendedor")
+    existing_vendedor = _vd if isinstance(_vd, dict) else {}
+    synced_vendedor = maybe_copy_owner_to_vendedor(
+        merged_re, existing_vendedor, vendedor_explicit=data.vendedor is not None,
+    )
+    if synced_vendedor is not None:
+        update_data["vendedor"] = synced_vendedor
+
+    if data.credit_data and can_update_credit:
+        incoming_credit = data.credit_data.model_dump(exclude_unset=True)
+        _cd = process.get("credit_data")
+        existing_credit = _cd if isinstance(_cd, dict) else {}
+        merged_credit = merge_nested_process_section(existing_credit, incoming_credit)
+        await log_data_changes(
+            process_id, user, existing_credit, incoming_credit, "dados de crédito",
+        )
+        await log_audit_event(
+            process_id, user, "Alterou dados de crédito",
+            request=request, source="web",
+            audit_reason=audit_reason, ai_suggested=ai_suggested,
+            ai_approved_by=ai_approved_by,
+        )
+        update_data["credit_data"] = merged_credit
+
+    if can_update_financial:
+        incoming_fd = raw_body.get("financial_data")
+        if isinstance(incoming_fd, dict):
+            _fd = process.get("financial_data")
+            existing_fd = _fd if isinstance(_fd, dict) else {}
+            merged_fd = merge_nested_process_section(
+                existing_fd, incoming_fd, drop_empty_strings=True,
+            )
+            await log_data_changes(
+                process_id, user, existing_fd, incoming_fd, "dados financeiros",
+            )
+            await log_audit_event(
+                process_id, user, "Alterou dados financeiros",
+                request=request, source="web",
+                audit_reason=audit_reason, ai_suggested=ai_suggested,
+                ai_approved_by=ai_approved_by,
+            )
+            update_data["financial_data"] = merged_fd
+
+    if data.second_client_id is not None:
+        new_second_id = data.second_client_id.strip() if data.second_client_id else None
+        second_fields = await sync_second_client_on_update(
+            process, process_id, new_second_id,
+        )
+        update_data.update(second_fields)
+
+    apply_cpcv_and_metadata_fields(update_data, data)
+
+    if data.status and can_update_status and (
+        data.status in valid_statuses or not valid_statuses
+    ):
+        await log_history(
+            process_id, user, "Alterou estado",
+            "status", process["status"], data.status,
+        )
+        await log_audit_event(
+            process_id, user, "Alterou estado",
+            field="status", old_value=process["status"], new_value=data.status,
+            request=request, source="web",
+            audit_reason=audit_reason, ai_suggested=ai_suggested,
+            ai_approved_by=ai_approved_by,
+        )
+        update_data["status"] = data.status
+        if process.get("client_email"):
+            await send_notification_with_preference_check(
+                process["client_email"],
+                "Estado do Processo Atualizado",
+                f"O estado do seu processo foi atualizado para: {data.status}",
+                notification_type="status_change",
+            )
+
+
+def encrypt_process_update_payload(update_data: dict, process_id: str) -> dict:
+    """
+    Encripta campos sensíveis do `$set` com diagnóstico TypeError.
+
+    Raises:
+        HTTPException(500)
+    """
+    from fastapi import HTTPException
+    from services.process_service import encrypt_sensitive_data
+
+    try:
+        return encrypt_sensitive_data(update_data)
+    except TypeError as e:
+        import traceback
+        tb = traceback.format_exc()
+        logger.error(
+            f"TypeError em encrypt_sensitive_data para processo {process_id}: {e}\n{tb}"
+        )
+        for k, v in update_data.items():
+            if isinstance(v, dict):
+                for sk, sv in v.items():
+                    if not isinstance(sv, (str, int, float, bool, type(None), list)):
+                        logger.error(
+                            f"  Suspeito: update_data[{k}][{sk}] = "
+                            f"{type(sv).__name__}: {repr(sv)[:100]}"
+                        )
+            elif not isinstance(v, (str, int, float, bool, type(None), list, dict)):
+                logger.error(
+                    f"  Suspeito root: update_data[{k}] = "
+                    f"{type(v).__name__}: {repr(v)[:100]}"
+                )
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"TypeError em encrypt: {e} | "
+                f"{tb.split(chr(10))[-3] if tb else 'no traceback'}"
+            ),
+        )
+
+
+def attach_field_metadata_if_present(
+    update_data: dict,
+    process: dict,
+    raw_body: dict,
+) -> None:
+    """Merge field_metadata do raw body (se dict)."""
+    field_metadata_cs = raw_body.get("field_metadata")
+    if field_metadata_cs and isinstance(field_metadata_cs, dict):
+        update_data["field_metadata"] = merge_field_metadata(
+            process.get("field_metadata"), field_metadata_cs,
+        )
+
+
+async def run_process_update_side_effects(
+    *,
+    process: dict,
+    process_id: str,
+    data: Any,
+    updated: dict,
+    user: dict,
+    can_update_status: bool,
+    broadcast_fn,
+    ensure_finance_snapshot_fn,
+    decrypt_fn,
+) -> None:
+    """
+    Pós-persist: Trello, snapshot financeiro, cache, WS, workflow automation.
+    """
+    import asyncio
+    from services.trello_service import sync_process_to_trello
+    from services.redis_cache import invalidate_stats_cache
+    from services.websocket_manager import WSEventType
+
+    if data.status and data.status != process.get("status"):
+        asyncio.create_task(
+            sync_process_to_trello(updated, action="move", new_status=data.status)
+        )
+    else:
+        asyncio.create_task(sync_process_to_trello(updated, action="update"))
+
+    current_status = updated.get("status", "")
+    if current_status in FINANCE_RELEVANT_STATUSES:
+        try:
+            decrypted_for_finance = decrypt_fn(updated)
+        except Exception:
+            decrypted_for_finance = updated
+        try:
+            await ensure_finance_snapshot_fn(decrypted_for_finance, user)
+        except Exception as snap_err:
+            logger.warning(
+                f"Falha na sincronização financeira retroativa "
+                f"para processo {process_id}: {snap_err}"
+            )
+
+    if data.status:
+        await invalidate_stats_cache(user_id=user.get("id"))
+
+    await broadcast_fn(
+        event_type=WSEventType.PROCESS_UPDATED,
+        process_id=process_id,
+        process_number=updated.get("process_number"),
+        client_name=updated.get("client_name"),
+        status=updated.get("status"),
+        old_status=process.get("status") if data.status else None,
+        priority=updated.get("prioridade") or updated.get("priority"),
+        prioridade=updated.get("prioridade"),
+        updated_at=updated.get("updated_at"),
+    )
+
+    if data.status and can_update_status:
+        try:
+            from services.workflow_engine import process_trigger
+            await process_trigger("process_status_changed", {
+                "process_id": process_id,
+                "old_status": process.get("status"),
+                "new_status": data.status,
+                "client_name": process.get("client_name", ""),
+            })
+        except Exception as e:
+            logger.warning(f"Erro ao processar automações: {e}")
