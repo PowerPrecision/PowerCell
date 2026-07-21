@@ -592,3 +592,129 @@ def schedule_assignment_emails(
                     ids, process_id, client_name, process_number, label,
                 )
             )
+
+
+async def run_staff_assign_process(
+    process_id: str,
+    user: dict,
+    *,
+    consultor_ids: Optional[str] = None,
+    mediador_ids: Optional[str] = None,
+    indexacao_id: Optional[str] = None,
+    parceiro_id: Optional[str] = None,
+    consultor_id: Optional[str] = None,
+    mediador_id: Optional[str] = None,
+    inject_cdc_fn,
+    invalidate_stats_fn,
+    broadcast_fn,
+) -> dict[str, Any]:
+    """Orquestra POST /assign: persist + cache + WS + emails."""
+    from fastapi import HTTPException
+
+    from services.websocket_manager import WSEventType
+
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    update_data, newly = await build_staff_assign_update(
+        process=process,
+        process_id=process_id,
+        user=user,
+        consultor_ids=consultor_ids,
+        mediador_ids=mediador_ids,
+        indexacao_id=indexacao_id,
+        parceiro_id=parceiro_id,
+        consultor_id=consultor_id,
+        mediador_id=mediador_id,
+    )
+
+    inject_cdc_fn(update_data, user)
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    await invalidate_stats_fn(user_id=user.get("id"))
+
+    updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    await broadcast_fn(
+        event_type=WSEventType.PROCESS_ASSIGNED,
+        process_id=process_id,
+        process_number=updated_process.get("process_number"),
+        client_name=updated_process.get("client_name"),
+        status=updated_process.get("status"),
+        assigned_consultor_ids=updated_process.get("assigned_consultor_ids", []),
+        assigned_mediador_ids=updated_process.get("assigned_mediador_ids", []),
+        consultor_names=updated_process.get("consultor_names", []),
+        mediador_names=updated_process.get("mediador_names", []),
+        prioridade=updated_process.get("prioridade"),
+        updated_at=updated_process.get("updated_at"),
+    )
+
+    schedule_assignment_emails(
+        newly,
+        process_id=process_id,
+        client_name=process.get("client_name", "Cliente"),
+        process_number=process.get("process_number", ""),
+    )
+    return {"success": True, "message": "Atribuições actualizadas com sucesso"}
+
+
+async def run_assign_me_to_process(
+    process_id: str,
+    user: dict,
+    *,
+    inject_cdc_fn,
+    log_history_fn,
+) -> dict[str, Any]:
+    """Orquestra POST /assign-me."""
+    from fastapi import HTTPException
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    update_data, assignment_type = build_assign_me_update(process, user)
+    inject_cdc_fn(update_data, user)
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    await log_history_fn(
+        process_id, user, f"Atribuiu-se como {assignment_type}",
+        f"assigned_{assignment_type}_ids", None, user["name"],
+    )
+    return {
+        "success": True,
+        "message": f"Atribuído como {assignment_type}",
+        "assignment_type": assignment_type,
+    }
+
+
+async def run_unassign_me_from_process(
+    process_id: str,
+    user: dict,
+    *,
+    inject_cdc_fn,
+    log_history_fn,
+) -> dict[str, Any]:
+    """Orquestra POST /unassign-me."""
+    from fastapi import HTTPException
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    update_data, removed_from = build_unassign_me_update(process, user)
+    if "consultor" in removed_from:
+        await log_history_fn(
+            process_id, user, "Removeu-se como consultor",
+            "assigned_consultor_ids", user["name"], None,
+        )
+    if "intermediario" in removed_from:
+        await log_history_fn(
+            process_id, user, "Removeu-se como intermediário",
+            "assigned_mediador_ids", user["name"], None,
+        )
+
+    inject_cdc_fn(update_data, user)
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    return {
+        "success": True,
+        "message": f"Removido como {', '.join(removed_from)}",
+        "removed_from": removed_from,
+    }

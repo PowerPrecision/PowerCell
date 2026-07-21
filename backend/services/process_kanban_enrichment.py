@@ -276,3 +276,83 @@ def build_kanban_board_payload(
         "view_mode": view_mode,
         "completed_days": completed_days,
     }
+
+
+async def run_get_kanban_board(
+    *,
+    user: dict,
+    role: Any,
+    show_all: bool,
+    consultor_id: Optional[str],
+    mediador_id: Optional[str],
+    indexacao_id: Optional[str],
+    parceiro_id: Optional[str],
+    view_mode: Optional[str],
+    completed_days: Optional[int],
+    decrypt_list_fn,
+    kanban_projection: dict,
+) -> dict[str, Any]:
+    """Orquestra GET /kanban."""
+    from services.process_list_enrichment import (
+        enrich_processes_portal_flags,
+        enrich_processes_latest_activity,
+    )
+    from services.process_list_filters import build_kanban_query
+
+    user_id = user["id"]
+    query = build_kanban_query(
+        user,
+        role,
+        show_all=bool(show_all),
+        consultor_id=consultor_id,
+        mediador_id=mediador_id,
+        indexacao_id=indexacao_id,
+        parceiro_id=parceiro_id,
+        view_mode=view_mode,
+        completed_days=completed_days,
+    )
+    if str(role).lower() == "indexacao":
+        logger.info(
+            f"[KANBAN-BQ] Indexacao {user_id} — vista scoped global: "
+            f"atribuídos a si OU em fila_espera"
+        )
+
+    statuses = await db.workflow_statuses.find(
+        {}, {"_id": 0},
+    ).sort("order", 1).to_list(100)
+    processes = await db.processes.find(query, kanban_projection).to_list(1000)
+    processes = decrypt_list_fn(
+        processes,
+        fields_to_decrypt=["client_phone", "client_nif"],
+    )
+
+    await fill_missing_process_client_contacts(processes)
+    await enrich_processes_portal_flags(processes)
+    await enrich_processes_latest_activity(processes)
+
+    users = await db.users.find(
+        {}, {"_id": 0, "id": 1, "name": 1, "role": 1},
+    ).to_list(1000)
+    user_map = {u["id"]: u for u in users}
+
+    indexacao_count = sum(1 for p in processes if p.get("assigned_indexacao_id"))
+    parceiro_count = sum(1 for p in processes if p.get("assigned_parceiro_id"))
+    logger.info(
+        f"[Kanban Export] {len(processes)} processos: "
+        f"{indexacao_count} com indexação, {parceiro_count} com parceiro"
+    )
+
+    processes_by_status = group_processes_by_status(processes)
+    active_count, inactive_count = await count_kanban_active_inactive(query)
+    sort_all_kanban_columns(processes_by_status)
+    kanban = safe_build_kanban_columns(statuses, processes_by_status, user_map, user_id)
+
+    return build_kanban_board_payload(
+        columns=kanban,
+        active_count=active_count,
+        inactive_count=inactive_count,
+        role=role,
+        user_id=user_id,
+        view_mode=view_mode,
+        completed_days=completed_days,
+    )

@@ -285,3 +285,120 @@ async def load_workflow_status_map() -> dict[str, dict]:
         {}, {"_id": 0},
     ).sort("order", 1).to_list(100)
     return {s["name"]: s for s in statuses}
+
+
+async def run_get_processes(
+    *,
+    user: dict,
+    role: str,
+    page: int,
+    size: int,
+    status: Optional[str],
+    search: Optional[str],
+    view_mode: Optional[str],
+    sort_field: Optional[str],
+    sort_order: Optional[str],
+    show_all: bool,
+    is_indexed: Optional[bool],
+    all_roles: Optional[list],
+    decrypt_list_fn,
+    list_projection: dict,
+) -> dict:
+    """Orquestra GET /processes (offset pagination)."""
+    from services.process_list_filters import build_process_list_query
+
+    query = build_process_list_query(
+        user,
+        role,
+        status=status,
+        search=search,
+        view_mode=view_mode,
+        show_all=bool(show_all),
+        is_indexed=is_indexed,
+        all_roles=all_roles,
+        search_mode="accent",
+    )
+
+    status_order = await load_workflow_status_order()
+    processes = await db.processes.find(
+        query,
+        list_projection,
+    ).to_list(5000)
+    processes = decrypt_list_fn(
+        processes, fields_to_decrypt=["client_phone", "client_nif"],
+    )
+
+    await enrich_processes_assignee_names(processes)
+    sort_process_list(
+        processes,
+        sort_field=sort_field,
+        sort_order=sort_order or "asc",
+        status_order=status_order,
+    )
+
+    page_items, total, pages = slice_page(processes, page, size)
+    await enrich_processes_portal_flags(page_items)
+    await enrich_processes_latest_notes(page_items)
+
+    return build_process_list_response(
+        items=page_items,
+        total=total,
+        page=page,
+        size=size,
+        pages=pages,
+        view_mode=view_mode,
+    )
+
+
+async def run_get_processes_paginated(
+    *,
+    user: dict,
+    role: str,
+    limit: int,
+    cursor: Optional[str],
+    sort_field: str,
+    sort_order: str,
+    status: Optional[str],
+    search: Optional[str],
+    view_mode: Optional[str],
+    decrypt_list_fn,
+    list_projection: dict,
+) -> dict:
+    """Orquestra GET /processes/paginated (cursor-based)."""
+    from services.cursor_pagination import CursorPaginator
+    from services.process_list_filters import build_process_list_query
+
+    query = build_process_list_query(
+        user,
+        role,
+        status=status,
+        search=search,
+        view_mode=view_mode,
+        search_mode="multiword",
+    )
+
+    order = -1 if sort_order.lower() == "desc" else 1
+    paginator = CursorPaginator(
+        collection=db.processes,
+        default_limit=20,
+        max_limit=100,
+        default_sort_field="client_name",
+        default_sort_order=1,
+    )
+    result = await paginator.paginate(
+        query=query,
+        limit=limit,
+        cursor=cursor,
+        sort_field=sort_field,
+        sort_order=order,
+        projection=list_projection,
+    )
+
+    result["items"] = decrypt_list_fn(
+        result["items"],
+        fields_to_decrypt=["client_phone", "client_nif"],
+    )
+    await enrich_processes_portal_flags(result["items"])
+    await enrich_processes_latest_notes(result["items"])
+
+    return build_process_cursor_list_response(result=result, view_mode=view_mode)

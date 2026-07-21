@@ -829,3 +829,116 @@ async def decrypt_and_populate_updated_process(
             detail="Erro interno ao desencriptar dados do processo",
         )
     return await populate_fn(updated)
+
+
+async def run_update_process(
+    process_id: str,
+    data: Any,
+    request: Any,
+    user: dict,
+    *,
+    decrypt_fn,
+    populate_fn,
+    extract_client_updates_fn,
+    inject_cdc_fn,
+    broadcast_fn,
+    ensure_finance_snapshot_fn,
+    log_history_fn,
+    log_audit_event_fn,
+    cliente_role: Any,
+) -> Any:
+    """Orquestra PUT /processes/{id}."""
+    from fastapi import HTTPException
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    process = decrypt_process_doc_or_500(process, process_id, decrypt_fn)
+    role = user["role"]
+
+    raw_body = {}
+    try:
+        raw_body = await request.json()
+    except Exception:
+        pass
+    raw_body, audit_reason, ai_suggested = parse_update_request_meta(raw_body)
+
+    client_id = process.get("client_id")
+    client_updates = extract_client_updates_fn(raw_body)
+    raw_client_email = raw_body.get("client_email")
+    raw_client_phone = raw_body.get("client_phone")
+
+    if client_updates and client_id:
+        client_updates = prepare_encrypted_client_updates(client_updates)
+        await apply_client_personal_updates_from_process_put(
+            client_id, client_updates, process_id,
+        )
+
+    new_client_id = raw_body.get("client_id")
+    await maybe_reassign_primary_client_with_audit(
+        process=process,
+        process_id=process_id,
+        new_client_id=new_client_id,
+        role=role,
+        user=user,
+        request=request,
+        log_history_fn=log_history_fn,
+        log_audit_event_fn=log_audit_event_fn,
+    )
+
+    assert_process_editable_for_role(process.get("status"), role)
+    update_data = seed_update_data(
+        process=process,
+        client_id_before=client_id,
+        new_client_id=new_client_id,
+        raw_client_email=raw_client_email,
+        raw_client_phone=raw_client_phone,
+    )
+
+    valid_statuses = await load_valid_workflow_status_names()
+    perms = build_role_update_permissions(role)
+    can_update_status = perms["can_update_status"]
+
+    assert_cliente_owns_process(process, user)
+    if role != cliente_role:
+        await apply_staff_business_updates(
+            process=process,
+            process_id=process_id,
+            data=data,
+            raw_body=raw_body,
+            update_data=update_data,
+            user=user,
+            request=request,
+            audit_reason=audit_reason,
+            ai_suggested=ai_suggested,
+            perms=perms,
+            valid_statuses=valid_statuses,
+        )
+
+    update_data = encrypt_process_update_payload(update_data, process_id)
+    inject_cdc_fn(update_data, user)
+    attach_field_metadata_if_present(update_data, process, raw_body)
+
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
+
+    await run_process_update_side_effects(
+        process=process,
+        process_id=process_id,
+        data=data,
+        updated=updated,
+        user=user,
+        can_update_status=can_update_status,
+        broadcast_fn=broadcast_fn,
+        ensure_finance_snapshot_fn=ensure_finance_snapshot_fn,
+        decrypt_fn=decrypt_fn,
+    )
+
+    updated = await decrypt_and_populate_updated_process(
+        updated,
+        process_id,
+        decrypt_fn=decrypt_fn,
+        populate_fn=populate_fn,
+    )
+    return build_process_response_or_500(updated, process_id)

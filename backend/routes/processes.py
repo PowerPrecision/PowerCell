@@ -90,22 +90,11 @@ from services.process_finance import (
     ensure_finance_snapshot as _ensure_finance_snapshot,
 )
 from services.process_list_filters import (
-    build_process_list_query,
-    build_kanban_query,
     build_my_clients_process_query,
     build_my_clients_leads_query,
 )
 from services.process_my_clients import (
-    my_clients_sort_key,
-    fetch_unread_messages_map,
-    fetch_new_documents_map,
-    fetch_latest_activity_notes_map,
-    fetch_orphan_leads_for_my_clients,
-    fetch_pending_tasks_by_process,
-    fetch_consultor_name_map,
-    assemble_my_clients_rows,
-    build_my_clients_response,
-    process_ids_from_my_clients_page,
+    run_get_my_clients,
 )
 from services.process_indexing import (
     run_mark_process_indexed,
@@ -151,31 +140,11 @@ from services.process_ai_conflict import (
 )
 from services.process_delete import soft_delete_process
 from services.process_update import (
-    prepare_encrypted_client_updates,
-    apply_client_personal_updates_from_process_put,
-    build_role_update_permissions,
-    assert_process_editable_for_role,
-    seed_update_data,
-    apply_staff_business_updates,
-    encrypt_process_update_payload,
-    attach_field_metadata_if_present,
-    run_process_update_side_effects,
-    parse_update_request_meta,
-    assert_cliente_owns_process,
-    decrypt_process_doc_or_500,
-    build_process_response_or_500,
-    load_valid_workflow_status_names,
-    maybe_reassign_primary_client_with_audit,
-    decrypt_and_populate_updated_process,
+    run_update_process,
 )
 from services.process_broadcast import broadcast_process_delta
 from services.process_kanban_enrichment import (
-    group_processes_by_status,
-    sort_all_kanban_columns,
-    fill_missing_process_client_contacts,
-    count_kanban_active_inactive,
-    safe_build_kanban_columns,
-    build_kanban_board_payload,
+    run_get_kanban_board,
 )
 from services.process_kanban_diagnose import run_kanban_diagnose
 from services.process_kanban_move import (
@@ -184,22 +153,15 @@ from services.process_kanban_move import (
     run_kanban_move_side_effects,
 )
 from services.process_list_enrichment import (
-    enrich_processes_assignee_names,
-    enrich_processes_portal_flags,
-    enrich_processes_latest_notes,
-    enrich_processes_latest_activity,
-    sort_process_list,
-    slice_page,
-    build_process_list_response,
-    build_process_cursor_list_response,
-    load_workflow_status_order,
+    run_get_processes,
+    run_get_processes_paginated,
     load_workflow_status_map,
+    slice_page,
 )
 from services.process_staff_assignment import (
-    build_staff_assign_update,
-    build_assign_me_update,
-    build_unassign_me_update,
-    schedule_assignment_emails,
+    run_staff_assign_process,
+    run_assign_me_to_process,
+    run_unassign_me_from_process,
 )
 from services.websocket_manager import WSEventType
 from services.redis_cache import invalidate_stats_cache
@@ -395,86 +357,26 @@ async def get_processes(
     sort_field: Optional[str] = Query(None, description="Campo de ordenação: client_name, status, created_at, updated_at, priority, property_value, property_location"),
     sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
     show_all: Optional[bool] = Query(False, description="Visão global: ignorar filtro de utilizador e mostrar todos os processos"),
-    # PACOTE BZ: filtro de estado de indexação passado como query param
-    # (antes era filtrado localmente no frontend, causando tamanhos de página irregulares)
     is_indexed: Optional[bool] = Query(None, description="PACOTE BZ — Filtrar por estado de indexação: true=indexados, false=pendentes"),
     user: dict = Depends(get_current_user)
 ):
-    """
-    Listar processos com paginação e projeção otimizada.
-    
-    OTIMIZAÇÕES APLICADAS:
-    - MongoDB Projection: Apenas campos necessários para a listagem
-    - Paginação nativa: Não carrega todos os documentos de uma vez
-    - Desencriptação seletiva: Só desencripta client_phone e client_nif
-    - Contagem otimizada: count_documents em vez de len(list)
-    
-    FILTRO DE ESTADO ATIVO (view_mode):
-    - 'active_only' (DEFAULT): Apenas processos em curso (exclui concluídos, desistências, eliminados)
-    - 'all': Todos os processos ativos e inativos (exceto is_deleted=True)
-    - 'historical': Apenas processos concluídos e desistências (para arquivo)
-    
-    FILTRAGEM AUTOMÁTICA:
-    - Admin/CEO: Todos os processos
-    - Cliente: Apenas os próprios processos
-    - Consultor: Processos atribuídos como consultor
-    - Intermediário: Processos atribuídos como intermediário
-    
-    SEGURANÇA:
-    - Processos com is_deleted=True NUNCA aparecem (exceto para admins com view_mode explícito)
-    
-    Returns:
-        {
-            "items": [...],
-            "total": 150,
-            "page": 1,
-            "size": 20,
-            "pages": 8,
-            "view_mode": "active_only"
-        }
-    """
+    """Listar processos com paginação, projeção e enriquecimento."""
     role = get_effective_role(request, user)
-
-    query = build_process_list_query(
-        user,
-        role,
+    return await run_get_processes(
+        user=user,
+        role=role,
+        page=page,
+        size=size,
         status=status,
         search=search,
         view_mode=view_mode,
+        sort_field=sort_field,
+        sort_order=sort_order,
         show_all=bool(show_all),
         is_indexed=is_indexed,
         all_roles=get_all_user_roles(user) if role == "__all_roles__" else None,
-        search_mode="accent",
-    )
-
-    status_order = await load_workflow_status_order()
-    processes = await db.processes.find(
-        query,
-        PROCESS_LIST_PROJECTION,
-    ).to_list(5000)
-    processes = decrypt_processes_list(
-        processes, fields_to_decrypt=["client_phone", "client_nif"],
-    )
-
-    await enrich_processes_assignee_names(processes)
-    sort_process_list(
-        processes,
-        sort_field=sort_field,
-        sort_order=sort_order or "asc",
-        status_order=status_order,
-    )
-
-    page_items, total, pages = slice_page(processes, page, size)
-    await enrich_processes_portal_flags(page_items)
-    await enrich_processes_latest_notes(page_items)
-
-    return build_process_list_response(
-        items=page_items,
-        total=total,
-        page=page,
-        size=size,
-        pages=pages,
-        view_mode=view_mode,
+        decrypt_list_fn=decrypt_processes_list,
+        list_projection=PROCESS_LIST_PROJECTION,
     )
 
 
@@ -489,71 +391,20 @@ async def get_processes_paginated(
     view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical"),
     user: dict = Depends(get_current_user)
 ):
-    """
-    Listar processos com paginação cursor-based (mais eficiente para grandes datasets).
-    
-    OTIMIZAÇÕES:
-    - Projeção MongoDB: Apenas campos necessários
-    - Desencriptação seletiva: Só campos sensíveis projetados
-    
-    FILTRO DE ESTADO ATIVO (view_mode):
-    - 'active_only' (DEFAULT): Apenas processos em curso
-    - 'all': Todos os processos ativos e inativos
-    - 'historical': Apenas processos concluídos e desistências
-    
-    Args:
-        limit: Número de processos por página (máximo 100)
-        cursor: Cursor da página anterior
-        sort_field: Campo de ordenação (created_at, updated_at, client_name)
-        sort_order: Direção (asc ou desc)
-        status: Filtrar por status
-        search: Pesquisar por nome/email
-        view_mode: Modo de visualização
-    
-    Returns:
-        {processes, next_cursor, has_more, view_mode}
-    """
-    from services.cursor_pagination import CursorPaginator
-
-    role = user["role"]
-
-    query = build_process_list_query(
-        user,
-        role,
-        status=status,
-        search=search,
-        view_mode=view_mode,
-        search_mode="multiword",
-    )
-
-    order = -1 if sort_order.lower() == "desc" else 1
-
-    paginator = CursorPaginator(
-        collection=db.processes,
-        default_limit=20,
-        max_limit=100,
-        default_sort_field="client_name",
-        default_sort_order=1,
-    )
-
-    result = await paginator.paginate(
-        query=query,
+    """Listar processos com paginação cursor-based."""
+    return await run_get_processes_paginated(
+        user=user,
+        role=user["role"],
         limit=limit,
         cursor=cursor,
         sort_field=sort_field,
-        sort_order=order,
-        projection=PROCESS_LIST_PROJECTION,
+        sort_order=sort_order,
+        status=status,
+        search=search,
+        view_mode=view_mode,
+        decrypt_list_fn=decrypt_processes_list,
+        list_projection=PROCESS_LIST_PROJECTION,
     )
-
-    result["items"] = decrypt_processes_list(
-        result["items"],
-        fields_to_decrypt=["client_phone", "client_nif"],
-    )
-
-    await enrich_processes_portal_flags(result["items"])
-    await enrich_processes_latest_notes(result["items"])
-
-    return build_process_cursor_list_response(result=result, view_mode=view_mode)
 
 
 @router.get("/kanban/diagnose")
@@ -586,26 +437,10 @@ async def get_kanban_board(
     completed_days: Optional[int] = Query(30, description="Limitar concluídos/desistências aos últimos N dias (0 = sem limite)"),
     user: dict = Depends(require_staff())
 ):
-    """
-    Get processes organized by status for Kanban board.
-    Admin/CEO see all, others see only their assigned processes.
-    Supports filtering by consultor_id, mediador_id, indexacao_id, and parceiro_id.
-    Supports multiple consultants and intermediaries per process.
-    
-    FILTRO DE ESTADO ATIVO (view_mode):
-    - 'active_only': Apenas processos em curso (exclui concluídos, desistências)
-    - 'all' (DEFAULT): Todos os processos (incluindo arquivo)
-    
-    FILTRO DE DATAS (completed_days):
-    - Limita processos concluídos/desistências aos últimos N dias
-    - Default: 30 dias. Use 0 para sem limite.
-    """
-    role = user["role"]
-    user_id = user["id"]
-
-    query = build_kanban_query(
-        user,
-        role,
+    """Kanban por status com filtros de assignee / view_mode / completed_days."""
+    return await run_get_kanban_board(
+        user=user,
+        role=user["role"],
         show_all=bool(show_all),
         consultor_id=consultor_id,
         mediador_id=mediador_id,
@@ -613,47 +448,8 @@ async def get_kanban_board(
         parceiro_id=parceiro_id,
         view_mode=view_mode,
         completed_days=completed_days,
-    )
-    if role == UserRole.INDEXACAO:
-        logger.info(
-            f"[KANBAN-BQ] Indexacao {user_id} — vista scoped global: "
-            f"atribuídos a si OU em fila_espera"
-        )
-
-    statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-    processes = await db.processes.find(query, PROCESS_KANBAN_PROJECTION).to_list(1000)
-    processes = decrypt_processes_list(
-        processes,
-        fields_to_decrypt=["client_phone", "client_nif"],
-    )
-
-    await fill_missing_process_client_contacts(processes)
-    await enrich_processes_portal_flags(processes)
-    await enrich_processes_latest_activity(processes)
-
-    users = await db.users.find({}, {"_id": 0, "id": 1, "name": 1, "role": 1}).to_list(1000)
-    user_map = {u["id"]: u for u in users}
-
-    indexacao_count = sum(1 for p in processes if p.get("assigned_indexacao_id"))
-    parceiro_count = sum(1 for p in processes if p.get("assigned_parceiro_id"))
-    logger.info(
-        f"[Kanban Export] {len(processes)} processos: "
-        f"{indexacao_count} com indexação, {parceiro_count} com parceiro"
-    )
-
-    processes_by_status = group_processes_by_status(processes)
-    active_count, inactive_count = await count_kanban_active_inactive(query)
-    sort_all_kanban_columns(processes_by_status)
-    kanban = safe_build_kanban_columns(statuses, processes_by_status, user_map, user_id)
-
-    return build_kanban_board_payload(
-        columns=kanban,
-        active_count=active_count,
-        inactive_count=inactive_count,
-        role=role,
-        user_id=user_id,
-        view_mode=view_mode,
-        completed_days=completed_days,
+        decrypt_list_fn=decrypt_processes_list,
+        kanban_projection=PROCESS_KANBAN_PROJECTION,
     )
 
 
@@ -667,75 +463,19 @@ async def get_my_clients(
     UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
     UserRole.INDEXACAO
 ]))):
-    """
-    Obter lista de clientes atribuídos ao utilizador atual.
-    
-    OTIMIZAÇÕES APLICADAS:
-    - MongoDB Projection: Apenas campos necessários
-    - Paginação: Não carrega todos os clientes de uma vez
-    - Desencriptação seletiva: Só client_phone e client_nif
-    
-    Retorna uma lista com:
-    - Nome do cliente
-    - Fase do processo
-    - Ações pendentes (tarefas, documentos a atualizar)
-    
-    Permissões:
-    - Consultor: Apenas os seus clientes (assigned_consultor_ids ou assigned_consultor_id)
-    - Intermediário/Mediador: Apenas os seus clientes (assigned_mediador_ids ou criados por eles)
-    - Admin/CEO: Todos os clientes (para supervisão)
-    
-    Suporta múltiplos consultores e intermediários por processo.
-    """
-    user_id = user["id"]
-    user_email = user.get("email", "")
-    role = get_effective_role(request, user)
-
-    query = build_my_clients_process_query(user_id, user_email, role)
-
-    processes = await db.processes.find(
-        query,
-        PROCESS_MY_CLIENTS_PROJECTION,
-    ).to_list(5000)
-    processes = decrypt_processes_list(
-        processes,
-        fields_to_decrypt=["client_phone", "client_nif"],
-    )
-
-    leads = await fetch_orphan_leads_for_my_clients(
-        db, user_id, role, build_my_clients_leads_query,
-    )
-    status_map = await load_workflow_status_map()
-
-    all_items = sorted(processes + leads, key=my_clients_sort_key(status_map))
-    paginated_items, total, pages = slice_page(all_items, page, size)
-
-    process_ids = process_ids_from_my_clients_page(paginated_items)
-    tasks_by_process = await fetch_pending_tasks_by_process(db, process_ids)
-    consultor_map = await fetch_consultor_name_map(db, paginated_items)
-    unread_map = await fetch_unread_messages_map(db, process_ids)
-    new_docs_map = await fetch_new_documents_map(db, process_ids)
-    notes_map = await fetch_latest_activity_notes_map(db, process_ids)
-
-    clients_list = assemble_my_clients_rows(
-        paginated_items,
-        status_map=status_map,
-        tasks_by_process=tasks_by_process,
-        consultor_map=consultor_map,
-        unread_map=unread_map,
-        new_docs_map=new_docs_map,
-        notes_map=notes_map,
-    )
-
-    return build_my_clients_response(
-        clients=clients_list,
-        total=total,
+    """Lista clientes/processos atribuídos ao utilizador (com leads órfãos)."""
+    return await run_get_my_clients(
+        db=db,
+        user=user,
+        role=get_effective_role(request, user),
         page=page,
         size=size,
-        pages=pages,
-        user_id=user_id,
-        user_role=role,
-        leads_count=len(leads),
+        decrypt_list_fn=decrypt_processes_list,
+        my_clients_projection=PROCESS_MY_CLIENTS_PROJECTION,
+        build_process_query_fn=build_my_clients_process_query,
+        build_leads_query_fn=build_my_clients_leads_query,
+        slice_page_fn=slice_page,
+        load_status_map_fn=load_workflow_status_map,
     )
 
 
@@ -992,98 +732,21 @@ async def delete_process(
 @router.put("/{process_id}", response_model=ProcessResponse)
 async def update_process(process_id: str, data: ProcessUpdate, request: Request, user: dict = Depends(get_current_user)):
     """Atualiza processo (negócio em `processes`, pessoais em `clients`) com ACL por role + CDC."""
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    process = decrypt_process_doc_or_500(process, process_id, decrypt_sensitive_data)
-    role = user["role"]
-
-    raw_body = {}
-    try:
-        raw_body = await request.json()
-    except Exception:
-        pass
-    raw_body, audit_reason, ai_suggested = parse_update_request_meta(raw_body)
-
-    client_id = process.get("client_id")
-    client_updates = extract_client_updates_from_body(raw_body)
-    raw_client_email = raw_body.get("client_email")
-    raw_client_phone = raw_body.get("client_phone")
-
-    if client_updates and client_id:
-        client_updates = prepare_encrypted_client_updates(client_updates)
-        await apply_client_personal_updates_from_process_put(
-            client_id, client_updates, process_id,
-        )
-
-    new_client_id = raw_body.get("client_id")
-    await maybe_reassign_primary_client_with_audit(
-        process=process,
-        process_id=process_id,
-        new_client_id=new_client_id,
-        role=role,
-        user=user,
-        request=request,
-        log_history_fn=log_history,
-        log_audit_event_fn=log_audit_event,
-    )
-
-    assert_process_editable_for_role(process.get("status"), role)
-    update_data = seed_update_data(
-        process=process,
-        client_id_before=client_id,
-        new_client_id=new_client_id,
-        raw_client_email=raw_client_email,
-        raw_client_phone=raw_client_phone,
-    )
-
-    valid_statuses = await load_valid_workflow_status_names()
-    perms = build_role_update_permissions(role)
-    can_update_status = perms["can_update_status"]
-
-    assert_cliente_owns_process(process, user)
-    if role != UserRole.CLIENTE:
-        await apply_staff_business_updates(
-            process=process,
-            process_id=process_id,
-            data=data,
-            raw_body=raw_body,
-            update_data=update_data,
-            user=user,
-            request=request,
-            audit_reason=audit_reason,
-            ai_suggested=ai_suggested,
-            perms=perms,
-            valid_statuses=valid_statuses,
-        )
-
-    update_data = encrypt_process_update_payload(update_data, process_id)
-    inject_cdc_context(update_data, user)
-    attach_field_metadata_if_present(update_data, process, raw_body)
-
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
-    updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
-
-    await run_process_update_side_effects(
-        process=process,
-        process_id=process_id,
-        data=data,
-        updated=updated,
-        user=user,
-        can_update_status=can_update_status,
-        broadcast_fn=broadcast_process_delta,
-        ensure_finance_snapshot_fn=_ensure_finance_snapshot,
-        decrypt_fn=decrypt_sensitive_data,
-    )
-
-    updated = await decrypt_and_populate_updated_process(
-        updated,
+    return await run_update_process(
         process_id,
+        data,
+        request,
+        user,
         decrypt_fn=decrypt_sensitive_data,
         populate_fn=populate_client_data,
+        extract_client_updates_fn=extract_client_updates_from_body,
+        inject_cdc_fn=inject_cdc_context,
+        broadcast_fn=broadcast_process_delta,
+        ensure_finance_snapshot_fn=_ensure_finance_snapshot,
+        log_history_fn=log_history,
+        log_audit_event_fn=log_audit_event,
+        cliente_role=UserRole.CLIENTE,
     )
-    return build_process_response_or_500(updated, process_id)
 
 
 # ====================================================================
@@ -1094,73 +757,28 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
 @router.post("/{process_id}/assign")
 async def assign_process(
     process_id: str, 
-    consultor_ids: Optional[str] = None,  # String separada por vírgulas ou ID único
-    mediador_ids: Optional[str] = None,   # String separada por vírgulas ou ID único
+    consultor_ids: Optional[str] = None,
+    mediador_ids: Optional[str] = None,
     indexacao_id: Optional[str] = None,
-    parceiro_id: Optional[str] = None,   # Parceiro (utilizador fantasma)
-    # Parâmetros de compatibilidade (deprecated)
+    parceiro_id: Optional[str] = None,
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
     user: dict = Depends(require_staff())
 ):
-    """
-    Atribuir consultores, intermediários, utilizador de indexação e/ou parceiro a um processo.
-    
-    Suporta múltiplos consultores e intermediários:
-    - consultor_ids: String com IDs separados por vírgula (ex: "id1,id2,id3")
-    - mediador_ids: String com IDs separados por vírgula (ex: "id1,id2,id3")
-    
-    O parceiro é um utilizador fantasma (sem acesso ao sistema) para fins de tracking.
-    
-    Mantém compatibilidade com os parâmetros antigos (consultor_id, mediador_id).
-    Qualquer utilizador staff pode atribuir.
-    """
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    update_data, newly = await build_staff_assign_update(
-        process=process,
-        process_id=process_id,
-        user=user,
+    """Atribuir consultores/intermediários/indexação/parceiro (multi-assignee)."""
+    return await run_staff_assign_process(
+        process_id,
+        user,
         consultor_ids=consultor_ids,
         mediador_ids=mediador_ids,
         indexacao_id=indexacao_id,
         parceiro_id=parceiro_id,
         consultor_id=consultor_id,
         mediador_id=mediador_id,
+        inject_cdc_fn=inject_cdc_context,
+        invalidate_stats_fn=invalidate_stats_cache,
+        broadcast_fn=broadcast_process_delta,
     )
-
-    inject_cdc_context(update_data, user)
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
-
-    await invalidate_stats_cache(user_id=user.get("id"))
-
-    updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    await broadcast_process_delta(
-        event_type=WSEventType.PROCESS_ASSIGNED,
-        process_id=process_id,
-        process_number=updated_process.get("process_number"),
-        client_name=updated_process.get("client_name"),
-        status=updated_process.get("status"),
-        assigned_consultor_ids=updated_process.get("assigned_consultor_ids", []),
-        assigned_mediador_ids=updated_process.get("assigned_mediador_ids", []),
-        consultor_names=updated_process.get("consultor_names", []),
-        mediador_names=updated_process.get("mediador_names", []),
-        prioridade=updated_process.get("prioridade"),
-        updated_at=updated_process.get("updated_at"),
-    )
-
-    client_name = process.get("client_name", "Cliente")
-    process_number = process.get("process_number", "")
-    schedule_assignment_emails(
-        newly,
-        process_id=process_id,
-        client_name=client_name,
-        process_number=process_number,
-    )
-
-    return {"success": True, "message": "Atribuições actualizadas com sucesso"}
 
 
 @router.post("/{process_id}/assign-me")
@@ -1168,28 +786,13 @@ async def assign_me_to_process(
     process_id: str,
     user: dict = Depends(require_staff())
 ):
-    """
-    Permite ao utilizador atribuir-se a um processo.
-    O utilizador será atribuído como consultor ou mediador dependendo do seu papel.
-    Suporta múltiplos consultores e intermediários.
-    """
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    update_data, assignment_type = build_assign_me_update(process, user)
-    inject_cdc_context(update_data, user)
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
-    await log_history(
-        process_id, user, f"Atribuiu-se como {assignment_type}",
-        f"assigned_{assignment_type}_ids", None, user["name"],
+    """Atribuir o utilizador actual ao processo (consultor ou mediador)."""
+    return await run_assign_me_to_process(
+        process_id,
+        user,
+        inject_cdc_fn=inject_cdc_context,
+        log_history_fn=log_history,
     )
-
-    return {
-        "success": True,
-        "message": f"Atribuído como {assignment_type}",
-        "assignment_type": assignment_type,
-    }
 
 
 @router.post("/{process_id}/unassign-me")
@@ -1197,34 +800,13 @@ async def unassign_me_from_process(
     process_id: str,
     user: dict = Depends(require_staff())
 ):
-    """
-    Permite ao utilizador remover-se de um processo.
-    Suporta múltiplos consultores e intermediários.
-    """
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    update_data, removed_from = build_unassign_me_update(process, user)
-    if "consultor" in removed_from:
-        await log_history(
-            process_id, user, "Removeu-se como consultor",
-            "assigned_consultor_ids", user["name"], None,
-        )
-    if "intermediario" in removed_from:
-        await log_history(
-            process_id, user, "Removeu-se como intermediário",
-            "assigned_mediador_ids", user["name"], None,
-        )
-
-    inject_cdc_context(update_data, user)
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
-
-    return {
-        "success": True,
-        "message": f"Removido como {', '.join(removed_from)}",
-        "removed_from": removed_from,
-    }
+    """Remover o utilizador actual do processo."""
+    return await run_unassign_me_from_process(
+        process_id,
+        user,
+        inject_cdc_fn=inject_cdc_context,
+        log_history_fn=log_history,
+    )
 
 
 @router.post("/{process_id}/resolve-conflict")

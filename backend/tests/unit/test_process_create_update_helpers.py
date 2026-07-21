@@ -734,6 +734,34 @@ class TestListAndMyClientsOrchestration:
         assert cursor_resp["processes"][0]["id"] == "p1"
         assert cursor_resp["has_more"] is True
 
+    def test_staff_assign_helpers_still_exported(self):
+        from services.process_staff_assignment import (
+            run_staff_assign_process,
+            run_assign_me_to_process,
+            run_unassign_me_from_process,
+            build_assign_me_update,
+            build_unassign_me_update,
+        )
+        assert callable(run_staff_assign_process)
+        assert callable(run_assign_me_to_process)
+        assert callable(run_unassign_me_from_process)
+        upd, kind = build_assign_me_update(
+            {"assigned_consultor_ids": []},
+            {"id": "u1", "name": "Ana", "role": "consultor"},
+        )
+        assert kind == "consultor"
+        assert "u1" in upd["assigned_consultor_ids"]
+        clear, removed = build_unassign_me_update(
+            {
+                "assigned_consultor_ids": ["u1"],
+                "consultor_names": ["Ana"],
+                "assigned_mediador_ids": [],
+            },
+            {"id": "u1", "name": "Ana", "role": "consultor"},
+        )
+        assert "consultor" in removed
+        assert clear["assigned_consultor_ids"] == []
+
     def test_assemble_my_clients_rows(self):
         from services.process_my_clients import (
             assemble_my_clients_rows,

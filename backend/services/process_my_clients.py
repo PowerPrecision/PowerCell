@@ -314,3 +314,68 @@ def process_ids_from_my_clients_page(paginated_items: list[dict]) -> list[str]:
         p["id"] for p in paginated_items
         if p.get("id") and not p.get("is_lead")
     ]
+
+
+async def run_get_my_clients(
+    *,
+    db: Any,
+    user: dict,
+    role: str,
+    page: int,
+    size: int,
+    decrypt_list_fn,
+    my_clients_projection: dict,
+    build_process_query_fn,
+    build_leads_query_fn,
+    slice_page_fn,
+    load_status_map_fn,
+) -> dict:
+    """Orquestra GET /my-clients."""
+    user_id = user["id"]
+    user_email = user.get("email", "")
+
+    query = build_process_query_fn(user_id, user_email, role)
+    processes = await db.processes.find(
+        query,
+        my_clients_projection,
+    ).to_list(5000)
+    processes = decrypt_list_fn(
+        processes,
+        fields_to_decrypt=["client_phone", "client_nif"],
+    )
+
+    leads = await fetch_orphan_leads_for_my_clients(
+        db, user_id, role, build_leads_query_fn,
+    )
+    status_map = await load_status_map_fn()
+
+    all_items = sorted(processes + leads, key=my_clients_sort_key(status_map))
+    paginated_items, total, pages = slice_page_fn(all_items, page, size)
+
+    process_ids = process_ids_from_my_clients_page(paginated_items)
+    tasks_by_process = await fetch_pending_tasks_by_process(db, process_ids)
+    consultor_map = await fetch_consultor_name_map(db, paginated_items)
+    unread_map = await fetch_unread_messages_map(db, process_ids)
+    new_docs_map = await fetch_new_documents_map(db, process_ids)
+    notes_map = await fetch_latest_activity_notes_map(db, process_ids)
+
+    clients_list = assemble_my_clients_rows(
+        paginated_items,
+        status_map=status_map,
+        tasks_by_process=tasks_by_process,
+        consultor_map=consultor_map,
+        unread_map=unread_map,
+        new_docs_map=new_docs_map,
+        notes_map=notes_map,
+    )
+
+    return build_my_clients_response(
+        clients=clients_list,
+        total=total,
+        page=page,
+        size=size,
+        pages=pages,
+        user_id=user_id,
+        user_role=role,
+        leads_count=len(leads),
+    )
