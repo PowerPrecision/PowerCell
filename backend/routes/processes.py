@@ -94,15 +94,14 @@ from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
     sanitize_string, sanitize_url, log_sanitization_rejection
 )
-from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
 from services.process_status import (
-    INACTIVE_STATUSES, ARCHIVED_STATUSES, PRE_REGISTO_STATUS,
-    LEAD_STATUS_VALUES, PRE_REGISTO_BYPASS_ROLES, _should_hide_pre_registo,
+    INACTIVE_STATUSES, ARCHIVED_STATUSES, PRE_REGISTO_STATUS, LEAD_STATUS_VALUES, PRE_REGISTO_BYPASS_ROLES, _should_hide_pre_registo,
 )
 from services.process_finance import (
     create_finance_snapshot as _create_finance_snapshot,
     ensure_finance_snapshot as _ensure_finance_snapshot,
 )
+from services.process_list_filters import build_process_list_query
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
 
@@ -990,166 +989,19 @@ async def get_processes(
         }
     """
     role = get_effective_role(request, user)
-    
-    # ====================================================================
-    # CONSTRUÇÃO ROBUSTA DA QUERY MONGODB
-    # Regra: TODOS os filtros são combinados com $and — nunca se anulam
-    # Estrutura: { $and: [filtro_is_deleted, filtro_role, filtro_status, filtro_search] }
-    # ====================================================================
-    and_conditions = []
-    
-    # ====================================================================
-    # FILTRO DE INTEGRIDADE: is_deleted
-    # Regra base: is_deleted != True (sempre, a menos que explicitamente pedido)
-    # EXCEÇÃO: status="eliminados" ou view_mode="deleted" → inverter lógica
-    # ====================================================================
-    is_admin = role in [UserRole.ADMIN, UserRole.CEO]
-    is_deleted_filter = None
-    
-    # Verificar se o utilizador quer VER eliminados
-    wants_deleted = (status == "eliminados" or view_mode == "deleted")
-    
-    if wants_deleted and is_admin:
-        # Admin quer ver eliminados → mostrar APENAS os eliminados
-        is_deleted_filter = {"is_deleted": True}
-    elif wants_deleted:
-        # Non-admin quer ver eliminados → mostrar eliminados do seu escopo
-        is_deleted_filter = {"is_deleted": True}
-    else:
-        # Comportamento normal: excluir eliminados
-        is_deleted_filter = {"is_deleted": {"$ne": True}}
-    
-    and_conditions.append(is_deleted_filter)
-    
-    # ====================================================================
-    # FILTRO DE ROLE (quem pode ver quê)
-    # ====================================================================
-    # Se show_all=True (visão global), ignorar filtro por utilizador
-    if show_all:
-        pass  # Visão global absoluta — todos os processos para todos os roles
-    elif role == "__all_roles__":
-        # Context Isolation: modo "all" — combinar queries de TODOS os cargos do utilizador
-        all_roles = get_all_user_roles(user)
-        role_conditions = []
-        for r in all_roles:
-            if r == UserRole.CONSULTOR:
-                role_conditions.extend([
-                    {"assigned_consultor_ids": user["id"]},
-                    {"assigned_consultor_id": user["id"]}
-                ])
-            elif r == UserRole.INTERMEDIARIO:
-                role_conditions.extend([
-                    {"assigned_mediador_ids": user["id"]},
-                    {"assigned_mediador_id": user["id"]}
-                ])
-            elif r == UserRole.INDEXACAO:
-                role_conditions.extend([
-                    {"assigned_indexacao_id": user["id"]},
-                    {"created_by": user.get("email", "")}
-                ])
-            elif r in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
-                # Cargos que vêem tudo — sem condição específica
-                role_conditions = []  # Reset — estes cargos não precisam de $or
-                break
-        if role_conditions:
-            and_conditions.append({"$or": role_conditions})
-    elif role == UserRole.CLIENTE:
-        and_conditions.append({"client_id": user["id"]})
-    elif role == UserRole.INDEXACAO:
-        # PACOTE BQ — indexacao vê globalmente (across all consultors/mediadores)
-        # mas scoped a: atribuídos a si OU criados por si OU na fila de espera.
-        and_conditions.append({"$or": [
-            {"assigned_indexacao_id": user["id"]},
-            {"created_by": user.get("email", "")},
-            {"status": "fila_espera"},
-        ]})
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
-        pass  # Vêem todos
-    elif role == UserRole.CONSULTOR:
-        and_conditions.append({"$or": [
-            {"assigned_consultor_ids": user["id"]},
-            {"assigned_consultor_id": user["id"]}
-        ]})
-    elif role == UserRole.INTERMEDIARIO:
-        and_conditions.append({"$or": [
-            {"assigned_mediador_ids": user["id"]},
-            {"assigned_mediador_id": user["id"]}
-        ]})
 
-    # ====================================================================
-    # FILTRO DE ESTADO ATIVO (view_mode)
-    # ====================================================================
-    # Se o utilizador pediu status="eliminados", NÃO aplicar filtro de view_mode
-    if status == "eliminados":
-        # Já tratado pelo is_deleted_filter acima
-        pass
-    elif view_mode == "active_only":
-        # DEFAULT: Apenas processos em curso
-        and_conditions.append({"status": {"$nin": INACTIVE_STATUSES}})
-    elif view_mode == "historical":
-        # Apenas processos arquivados (concluídos e desistências)
-        and_conditions.append({"status": {"$in": ARCHIVED_STATUSES}})
-    # view_mode == 'all': Não aplica filtro de status (mostra tudo exceto eliminados)
-    
-    # Adicionar filtro de status explícito (sobrepõe-se ao view_mode, exceto "eliminados")
-    if status and status != "eliminados":
-        and_conditions.append({"status": status})
-
-    # PACOTE BZ — Filtro de estado de indexação passado como query param
-    # (antes era filtrado localmente no frontend, causando tamanhos de página irregulares)
-    if is_indexed is not None:
-        if is_indexed is True:
-            and_conditions.append({"is_indexed": True})
-        else:
-            # false = pendentes (is_indexed != True, incluindo null/undefined)
-            and_conditions.append({"$or": [
-                {"is_indexed": {"$ne": True}},
-                {"is_indexed": {"$exists": False}},
-            ]})
-
-    # ====================================================================
-    # PESQUISA DE TEXTO (expandida)
-    # Campos: client_name, client_email, client_nif, client_phone, process_number (ref)
-    # Sempre combinada com $and — NUNCA anula os filtros
-    # ====================================================================
-    if search:
-        name_regex = create_accent_insensitive_regex(search)
-        simple_regex = {"$regex": re.escape(search), "$options": "i"}
-        
-        search_or_conditions = [
-            {"client_name": name_regex},
-            {"client_email": simple_regex},
-            {"client_nif": simple_regex},
-            {"client_phone": simple_regex},
-            {"process_number": simple_regex},
-        ]
-        
-        # Pesquisar também no campo "ref" (alias para process_number)
-        # e em personal_data aninhado (para NIF/telefone que podem estar encriptados)
-        search_condition = {"$or": search_or_conditions}
-        and_conditions.append(search_condition)
-
-    # ====================================================================
-    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
-    # ====================================================================
-    # Consultores/intermediários/indexação nunca veem pré-registos. Admins
-    # veem-nos apenas quando estão a pesquisar ativamente ou a filtrar por
-    # status explícito (incl. pré_registo). O helper _should_hide_pre_registo
-    # encapsula toda a lógica de bypass.
-    # ====================================================================
-    if _should_hide_pre_registo(role, status, search):
-        and_conditions.append({"status": {"$nin": LEAD_STATUS_VALUES}})
-
-    # ====================================================================
-    # MONTAR QUERY FINAL COM $and
-    # Se há apenas 1 condição, não precisa de $and (otimização)
-    # ====================================================================
-    if len(and_conditions) == 1:
-        query = and_conditions[0]
-    elif len(and_conditions) > 1:
-        query = {"$and": and_conditions}
-    else:
-        query = {}
+    # Query MongoDB partilhada (services/process_list_filters.py)
+    query = build_process_list_query(
+        user,
+        role,
+        status=status,
+        search=search,
+        view_mode=view_mode,
+        show_all=bool(show_all),
+        is_indexed=is_indexed,
+        all_roles=get_all_user_roles(user) if role == "__all_roles__" else None,
+        search_mode="accent",
+    )
 
     # Calcular offset
     skip = (page - 1) * size
@@ -1418,99 +1270,18 @@ async def get_processes_paginated(
     from services.cursor_pagination import CursorPaginator
 
     role = user["role"]
-    
-    # ====================================================================
-    # CONSTRUÇÃO ROBUSTA DA QUERY MONGODB (igual ao GET /processes)
-    # Regra: TODOS os filtros são combinados com $and — nunca se anulam
-    # ====================================================================
-    and_conditions = []
-    
-    # ====================================================================
-    # FILTRO DE INTEGRIDADE: is_deleted
-    # ====================================================================
-    is_admin = role in [UserRole.ADMIN, UserRole.CEO]
-    wants_deleted = (status == "eliminados" or view_mode == "deleted")
-    
-    if wants_deleted:
-        is_deleted_filter = {"is_deleted": True}
-    else:
-        is_deleted_filter = {"is_deleted": {"$ne": True}}
-    
-    and_conditions.append(is_deleted_filter)
 
-    # Construir query baseada no papel
-    if role == UserRole.CLIENTE:
-        and_conditions.append({"client_id": user["id"]})
-    elif role == UserRole.INDEXACAO:
-        # PACOTE BQ — indexacao vê globalmente mas scoped a: atribuídos + criados + fila_espera
-        and_conditions.append({"$or": [
-            {"assigned_indexacao_id": user["id"]},
-            {"created_by": user.get("email", "")},
-            {"status": "fila_espera"},
-        ]})
-    elif role in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
-        pass
-    elif role == UserRole.CONSULTOR:
-        and_conditions.append({"$or": [
-            {"assigned_consultor_ids": user["id"]},
-            {"assigned_consultor_id": user["id"]}
-        ]})
-    elif role == UserRole.INTERMEDIARIO:
-        and_conditions.append({"$or": [
-            {"assigned_mediador_ids": user["id"]},
-            {"assigned_mediador_id": user["id"]}
-        ]})
+    # Query MongoDB partilhada (services/process_list_filters.py)
+    # search_mode="multiword" preserva o comportamento anterior deste endpoint.
+    query = build_process_list_query(
+        user,
+        role,
+        status=status,
+        search=search,
+        view_mode=view_mode,
+        search_mode="multiword",
+    )
 
-    # ====================================================================
-    # FILTRO DE ESTADO ATIVO (view_mode)
-    # ====================================================================
-    if status == "eliminados":
-        pass  # Já tratado pelo is_deleted_filter
-    elif view_mode == "active_only":
-        and_conditions.append({"status": {"$nin": INACTIVE_STATUSES}})
-    elif view_mode == "historical":
-        and_conditions.append({"status": {"$in": ARCHIVED_STATUSES}})
-
-    # Adicionar filtros opcionais de status (exceto "eliminados")
-    if status and status != "eliminados":
-        and_conditions.append({"status": status})
-    
-    # ====================================================================
-    # PESQUISA DE TEXTO (expandida — mesmo campos que GET /processes)
-    # Campos: client_name, client_email, client_nif, client_phone, process_number
-    # ====================================================================
-    if search:
-        name_filter = build_multiword_search_filter(search, "client_name")
-        simple_regex = {"$regex": re.escape(search), "$options": "i"}
-        
-        search_or_conditions = []
-        # Adicionar filtro de nome (pode ser $and se multi-word)
-        if "$and" in name_filter:
-            search_or_conditions.append(name_filter)
-        elif name_filter:
-            search_or_conditions.append(name_filter)
-        search_or_conditions.append({"client_email": simple_regex})
-        search_or_conditions.append({"client_nif": simple_regex})
-        search_or_conditions.append({"client_phone": simple_regex})
-        search_or_conditions.append({"process_number": simple_regex})
-        
-        search_condition = {"$or": search_or_conditions}
-        and_conditions.append(search_condition)
-
-    # ====================================================================
-    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO
-    # ====================================================================
-    if _should_hide_pre_registo(role, status, search):
-        and_conditions.append({"status": {"$nin": LEAD_STATUS_VALUES}})
-
-    # Montar query final
-    if len(and_conditions) == 1:
-        query = and_conditions[0]
-    elif len(and_conditions) > 1:
-        query = {"$and": and_conditions}
-    else:
-        query = {}
-    
     # Converter sort_order para int
     order = -1 if sort_order.lower() == "desc" else 1
     
