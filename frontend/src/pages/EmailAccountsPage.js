@@ -13,7 +13,8 @@
  * @context {AuthContext} — Consumes token, user for verifying permissions and API calls
  * @route /admin/email-accounts — Página acessível apenas a admin/ceo
  */
-import React, { useState, useEffect, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -57,6 +58,15 @@ import {
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+async function fetchSystemConfig(token) {
+  const res = await fetch(`${API_URL}/api/system-config`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Erro ao carregar configuração do sistema");
+  const response = await res.json();
+  return response.config || response;
+}
+
 // ====================================================================
 // Card 1: Email do Sistema (Transacional) — system_smtp
 // Copied from IntegrationsConfigSection Bloco A
@@ -70,39 +80,28 @@ const SystemSmtpCard = () => {
     smtp_from_name: "",
     email_signature: "",
   });
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(null);
   // Resultado do teste isolado por secção (evita bleed para outros sub-menus)
   const [testResult, setTestResult] = useState(null);
+  const hydratedRef = useRef(false);
+
+  const { data: systemConfig, isLoading: loading } = useQuery({
+    queryKey: ["system-config"],
+    enabled: Boolean(token),
+    queryFn: () => fetchSystemConfig(token),
+  });
 
   useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/system-config`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const response = await res.json();
-          const data = response.config || response;
-          if (data.system_smtp) {
-            setSystemSmtp((prev) => ({
-              ...prev,
-              resend_api_key: data.system_smtp.resend_api_key || "",
-              smtp_from_email: data.system_smtp.smtp_from_email || "",
-              smtp_from_name: data.system_smtp.smtp_from_name || "",
-              email_signature: data.system_smtp.email_signature || "",
-            }));
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching system_smtp config:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchConfig();
-  }, [token]);
+    if (!systemConfig?.system_smtp || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setSystemSmtp({
+      resend_api_key: systemConfig.system_smtp.resend_api_key || "",
+      smtp_from_email: systemConfig.system_smtp.smtp_from_email || "",
+      smtp_from_name: systemConfig.system_smtp.smtp_from_name || "",
+      email_signature: systemConfig.system_smtp.email_signature || "",
+    });
+  }, [systemConfig]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -299,36 +298,25 @@ const IndexationImapCard = () => {
     email_user: "",
     app_password: "",
   });
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const hydratedRef = useRef(false);
+
+  const { data: systemConfig, isLoading: loading } = useQuery({
+    queryKey: ["system-config"],
+    enabled: Boolean(token),
+    queryFn: () => fetchSystemConfig(token),
+  });
 
   useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/system-config`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const response = await res.json();
-          const data = response.config || response;
-          if (data.system_webmail) {
-            setSystemWebmail((prev) => ({
-              ...prev,
-              imap_host: data.system_webmail.imap_host || "",
-              imap_port: String(data.system_webmail.imap_port || 993),
-              email_user: data.system_webmail.email_user || "",
-              app_password: data.system_webmail.app_password ? "••••••••" : "",
-            }));
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching system_webmail config:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchConfig();
-  }, [token]);
+    if (!systemConfig?.system_webmail || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setSystemWebmail({
+      imap_host: systemConfig.system_webmail.imap_host || "",
+      imap_port: String(systemConfig.system_webmail.imap_port || 993),
+      email_user: systemConfig.system_webmail.email_user || "",
+      app_password: systemConfig.system_webmail.app_password ? "••••••••" : "",
+    });
+  }, [systemConfig]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -436,31 +424,26 @@ const SHARED_EMAIL_ROLES = [
 
 const SharedEmailCard = () => {
   const { token } = useAuth();
-  const [configs, setConfigs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [authenticating, setAuthenticating] = useState(null);
   const [syncing, setSyncing] = useState(null);
 
-  const fetchConfigs = async () => {
-    setLoading(true);
-    try {
+  const {
+    data: configs = [],
+    isLoading: loading,
+    refetch: fetchConfigs,
+  } = useQuery({
+    queryKey: ["shared-email"],
+    enabled: Boolean(token),
+    queryFn: async () => {
       const res = await fetch(`${API_URL}/api/admin/shared-email`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setConfigs(data.configs || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar configs de email partilhado:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchConfigs();
-  }, []);
+      if (!res.ok) throw new Error("Erro ao carregar configs de email partilhado");
+      const data = await res.json();
+      return data.configs || [];
+    },
+  });
 
   // Escutar postMessage do popup OAuth
   useEffect(() => {
@@ -468,7 +451,7 @@ const SharedEmailCard = () => {
       if (event.data?.type === "shared_google_oauth_success") {
         toast.success(`Google OAuth conectado para ${event.data.email}`);
         setAuthenticating(null);
-        fetchConfigs();
+        queryClient.invalidateQueries({ queryKey: ["shared-email"] });
       }
       if (event.data?.type === "shared_google_oauth_error") {
         toast.error(`Autenticação cancelada: ${event.data.error}`);
@@ -477,7 +460,7 @@ const SharedEmailCard = () => {
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, []);
+  }, [queryClient]);
 
   const handleGoogleAuth = async (role, emailAddress) => {
     setAuthenticating(role);
@@ -724,9 +707,7 @@ const SharedEmailCard = () => {
 
 const CompanyEmailCard = () => {
   const { token } = useAuth();
-  const [configs, setConfigs] = useState([]);
-  const [companies, setCompanies] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [saving, setSaving] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -741,41 +722,39 @@ const CompanyEmailCard = () => {
   });
   const [deletingCompany, setDeletingCompany] = useState(null);
 
-  const fetchConfigs = async () => {
-    setLoading(true);
-    try {
+  const {
+    data: configs = [],
+    isLoading: loading,
+  } = useQuery({
+    queryKey: ["company-email-configs"],
+    enabled: Boolean(token),
+    queryFn: async () => {
       const res = await fetch(`${API_URL}/api/admin/company-email-configs`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setConfigs(data.configs || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar configs:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
+      if (!res.ok) throw new Error("Erro ao carregar configs");
+      const data = await res.json();
+      return data.configs || [];
+    },
+  });
 
-  const fetchCompanies = async () => {
-    try {
+  const { data: companies = [] } = useQuery({
+    queryKey: ["company-email-available-companies"],
+    enabled: Boolean(token),
+    queryFn: async () => {
       const res = await fetch(`${API_URL}/api/admin/company-email-configs/available-companies`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setCompanies(data.companies || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar empresas:", error);
-    }
-  };
+      if (!res.ok) throw new Error("Erro ao carregar empresas");
+      const data = await res.json();
+      return data.companies || [];
+    },
+  });
 
-  useEffect(() => {
-    fetchConfigs();
-    fetchCompanies();
-  }, []);
+  const invalidateCompanyEmail = () => {
+    queryClient.invalidateQueries({ queryKey: ["company-email-configs"] });
+    queryClient.invalidateQueries({ queryKey: ["company-email-available-companies"] });
+  };
 
   const handleEdit = (config) => {
     setEditingCompany(config.company_name);
@@ -832,8 +811,7 @@ const CompanyEmailCard = () => {
         setEditingCompany(null);
         setShowCreateDialog(false);
         setSelectedCompany("");
-        fetchConfigs();
-        fetchCompanies();
+        invalidateCompanyEmail();
       } else {
         const data = await res.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
@@ -858,8 +836,7 @@ const CompanyEmailCard = () => {
       );
       if (res.ok) {
         toast.success("Configuração removida");
-        fetchConfigs();
-        fetchCompanies();
+        invalidateCompanyEmail();
       } else {
         toast.error("Erro ao remover");
       }
