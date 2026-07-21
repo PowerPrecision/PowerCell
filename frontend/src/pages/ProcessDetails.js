@@ -191,6 +191,9 @@ import {
 } from "./processDetails/processFormCleaners";
 import { validateNIF } from "../utils/validateNIF";
 import VisitasTab from "../components/processDetails/VisitasTab";
+import ProcessPortalMessagesTab from "../components/processDetails/ProcessPortalMessagesTab";
+import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
+import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -203,14 +206,16 @@ const ProcessDetails = () => {
   const { user, token } = useAuth();
   
   // ── WebSocket: juntar-se à room do processo para mensagens em tempo real ──
-  const { joinProcessRoom, leaveProcessRoom, on, off } = useWebSocket({
+  // portalRefreshRef aponta para o refresh do hook useProcessPortalMessages
+  // (definido mais abaixo) — evita TDZ e mantém o callback WS estável.
+  const portalRefreshRef = useRef(() => {});
+  const { joinProcessRoom, leaveProcessRoom } = useWebSocket({
     onPortalMessage: (data) => {
       // Quando chega uma nova mensagem do portal, refrescar a lista SEMPRE
       // (independentemente do tab ativo, para que o unread count e as mensagens
       // estejam atualizados quando o utilizador mudar de tab)
       if (data?.process_id === id) {
-        fetchPortalMessages();
-        fetchPortalUnreadCount();
+        portalRefreshRef.current();
       }
     },
   });
@@ -234,6 +239,11 @@ const ProcessDetails = () => {
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("personal");
   const [sideTab, setSideTab] = useState("deadlines");
+
+  // Mensagens do Portal — estado/polling vivem no hook (badge do tab precisa de unread)
+  const portal = useProcessPortalMessages(id, { isActive: activeTab === "mensagens" });
+  portalRefreshRef.current = portal.refresh;
+
 
   const [accessDenied, setAccessDenied] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -308,14 +318,6 @@ const ProcessDetails = () => {
 
   // Estado para etiquetas (Fase 3)
   const [newLabel, setNewLabel] = useState("");
-
-  // Estado para Mensagens do Portal (cliente ↔ staff)
-  const [portalMessages, setPortalMessages] = useState([]);
-  const [portalMessagesLoading, setPortalMessagesLoading] = useState(false);
-  const [portalNewMessage, setPortalNewMessage] = useState("");
-  const [portalSendingMessage, setPortalSendingMessage] = useState(false);
-  const [portalUnreadCount, setPortalUnreadCount] = useState(0);
-  const portalMessagesEndRef = useRef(null);
 
   // Buscar utilizadores
   const fetchUsers = async () => {
@@ -776,120 +778,6 @@ const ProcessDetails = () => {
 
     return () => clearTimeout(timeoutId);
   }, [status]);
-
-  // ── Portal Messages: Hooks para mensagens cliente ↔ staff ──
-  const fetchPortalMessages = useCallback(async () => {
-    if (!id) return;
-    setPortalMessagesLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/processes/${id}/portal-messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Backend returns { messages: [...], total: N, process_id: "..." }
-        // Support both array and wrapped object formats
-        const msgs = Array.isArray(data) ? data : (data.messages || []);
-        setPortalMessages(msgs);
-      } else {
-        console.error(`[PortalMessages] API returned ${response.status}`);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar mensagens do portal:", error);
-    } finally {
-      setPortalMessagesLoading(false);
-    }
-  }, [id, token]);
-
-  const fetchPortalUnreadCount = useCallback(async () => {
-    if (!id || !token) return;
-    try {
-      const response = await fetch(`${API_URL}/api/processes/${id}/portal-messages/unread`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setPortalUnreadCount(data.unread_count || 0);
-      } else if (response.status === 404) {
-        // 404 = processo não encontrado OU endpoint indisponível.
-        // Desativar polling para evitar loop de 404s (especialmente em
-        // processos eliminados onde o utilizador ainda está na página).
-        setPortalUnreadCount(0);
-        return 'ENDPOINT_NOT_AVAILABLE';
-      } else if (response.status === 401 || response.status === 403) {
-        // Token inválido/expirado — desativar polling silenciosamente
-        setPortalUnreadCount(0);
-        return 'ENDPOINT_NOT_AVAILABLE';
-      }
-    } catch (error) {
-      // Silent — erro de rede, tentará novamente no próximo intervalo
-    }
-  }, [id, token]);
-
-  const sendPortalMessage = useCallback(async () => {
-    if (!portalNewMessage.trim() || !id) return;
-    setPortalSendingMessage(true);
-    try {
-      const response = await fetch(`${API_URL}/api/processes/${id}/portal-messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content: portalNewMessage.trim() }),
-      });
-      if (response.ok) {
-        setPortalNewMessage("");
-        fetchPortalMessages();
-        toast.success("Mensagem enviada");
-      } else {
-        toast.error("Erro ao enviar mensagem");
-      }
-    } catch (error) {
-      toast.error("Erro ao enviar mensagem");
-    } finally {
-      setPortalSendingMessage(false);
-    }
-  }, [id, token, portalNewMessage, fetchPortalMessages]);
-
-  // Buscar mensagens e unread count quando o tab fica activo
-  useEffect(() => {
-    if (activeTab === "mensagens") {
-      fetchPortalMessages();
-      fetchPortalUnreadCount();
-    }
-  }, [activeTab, fetchPortalMessages, fetchPortalUnreadCount]);
-
-  // Polling para unread count (a cada 30s)
-  // Desativa automaticamente se o endpoint não existir (404) ou se o
-  // processo estiver eliminado/bloqueado. Só corre quando há token e id válidos.
-  const portalUnreadAvailableRef = useRef(true);
-  useEffect(() => {
-    // Só iniciar polling se temos id, token, e o endpoint ainda está disponível
-    if (!id || !token || !portalUnreadAvailableRef.current) return;
-
-    const interval = setInterval(async () => {
-      if (!portalUnreadAvailableRef.current) {
-        clearInterval(interval);
-        return;
-      }
-      const result = await fetchPortalUnreadCount();
-      if (result === 'ENDPOINT_NOT_AVAILABLE') {
-        portalUnreadAvailableRef.current = false;
-        clearInterval(interval);
-      }
-    }, 30000);
-
-    // Fetch inicial imediato
-    fetchPortalUnreadCount().then(result => {
-      if (result === 'ENDPOINT_NOT_AVAILABLE') {
-        portalUnreadAvailableRef.current = false;
-        clearInterval(interval);
-      }
-    });
-
-    return () => clearInterval(interval);
-  }, [fetchPortalUnreadCount, id, token]);
 
   // ── WebSocket Room: juntar-se à room do processo para mensagens em tempo real ──
   useEffect(() => {
@@ -1561,58 +1449,25 @@ const ProcessDetails = () => {
     return isCardEmpty(cardId); // Auto-collapse if empty (default)
   };
 
-  // Reusable card header with edit toggle (pencil → Cancelar/Guardar)
-  // + Collapse toggle for empty cards
-  const CardHeaderWithEdit = ({ title, cardKey, icon: Icon, canEdit, collapsible }) => {
-    const collapsed = collapsible && shouldCardBeCollapsed(cardKey);
-    const empty = collapsible && isCardEmpty(cardKey);
-    return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => collapsible && toggleCardCollapse(cardKey)}>
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
-        <h4 className="font-semibold text-sm">{title}</h4>
-        {collapsible && (
-          collapsed ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> :
-                      <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-        {empty && !collapsed && (
-          <span className="text-xs text-muted-foreground italic ml-1">— Sem dados preenchidos</span>
-        )}
-      </div>
-      {canEdit && !isProcessLocked && editingCardId !== cardKey && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => setEditingCardId(cardKey)}
-          title="Editar"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
-      )}
-      {canEdit && !isProcessLocked && editingCardId === cardKey && (
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setEditingCardId(null)}
-          >
-            Cancelar
-          </Button>
-          <Button
-            size="sm"
-            className="h-7 text-xs"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Guardar"}
-          </Button>
-        </div>
-      )}
-    </div>
+  // Thin wrapper: liga o CardHeaderWithEdit extraído ao estado local do processo
+  const CardHeaderWithEdit = ({ title, cardKey, icon, canEdit, collapsible }) => (
+    <CardHeaderWithEditBase
+      title={title}
+      cardKey={cardKey}
+      icon={icon}
+      canEdit={canEdit}
+      collapsible={collapsible}
+      collapsed={collapsible && shouldCardBeCollapsed(cardKey)}
+      empty={collapsible && isCardEmpty(cardKey)}
+      isEditing={editingCardId === cardKey}
+      isProcessLocked={isProcessLocked}
+      saving={saving}
+      onToggleCollapse={toggleCardCollapse}
+      onStartEdit={setEditingCardId}
+      onCancelEdit={() => setEditingCardId(null)}
+      onSave={handleSave}
+    />
   );
-  };
 
   if (loading) {
     return (
@@ -2354,9 +2209,9 @@ const ProcessDetails = () => {
                     <TabsTrigger value="mensagens" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-violet-50 dark:bg-violet-900/20 data-[state=active]:bg-violet-100 dark:data-[state=active]:bg-violet-900/40 relative">
                       <MessageSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Mensagens</span>
-                      {portalUnreadCount > 0 && (
+                      {portal.unreadCount > 0 && (
                         <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                          {portalUnreadCount > 9 ? '9+' : portalUnreadCount}
+                          {portal.unreadCount > 9 ? '9+' : portal.unreadCount}
                         </span>
                       )}
                     </TabsTrigger>
@@ -4496,118 +4351,15 @@ const ProcessDetails = () => {
 
                   {/* Mensagens do Portal Tab */}
                   <TabsContent value="mensagens" className="mt-4">
-                    <div className="space-y-4">
-                      {/* Header */}
-                      <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg p-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-violet-100 dark:bg-violet-900/40 rounded-lg">
-                              <MessageSquare className="h-6 w-6 text-violet-600 dark:text-violet-400" />
-                            </div>
-                            <div>
-                              <h3 className="font-semibold text-violet-800 dark:text-violet-200">Mensagens com o Cliente</h3>
-                              <p className="text-sm text-violet-600 dark:text-violet-400">
-                                Comunicação direta com o cliente via Portal
-                              </p>
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5"
-                            onClick={() => fetchPortalMessages()}
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            Actualizar
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Messages Area */}
-                      <Card>
-                        <CardContent className="p-4">
-                          {portalMessagesLoading && portalMessages.length === 0 ? (
-                            <div className="flex items-center justify-center py-12">
-                              <Loader2 className="h-8 w-8 animate-spin text-violet-500" />
-                              <span className="ml-3 text-muted-foreground">A carregar mensagens...</span>
-                            </div>
-                          ) : portalMessages.length === 0 ? (
-                            <div className="text-center py-12">
-                              <MessageSquare className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                              <p className="text-muted-foreground">Sem mensagens ainda</p>
-                              <p className="text-xs text-muted-foreground/70 mt-1">Envie a primeira mensagem ao cliente</p>
-                            </div>
-                          ) : (
-                            <div className="max-h-96 overflow-y-auto space-y-3 pr-1">
-                              {portalMessages.map((msg) => (
-                                <div
-                                  key={msg.id}
-                                  className={`flex ${msg.sender_type === 'staff' ? 'justify-end' : 'justify-start'}`}
-                                >
-                                  <div className={`max-w-[80%] rounded-xl px-4 py-2.5 ${
-                                    msg.sender_type === 'staff'
-                                      ? 'bg-violet-100 dark:bg-violet-900/30 rounded-br-sm'
-                                      : 'bg-gray-100 dark:bg-gray-800 rounded-bl-sm'
-                                  }`}>
-                                    {msg.sender_type === 'client' && (
-                                      <p className="text-xs font-medium text-violet-600 dark:text-violet-400 mb-1">
-                                        {safeString(msg.sender_name)}
-                                      </p>
-                                    )}
-                                    {msg.sender_type === 'staff' && (
-                                      <p className="text-xs font-medium text-right text-gray-500 dark:text-gray-400 mb-1">
-                                        {safeString(msg.sender_name)} (Equipamento)
-                                      </p>
-                                    )}
-                                    <p className="text-sm whitespace-pre-wrap break-words">{safeString(msg.content)}</p>
-                                    <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                                      {msg.created_at ? safeFormat(msg.created_at, "dd/MM/yyyy HH:mm", { locale: pt }) : ''}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))}
-                              <div ref={portalMessagesEndRef} />
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      {/* Send Message */}
-                      <Card>
-                        <CardContent className="p-4">
-                          <div className="flex gap-2">
-                            <Textarea
-                              placeholder="Escreva uma mensagem para o cliente..."
-                              value={portalNewMessage}
-                              onChange={(e) => setPortalNewMessage(e.target.value)}
-                              className="flex-1 min-h-[44px] max-h-32 resize-none"
-                              rows={2}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                  e.preventDefault();
-                                  sendPortalMessage();
-                                }
-                              }}
-                            />
-                            <Button
-                              className="bg-violet-600 hover:bg-violet-700 self-end gap-1.5"
-                              onClick={sendPortalMessage}
-                              disabled={!portalNewMessage.trim() || portalSendingMessage}
-                            >
-                              {portalSendingMessage ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Send className="h-4 w-4" />
-                              )}
-                              Enviar
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            A mensagem ficará visível no portal do cliente. Prima Enter para enviar.
-                          </p>
-                        </CardContent>
-                      </Card>
-                    </div>
+                    <ProcessPortalMessagesTab
+                      messages={portal.messages}
+                      loading={portal.loading}
+                      newMessage={portal.newMessage}
+                      setNewMessage={portal.setNewMessage}
+                      sending={portal.sending}
+                      onRefresh={portal.fetchMessages}
+                      onSend={portal.sendMessage}
+                    />
                   </TabsContent>
                 </Tabs>
 
