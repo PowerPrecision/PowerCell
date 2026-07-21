@@ -205,3 +205,112 @@ async def fetch_latest_activity_notes_map(
         }},
     ]).to_list(1000)
     return {r["_id"]: r for r in rows}
+
+
+async def fetch_orphan_leads_for_my_clients(
+    db: Any,
+    user_id: str,
+    role: str,
+    leads_query_builder,
+) -> list[dict]:
+    """
+    Leads órfãos (só consultor/intermediário).
+    `leads_query_builder(user_id)` → filtro Mongo.
+    """
+    from models.auth import UserRole
+    if role not in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
+        return []
+    from services.encryption import decrypt_clients_list
+    leads_cursor = await db.clients.find(
+        leads_query_builder(user_id),
+        LEAD_CLIENTS_PROJECTION,
+    ).to_list(500)
+    leads_cursor = decrypt_clients_list(leads_cursor)
+    return [format_lead_as_my_client_row(lead) for lead in leads_cursor]
+
+
+async def fetch_pending_tasks_by_process(
+    db: Any, process_ids: list[str],
+) -> dict[str, list[dict]]:
+    if not process_ids:
+        return {}
+    tasks = await db.tasks.find(
+        {"process_id": {"$in": process_ids}, "completed": {"$ne": True}},
+        {"_id": 0, "id": 1, "process_id": 1, "title": 1, "priority": 1, "due_date": 1},
+    ).to_list(500)
+    return group_tasks_by_process(tasks)
+
+
+async def fetch_consultor_name_map(
+    db: Any, items: list[dict],
+) -> dict[str, str]:
+    consultor_ids = list({
+        p.get("assigned_consultor_id")
+        for p in items
+        if p.get("assigned_consultor_id")
+    })
+    if not consultor_ids:
+        return {}
+    consultores = await db.users.find(
+        {"id": {"$in": consultor_ids}},
+        {"_id": 0, "id": 1, "name": 1},
+    ).to_list(100)
+    return {c["id"]: c["name"] for c in consultores}
+
+
+def assemble_my_clients_rows(
+    paginated_items: list[dict],
+    *,
+    status_map: dict,
+    tasks_by_process: dict[str, list[dict]],
+    consultor_map: dict[str, str],
+    unread_map: dict[str, bool],
+    new_docs_map: dict[str, bool],
+    notes_map: dict[str, dict],
+) -> list[dict]:
+    rows: list[dict] = []
+    for p in paginated_items:
+        if p.get("is_lead"):
+            rows.append(finalize_lead_row(p))
+            continue
+        rows.append(build_my_clients_process_row(
+            p,
+            status_map=status_map,
+            tasks_by_process=tasks_by_process,
+            consultor_map=consultor_map,
+            unread_map=unread_map,
+            new_docs_map=new_docs_map,
+            notes_map=notes_map,
+        ))
+    return rows
+
+
+def build_my_clients_response(
+    *,
+    clients: list[dict],
+    total: int,
+    page: int,
+    size: int,
+    pages: int,
+    user_id: str,
+    user_role: str,
+    leads_count: int,
+) -> dict:
+    return {
+        "clients": clients,
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": pages,
+        "user_id": user_id,
+        "user_role": user_role,
+        "leads_count": leads_count,
+    }
+
+
+def process_ids_from_my_clients_page(paginated_items: list[dict]) -> list[str]:
+    """IDs de processos (exclui leads) na página actual."""
+    return [
+        p["id"] for p in paginated_items
+        if p.get("id") and not p.get("is_lead")
+    ]

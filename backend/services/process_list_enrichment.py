@@ -217,3 +217,71 @@ def sort_process_list(
         status_order.get(p.get("status"), 999),
         (p.get("client_name") or "").lower(),
     ))
+
+
+def compute_page_slice(total: int, page: int, size: int) -> tuple[int, int, int]:
+    """Returns (skip, pages, size_safe)."""
+    size_safe = size if size > 0 else 0
+    skip = (page - 1) * size if size_safe else 0
+    pages = (total + size_safe - 1) // size_safe if size_safe else 0
+    return skip, pages, size_safe
+
+
+def slice_page(items: list, page: int, size: int) -> tuple[list, int, int]:
+    """Paginação Python-side: (page_items, total, pages)."""
+    total = len(items)
+    skip, pages, size_safe = compute_page_slice(total, page, size)
+    if not size_safe:
+        return [], total, 0
+    return items[skip:skip + size_safe], total, pages
+
+
+def build_process_list_response(
+    *,
+    items: list,
+    total: int,
+    page: int,
+    size: int,
+    pages: int,
+    view_mode: Optional[str],
+) -> dict:
+    return {
+        "items": items,
+        "total": total,
+        "page": page,
+        "size": size,
+        "pages": pages,
+        "view_mode": view_mode,
+    }
+
+
+def build_process_cursor_list_response(
+    *,
+    result: dict,
+    view_mode: Optional[str],
+) -> dict:
+    return {
+        "processes": result["items"],
+        "next_cursor": result["next_cursor"],
+        "has_more": result["has_more"],
+        "limit": result["limit"],
+        "view_mode": view_mode,
+    }
+
+
+async def load_workflow_status_order() -> dict[str, int]:
+    """name → índice de ordem no workflow."""
+    from database import db
+    statuses = await db.workflow_statuses.find(
+        {}, {"_id": 0},
+    ).sort("order", 1).to_list(100)
+    return {s["name"]: idx for idx, s in enumerate(statuses)}
+
+
+async def load_workflow_status_map() -> dict[str, dict]:
+    """name → doc workflow_status completo."""
+    from database import db
+    statuses = await db.workflow_statuses.find(
+        {}, {"_id": 0},
+    ).sort("order", 1).to_list(100)
+    return {s["name"]: s for s in statuses}

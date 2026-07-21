@@ -100,15 +100,16 @@ from services.process_list_filters import (
     build_my_clients_leads_query,
 )
 from services.process_my_clients import (
-    LEAD_CLIENTS_PROJECTION,
-    format_lead_as_my_client_row,
-    finalize_lead_row,
     my_clients_sort_key,
-    group_tasks_by_process,
-    build_my_clients_process_row,
     fetch_unread_messages_map,
     fetch_new_documents_map,
     fetch_latest_activity_notes_map,
+    fetch_orphan_leads_for_my_clients,
+    fetch_pending_tasks_by_process,
+    fetch_consultor_name_map,
+    assemble_my_clients_rows,
+    build_my_clients_response,
+    process_ids_from_my_clients_page,
 )
 from services.process_indexing import (
     compute_next_workflow_status,
@@ -190,6 +191,11 @@ from services.process_list_enrichment import (
     enrich_processes_latest_notes,
     enrich_processes_latest_activity,
     sort_process_list,
+    slice_page,
+    build_process_list_response,
+    build_process_cursor_list_response,
+    load_workflow_status_order,
+    load_workflow_status_map,
 )
 from services.process_staff_assignment import (
     build_staff_assign_update,
@@ -743,7 +749,6 @@ async def get_processes(
     """
     role = get_effective_role(request, user)
 
-    # Query MongoDB partilhada (services/process_list_filters.py)
     query = build_process_list_query(
         user,
         role,
@@ -756,23 +761,14 @@ async def get_processes(
         search_mode="accent",
     )
 
-    # Calcular offset
-    skip = (page - 1) * size
-    
-    # Buscar ordem das fases do workflow para ordenação composta
-    statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-    status_order = {s["name"]: idx for idx, s in enumerate(statuses)}
-    
-    # BUSCAR COM PROJEÇÃO OTIMIZADA (até 5000 para ordenação Python-side)
-    # Apenas campos necessários para a tabela de listagem
+    status_order = await load_workflow_status_order()
     processes = await db.processes.find(
-        query, 
-        PROCESS_LIST_PROJECTION
+        query,
+        PROCESS_LIST_PROJECTION,
     ).to_list(5000)
-    
-    # Desencriptar apenas campos sensíveis necessários (client_phone, client_nif)
-    # NOTA: personal_data e financial_data NÃO são projetados, então não precisam de desencriptação
-    processes = decrypt_processes_list(processes, fields_to_decrypt=["client_phone", "client_nif"])
+    processes = decrypt_processes_list(
+        processes, fields_to_decrypt=["client_phone", "client_nif"],
+    )
 
     await enrich_processes_assignee_names(processes)
     sort_process_list(
@@ -782,29 +778,18 @@ async def get_processes(
         status_order=status_order,
     )
 
-    # Total e paginação (após ordenação)
-    total = len(processes)
-    processes = processes[skip:skip + size]
+    page_items, total, pages = slice_page(processes, page, size)
+    await enrich_processes_portal_flags(page_items)
+    await enrich_processes_latest_notes(page_items)
 
-    await enrich_processes_portal_flags(processes)
-    await enrich_processes_latest_notes(processes)
-
-    # Calcular total de páginas
-    pages = (total + size - 1) // size if size > 0 else 0
-
-    # PACOTE CZ — Removido o bloco PACOTE CJ (dead code): fazia find_one por
-    # "action" field que não existe na coleção activities. A enrichação real
-    # já é feita pelo batch aggregation PACOTE BT acima (latest_note +
-    # latest_activity_preview alias).
-
-    return {
-        "items": processes,
-        "total": total,
-        "page": page,
-        "size": size,
-        "pages": pages,
-        "view_mode": view_mode
-    }
+    return build_process_list_response(
+        items=page_items,
+        total=total,
+        page=page,
+        size=size,
+        pages=pages,
+        view_mode=view_mode,
+    )
 
 
 @router.get("/paginated")
@@ -846,8 +831,6 @@ async def get_processes_paginated(
 
     role = user["role"]
 
-    # Query MongoDB partilhada (services/process_list_filters.py)
-    # search_mode="multiword" preserva o comportamento anterior deste endpoint.
     query = build_process_list_query(
         user,
         role,
@@ -857,43 +840,34 @@ async def get_processes_paginated(
         search_mode="multiword",
     )
 
-    # Converter sort_order para int
     order = -1 if sort_order.lower() == "desc" else 1
-    
-    # Usar paginador COM PROJEÇÃO OTIMIZADA
+
     paginator = CursorPaginator(
         collection=db.processes,
         default_limit=20,
         max_limit=100,
         default_sort_field="client_name",
-        default_sort_order=1
+        default_sort_order=1,
     )
-    
+
     result = await paginator.paginate(
         query=query,
         limit=limit,
         cursor=cursor,
         sort_field=sort_field,
         sort_order=order,
-        projection=PROCESS_LIST_PROJECTION  # PROJEÇÃO OTIMIZADA
+        projection=PROCESS_LIST_PROJECTION,
     )
-    
-    # Desencriptar APENAS campos sensíveis projetados (não todo o documento)
+
     result["items"] = decrypt_processes_list(
-        result["items"], 
-        fields_to_decrypt=["client_phone", "client_nif"]
+        result["items"],
+        fields_to_decrypt=["client_phone", "client_nif"],
     )
 
     await enrich_processes_portal_flags(result["items"])
     await enrich_processes_latest_notes(result["items"])
 
-    return {
-        "processes": result["items"],
-        "next_cursor": result["next_cursor"],
-        "has_more": result["has_more"],
-        "limit": result["limit"],
-        "view_mode": view_mode
-    }
+    return build_process_cursor_list_response(result=result, view_mode=view_mode)
 
 
 @router.get("/kanban/diagnose")
@@ -1032,7 +1006,6 @@ async def get_my_clients(
     role = get_effective_role(request, user)
 
     query = build_my_clients_process_query(user_id, user_email, role)
-    skip = (page - 1) * size
 
     processes = await db.processes.find(
         query,
@@ -1043,75 +1016,41 @@ async def get_my_clients(
         fields_to_decrypt=["client_phone", "client_nif"],
     )
 
-    # Leads órfãos criados pelo utilizador (só consultor/intermediário)
-    leads = []
-    if role in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
-        from services.encryption import decrypt_clients_list
-        leads_cursor = await db.clients.find(
-            build_my_clients_leads_query(user_id),
-            LEAD_CLIENTS_PROJECTION,
-        ).to_list(500)
-        leads_cursor = decrypt_clients_list(leads_cursor)
-        leads = [format_lead_as_my_client_row(lead) for lead in leads_cursor]
-
-    statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-    status_map = {s["name"]: s for s in statuses}
+    leads = await fetch_orphan_leads_for_my_clients(
+        db, user_id, role, build_my_clients_leads_query,
+    )
+    status_map = await load_workflow_status_map()
 
     all_items = sorted(processes + leads, key=my_clients_sort_key(status_map))
-    total = len(all_items)
-    paginated_items = all_items[skip:skip + size]
+    paginated_items, total, pages = slice_page(all_items, page, size)
 
-    process_ids = [p["id"] for p in paginated_items if not p.get("is_lead")]
-    tasks = await db.tasks.find(
-        {"process_id": {"$in": process_ids}, "completed": {"$ne": True}},
-        {"_id": 0, "id": 1, "process_id": 1, "title": 1, "priority": 1, "due_date": 1},
-    ).to_list(500)
-    tasks_by_process = group_tasks_by_process(tasks)
+    process_ids = process_ids_from_my_clients_page(paginated_items)
+    tasks_by_process = await fetch_pending_tasks_by_process(db, process_ids)
+    consultor_map = await fetch_consultor_name_map(db, paginated_items)
+    unread_map = await fetch_unread_messages_map(db, process_ids)
+    new_docs_map = await fetch_new_documents_map(db, process_ids)
+    notes_map = await fetch_latest_activity_notes_map(db, process_ids)
 
-    consultor_ids = list({
-        p.get("assigned_consultor_id")
-        for p in paginated_items
-        if p.get("assigned_consultor_id")
-    })
-    consultores = await db.users.find(
-        {"id": {"$in": consultor_ids}},
-        {"_id": 0, "id": 1, "name": 1},
-    ).to_list(100)
-    consultor_map = {c["id"]: c["name"] for c in consultores}
+    clients_list = assemble_my_clients_rows(
+        paginated_items,
+        status_map=status_map,
+        tasks_by_process=tasks_by_process,
+        consultor_map=consultor_map,
+        unread_map=unread_map,
+        new_docs_map=new_docs_map,
+        notes_map=notes_map,
+    )
 
-    bi_process_ids = [
-        p["id"] for p in paginated_items if p.get("id") and not p.get("is_lead")
-    ]
-    unread_map = await fetch_unread_messages_map(db, bi_process_ids)
-    new_docs_map = await fetch_new_documents_map(db, bi_process_ids)
-    notes_map = await fetch_latest_activity_notes_map(db, bi_process_ids)
-
-    clients_list = []
-    for p in paginated_items:
-        if p.get("is_lead"):
-            clients_list.append(finalize_lead_row(p))
-            continue
-        clients_list.append(build_my_clients_process_row(
-            p,
-            status_map=status_map,
-            tasks_by_process=tasks_by_process,
-            consultor_map=consultor_map,
-            unread_map=unread_map,
-            new_docs_map=new_docs_map,
-            notes_map=notes_map,
-        ))
-
-    pages = (total + size - 1) // size if size > 0 else 0
-    return {
-        "clients": clients_list,
-        "total": total,
-        "page": page,
-        "size": size,
-        "pages": pages,
-        "user_id": user_id,
-        "user_role": role,
-        "leads_count": len(leads),
-    }
+    return build_my_clients_response(
+        clients=clients_list,
+        total=total,
+        page=page,
+        size=size,
+        pages=pages,
+        user_id=user_id,
+        user_role=role,
+        leads_count=len(leads),
+    )
 
 
 @router.put("/kanban/{process_id}/move")

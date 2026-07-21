@@ -649,6 +649,71 @@ class TestUpdateProcessMetaHelpers:
             assert e.status_code == 403
 
 
+class TestListAndMyClientsOrchestration:
+    def test_slice_page_and_responses(self):
+        from services.process_list_enrichment import (
+            slice_page,
+            build_process_list_response,
+            build_process_cursor_list_response,
+        )
+        items = list(range(25))
+        page_items, total, pages = slice_page(items, 2, 10)
+        assert total == 25 and pages == 3 and page_items == list(range(10, 20))
+        resp = build_process_list_response(
+            items=page_items, total=total, page=2, size=10, pages=pages,
+            view_mode="active_only",
+        )
+        assert resp["page"] == 2 and len(resp["items"]) == 10
+        cursor_resp = build_process_cursor_list_response(
+            result={
+                "items": [{"id": "p1"}],
+                "next_cursor": "abc",
+                "has_more": True,
+                "limit": 20,
+            },
+            view_mode="all",
+        )
+        assert cursor_resp["processes"][0]["id"] == "p1"
+        assert cursor_resp["has_more"] is True
+
+    def test_assemble_my_clients_rows(self):
+        from services.process_my_clients import (
+            assemble_my_clients_rows,
+            process_ids_from_my_clients_page,
+            build_my_clients_response,
+        )
+        page = [
+            {"id": "lead1", "is_lead": True, "client_name": "L"},
+            {
+                "id": "p1",
+                "client_id": "c1",
+                "client_name": "Ana",
+                "status": "fase_1",
+                "assigned_consultor_id": "u1",
+            },
+        ]
+        assert process_ids_from_my_clients_page(page) == ["p1"]
+        rows = assemble_my_clients_rows(
+            page,
+            status_map={"fase_1": {"label": "Fase 1", "color": "#111"}},
+            tasks_by_process={"p1": [{"title": "T1", "priority": "high"}]},
+            consultor_map={"u1": "João"},
+            unread_map={"p1": True},
+            new_docs_map={},
+            notes_map={},
+        )
+        assert rows[0]["is_lead"] is True
+        assert rows[0]["has_unread_messages"] is False
+        assert rows[1]["consultor_name"] == "João"
+        assert rows[1]["pending_count"] == 1
+        assert rows[1]["has_unread_messages"] is True
+        out = build_my_clients_response(
+            clients=rows, total=2, page=1, size=50, pages=1,
+            user_id="u1", user_role="consultor", leads_count=1,
+        )
+        assert out["leads_count"] == 1 and out["total"] == 2
+
+
 
 class TestListEnrichmentSort:
     def test_default_sort_priority_then_status(self):
