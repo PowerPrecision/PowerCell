@@ -46,59 +46,48 @@ from utils.input_sanitization import (sanitize_string, sanitize_name, sanitize_e
 router = APIRouter(prefix="/documents", tags=["Document Management"])
 logger = logging.getLogger(__name__)
 
-
-# ====================================================================
-# CONSTANTES PARA MENSAGENS DE ERRO (SonarQube - DRY)
-# ====================================================================
-ERROR_CLIENT_NOT_FOUND = "Cliente não encontrado"
-ERROR_PROCESS_NOT_FOUND = "Processo não encontrado"
-ERROR_S3_NOT_CONFIGURED = "S3 não configurado"
-ERROR_FILE_ACCESS_DENIED = "Acesso não autorizado a este ficheiro"
-ERROR_S3_UPLOAD_FAILED = "Erro ao enviar ficheiro para o armazenamento S3"
-ERROR_DOWNLOAD_URL = "Erro ao gerar link de download"
-ERROR_PRESIGNED_URL = "Erro ao gerar URL"
-ERROR_DELETE_FILE = "Erro ao eliminar ficheiro"
-ERROR_RECORD_NOT_FOUND = "Registo não encontrado"
-ERROR_S3_FILE_NOT_FOUND = "Ficheiro não encontrado no S3"
-ERROR_S3_ACCESS = "Erro ao aceder ao ficheiro"
-ERROR_CATEGORIZE_DOC = "Erro ao categorizar documento"
-ERROR_NO_VALID_FILES = "Nenhum ficheiro válido enviado"
-ERROR_NO_SUGGESTIONS = "Nenhuma sugestão enviada"
-ERROR_NO_ORGANIZATION = "Nenhuma organização especificada"
-ERROR_S3_PATH_REQUIRED = "s3_path é obrigatório"
-ERROR_DOC_NOT_CATEGORIZED = "Documento não foi categorizado pela IA. Execute a categorização primeiro."
-ERROR_NEW_NAME_REQUIRED = "novo_nome é obrigatório quando apply_ai_name=False"
-ERROR_RENAME_FAILED = "Falha ao renomear ficheiro no S3"
-
-# ====================================================================
-# CONSTANTES PARA VALORES DEFAULT (SonarQube - DRY)
-# ====================================================================
-DEFAULT_CLIENT_NAME = "Cliente"
-DEFAULT_CONSULTOR_NAME = "N/D"
-DEFAULT_FILE_PREFIX = "Ficheiro: "
-MIME_TYPE_PDF = "application/pdf"
-
-# ====================================================================
-# CONSTANTES PARA RESPOSTAS HTTP (SonarQube - Documentation)
-# ====================================================================
-HTTP_400_RESPONSE = {"description": "Bad Request - Parâmetros inválidos"}
-HTTP_403_RESPONSE = {"description": "Forbidden - Acesso não autorizado"}
-HTTP_404_RESPONSE = {"description": "Not Found - Recurso não encontrado"}
-HTTP_500_RESPONSE = {"description": "Internal Server Error - Erro interno do servidor"}
-
-
-# ====================================================================
-# FUNÇÃO DE SANITIZAÇÃO PARA LOGS (Segurança)
-# ====================================================================
-def sanitize_for_log(value: str, max_length: int = 50) -> str:
-    """
-    Sanitiza dados controlados pelo utilizador antes de logar.
-    Remove carateres potencialmente perigosos e limita o tamanho.
-    """
-    if not value:
-        return "[empty]"
-    sanitized = str(value)[:max_length].replace('\n', ' ').replace('\r', '')
-    return sanitized if sanitized else "[sanitized]"
+from services.document_constants import (
+    ERROR_CLIENT_NOT_FOUND,
+    ERROR_PROCESS_NOT_FOUND,
+    ERROR_S3_NOT_CONFIGURED,
+    ERROR_FILE_ACCESS_DENIED,
+    ERROR_S3_UPLOAD_FAILED,
+    ERROR_DOWNLOAD_URL,
+    ERROR_PRESIGNED_URL,
+    ERROR_DELETE_FILE,
+    ERROR_RECORD_NOT_FOUND,
+    ERROR_S3_FILE_NOT_FOUND,
+    ERROR_S3_ACCESS,
+    ERROR_CATEGORIZE_DOC,
+    ERROR_NO_VALID_FILES,
+    ERROR_NO_SUGGESTIONS,
+    ERROR_NO_ORGANIZATION,
+    ERROR_S3_PATH_REQUIRED,
+    ERROR_DOC_NOT_CATEGORIZED,
+    ERROR_NEW_NAME_REQUIRED,
+    ERROR_RENAME_FAILED,
+    ERROR_CLIENT_WITHOUT_PROCESS,
+    DEFAULT_CLIENT_NAME,
+    DEFAULT_CONSULTOR_NAME,
+    DEFAULT_FILE_PREFIX,
+    MIME_TYPE_PDF,
+    HTTP_400_RESPONSE,
+    HTTP_403_RESPONSE,
+    HTTP_404_RESPONSE,
+    HTTP_500_RESPONSE,
+    DOCUMENT_CATEGORY_MAP,
+)
+from services.document_filenames import (
+    sanitize_for_log,
+    normalize_filename,
+    is_image_file,
+    generate_smart_filename,
+)
+from services.document_process_resolve import (
+    resolve_process_from_flexible_id,
+    extract_second_client_name,
+)
+from services.document_expiring_dashboard import run_get_expiring_documents_dashboard
 
 
 # ====================================================================
@@ -251,68 +240,6 @@ async def auto_categorize_document_background(
         logger.error(f"[AUTO-CAT] Erro ao categorizar documento: {type(e).__name__}: {e}")
 
 
-# ====================================================================
-# FUNÇÕES DE NORMALIZAÇÃO DE NOMES DE FICHEIROS
-# ====================================================================
-
-def normalize_filename(filename: str, category: str = None) -> str:
-    """
-    Sanitiza o nome do ficheiro para armazenamento seguro no S3.
-    
-    NOTA: NÃO altera o nome original - apenas remove caracteres perigosos.
-    Mantém o nome original do ficheiro para não confundir o utilizador.
-    
-    Args:
-        filename: Nome original do ficheiro
-        category: Categoria do documento (IGNORADO - mantido para compatibilidade)
-        
-    Returns:
-        Nome sanitizado (mantém o original, apenas remove caracteres perigosos)
-    """
-    if not filename:
-        return f"documento_{datetime.now().strftime('%Y%m%d_%H%M%S')}.pdf"
-    
-    # Separar nome e extensão
-    if '.' in filename:
-        name_part, ext = filename.rsplit('.', 1)
-        ext = ext.lower()
-    else:
-        name_part = filename
-        ext = 'pdf'
-    
-    # Sanitizar APENAS caracteres realmente perigosos para S3
-    # Manter acentos, espaços e caracteres portugueses
-    # Remover apenas: / \ : * ? " < > | (caracteres inválidos em paths)
-    name_sanitized = re.sub(r'[/\\:*?"<>|]', '', name_part)
-    
-    # Remover caracteres de controlo
-    name_sanitized = re.sub(r'[\x00-\x1f\x7f]', '', name_sanitized)
-    
-    # Limitar tamanho mas manter nome reconhecível
-    if len(name_sanitized) > 200:
-        name_sanitized = name_sanitized[:200]
-    
-    # Se ficou vazio, usar fallback
-    if not name_sanitized.strip():
-        name_sanitized = f"documento_{datetime.now().strftime('%Y%m%d_%H%M%S')}"
-    
-    return f"{name_sanitized}.{ext}"
-
-
-def is_image_file(filename: str, content_type: str = None) -> bool:
-    """Verifica se o ficheiro é uma imagem suportada para conversão."""
-    image_extensions = {'.jpg', '.jpeg', '.png', '.tiff', '.tif'}
-    image_mimes = {'image/jpeg', 'image/png', 'image/tiff'}
-    
-    if filename:
-        ext = '.' + filename.rsplit('.', 1)[-1].lower() if '.' in filename else ''
-        if ext in image_extensions:
-            return True
-    
-    if content_type and content_type.lower() in image_mimes:
-        return True
-    
-    return False
 
 # ====================================================================
 # PARTE 1: GESTÃO DE FICHEIROS (S3 STORAGE) - NOVO
@@ -329,53 +256,21 @@ async def list_client_files(
     - ID de processo (procura em processes por "id")
     - ID de cliente (procura em clients por "id", depois em processes por "client_id")
     """
-    effective_id = client_id
-    process = None
-    
-    # 1. Tentar como ID de processo (comportamento original)
-    process = await db.processes.find_one({"id": client_id})
-    if process:
-        logger.debug(f"[FILES] Encontrado processo por ID: {client_id}")
-    
-    # 2. Se não encontrado, tentar como ID de cliente na coleção clients
-    if not process:
+    process, effective_id = await resolve_process_from_flexible_id(
+        client_id,
+        log_prefix="[FILES]",
+        allow_client_without_process=True,
+        raise_on_client_without_process=False,
+    )
+    if process is None and effective_id is None:
+        # Cliente sem processo OU não encontrado — distinguir
         client = await db.clients.find_one({"id": client_id})
         if client:
-            logger.debug(f"[FILES] Encontrado cliente por ID: {client_id}")
-            # Procurar processo associado via process_ids
-            process_ids = client.get("process_ids", [])
-            if process_ids:
-                process = await db.processes.find_one({"id": process_ids[0]})
-                if process:
-                    effective_id = process["id"]
-                    logger.debug(f"[FILES] Processo encontrado via process_ids: {effective_id}")
-            
-            # 3. Se ainda sem processo, tentar procurar processo por client_id
-            if not process:
-                process = await db.processes.find_one({"client_id": client_id})
-                if process:
-                    effective_id = process["id"]
-                    logger.debug(f"[FILES] Processo encontrado via client_id: {effective_id}")
-            
-            # 4. Cliente existe mas sem processo — retornar lista vazia
-            if not process:
-                logger.info(f"[FILES] Cliente {client_id} existe mas sem processo associado — retornando lista vazia")
-                return {"files": {}, "categories": []}
-    
-    # 5. Se ainda sem processo, tentar procura por client_id no processo
-    if not process:
-        process = await db.processes.find_one({"client_id": client_id})
-        if process:
-            effective_id = process["id"]
-            logger.debug(f"[FILES] Processo encontrado via client_id (fallback): {effective_id}")
-    
-    if not process:
-        logger.warning(f"[FILES] Nenhum processo ou cliente encontrado para ID: {client_id}")
+            return {"files": {}, "categories": []}
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-    
+
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    titular2 = process.get("titular2_data") or {}
-    second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
+    second_client_name = extract_second_client_name(process)
     s3_folder = process.get("s3_folder")
     
     # Executar operação síncrona do S3 em thread separada para não bloquear o event loop
@@ -454,44 +349,12 @@ async def upload_file_s3(
         #         )
         # ================================================================
         
-        process = await db.processes.find_one({"id": client_id})
-        effective_id = client_id
-        
-        # Se não encontrado como processo, tentar como ID de cliente
-        if not process:
-            client = await db.clients.find_one({"id": client_id})
-            if client:
-                logger.debug(f"[UPLOAD] Encontrado cliente por ID: {client_id}")
-                process_ids = client.get("process_ids", [])
-                if process_ids:
-                    process = await db.processes.find_one({"id": process_ids[0]})
-                    if process:
-                        effective_id = process["id"]
-                        logger.debug(f"[UPLOAD] Processo encontrado via process_ids: {effective_id}")
-                
-                # Fallback: procurar processo por client_id
-                if not process:
-                    process = await db.processes.find_one({"client_id": client_id})
-                    if process:
-                        effective_id = process["id"]
-                        logger.debug(f"[UPLOAD] Processo encontrado via client_id: {effective_id}")
-                
-                # Cliente existe mas sem processo
-                if not process:
-                    logger.info(f"[UPLOAD] Cliente {client_id} existe mas sem processo associado")
-                    raise HTTPException(status_code=404, detail="Cliente encontrado mas sem processo associado. Não é possível fazer upload.")
-        
-        # Fallback final: procurar processo por client_id mesmo sem cliente na coleção
-        if not process:
-            process = await db.processes.find_one({"client_id": client_id})
-            if process:
-                effective_id = process["id"]
-                logger.debug(f"[UPLOAD] Processo encontrado via client_id (fallback): {effective_id}")
-        
-        if not process:
-            logger.warning(f"[UPLOAD] Nenhum processo ou cliente encontrado para ID: {client_id}")
-            raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
-        
+        process, effective_id = await resolve_process_from_flexible_id(
+            client_id,
+            log_prefix="[UPLOAD]",
+            allow_client_without_process=False,
+            raise_on_client_without_process=True,
+        )
         # Usar effective_id (processo) para operações S3, não o client_id original
         client_id = effective_id
         
@@ -505,9 +368,7 @@ async def upload_file_s3(
             )
         
         client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-        # Obter segundo titular se existir (com verificação de None)
-        titular2_upload = process.get("titular2_data") or {}
-        second_client_name = process.get("second_client_name") or titular2_upload.get("nome") or titular2_upload.get("name")
+        second_client_name = extract_second_client_name(process)
         
         # Obter mapeamento S3 configurado (prioridade máxima)
         s3_folder = process.get("s3_folder")
@@ -2702,227 +2563,14 @@ async def get_expiring_documents_dashboard(
     search: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Dashboard de documentos a expirar.
-    
-    Permissões:
-    - CEO/Diretor/Admin: Vêem todos os clientes
-    - Consultor/Intermediário: Vêem apenas os seus clientes
-    
-    Args:
-        days_ahead: Dias a verificar (default 60)
-        urgency: Filtro por urgência (critical=<7, high=7-29, medium=30-60)
-        consultor_id: Filtro por consultor (apenas para management)
-        search: Pesquisa por nome de cliente
-    
-    Returns:
-        Dashboard com estatísticas e lista de documentos agrupados por cliente
-    """
-    from datetime import timezone
-    
-    user_role = user.get("role", "")
-    user_id = user.get("id", "")
-    
-    # Verificar se é management (pode ver tudo)
-    is_management = user_role in UserRole.MANAGEMENT_ROLES
-    
-    today = datetime.now(timezone.utc)
-    future_date = today + timedelta(days=days_ahead)
-    
-    # Query base para documentos com data de expiração
-    doc_query = {
-        "expiry_date": {
-            "$ne": None,
-            "$gte": today.strftime("%Y-%m-%d"),
-            "$lte": future_date.strftime("%Y-%m-%d")
-        }
-    }
-    
-    # Aplicar filtro de urgência
-    if urgency:
-        if urgency == "critical":
-            critical_date = (today + timedelta(days=7)).strftime("%Y-%m-%d")
-            doc_query["expiry_date"]["$lt"] = critical_date
-        elif urgency == "high":
-            high_start = (today + timedelta(days=7)).strftime("%Y-%m-%d")
-            high_end = (today + timedelta(days=30)).strftime("%Y-%m-%d")
-            doc_query["expiry_date"]["$gte"] = high_start
-            doc_query["expiry_date"]["$lt"] = high_end
-        elif urgency == "medium":
-            medium_start = (today + timedelta(days=30)).strftime("%Y-%m-%d")
-            doc_query["expiry_date"]["$gte"] = medium_start
-    
-    # Buscar todos os documentos a expirar
-    expiring_docs = await db.document_metadata.find(
-        doc_query,
-        {"_id": 0, "extracted_text": 0}
-    ).to_list(1000)
-    
-    # Obter process_ids únicos
-    process_ids = list(set(doc.get("process_id") for doc in expiring_docs if doc.get("process_id")))
-    
-    # Buscar processos para obter informações dos clientes e consultores
-    processes_query = {"id": {"$in": process_ids}}
-    
-    # Se não é management, filtrar apenas processos do utilizador
-    if not is_management:
-        processes_query["$or"] = [
-            {"assigned_consultor_id": user_id},
-            {"consultor_id": user_id},
-            {"assigned_mediador_id": user_id},
-            {"mediador_id": user_id}
-        ]
-    
-    # Filtro por consultor específico (apenas para management)
-    if is_management and consultor_id:
-        processes_query["$or"] = [
-            {"assigned_consultor_id": consultor_id},
-            {"consultor_id": consultor_id},
-            {"assigned_mediador_id": consultor_id},
-            {"mediador_id": consultor_id}
-        ]
-    
-    processes = await db.processes.find(
-        processes_query,
-        {"_id": 0, "id": 1, "client_name": 1, "assigned_consultor_id": 1, 
-         "consultor_id": 1, "assigned_mediador_id": 1, "mediador_id": 1}
-    ).to_list(500)
-    
-    # Criar mapa de processos
-    process_map = {p["id"]: p for p in processes}
-    
-    # Filtrar documentos apenas dos processos autorizados
-    authorized_process_ids = set(process_map.keys())
-    filtered_docs = [d for d in expiring_docs if d.get("process_id") in authorized_process_ids]
-    
-    # Aplicar filtro de pesquisa
-    if search:
-        search_lower = search.lower()
-        search_process_ids = [
-            pid for pid, p in process_map.items() 
-            if search_lower in (p.get("client_name") or "").lower()
-        ]
-        filtered_docs = [d for d in filtered_docs if d.get("process_id") in search_process_ids]
-    
-    # Obter nomes dos consultores
-    consultor_ids = set()
-    for p in processes:
-        if p.get("assigned_consultor_id"):
-            consultor_ids.add(p["assigned_consultor_id"])
-        if p.get("consultor_id"):
-            consultor_ids.add(p["consultor_id"])
-        if p.get("assigned_mediador_id"):
-            consultor_ids.add(p["assigned_mediador_id"])
-        if p.get("mediador_id"):
-            consultor_ids.add(p["mediador_id"])
-    
-    consultors = await db.users.find(
-        {"id": {"$in": list(consultor_ids)}},
-        {"_id": 0, "id": 1, "name": 1}
-    ).to_list(100)
-    consultor_map = {c["id"]: c.get("name", DEFAULT_CONSULTOR_NAME) for c in consultors}
-    
-    # Calcular estatísticas
-    stats = {"critical": 0, "high": 0, "medium": 0, "total": len(filtered_docs)}
-    
-    for doc in filtered_docs:
-        try:
-            expiry = datetime.strptime(doc["expiry_date"], "%Y-%m-%d")
-            days_until = (expiry - today).days
-            if days_until < 7:
-                stats["critical"] += 1
-            elif days_until < 30:
-                stats["high"] += 1
-            else:
-                stats["medium"] += 1
-        except (ValueError, KeyError):
-            pass
-    
-    # Agrupar documentos por cliente
-    clients_data = {}
-    
-    for doc in filtered_docs:
-        process_id = doc.get("process_id")
-        if not process_id or process_id not in process_map:
-            continue
-        
-        process = process_map[process_id]
-        client_name = doc.get("client_name") or process.get("client_name", DEFAULT_CLIENT_NAME)
-        
-        if process_id not in clients_data:
-            # Identificar consultor responsável
-            consultor_id = process.get("assigned_consultor_id") or process.get("consultor_id") or \
-                          process.get("assigned_mediador_id") or process.get("mediador_id")
-            consultor_name = consultor_map.get(consultor_id, DEFAULT_CONSULTOR_NAME)
-            
-            clients_data[process_id] = {
-                "process_id": process_id,
-                "client_name": client_name,
-                "consultor_id": consultor_id,
-                "consultor_name": consultor_name,
-                "documents": [],
-                "critical_count": 0,
-                "high_count": 0,
-                "medium_count": 0
-            }
-        
-        # Calcular urgência do documento
-        try:
-            expiry = datetime.strptime(doc["expiry_date"], "%Y-%m-%d")
-            days_until = (expiry - today).days
-            
-            if days_until < 7:
-                urgency_level = "critical"
-                clients_data[process_id]["critical_count"] += 1
-            elif days_until < 30:
-                urgency_level = "high"
-                clients_data[process_id]["high_count"] += 1
-            else:
-                urgency_level = "medium"
-                clients_data[process_id]["medium_count"] += 1
-        except (ValueError, KeyError):
-            urgency_level = "unknown"
-            days_until = None
-        
-        clients_data[process_id]["documents"].append({
-            "id": doc.get("id"),
-            "filename": doc.get("filename"),
-            "category": doc.get("ai_category"),
-            "subcategory": doc.get("ai_subcategory"),
-            "expiry_date": doc.get("expiry_date"),
-            "days_until": days_until,
-            "urgency": urgency_level,
-            "s3_path": doc.get("s3_path")
-        })
-    
-    # Converter para lista e ordenar por urgência (mais críticos primeiro)
-    clients_list = list(clients_data.values())
-    clients_list.sort(key=lambda x: (-x["critical_count"], -x["high_count"], -x["medium_count"]))
-    
-    # Obter lista de consultores para filtro (apenas para management)
-    consultors_filter = []
-    if is_management:
-        from services.role_query import deep_role_in_filter
-        all_consultors = await db.users.find(
-            deep_role_in_filter(["consultor", "intermediario"]),
-            {"_id": 0, "id": 1, "name": 1}
-        ).to_list(100)
-        consultors_filter = [{"id": c["id"], "name": c.get("name", DEFAULT_CONSULTOR_NAME)} for c in all_consultors]
-    
-    return {
-        "stats": stats,
-        "clients": clients_list,
-        "total_clients": len(clients_list),
-        "is_management": is_management,
-        "consultors_filter": consultors_filter,
-        "filters_applied": {
-            "days_ahead": days_ahead,
-            "urgency": urgency,
-            "consultor_id": consultor_id,
-            "search": search
-        }
-    }
-
+    """Dashboard de documentos a expirar (ACL por role + filtros)."""
+    return await run_get_expiring_documents_dashboard(
+        days_ahead=days_ahead,
+        urgency=urgency,
+        consultor_id=consultor_id,
+        search=search,
+        user=user,
+    )
 
 
 # ====================================================================
@@ -3474,63 +3122,8 @@ async def organize_documents_after_analysis(
 
 # ====================================================================
 # RENOMEAÇÃO INTELIGENTE DE DOCUMENTOS COM IA
+# (generate_smart_filename → services.document_filenames)
 # ====================================================================
-
-def generate_smart_filename(
-    category: str,
-    subcategory: str,
-    client_name: str,
-    expiry_date: str = None,
-    original_extension: str = "pdf"
-) -> str:
-    """
-    Gera um nome de ficheiro inteligente baseado na categorização IA.
-    
-    Formato: {Categoria}_{Subcategoria}_{Cliente}_{Validade}.{ext}
-    Exemplo: Identificacao_CC_JoaoSilva_2028-03-15.pdf
-    
-    Args:
-        category: Categoria do documento
-        subcategory: Subcategoria/tipo específico
-        client_name: Nome do cliente
-        expiry_date: Data de validade (opcional, formato YYYY-MM-DD)
-        original_extension: Extensão original do ficheiro
-        
-    Returns:
-        Nome normalizado e inteligente
-    """
-    import unicodedata
-    import re
-    
-    def normalize_text(text: str, max_len: int = 20) -> str:
-        """Remove acentos e caracteres especiais."""
-        if not text:
-            return ""
-        normalized = unicodedata.normalize('NFKD', text)
-        normalized = normalized.encode('ASCII', 'ignore').decode('ASCII')
-        normalized = re.sub(r'[^\w]', '', normalized)
-        return normalized[:max_len]
-    
-    # Normalizar componentes
-    cat_norm = normalize_text(category, 15) or "Doc"
-    subcat_norm = normalize_text(subcategory, 15) or "Geral"
-    client_norm = normalize_text(client_name, 20) or DEFAULT_CLIENT_NAME
-    
-    # Construir nome
-    parts = [cat_norm, subcat_norm, client_norm]
-    
-    # Adicionar data de validade se existir
-    if expiry_date:
-        parts.append(expiry_date)
-    
-    # Juntar partes
-    smart_name = "_".join(parts)
-    
-    # Garantir extensão
-    ext = original_extension.lower().lstrip('.')
-    
-    return f"{smart_name}.{ext}"
-
 
 @router.post("/rename-smart/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def rename_document_smart(
@@ -4020,23 +3613,6 @@ async def bulk_download_documents(
 # ====================================================================
 # PORTAL DOCUMENT REQUESTS — Admin manages what the client sees
 # ====================================================================
-
-DOCUMENT_CATEGORY_MAP = {
-    "Cartao_Cidadao": {"label": "Cartão de Cidadão", "icon": "🪪"},
-    "IRS": {"label": "Declaração de IRS", "icon": "📋"},
-    "Recibo_Vencimento": {"label": "Recibo de Vencimento", "icon": "💰"},
-    "Comprovativo_IBAN": {"label": "Comprovativo de IBAN", "icon": "🏦"},
-    "Certidao_Nascimento": {"label": "Certidão de Nascimento", "icon": "📄"},
-    "Atestado_Trabalho": {"label": "Atestado de Trabalho", "icon": "🏢"},
-    "Mapa_Creditos": {"label": "Mapa de Créditos", "icon": "📊"},
-    "Declaracao_Imposto_Renda": {"label": "Declaração de Imposto de Renda", "icon": "📑"},
-    "Certidao_Permanente": {"label": "Certidão Permanente", "icon": "📜"},
-    "Contrato_Promessa": {"label": "Contrato de Promessa", "icon": "📝"},
-    "Plantas_Casa": {"label": "Plantas da Casa", "icon": "🏠"},
-    "Certificado_Energetico": {"label": "Certificado Energético", "icon": "⚡"},
-    "Outros": {"label": "Outro Documento", "icon": "📎"},
-}
-
 
 @router.get("/portal-requests/{process_id}")
 async def get_portal_document_requests(
