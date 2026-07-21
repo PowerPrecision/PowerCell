@@ -588,6 +588,67 @@ class TestProcessClientsNm:
             assert e.status_code == 400
 
 
+class TestPortalMessageHelpers:
+    def test_validate_content(self):
+        from fastapi import HTTPException
+        from services.process_portal_messages import (
+            validate_staff_portal_message_content,
+            build_staff_portal_message_doc,
+            staff_portal_message_response,
+        )
+        try:
+            validate_staff_portal_message_content("   ")
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+        try:
+            validate_staff_portal_message_content("x" * 5001)
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+        assert validate_staff_portal_message_content("  oi  ") == "oi"
+        doc = build_staff_portal_message_doc(
+            process_id="p1",
+            user={"id": "u1", "name": "Ana"},
+            content="olá",
+            now="t0",
+            message_id="m1",
+        )
+        assert doc["sender_type"] == "staff" and doc["id"] == "m1"
+        resp = staff_portal_message_response(doc)
+        assert resp["content"] == "olá" and "_id" not in resp
+
+
+class TestUpdateProcessMetaHelpers:
+    def test_parse_and_guards(self):
+        from fastapi import HTTPException
+        from services.process_update import (
+            parse_update_request_meta,
+            assert_can_reassign_primary_client,
+            assert_cliente_owns_process,
+        )
+        body, reason, ai = parse_update_request_meta({
+            "audit_reason": "fix", "ai_suggested": 1,
+        })
+        assert reason == "fix" and ai is True
+        assert_can_reassign_primary_client(UserRole.ADMIN)
+        try:
+            assert_can_reassign_primary_client(UserRole.CONSULTOR)
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 403
+        assert_cliente_owns_process(
+            {"client_id": "c1"}, {"id": "c1", "role": UserRole.CLIENTE},
+        )
+        try:
+            assert_cliente_owns_process(
+                {"client_id": "c1"}, {"id": "other", "role": UserRole.CLIENTE},
+            )
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 403
+
+
 
 class TestListEnrichmentSort:
     def test_default_sort_priority_then_status(self):

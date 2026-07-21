@@ -140,6 +140,18 @@ from services.process_clients_nm import (
     format_add_client_response,
     format_remove_client_response,
 )
+from services.process_portal_messages import (
+    load_process_for_portal_or_404,
+    validate_staff_portal_message_content,
+    build_staff_portal_message_doc,
+    staff_portal_message_response,
+    count_unread_client_portal_messages,
+    list_portal_messages_for_staff,
+    insert_staff_portal_message,
+    notify_team_email_portal_message,
+    notify_assigned_realtime_portal_message,
+    broadcast_staff_portal_message_ws,
+)
 from services.process_ai_conflict import apply_ai_conflict_choice
 from services.process_update import (
     prepare_encrypted_client_updates,
@@ -152,6 +164,11 @@ from services.process_update import (
     encrypt_process_update_payload,
     attach_field_metadata_if_present,
     run_process_update_side_effects,
+    parse_update_request_meta,
+    assert_can_reassign_primary_client,
+    assert_cliente_owns_process,
+    decrypt_process_doc_or_500,
+    build_process_response_or_500,
 )
 from services.process_kanban_enrichment import (
     group_processes_by_status,
@@ -1575,68 +1592,44 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    # Desencriptar dados existentes antes de fazer merge com dados novos
-    # (sem isto, campos encriptados do DB seriam misturados com dados em claro e
-    # re-encriptados na guarda, causando dupla encriptação e corrupção de dados)
-    try:
-        process = decrypt_sensitive_data(process)
-    except Exception as e:
-        logger.error(f"Erro ao desencriptar processo {process_id}: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro interno ao desencriptar dados do processo: {type(e).__name__}")
-    
+
+    process = decrypt_process_doc_or_500(process, process_id, decrypt_sensitive_data)
     role = user["role"]
-    
-    # Extrair campos opcionais do body para auditoria (não são parte do modelo ProcessUpdate)
-    audit_reason = None
-    ai_suggested = False
+
     raw_body = {}
     try:
         raw_body = await request.json()
-        audit_reason = raw_body.get("audit_reason")
-        ai_suggested = bool(raw_body.get("ai_suggested", False))
     except Exception:
         pass
-    
-    # ── FASE 2: Extrair dados pessoais do body e aplicar ao cliente ──────
-    # O Frontend ainda envia personal_data/titular2_data no PUT.
-    # Extraímos esses campos e atualizamos a coleção `clients` em vez de `processes`.
+    raw_body, audit_reason, ai_suggested = parse_update_request_meta(raw_body)
+
     client_id = process.get("client_id")
     client_updates = extract_client_updates_from_body(raw_body)
-    
-    # ── Sincronizar client_email/client_phone para o processo ──
-    # O Frontend envia estes campos directamente no body do PUT do processo.
-    # Precisamos guardá-los no documento do processo (além de sincronizar com o cliente).
     raw_client_email = raw_body.get("client_email")
     raw_client_phone = raw_body.get("client_phone")
-    
+
     if client_updates and client_id:
         client_updates = prepare_encrypted_client_updates(client_updates)
         await apply_client_personal_updates_from_process_put(
             client_id, client_updates, process_id,
         )
-    # ── REATRIBUIÇÃO DE CLIENTE: Se o body inclui client_id diferente do actual ──
+
     new_client_id = raw_body.get("client_id")
     if new_client_id and new_client_id != process.get("client_id"):
-        if role not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
-            raise HTTPException(
-                status_code=403,
-                detail="Apenas administradores, CEO ou directores podem reatribuir o cliente de um processo."
-            )
-
+        assert_can_reassign_primary_client(role)
         reassign_info = await reassign_process_primary_client(
             process, process_id, new_client_id,
         )
         await log_history(
             process_id, user,
             f"Reatribuiu cliente de '{reassign_info['old_client_name']}' "
-            f"para '{reassign_info['new_client_name']}'"
+            f"para '{reassign_info['new_client_name']}'",
         )
         await log_audit_event(
             process_id, user,
             f"Reatribuiu cliente de '{reassign_info['old_client_name']}' "
             f"para '{reassign_info['new_client_name']}'",
-            request=request, source="web"
+            request=request, source="web",
         )
         logger.info(
             f"Processo {process_id} reatribuído de cliente "
@@ -1644,8 +1637,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
             f"para cliente {reassign_info['new_client_id']} "
             f"({reassign_info['new_client_name']}) por {user.get('email')}"
         )
-    
-    # Bloquear edição em estados terminais (admin/CEO podem corrigir concluídos).
+
     assert_process_editable_for_role(process.get("status"), role)
 
     update_data = seed_update_data(
@@ -1663,10 +1655,8 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
     perms = build_role_update_permissions(role)
     can_update_status = perms["can_update_status"]
 
-    if role == UserRole.CLIENTE:
-        if process.get("client_id") != user["id"]:
-            raise HTTPException(status_code=403, detail="Acesso negado")
-    else:
+    assert_cliente_owns_process(process, user)
+    if role != UserRole.CLIENTE:
         await apply_staff_business_updates(
             process=process,
             process_id=process_id,
@@ -1710,15 +1700,7 @@ async def update_process(process_id: str, data: ProcessUpdate, request: Request,
         )
 
     updated = await populate_client_data(updated)
-
-    try:
-        return ProcessResponse(**updated)
-    except Exception as e:
-        logger.error(f"Erro ao serializar resposta do processo {process_id}: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro interno ao serializar dados do processo: {str(e)[:200]}",
-        )
+    return build_process_response_or_500(updated, process_id)
 
 
 # ====================================================================
@@ -2291,24 +2273,9 @@ async def get_portal_messages_unread_staff(
     Retorna o número de mensagens enviadas pelo cliente que o staff
     ainda não leu (read_by_staff=False).
     """
-    # Validate process exists and user has access
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    try:
-        count = await db.portal_messages.count_documents({
-            "process_id": process_id,
-            "sender_type": "client",
-            "read_by_staff": False,
-        })
-        return {"unread_count": count}
-    except Exception as e:
-        logger.error(f"[PROCESS] Erro ao contar mensagens não lidas do portal: {e}")
-        return {"unread_count": 0}
+    await load_process_for_portal_or_404(process_id)
+    count = await count_unread_client_portal_messages(process_id)
+    return {"unread_count": count}
 
 
 @router.get("/{process_id}/portal-messages")
@@ -2323,45 +2290,8 @@ async def get_portal_messages_staff(
     ascendente (mais antigas primeiro). Ao listar, marca automaticamente
     as mensagens do cliente como lidas pelo staff (read_by_staff=True).
     """
-    # Validate process exists
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    try:
-        # Buscar últimas 100 mensagens
-        messages = await db.portal_messages.find(
-            {"process_id": process_id},
-            {"_id": 0}
-        ).sort("created_at", 1).limit(100).to_list(100)
-
-        # Marcar mensagens do cliente como lidas pelo staff
-        try:
-            await db.portal_messages.update_many(
-                {
-                    "process_id": process_id,
-                    "sender_type": "client",
-                    "read_by_staff": False,
-                },
-                {"$set": {"read_by_staff": True}}
-            )
-        except Exception as e:
-            logger.warning(f"[PROCESS] Erro ao marcar mensagens do portal como lidas: {e}")
-
-        return {
-            "messages": messages,
-            "total": len(messages),
-            "process_id": process_id,
-        }
-    except Exception as e:
-        logger.error(f"[PROCESS] Erro ao listar mensagens do portal: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Erro ao carregar mensagens do portal."
-        )
+    await load_process_for_portal_or_404(process_id)
+    return await list_portal_messages_for_staff(process_id)
 
 
 @router.post("/{process_id}/portal-messages")
@@ -2376,133 +2306,26 @@ async def send_portal_message_staff(
     Body:
     - content: Texto da mensagem (obrigatório)
     """
-    import uuid as _uuid
-
-    # Validate process exists
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    content = data.get("content", "").strip()
-    if not content:
-        raise HTTPException(status_code=400, detail="A mensagem não pode estar vazia.")
-    if len(content) > 5000:
-        raise HTTPException(status_code=400, detail="A mensagem não pode exceder 5000 caracteres.")
-
+    process = await load_process_for_portal_or_404(process_id)
+    content = validate_staff_portal_message_content(data.get("content", ""))
     now = datetime.now(timezone.utc).isoformat()
-    message_id = str(_uuid.uuid4())
+    message_doc = build_staff_portal_message_doc(
+        process_id=process_id,
+        user=user,
+        content=content,
+        now=now,
+    )
+    await insert_staff_portal_message(
+        message_doc, user_email=user.get("email", ""),
+    )
 
-    message_doc = {
-        "id": message_id,
-        "process_id": process_id,
-        "sender_type": "staff",
-        "sender_id": user.get("id", ""),
-        "sender_name": user.get("name", "Staff"),
-        "content": content,
-        "created_at": now,
-        "read_by_client": False,
-        "read_by_staff": True,
-    }
-
-    try:
-        await db.portal_messages.insert_one(message_doc)
-        logger.info(
-            f"[PROCESS] Mensagem do portal enviada por {user.get('email')} "
-            f"para processo {process_id}"
-        )
-    except Exception as e:
-        logger.error(f"[PROCESS] Erro ao enviar mensagem do portal: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail="Erro ao enviar mensagem. Tente novamente."
-        )
-
-    # ── Notificar outros membros da equipa (excluindo o remetente) ──
-    await _notify_team_portal_message(process, user, process_id)
-
-    # ── In-app notification para membros da equipa atribuídos ──
-    try:
-        from routes.portal import _get_all_assigned_user_ids
-        assigned_ids = _get_all_assigned_user_ids(process)
-        sender_id = user.get("id", "")
-        process_number = process.get("process_number", "")
-        process_ref = f"#{process_number}" if process_number else process_id[:8]
-        
-        for uid in assigned_ids:
-            if uid == sender_id:
-                continue  # Não notificar o remetente
-            try:
-                from services.realtime_notifications import send_realtime_notification
-                await send_realtime_notification(
-                    user_id=uid,
-                    title="Nova Mensagem Interna",
-                    message=f"{user.get('name', 'Staff')} enviou uma mensagem no processo {process_ref}.",
-                    notification_type="portal_message",
-                    link=f"/processes/{process_id}",
-                    process_id=process_id,
-                )
-            except Exception as notif_err:
-                logger.debug(f"Erro ao notificar membro {uid} sobre mensagem interna: {notif_err}")
-    except Exception as e:
-        logger.warning(f"Erro ao notificar equipa sobre mensagem do portal: {e}")
-
-    # ── Broadcast para a sala WebSocket do processo ──
-    try:
-        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
-            "id": message_id,
-            "process_id": process_id,
-            "sender_type": "staff",
-            "sender_id": user.get("id", ""),
-            "sender_name": user.get("name", "Staff"),
-            "content": content[:200],
-            "created_at": now,
-        })
-        await manager.broadcast_to_room(f"process_{process_id}", ws_message, exclude_user=user.get("id"))
-    except Exception as ws_err:
-        logger.debug(f"Erro ao broadcast mensagem staff via WebSocket: {ws_err}")
-
-    # Return without MongoDB _id
-    return {
-        "id": message_id,
-        "process_id": process_id,
-        "sender_type": "staff",
-        "sender_id": user.get("id", ""),
-        "sender_name": user.get("name", "Staff"),
-        "content": content,
-        "created_at": now,
-        "read_by_client": False,
-        "read_by_staff": True,
-    }
-
-
-async def _notify_team_portal_message(process: dict, sender: dict, process_id: str):
-    """Notifica outros membros da equipa atribuída quando um membro envia mensagem ao cliente.
-    
-    O remetente NÃO recebe notificação. Apenas os outros utilizadores atribuídos.
-    """
-    from routes.portal import _get_all_assigned_user_ids
-    
-    assigned_ids = _get_all_assigned_user_ids(process)
-    sender_id = sender.get("id", "")
-    process_ref = process.get("process_number", process_id)
-    sender_name = sender.get("name", "Membro da equipa")
-    client_name = process.get("client_name", "Cliente")
-    
-    for uid in assigned_ids:
-        if uid == sender_id:
-            continue  # Não notificar o remetente
-        try:
-            team_user = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
-            if team_user and team_user.get("email"):
-                await send_notification_with_preference_check(
-                    team_user["email"],
-                    "Nova Mensagem no Processo",
-                    f"{sender_name} enviou uma mensagem ao cliente {client_name} no processo #{process_ref}.",
-                    notification_type="portal_message"
-                )
-        except Exception as e:
-            logger.warning(f"Erro ao notificar membro {uid} sobre mensagem do portal: {e}")
+    await notify_team_email_portal_message(process, user, process_id)
+    await notify_assigned_realtime_portal_message(process, user, process_id)
+    await broadcast_staff_portal_message_ws(
+        process_id=process_id,
+        message_doc=message_doc,
+        content=content,
+        exclude_user_id=user.get("id"),
+    )
+    return staff_portal_message_response(message_doc)
 

@@ -710,3 +710,59 @@ async def run_process_update_side_effects(
             })
         except Exception as e:
             logger.warning(f"Erro ao processar automações: {e}")
+
+
+def parse_update_request_meta(raw_body: Optional[dict]) -> tuple[dict, Any, bool]:
+    """Extrai raw_body seguro + audit_reason + ai_suggested."""
+    body = raw_body if isinstance(raw_body, dict) else {}
+    return body, body.get("audit_reason"), bool(body.get("ai_suggested", False))
+
+
+def assert_can_reassign_primary_client(role: str) -> None:
+    from fastapi import HTTPException
+    if role not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "Apenas administradores, CEO ou directores podem reatribuir "
+                "o cliente de um processo."
+            ),
+        )
+
+
+def assert_cliente_owns_process(process: dict, user: dict) -> None:
+    """CLIENTE só edita o próprio processo (client_id == user.id)."""
+    from fastapi import HTTPException
+    if user.get("role") != UserRole.CLIENTE:
+        return
+    if process.get("client_id") != user.get("id"):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+
+def decrypt_process_doc_or_500(process: dict, process_id: str, decrypt_fn) -> dict:
+    from fastapi import HTTPException
+    try:
+        return decrypt_fn(process)
+    except Exception as e:
+        logger.error(f"Erro ao desencriptar processo {process_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                f"Erro interno ao desencriptar dados do processo: "
+                f"{type(e).__name__}"
+            ),
+        )
+
+
+def build_process_response_or_500(updated: dict, process_id: str):
+    """Serializa ProcessResponse ou HTTP 500."""
+    from fastapi import HTTPException
+    from models.process import ProcessResponse
+    try:
+        return ProcessResponse(**updated)
+    except Exception as e:
+        logger.error(f"Erro ao serializar resposta do processo {process_id}: {e}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro interno ao serializar dados do processo: {str(e)[:200]}",
+        )
