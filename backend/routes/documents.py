@@ -90,158 +90,24 @@ from services.document_process_resolve import (
     build_s3_valid_prefixes,
 )
 from services.document_expiring_dashboard import run_get_expiring_documents_dashboard
-from services.document_portal_request import run_create_portal_document_request
+from services.document_portal_request import (
+    run_create_portal_document_request,
+    run_get_portal_document_requests,
+    run_update_portal_document_request,
+    run_delete_portal_document_request,
+)
+from services.document_upload_conflict import run_check_upload_conflict
+from services.document_auto_categorize import (
+    auto_categorize_document_background,
+)
 
 
 # ====================================================================
 # FUNÇÃO DE CATEGORIZAÇÃO AUTOMÁTICA EM BACKGROUND
 # ====================================================================
 
-async def auto_categorize_document_background(
-    process_id: str,
-    client_name: str,
-    s3_path: str,
-    filename: str,
-    file_content: bytes
-):
-    """
-    Categoriza automaticamente um documento com IA em background,
-    extraindo texto do PDF e aplicando classificação com GPT.
-    
-    ADICIONADO: Também executa o ai_document_analyzer para extrair
-    entidades (Nome, NIF, Morada, Validade) de documentos de 
-    identificação ou fiscal, guardando extracted_data nos metadados.
-
-    Garante resiliência ao capturar TODOS os erros internamente
-    (nunca crasha a tarefa de background) e registar no log para
-    troubleshooting sem afetar a experiência do utilizador.
-
-    Args:
-        process_id: ID do processo associado ao documento.
-        client_name: Nome do cliente (para metadados).
-        s3_path: Caminho do ficheiro no S3.
-        filename: Nome do ficheiro para análise do nome.
-        file_content: Conteúdo binário do ficheiro (para extração de texto).
-    """
-    from services.document_categorization import extract_text_from_pdf, categorize_document_with_ai
-    
-    try:
-        logger.info(f"[AUTO-CAT] Iniciando categorização automática")
-        
-        # Verificar se já existe metadados para este ficheiro
-        existing = await db.document_metadata.find_one({"s3_path": s3_path}, {"_id": 0})
-        
-        # Extrair texto do documento
-        extracted_text = ""
-        if filename.lower().endswith('.pdf'):
-            extracted_text = extract_text_from_pdf(file_content)
-        
-        # Se não conseguir extrair texto, usar apenas o nome do ficheiro
-        text_for_analysis = extracted_text if extracted_text else f"{DEFAULT_FILE_PREFIX}{filename}"
-        
-        # Obter categorias existentes para consistência
-        existing_categories = await db.document_metadata.distinct("ai_category")
-        
-        # Categorizar com IA
-        result = await categorize_document_with_ai(
-            text_content=text_for_analysis,
-            filename=filename,
-            existing_categories=existing_categories
-        )
-        
-        if not result.get("success"):
-            logger.warning(f"[AUTO-CAT] Falha ao categorizar documento")
-            return
-        
-        now = datetime.now(timezone.utc).isoformat()
-        
-        # Criar ou actualizar metadados - CORRIGIDO: verificar se existing é None
-        doc_id = existing.get("id") if existing else str(uuid.uuid4())
-        
-        # ====================================================================
-        # AI OCR: Extrair entidades de documentos de identificação/fiscal
-        # Se o documento for CC, IRS, ou similar, executar o analyzer
-        # para extrair Nome, NIF, Morada, Validade, etc.
-        # ====================================================================
-        extracted_data = None
-        ai_category = result.get("category", "")
-        ocr_categories = {"Identificação", "Identificacao", "Identidade", "Fiscal", "Financiamento", "Financeiros"}
-        should_run_ocr = (
-            ai_category in ocr_categories
-            or any(cat in (ai_category or "").lower() for cat in ["ident", "fiscal", "financeiro", "cc", "irs"])
-        )
-        
-        if should_run_ocr and len(file_content) > 0:
-            try:
-                from services.ai_document import analyze_document_from_base64
-                import base64 as b64
-                
-                # Determinar document_type para o analyzer
-                doc_type_map = {
-                    "Identificação": "cc", "Identidade": "cc", "Identificacao": "cc",
-                    "Fiscal": "irs", "Financeiros": "irs", "Financiamento": "irs",
-                }
-                document_type = doc_type_map.get(ai_category, "cc")
-                
-                b64_content = b64.b64encode(file_content).decode('utf-8')
-                mime_type = MIME_TYPE_PDF if filename.lower().endswith('.pdf') else "image/jpeg"
-                
-                ocr_result = await analyze_document_from_base64(b64_content, mime_type, document_type)
-                
-                if ocr_result and ocr_result.get("extracted_data"):
-                    extracted_data = ocr_result["extracted_data"]
-                    logger.info(f"[AUTO-CAT] OCR extraído: {list(extracted_data.keys())}")
-                    
-                    # Criar sugestões de conflito se o processo tem dados diferentes
-                    if extracted_data:
-                        process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-                        if process and not process.get("is_data_confirmed"):
-                            from services.data_conflict import create_conflict_suggestions
-                            await create_conflict_suggestions(process_id, extracted_data, filename, doc_id)
-                else:
-                    logger.info(f"[AUTO-CAT] OCR não retornou dados extraídos")
-            except Exception as ocr_err:
-                logger.warning(f"[AUTO-CAT] Erro no OCR (não bloqueia categorização): {ocr_err}")
-        
-        metadata = {
-            "id": doc_id,
-            "process_id": process_id,
-            "client_name": client_name,
-            "s3_path": s3_path,
-            "filename": filename,
-            "ai_category": result.get("category"),
-            "ai_subcategory": result.get("subcategory"),
-            "ai_confidence": result.get("confidence"),
-            "ai_tags": result.get("tags", []),
-            "ai_summary": result.get("summary"),
-            "expiry_date": result.get("expiry_date"),  # Nova: data de validade
-            "expiry_alert_sent": False,  # Nova: flag de alerta
-            "extracted_text": extracted_text[:5000] if extracted_text else None,
-            "extracted_data": extracted_data,  # Dados OCR extraídos (Nome, NIF, Morada, etc.)
-            "file_size": len(file_content),
-            "mime_type": MIME_TYPE_PDF if filename.lower().endswith('.pdf') else None,
-            "is_categorized": True,
-            "categorized_at": now,
-            "updated_at": now
-        }
-        
-        if existing:
-            await db.document_metadata.update_one(
-                {"id": doc_id},
-                {"$set": metadata}
-            )
-            logger.info(f"[AUTO-CAT] Metadados actualizados")
-        else:
-            metadata["created_at"] = now
-            await db.document_metadata.insert_one(metadata)
-            logger.info(f"[AUTO-CAT] Metadados criados")
-        
-        logger.info(f"[AUTO-CAT] Categorização concluída")
-        
-    except Exception as e:
-        # Capturar TODOS os erros para não crashar a tarefa de background
-        logger.error(f"[AUTO-CAT] Erro ao categorizar documento: {type(e).__name__}: {e}")
-
+# Re-export: testes/integration importam de routes.documents
+# (auto_categorize_document_background → services.document_auto_categorize)
 
 
 # ====================================================================
@@ -633,73 +499,7 @@ async def check_upload_conflict(
         - existing_path: Caminho do ficheiro existente
         - suggested_names: Lista de nomes alternativos
     """
-    process_id = data.get("process_id")
-    filenames = data.get("filenames", [])
-    category = data.get("category", "Outros")
-    
-    if not process_id or not filenames:
-        raise HTTPException(status_code=400, detail="process_id e filenames são obrigatórios")
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    second_client_name = process.get("second_client_name") or process.get("titular2", {}).get("nome")
-    s3_folder = process.get("s3_folder")
-    
-    # Determinar o caminho base
-    if s3_folder:
-        base_path = s3_folder.rstrip('/')
-    else:
-        base_path = s3_service._get_client_base_path_for_upload(
-            process_id, 
-            client_name, 
-            second_client_name
-        )
-    
-    safe_category = sanitize_folder_name(category)
-    conflicts = []
-    
-    for filename in filenames:
-        # Normalizar nome do ficheiro como seria no upload
-        normalized = normalize_filename(filename, category)
-        
-        # Construir caminho completo
-        target_path = f"{base_path}/{safe_category}/{normalized}"
-        
-        # Verificar se existe
-        if s3_service.file_exists(target_path):
-            # Gerar nomes alternativos
-            name_part, ext = normalized.rsplit('.', 1) if '.' in normalized else (normalized, 'pdf')
-            suggested = []
-            
-            for i in range(2, 5):
-                new_name = f"{name_part}_{i}.{ext}"
-                new_path = f"{base_path}/{safe_category}/{new_name}"
-                if not s3_service.file_exists(new_path):
-                    suggested.append({
-                        "filename": new_name,
-                        "path": new_path
-                    })
-            
-            conflicts.append({
-                "original_filename": filename,
-                "normalized_filename": normalized,
-                "existing_path": target_path,
-                "existing_size": None,  # Could add file size if needed
-                "suggested_names": suggested
-            })
-    
-    return {
-        "has_conflicts": len(conflicts) > 0,
-        "conflict_count": len(conflicts),
-        "total_files": len(filenames),
-        "conflicts": conflicts,
-        "base_path": base_path,
-        "category": category
-    }
+    return await run_check_upload_conflict(data)
 
 
 # ====================================================================
@@ -3490,57 +3290,7 @@ async def get_portal_document_requests(
     Lista todos os pedidos de documentos do portal para um processo.
     Inclui docs com status REQUESTED, PENDING, UPLOADED, RECEIVED.
     """
-    try:
-        docs = []
-        cursor = db.documents.find(
-            {
-                "process_id": process_id,
-                "status": {"$in": ["REQUESTED", "PENDING", "UPLOADED", "SUBMITTED", "RECEIVED", "requested", "pending", "uploaded", "submitted", "received"]},
-                "$or": [
-                    {"source": {"$in": ["client_portal", "admin_request", "auto_default"]}},
-                    {"source": {"$exists": False}},
-                ]
-            },
-            {"_id": 0}
-        )
-
-        async for doc in cursor:
-            cat = doc.get("category") or "Outros"
-            # Ensure cat is a string (backend may have stored objects)
-            if isinstance(cat, dict):
-                cat = cat.get("value", cat.get("label", "Outros"))
-            if not isinstance(cat, str):
-                cat = str(cat) if cat else "Outros"
-            cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
-            docs.append({
-                "id": doc.get("id"),
-                "process_id": doc.get("process_id"),
-                "category": cat,
-                "category_label": cat_info.get("label", cat) if isinstance(cat_info, dict) else cat,
-                "category_icon": cat_info.get("icon", "📎") if isinstance(cat_info, dict) else "📎",
-                "custom_label": doc.get("custom_label"),
-                "status": doc.get("status", "REQUESTED"),
-                "notes": doc.get("notes", ""),
-                "filename": doc.get("filename"),
-                "original_filename": doc.get("original_filename"),
-                "file_size": doc.get("file_size"),
-                "content_type": doc.get("content_type"),
-                "source": doc.get("source"),
-                "requested_by": doc.get("requested_by"),
-                "requested_by_name": doc.get("requested_by_name"),
-                "created_at": doc.get("created_at"),
-                "updated_at": doc.get("updated_at"),
-                "uploaded_at": doc.get("uploaded_at"),
-                "reviewed_at": doc.get("reviewed_at"),
-            })
-
-        # Sort in Python (avoid MongoDB sort errors on missing/invalid created_at)
-        docs.sort(key=lambda d: d.get("created_at") or "")
-
-        return {"success": True, "documents": docs}
-    except Exception as e:
-        logger.error(f"[DOCUMENTS] Erro em portal-requests GET para {process_id}: {type(e).__name__}: {e}")
-        raise HTTPException(status_code=500, detail=f"Erro ao obter pedidos do portal: {type(e).__name__}")
+    return await run_get_portal_document_requests(process_id)
 
 
 class DocumentRequestCreate(BaseModel):
@@ -3620,67 +3370,9 @@ async def update_portal_document_request(
     - UPLOADED: cliente submeteu o ficheiro
     """
     try:
-        valid_statuses = ["REQUESTED", "PENDING", "RECEIVED", "UPLOADED"]
-        new_status = data.status.upper()
-        if new_status not in valid_statuses:
-            raise HTTPException(status_code=400, detail=f"Status inválido. Use um de: {', '.join(valid_statuses)}")
-
-        existing = await db.documents.find_one({"id": document_id, "process_id": process_id})
-        if not existing:
-            raise HTTPException(status_code=404, detail="Documento não encontrado")
-
-        old_status = existing.get("status", "")
-        now = datetime.now(timezone.utc).isoformat()
-        user_id = user.get("id", "")
-        user_name = user.get("name", "")
-
-        await db.documents.update_one(
-            {"id": document_id, "process_id": process_id},
-            {"$set": {
-                "status": new_status,
-                "updated_at": now,
-                "reviewed_by": user_id,
-                "reviewed_at": now,
-            }}
+        return await run_update_portal_document_request(
+            process_id, document_id, status=data.status, user=user
         )
-
-        # Audit log (fire-and-forget)
-        # Pacote D — Indexador silencioso: NÃO regista no histórico se o
-        # utilizador for indexacao (mesma barra de bloqueio do log_history).
-        try:
-            status_labels = {
-                "REQUESTED": "Pendente",
-                "RECEIVED": "Recebido",
-                "UPLOADED": "Submetido pelo cliente",
-            }
-            if user and user.get("role") != "indexacao":
-                await db.history.insert_one({
-                    "id": str(uuid.uuid4()),
-                    "process_id": process_id,
-                    "user_id": user_id,
-                    "user_name": user_name,
-                    "action": f"Status do documento alterado: {old_status} → {new_status}",
-                    "field": "portal_document_status",
-                    "old_value": old_status,
-                    "new_value": new_status,
-                    "created_at": now,
-                })
-        except Exception as hist_err:
-            logging.getLogger(__name__).warning(f"Failed to write audit log: {hist_err}")
-
-        status_labels = {
-            "REQUESTED": "Pendente",
-            "RECEIVED": "Recebido",
-            "UPLOADED": "Submetido pelo cliente",
-        }
-
-        return {
-            "success": True,
-            "document_id": document_id,
-            "old_status": old_status,
-            "new_status": new_status,
-            "new_status_label": status_labels.get(new_status, new_status),
-        }
     except HTTPException:
         raise
     except Exception as e:
@@ -3697,29 +3389,9 @@ async def delete_portal_document_request(
     """
     Remove um pedido de documento do portal.
     """
-    existing = await db.documents.find_one({"id": document_id, "process_id": process_id})
-    if not existing:
-        raise HTTPException(status_code=404, detail="Documento não encontrado")
-
-    await db.documents.delete_one({"id": document_id, "process_id": process_id})
-
-    # Pacote D — Indexador silencioso: NÃO regista no histórico se o
-    # utilizador for indexacao (mesma barra de bloqueio do log_history).
-    now = datetime.now(timezone.utc).isoformat()
-    if user and user.get("role") != "indexacao":
-        await db.history.insert_one({
-            "id": str(uuid.uuid4()),
-            "process_id": process_id,
-            "user_id": user["id"],
-            "user_name": user.get("name", ""),
-            "action": f"Pedido de documento removido: {existing.get('category', '')}",
-            "field": "portal_document_deleted",
-            "old_value": existing.get("status"),
-            "new_value": None,
-            "created_at": now,
-        })
-
-    return {"success": True, "message": "Pedido de documento removido"}
+    return await run_delete_portal_document_request(
+        process_id, document_id, user=user
+    )
 
 
 # ====================================================================

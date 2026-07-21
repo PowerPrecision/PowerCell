@@ -26,8 +26,15 @@ from services.document_process_resolve import (
     build_s3_valid_prefixes,
     assert_s3_file_belongs_to_process,
 )
+from services.document_auto_categorize import (
+    should_run_ocr_for_category,
+    build_auto_cat_metadata,
+)
+from services.document_portal_request import serialize_portal_document
+from services.document_upload_conflict import suggest_alternate_filenames
 import pytest
 from fastapi import HTTPException
+from unittest.mock import patch
 
 
 class TestDocumentFilenames:
@@ -150,3 +157,55 @@ class TestS3AccessHelpers:
         with pytest.raises(HTTPException) as exc:
             assert_s3_file_belongs_to_process("other/a.pdf", process)
         assert exc.value.status_code == 403
+
+
+class TestAutoCategorizeHelpers:
+    def test_should_run_ocr(self):
+        assert should_run_ocr_for_category("Identificação") is True
+        assert should_run_ocr_for_category("Outros") is False
+        assert should_run_ocr_for_category("doc_cc_scan") is True
+
+    def test_build_auto_cat_metadata(self):
+        meta = build_auto_cat_metadata(
+            doc_id="d1",
+            process_id="p1",
+            client_name="Ana",
+            s3_path="a/b.pdf",
+            filename="b.pdf",
+            result={"category": "Fiscal", "confidence": 0.9, "tags": [], "summary": "x"},
+            extracted_text="hello",
+            extracted_data={"nif": "123"},
+            file_content=b"%PDF",
+            now="2026-01-01T00:00:00+00:00",
+        )
+        assert meta["is_categorized"] is True
+        assert meta["ai_category"] == "Fiscal"
+        assert meta["extracted_data"]["nif"] == "123"
+
+
+class TestPortalSerializeAndConflictSuggest:
+    def test_serialize_portal_document(self):
+        row = serialize_portal_document(
+            {
+                "id": "d1",
+                "process_id": "p1",
+                "category": {"value": "IRS"},
+                "status": "REQUESTED",
+                "created_at": "2026-01-01",
+            }
+        )
+        assert row["category"] == "IRS"
+        assert row["category_label"]
+
+    def test_suggest_alternate_filenames(self):
+        with patch(
+            "services.document_upload_conflict.s3_service.file_exists",
+            side_effect=lambda p: p.endswith("_2.pdf"),
+        ):
+            suggested = suggest_alternate_filenames(
+                base_path="base",
+                safe_category="Outros",
+                normalized="doc.pdf",
+            )
+        assert suggested
+        assert suggested[0]["filename"] == "doc_3.pdf"

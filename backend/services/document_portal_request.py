@@ -260,3 +260,185 @@ async def run_create_portal_document_request(
             "category_icon": cat_info.get("icon", "📎"),
         },
     }
+
+
+_PORTAL_LIST_STATUSES = list(_ACTIVE_PORTAL_STATUSES)
+
+_STATUS_LABELS = {
+    "REQUESTED": "Pendente",
+    "RECEIVED": "Recebido",
+    "UPLOADED": "Submetido pelo cliente",
+}
+
+_VALID_UPDATE_STATUSES = ["REQUESTED", "PENDING", "RECEIVED", "UPLOADED"]
+
+
+def serialize_portal_document(doc: dict) -> dict:
+    """Normaliza um doc Mongo → payload de listagem portal."""
+    cat = doc.get("category") or "Outros"
+    if isinstance(cat, dict):
+        cat = cat.get("value", cat.get("label", "Outros"))
+    if not isinstance(cat, str):
+        cat = str(cat) if cat else "Outros"
+    cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
+    return {
+        "id": doc.get("id"),
+        "process_id": doc.get("process_id"),
+        "category": cat,
+        "category_label": cat_info.get("label", cat) if isinstance(cat_info, dict) else cat,
+        "category_icon": cat_info.get("icon", "📎") if isinstance(cat_info, dict) else "📎",
+        "custom_label": doc.get("custom_label"),
+        "status": doc.get("status", "REQUESTED"),
+        "notes": doc.get("notes", ""),
+        "filename": doc.get("filename"),
+        "original_filename": doc.get("original_filename"),
+        "file_size": doc.get("file_size"),
+        "content_type": doc.get("content_type"),
+        "source": doc.get("source"),
+        "requested_by": doc.get("requested_by"),
+        "requested_by_name": doc.get("requested_by_name"),
+        "created_at": doc.get("created_at"),
+        "updated_at": doc.get("updated_at"),
+        "uploaded_at": doc.get("uploaded_at"),
+        "reviewed_at": doc.get("reviewed_at"),
+    }
+
+
+async def run_get_portal_document_requests(process_id: str) -> dict:
+    """Lista pedidos portal do processo (REQUESTED/PENDING/UPLOADED/RECEIVED)."""
+    try:
+        docs = []
+        cursor = db.documents.find(
+            {
+                "process_id": process_id,
+                "status": {"$in": _PORTAL_LIST_STATUSES},
+                "$or": [
+                    {
+                        "source": {
+                            "$in": ["client_portal", "admin_request", "auto_default"]
+                        }
+                    },
+                    {"source": {"$exists": False}},
+                ],
+            },
+            {"_id": 0},
+        )
+        async for doc in cursor:
+            docs.append(serialize_portal_document(doc))
+        docs.sort(key=lambda d: d.get("created_at") or "")
+        return {"success": True, "documents": docs}
+    except Exception as e:
+        logger.error(
+            f"[DOCUMENTS] Erro em portal-requests GET para {process_id}: "
+            f"{type(e).__name__}: {e}"
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao obter pedidos do portal: {type(e).__name__}",
+        )
+
+
+async def run_update_portal_document_request(
+    process_id: str,
+    document_id: str,
+    *,
+    status: str,
+    user: dict,
+) -> dict:
+    """Atualiza status de um pedido portal (REQUESTED/RECEIVED/UPLOADED/PENDING)."""
+    new_status = (status or "").upper()
+    if new_status not in _VALID_UPDATE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Status inválido. Use um de: {', '.join(_VALID_UPDATE_STATUSES)}"
+            ),
+        )
+
+    existing = await db.documents.find_one(
+        {"id": document_id, "process_id": process_id}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    old_status = existing.get("status", "")
+    now = datetime.now(timezone.utc).isoformat()
+    user_id = user.get("id", "")
+    user_name = user.get("name", "")
+
+    await db.documents.update_one(
+        {"id": document_id, "process_id": process_id},
+        {
+            "$set": {
+                "status": new_status,
+                "updated_at": now,
+                "reviewed_by": user_id,
+                "reviewed_at": now,
+            }
+        },
+    )
+
+    try:
+        if user and user.get("role") != "indexacao":
+            await db.history.insert_one(
+                {
+                    "id": str(uuid.uuid4()),
+                    "process_id": process_id,
+                    "user_id": user_id,
+                    "user_name": user_name,
+                    "action": (
+                        f"Status do documento alterado: {old_status} → {new_status}"
+                    ),
+                    "field": "portal_document_status",
+                    "old_value": old_status,
+                    "new_value": new_status,
+                    "created_at": now,
+                }
+            )
+    except Exception as hist_err:
+        logger.warning(f"Failed to write audit log: {hist_err}")
+
+    return {
+        "success": True,
+        "document_id": document_id,
+        "old_status": old_status,
+        "new_status": new_status,
+        "new_status_label": _STATUS_LABELS.get(new_status, new_status),
+    }
+
+
+async def run_delete_portal_document_request(
+    process_id: str,
+    document_id: str,
+    *,
+    user: dict,
+) -> dict:
+    """Remove um pedido de documento do portal."""
+    existing = await db.documents.find_one(
+        {"id": document_id, "process_id": process_id}
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Documento não encontrado")
+
+    await db.documents.delete_one({"id": document_id, "process_id": process_id})
+
+    now = datetime.now(timezone.utc).isoformat()
+    if user and user.get("role") != "indexacao":
+        await db.history.insert_one(
+            {
+                "id": str(uuid.uuid4()),
+                "process_id": process_id,
+                "user_id": user["id"],
+                "user_name": user.get("name", ""),
+                "action": (
+                    f"Pedido de documento removido: {existing.get('category', '')}"
+                ),
+                "field": "portal_document_deleted",
+                "old_value": existing.get("status"),
+                "new_value": None,
+                "created_at": now,
+            }
+        )
+
+    return {"success": True, "message": "Pedido de documento removido"}
+
