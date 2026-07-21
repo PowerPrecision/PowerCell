@@ -161,3 +161,164 @@ def format_remove_client_response(
         "message": f"Cliente {client_name} removido do processo",
         "total_clients": total_clients,
     }
+
+
+def resolve_process_client_ids(process: dict) -> list:
+    """client_ids com fallback para client_id singular."""
+    client_ids = process.get("client_ids", []) or []
+    if client_ids:
+        return list(client_ids)
+    if process.get("client_id"):
+        return [process.get("client_id")]
+    return []
+
+
+def build_process_client_info_row(
+    client: dict,
+    *,
+    process: dict,
+    co_buyer_ids: set,
+) -> dict[str, Any]:
+    cid = client.get("id")
+    return {
+        "id": cid,
+        "nome": client.get("nome"),
+        "email": client.get("contacto", {}).get("email"),
+        "telefone": client.get("contacto", {}).get("telefone"),
+        "nif": client.get("dados_pessoais", {}).get("nif"),
+        "is_main": cid == process.get("client_id"),
+        "relacao": "co-titular" if cid in co_buyer_ids else "titular",
+    }
+
+
+def build_process_clients_payload(
+    *,
+    process: dict,
+    clients: list[dict],
+) -> dict[str, Any]:
+    co_buyers = process.get("co_buyers", []) or []
+    co_buyer_ids = {cb.get("client_id") for cb in co_buyers if cb.get("client_id")}
+    result = [
+        build_process_client_info_row(
+            c, process=process, co_buyer_ids=co_buyer_ids,
+        )
+        for c in clients
+    ]
+    return {
+        "clients": result,
+        "total": len(result),
+        "process_id": process.get("id"),
+        "process_number": process.get("process_number"),
+    }
+
+
+async def run_add_client_to_process(
+    process_id: str,
+    client_id: str,
+    user: dict,
+    *,
+    as_co_titular: bool,
+    inject_cdc_fn,
+    log_history_fn,
+) -> dict[str, Any]:
+    from datetime import datetime, timezone
+
+    from fastapi import HTTPException
+
+    from database import db
+
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    client = await db.clients.find_one({"id": client_id})
+    if not client:
+        raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_data, current_client_ids = build_add_client_update(
+        process, client, client_id, as_co_titular=as_co_titular, now=now,
+    )
+
+    inject_cdc_fn(update_data, user)
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$addToSet": {"process_ids": process_id},
+            "$set": {"updated_at": now},
+        },
+    )
+    await log_history_fn(
+        process_id, user,
+        f"Adicionou cliente {client.get('nome')} ao processo"
+        + (" como co-titular" if as_co_titular else ""),
+    )
+    return format_add_client_response(
+        client.get("nome"),
+        as_co_titular=as_co_titular,
+        total_clients=len(current_client_ids),
+    )
+
+
+async def run_remove_client_from_process(
+    process_id: str,
+    client_id: str,
+    user: dict,
+    *,
+    inject_cdc_fn,
+    log_history_fn,
+) -> dict[str, Any]:
+    from datetime import datetime, timezone
+
+    from fastapi import HTTPException
+
+    from database import db
+
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_data, current_client_ids = build_remove_client_update(
+        process, client_id, now=now,
+    )
+
+    inject_cdc_fn(update_data, user)
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$pull": {"process_ids": process_id},
+            "$set": {"updated_at": now},
+        },
+    )
+
+    client = await db.clients.find_one({"id": client_id})
+    client_name = client.get("nome") if client else client_id
+    await log_history_fn(
+        process_id, user, f"Removeu cliente {client_name} do processo",
+    )
+    return format_remove_client_response(
+        client_name, total_clients=len(current_client_ids),
+    )
+
+
+async def run_get_process_clients(process_id: str) -> dict[str, Any]:
+    from fastapi import HTTPException
+
+    from database import db
+
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    client_ids = resolve_process_client_ids(process)
+    if not client_ids:
+        return {"clients": [], "total": 0}
+
+    clients = await db.clients.find(
+        {"id": {"$in": client_ids}},
+        {"_id": 0},
+    ).to_list(length=10)
+    return build_process_clients_payload(process=process, clients=clients)

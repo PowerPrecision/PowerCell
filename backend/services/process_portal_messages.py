@@ -248,3 +248,34 @@ async def broadcast_staff_portal_message_ws(
         logger.debug(
             f"Erro ao broadcast mensagem staff via WebSocket: {ws_err}"
         )
+
+async def run_send_portal_message_staff(
+    process_id: str,
+    data: dict,
+    user: dict,
+) -> dict:
+    """Orquestra POST /portal-messages (staff)."""
+    from datetime import datetime, timezone
+
+    process = await load_process_for_portal_or_404(process_id)
+    content = validate_staff_portal_message_content(data.get("content", ""))
+    now = datetime.now(timezone.utc).isoformat()
+    message_doc = build_staff_portal_message_doc(
+        process_id=process_id,
+        user=user,
+        content=content,
+        now=now,
+    )
+    await insert_staff_portal_message(
+        message_doc, user_email=user.get("email", ""),
+    )
+    await notify_team_email_portal_message(process, user, process_id)
+    await notify_assigned_realtime_portal_message(process, user, process_id)
+    await broadcast_staff_portal_message_ws(
+        process_id=process_id,
+        message_doc=message_doc,
+        content=content,
+        exclude_user_id=user.get("id"),
+    )
+    return staff_portal_message_response(message_doc)
+

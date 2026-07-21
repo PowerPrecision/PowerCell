@@ -5,25 +5,14 @@ ROTAS DE GESTÃO DE PROCESSOS - CREDITOIMO
 Endpoints REST para gestão de processos de crédito habitação
 e transações imobiliárias.
 
-A lógica de negócio está separada em serviços:
-- services/process_service.py - Lógica principal
-- services/process_assignment.py - Atribuições
-- services/process_kanban.py - Kanban
-
-WORKFLOW DE 14 FASES:
-1. Clientes em Espera → 14. Desistências
+A lógica de negócio está separada em serviços (process_*).
 
 Autor: PowerCell Development Team
 ====================================================================
 """
-import os
-import uuid
 import logging
-import re
-import asyncio
-from datetime import datetime, timezone
-from typing import List, Optional
-from fastapi import APIRouter, Depends, HTTPException, Query
+from typing import Optional
+from fastapi import APIRouter, Depends, Query, Request
 
 from database import db
 from models.auth import UserRole
@@ -31,39 +20,16 @@ from models.process import (
     ProcessCreate, ProcessUpdate, ProcessResponse
 )
 from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles
-from fastapi import Request
-from services.notification_service import (
-    send_notification_with_preference_check,
-    send_status_change_notification,
-    send_new_process_notification,
-    send_to_admins
-)
-from services.history import log_history, log_data_changes
+from services.notification_service import send_to_admins
+from services.history import log_history
 from services.audit_trail_service import log_audit_event
 from services.audit_cdc import inject_cdc_context
-from services.alerts import (
-    get_process_alerts,
-    check_property_documents,
-    create_deed_reminder,
-    notify_pre_approval_countdown,
-    notify_cpcv_or_deed_document_check
-)
-from services.realtime_notifications import notify_process_status_change
+from services.alerts import get_process_alerts
 from services.encryption import decrypt_client_data
-# PACOTE CW — Trello Mirror Service (sync unidirecional CRM → Trello)
-from services.trello_service import sync_process_to_trello
 
-# Importar serviços refatorados
 from services.process_service import (
-    get_next_process_number,
     can_view_process,
     can_edit_process_data,
-    build_query_filter,
-    create_process_document,
-    update_process_document,
-    get_process_by_id,
-    get_processes_for_user,
-    get_user_name,
     encrypt_sensitive_data,
     decrypt_sensitive_data,
     decrypt_processes_list,
@@ -72,18 +38,6 @@ from services.process_service import (
     PROCESS_LIST_PROJECTION,
     PROCESS_KANBAN_PROJECTION,
     PROCESS_MY_CLIENTS_PROJECTION,
-)
-from services.process_assignment import (
-    assign_both_to_process,
-    assign_self_to_process,
-    unassign_self_from_process,
-    get_users_for_assignment
-)
-from services.process_kanban import (
-    get_kanban_response,
-    move_process as move_process_kanban_service,
-    KANBAN_COLUMNS,
-    is_valid_status
 )
 from services.process_finance import (
     create_finance_snapshot as _create_finance_snapshot,
@@ -100,39 +54,24 @@ from services.process_indexing import (
     run_mark_process_indexed,
 )
 from services.process_create import (
-    resolve_initial_workflow_status,
-    assert_is_cliente_role,
-    load_client_doc_or_404,
-    build_client_self_process_doc,
-    link_single_client_to_process,
     assemble_staff_create_bundle,
     persist_and_finalize_staff_create,
+    persist_and_finalize_client_self_create,
 )
 from services.process_detail import (
-    load_process_doc_or_404,
-    assert_can_view_process_or_403,
-    attach_latest_activity,
-    attach_portal_access,
-    ensure_client_id_default,
-    serialize_process_detail_response,
+    run_get_process_detail,
+    run_get_process_alerts,
 )
 from services.process_clients_nm import (
-    build_add_client_update,
-    build_remove_client_update,
-    format_add_client_response,
-    format_remove_client_response,
+    run_add_client_to_process,
+    run_remove_client_from_process,
+    run_get_process_clients,
 )
 from services.process_portal_messages import (
     load_process_for_portal_or_404,
-    validate_staff_portal_message_content,
-    build_staff_portal_message_doc,
-    staff_portal_message_response,
     count_unread_client_portal_messages,
     list_portal_messages_for_staff,
-    insert_staff_portal_message,
-    notify_team_email_portal_message,
-    notify_assigned_realtime_portal_message,
-    broadcast_staff_portal_message_ws,
+    run_send_portal_message_staff,
 )
 from services.process_ai_conflict import (
     resolve_ai_data_conflict,
@@ -148,9 +87,11 @@ from services.process_kanban_enrichment import (
 )
 from services.process_kanban_diagnose import run_kanban_diagnose
 from services.process_kanban_move import (
-    resolve_workflow_purpose_flags,
-    build_kanban_move_update,
-    run_kanban_move_side_effects,
+    run_move_process_kanban,
+)
+from services.process_dsti import (
+    run_get_process_dsti,
+    run_get_dsti_high_risk_processes,
 )
 from services.process_list_enrichment import (
     run_get_processes,
@@ -163,7 +104,6 @@ from services.process_staff_assignment import (
     run_assign_me_to_process,
     run_unassign_me_from_process,
 )
-from services.websocket_manager import WSEventType
 from services.redis_cache import invalidate_stats_cache
 
 # Portal imports
@@ -253,72 +193,20 @@ async def send_magic_link_email(
 
 @router.post("", response_model=ProcessResponse)
 async def create_process(data: ProcessCreate, user: dict = Depends(get_current_user)):
-    """
-    Criar um novo processo (endpoint para clientes autenticados).
-
-    FASE 2 — Refatoração relacional:
-    - Recebe client_id em vez de dados pessoais embutidos
-    - Valida que o cliente existe na coleção `clients` (HTTP 404 se não)
-    - Após criar o processo, atualiza o array process_ids do cliente
-
-    NOTA: Para registos públicos (sem autenticação),
-    utilize o endpoint /api/public/register
-
-    Args:
-        data: Dados do processo (process_type + client_id obrigatório)
-        user: Utilizador autenticado (deve ser cliente)
-
-    Returns:
-        ProcessResponse: Processo criado com dados do cliente populados
-    """
-    assert_is_cliente_role(user["role"])
-
-    client_doc = await load_client_doc_or_404(data.client_id)
-    initial_status, _ = await resolve_initial_workflow_status(is_lead=False)
-
-    process_id = str(uuid.uuid4())
-    process_number = await get_next_process_number()
-    now = datetime.now(timezone.utc).isoformat()
-
-    decrypted_client = decrypt_client_data(client_doc)
-    client_name = decrypted_client.get("nome", "")
-
-    process_doc = build_client_self_process_doc(
-        process_id=process_id,
-        process_number=process_number,
-        client_id=data.client_id,
-        process_type=data.process_type,
-        initial_status=initial_status,
-        now=now,
+    """Criar processo (self-service) para cliente autenticado."""
+    return await persist_and_finalize_client_self_create(
+        data,
+        user,
+        encrypt_fn=encrypt_sensitive_data,
+        decrypt_fn=decrypt_sensitive_data,
+        decrypt_client_fn=decrypt_client_data,
+        populate_fn=populate_client_data,
+        log_history_fn=log_history,
+        broadcast_fn=broadcast_process_delta,
+        send_to_admins_fn=send_to_admins,
+        invalidate_stats_fn=invalidate_stats_cache,
+        response_cls=ProcessResponse,
     )
-    process_doc = encrypt_sensitive_data(process_doc)
-    await db.processes.insert_one(process_doc)
-
-    await link_single_client_to_process(process_id, data.client_id, now=now)
-
-    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
-    await invalidate_stats_cache(user_id=user["id"])
-    await log_history(process_id, user, "Criou processo")
-
-    await broadcast_process_delta(
-        event_type=WSEventType.PROCESS_CREATED,
-        process_id=process_id,
-        process_number=process_number,
-        client_name=client_name,
-        status=initial_status,
-        process_type=data.process_type,
-        updated_at=now,
-    )
-
-    await send_to_admins(
-        "Novo Processo Criado",
-        f"O cliente {client_name} criou um novo processo de {data.process_type}.",
-        notification_type="new_process",
-    )
-
-    response_doc = decrypt_sensitive_data(process_doc)
-    response_doc = await populate_client_data(response_doc)
-    return ProcessResponse(**{k: v for k, v in response_doc.items() if k != "_id"})
 
 
 @router.post("/create-client", response_model=ProcessResponse)
@@ -486,218 +374,59 @@ async def move_process_kanban(
     deed_date: Optional[str] = Query(None, description="Data da escritura (YYYY-MM-DD)"),
     user: dict = Depends(require_staff())
 ):
-    """
-    Move a process to a different status column in Kanban.
-    
-    ALERTAS AUTOMÁTICOS:
-    - Ao mover para "ch_aprovado": Inicia countdown de 90 dias, verifica docs do imóvel
-    - Ao mover para "escritura_agendada": Cria lembrete 15 dias antes
-    """
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    if not can_view_process(user, process):
-        raise HTTPException(status_code=403, detail="Sem permissão para mover este processo")
-
-    status_exists = await db.workflow_statuses.find_one({"name": new_status})
-    if not status_exists:
-        raise HTTPException(status_code=400, detail="Estado inválido")
-
-    old_status = process.get("status", "")
-    flags = resolve_workflow_purpose_flags(status_exists, new_status)
-
-    logger.info(
-        f"[KANBAN-MOVE-BR] Processo {process_id} → '{new_status}'. "
-        f"Flags dinâmicas: trigger_finance={flags['trigger_finance']}, "
-        f"trigger_countdown={flags['trigger_countdown']}, "
-        f"trigger_property_check={flags['trigger_property_check']}, "
-        f"trigger_deed_reminder={flags['trigger_deed_reminder']}, "
-        f"is_active={flags['is_active']}"
-    )
-
-    move_update_data = build_kanban_move_update(new_status, flags["is_active"])
-    inject_cdc_context(move_update_data, user)
-    await db.processes.update_one(
-        {"id": process_id},
-        {"$set": move_update_data},
-    )
-
-    return await run_kanban_move_side_effects(
-        process=process,
-        process_id=process_id,
-        user=user,
-        old_status=old_status,
-        new_status=new_status,
-        flags=flags,
+    """Move processo no Kanban e dispara alertas/side-effects."""
+    return await run_move_process_kanban(
+        process_id,
+        new_status,
+        user,
         deed_date=deed_date,
+        can_view_fn=can_view_process,
+        inject_cdc_fn=inject_cdc_context,
         broadcast_fn=broadcast_process_delta,
         create_finance_snapshot_fn=_create_finance_snapshot,
-        inject_cdc_fn=inject_cdc_context,
     )
 
-
-# ==== DSTI AUTOMÁTICO (antes de /{process_id}) ====
 
 @router.get("/dsti/{process_id}")
 async def get_process_dsti(
     process_id: str,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Calcula o DSTI automático de um processo.
-    
-    Usa dados extraídos pela IA (rendimento_liquido e mapa_responsabilidades)
-    para calcular automaticamente a taxa de esforço e sinalizar risco.
-    
-    Retorna:
-    - dsti_pct: DSTI em percentagem
-    - effort_rate_pct: Taxa de esforço global
-    - risk_level: baixo, moderado, elevado, critico, sem_dados
-    - components: breakdown dos valores
-    """
-    # Verificar se funcionalidade está activada
-    from services.system_config import get_system_config
-    config = await get_system_config()
-    if not config.dsti_analysis.enabled:
-        raise HTTPException(status_code=403, detail="Análise DSTI automática desactivada pelo administrador")
-    
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    if not can_view_process(user, process):
-        raise HTTPException(status_code=403, detail="Acesso negado")
-    
-    from services.dsti_service import calculate_dsti, get_risk_label
-    
-    result = calculate_dsti(process)
-    result["process_id"] = process_id
-    result["process_number"] = process.get("process_number")
-    result["client_name"] = process.get("client_name")
-    result["high_risk_threshold"] = config.dsti_analysis.high_risk_threshold
-    result["critical_risk_threshold"] = config.dsti_analysis.critical_risk_threshold
-    result["risk_label"] = get_risk_label(result["risk_level"])
-    
-    return result
+    """Calcula DSTI automático de um processo."""
+    return await run_get_process_dsti(
+        process_id, user, can_view_fn=can_view_process,
+    )
 
 
 @router.get("/dsti-alerts")
 async def get_dsti_high_risk_processes(
     user: dict = Depends(get_current_user)
 ):
-    """
-    Lista processos com DSTI de alto risco.
-    
-    Retorna todos os processos onde o DSTI ultrapassa o limiar
-    configurado pelo administrador (default: 40%).
-    """
-    from services.system_config import get_system_config
-    config = await get_system_config()
-    if not config.dsti_analysis.enabled:
-        return {"enabled": False, "processes": [], "total": 0}
-    
-    threshold = config.dsti_analysis.high_risk_threshold
-    processes = await db.processes.find(
-        {"financial_data.rendimento_bruto_mensal": {"$gt": 0}},
-        {"_id": 0, "id": 1, "process_number": 1, "client_name": 1, 
-         "financial_data": 1, "personal_data": 1, "status": 1}
-    ).to_list(length=500)
-    
-    from services.dsti_service import calculate_dsti, is_high_risk
-    
-    high_risk = []
-    for proc in processes:
-        dsti_result = calculate_dsti(proc)
-        if is_high_risk(dsti_result, threshold):
-            high_risk.append({
-                "process_id": proc.get("id"),
-                "process_number": proc.get("process_number"),
-                "client_name": proc.get("client_name"),
-                "status": proc.get("status"),
-                "dsti_pct": dsti_result["dsti_pct"],
-                "effort_rate_pct": dsti_result["effort_rate_pct"],
-                "risk_level": dsti_result["risk_level"],
-                "risk_color": dsti_result["risk_color"],
-                "prestacao_creditos": dsti_result["components"]["prestacao_creditos_mensal"],
-                "rendimento_bruto": dsti_result["components"]["rendimento_bruto_total"],
-            })
-    
-    # Ordenar por DSTI descendente (mais grave primeiro)
-    high_risk.sort(key=lambda x: x["dsti_pct"], reverse=True)
-    
-    return {
-        "enabled": True,
-        "threshold": threshold,
-        "processes": high_risk,
-        "total": len(high_risk),
-    }
+    """Lista processos com DSTI acima do limiar configurado."""
+    return await run_get_dsti_high_risk_processes()
 
 
 @router.get("/{process_id}", response_model=ProcessResponse)
 async def get_process(process_id: str, user: dict = Depends(get_current_user)):
-    """Obtém os detalhes completos de um processo.
-
-    FASE 2 — Refatoração relacional:
-    - Lê o processo da coleção `processes`
-    - Via client_id, busca os dados pessoais na coleção `clients`
-    - Junta (popula) personal_data, titular2_data, financial_data
-      dinamicamente na resposta para retrocompatibilidade com o Frontend
-
-    Verifica permissões de visualização (can_view_process) antes de
-    devolver os dados. Dados sensíveis (NIF, telefone, email do cliente)
-    são desencriptados antes da resposta.
-
-    Args:
-        process_id: ID do processo.
-        user: Utilizador autenticado (injetado).
-
-    Returns:
-        ProcessResponse: Dados completos do processo (desencriptados + cliente populado).
-
-    Raises:
-        HTTPException(404): Se processo não encontrado.
-        HTTPException(403): Se utilizador não tem permissão para ver.
-    """
-    process = await load_process_doc_or_404(process_id)
-    assert_can_view_process_or_403(user, process, can_view_process)
-
-    process = decrypt_sensitive_data(process)
-    process = await populate_client_data(process)
-    ensure_client_id_default(process)
-    await attach_latest_activity(process, process_id)
-    await attach_portal_access(process, process_id)
-    return serialize_process_detail_response(process, process_id)
+    """Detalhe do processo (desencriptado + cliente + portal_access)."""
+    return await run_get_process_detail(
+        process_id,
+        user,
+        can_view_fn=can_view_process,
+        decrypt_fn=decrypt_sensitive_data,
+        populate_fn=populate_client_data,
+    )
 
 
 @router.get("/{process_id}/alerts")
 async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_current_user)):
-    """
-    Obter todos os alertas ativos para um processo.
-    
-    Retorna alertas de:
-    - Idade < 35 anos (Apoio ao Estado)
-    - Countdown de 90 dias (pré-aprovação)
-    - Documentos a expirar em 15 dias
-    - Documentos do imóvel em falta
-    """
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    if not can_view_process(user, process):
-        raise HTTPException(status_code=403, detail="Acesso negado")
-    
-    alerts = await get_process_alerts(process)
-    
-    return {
-        "process_id": process_id,
-        "client_name": process.get("client_name"),
-        "alerts": alerts,
-        "total": len(alerts),
-        "has_critical": any(a.get("priority") == "critical" for a in alerts),
-        "has_high": any(a.get("priority") == "high" for a in alerts)
-    }
+    """Alertas activos do processo (idade, countdown, docs)."""
+    return await run_get_process_alerts(
+        process_id,
+        user,
+        can_view_fn=can_view_process,
+        get_alerts_fn=get_process_alerts,
+    )
 
 
 # ====================================================================
@@ -852,54 +581,14 @@ async def add_client_to_process(
     as_co_titular: bool = Query(False, description="Se True, adiciona como co-titular"),
     user: dict = Depends(require_staff())
 ):
-    """
-    Adicionar um cliente existente a um processo.
-    
-    Isto permite que um processo tenha múltiplos clientes (titulares).
-    Por exemplo, um processo de crédito com dois titulares.
-    
-    Args:
-        process_id: ID do processo
-        client_id: ID do cliente a adicionar
-        as_co_titular: Se True, adiciona como co-titular (co_buyer)
-    
-    Returns:
-        Success message
-    """
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    client = await db.clients.find_one({"id": client_id})
-    if not client:
-        raise HTTPException(status_code=404, detail="Cliente não encontrado")
-
-    now = datetime.now(timezone.utc).isoformat()
-    update_data, current_client_ids = build_add_client_update(
-        process, client, client_id, as_co_titular=as_co_titular, now=now,
-    )
-
-    inject_cdc_context(update_data, user)
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
-
-    await db.clients.update_one(
-        {"id": client_id},
-        {
-            "$addToSet": {"process_ids": process_id},
-            "$set": {"updated_at": now},
-        },
-    )
-
-    await log_history(
-        process_id, user,
-        f"Adicionou cliente {client.get('nome')} ao processo"
-        + (" como co-titular" if as_co_titular else ""),
-    )
-
-    return format_add_client_response(
-        client.get("nome"),
+    """Adicionar cliente existente ao processo (N:M)."""
+    return await run_add_client_to_process(
+        process_id,
+        client_id,
+        user,
         as_co_titular=as_co_titular,
-        total_clients=len(current_client_ids),
+        inject_cdc_fn=inject_cdc_context,
+        log_history_fn=log_history,
     )
 
 
@@ -909,46 +598,13 @@ async def remove_client_from_process(
     client_id: str = Query(..., description="ID do cliente a remover"),
     user: dict = Depends(require_staff())
 ):
-    """
-    Remover um cliente de um processo.
-    
-    Nota: Não é possível remover o cliente principal (titular).
-    Apenas co-titulares podem ser removidos.
-    
-    Args:
-        process_id: ID do processo
-        client_id: ID do cliente a remover
-    
-    Returns:
-        Success message
-    """
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    now = datetime.now(timezone.utc).isoformat()
-    update_data, current_client_ids = build_remove_client_update(
-        process, client_id, now=now,
-    )
-
-    inject_cdc_context(update_data, user)
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
-
-    await db.clients.update_one(
-        {"id": client_id},
-        {
-            "$pull": {"process_ids": process_id},
-            "$set": {"updated_at": now},
-        },
-    )
-
-    client = await db.clients.find_one({"id": client_id})
-    client_name = client.get("nome") if client else client_id
-
-    await log_history(process_id, user, f"Removeu cliente {client_name} do processo")
-
-    return format_remove_client_response(
-        client_name, total_clients=len(current_client_ids),
+    """Remover co-titular do processo (não remove titular principal)."""
+    return await run_remove_client_from_process(
+        process_id,
+        client_id,
+        user,
+        inject_cdc_fn=inject_cdc_context,
+        log_history_fn=log_history,
     )
 
 
@@ -957,52 +613,8 @@ async def get_process_clients(
     process_id: str,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Obter todos os clientes associados a um processo.
-    
-    Returns:
-        Lista de clientes com seus dados básicos
-    """
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    client_ids = process.get("client_ids", [])
-    if not client_ids:
-        # Compatibilidade com processos antigos
-        if process.get("client_id"):
-            client_ids = [process.get("client_id")]
-        else:
-            return {"clients": [], "total": 0}
-    
-    clients = await db.clients.find(
-        {"id": {"$in": client_ids}},
-        {"_id": 0}
-    ).to_list(length=10)
-    
-    # Enriquecer com informação de relação
-    co_buyers = process.get("co_buyers", [])
-    co_buyer_ids = {cb.get("client_id") for cb in co_buyers if cb.get("client_id")}
-    
-    result = []
-    for c in clients:
-        client_info = {
-            "id": c.get("id"),
-            "nome": c.get("nome"),
-            "email": c.get("contacto", {}).get("email"),
-            "telefone": c.get("contacto", {}).get("telefone"),
-            "nif": c.get("dados_pessoais", {}).get("nif"),
-            "is_main": c.get("id") == process.get("client_id"),
-            "relacao": "co-titular" if c.get("id") in co_buyer_ids else "titular"
-        }
-        result.append(client_info)
-    
-    return {
-        "clients": result,
-        "total": len(result),
-        "process_id": process_id,
-        "process_number": process.get("process_number")
-    }
+    """Listar clientes associados ao processo."""
+    return await run_get_process_clients(process_id)
 
 
 # ====================================================================
@@ -1047,32 +659,6 @@ async def send_portal_message_staff(
     data: dict,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Envia uma mensagem do staff para o cliente via portal.
-
-    Body:
-    - content: Texto da mensagem (obrigatório)
-    """
-    process = await load_process_for_portal_or_404(process_id)
-    content = validate_staff_portal_message_content(data.get("content", ""))
-    now = datetime.now(timezone.utc).isoformat()
-    message_doc = build_staff_portal_message_doc(
-        process_id=process_id,
-        user=user,
-        content=content,
-        now=now,
-    )
-    await insert_staff_portal_message(
-        message_doc, user_email=user.get("email", ""),
-    )
-
-    await notify_team_email_portal_message(process, user, process_id)
-    await notify_assigned_realtime_portal_message(process, user, process_id)
-    await broadcast_staff_portal_message_ws(
-        process_id=process_id,
-        message_doc=message_doc,
-        content=content,
-        exclude_user_id=user.get("id"),
-    )
-    return staff_portal_message_response(message_doc)
+    """Envia mensagem staff → cliente via portal."""
+    return await run_send_portal_message_staff(process_id, data, user)
 

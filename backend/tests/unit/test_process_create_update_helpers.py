@@ -926,3 +926,55 @@ class TestListEnrichmentSort:
         apply_assignee_names(procs, {"c1": "Ana", "i1": "Inês"})
         assert procs[0]["consultor_name"] == "Ana"
         assert procs[0]["indexacao_name"] == "Inês"
+
+
+class TestDstiAndClientsNmHelpers:
+    def test_dsti_high_risk_row(self):
+        from services.process_dsti import build_dsti_high_risk_row
+        row = build_dsti_high_risk_row(
+            {"id": "p1", "process_number": 1, "client_name": "A", "status": "x"},
+            {
+                "dsti_pct": 50.0,
+                "effort_rate_pct": 55.0,
+                "risk_level": "elevado",
+                "risk_color": "orange",
+                "components": {
+                    "prestacao_creditos_mensal": 400,
+                    "rendimento_bruto_total": 2000,
+                },
+            },
+        )
+        assert row["process_id"] == "p1" and row["dsti_pct"] == 50.0
+
+    def test_process_clients_payload(self):
+        from services.process_clients_nm import (
+            resolve_process_client_ids,
+            build_process_clients_payload,
+        )
+        assert resolve_process_client_ids({"client_id": "c1"}) == ["c1"]
+        assert resolve_process_client_ids({"client_ids": ["a", "b"]}) == ["a", "b"]
+        payload = build_process_clients_payload(
+            process={
+                "id": "p1",
+                "process_number": 9,
+                "client_id": "c1",
+                "co_buyers": [{"client_id": "c2"}],
+            },
+            clients=[
+                {"id": "c1", "nome": "A", "contacto": {"email": "a@x"}, "dados_pessoais": {}},
+                {"id": "c2", "nome": "B", "contacto": {}, "dados_pessoais": {"nif": "1"}},
+            ],
+        )
+        assert payload["total"] == 2
+        assert payload["clients"][0]["is_main"] is True
+        assert payload["clients"][1]["relacao"] == "co-titular"
+
+    def test_alerts_payload(self):
+        from services.process_detail import build_process_alerts_payload
+        p = build_process_alerts_payload(
+            "p1",
+            {"client_name": "X"},
+            [{"priority": "critical"}, {"priority": "low"}],
+        )
+        assert p["has_critical"] is True and p["total"] == 2
+

@@ -115,3 +115,55 @@ def build_portal_access_payload(
         "magic_link": magic_link,
         "has_active_token": short_id is not None,
     }
+
+
+async def run_get_process_detail(
+    process_id: str,
+    user: dict,
+    *,
+    can_view_fn,
+    decrypt_fn,
+    populate_fn,
+) -> Any:
+    """Orquestra GET /processes/{id}."""
+    process = await load_process_doc_or_404(process_id)
+    assert_can_view_process_or_403(user, process, can_view_fn)
+    process = decrypt_fn(process)
+    process = await populate_fn(process)
+    ensure_client_id_default(process)
+    await attach_latest_activity(process, process_id)
+    await attach_portal_access(process, process_id)
+    return serialize_process_detail_response(process, process_id)
+
+
+def build_process_alerts_payload(process_id: str, process: dict, alerts: list) -> dict:
+    return {
+        "process_id": process_id,
+        "client_name": process.get("client_name"),
+        "alerts": alerts,
+        "total": len(alerts),
+        "has_critical": any(a.get("priority") == "critical" for a in alerts),
+        "has_high": any(a.get("priority") == "high" for a in alerts),
+    }
+
+
+async def run_get_process_alerts(
+    process_id: str,
+    user: dict,
+    *,
+    can_view_fn,
+    get_alerts_fn,
+) -> dict:
+    """Orquestra GET /processes/{id}/alerts."""
+    from fastapi import HTTPException
+
+    from database import db
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if not can_view_fn(user, process):
+        raise HTTPException(status_code=403, detail="Acesso negado")
+
+    alerts = await get_alerts_fn(process)
+    return build_process_alerts_payload(process_id, process, alerts)

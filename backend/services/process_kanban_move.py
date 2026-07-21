@@ -290,3 +290,62 @@ async def run_kanban_move_side_effects(
         "new_status": new_status,
         "alerts": alerts_generated,
     }
+
+
+async def run_move_process_kanban(
+    process_id: str,
+    new_status: str,
+    user: dict,
+    *,
+    deed_date: Optional[str],
+    can_view_fn,
+    inject_cdc_fn,
+    broadcast_fn,
+    create_finance_snapshot_fn,
+) -> dict[str, Any]:
+    """Orquestra PUT /kanban/{id}/move."""
+    from fastapi import HTTPException
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+    if not can_view_fn(user, process):
+        raise HTTPException(
+            status_code=403, detail="Sem permissão para mover este processo",
+        )
+
+    status_exists = await db.workflow_statuses.find_one({"name": new_status})
+    if not status_exists:
+        raise HTTPException(status_code=400, detail="Estado inválido")
+
+    old_status = process.get("status", "")
+    flags = resolve_workflow_purpose_flags(status_exists, new_status)
+
+    logger.info(
+        f"[KANBAN-MOVE-BR] Processo {process_id} → '{new_status}'. "
+        f"Flags dinâmicas: trigger_finance={flags['trigger_finance']}, "
+        f"trigger_countdown={flags['trigger_countdown']}, "
+        f"trigger_property_check={flags['trigger_property_check']}, "
+        f"trigger_deed_reminder={flags['trigger_deed_reminder']}, "
+        f"is_active={flags['is_active']}"
+    )
+
+    move_update_data = build_kanban_move_update(new_status, flags["is_active"])
+    inject_cdc_fn(move_update_data, user)
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": move_update_data},
+    )
+
+    return await run_kanban_move_side_effects(
+        process=process,
+        process_id=process_id,
+        user=user,
+        old_status=old_status,
+        new_status=new_status,
+        flags=flags,
+        deed_date=deed_date,
+        broadcast_fn=broadcast_fn,
+        create_finance_snapshot_fn=create_finance_snapshot_fn,
+        inject_cdc_fn=inject_cdc_fn,
+    )

@@ -594,3 +594,77 @@ async def persist_and_finalize_staff_create(
 
     response_doc = decrypt_fn(process_doc)
     return response_cls(**{k: v for k, v in response_doc.items() if k != "_id"})
+
+async def persist_and_finalize_client_self_create(
+    data,
+    user: dict,
+    *,
+    encrypt_fn,
+    decrypt_fn,
+    decrypt_client_fn,
+    populate_fn,
+    log_history_fn,
+    broadcast_fn,
+    send_to_admins_fn,
+    invalidate_stats_fn,
+    response_cls,
+):
+    """Orquestra POST /processes (self-service cliente autenticado)."""
+    import asyncio
+    import uuid
+    from datetime import datetime, timezone
+    from typing import Any
+
+    from services.process_service import get_next_process_number
+    from services.trello_service import sync_process_to_trello
+    from services.websocket_manager import WSEventType
+
+    assert_is_cliente_role(user["role"])
+
+    client_doc = await load_client_doc_or_404(data.client_id)
+    initial_status, _ = await resolve_initial_workflow_status(is_lead=False)
+
+    process_id = str(uuid.uuid4())
+    process_number = await get_next_process_number()
+    now = datetime.now(timezone.utc).isoformat()
+
+    decrypted_client = decrypt_client_fn(client_doc)
+    client_name = decrypted_client.get("nome", "")
+
+    process_doc = build_client_self_process_doc(
+        process_id=process_id,
+        process_number=process_number,
+        client_id=data.client_id,
+        process_type=data.process_type,
+        initial_status=initial_status,
+        now=now,
+    )
+    process_doc = encrypt_fn(process_doc)
+    await db.processes.insert_one(process_doc)
+
+    await link_single_client_to_process(process_id, data.client_id, now=now)
+
+    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
+    await invalidate_stats_fn(user_id=user["id"])
+    await log_history_fn(process_id, user, "Criou processo")
+
+    await broadcast_fn(
+        event_type=WSEventType.PROCESS_CREATED,
+        process_id=process_id,
+        process_number=process_number,
+        client_name=client_name,
+        status=initial_status,
+        process_type=data.process_type,
+        updated_at=now,
+    )
+
+    await send_to_admins_fn(
+        "Novo Processo Criado",
+        f"O cliente {client_name} criou um novo processo de {data.process_type}.",
+        notification_type="new_process",
+    )
+
+    response_doc = decrypt_fn(process_doc)
+    response_doc = await populate_fn(response_doc)
+    return response_cls(**{k: v for k, v in response_doc.items() if k != "_id"})
+
