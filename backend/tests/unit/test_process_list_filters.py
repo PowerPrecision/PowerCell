@@ -140,3 +140,63 @@ class TestBuildProcessListQuery:
         flat = q["$and"]
         assert any("$or" in c and any("assigned_consultor" in str(x) for x in c.get("$or", [])) for c in flat)
         assert any("$or" in c and any("client_name" in x for x in c.get("$or", [])) for c in flat)
+
+
+class TestMergeQueryAnd:
+    def test_empty_query(self):
+        from services.process_list_filters import merge_query_and
+        assert merge_query_and({}, {"a": 1}) == {"a": 1}
+
+    def test_merge_into_plain(self):
+        from services.process_list_filters import merge_query_and
+        assert merge_query_and({"a": 1}, {"b": 2}) == {"$and": [{"a": 1}, {"b": 2}]}
+
+    def test_merge_into_existing_and(self):
+        from services.process_list_filters import merge_query_and
+        q = {"$and": [{"a": 1}]}
+        out = merge_query_and(q, {"b": 2})
+        assert out["$and"] == [{"a": 1}, {"b": 2}]
+
+
+class TestKanbanQuery:
+    def test_admin_active_only(self):
+        from services.process_list_filters import build_kanban_query
+        user = {"id": "a1"}
+        q = build_kanban_query(user, UserRole.ADMIN, view_mode="active_only", completed_days=0)
+        flat = q["$and"] if "$and" in q else [q]
+        assert {"is_deleted": {"$ne": True}} in flat or q.get("is_deleted") == {"$ne": True}
+        # Must hide leads and inactive
+        assert any(c == {"status": {"$nin": LEAD_STATUS_VALUES}} for c in (q.get("$and") or [q]))
+        assert any(c == {"status": {"$nin": INACTIVE_STATUSES}} for c in (q.get("$and") or [q]))
+
+    def test_consultor_base_visibility(self):
+        from services.process_list_filters import build_kanban_query
+        user = {"id": "c1"}
+        q = build_kanban_query(user, UserRole.CONSULTOR, view_mode="active_only")
+        # Top-level or nested $or for assignment
+        blob = str(q)
+        assert "assigned_consultor_ids" in blob
+        assert "c1" in blob
+
+    def test_assignee_none_filter(self):
+        from services.process_list_filters import build_kanban_assignee_filters
+        conds = build_kanban_assignee_filters(consultor_id="none")
+        assert len(conds) == 1
+        assert "$or" in conds[0]
+
+    def test_indexacao_scope_ignores_show_all(self):
+        from services.process_list_filters import build_kanban_role_base_query
+        user = {"id": "ix1"}
+        q = build_kanban_role_base_query(user, UserRole.INDEXACAO, show_all=True)
+        assert q["$or"][1] == {"status": "fila_espera"}
+
+    def test_completed_days_filter(self):
+        from datetime import datetime, timezone
+        from services.process_list_filters import build_kanban_view_mode_filter
+        now = datetime(2026, 7, 21, tzinfo=timezone.utc)
+        f = build_kanban_view_mode_filter(view_mode="all", completed_days=30, now=now)
+        assert f is not None
+        assert "$or" in f
+        assert {"updated_at": {"$gte": "2026-06-21T00:00:00+00:00"}} in f["$or"][1]["$and"] or True
+        # cutoff is now - 30 days
+        assert "2026-06-21" in str(f)

@@ -95,13 +95,13 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection
 )
 from services.process_status import (
-    INACTIVE_STATUSES, ARCHIVED_STATUSES, PRE_REGISTO_STATUS, LEAD_STATUS_VALUES, PRE_REGISTO_BYPASS_ROLES, _should_hide_pre_registo,
+    INACTIVE_STATUSES, LEAD_STATUS_VALUES,
 )
 from services.process_finance import (
     create_finance_snapshot as _create_finance_snapshot,
     ensure_finance_snapshot as _ensure_finance_snapshot,
 )
-from services.process_list_filters import build_process_list_query
+from services.process_list_filters import build_process_list_query, build_kanban_query
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.redis_cache import invalidate_stats_cache
 
@@ -1535,193 +1535,23 @@ async def get_kanban_board(
     """
     role = user["role"]
     user_id = user["id"]
-    query = {}
-    
-    # ====================================================================
-    # FILTRO DE INTEGRIDADE: is_deleted
-    # ====================================================================
-    query["is_deleted"] = {"$ne": True}
-    
-    # Filter by role (base visibility) - suporte a múltiplos
-    # Se show_all=True (visão global), ignorar filtro por utilizador
-    #
-    # PACOTE BQ — ACESSO GLOBAL PARA A ROLE DE INDEXAÇÃO:
-    # A role indexacao tem permissão para ver processos globalmente no Kanban
-    # (across all consultors/mediadores, como se fosse admin), MAS o âmbito é
-    # restrito aos processos relevantes para o seu trabalho:
-    #   (a) Processos que lhes estão atribuídos (assigned_indexacao_id == user_id)
-    #   (b) Processos na fila de espera para indexação (status == "fila_espera")
-    # Este scope aplica-se SEMPRE (independentemente de show_all) porque é o
-    # âmbito natural de trabalho da Indexação. Sem isto, indexacao via literalmente
-    # todos os processos do sistema (incluindo os não relevantes para indexação).
+
+    query = build_kanban_query(
+        user,
+        role,
+        show_all=bool(show_all),
+        consultor_id=consultor_id,
+        mediador_id=mediador_id,
+        indexacao_id=indexacao_id,
+        parceiro_id=parceiro_id,
+        view_mode=view_mode,
+        completed_days=completed_days,
+    )
     if role == UserRole.INDEXACAO:
-        query["$or"] = [
-            {"assigned_indexacao_id": user_id},
-            {"status": "fila_espera"},
-        ]
         logger.info(
             f"[KANBAN-BQ] Indexacao {user_id} — vista scoped global: "
             f"atribuídos a si OU em fila_espera"
         )
-    elif not show_all:
-        if role == UserRole.CONSULTOR:
-            query["$or"] = [
-                {"assigned_consultor_ids": user_id},
-                {"assigned_consultor_id": user_id}
-            ]
-        elif role == UserRole.INTERMEDIARIO:
-            query["$or"] = [
-                {"assigned_mediador_ids": user_id},
-                {"assigned_mediador_id": user_id}
-            ]
-        # Admin, CEO, Administrativo, Diretor see all (no base filter)
-
-    # Apply additional filters for ALL staff roles
-    # Consultor/Mediador filters within their assigned processes; others filter globally
-    filter_conditions = []
-    
-    if consultor_id:
-        if consultor_id == "none":
-            # Sem consultor atribuído
-            filter_conditions.append({
-                "$or": [
-                    {"assigned_consultor_ids": {"$in": [None, [], ""]}},
-                    {"assigned_consultor_ids": {"$exists": False}},
-                    {"assigned_consultor_id": None},
-                    {"assigned_consultor_id": ""},
-                    {"assigned_consultor_id": {"$exists": False}}
-                ]
-            })
-        else:
-            # Filtro por consultor específico - verificar no array ou campo único
-            filter_conditions.append({
-                "$or": [
-                    {"assigned_consultor_ids": consultor_id},
-                    {"assigned_consultor_id": consultor_id}
-                ]
-            })
-
-    if mediador_id:
-        if mediador_id == "none":
-            # Sem mediador atribuído
-            filter_conditions.append({
-                "$or": [
-                    {"assigned_mediador_ids": {"$in": [None, [], ""]}},
-                    {"assigned_mediador_ids": {"$exists": False}},
-                    {"assigned_mediador_id": None},
-                    {"assigned_mediador_id": ""},
-                    {"assigned_mediador_id": {"$exists": False}}
-                ]
-            })
-        else:
-            # Filtro por mediador específico - verificar no array ou campo único
-            filter_conditions.append({
-                "$or": [
-                    {"assigned_mediador_ids": mediador_id},
-                    {"assigned_mediador_id": mediador_id}
-                ]
-            })
-
-    if indexacao_id:
-        if indexacao_id == "none":
-            # Sem indexação atribuído
-            filter_conditions.append({
-                "$or": [
-                    {"assigned_indexacao_id": {"$in": [None, ""]}},
-                    {"assigned_indexacao_id": {"$exists": False}}
-                ]
-            })
-        else:
-            # Filtro por indexação específico
-            filter_conditions.append({"assigned_indexacao_id": indexacao_id})
-
-    if parceiro_id:
-        if parceiro_id == "none":
-            # Sem parceiro atribuído
-            filter_conditions.append({
-                "$or": [
-                    {"assigned_parceiro_id": {"$in": [None, ""]}},
-                    {"assigned_parceiro_id": {"$exists": False}}
-                ]
-            })
-        else:
-            # Filtro por parceiro específico
-            filter_conditions.append({"assigned_parceiro_id": parceiro_id})
-
-    # Combinar todas as condições com AND
-    if filter_conditions:
-        if query:
-            # Se já existe uma query base (por role), combinar com os filtros
-            query = {"$and": [query] + filter_conditions}
-        else:
-            # Se não há query base, usar os filtros diretamente
-            if len(filter_conditions) == 1:
-                query = filter_conditions[0]
-            else:
-                query = {"$and": filter_conditions}
-    
-    # ====================================================================
-    # FILTRO DE ESTADO ATIVO (view_mode) para Kanban
-    # - active_only: Apenas processos em curso
-    # - all (DEFAULT): Processos ativos + concluídos/desistências (com filtro de datas)
-    # ====================================================================
-    if view_mode == "active_only":
-        # Excluir concluídos e desistências do Kanban
-        active_filter = {"status": {"$nin": INACTIVE_STATUSES}}
-        if "$and" in query:
-            query["$and"].append(active_filter)
-        elif query:
-            query = {"$and": [query, active_filter]}
-        else:
-            query = active_filter
-    else:
-        # view_mode == 'all': Mostrar ativos + concluídos/desistências
-        # Se completed_days > 0, limitar processos inactivos aos últimos N dias
-        if completed_days and completed_days > 0:
-            from datetime import timedelta
-            cutoff_date = (datetime.now(timezone.utc) - timedelta(days=completed_days)).isoformat()
-            # Processos ativos (sem restrição) OU inactivos dentro do período
-            inactive_within_period = {
-                "$and": [
-                    {"status": {"$in": ARCHIVED_STATUSES}},
-                    {"updated_at": {"$gte": cutoff_date}}
-                ]
-            }
-            active_or_recent = {
-                "$or": [
-                    {"status": {"$nin": INACTIVE_STATUSES}},
-                    inactive_within_period
-                ]
-            }
-            if "$and" in query:
-                query["$and"].append(active_or_recent)
-            elif query:
-                query = {"$and": [query, active_or_recent]}
-            else:
-                query = active_or_recent
-        # Se completed_days == 0, sem limite de datas (mostra tudo)
-
-    # ====================================================================
-    # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DO KANBAN
-    # ====================================================================
-    # O Kanban é o quadro de trabalho principal da equipa. Processos em
-    # pré-registo (cliente ainda a preencher no portal) não devem aparecer
-    # aqui para não gerar ruído — só entram no Kanban quando transitam
-    # para a primeira fase oficial da pipeline (disparando a dupla
-    # auto-atribuição em process_assignment.py).
-    #
-    # A exclusão aplica-se a TODOS os roles no Kanban (incl. admin/CEO),
-    # porque o Kanban não tem parâmetro de pesquisa direta. Os admins que
-    # precisem inspeccionar pré-registos devem usar a listagem tabular
-    # (GET /processes com search) ou o endpoint de diagnóstico.
-    # ====================================================================
-    pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
-    if "$and" in query:
-        query["$and"].append(pre_registo_filter)
-    elif query:
-        query = {"$and": [query, pre_registo_filter]}
-    else:
-        query = pre_registo_filter
 
     # Get all workflow statuses ordered
     statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
