@@ -392,3 +392,147 @@ async def run_organize_documents_after_analysis(
         "folders_created_count": len(results["folders_created"]),
         "results": results,
     }
+
+
+# Frontend field → Mongo dot-path for apply-suggestions
+AI_SUGGESTION_FIELD_MAP = {
+    "client_name": "client_name",
+    "nif": "personal_data.nif",
+    "documento_id": "personal_data.documento_id",
+    "cc_number": "personal_data.documento_id",
+    "birth_date": "personal_data.data_nascimento",
+    "cc_validity": "personal_data.cc_validity",
+    "nationality": "personal_data.nacionalidade",
+    "gender": "personal_data.sexo",
+    "address": "personal_data.morada",
+    "fiscal_address": "personal_data.morada_fiscal",
+    "estado_civil": "personal_data.estado_civil",
+    "rendimento_mensal": "financial_data.rendimento_mensal",
+    "salario_liquido": "financial_data.rendimento_mensal",
+    "rendimento_bruto": "financial_data.rendimento_bruto",
+    "salario_bruto": "financial_data.rendimento_bruto",
+    "empresa": "financial_data.empresa",
+    "entidade_empregadora": "financial_data.empresa",
+    "tipo_contrato": "financial_data.tipo_contrato",
+    "categoria_profissional": "financial_data.categoria_profissional",
+    "subsidiario_alimentacao": "financial_data.subsidiario_alimentacao",
+    "valor_imovel": "real_estate_data.valor_imovel",
+    "localizacao": "real_estate_data.localizacao",
+    "tipologia": "real_estate_data.tipologia",
+    "area": "real_estate_data.area",
+    "artigo_matricial": "real_estate_data.artigo_matricial",
+}
+
+
+def map_ai_suggestions_to_mongo_update(suggestions: dict) -> dict:
+    """Converte sugestões frontend → campos com dot-notation Mongo."""
+    update_data = {}
+    for field, value in suggestions.items():
+        if field in AI_SUGGESTION_FIELD_MAP:
+            update_data[AI_SUGGESTION_FIELD_MAP[field]] = value
+    return update_data
+
+
+async def run_apply_ai_suggestions(
+    process_id: str,
+    suggestions: dict | None,
+    *,
+    user: dict,
+) -> dict[str, Any]:
+    """Aplica sugestões IA aos subdocumentos do processo (com ACL)."""
+    from datetime import datetime, timezone
+
+    from services.document_constants import ERROR_NO_SUGGESTIONS
+    from services.document_filenames import sanitize_for_log
+    from services.process_service import can_edit_process_data
+
+    if not suggestions:
+        raise HTTPException(status_code=400, detail=ERROR_NO_SUGGESTIONS)
+
+    process = await db.processes.find_one({"id": process_id})
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+
+    can_edit, reason = can_edit_process_data(user, process)
+    if not can_edit:
+        logger.warning(
+            f"IDOR attempt: User {user.get('id')} ({user.get('role')}) "
+            f"tried to apply AI suggestions on process {process_id}: {reason}"
+        )
+        raise HTTPException(
+            status_code=403,
+            detail=f"Não tem permissões para alterar este processo. {reason}",
+        )
+
+    update_data = map_ai_suggestions_to_mongo_update(suggestions)
+    if not update_data:
+        return {
+            "success": True,
+            "updated_fields": 0,
+            "message": "Nenhum campo válido para atualizar",
+        }
+
+    mongo_update = dict(update_data)
+    mongo_update["updated_at"] = datetime.now(timezone.utc).isoformat()
+    mongo_update["updated_by"] = user.get("id")
+
+    await db.processes.update_one({"id": process_id}, {"$set": mongo_update})
+    logger.info(
+        f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)}"
+    )
+    return {
+        "success": True,
+        "updated_fields": len(update_data),
+        "fields": list(update_data.keys()),
+    }
+
+
+async def run_organize_files_in_folders(
+    process_id: str,
+    organization: list[dict] | None,
+) -> dict[str, Any]:
+    """Move ficheiros S3 conforme lista {source_path, target_folder, file_name}."""
+    from services.document_constants import ERROR_NO_ORGANIZATION
+
+    if not organization:
+        raise HTTPException(status_code=400, detail=ERROR_NO_ORGANIZATION)
+
+    process = await db.processes.find_one(
+        {"id": process_id}, {"_id": 0, "client_name": 1}
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
+
+    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
+    results = {"moved": [], "errors": []}
+
+    for item in organization:
+        try:
+            source_path = item.get("source_path")
+            target_folder = item.get("target_folder")
+            file_name = item.get("file_name")
+            if not all([source_path, target_folder, file_name]):
+                results["errors"].append(
+                    {"file": file_name, "error": "Dados incompletos"}
+                )
+                continue
+            success = s3_service.move_file(
+                source_path, client_name, target_folder, file_name
+            )
+            if success:
+                results["moved"].append({"file": file_name, "to": target_folder})
+            else:
+                results["errors"].append(
+                    {"file": file_name, "error": "Falha ao mover"}
+                )
+        except (IOError, OSError, ValueError, KeyError, TypeError) as e:
+            results["errors"].append(
+                {"file": item.get("file_name", "?"), "error": str(e)}
+            )
+
+    return {
+        "success": True,
+        "moved_count": len(results["moved"]),
+        "error_count": len(results["errors"]),
+        "results": results,
+    }

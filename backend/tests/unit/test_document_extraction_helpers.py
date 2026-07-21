@@ -313,3 +313,30 @@ class TestBatch6Helpers:
         )
         assert name == "novo.pdf"
         assert build_renamed_s3_path("a/b/old.pdf", "novo.pdf") == "a/b/novo.pdf"
+
+
+class TestBatch7Helpers:
+    def test_map_ai_suggestions(self):
+        from services.document_ai_analyze import map_ai_suggestions_to_mongo_update
+
+        mapped = map_ai_suggestions_to_mongo_update(
+            {"nif": "123", "valor_imovel": 1, "unknown": "x"}
+        )
+        assert mapped["personal_data.nif"] == "123"
+        assert mapped["real_estate_data.valor_imovel"] == 1
+        assert "unknown" not in mapped
+
+    def test_serialize_metadata_doc(self):
+        from services.document_queries import serialize_metadata_doc
+
+        row = serialize_metadata_doc(
+            {"id": "d1", "filename": "a.pdf", "ai_category": "Fiscal", "s3_path": "p/a.pdf"}
+        )
+        assert row["category"] == "Fiscal"
+        assert row["s3_path"] == "p/a.pdf"
+
+    def test_document_types_constant(self):
+        from services.document_expiry_crud import DOCUMENT_TYPES, EXPIRY_WARNING_DAYS
+
+        assert EXPIRY_WARNING_DAYS == 60
+        assert any(t["type"] == "cc" for t in DOCUMENT_TYPES)

@@ -118,7 +118,33 @@ from services.document_upload import run_upload_file_s3
 from services.document_ai_analyze import (
     run_ai_analyze_documents,
     run_organize_documents_after_analysis,
+    run_apply_ai_suggestions,
+    run_organize_files_in_folders,
 )
+from services.document_queries import (
+    run_get_process_documents,
+    run_get_document_metadata,
+    run_search_documents,
+    run_get_all_categories,
+)
+from services.document_expiry_crud import (
+    EXPIRY_WARNING_DAYS,
+    DOCUMENT_TYPES,
+    run_create_document_expiry,
+    run_get_document_expiries,
+    run_get_upcoming_expiries,
+    run_get_expiry_calendar_events,
+    run_delete_document_expiry,
+)
+from services.document_misc import (
+    run_check_file_upload,
+    run_initialize_folders,
+    run_get_download_url,
+    run_get_download_url_by_path,
+    run_check_employer_nif,
+)
+from models.document import DocumentSearchRequest
+
 from services.document_delete import (
     run_delete_file_s3,
     run_bulk_delete_files,
@@ -364,86 +390,15 @@ async def check_file_upload(
     
     Útil para dar feedback proativo ao utilizador.
     """
-    from services.file_converter import can_convert_file, detect_file_type
-    
-    try:
-        # Ler o conteúdo do ficheiro
-        file_content = await file.read()
-        filename = file.filename
-        
-        if not file_content or len(file_content) == 0:
-            return {
-                "can_upload": False,
-                "reason": "Ficheiro vazio",
-                "filename": filename
-            }
-        
-        # Detectar tipo real
-        detected_mime, detected_ext, confidence = detect_file_type(file_content)
-        
-        # Verificar se pode ser convertido
-        conversion_check = can_convert_file(file_content, filename)
-        
-        # Verificar tamanho
-        file_size_mb = len(file_content) / (1024 * 1024)
-        
-        return {
-            "can_upload": conversion_check["can_convert"] != False,
-            "filename": filename,
-            "file_size_mb": round(file_size_mb, 2),
-            "detected_type": detected_mime,
-            "detected_extension": detected_ext,
-            "confidence": confidence,
-            "conversion_info": conversion_check,
-            "recommendation": conversion_check.get("suggested_action", "Pode fazer upload diretamente")
-        }
-        
-    except Exception as e:
-        logger.error(f"[CHECK-FILE] Erro: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro ao verificar ficheiro: {str(e)}"
-        )
+    return await run_check_file_upload(file)
+
 
 
 @router.post("/client/{client_id}/init-folders", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def initialize_folders(client_id: str, user: dict = Depends(get_current_user)):
     """Cria a estrutura de pastas inicial no S3 (se não existir)."""
-    process, effective_id = await resolve_process_from_flexible_id(
-        client_id,
-        log_prefix="[INIT-FOLDERS]",
-        client_without_process_detail=(
-            "Cliente encontrado mas sem processo associado. "
-            "Não é possível inicializar pastas."
-        ),
-    )
+    return await run_initialize_folders(client_id)
 
-    # Verificar se já existe mapeamento S3 - NÃO criar duplicados
-    existing_s3_folder = process.get("s3_folder")
-    if existing_s3_folder:
-        # Verificar se a pasta ainda existe no S3
-        if s3_service._folder_exists(existing_s3_folder):
-            logger.info(f"Pasta S3 já existe para cliente {client_id}: {existing_s3_folder}")
-            return {"success": True, "s3_folder": existing_s3_folder, "already_exists": True}
-        # Se não existe, continuar para criar nova
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    second_client_name = extract_second_client_name(process)
-    
-    success, s3_folder_path = s3_service.initialize_client_folders(
-        effective_id, 
-        client_name,
-        second_client_name=second_client_name
-    )
-    
-    # Se criou as pastas, guardar mapeamento no processo
-    if success and s3_folder_path:
-        await db.processes.update_one(
-            {"id": effective_id},
-            {"$set": {"s3_folder": s3_folder_path}}
-        )
-    
-    return {"success": success, "s3_folder": s3_folder_path}
 
 
 @router.get("/client/{client_id}/download", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -453,21 +408,8 @@ async def get_download_url(
     user: dict = Depends(get_current_user)
 ):
     """Gera um URL temporário para download de um ficheiro."""
-    process, _effective_id = await resolve_process_from_flexible_id(
-        client_id,
-        log_prefix="[DOWNLOAD]",
-        client_without_process_detail=(
-            "Cliente encontrado mas sem processo associado. "
-            "Não é possível gerar link de download."
-        ),
-    )
-    assert_s3_file_belongs_to_process(file_path, process)
-    
-    url = s3_service.get_presigned_url(file_path)
-    if not url:
-        raise HTTPException(status_code=500, detail=ERROR_DOWNLOAD_URL)
-    
-    return {"success": True, "url": url}
+    return await run_get_download_url(client_id, file_path)
+
 
 
 @router.get("/download-url/{file_path:path}", responses={500: HTTP_500_RESPONSE})
@@ -478,51 +420,9 @@ async def get_download_url_by_path(
     """
     Gera URL temporário (pre-signed) para download ou preview de um
     ficheiro por caminho S3 direto.
-
-    Porquê pre-signed URLs em vez de servir o ficheiro pelo backend:
-    - Reduz drasticamente o consumo de RAM e largura de banda do servidor.
-    - O ficheiro vai diretamente do S3 para o browser do utilizador.
-    - A URL expira automaticamente (segurança temporal).
-    - Permite preview inline de PDFs no browser sem download completo.
-
-    Args:
-        file_path: Caminho completo do ficheiro no S3.
-        user: Utilizador autenticado (injetado pelo Depends).
-
-    Returns:
-        dict: URL temporário para download/preview.
     """
-    import asyncio
-    
-    # Tentar path original e variações
-    variations = [file_path]
-    
-    # Variação com underscores -> espaços
-    if '_' in file_path:
-        variations.append(file_path.replace('_', ' '))
-    
-    # Variação com espaços -> underscores
-    if ' ' in file_path:
-        variations.append(file_path.replace(' ', '_'))
-    
-    # Variação com a pasta "Documentação Clientes"
-    if 'Documentação Clientes/' in file_path:
-        variations.append(file_path.replace('Documentação Clientes/', 'Documentação_Clientes/'))
-    if 'Documentação_Clientes/' in file_path:
-        variations.append(file_path.replace('Documentação_Clientes/', 'Documentação Clientes/'))
-    
-    # Verificar qual variação existe no S3
-    loop = asyncio.get_event_loop()
-    for path in variations:
-        exists = await loop.run_in_executor(None, lambda p=path: s3_service.file_exists(p))
-        if exists:
-            url = s3_service.get_presigned_url(path)
-            if url:
-                logger.info(f"[DOWNLOAD-URL] URL gerado para: {path}")
-                return {"url": url, "path": path}
-    
-    logger.warning(f"[DOWNLOAD-URL] Ficheiro não encontrado (tentadas {len(variations)} variações): {file_path}")
-    raise HTTPException(status_code=404, detail=ERROR_S3_FILE_NOT_FOUND)
+    return await run_get_download_url_by_path(file_path)
+
 
 
 @router.get("/proxy/{file_path:path}", responses={500: HTTP_500_RESPONSE})
@@ -638,38 +538,15 @@ async def move_file_to_category(
 # ====================================================================
 # PARTE 2: GESTÃO DE VALIDADES (EXISTENTE)
 # ====================================================================
-EXPIRY_WARNING_DAYS = 60 
-
 @router.post("/expiry", response_model=DocumentExpiryResponse, responses={404: HTTP_404_RESPONSE})
 async def create_document_expiry(
     data: DocumentExpiryCreate,
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))
 ):
     """Registar validade de um documento."""
-    process = await db.processes.find_one({"id": data.process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    doc_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
-    
-    # Sanitizar inputs do utilizador antes de guardar
-    sanitized_document_name = sanitize_string(data.document_name, max_length=300) if data.document_name else data.document_name
-    sanitized_notes = sanitize_string(data.notes, max_length=1000) if data.notes else data.notes
-    
-    doc = {
-        "id": doc_id,
-        "process_id": data.process_id,
-        "document_type": data.document_type,
-        "document_name": sanitized_document_name,
-        "expiry_date": data.expiry_date,
-        "notes": sanitized_notes,
-        "created_at": now,
-        "created_by": user["id"]
-    }
-    
-    await db.document_expiries.insert_one(doc)
-    return DocumentExpiryResponse(**{k: v for k, v in doc.items() if k != "_id"})
+    return await run_create_document_expiry(data, user=user)
+
+
 
 @router.get("/expiry", response_model=List[DocumentExpiryResponse], responses={500: HTTP_500_RESPONSE})
 async def get_document_expiries(
@@ -677,18 +554,9 @@ async def get_document_expiries(
     user: dict = Depends(get_current_user)
 ):
     """Obter registos de validade."""
-    query = {}
-    if process_id:
-        query["process_id"] = process_id
-    elif user["role"] == UserRole.CONSULTOR:
-        processes = await db.processes.find({"assigned_consultor_id": user["id"]}, {"id": 1}).to_list(1000)
-        query["process_id"] = {"$in": [p["id"] for p in processes]}
-    elif user["role"] == UserRole.INTERMEDIARIO:
-        processes = await db.processes.find({"assigned_mediador_id": user["id"]}, {"id": 1}).to_list(1000)
-        query["process_id"] = {"$in": [p["id"] for p in processes]}
-    
-    docs = await db.document_expiries.find(query, {"_id": 0}).to_list(1000)
-    return [DocumentExpiryResponse(**d) for d in docs]
+    return await run_get_document_expiries(process_id, user=user)
+
+
 
 @router.get("/expiry/upcoming", responses={500: HTTP_500_RESPONSE})
 async def get_upcoming_expiries(
@@ -696,77 +564,24 @@ async def get_upcoming_expiries(
     user: dict = Depends(get_current_user)
 ):
     """Alertas de documentos a expirar."""
-    today = datetime.now(timezone.utc).date()
-    future_date = today + timedelta(days=days)
-    excluded_statuses = ["concluido", "desistencia", "desistência"]
-    
-    query = {
-        "expiry_date": {
-            "$gte": today.isoformat(),
-            "$lte": future_date.isoformat()
-        }
-    }
-    
-    # Filtros de role (simplificado para brevidade, mantém a lógica original)
-    if user["role"] == UserRole.CONSULTOR:
-        procs = await db.processes.find({"$or": [{"assigned_consultor_id": user["id"]}, {"consultor_id": user["id"]}]}, {"id": 1}).to_list(1000)
-        query["process_id"] = {"$in": [p["id"] for p in procs]} if procs else {"$in": []}
-    
-    docs = await db.document_expiries.find(query, {"_id": 0}).sort("expiry_date", 1).to_list(1000)
-    
-    result = []
-    for doc in docs:
-        process = await db.processes.find_one({"id": doc["process_id"]}, {"_id": 0})
-        if process and process.get("status", "").lower() not in excluded_statuses:
-            expiry = datetime.strptime(doc["expiry_date"], "%Y-%m-%d").date()
-            days_until = (expiry - today).days
-            result.append({
-                **doc,
-                "client_name": process.get("client_name"),
-                "days_until_expiry": days_until,
-                "urgency": "critical" if days_until <= 7 else "warning" if days_until <= 30 else "normal"
-            })
-    return result
+    return await run_get_upcoming_expiries(days=days, user=user)
+
+
 
 @router.get("/expiry/calendar", responses={500: HTTP_500_RESPONSE})
 async def get_expiry_calendar_events(user: dict = Depends(get_current_user)):
     """Eventos para calendário."""
-    upcoming = await get_upcoming_expiries(days=EXPIRY_WARNING_DAYS, user=user)
-    events = []
-    for doc in upcoming:
-        color = "#EF4444" if doc["urgency"] == "critical" else "#F59E0B" if doc["urgency"] == "warning" else "#3B82F6"
-        events.append({
-            "id": f"doc-expiry-{doc['id']}",
-            "title": f"📄 {doc['document_name']} - {doc['client_name']}",
-            "date": doc["expiry_date"],
-            "color": color
-        })
-    return events
+    return await run_get_expiry_calendar_events(user=user)
+
+
 
 @router.delete("/expiry/{doc_id}", responses={404: HTTP_404_RESPONSE})
 async def delete_document_expiry(doc_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CONSULTOR, UserRole.INDEXACAO]))):
-    """Remove uma regra de validade de documento.
+    """Remove uma regra de validade de documento."""
+    return await run_delete_document_expiry(doc_id)
 
-    Porquê um endpoint dedicado: permite ao admin ou consultor remover
-    regras de validade incorretamente configuradas (ex: data de validade
-    errada ou documento que já não é necessário).
 
-    Args:
-        doc_id: ID da regra de validade a eliminar.
-        user: Utilizador autenticado com role permitido (injetado).
 
-    Returns:
-        dict: ``{"message": "Eliminado"}``.
-
-    Raises:
-        HTTPException(404): Se registo de validade não encontrado.
-    """
-    delete_result = await db.document_expiries.delete_one({"id": doc_id})
-    if delete_result.deleted_count == 0:
-        raise HTTPException(status_code=404, detail=ERROR_RECORD_NOT_FOUND)
-    return {"message": "Eliminado"}
-
-# Tipos de documentos (mantido)
 DOCUMENT_TYPES = [
     {"type": "cc", "name": "Cartão de Cidadão", "validity_years": 5},
     {"type": "irs", "name": "Declaração de IRS", "validity_years": 1},
@@ -776,21 +591,9 @@ DOCUMENT_TYPES = [
 
 @router.get("/types", responses={500: HTTP_500_RESPONSE})
 async def get_document_types(user: dict = Depends(get_current_user)):
-    """Retorna a lista de tipos de documentos suportados com prazos de validade.
-
-    Os tipos incluem informação sobre o tempo de validade padrão
-    (ex: CC = 5 anos, IRS = 1 ano, Recibo = 3 meses). Esta informação
-    é usada para calcular automaticamente a data de alerta de validade
-    quando um documento é categorizado.
-
-    Args:
-        user: Utilizador autenticado (injetado).
-
-    Returns:
-        list[dict]: Lista de tipos com type, name, validity_years e
-            validity_months.
-    """
+    """Retorna a lista de tipos de documentos suportados com prazos de validade."""
     return DOCUMENT_TYPES
+
 
 
 # ====================================================================
@@ -801,9 +604,6 @@ from services.document_categorization import (
     extract_text_from_pdf,
     categorize_document_with_ai,
     search_documents_by_content
-)
-from models.document import (
-    DocumentSearchRequest
 )
 
 
@@ -850,95 +650,9 @@ async def get_process_documents(
     """
     Obter lista simples de documentos de um processo.
     Usado pelo modal de envio de documentação para balcões.
-    
-    Retorna documentos da coleção document_metadata.
-    Se não houver metadados, faz fallback para listar ficheiros do S3.
-    
-    Retorna:
-    - id: ID do documento
-    - filename: Nome do ficheiro
-    - original_name: Nome original
-    - category: Categoria (se disponível)
-    - s3_path: Caminho no S3
-    - file_size: Tamanho do ficheiro
-    - upload_date: Data de upload
     """
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    # Obter metadados dos documentos
-    metadata_docs = await db.document_metadata.find(
-        {"process_id": process_id},
-        {"_id": 0}
-    ).to_list(1000)
-    
-    # Converter para formato simples
-    documents = []
-    # Conjunto de s3_paths já adicionados via metadados (para evitar duplicados)
-    existing_s3_paths = set()
-    for doc in metadata_docs:
-        s3_path = doc.get("s3_path", "")
-        if s3_path:
-            existing_s3_paths.add(s3_path)
-        documents.append({
-            "id": doc.get("id") or str(uuid.uuid4()),
-            "filename": doc.get("filename"),
-            "original_name": doc.get("filename"),
-            "category": doc.get("ai_category"),
-            "subcategory": doc.get("ai_subcategory"),
-            "s3_path": s3_path,
-            "file_size": doc.get("file_size"),
-            "upload_date": doc.get("created_at") or doc.get("categorized_at"),
-            "mime_type": doc.get("mime_type")
-        })
-    
-    # Complementar com ficheiros do S3 que não estão nos metadados
-    if s3_service.is_configured():
-        try:
-            client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-            titular2 = process.get("titular2_data") or {}
-            second_client_name = process.get("second_client_name") or titular2.get("nome") or titular2.get("name")
-            s3_folder = process.get("s3_folder")
-            
-            loop = asyncio.get_event_loop()
-            files_result = await loop.run_in_executor(
-                None,
-                lambda: s3_service.list_files(process_id, client_name, second_client_name, s3_folder)
-            )
-            
-            if isinstance(files_result, dict) and files_result.get("error"):
-                logger.warning(f"[DOCS-PROCESS] S3 error: {files_result['error']}")
-            elif isinstance(files_result, dict) and files_result.get("files"):
-                # list_files retorna: {"files": {"Financeiros": [...], "Pessoais": [...], ...}, ...}
-                s3_files_map = files_result["files"]
-                for category, files in s3_files_map.items():
-                    if isinstance(files, list):
-                        for f in files:
-                            s3_path = f.get("path") or f.get("key") or ""
-                            filename = f.get("name") or f.get("filename") or ""
-                            # Só adicionar se não existe nos metadados
-                            if s3_path and s3_path not in existing_s3_paths:
-                                existing_s3_paths.add(s3_path)
-                                documents.append({
-                                    "id": str(uuid.uuid4()),
-                                    "filename": filename,
-                                    "original_name": filename,
-                                    "category": category if category != "Outros" else None,
-                                    "s3_path": s3_path,
-                                    "file_size": f.get("size"),
-                                    "upload_date": f.get("last_modified"),
-                                    "mime_type": None
-                                })
-        except Exception as e:
-            logger.warning(f"[DOCS-PROCESS] Fallback S3 falhou: {e}")
-    
-    return {
-        "process_id": process_id,
-        "client_name": process.get("client_name"),
-        "documents": documents,
-        "total": len(documents)
-    }
+    return await run_get_process_documents(process_id)
+
 
 
 @router.get("/metadata/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -950,36 +664,8 @@ async def get_document_metadata(
     Obter metadados de todos os documentos de um processo.
     Inclui categorização IA se disponível.
     """
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    # Obter metadados existentes
-    metadata_list = await db.document_metadata.find(
-        {"process_id": process_id},
-        {"_id": 0, "extracted_text": 0}  # Não retornar texto completo
-    ).to_list(1000)
-    
-    # Adicionar temporary_url a cada documento
-    for doc in metadata_list:
-        s3_path = doc.get("s3_path")
-        if s3_path:
-            doc["temporary_url"] = s3_service.get_presigned_url(s3_path) or ""
-    
-    # Obter categorias únicas
-    categories = await db.document_metadata.distinct(
-        "ai_category",
-        {"process_id": process_id, "ai_category": {"$ne": None}}
-    )
-    
-    return {
-        "process_id": process_id,
-        "client_name": process.get("client_name"),
-        "documents": metadata_list,
-        "total": len(metadata_list),
-        "categorized": sum(1 for d in metadata_list if d.get("is_categorized")),
-        "categories": sorted(categories)
-    }
+    return await run_get_document_metadata(process_id)
+
 
 
 @router.post("/search", responses={500: HTTP_500_RESPONSE})
@@ -987,48 +673,9 @@ async def search_documents(
     request: DocumentSearchRequest,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Pesquisar documentos por conteúdo.
-    
-    Pesquisa em:
-    - Nome do ficheiro
-    - Categoria e subcategoria IA
-    - Tags
-    - Resumo
-    - Texto extraído
-    """
-    query = {"is_categorized": True}
-    
-    # Filtrar por processo se especificado
-    if request.process_id:
-        query["process_id"] = request.process_id
-    
-    # Filtrar por categorias se especificado
-    if request.categories:
-        query["ai_category"] = {"$in": request.categories}
-    
-    # Obter documentos
-    documents = await db.document_metadata.find(query, {"_id": 0}).to_list(1000)
-    
-    # Pesquisar
-    results = await search_documents_by_content(
-        query=request.query,
-        process_id=request.process_id,
-        documents=documents,
-        limit=request.limit
-    )
-    
-    # Adicionar temporary_url aos resultados
-    for doc in results:
-        s3_path = doc.get("s3_path")
-        if s3_path:
-            doc["temporary_url"] = s3_service.get_presigned_url(s3_path) or ""
-    
-    return {
-        "query": request.query,
-        "total_results": len(results),
-        "results": results
-    }
+    """Pesquisar documentos por conteúdo."""
+    return await run_search_documents(request)
+
 
 
 @router.get("/categories", responses={500: HTTP_500_RESPONSE})
@@ -1036,34 +683,8 @@ async def get_all_categories(
     process_id: Optional[str] = None,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Obter todas as categorias de documentos.
-    Opcionalmente filtrar por processo.
-    """
-    query = {"ai_category": {"$ne": None}}
-    
-    if process_id:
-        query["process_id"] = process_id
-    
-    # Contar documentos por categoria
-    pipeline = [
-        {"$match": query},
-        {"$group": {"_id": "$ai_category", "count": {"$sum": 1}}},
-        {"$sort": {"count": -1}}
-    ]
-    
-    category_counts = await db.document_metadata.aggregate(pipeline).to_list(100)
-    
-    return {
-        "categories": [
-            {
-                "name": cat["_id"],
-                "count": cat["count"]
-            }
-            for cat in category_counts if cat["_id"]
-        ],
-        "total_categories": len(category_counts)
-    }
+    """Obter todas as categorias de documentos."""
+    return await run_get_all_categories(process_id)
 
 
 
@@ -1127,96 +748,9 @@ async def apply_ai_suggestions(
     suggestions: Dict = Body(default=None),
     user: dict = Depends(get_current_user)
 ):
-    """
-    Aplica sugestões da análise IA aos dados do cliente.
-    
-    Args:
-        process_id: ID do processo
-        suggestions: Dicionário com campo: valor a aplicar
-        
-    Returns:
-        Resultado da atualização
-    """
-    if not suggestions:
-        raise HTTPException(status_code=400, detail=ERROR_NO_SUGGESTIONS)
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    # SECURITY: Verificar permissão de edição antes de aplicar sugestões
-    can_edit, reason = can_edit_process_data(user, process)
-    if not can_edit:
-        logger.warning(f"IDOR attempt: User {user.get('id')} ({user.get('role')}) tried to apply AI suggestions on process {process_id}: {reason}")
-        raise HTTPException(status_code=403, detail=f"Não tem permissões para alterar este processo. {reason}")
-    
-    # Mapeamento de campos frontend para subdocumentos aninhados no backend
-    # Cada entrada: (campo_frontend) → (subdocumento.campo_backend)
-    personal_fields = {
-        "client_name": "client_name",       # top-level
-        "nif": "personal_data.nif",
-        "documento_id": "personal_data.documento_id",
-        "cc_number": "personal_data.documento_id",
-        "birth_date": "personal_data.data_nascimento",
-        "cc_validity": "personal_data.cc_validity",
-        "nationality": "personal_data.nacionalidade",
-        "gender": "personal_data.sexo",
-        "address": "personal_data.morada",
-        "fiscal_address": "personal_data.morada_fiscal",
-        "estado_civil": "personal_data.estado_civil",
-    }
-    financial_fields = {
-        "rendimento_mensal": "financial_data.rendimento_mensal",
-        "salario_liquido": "financial_data.rendimento_mensal",
-        "rendimento_bruto": "financial_data.rendimento_bruto",
-        "salario_bruto": "financial_data.rendimento_bruto",
-        "empresa": "financial_data.empresa",
-        "entidade_empregadora": "financial_data.empresa",
-        "tipo_contrato": "financial_data.tipo_contrato",
-        "categoria_profissional": "financial_data.categoria_profissional",
-        "subsidiario_alimentacao": "financial_data.subsidiario_alimentacao",
-    }
-    real_estate_fields = {
-        "valor_imovel": "real_estate_data.valor_imovel",
-        "localizacao": "real_estate_data.localizacao",
-        "tipologia": "real_estate_data.tipologia",
-        "area": "real_estate_data.area",
-        "artigo_matricial": "real_estate_data.artigo_matricial",
-    }
-    
-    all_field_mappings = {**personal_fields, **financial_fields, **real_estate_fields}
-    
-    # Preparar actualizações por subdocumento
-    update_data = {}
-    for field, value in suggestions.items():
-        if field in all_field_mappings:
-            dot_path = all_field_mappings[field]
-            update_data[dot_path] = value
-    
-    if not update_data:
-        return {"success": True, "updated_fields": 0, "message": "Nenhum campo válido para atualizar"}
-    
-    # Construir update com dot notation para subdocumentos
-    mongo_update = {}
-    for dot_path, value in update_data.items():
-        mongo_update[dot_path] = value
-    
-    mongo_update["updated_at"] = datetime.now(timezone.utc).isoformat()
-    mongo_update["updated_by"] = user.get("id")
-    
-    await db.processes.update_one(
-        {"id": process_id},
-        {"$set": mongo_update}
-    )
-    
-    logger.info(f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)}")
-    
-    return {
-        "success": True,
-        "updated_fields": len(update_data) - 2,  # Excluir updated_at e updated_by
-        "fields": list(update_data.keys())
-    }
+    """Aplica sugestões da análise IA aos dados do cliente."""
+    return await run_apply_ai_suggestions(process_id, suggestions, user=user)
+
 
 
 @router.post("/organize-files/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -1225,54 +759,9 @@ async def organize_files_in_folders(
     organization: List[Dict] = None,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Organiza ficheiros em pastas no S3 baseado na análise IA.
-    
-    Args:
-        process_id: ID do processo
-        organization: Lista de {file_name, source_path, target_folder}
-        
-    Returns:
-        Resultado da organização
-    """
-    if not organization:
-        raise HTTPException(status_code=400, detail=ERROR_NO_ORGANIZATION)
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0, "client_name": 1})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    results = {"moved": [], "errors": []}
-    
-    for item in organization:
-        try:
-            source_path = item.get("source_path")
-            target_folder = item.get("target_folder")
-            file_name = item.get("file_name")
-            
-            if not all([source_path, target_folder, file_name]):
-                results["errors"].append({"file": file_name, "error": "Dados incompletos"})
-                continue
-            
-            # Mover ficheiro no S3 (copiar + apagar original)
-            success = s3_service.move_file(source_path, client_name, target_folder, file_name)
-            
-            if success:
-                results["moved"].append({"file": file_name, "to": target_folder})
-            else:
-                results["errors"].append({"file": file_name, "error": "Falha ao mover"})
-                
-        except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-            results["errors"].append({"file": item.get("file_name", "?"), "error": str(e)})
-    
-    return {
-        "success": True,
-        "moved_count": len(results["moved"]),
-        "error_count": len(results["errors"]),
-        "results": results
-    }
+    """Organiza ficheiros em pastas no S3 baseado na análise IA."""
+    return await run_organize_files_in_folders(process_id, organization)
+
 
 
 @router.post("/organize/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -1356,66 +845,9 @@ async def check_employer_nif(
     nif: str,
     user: dict = Depends(get_current_user)
 ):
-    """
-    Verifica se um NIF de empresa já existe na base de dados.
-    
-    Retorna:
-    - exists: True se o NIF já foi usado
-    - processes: Lista de processos onde este NIF foi usado
-    - total_count: Número total de processos com este NIF
-    
-    Útil para utilizadores "indexacao" verificarem se a empresa
-    do cliente já enviou documentos para outros balcões.
-    """
-    import re
-    
-    # Validar formato do NIF
-    if not re.match(r'^\d{9}$', nif):
-        raise HTTPException(
-            status_code=400,
-            detail="NIF inválido. Deve conter exatamente 9 dígitos."
-        )
-    
-    # Buscar processos com este NIF de empregador
-    # O NIF pode estar em personal_data.employer_nif ou personal_data.nif (se for empresa)
-    processes = await db.processes.find(
-        {
-            "$or": [
-                {"personal_data.employer_nif": nif},
-                {"personal_data.nif": nif, "personal_data.nif": {"$regex": "^5"}},  # NIFs de empresa começam por 5
-            ]
-        },
-        {"_id": 0, "id": 1, "client_name": 1, "status": 1, "created_at": 1, 
-         "personal_data.employer_name": 1, "personal_data.employer_nif": 1,
-         "consultor_name": 1, "mediador_name": 1}
-    ).to_list(100)
-    
-    # Buscar nomes dos status
-    workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0, "name": 1, "label": 1, "color": 1}).to_list(100)
-    status_map = {s["name"]: s for s in workflow_statuses}
-    
-    # Formatar resultados
-    results = []
-    for proc in processes:
-        status_info = status_map.get(proc.get("status"), {})
-        results.append({
-            "id": proc.get("id"),
-            "client_name": proc.get("client_name"),
-            "employer_name": proc.get("personal_data", {}).get("employer_name"),
-            "status": proc.get("status"),
-            "status_label": status_info.get("label", proc.get("status")),
-            "status_color": status_info.get("color", "#6B7280"),
-            "consultor_name": proc.get("consultor_name"),
-            "mediador_name": proc.get("mediador_name"),
-            "created_at": proc.get("created_at")
-        })
-    
-    return {
-        "nif": nif,
-        "exists": len(results) > 0,
-        "total_count": len(results),
-        "processes": results
-    }
+    """Verifica se um NIF de empresa já existe na base de dados."""
+    return await run_check_employer_nif(nif)
+
 
 
 # ====================================================================
