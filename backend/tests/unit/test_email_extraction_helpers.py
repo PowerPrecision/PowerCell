@@ -70,3 +70,24 @@ def test_build_professional_email_html_contains_proponent():
     assert "1º Proponente" in html
     assert "PrecisionCrédito" in html
     assert "João" in html
+
+
+def test_documentation_bracket_placeholder_normalization():
+    """Bank templates use [VAR]; documentation service normalizes to {VAR}."""
+    import re
+
+    template = "Imóvel [VALOR_IMOVEL] / prazo [PRAZO_FINANCIAMENTO] / {p1_nome}"
+    normalized = re.sub(r"\[([A-Z_]+)\]", r"{\1}", template)
+    assert normalized == "Imóvel {VALOR_IMOVEL} / prazo {PRAZO_FINANCIAMENTO} / {p1_nome}"
+
+
+def test_email_documentation_module_exports():
+    from services import email_documentation as mod
+
+    for name in (
+        "run_get_document_recipients",
+        "run_preview_email_template",
+        "run_preview_documentation_email",
+        "run_send_documentation_email",
+    ):
+        assert callable(getattr(mod, name))

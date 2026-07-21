@@ -34,7 +34,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 |---|---|---|---|
 | Processes | `routes/processes.py` (~664) | `services/process_*.py` | Mostly done |
 | Documents | `routes/documents.py` (~1072; was ~4623) | `services/document_*.py` | Thin stubs only — see map |
-| Emails | `routes/emails.py` (~3550; thinning in progress) | `services/email_template_vars.py`, `email_enrich.py`, `email_labels_folders.py` (+ more planned) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
+| Emails | `routes/emails.py` (~2825; thinning in progress) | `services/email_*.py` (see map) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
 
 **`email_*` thinning so far:**
 
@@ -43,6 +43,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | `email_template_vars.py` | `_extract_email_variables`, `_build_professional_email_html` |
 | `email_enrich.py` | `enrich_email` (client_name / created_by_name) |
 | `email_labels_folders.py` | Labels/folders CRUD + `validate_hex_color` + move-to-folder |
+| `email_documentation.py` | document-recipients, preview-template, preview/send-documentation |
 
 Unit helpers: `backend/tests/unit/test_email_extraction_helpers.py`.
 

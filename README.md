@@ -103,7 +103,7 @@ PowerCell/
 │   ├── vercel.json            # SPA rewrite + security headers
 │   └── public/
 ├── .github/workflows/
-│   └── ci.yml                 # CI/CD pipeline (Node 24 + Python 3.11)
+│   └── ci.yml                 # CI/CD pipeline (Node 24 + Python 3.12)
 ├── memory/
 │   └── PRD.md                 # Product Requirements Document
 ├── ARCHITECTURE.md            # Diagramas e padrões de design
@@ -497,7 +497,7 @@ flowchart TD
 
 ### Pré-requisitos
 
-- **Python 3.11+** com pip
+- **Python 3.12+** com pip
 - **Node.js 18+** (recomendado 24) com npm/yarn
 - **MongoDB Atlas** (ou instância local) — connection string SRV
 - **Conta AWS** (para S3) — opcional mas recomendado
