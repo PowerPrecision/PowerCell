@@ -80,19 +80,13 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import {
-  getProcess,
   updateProcess,
-  getClient,
   updateClient,
-  getDeadlines,
   createDeadline,
   updateDeadline,
   deleteDeadline,
-  getActivities,
   createActivity,
   deleteActivity,
-  getHistory,
-  getWorkflowStatuses,
   getClientS3Files,
   getS3DownloadUrl,
   deleteProcess,
@@ -194,7 +188,8 @@ import ProcessPortalMessagesTab from "../components/processDetails/ProcessPortal
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
-import { queryKeys } from "../lib/queryClient";
+import { queryKeys, invalidateProcessDetailsQueries } from "../lib/queryClient";
+import { useProcessFullData } from "../hooks/queries/useProcessQuery";
 import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
 import ProcessPersonalTab from "../components/processDetails/ProcessPersonalTab";
 import ProcessFinancialTab from "../components/processDetails/ProcessFinancialTab";
@@ -211,6 +206,9 @@ const ProcessDetails = () => {
   const navigate = useNavigate();
   const { user, token } = useAuth();
   const queryClient = useQueryClient();
+
+  // Live TanStack queries (process + client + side panels)
+  const processBundle = useProcessFullData(id);
   
   // ── WebSocket: juntar-se à room do processo para mensagens em tempo real ──
   // portalRefreshRef aponta para o refresh do hook useProcessPortalMessages
@@ -233,6 +231,8 @@ const ProcessDetails = () => {
   // Guardar os dados originais do processo (da BD) para componentes
   // que precisam dos valores guardados (ex: email para notificações)
   const savedProcessRef = useRef(null);
+  const lastHydratedAtRef = useRef(0);
+  const wasEditingRef = useRef(false);
   // Refs para os triggers das calculadoras (desacopladas do Dropdown — Pacote AF)
   const dstiRef = useRef(null);
   const riskRef = useRef(null);
@@ -744,46 +744,130 @@ const ProcessDetails = () => {
   };
 
   useEffect(() => {
-    fetchData();
     fetchRgpdStatus();
   }, [id]);
 
-  // Auto-save quando o status muda
+  // Side panels: live sync from TanStack queries (only when reference changes)
   useEffect(() => {
-    // Ignorar se:
-    // - Ainda está a carregar
-    // - Não há processo carregado
-    // - Status ainda não foi definido
-    // - Status é igual ao status original do processo
+    setDeadlines((prev) => (prev === processBundle.deadlines ? prev : (processBundle.deadlines || [])));
+  }, [processBundle.deadlines]);
+
+  useEffect(() => {
+    setActivities((prev) => (prev === processBundle.activities ? prev : (processBundle.activities || [])));
+  }, [processBundle.activities]);
+
+  useEffect(() => {
+    setHistory((prev) => (prev === processBundle.history ? prev : (processBundle.history || [])));
+  }, [processBundle.history]);
+
+  useEffect(() => {
+    setWorkflowStatuses((prev) => (
+      prev === processBundle.workflowStatuses ? prev : (processBundle.workflowStatuses || [])
+    ));
+  }, [processBundle.workflowStatuses]);
+
+  // Loading / error from live process query
+  useEffect(() => {
+    if (processBundle.isLoading) {
+      setLoading(true);
+      return;
+    }
+    if (processBundle.isError) {
+      const statusCode = processBundle.error?.response?.status;
+      if (statusCode === 404) {
+        setNotFound(true);
+      } else if (statusCode === 403) {
+        setAccessDenied(true);
+        toast.error("Não tem permissão para aceder a este processo");
+      } else if (statusCode) {
+        toast.error("Erro ao carregar dados do processo");
+        navigate(-1);
+      }
+      setLoading(false);
+    }
+  }, [processBundle.isLoading, processBundle.isError, processBundle.error, navigate]);
+
+  // Hydrate editable form state from query data (skip while a card is being edited)
+  useEffect(() => {
+    if (editingCardId) {
+      wasEditingRef.current = true;
+      return;
+    }
+    if (wasEditingRef.current) {
+      wasEditingRef.current = false;
+      lastHydratedAtRef.current = 0; // force re-apply server VM after cancel/exit edit
+    }
+
+    const processData = processBundle.process;
+    if (!processData) return;
+
+    const updatedAt = processBundle.processQuery?.dataUpdatedAt
+      || processBundle.clientQuery?.dataUpdatedAt
+      || 0;
+    // Guard against re-entry: only hydrate when TanStack reports a new data timestamp
+    if (!updatedAt || updatedAt === lastHydratedAtRef.current) return;
+
+    lastHydratedAtRef.current = updatedAt;
+    const vm = deriveProcessDetailsViewModel(processData, processBundle.client);
+    setProcess(vm.process);
+    savedProcessRef.current = vm.process;
+    setClientId(vm.clientId);
+    setClientData(vm.clientData);
+    setPersonalData(vm.personalData);
+    setTitular2Data(vm.titular2Data);
+    setFinancialData(vm.financialData);
+    setRealEstateData(vm.realEstateData);
+    setCreditData(vm.creditData);
+    setStatus(vm.status);
+    setAiSummary(vm.aiSummary);
+    setAiAnalysisDate(vm.aiAnalysisDate);
+    setAiSuggestions(vm.aiSuggestions);
+    setIsDataConfirmed(vm.isDataConfirmed);
+    setLoading(false);
+    setNotFound(false);
+    setAccessDenied(false);
+  }, [
+    processBundle.process,
+    processBundle.client,
+    processBundle.processQuery?.dataUpdatedAt,
+    processBundle.clientQuery?.dataUpdatedAt,
+    editingCardId,
+  ]);
+
+  // Auto-save quando o status muda (deps mínimas — evitar loop com `process`/`loading`)
+  useEffect(() => {
     if (loading || !process || !status || status === process.status) {
       return;
     }
 
-    // Verificar se o utilizador pode mudar o status
     const canChangeStatus = ["consultor", "intermediario", "admin", "ceo", "diretor", "administrativo"].includes(user?.role?.toLowerCase());
     if (!canChangeStatus) {
       return;
     }
 
-    // Debounce para evitar múltiplas gravações
+    const previousStatus = process.status;
     const timeoutId = setTimeout(() => {
-      // Guardar apenas o status
       const saveStatusOnly = async () => {
         try {
           await updateProcess(id, { status });
           toast.success("Estado atualizado");
-          fetchData();
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.processes.detail(id),
+          });
+          await queryClient.invalidateQueries({
+            queryKey: queryKeys.processes.kanban({}),
+          });
         } catch (error) {
           console.error("Erro ao atualizar estado:", error);
           toast.error("Erro ao atualizar estado");
-          // Reverter para o status anterior
-          setStatus(process.status);
+          setStatus(previousStatus);
         }
       };
       saveStatusOnly();
     }, 500);
 
     return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only react to status changes
   }, [status]);
 
   // ── WebSocket Room: juntar-se à room do processo para mensagens em tempo real ──
@@ -798,109 +882,21 @@ const ProcessDetails = () => {
     };
   }, [id, joinProcessRoom, leaveProcessRoom]);
 
-  const fetchData = async () => {
-    try {
-      // TanStack Query cache (same keys as useProcessQuery / useProcessFullData)
-      const [processData, deadlinesData, activitiesData, historyData, statusesData] = await Promise.all([
-        queryClient.fetchQuery({
-          queryKey: queryKeys.processes.detail(id),
-          queryFn: async () => {
-            const response = await getProcess(id);
-            return response.data;
-          },
-        }),
-        queryClient.fetchQuery({
-          queryKey: queryKeys.deadlines.byProcess(id),
-          queryFn: async () => {
-            try {
-              const response = await getDeadlines(id);
-              return Array.isArray(response.data) ? response.data : [];
-            } catch {
-              return [];
-            }
-          },
-        }),
-        queryClient.fetchQuery({
-          queryKey: queryKeys.activities.byProcess(id),
-          queryFn: async () => {
-            try {
-              const response = await getActivities(id);
-              return Array.isArray(response.data) ? response.data : [];
-            } catch {
-              return [];
-            }
-          },
-        }),
-        queryClient.fetchQuery({
-          queryKey: queryKeys.history.byProcess(id),
-          queryFn: async () => {
-            try {
-              const response = await getHistory(id);
-              return Array.isArray(response.data) ? response.data : [];
-            } catch {
-              return [];
-            }
-          },
-        }),
-        queryClient.fetchQuery({
-          queryKey: queryKeys.workflowStatuses.list(),
-          queryFn: async () => {
-            try {
-              const response = await getWorkflowStatuses();
-              return Array.isArray(response.data) ? response.data : [];
-            } catch {
-              return [];
-            }
-          },
-        }),
-      ]);
+  const fetchData = useCallback(async () => {
+    const cid = clientId || processBundle.process?.client_id;
+    await invalidateProcessDetailsQueries(queryClient, id, { clientId: cid });
+    await processBundle.refetchAll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchAll is stable enough per id
+  }, [queryClient, id, clientId, processBundle.process?.client_id, processBundle.refetchAll]);
 
-      setDeadlines(deadlinesData);
-      setActivities(activitiesData);
-      setHistory(historyData);
-      setWorkflowStatuses(statusesData);
-
-      let clientData = null;
-      if (processData.client_id) {
-        setClientId(processData.client_id);
-        try {
-          const clientRes = await getClient(processData.client_id);
-          clientData = clientRes.data;
-        } catch (clientErr) {
-          console.warn("Não foi possível carregar dados do cliente via client_id:", clientErr);
-        }
-      }
-
-      const vm = deriveProcessDetailsViewModel(processData, clientData);
-      setProcess(vm.process);
-      savedProcessRef.current = vm.process;
-      setClientId(vm.clientId);
-      setClientData(vm.clientData);
-      setPersonalData(vm.personalData);
-      setTitular2Data(vm.titular2Data);
-      setFinancialData(vm.financialData);
-      setRealEstateData(vm.realEstateData);
-      setCreditData(vm.creditData);
-      setStatus(vm.status);
-      setAiSummary(vm.aiSummary);
-      setAiAnalysisDate(vm.aiAnalysisDate);
-      setAiSuggestions(vm.aiSuggestions);
-      setIsDataConfirmed(vm.isDataConfirmed);
-    } catch (error) {
-      console.error("Error fetching data:", error);
-      if (error.response?.status === 404) {
-        setNotFound(true);
-      } else if (error.response?.status === 403) {
-        setAccessDenied(true);
-        toast.error("Não tem permissão para aceder a este processo");
-      } else {
-        toast.error("Erro ao carregar dados do processo");
-        navigate(-1);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Reset hydration when navigating to another process
+  useEffect(() => {
+    lastHydratedAtRef.current = 0;
+    setLoading(true);
+    setProcess(null);
+    setNotFound(false);
+    setAccessDenied(false);
+  }, [id]);
 
   // Legacy OneDrive functions - kept for compatibility but use S3FileManager instead
   const loadOneDriveFolder = async (subfolder = "") => {
@@ -1142,8 +1138,7 @@ const ProcessDetails = () => {
     try {
       await createActivity({ process_id: id, comment: newComment });
       setNewComment("");
-      const activitiesRes = await getActivities(id);
-      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
+      await invalidateProcessDetailsQueries(queryClient, id);
       toast.success("Comentário adicionado");
     } catch (error) {
       toast.error("Erro ao adicionar comentário");
@@ -1155,8 +1150,7 @@ const ProcessDetails = () => {
   const handleDeleteComment = async (activityId) => {
     try {
       await deleteActivity(activityId);
-      const activitiesRes = await getActivities(id);
-      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
+      await invalidateProcessDetailsQueries(queryClient, id);
       toast.success("Comentário eliminado");
     } catch (error) {
       toast.error("Erro ao eliminar comentário");
@@ -1181,7 +1175,7 @@ const ProcessDetails = () => {
       setIsDeadlineDialogOpen(false);
       setDeadlineForm({ title: "", description: "", due_date: "", priority: "medium" });
       setSelectedDate(null);
-      fetchData();
+      await fetchData();
     } catch (error) {
       toast.error("Erro ao criar prazo");
     }

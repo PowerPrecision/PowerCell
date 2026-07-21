@@ -203,4 +203,29 @@ export const queryKeys = {
   },
 };
 
+/**
+ * Invalida o bundle ProcessDetails (processo + side panels + kanban + cliente).
+ * Usar após saves/assigns/comentários/prazos em ProcessDetails.
+ */
+export async function invalidateProcessDetailsQueries(
+  queryClient,
+  processId,
+  { clientId } = {},
+) {
+  const tasks = [
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.detail(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.history.byProcess(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.activities.byProcess(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.deadlines.byProcess(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanban({}) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.lists() }),
+  ];
+  if (clientId) {
+    tasks.push(
+      queryClient.invalidateQueries({ queryKey: queryKeys.clients.detail(clientId) }),
+    );
+  }
+  await Promise.all(tasks);
+}
+
 export default queryClient;
