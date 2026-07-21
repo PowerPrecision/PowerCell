@@ -118,7 +118,9 @@ from services.process_my_clients import (
 from services.process_indexing import (
     compute_next_workflow_status,
     build_indexacao_update_set,
-    collect_assigned_user_ids,
+    assert_mark_indexed_permission,
+    load_workflow_status_pipeline,
+    run_mark_indexed_side_effects,
 )
 from services.process_create import (
     resolve_initial_workflow_status,
@@ -1901,24 +1903,17 @@ async def mark_process_indexed(
     Body (opcional):
     - is_indexed: boolean (default true)
     """
-    # Verificar permissão — roles indexacao, admin, ceo (usar effectiveRole)
     user_role = get_effective_role(request, user).lower()
     all_roles = get_all_user_roles(user)
-    if user_role not in ["indexacao", "admin", "ceo"] and not any(r in all_roles for r in ["indexacao", "admin", "ceo"]):
-        raise HTTPException(
-            status_code=403,
-            detail="Apenas utilizadores com perfil de Indexação, Admin ou CEO podem marcar a indexação como concluída."
-        )
-    
-    # Buscar processo
+    assert_mark_indexed_permission(user_role, all_roles)
+
     process = await db.processes.find_one(
         {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
+        {"_id": 0},
     )
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    # Se já está indexado, informar
+
     if process.get("is_indexed") is True:
         return {
             "success": True,
@@ -1926,12 +1921,9 @@ async def mark_process_indexed(
             "process_id": process_id,
             "is_indexed": True,
         }
-    
+
     current_status = process.get("status", "clientes_espera")
-    all_statuses = await db.workflow_statuses.find(
-        {}, {"_id": 0}
-    ).sort("order", 1).to_list(100)
-    status_pipeline = [s["name"] for s in all_statuses]
+    status_pipeline = await load_workflow_status_pipeline()
     next_status = compute_next_workflow_status(current_status, status_pipeline)
 
     now = datetime.now(timezone.utc).isoformat()
@@ -1939,239 +1931,35 @@ async def mark_process_indexed(
 
     result = await db.processes.update_one(
         {"id": process_id},
-        {"$set": update_set}
+        {"$set": update_set},
     )
-    
-    # Verificar se a atualização foi persistida
+
     if result.matched_count == 0:
-        logger.error(f"[INDEXACAO] update_one matched 0 documents para processo {process_id}")
+        logger.error(
+            f"[INDEXACAO] update_one matched 0 documents para processo {process_id}"
+        )
         raise HTTPException(
             status_code=404,
-            detail="Processo não encontrado durante atualização. A indexação pode não ter sido persistida."
+            detail=(
+                "Processo não encontrado durante atualização. "
+                "A indexação pode não ter sido persistida."
+            ),
         )
     if result.modified_count == 0 and not process.get("is_indexed"):
-        logger.warning(f"[INDEXACAO] update_one modified 0 documents para processo {process_id} (já estava indexado?)")
-    
-    # ── Registar no histórico — Indexação concluída ──
-    try:
-        await log_history(
-            process_id,
-            user=user,
-            action="INDEXACAO_CONCLUIDA",
-            field="is_indexed",
-            old_value="false",
-            new_value="true"
+        logger.warning(
+            f"[INDEXACAO] update_one modified 0 documents para processo "
+            f"{process_id} (já estava indexado?)"
         )
-        # PACOTE BM — Registar também o congelamento dos dados do cliente
-        await log_history(
-            process_id,
-            user=user,
-            action="DADOS_CONFIRMADOS_INDEXACAO",
-            field="is_data_confirmed",
-            old_value="false",
-            new_value="true"
-        )
-    except Exception as e:
-        logger.warning(f"Erro ao registar histórico de indexação: {e}")
 
-    # ── Registar no histórico — Salto dinâmico de estado ──
-    if next_status and next_status != current_status:
-        try:
-            system_user = {"id": "system", "name": "Sistema", "role": "admin"}
-            await log_history(
-                process_id,
-                user=system_user,
-                action=f"Salto dinâmico: {current_status} → {next_status} (indexação concluída)",
-                field="status",
-                old_value=current_status,
-                new_value=next_status,
-            )
-        except Exception as e:
-            logger.warning(f"Erro ao registar histórico de salto de estado: {e}")
-
-    # ── Registar no histórico — Limpeza do indexador ──
-    if process.get("assigned_indexacao_id"):
-        try:
-            system_user = {"id": "system", "name": "Sistema", "role": "admin"}
-            await log_history(
-                process_id,
-                user=system_user,
-                action="Responsabilidade do indexador removida (indexação concluída)",
-                field="assigned_indexacao_id",
-                old_value=process.get("indexacao_name") or process.get("assigned_indexacao_id"),
-                new_value=None,
-            )
-        except Exception as e:
-            logger.warning(f"Erro ao registar histórico de limpeza do indexador: {e}")
-    
-    # ── Disparar notificação para utilizadores atribuídos ──
-    client_name = process.get("client_name", "Cliente")
-    process_number = process.get("process_number", "")
-    process_ref = f"#{process_number}" if process_number else process_id[:8]
-    
-    # Recolher todos os IDs de utilizadores atribuídos
-    assigned_ids = collect_assigned_user_ids(process)
-    
-    notification_message = f"A Indexação concluiu o tratamento documental do processo {process_ref} — {client_name}"
-    
-    for uid in assigned_ids:
-        try:
-            user_doc = await db.users.find_one({"id": uid}, {"name": 1, "email": 1})
-            if user_doc:
-                # Notificação por email (com verificação de preferências)
-                await send_notification_with_preference_check(
-                    user_doc.get("email"),
-                    "Indexação Concluída",
-                    notification_message,
-                    notification_type="indexing_complete"
-                )
-                # Notificação in-app em tempo real
-                try:
-                    from services.realtime_notifications import send_realtime_notification
-                    await send_realtime_notification(
-                        user_id=uid,
-                        title="Indexação Concluída",
-                        message=notification_message,
-                        notification_type="indexing_complete",
-                        link=f"/process/${process_id}",
-                        process_id=process_id,
-                    )
-                except Exception as notif_err:
-                    logger.debug(f"Erro ao enviar notificação in-app para {uid}: {notif_err}")
-        except Exception as e:
-            logger.warning(f"Erro ao notificar utilizador {uid} sobre indexação concluída: {e}")
-    
-    # ── Broadcast WebSocket ──
-    try:
-        await broadcast_process_delta(
-            event_type=WSEventType.PROCESS_UPDATED,
-            process_id=process_id,
-            client_name=client_name,
-            status=next_status or current_status,
-            old_status=current_status,
-            updated_at=now,
-        )
-    except Exception as ws_err:
-        logger.debug(f"Erro ao broadcast indexação concluída via WS: {ws_err}")
-    
-    logger.info(
-        f"[INDEXACAO] Processo {process_ref} marcado como indexado por {user.get('email')}. "
-        f"Estado: {current_status} → {next_status or current_status}. "
-        f"Indexador limpo: {process.get('assigned_indexacao_id') is not None}. "
-        f"Notificações enviadas para {len(assigned_ids)} utilizadores."
+    return await run_mark_indexed_side_effects(
+        process=process,
+        process_id=process_id,
+        user=user,
+        current_status=current_status,
+        next_status=next_status,
+        now=now,
+        broadcast_fn=broadcast_process_delta,
     )
-    
-    # ── Gatilho: Verificar fila de espera para o indexador ──
-    # Quando o indexador marca is_indexed=true, liberta um slot na sua lista.
-    # Verificar se há processos na fila_espera que possam ser atribuídos.
-    try:
-        from services.process_assignment import check_waitlist_for_indexer
-        import asyncio
-        assigned_indexer_id = process.get("assigned_indexacao_id")
-        if assigned_indexer_id:
-            asyncio.create_task(check_waitlist_for_indexer(assigned_indexer_id))
-            logger.info(
-                f"[INDEXACAO] Gatilho de fila de espera disparado para indexador {assigned_indexer_id}"
-            )
-        else:
-            # Se não havia indexador atribuído, verificar todos os indexadores
-            # (pode haver fila e algum indexador com vaga agora)
-            from services.process_assignment import process_queue_for_freed_indexer
-            from services.role_query import build_deep_role_query
-            indexers_cursor = db.users.find(
-                build_deep_role_query({"is_active": True}, role="indexacao"),
-                {"_id": 0, "id": 1}
-            )
-            indexers = await indexers_cursor.to_list(length=100)
-            for idx in indexers:
-                asyncio.create_task(process_queue_for_freed_indexer(idx["id"]))
-    except Exception as waitlist_err:
-        logger.warning(f"[INDEXACAO] Erro ao verificar fila de espera: {waitlist_err}")
-
-    # ==================================================================
-    # DUPLA AUTO-ATRIBUIÇÃO (Conversão Pré-Registo/Lead → Pipeline)
-    # ==================================================================
-    # Se o processo transitou de pre_registo (ou status vazio/Lead), dispara
-    # a dupla auto-atribuição (consultor + intermediário em simultâneo).
-    # Caso contrário, usa a lógica de auto-atribuição de consultor apenas.
-    # PACOTE DB — aceita também current_status=None (novos registos).
-    consultant_result = None
-    is_pre_registo_transition = (current_status in ("pre_registo", None))
-
-    if is_pre_registo_transition:
-        try:
-            from services.process_assignment import dual_auto_assign_on_pre_registo_transition
-            company_id = process.get("company_id")
-            dual_result = await dual_auto_assign_on_pre_registo_transition(
-                process_id=process_id,
-                company_id=company_id,
-                indexador_user_id=user.get("id"),
-            )
-            consultant_result = dual_result
-            logger.info(
-                f"[INDEXACAO-DUAL] Dupla auto-atribuição disparada (pre_registo → pipeline): "
-                f"consultor={dual_result.get('consultant_name', 'N/A')}, "
-                f"intermediario={dual_result.get('mediador_name', 'N/A')}"
-            )
-        except Exception as dual_err:
-            logger.warning(
-                f"[INDEXACAO-DUAL] Erro na dupla auto-atribuição: {dual_err}"
-            )
-    else:
-        # Lógica original: auto-atribuição de consultor apenas (fallback)
-        try:
-            from services.process_assignment import assign_to_least_busy_consultant
-
-            existing_consultor = (
-                process.get("assigned_consultor_id")
-                or process.get("consultant_id")
-            )
-            if not existing_consultor:
-                logger.info(
-                    f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} sem consultor. "
-                    f"A invocar auto-atribuição..."
-                )
-                success, data, msg = await assign_to_least_busy_consultant(process_id)
-                if success:
-                    consultant_result = data
-                    logger.info(
-                        f"[INDEXACAO-AUTOASSIGN] Auto-atribuição concluída: {msg}"
-                    )
-                else:
-                    logger.warning(
-                        f"[INDEXACAO-AUTOASSIGN] Falha na auto-atribuição: {msg}"
-                    )
-            else:
-                logger.info(
-                    f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} já tem consultor "
-                    f"({process.get('consultor_name') or existing_consultor}). "
-                    f"A manter atribuição existente."
-                )
-        except Exception as assign_err:
-            logger.warning(
-                f"[INDEXACAO-AUTOASSIGN] Erro na auto-atribuição de consultor: {assign_err}"
-            )
-
-    return {
-        "success": True,
-        "message": f"Indexação do processo {process_ref} marcada como concluída.",
-        "process_id": process_id,
-        "is_indexed": True,
-        "notified_users": len(assigned_ids),
-        # Novos campos — Progressão Dinâmica
-        "status_transition": {
-            "from": current_status,
-            "to": next_status,
-        } if next_status and next_status != current_status else None,
-        "indexer_cleared": process.get("assigned_indexacao_id") is not None,
-        "consultant_auto_assigned": consultant_result,
-        # Dupla auto-atribuição (pre_registo → pipeline)
-        "dual_auto_assigned": is_pre_registo_transition,
-        "assignment": consultant_result if is_pre_registo_transition else None,
-        # PACOTE BM — Dados do cliente confirmados/congelados pela Indexação.
-        # O Portal do Cliente lê esta flag via GET /portal/me e bloqueia a edição.
-        "is_data_confirmed": True,
-    }
 
 
 @router.delete("/{process_id}")

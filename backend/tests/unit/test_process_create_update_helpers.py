@@ -55,6 +55,56 @@ class TestCollectAssignedIds:
         assert set(ids) == {"c1", "c2", "m1", "i1"}
 
 
+class TestMarkIndexedPermissionAndResponse:
+    def test_permission_blocks_consultor(self):
+        from fastapi import HTTPException
+        from services.process_indexing import assert_mark_indexed_permission
+        try:
+            assert_mark_indexed_permission("consultor", ["consultor"])
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 403
+
+    def test_permission_allows_additional_role(self):
+        from services.process_indexing import assert_mark_indexed_permission
+        assert_mark_indexed_permission("consultor", ["consultor", "indexacao"])
+
+    def test_build_response_with_transition(self):
+        from services.process_indexing import build_mark_indexed_response
+        resp = build_mark_indexed_response(
+            process={"assigned_indexacao_id": "i1"},
+            process_id="p1",
+            process_ref="#42",
+            current_status="a",
+            next_status="b",
+            assigned_ids=["u1", "u2"],
+            consultant_result={"consultant_name": "Ana"},
+            is_pre_registo_transition=False,
+        )
+        assert resp["is_indexed"] is True
+        assert resp["notified_users"] == 2
+        assert resp["status_transition"] == {"from": "a", "to": "b"}
+        assert resp["indexer_cleared"] is True
+        assert resp["dual_auto_assigned"] is False
+        assert resp["assignment"] is None
+
+    def test_build_response_pre_registo(self):
+        from services.process_indexing import build_mark_indexed_response
+        dual = {"consultant_name": "A", "mediador_name": "B"}
+        resp = build_mark_indexed_response(
+            process={},
+            process_id="p1",
+            process_ref="p1",
+            current_status="pre_registo",
+            next_status="fase_1",
+            assigned_ids=[],
+            consultant_result=dual,
+            is_pre_registo_transition=True,
+        )
+        assert resp["dual_auto_assigned"] is True
+        assert resp["assignment"] == dual
+
+
 class TestBuildStaffProcessDoc:
     def test_lead_source_and_status(self):
         doc = build_staff_process_doc(
