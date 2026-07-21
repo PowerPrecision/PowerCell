@@ -515,6 +515,80 @@ class TestKanbanDiagnoseFinalize:
         assert out["blocking_issue"]
 
 
+class TestClientSelfCreate:
+    def test_role_guard(self):
+        from fastapi import HTTPException
+        from services.process_create import assert_is_cliente_role, build_client_self_process_doc
+        try:
+            assert_is_cliente_role(UserRole.ADMIN)
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 403
+        assert_is_cliente_role(UserRole.CLIENTE)
+        doc = build_client_self_process_doc(
+            process_id="p1", process_number=1, client_id="c1",
+            process_type="credito", initial_status="fase_1", now="t",
+        )
+        assert doc["client_id"] == "c1"
+        assert doc["assigned_consultor_id"] is None
+
+
+class TestProcessClientsNm:
+    def test_add_as_co_titular(self):
+        from services.process_clients_nm import build_add_client_update
+        process = {"client_ids": ["c1"], "co_buyers": []}
+        client = {
+            "nome": "B",
+            "contacto": {"email": "b@x.com", "telefone": "91"},
+            "dados_pessoais": {"nif": "2"},
+        }
+        update, ids = build_add_client_update(
+            process, client, "c2", as_co_titular=True, now="t",
+        )
+        assert ids == ["c1", "c2"]
+        assert update["co_buyers"][0]["client_id"] == "c2"
+        assert update["titular2_data"]["name"] == "B"
+
+    def test_add_duplicate_raises(self):
+        from fastapi import HTTPException
+        from services.process_clients_nm import build_add_client_update
+        try:
+            build_add_client_update(
+                {"client_ids": ["c1"]}, {"nome": "A"}, "c1",
+                as_co_titular=False, now="t",
+            )
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+
+    def test_remove_clears_second_client(self):
+        from services.process_clients_nm import build_remove_client_update
+        process = {
+            "client_id": "c1",
+            "client_ids": ["c1", "c2"],
+            "second_client_id": "c2",
+            "second_client_name": "B",
+            "co_buyers": [{"client_id": "c2", "name": "B"}],
+        }
+        update, ids = build_remove_client_update(process, "c2", now="t")
+        assert ids == ["c1"]
+        assert update["second_client_id"] is None
+        assert update["titular2_data"] is None
+        assert update["co_buyers"] is None
+
+    def test_remove_primary_raises(self):
+        from fastapi import HTTPException
+        from services.process_clients_nm import build_remove_client_update
+        try:
+            build_remove_client_update(
+                {"client_id": "c1", "client_ids": ["c1"]}, "c1", now="t",
+            )
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+
+
+
 class TestListEnrichmentSort:
     def test_default_sort_priority_then_status(self):
         from services.process_list_enrichment import sort_process_list, get_priority_weight

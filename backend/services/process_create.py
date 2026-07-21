@@ -310,3 +310,77 @@ def build_create_broadcast_names(user: dict) -> tuple[list, list]:
         [user["name"]] if user["role"] == UserRole.INTERMEDIARIO else []
     )
     return consultor_names, mediador_names
+
+
+def assert_is_cliente_role(role: str) -> None:
+    """POST /processes (self-service) só para role CLIENTE."""
+    if role != UserRole.CLIENTE:
+        raise HTTPException(
+            status_code=403,
+            detail="Apenas clientes podem criar processos",
+        )
+
+
+async def load_client_doc_or_404(client_id: Optional[str]) -> dict[str, Any]:
+    """Carrega cliente por id ou 404."""
+    if not client_id:
+        raise HTTPException(
+            status_code=404,
+            detail="Cliente com ID '' não encontrado. "
+                   "O processo deve estar associado a um cliente existente.",
+        )
+    client_doc = await db.clients.find_one({"id": client_id})
+    if not client_doc:
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                f"Cliente com ID '{client_id}' não encontrado. "
+                "O processo deve estar associado a um cliente existente."
+            ),
+        )
+    return client_doc
+
+
+def build_client_self_process_doc(
+    *,
+    process_id: str,
+    process_number: Any,
+    client_id: str,
+    process_type: Any,
+    initial_status: Optional[str],
+    now: str,
+) -> dict[str, Any]:
+    """Documento base do processo criado pelo próprio cliente."""
+    return {
+        "id": process_id,
+        "process_number": process_number,
+        "client_id": client_id,
+        "process_type": process_type,
+        "status": initial_status,
+        "is_active": True,
+        "real_estate_data": None,
+        "credit_data": None,
+        "assigned_consultor_id": None,
+        "assigned_mediador_id": None,
+        "created_at": now,
+        "updated_at": now,
+    }
+
+
+async def link_single_client_to_process(
+    process_id: str,
+    client_id: str,
+    *,
+    now: str,
+) -> None:
+    """$addToSet process_ids no cliente após self-create."""
+    await db.clients.update_one(
+        {"id": client_id},
+        {
+            "$addToSet": {"process_ids": process_id},
+            "$set": {"updated_at": now},
+        },
+    )
+    logger.info(
+        f"Processo {process_id} criado e associado ao cliente {client_id}"
+    )

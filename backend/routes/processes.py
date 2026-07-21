@@ -129,6 +129,16 @@ from services.process_create import (
     assert_client_id_required,
     maybe_auto_assign_indexer_on_create,
     build_create_broadcast_names,
+    assert_is_cliente_role,
+    load_client_doc_or_404,
+    build_client_self_process_doc,
+    link_single_client_to_process,
+)
+from services.process_clients_nm import (
+    build_add_client_update,
+    build_remove_client_update,
+    format_add_client_response,
+    format_remove_client_response,
 )
 from services.process_ai_conflict import apply_ai_conflict_choice
 from services.process_update import (
@@ -489,77 +499,35 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
     Returns:
         ProcessResponse: Processo criado com dados do cliente populados
     """
-    # Apenas clientes podem criar processos por este endpoint
-    if user["role"] != UserRole.CLIENTE:
-        raise HTTPException(status_code=403, detail="Apenas clientes podem criar processos")
-    
-    # ── FASE 2: Validar que o client_id existe ──────────────────────────
-    client_doc = await db.clients.find_one({"id": data.client_id})
-    if not client_doc:
-        raise HTTPException(
-            status_code=404,
-            detail=f"Cliente com ID '{data.client_id}' não encontrado. "
-                   "O processo deve estar associado a um cliente existente."
-        )
-    
-    # Obter o primeiro estado do workflow (Clientes em Espera)
-    # PACOTE DB — Se não houver workflow_statuses, deixa vazio (None) em vez
-    # de inventar "clientes_espera". Não inventar nomes de fases no código.
-    first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
-    initial_status = first_status["name"] if first_status else None
-    
-    # Gerar ID único, número sequencial e timestamp
+    assert_is_cliente_role(user["role"])
+
+    client_doc = await load_client_doc_or_404(data.client_id)
+    initial_status, _ = await resolve_initial_workflow_status(is_lead=False)
+
     process_id = str(uuid.uuid4())
     process_number = await get_next_process_number()
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Desencriptar dados do cliente para popular o processo
+
     decrypted_client = decrypt_client_data(client_doc)
     client_name = decrypted_client.get("nome", "")
-    client_email = decrypted_client.get("contacto", {}).get("email", "")
-    
-    # Construir documento do processo — SEM dados pessoais do cliente
-    process_doc = {
-        "id": process_id,
-        "process_number": process_number,
-        "client_id": data.client_id,
-        "process_type": data.process_type,
-        "status": initial_status,
-        "is_active": True,
-        "real_estate_data": None,
-        "credit_data": None,
-        "assigned_consultor_id": None,
-        "assigned_mediador_id": None,
-        "created_at": now,
-        "updated_at": now
-    }
-    
-    # Encriptar campos sensíveis antes de guardar
-    process_doc = encrypt_sensitive_data(process_doc)
-    
-    # Inserir na base de dados
-    await db.processes.insert_one(process_doc)
-    
-    # ── FASE 2: Atualizar process_ids do cliente ($push) ────────────────
-    await db.clients.update_one(
-        {"id": data.client_id},
-        {
-            "$addToSet": {"process_ids": process_id},
-            "$set": {"updated_at": now}
-        }
+
+    process_doc = build_client_self_process_doc(
+        process_id=process_id,
+        process_number=process_number,
+        client_id=data.client_id,
+        process_type=data.process_type,
+        initial_status=initial_status,
+        now=now,
     )
-    logger.info(f"Processo {process_id} criado e associado ao cliente {data.client_id}")
+    process_doc = encrypt_sensitive_data(process_doc)
+    await db.processes.insert_one(process_doc)
 
-    # === PACOTE CW — Trello Mirror: criar cartão em background ===
+    await link_single_client_to_process(process_id, data.client_id, now=now)
+
     asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
-
-    # === CACHE INVALIDATION: Novo processo afecta KPIs ===
     await invalidate_stats_cache(user_id=user["id"])
-    
-    # Registar no histórico
     await log_history(process_id, user, "Criou processo")
-    
-    # === WEBSOCKET BROADCAST: Novo processo criado ===
+
     await broadcast_process_delta(
         event_type=WSEventType.PROCESS_CREATED,
         process_id=process_id,
@@ -567,17 +535,15 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
         client_name=client_name,
         status=initial_status,
         process_type=data.process_type,
-        updated_at=now
+        updated_at=now,
     )
-    
-    # Notificar administradores e CEO (com verificação de preferências)
+
     await send_to_admins(
         "Novo Processo Criado",
         f"O cliente {client_name} criou um novo processo de {data.process_type}.",
-        notification_type="new_process"
+        notification_type="new_process",
     )
-    
-    # Desencriptar para a resposta e popular com dados do cliente (retrocompatibilidade)
+
     response_doc = decrypt_sensitive_data(process_doc)
     response_doc = await populate_client_data(response_doc)
     return ProcessResponse(**{k: v for k, v in response_doc.items() if k != "_id"})
@@ -2174,71 +2140,38 @@ async def add_client_to_process(
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
+
     client = await db.clients.find_one({"id": client_id})
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
-    
-    # Verificar se já está associado
-    current_client_ids = process.get("client_ids", [])
-    if client_id in current_client_ids:
-        raise HTTPException(status_code=400, detail="Cliente já está associado a este processo")
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Adicionar cliente ao processo
-    update_data = {
-        "updated_at": now
-    }
-    
-    # Adicionar à lista de client_ids
-    current_client_ids.append(client_id)
-    update_data["client_ids"] = current_client_ids
-    
-    # Se for co-titular, adicionar aos co_buyers
-    if as_co_titular:
-        co_buyers = process.get("co_buyers", [])
-        co_buyers.append({
-            "name": client.get("nome"),
-            "email": client.get("contacto", {}).get("email"),
-            "nif": client.get("dados_pessoais", {}).get("nif"),
-            "phone": client.get("contacto", {}).get("telefone"),
-            "client_id": client_id,
-            "relacao": "co-titular"
-        })
-        update_data["co_buyers"] = co_buyers
-        
-        # Adicionar também ao titular2_data se for o primeiro co-titular
-        if len(co_buyers) == 1:
-            update_data["titular2_data"] = {
-                "name": client.get("nome"),
-                "email": client.get("contacto", {}).get("email"),
-                "nif": client.get("dados_pessoais", {}).get("nif"),
-                "phone": client.get("contacto", {}).get("telefone")
-            }
-    
+    update_data, current_client_ids = build_add_client_update(
+        process, client, client_id, as_co_titular=as_co_titular, now=now,
+    )
+
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
-    
-    # Actualizar process_ids do cliente
+
     await db.clients.update_one(
         {"id": client_id},
         {
             "$addToSet": {"process_ids": process_id},
-            "$set": {"updated_at": now}
-        }
+            "$set": {"updated_at": now},
+        },
     )
-    
+
     await log_history(
-        process_id, user, 
-        f"Adicionou cliente {client.get('nome')} ao processo" + (" como co-titular" if as_co_titular else "")
+        process_id, user,
+        f"Adicionou cliente {client.get('nome')} ao processo"
+        + (" como co-titular" if as_co_titular else ""),
     )
-    
-    return {
-        "success": True,
-        "message": f"Cliente {client.get('nome')} adicionado ao processo",
-        "total_clients": len(current_client_ids)
-    }
+
+    return format_add_client_response(
+        client.get("nome"),
+        as_co_titular=as_co_titular,
+        total_clients=len(current_client_ids),
+    )
 
 
 @router.post("/{process_id}/remove-client")
@@ -2263,76 +2196,31 @@ async def remove_client_from_process(
     process = await db.processes.find_one({"id": process_id})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    current_client_ids = process.get("client_ids", [])
-    
-    # Verificar se está associado
-    if client_id not in current_client_ids:
-        raise HTTPException(status_code=400, detail="Cliente não está associado a este processo")
-    
-    # Não permitir remover o cliente principal
-    if client_id == process.get("client_id"):
-        raise HTTPException(
-            status_code=400, 
-            detail="Não é possível remover o cliente principal. Apenas co-titulares podem ser removidos."
-        )
-    
+
     now = datetime.now(timezone.utc).isoformat()
-    
-    # Remover cliente da lista
-    current_client_ids.remove(client_id)
-    
-    # Remover dos co_buyers
-    co_buyers = process.get("co_buyers", [])
-    co_buyers = [cb for cb in co_buyers if cb.get("client_id") != client_id]
-    
-    update_data = {
-        "client_ids": current_client_ids,
-        "co_buyers": co_buyers if co_buyers else None,
-        "updated_at": now
-    }
+    update_data, current_client_ids = build_remove_client_update(
+        process, client_id, now=now,
+    )
 
-    # PACOTE BP — Se o cliente removido era o second_client_id (2º titular
-    # ligado via backend), limpar também second_client_id e second_client_name
-    # para manter consistência. Sem isto, o processo ficava com second_client_id
-    # apontando para um cliente que já não está associado.
-    if process.get("second_client_id") == client_id:
-        update_data["second_client_id"] = None
-        update_data["second_client_name"] = None
-
-    # Actualizar titular2_data se necessário
-    if co_buyers:
-        update_data["titular2_data"] = {
-            "name": co_buyers[0].get("name"),
-            "email": co_buyers[0].get("email"),
-            "nif": co_buyers[0].get("nif"),
-            "phone": co_buyers[0].get("phone")
-        }
-    else:
-        update_data["titular2_data"] = None
-    
     inject_cdc_context(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
-    
-    # Remover process_ids do cliente
+
     await db.clients.update_one(
         {"id": client_id},
         {
             "$pull": {"process_ids": process_id},
-            "$set": {"updated_at": now}
-        }
+            "$set": {"updated_at": now},
+        },
     )
-    
+
     client = await db.clients.find_one({"id": client_id})
     client_name = client.get("nome") if client else client_id
-    
+
     await log_history(process_id, user, f"Removeu cliente {client_name} do processo")
-    
-    return {
-        "success": True,
-        "message": f"Cliente {client_name} removido do processo",
-        "total_clients": len(current_client_ids)
-    }
+
+    return format_remove_client_response(
+        client_name, total_clients=len(current_client_ids),
+    )
 
 
 @router.get("/{process_id}/clients")
