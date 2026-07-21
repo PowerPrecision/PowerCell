@@ -33,7 +33,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Area | Route file | Services pattern | Notes |
 |---|---|---|---|
 | Processes | `routes/processes.py` (~664) | `services/process_*.py` | Mostly done |
-| Documents | `routes/documents.py` (~3080; was ~4623) | `services/document_*.py` | See map below |
+| Documents | `routes/documents.py` (~2493; was ~4623) | `services/document_*.py` | See map below |
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
@@ -47,7 +47,9 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | `document_auto_categorize.py` | Background IA categorize + OCR entities (**re-exported** from `routes.documents` for tests) |
 | `document_upload_conflict.py` | Pre-upload filename conflict check |
 | `document_direct_upload.py` | Pre-signed URL generate + confirm-upload |
+| `document_upload.py` | Multipart upload pipeline (MIME validate, convert, IA triage, S3, history) |
 | `document_move.py` | Move/rename conflict check + move-to-category |
+| `document_ai_analyze.py` | Multi-doc IA analyze + organize-after-analysis folders |
 | `document_ocr_data.py` | OCR status, data suggestions, resolve/confirm conflicts |
 
 **Gotchas**

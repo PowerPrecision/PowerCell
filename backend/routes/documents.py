@@ -114,6 +114,11 @@ from services.document_ocr_data import (
     run_resolve_data_conflict,
     run_confirm_process_data,
 )
+from services.document_upload import run_upload_file_s3
+from services.document_ai_analyze import (
+    run_ai_analyze_documents,
+    run_organize_documents_after_analysis,
+)
 
 
 # ====================================================================
@@ -205,291 +210,37 @@ async def upload_file_s3(
             converted_to_pdf, e auto_categorization status.
     """
     try:
-        # Verificar se S3 está configurado
-        if not s3_service.is_configured():
-            raise HTTPException(
-                status_code=503, 
-                detail="Serviço de armazenamento S3 não configurado. Contacte o administrador para configurar as credenciais AWS."
-            )
-        
-        # ================================================================
-        # VALIDAÇÃO DE NIF DA EMPRESA DESATIVADA TEMPORARIAMENTE
-        # Para reativar, descomentar o bloco abaixo
-        # ================================================================
-        # # Verificar se utilizador "indexacao" forneceu o NIF da empresa
-        # if user.get("role") == "indexacao":
-        #     if not empresa_nif:
-        #         raise HTTPException(
-        #             status_code=400, 
-        #             detail="O NIF da empresa é obrigatório para utilizadores de indexação. Por favor, insira o NIF da entidade empregadora do cliente."
-        #         )
-        #     # Validar formato do NIF (9 dígitos)
-        #     import re
-        #     if not re.match(r'^\d{9}$', empresa_nif):
-        #         raise HTTPException(
-        #             status_code=400,
-        #             detail="NIF da empresa inválido. Deve conter exatamente 9 dígitos."
-        #         )
-        # ================================================================
-        
-        process, effective_id = await resolve_process_from_flexible_id(
-            client_id,
-            log_prefix="[UPLOAD]",
-            allow_client_without_process=False,
-            raise_on_client_without_process=True,
-        )
-        # Usar effective_id (processo) para operações S3, não o client_id original
-        client_id = effective_id
-        
-        # Se empresa_nif foi fornecido, guardar no processo
-        if empresa_nif:
-            personal_data = process.get("personal_data", {})
-            personal_data["employer_nif"] = empresa_nif
-            await db.processes.update_one(
-                {"id": client_id},
-                {"$set": {"personal_data": personal_data}}
-            )
-        
-        client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-        second_client_name = extract_second_client_name(process)
-        
-        # Obter mapeamento S3 configurado (prioridade máxima)
-        s3_folder = process.get("s3_folder")
-        
-        # Ler o conteúdo do ficheiro
         file_content = await file.read()
-        original_filename = file.filename or f"documento_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
-        content_type = file.content_type or "application/octet-stream"
-        
-        # ====================================================================
-        # Inicializar todas as variáveis de controlo
-        # ====================================================================
-        was_extracted = False
-        was_converted = False
-        converted_to_pdf = False
-        conversion_info = {}
-        
-        # ====================================================================
-        # SEGURANÇA: Validar MIME type usando magic bytes (não apenas extensão)
-        # Isto previne uploads de executáveis disfarçados como documentos
-        # TAMBÉM: Tenta extrair conteúdo de wrappers (Java serialization, base64)
-        # E: Converte automaticamente ficheiros para PDF quando possível
-        # ====================================================================
-        from services.file_validation import validate_and_convert_file
-        
-        try:
-            # Usar validate_and_convert_file para validação, extração e conversão
-            validated_content, detected_mime, mime_description, conversion_info = validate_and_convert_file(
-                file_content, original_filename, auto_convert=True
-            )
-            
-            # Processar informações de conversão
-            was_extracted = conversion_info.get("was_extracted", False)
-            was_converted = conversion_info.get("was_converted", False)
-            
-            if was_extracted or was_converted:
-                logger.info(
-                    f"[UPLOAD] Ficheiro processado: {sanitize_for_log(original_filename)} "
-                    f"(extraído: {was_extracted}, convertido: {was_converted}, "
-                    f"método: {conversion_info.get('conversion_method') or conversion_info.get('extraction_method')})"
-                )
-                file_content = validated_content
-                content_type = detected_mime
-                
-                # Actualizar nome do ficheiro se foi convertido para PDF
-                if detected_mime == MIME_TYPE_PDF and not original_filename.lower().endswith('.pdf'):
-                    original_filename = original_filename.rsplit('.', 1)[0] + '.pdf' if '.' in original_filename else original_filename + '.pdf'
-                    
-        except HTTPException as e:
-            logger.warning(f"[UPLOAD] Ficheiro rejeitado: {sanitize_for_log(original_filename)} - {e.detail}")
-            raise
-        except Exception as e:
-            # Se houver erro na validação, continuar com o ficheiro original
-            logger.warning(f"[UPLOAD] Erro na validação/conversão, usando ficheiro original: {e}")
-            # conversion_info já está inicializado como {} acima
-        
-        # Verificar se é uma imagem e converter para PDF (fallback para imagens puras)
-        # Nota: was_converted já pode ter sido definido acima se a conversão automática funcionou
-        converted_to_pdf = was_converted  # Inicializar com valor de conversão automática
-        if not was_converted and is_image_file(original_filename, content_type) and IMG2PDF_AVAILABLE:
-            try:
-                logger.info(f"[UPLOAD] A converter imagem para PDF: {sanitize_for_log(original_filename)}")
-                pdf_bytes, new_filename = await convert_image_to_pdf(file_content, original_filename)
-                
-                if new_filename != original_filename:
-                    file_content = pdf_bytes
-                    original_filename = new_filename
-                    content_type = MIME_TYPE_PDF
-                    converted_to_pdf = True
-                    logger.info(f"[UPLOAD] Conversão concluída: {sanitize_for_log(new_filename)}")
-            except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-                logger.warning(f"[UPLOAD] Não foi possível converter imagem para PDF: {e}")
-                # Continua com o ficheiro original
-        
-        # Verificar se é HEIC/HEIF (formato iPhone) - não suportado para conversão
-        ext_lower = original_filename.lower().rsplit('.', 1)[-1] if '.' in original_filename else ''
-        if ext_lower in ['heic', 'heif'] and not converted_to_pdf:
-            logger.info(f"[UPLOAD] Ficheiro HEIC/HEIF aceite: {sanitize_for_log(original_filename)}")
-            # HEIC/HEIF são aceites mas não convertidos automaticamente
-            # O utilizador deve converter para JPEG antes do upload idealmente
-        
-        # ====================================================================
-        # TRIAGEM AUTOMÁTICA COM IA: Se a categoria for 'Outros', 'Auto' ou vazia,
-        # invocar o serviço de IA para determinar a categoria correta com base
-        # no nome do ficheiro e no texto extraído (se PDF).
-        # Isto garante que o documento é guardado na pasta S3 correta desde
-        # o início, em vez de ficar como 'Outros'.
-        # ====================================================================
-        ai_suggested_category = None
-        auto_categorization_detail = None
-        needs_ai_categorization = category.lower().strip() in ("outros", "auto", "", "other")
-
-        if needs_ai_categorization:
-            try:
-                from services.document_categorization import (
-                    extract_text_from_pdf,
-                    categorize_document_with_ai,
-                )
-
-                # Extrair texto do PDF para análise (se aplicável)
-                text_for_analysis = f"{DEFAULT_FILE_PREFIX}{original_filename}"
-                if original_filename.lower().endswith('.pdf') and len(file_content) > 0:
-                    extracted = await asyncio.to_thread(extract_text_from_pdf, file_content, max_chars=3000)
-                    if extracted:
-                        text_for_analysis = extracted
-
-                # Obter categorias existentes para consistência
-                existing_categories = await db.document_metadata.distinct("ai_category")
-
-                # Invocar IA para categorização
-                ai_result = await categorize_document_with_ai(
-                    text_content=text_for_analysis,
-                    filename=original_filename,
-                    existing_categories=existing_categories,
-                )
-
-                if ai_result.get("success") and ai_result.get("category"):
-                    ai_suggested_category = ai_result["category"]
-                    auto_categorization_detail = {
-                        "original_category": category or "Outros",
-                        "ai_category": ai_suggested_category,
-                        "ai_subcategory": ai_result.get("subcategory"),
-                        "ai_confidence": ai_result.get("confidence"),
-                    }
-                    # Usar a categoria sugerida pela IA
-                    category = ai_suggested_category
-                    logger.info(
-                        f"[UPLOAD-IA] Categoria IA: {ai_suggested_category} "
-                        f"(confiança: {ai_result.get('confidence', 0):.0%}) "
-                        f"para {sanitize_for_log(original_filename)}"
-                    )
-                else:
-                    logger.warning(
-                        f"[UPLOAD-IA] IA não conseguiu categorizar, "
-                        f"a usar 'Outros' como fallback"
-                    )
-                    category = category or "Outros"
-            except Exception as ai_err:
-                logger.warning(
-                    f"[UPLOAD-IA] Erro na triagem IA (fallback para 'Outros'): {ai_err}"
-                )
-                category = category or "Outros"
-
-        # Usar nome personalizado se fornecido (para evitar conflitos), senão normalizar
-        if custom_filename:
-            # Sanitizar o nome personalizado para segurança
-            normalized_filename = normalize_filename(custom_filename, category)
-            logger.info(f"Nome personalizado usado: {sanitize_for_log(normalized_filename)}")
-        else:
-            # Normalizar nome do ficheiro original
-            normalized_filename = normalize_filename(original_filename, category)
-            logger.info(f"Nome normalizado: {sanitize_for_log(normalized_filename)}")
-        
-        # Criar BytesIO para o upload
-        file_buffer = BytesIO(file_content)
-        
-        # Upload para o S3
-        s3_path = s3_service.upload_file(
-            file_buffer,
-            client_id,
-            client_name,
-            category,
-            normalized_filename,
-            content_type,
-            second_client_name=second_client_name,
-            s3_folder=s3_folder
+        original_filename = file.filename or (
+            f"documento_{datetime.now().strftime('%Y%m%d%H%M%S')}.pdf"
         )
-        
-        if not s3_path:
-            raise HTTPException(status_code=500, detail=ERROR_S3_UPLOAD_FAILED)
-        
-        # Gerar link temporário para acesso imediato (não falha se houver erro)
-        try:
-            temporary_url = s3_service.get_presigned_url(s3_path) or ""
-        except Exception as e:
-            logger.warning(f"[UPLOAD] Erro ao gerar URL temporário: {e}")
-            temporary_url = ""
-        
-        # Agendar categorização automática em background (não bloqueia o response)
-        # IMPORTANTE: Fazer cópia do file_content para a tarefa de background
-        # para evitar problemas com referências
-        try:
-            file_content_copy = bytes(file_content)  # Cópia explícita
-            background_tasks.add_task(
-                auto_categorize_document_background,
-                process_id=client_id,
-                client_name=client_name,
-                s3_path=s3_path,
-                filename=normalized_filename,
-                file_content=file_content_copy
-            )
-        except Exception as e:
-            logger.warning(f"[UPLOAD] Erro ao agendar categorização: {e}")
-        
-        # Registar no histórico (não falha o upload se houver erro)
-        try:
-            await log_history(
-                process_id=client_id,
-                user=user,
-                action="Carregou documento",
-                field="documento",
-                new_value=f"{normalized_filename} ({category})"
-            )
-        except Exception as e:
-            logger.warning(f"[UPLOAD] Erro ao registar histórico: {e}")
-        
-        logger.info(f"[UPLOAD] Upload concluído com sucesso: {normalized_filename}")
-        
-        # Retornar JSONResponse explicitamente para compatibilidade com slowapi rate limiter
-        response_data = {
-            "success": True, 
-            "path": s3_path, 
-            "message": "Ficheiro guardado com sucesso",
-            "original_filename": file.filename,
-            "normalized_filename": normalized_filename,
-            "converted_to_pdf": converted_to_pdf,
-            "was_extracted": was_extracted,
-            "was_converted": was_converted,
-            "conversion_method": conversion_info.get("conversion_method"),
-            "auto_categorization": "iniciada",
-            "temporary_url": temporary_url,
-            "category": category,
-        }
-        # Incluir detalhes da triagem IA se foi executada
-        if auto_categorization_detail:
-            response_data["ai_categorization"] = auto_categorization_detail
-
+        content_type = file.content_type or "application/octet-stream"
+        response_data = await run_upload_file_s3(
+            client_id,
+            file_content=file_content,
+            original_filename=original_filename,
+            content_type=content_type,
+            category=category,
+            empresa_nif=empresa_nif,
+            custom_filename=custom_filename,
+            user=user,
+            background_tasks=background_tasks,
+            client_original_filename=file.filename,
+        )
         return JSONResponse(status_code=200, content=response_data)
-    
     except HTTPException:
-        # Re-raise HTTPExceptions para manter o status code correto
         raise
     except Exception as e:
-        # Log do erro completo para debugging
-        logger.error(f"[UPLOAD] Erro inesperado: {type(e).__name__}: {str(e)}", exc_info=True)
+        logger.error(
+            f"[UPLOAD] Erro inesperado: {type(e).__name__}: {str(e)}",
+            exc_info=True,
+        )
         raise HTTPException(
-            status_code=500, 
-            detail=f"Erro interno ao processar upload. Por favor tente novamente ou contacte o suporte se o problema persistir."
+            status_code=500,
+            detail=(
+                "Erro interno ao processar upload. Por favor tente novamente "
+                "ou contacte o suporte se o problema persistir."
+            ),
         )
 
 
@@ -1873,196 +1624,7 @@ async def ai_analyze_documents(
     Returns:
         Resultado da análise com comparações e sugestões
     """
-    import time
-    
-    start_time = time.time()
-    
-    try:
-        from services.ai_document_analyzer import analyze_multiple_documents
-    except ImportError as e:
-        logger.error(f"Erro ao importar ai_document_analyzer: {e}")
-        raise HTTPException(status_code=500, detail=f"Serviço de análise não disponível: {str(e)}")
-    
-    try:
-        from routes.ai_import_logs import create_ai_import_log, finalize_ai_import_log
-    except ImportError as e:
-        logger.warning(f"ai_import_logs não disponível: {e}")
-        create_ai_import_log = None
-        finalize_ai_import_log = None
-    
-    # Buscar dados do processo
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    
-    # Criar log de importação (se disponível)
-    log_id = None
-    if create_ai_import_log:
-        try:
-            log_id = await create_ai_import_log(
-                process_id=process_id,
-                client_name=client_name,
-                created_by=user.get("id"),
-                created_by_name=user.get("name")
-            )
-        except Exception as e:
-            logger.warning(f"Erro ao criar log de importação: {e}")
-    
-    # Preparar documentos para análise
-    documents = []
-    for file in files:
-        try:
-            content = await file.read()
-            if len(content) == 0:
-                continue
-                
-            documents.append({
-                "content": content,
-                "name": file.filename,
-                "mime_type": file.content_type or "application/octet-stream"
-            })
-        except Exception as e:
-            logger.warning(f"Erro ao ler ficheiro {file.filename}: {e}")
-            continue
-    
-    if not documents:
-        # Actualizar log com erro
-        if log_id and finalize_ai_import_log:
-            try:
-                await finalize_ai_import_log(log_id, duration_ms=0)
-            except Exception:
-                pass
-        raise HTTPException(status_code=400, detail=ERROR_NO_VALID_FILES)
-    
-    # Extrair dados existentes do cliente para comparação
-    # Ler dos subdocumentos aninhados (personal_data, financial_data, real_estate_data)
-    personal = process.get("personal_data", {}) or {}
-    financial = process.get("financial_data", {}) or {}
-    real_estate = process.get("real_estate_data", {}) or {}
-    
-    existing_data = {
-        # Dados pessoais (de personal_data + top-level para compatibilidade)
-        "client_name": process.get("client_name"),
-        "nif": personal.get("nif") or process.get("client_nif") or process.get("nif"),
-        "birth_date": personal.get("data_nascimento") or process.get("data_nascimento"),
-        "documento_id": personal.get("documento_id") or process.get("cc_number"),
-        "cc_number": personal.get("documento_id") or process.get("cc_number"),
-        "cc_validity": personal.get("cc_validity") or process.get("validade_cc"),
-        "nationality": personal.get("nacionalidade"),
-        "gender": personal.get("sexo"),
-        "address": personal.get("morada"),
-        "fiscal_address": personal.get("morada_fiscal"),
-        "phone": personal.get("telefone") or process.get("phone"),
-        "email": personal.get("email") or process.get("client_email"),
-        "estado_civil": personal.get("estado_civil"),
-        # Dados financeiros (de financial_data)
-        "rendimento_mensal": financial.get("rendimento_mensal") or financial.get("renda_habitacao_atual"),
-        "rendimento_bruto": financial.get("rendimento_bruto"),
-        "salario_liquido": financial.get("rendimento_mensal") or financial.get("renda_habitacao_atual"),
-        "salario_bruto": financial.get("rendimento_bruto"),
-        "empresa": financial.get("empresa") or financial.get("employer_name"),
-        "tipo_contrato": financial.get("tipo_contrato") or ("sim" if financial.get("efetivo") == "sim" else None),
-        # Dados imóvel (de real_estate_data)
-        "valor_imovel": real_estate.get("valor_imovel"),
-        "localizacao": real_estate.get("localizacao"),
-        "tipologia": real_estate.get("tipologia"),
-        "area": real_estate.get("area"),
-    }
-    
-    # Analisar documentos
-    try:
-        results = await analyze_multiple_documents(documents, existing_data, log_id=log_id)
-    except Exception as e:
-        logger.error(f"Erro na análise de documentos: {e}", exc_info=True)
-        
-        # Finalizar log com erro
-        total_duration = int((time.time() - start_time) * 1000)
-        if log_id and finalize_ai_import_log:
-            try:
-                await finalize_ai_import_log(log_id, duration_ms=total_duration)
-            except Exception:
-                pass
-        
-        raise HTTPException(status_code=500, detail=f"Erro na análise: {str(e)}")
-    
-    # Extrair dados e identificar conflitos
-    extracted_data = {}
-    conflicts = []
-    document_types = []
-    
-    # Processar resultados da análise
-    if results and isinstance(results, dict):
-        # Ler auto_fill_suggestions (campos que o AI identificou como preenchíveis)
-        # Inclui tanto campos novos (empty_fields) como overrides (different fields)
-        auto_fill = results.get("auto_fill_suggestions", {})
-        for field, suggestion in auto_fill.items():
-            value = suggestion.get("value")
-            if value is not None and str(value).strip():
-                extracted_data[field] = value
-                
-                # Se for override, adicionar como conflito para o utilizador decidir
-                if suggestion.get("type") == "override":
-                    current_val = suggestion.get("current_value")
-                    if current_val:
-                        conflicts.append({
-                            "field": field,
-                            "existing_value": current_val,
-                            "new_value": value,
-                            "source": suggestion.get("source", "documento"),
-                            "type": "override"
-                        })
-        
-        # Também adicionar dados da comparison (empty_fields = campos novos descobertos)
-        comparison = results.get("comparison", {})
-        for empty_field in comparison.get("empty_fields", []):
-            field = empty_field.get("field")
-            suggested = empty_field.get("suggested_value")
-            if field and suggested and field not in extracted_data:
-                extracted_data[field] = suggested
-        
-        # Extrair tipos de documentos processados
-        # Incluir source_path (S3 path) para permitir organização automática
-        for doc_result in results.get("documents_analyzed", []):
-            doc_type = doc_result.get("tipo_documento") or doc_result.get("type") or doc_result.get("document_type")
-            file_name = doc_result.get("file_name", "")
-            if doc_type:
-                # Procurar o source_path do ficheiro original (já existe no S3)
-                source_path = None
-                for orig_doc in documents:
-                    if orig_doc.get("name") == file_name:
-                        source_path = orig_doc.get("source_path")
-                        break
-                
-                document_types.append({
-                    "file_name": file_name,
-                    "type": doc_type,
-                    "confidence": doc_result.get("confianca", 0.5),
-                    "source_path": source_path
-                })
-    
-    # Finalizar log
-    total_duration = int((time.time() - start_time) * 1000)
-    if log_id and finalize_ai_import_log:
-        try:
-            await finalize_ai_import_log(log_id, duration_ms=total_duration)
-        except Exception as e:
-            logger.warning(f"Erro ao finalizar log: {e}")
-    
-    return {
-        "success": True,
-        "process_id": process_id,
-        "client_name": client_name,
-        "documents_count": len(documents),
-        "log_id": log_id,
-        "extracted_data": extracted_data,
-        "field_confidence": results.get("field_confidence", {}),
-        "conflicts": conflicts,
-        "documents": document_types,
-        "suggestions": list(extracted_data.keys()),
-        "analysis": results
-    }
+    return await run_ai_analyze_documents(process_id, files, user=user)
 
 
 @router.post("/ai-apply-suggestions/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -2235,160 +1797,11 @@ async def organize_documents_after_analysis(
         create_folders: Se deve criar pastas automaticamente
     """
     body = await request.json()
-    documents = body.get("documents", [])
-    create_folders = body.get("create_folders", True)
-    
-    # Buscar processo
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0, "client_name": 1})
-    if not process:
-        raise HTTPException(status_code=404, detail=ERROR_PROCESS_NOT_FOUND)
-    
-    client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
-    
-    # Mapeamento de tipos de documento para pastas
-    # Unificado com DOCUMENT_CATEGORIES do ai_document_analyzer.py
-    from services.ai_document_analyzer import DOCUMENT_CATEGORIES
-    
-    # Mapeamento estendido para sub-pastas específicas
-    document_type_folders = {
-        "cc": "Identificação",
-        "bi": "Identificação",
-        "passport": "Identificação",
-        "cartao_cidadao": "Identificação",
-        "nif": "Identificação",
-        "comprovativo_morada": "Morada",
-        "irs": "Financeiros",
-        "declaracao_irs": "Financeiros",
-        "nota_liquidacao": "Financeiros",
-        "recibo_vencimento": "Financeiros",
-        "extrato_bancario": "Bancários",
-        "comprovativo_poupanca": "Bancários",
-        "mapa_responsabilidades": "Bancários",
-        "caderneta_predial": "Imóvel",
-        "certidao_teor": "Imóvel",
-        "certidao_permanente": "Imóvel",
-        "licenca_habitacao": "Imóvel",
-        "licenca_utilizacao": "Imóvel",
-        "plantas": "Imóvel",
-        "planta": "Imóvel",
-        "ficha_tecnica": "Imóvel",
-        "certificado_energetico": "Imóvel",
-        "contrato": "Outros",
-        "procuracao": "Outros",
-        "cpcv": "CPCV",
-        "contrato_promessa": "CPCV",
-        "escritura": "Escritura",
-        "simulacao": "Simulações",
-        "proposta": "Propostas",
-        "minuta": "Minutas",
-        "default": "Outros"
-    }
-    
-    results = {"organized": [], "errors": [], "folders_created": []}
-    
-    if create_folders and s3_service.is_configured():
-        # IMPORTANTE: Obter base_path UMA única vez ANTES do loop
-        # Usar _get_client_base_path_for_upload para respeitar pastas existentes
-        base_path = s3_service._get_client_base_path_for_upload(process_id, client_name, None)
-        logger.info(f"Organizar documentos: usando pasta {base_path} para {client_name}")
-        
-        # Criar pastas standard se não existirem
-        standard_folders = [
-            "Identificação",
-            "Financeiros",
-            "Bancários",
-            "Morada",
-            "Imóvel",
-            "CPCV",
-            "Simulações",
-            "Propostas",
-            "Minutas",
-            "Escritura",
-            "Outros"
-        ]
-        
-        for folder in standard_folders:
-            try:
-                folder_key = f"{base_path}/{folder}/.keep"
-                
-                # Verificar se pasta já existe
-                try:
-                    s3_service.s3_client.head_object(
-                        Bucket=s3_service.bucket_name,
-                        Key=folder_key
-                    )
-                except (KeyError, AttributeError):
-                    # Criar pasta
-                    s3_service.s3_client.put_object(
-                        Bucket=s3_service.bucket_name,
-                        Key=folder_key,
-                        Body=b''
-                    )
-                    results["folders_created"].append(folder)
-                except Exception as e:
-                    # Verificar se é um erro do S3 (NotFound)
-                    if "NotFound" in str(type(e).__name__) or "404" in str(e):
-                        # Criar pasta
-                        s3_service.s3_client.put_object(
-                            Bucket=s3_service.bucket_name,
-                            Key=folder_key,
-                            Body=b''
-                        )
-                        results["folders_created"].append(folder)
-                    else:
-                        raise
-            except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-                logger.warning(f"Erro ao criar pasta {folder}: {e}")
-    
-    # Organizar documentos por tipo — MOVER ficheiros no S3
-    if s3_service.is_configured():
-        for doc in documents:
-            try:
-                doc_type = doc.get("type", "").lower()
-                file_name = doc.get("file_name", "")
-                source_path = doc.get("source_path")
-                
-                if not file_name:
-                    continue
-                
-                # Determinar pasta destino
-                target_folder = document_type_folders.get(doc_type, document_type_folders["default"])
-                
-                # Tentar mover o ficheiro no S3
-                moved = False
-                if source_path and base_path:
-                    target_path = f"{base_path}/{target_folder}/{file_name}"
-                    
-                    # Verificar se o ficheiro já está na pasta correta
-                    if source_path.endswith(f"/{target_folder}/{file_name}"):
-                        logger.info(f"Ficheiro já está na pasta correcta: {file_name}")
-                        moved = True
-                    else:
-                        # Mover usando rename_file (copy + delete)
-                        try:
-                            moved = s3_service.rename_file(source_path, target_path)
-                            if moved:
-                                logger.info(f"Ficheiro movido: {source_path} -> {target_path}")
-                        except Exception as move_err:
-                            logger.warning(f"Erro ao mover {file_name}: {move_err}")
-                
-                results["organized"].append({
-                    "file": file_name,
-                    "type": doc_type,
-                    "folder": target_folder,
-                    "moved": moved,
-                    "source_path": source_path
-                })
-                
-            except (IOError, OSError, ValueError, KeyError, TypeError) as e:
-                results["errors"].append({"file": doc.get("file_name", "?"), "error": str(e)})
-    
-    return {
-        "success": True,
-        "organized_count": len(results["organized"]),
-        "folders_created_count": len(results["folders_created"]),
-        "results": results
-    }
+    return await run_organize_documents_after_analysis(
+        process_id,
+        documents=body.get("documents", []),
+        create_folders=body.get("create_folders", True),
+    )
 
 
 # ====================================================================

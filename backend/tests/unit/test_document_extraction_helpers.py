@@ -224,3 +224,52 @@ class TestMoveHelpers:
         assert path == "base/Financeiros/a.pdf"
         assert cat == "Financeiros"
         assert name == "a.pdf"
+
+
+class TestAiAnalyzeHelpers:
+    def test_build_existing_data_for_ai_compare(self):
+        from services.document_ai_analyze import build_existing_data_for_ai_compare
+
+        data = build_existing_data_for_ai_compare(
+            {
+                "client_name": "Ana",
+                "personal_data": {"nif": "123456789"},
+                "financial_data": {"rendimento_mensal": 1000},
+                "real_estate_data": {"valor_imovel": 200000},
+            }
+        )
+        assert data["nif"] == "123456789"
+        assert data["rendimento_mensal"] == 1000
+        assert data["valor_imovel"] == 200000
+
+    def test_process_ai_analyze_results(self):
+        from services.document_ai_analyze import process_ai_analyze_results
+
+        extracted, conflicts, types = process_ai_analyze_results(
+            {
+                "auto_fill_suggestions": {
+                    "nif": {
+                        "value": "111",
+                        "type": "override",
+                        "current_value": "222",
+                        "source": "cc",
+                    }
+                },
+                "comparison": {"empty_fields": [{"field": "email", "suggested_value": "a@b.c"}]},
+                "documents_analyzed": [
+                    {"tipo_documento": "cc", "file_name": "x.pdf", "confianca": 0.9}
+                ],
+            },
+            [{"name": "x.pdf", "source_path": "s3/x.pdf"}],
+        )
+        assert extracted["nif"] == "111"
+        assert extracted["email"] == "a@b.c"
+        assert conflicts[0]["field"] == "nif"
+        assert types[0]["type"] == "cc"
+        assert types[0]["source_path"] == "s3/x.pdf"
+
+    def test_document_type_folders_defaults(self):
+        from services.document_ai_analyze import DOCUMENT_TYPE_FOLDERS
+
+        assert DOCUMENT_TYPE_FOLDERS["irs"] == "Financeiros"
+        assert DOCUMENT_TYPE_FOLDERS["default"] == "Outros"
