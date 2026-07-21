@@ -249,8 +249,66 @@ class TestAiConflictHelpers:
         assert len(update2["ai_suggestions"]) == 1
         assert sug2["field"] == "email"
 
+    def test_parse_resolve_body_and_confirm_helpers(self):
+        from fastapi import HTTPException
+        from services.process_ai_conflict import (
+            parse_resolve_conflict_body,
+            build_confirm_data_update,
+            assert_no_pending_ai_conflicts,
+            build_resolve_conflict_response,
+            build_confirm_data_response,
+        )
 
-class TestMergeAndPermissions:
+        f, c, sid = parse_resolve_conflict_body(
+            {"field": "nif", "choice": "ai", "suggestion_id": "x"},
+        )
+        assert (f, c, sid) == ("nif", "ai", "x")
+        try:
+            parse_resolve_conflict_body({"field": "nif", "choice": "maybe"})
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+
+        upd = build_confirm_data_update(True, {"id": "u1"}, "t0")
+        assert upd["is_data_confirmed"] is True
+        assert upd["data_confirmed_by"] == "u1"
+        assert_no_pending_ai_conflicts([], confirmed=True)
+        try:
+            assert_no_pending_ai_conflicts([{"id": "s"}], confirmed=True)
+            assert False
+        except HTTPException as e:
+            assert e.status_code == 400
+
+        r = build_resolve_conflict_response("nif", "ai", [{}])
+        assert r["remaining_conflicts"] == 1 and "aceite" in r["message"]
+        assert build_confirm_data_response(False)["is_data_confirmed"] is False
+
+
+class TestSoftDeleteBuilders:
+    def test_soft_delete_sets_and_activity(self):
+        from datetime import datetime, timezone
+        from services.process_delete import (
+            build_soft_delete_process_set,
+            build_cascade_soft_delete_set,
+            build_process_deleted_activity,
+        )
+
+        now = datetime(2026, 1, 1, tzinfo=timezone.utc)
+        s = build_soft_delete_process_set(
+            {"status": "em_curso"},
+            {"id": "u1", "name": "Ana"},
+            now,
+        )
+        assert s["is_deleted"] is True
+        assert s["status"] == "eliminado"
+        assert s["previous_status"] == "em_curso"
+        assert s["deleted_by"] == "u1"
+        assert build_cascade_soft_delete_set(now)["deleted"] is True
+        act = build_process_deleted_activity("p1", {"id": "u1", "name": "Ana"}, now)
+        assert act["type"] == "process_deleted"
+        assert act["process_id"] == "p1"
+        assert "Ana" in act["description"]
+
     def test_merge_drops_none_only(self):
         merged = merge_nested_process_section({"a": 1, "b": 2}, {"b": None, "c": 3})
         assert merged == {"a": 1, "c": 3}
@@ -787,6 +845,30 @@ class TestBroadcastAndMagicLinkResponses:
             portal_access_code="ZZ",
         )
         assert sent["success"] is True and sent["portal_access_code"] == "ZZ"
+
+    def test_update_reassign_skip_when_same(self):
+        import asyncio
+        from services.process_update import maybe_reassign_primary_client_with_audit
+
+        async def _run():
+            called = {"h": 0}
+
+            async def fake_hist(*a, **k):
+                called["h"] += 1
+
+            await maybe_reassign_primary_client_with_audit(
+                process={"client_id": "c1"},
+                process_id="p1",
+                new_client_id="c1",
+                role="admin",
+                user={"email": "a@x.com"},
+                request=None,
+                log_history_fn=fake_hist,
+                log_audit_event_fn=fake_hist,
+            )
+            assert called["h"] == 0
+
+        asyncio.run(_run())
 
 
 

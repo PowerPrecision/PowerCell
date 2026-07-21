@@ -408,3 +408,75 @@ async def run_mark_indexed_side_effects(
         consultant_result=consultant_result,
         is_pre_registo_transition=is_pre_registo,
     )
+
+
+async def run_mark_process_indexed(
+    process_id: str,
+    user: dict,
+    *,
+    user_role: str,
+    all_roles: list,
+    broadcast_fn,
+) -> dict[str, Any]:
+    """Orquestra POST mark-indexed: permissão, persistência e side-effects."""
+    from datetime import datetime, timezone
+
+    from fastapi import HTTPException
+
+    from database import db
+
+    assert_mark_indexed_permission(user_role, all_roles)
+
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    if process.get("is_indexed") is True:
+        return {
+            "success": True,
+            "message": "Este processo já estava marcado como indexado.",
+            "process_id": process_id,
+            "is_indexed": True,
+        }
+
+    current_status = process.get("status", "clientes_espera")
+    status_pipeline = await load_workflow_status_pipeline()
+    next_status = compute_next_workflow_status(current_status, status_pipeline)
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_set = build_indexacao_update_set(user, now, next_status)
+
+    result = await db.processes.update_one(
+        {"id": process_id},
+        {"$set": update_set},
+    )
+
+    if result.matched_count == 0:
+        logger.error(
+            f"[INDEXACAO] update_one matched 0 documents para processo {process_id}"
+        )
+        raise HTTPException(
+            status_code=404,
+            detail=(
+                "Processo não encontrado durante atualização. "
+                "A indexação pode não ter sido persistida."
+            ),
+        )
+    if result.modified_count == 0 and not process.get("is_indexed"):
+        logger.warning(
+            f"[INDEXACAO] update_one modified 0 documents para processo "
+            f"{process_id} (já estava indexado?)"
+        )
+
+    return await run_mark_indexed_side_effects(
+        process=process,
+        process_id=process_id,
+        user=user,
+        current_status=current_status,
+        next_status=next_status,
+        now=now,
+        broadcast_fn=broadcast_fn,
+    )

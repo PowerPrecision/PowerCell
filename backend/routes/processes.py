@@ -108,24 +108,16 @@ from services.process_my_clients import (
     process_ids_from_my_clients_page,
 )
 from services.process_indexing import (
-    compute_next_workflow_status,
-    build_indexacao_update_set,
-    assert_mark_indexed_permission,
-    load_workflow_status_pipeline,
-    run_mark_indexed_side_effects,
+    run_mark_process_indexed,
 )
 from services.process_create import (
     resolve_initial_workflow_status,
-    create_default_portal_documents,
-    link_clients_after_process_create,
-    maybe_auto_assign_indexer_on_create,
-    build_create_broadcast_names,
     assert_is_cliente_role,
     load_client_doc_or_404,
     build_client_self_process_doc,
     link_single_client_to_process,
     assemble_staff_create_bundle,
-    send_portal_welcome_email_from_process,
+    persist_and_finalize_staff_create,
 )
 from services.process_detail import (
     load_process_doc_or_404,
@@ -153,7 +145,11 @@ from services.process_portal_messages import (
     notify_assigned_realtime_portal_message,
     broadcast_staff_portal_message_ws,
 )
-from services.process_ai_conflict import apply_ai_conflict_choice
+from services.process_ai_conflict import (
+    resolve_ai_data_conflict,
+    confirm_process_client_data,
+)
+from services.process_delete import soft_delete_process
 from services.process_update import (
     prepare_encrypted_client_updates,
     apply_client_personal_updates_from_process_put,
@@ -366,94 +362,19 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
 @router.post("/create-client", response_model=ProcessResponse)
 async def create_client_process(data: ProcessCreate, user: dict = Depends(get_current_user)):
     """
-    Criar um novo processo/cliente.
-    
-    REGRA DE NEGÓCIO (ESTRITA):
-    - É PROIBIDO criar um processo sem associar a um cliente existente.
-    - O campo client_id é OBRIGATÓRIO. Se não for fornecido, retorna erro 400.
-    - Se o cliente não existir na base de dados, retorna erro 404.
-    
-    Um cliente pode existir sem processo, mas um processo NUNCA existe sem cliente.
-    Este endpoint permite que Intermediários de Crédito criem 
-    processos para os seus clientes. O processo é automaticamente
-    atribuído ao intermediário que o criou.
-    
-    RELAÇÃO CLIENTE-PROCESSO (N:M):
-    - Um cliente pode ter vários processos
-    - Um processo pode ter vários clientes (titulares)
-    - Se o cliente já existir (por NIF ou email), usa o existente
-    - Se não existir, cria um novo cliente
-    
-    Permissões:
-    - Admin, CEO, Consultor, Intermediário: Podem criar
-    
-    Args:
-        data: Dados do processo
-        user: Utilizador autenticado
-    
-    Returns:
-        ProcessResponse: Processo criado
+    Criar processo staff associado a cliente existente (client_id obrigatório).
+    Intermediário fica automaticamente atribuído quando é o criador.
     """
     bundle = await assemble_staff_create_bundle(data, user)
-    process_id = bundle["process_id"]
-    process_number = bundle["process_number"]
-    now = bundle["now"]
-    is_lead = bundle["is_lead"]
-    initial_status = bundle["initial_status"]
-    client_id = bundle["client_id"]
-    client_name = bundle["client_name"]
-    client_email = bundle["client_email"]
-    process_doc = bundle["process_doc"]
-    second_client_id_for_process = bundle["second_client_id"]
-
-    process_doc = encrypt_sensitive_data(process_doc)
-    await db.processes.insert_one(process_doc)
-
-    await maybe_auto_assign_indexer_on_create(
-        process_id,
-        process_doc,
-        is_lead=is_lead,
-        initial_status=initial_status,
+    return await persist_and_finalize_staff_create(
+        bundle,
+        user,
+        encrypt_fn=encrypt_sensitive_data,
+        decrypt_fn=decrypt_sensitive_data,
+        log_history_fn=log_history,
+        broadcast_fn=broadcast_process_delta,
+        response_cls=ProcessResponse,
     )
-
-    await create_default_portal_documents(process_id, user)
-    await invalidate_stats_cache(user_id=user["id"])
-    await link_clients_after_process_create(
-        process_id,
-        client_id,
-        second_client_id_for_process,
-        is_lead=is_lead,
-        now=now,
-    )
-
-    await log_history(process_id, user, f"Criou processo para cliente {client_name}")
-    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
-
-    if client_email:
-        asyncio.create_task(send_portal_welcome_email_from_process(
-            client_id=client_id,
-            client_email=client_email,
-            client_name=client_name,
-        ))
-
-    consultor_names, mediador_names = build_create_broadcast_names(user)
-    await broadcast_process_delta(
-        event_type=WSEventType.PROCESS_CREATED,
-        process_id=process_id,
-        process_number=process_number,
-        client_name=client_name,
-        status=initial_status,
-        process_type=bundle["process_type"],
-        assigned_consultor_ids=process_doc.get("assigned_consultor_ids", []),
-        assigned_mediador_ids=process_doc.get("assigned_mediador_ids", []),
-        consultor_names=consultor_names,
-        mediador_names=mediador_names,
-        updated_at=now,
-    )
-
-    response_doc = decrypt_sensitive_data(process_doc)
-    return ProcessResponse(**{k: v for k, v in response_doc.items() if k != "_id"})
-
 
 # ====================================================================
 # ENDPOINTS DE LISTAGEM - OTIMIZADOS COM PROJEÇÃO E PAGINAÇÃO
@@ -1050,76 +971,14 @@ async def mark_process_indexed(
     request: Request,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Marca o processo como tendo a indexação documental concluída (is_indexed=true).
-    
-    Utilizadores com role 'indexacao', 'admin' ou 'ceo' podem marcar a indexação.
-    Usa o effectiveRole (X-Active-Role header) para suportar utilizadores
-    com múltiplos perfis (additional_roles).
-    Quando is_indexed passa a true, dispara automaticamente uma notificação
-    para todos os utilizadores atribuídos ao processo (assigned_users).
-    
-    Body (opcional):
-    - is_indexed: boolean (default true)
-    """
-    user_role = get_effective_role(request, user).lower()
-    all_roles = get_all_user_roles(user)
-    assert_mark_indexed_permission(user_role, all_roles)
-
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0},
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    if process.get("is_indexed") is True:
-        return {
-            "success": True,
-            "message": "Este processo já estava marcado como indexado.",
-            "process_id": process_id,
-            "is_indexed": True,
-        }
-
-    current_status = process.get("status", "clientes_espera")
-    status_pipeline = await load_workflow_status_pipeline()
-    next_status = compute_next_workflow_status(current_status, status_pipeline)
-
-    now = datetime.now(timezone.utc).isoformat()
-    update_set = build_indexacao_update_set(user, now, next_status)
-
-    result = await db.processes.update_one(
-        {"id": process_id},
-        {"$set": update_set},
-    )
-
-    if result.matched_count == 0:
-        logger.error(
-            f"[INDEXACAO] update_one matched 0 documents para processo {process_id}"
-        )
-        raise HTTPException(
-            status_code=404,
-            detail=(
-                "Processo não encontrado durante atualização. "
-                "A indexação pode não ter sido persistida."
-            ),
-        )
-    if result.modified_count == 0 and not process.get("is_indexed"):
-        logger.warning(
-            f"[INDEXACAO] update_one modified 0 documents para processo "
-            f"{process_id} (já estava indexado?)"
-        )
-
-    return await run_mark_indexed_side_effects(
-        process=process,
-        process_id=process_id,
-        user=user,
-        current_status=current_status,
-        next_status=next_status,
-        now=now,
+    """Marca indexação documental concluída (is_indexed=true) e dispara side-effects."""
+    return await run_mark_process_indexed(
+        process_id,
+        user,
+        user_role=get_effective_role(request, user).lower(),
+        all_roles=get_all_user_roles(user),
         broadcast_fn=broadcast_process_delta,
     )
-
 
 @router.delete("/{process_id}")
 async def delete_process(
@@ -1127,103 +986,12 @@ async def delete_process(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]))
 ):
     """Soft delete a process. Does NOT affect the client document."""
-    # Find the process
-    process = await db.processes.find_one(
-        {"id": process_id, "is_deleted": {"$ne": True}},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    now = datetime.now(timezone.utc)
-    
-    # Soft delete the process
-    # FIX (Pacote K): guardar previous_status para o endpoint de restore poder
-    # recuperar o status original em vez de forçar "clientes_espera".
-    await db.processes.update_one(
-        {"id": process_id},
-        {"$set": {
-            "is_deleted": True,
-            "status": "eliminado",
-            "is_active": False,
-            "previous_status": process.get("status"),  # para restore
-            "deleted_at": now,
-            "deleted_by": user.get("id", ""),
-            "updated_at": now,
-        }}
-    )
-    
-    # Cascade: soft-delete documents and tasks for this process
-    await db.documents.update_many(
-        {"process_id": process_id, "is_deleted": {"$ne": True}},
-        {"$set": {
-            "deleted": True,
-            "is_deleted": True,
-            "deleted_at": now,
-        }}
-    )
-    await db.tasks.update_many(
-        {"process_id": process_id, "is_deleted": {"$ne": True}},
-        {"$set": {
-            "deleted": True,
-            "is_deleted": True,
-            "deleted_at": now,
-        }}
-    )
-    
-    # IMPORTANT: Do NOT touch the client document. Process deletion must be independent.
-    
-    # Log activity
-    await db.process_activities.insert_one({
-        "id": str(uuid.uuid4()),
-        "process_id": process_id,
-        "type": "process_deleted",
-        "description": f"Processo eliminado (soft delete) por {user.get('name', 'Utilizador')}",
-        "created_at": now,
-        "user_id": user.get("id", ""),
-        "user_name": user.get("name", ""),
-    })
-    
-    return {"message": "Processo eliminado com sucesso", "id": process_id}
+    return await soft_delete_process(process_id, user)
 
 
 @router.put("/{process_id}", response_model=ProcessResponse)
 async def update_process(process_id: str, data: ProcessUpdate, request: Request, user: dict = Depends(get_current_user)):
-    """Atualiza os dados de um processo existente com controlo de acesso por role.
-
-    FASE 2 — Refatoração relacional:
-    - Dados de NEGÓCIO (status, imobiliário, crédito, atribuições) → coleção `processes`
-    - Dados PESSOAIS (personal_data, titular2_data) → coleção `clients`
-    - Se o Frontend envia dados pessoais no body, são extraídos e aplicados
-      ao cliente via `extract_client_updates_from_body()`
-    - A resposta final é populada com dados do cliente (retrocompatibilidade)
-
-    Este endpoint implementa controlo granular de edição por role:
-    - **Admin/CEO**: Podem editar todos os campos.
-    - **Consultor/Diretor**: Podem editar dados pessoais, imóvel e crédito.
-    - **Intermediário**: Pode editar dados financeiros e de crédito.
-    - **Indexação**: Pode editar APENAS dados financeiros.
-    - **Clientes**: Não podem editar processos por este endpoint.
-
-    Processos em estados terminais (eliminados, desistências, concluídos)
-    não podem ser editados.
-
-    Regista alterações no histórico (CDC — Change Data Capture) para
-    auditoria completa de quem mudou o quê e quando.
-
-    Args:
-        process_id: ID do processo.
-        data: Campos a atualizar (ProcessUpdate).
-        request: Objeto Request do FastAPI (para ler body raw).
-        user: Utilizador autenticado (injetado).
-
-    Returns:
-        ProcessResponse: Processo atualizado (desencriptado + cliente populado).
-
-    Raises:
-        HTTPException(404): Se processo não encontrado.
-        HTTPException(403): Se processo em estado terminal ou sem permissão.
-    """
+    """Atualiza processo (negócio em `processes`, pessoais em `clients`) com ACL por role + CDC."""
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
@@ -1465,80 +1233,14 @@ async def resolve_data_conflict(
     data: dict,
     user: dict = Depends(get_current_user)
 ):
-    """
-    TAREFA 2: Resolver conflito de dados extraídos pela IA.
-    
-    Quando a IA extrai dados de um documento e o campo já tem valor,
-    é criada uma sugestão em ai_suggestions. Este endpoint permite
-    ao utilizador escolher qual valor manter.
-    
-    Body:
-    {
-        "field": "nif",  # Campo em conflito
-        "choice": "ai" | "current",  # Qual valor manter
-        "suggestion_id": "uuid da sugestão"  # Opcional, para identificar sugestão específica
-    }
-    """
-    field = data.get("field")
-    choice = data.get("choice")
-    suggestion_id = data.get("suggestion_id")
-
-    if not field or choice not in ["ai", "current"]:
-        raise HTTPException(
-            status_code=400,
-            detail="field e choice ('ai' ou 'current') são obrigatórios",
-        )
-
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    can_edit, reason = can_edit_process_data(user, process)
-    if not can_edit:
-        logger.warning(
-            f"IDOR attempt: User {user.get('id')} ({user.get('role')}) "
-            f"tried to resolve conflict on process {process_id}: {reason}"
-        )
-        raise HTTPException(
-            status_code=403,
-            detail=f"Não tem permissões para alterar este processo. {reason}",
-        )
-
-    now = datetime.now(timezone.utc).isoformat()
-    update_data, suggestion, resolved_value = apply_ai_conflict_choice(
-        ai_suggestions=process.get("ai_suggestions", []),
-        field=field,
-        choice=choice,
-        suggestion_id=suggestion_id,
-        now=now,
+    """Resolver conflito de dados extraídos pela IA (choice: ai | current)."""
+    return await resolve_ai_data_conflict(
+        process_id,
+        data,
+        user,
+        can_edit_fn=can_edit_process_data,
+        log_history_fn=log_history,
     )
-
-    if choice == "ai":
-        await log_history(
-            process_id, user,
-            f"Aceitou sugestão IA para '{field}'",
-            field, suggestion.get("current"), resolved_value,
-        )
-    else:
-        await log_history(
-            process_id, user,
-            f"Manteve valor actual para '{field}'",
-            field, suggestion.get("suggested"), suggestion.get("current"),
-        )
-
-    inject_cdc_context(update_data, user)
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
-
-    remaining = update_data.get("ai_suggestions", [])
-    return {
-        "success": True,
-        "message": (
-            f"Conflito resolvido: "
-            f"{'valor IA aceite' if choice == 'ai' else 'valor actual mantido'}"
-        ),
-        "field": field,
-        "remaining_conflicts": len(remaining),
-    }
 
 
 @router.post("/{process_id}/confirm-data")
@@ -1547,58 +1249,14 @@ async def confirm_client_data(
     data: dict,
     user: dict = Depends(get_current_user)
 ):
-    """
-    TAREFA 2: Confirmar dados do cliente e bloquear actualizações automáticas da IA.
-    
-    Quando is_data_confirmed=True, a IA continua a classificar documentos
-    mas não extrai dados de perfil automaticamente.
-    
-    Body:
-    {
-        "confirmed": true | false
-    }
-    """
-    confirmed = data.get("confirmed", True)
-    
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    # SECURITY: Verificar permissão de edição antes de processar
-    can_edit, reason = can_edit_process_data(user, process)
-    if not can_edit:
-        logger.warning(f"IDOR attempt: User {user.get('id')} ({user.get('role')}) tried to confirm data on process {process_id}: {reason}")
-        raise HTTPException(status_code=403, detail=f"Não tem permissões para alterar este processo. {reason}")
-    
-    # Verificar se há conflitos pendentes antes de confirmar
-    ai_suggestions = process.get("ai_suggestions", [])
-    if confirmed and len(ai_suggestions) > 0:
-        raise HTTPException(
-            status_code=400, 
-            detail=f"Existem {len(ai_suggestions)} conflitos pendentes. Resolva-os antes de confirmar os dados."
-        )
-    
-    now = datetime.now(timezone.utc).isoformat()
-    confirm_update_data = {
-        "is_data_confirmed": confirmed,
-        "data_confirmed_at": now if confirmed else None,
-        "data_confirmed_by": user["id"] if confirmed else None,
-        "updated_at": now
-    }
-    inject_cdc_context(confirm_update_data, user)
-    await db.processes.update_one(
-        {"id": process_id},
-        {"$set": confirm_update_data}
+    """Confirmar dados do cliente e bloquear extracoes automaticas de perfil pela IA."""
+    return await confirm_process_client_data(
+        process_id,
+        data,
+        user,
+        can_edit_fn=can_edit_process_data,
+        log_history_fn=log_history,
     )
-    
-    action = "confirmou" if confirmed else "desbloqueou"
-    await log_history(process_id, user, f"{action} os dados do cliente", "is_data_confirmed", not confirmed, confirmed)
-    
-    return {
-        "success": True,
-        "message": f"Dados do cliente {'confirmados e bloqueados' if confirmed else 'desbloqueados'}",
-        "is_data_confirmed": confirmed
-    }
 
 
 # ====================================================================

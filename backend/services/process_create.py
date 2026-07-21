@@ -514,3 +514,83 @@ async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
         "second_client_id": second_client_id,
         "process_type": data.process_type,
     }
+
+
+async def persist_and_finalize_staff_create(
+    bundle: dict[str, Any],
+    user: dict,
+    *,
+    encrypt_fn,
+    decrypt_fn,
+    log_history_fn,
+    broadcast_fn,
+    response_cls,
+):
+    """
+    Insert + side-effects pós-create (indexador, docs portal, links, email, WS).
+    Devolve ProcessResponse (ou equivalente).
+    """
+    import asyncio
+
+    from services.redis_cache import invalidate_stats_cache
+    from services.trello_service import sync_process_to_trello
+    from services.websocket_manager import WSEventType
+
+    process_id = bundle["process_id"]
+    process_number = bundle["process_number"]
+    now = bundle["now"]
+    is_lead = bundle["is_lead"]
+    initial_status = bundle["initial_status"]
+    client_id = bundle["client_id"]
+    client_name = bundle["client_name"]
+    client_email = bundle["client_email"]
+    process_doc = bundle["process_doc"]
+    second_client_id_for_process = bundle["second_client_id"]
+
+    process_doc = encrypt_fn(process_doc)
+    await db.processes.insert_one(process_doc)
+
+    await maybe_auto_assign_indexer_on_create(
+        process_id,
+        process_doc,
+        is_lead=is_lead,
+        initial_status=initial_status,
+    )
+
+    await create_default_portal_documents(process_id, user)
+    await invalidate_stats_cache(user_id=user["id"])
+    await link_clients_after_process_create(
+        process_id,
+        client_id,
+        second_client_id_for_process,
+        is_lead=is_lead,
+        now=now,
+    )
+
+    await log_history_fn(process_id, user, f"Criou processo para cliente {client_name}")
+    asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
+
+    if client_email:
+        asyncio.create_task(send_portal_welcome_email_from_process(
+            client_id=client_id,
+            client_email=client_email,
+            client_name=client_name,
+        ))
+
+    consultor_names, mediador_names = build_create_broadcast_names(user)
+    await broadcast_fn(
+        event_type=WSEventType.PROCESS_CREATED,
+        process_id=process_id,
+        process_number=process_number,
+        client_name=client_name,
+        status=initial_status,
+        process_type=bundle["process_type"],
+        assigned_consultor_ids=process_doc.get("assigned_consultor_ids", []),
+        assigned_mediador_ids=process_doc.get("assigned_mediador_ids", []),
+        consultor_names=consultor_names,
+        mediador_names=mediador_names,
+        updated_at=now,
+    )
+
+    response_doc = decrypt_fn(process_doc)
+    return response_cls(**{k: v for k, v in response_doc.items() if k != "_id"})

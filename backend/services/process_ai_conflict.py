@@ -1,15 +1,19 @@
 """
-Helpers para POST /processes/{id}/resolve-conflict (sugestões IA).
+Helpers para resolve-conflict / confirm-data (sugestões IA).
 
-Extraído de `routes/processes.py` — localizar sugestão, sanitizar valor
-e construir campos `$set`.
+Extraído de `routes/processes.py` — localizar sugestão, sanitizar valor,
+construir campos `$set` e orquestrar persistência + histórico.
 """
 from __future__ import annotations
 
+import logging
+from datetime import datetime, timezone
 from typing import Any, Optional, Tuple
 
 from fastapi import HTTPException
 
+from database import db
+from services.audit_cdc import inject_cdc_context
 from utils.input_sanitization import (
     sanitize_email,
     sanitize_name,
@@ -18,6 +22,8 @@ from utils.input_sanitization import (
     sanitize_string,
     log_sanitization_rejection,
 )
+
+logger = logging.getLogger(__name__)
 
 PERSONAL_FIELDS = {
     "nif", "documento_id", "naturalidade", "nacionalidade", "morada_fiscal",
@@ -126,3 +132,181 @@ def apply_ai_conflict_choice(
     remaining.pop(suggestion_index)
     update_data["ai_suggestions"] = remaining
     return update_data, suggestion, resolved_value
+
+
+def parse_resolve_conflict_body(data: Optional[dict]) -> tuple[str, str, Optional[str]]:
+    """Valida body do resolve-conflict. Devolve (field, choice, suggestion_id)."""
+    data = data or {}
+    field = data.get("field")
+    choice = data.get("choice")
+    suggestion_id = data.get("suggestion_id")
+    if not field or choice not in ("ai", "current"):
+        raise HTTPException(
+            status_code=400,
+            detail="field e choice ('ai' ou 'current') são obrigatórios",
+        )
+    return field, choice, suggestion_id
+
+
+def assert_can_edit_process_or_403(
+    user: dict,
+    process: dict,
+    process_id: str,
+    *,
+    action: str,
+    can_edit_fn,
+) -> None:
+    """IDOR guard partilhado por resolve-conflict e confirm-data."""
+    can_edit, reason = can_edit_fn(user, process)
+    if can_edit:
+        return
+    logger.warning(
+        "IDOR attempt: User %s (%s) tried to %s on process %s: %s",
+        user.get("id"),
+        user.get("role"),
+        action,
+        process_id,
+        reason,
+    )
+    raise HTTPException(
+        status_code=403,
+        detail=f"Não tem permissões para alterar este processo. {reason}",
+    )
+
+
+def build_confirm_data_update(confirmed: bool, user: dict, now: str) -> dict[str, Any]:
+    return {
+        "is_data_confirmed": confirmed,
+        "data_confirmed_at": now if confirmed else None,
+        "data_confirmed_by": user["id"] if confirmed else None,
+        "updated_at": now,
+    }
+
+
+def assert_no_pending_ai_conflicts(ai_suggestions: list, *, confirmed: bool) -> None:
+    if confirmed and len(ai_suggestions) > 0:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"Existem {len(ai_suggestions)} conflitos pendentes. "
+                "Resolva-os antes de confirmar os dados."
+            ),
+        )
+
+
+def build_resolve_conflict_response(field: str, choice: str, remaining: list) -> dict:
+    return {
+        "success": True,
+        "message": (
+            f"Conflito resolvido: "
+            f"{'valor IA aceite' if choice == 'ai' else 'valor actual mantido'}"
+        ),
+        "field": field,
+        "remaining_conflicts": len(remaining),
+    }
+
+
+def build_confirm_data_response(confirmed: bool) -> dict:
+    return {
+        "success": True,
+        "message": (
+            f"Dados do cliente "
+            f"{'confirmados e bloqueados' if confirmed else 'desbloqueados'}"
+        ),
+        "is_data_confirmed": confirmed,
+    }
+
+
+async def resolve_ai_data_conflict(
+    process_id: str,
+    data: dict,
+    user: dict,
+    *,
+    can_edit_fn,
+    log_history_fn,
+) -> dict:
+    """Orquestra POST /resolve-conflict."""
+    field, choice, suggestion_id = parse_resolve_conflict_body(data)
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    assert_can_edit_process_or_403(
+        user, process, process_id,
+        action="resolve conflict",
+        can_edit_fn=can_edit_fn,
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    update_data, suggestion, resolved_value = apply_ai_conflict_choice(
+        ai_suggestions=process.get("ai_suggestions", []),
+        field=field,
+        choice=choice,
+        suggestion_id=suggestion_id,
+        now=now,
+    )
+
+    if choice == "ai":
+        await log_history_fn(
+            process_id, user,
+            f"Aceitou sugestão IA para '{field}'",
+            field, suggestion.get("current"), resolved_value,
+        )
+    else:
+        await log_history_fn(
+            process_id, user,
+            f"Manteve valor actual para '{field}'",
+            field, suggestion.get("suggested"), suggestion.get("current"),
+        )
+
+    inject_cdc_context(update_data, user)
+    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+
+    return build_resolve_conflict_response(
+        field, choice, update_data.get("ai_suggestions", []),
+    )
+
+
+async def confirm_process_client_data(
+    process_id: str,
+    data: dict,
+    user: dict,
+    *,
+    can_edit_fn,
+    log_history_fn,
+) -> dict:
+    """Orquestra POST /confirm-data."""
+    confirmed = (data or {}).get("confirmed", True)
+
+    process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    assert_can_edit_process_or_403(
+        user, process, process_id,
+        action="confirm data",
+        can_edit_fn=can_edit_fn,
+    )
+
+    assert_no_pending_ai_conflicts(
+        process.get("ai_suggestions", []),
+        confirmed=bool(confirmed),
+    )
+
+    now = datetime.now(timezone.utc).isoformat()
+    confirm_update_data = build_confirm_data_update(bool(confirmed), user, now)
+    inject_cdc_context(confirm_update_data, user)
+    await db.processes.update_one(
+        {"id": process_id},
+        {"$set": confirm_update_data},
+    )
+
+    action = "confirmou" if confirmed else "desbloqueou"
+    await log_history_fn(
+        process_id, user,
+        f"{action} os dados do cliente",
+        "is_data_confirmed", not confirmed, confirmed,
+    )
+
+    return build_confirm_data_response(bool(confirmed))
