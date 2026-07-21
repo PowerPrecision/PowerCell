@@ -148,6 +148,11 @@ from services.process_kanban_enrichment import (
     sort_all_kanban_columns,
     build_kanban_columns,
 )
+from services.process_kanban_move import (
+    resolve_workflow_purpose_flags,
+    build_kanban_move_update,
+    run_kanban_move_side_effects,
+)
 from services.process_list_enrichment import (
     enrich_processes_assignee_names,
     enrich_processes_portal_flags,
@@ -1417,235 +1422,45 @@ async def move_process_kanban(
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
-    
-    # Check permission
+
     if not can_view_process(user, process):
         raise HTTPException(status_code=403, detail="Sem permissão para mover este processo")
-    
-    # Validate new status
+
     status_exists = await db.workflow_statuses.find_one({"name": new_status})
     if not status_exists:
         raise HTTPException(status_code=400, detail="Estado inválido")
 
     old_status = process.get("status", "")
-    alerts_generated = []
-
-    # ==================================================================
-    # PACOTE BR — DYNAMIC WORKFLOW PURPOSE FLAGS
-    # ==================================================================
-    # Em vez de hardcoded status strings, lemos as flags de comportamento
-    # configuradas na coleção workflow_statuses. Isto dá flexibilidade total
-    # ao negócio: o admin pode configurar quais estados disparam cada
-    # automação sem alterar código.
-    #
-    # FALLBACK RETROCOMPATÍVEL: se a flag não existir no documento (instalações
-    # existentes que ainda não migraram), usamos o comportamento hardcoded
-    # atual para não quebrar nada. À medida que o admin configura as flags
-    # no WorkflowEditor, o fallback deixa de ser usado.
-    # ==================================================================
-    # trigger_finance: cria snapshot financeiro (era: new_status == "concluidos")
-    trigger_finance = status_exists.get("trigger_finance")
-    if trigger_finance is None:
-        trigger_finance = (new_status == "concluidos")
-
-    # trigger_countdown: inicia countdown de 90 dias (era: new_status == "fase_bancaria")
-    trigger_countdown = status_exists.get("trigger_countdown")
-    if trigger_countdown is None:
-        trigger_countdown = (new_status == "fase_bancaria")
-
-    # trigger_property_check: verifica docs do imóvel + alerta CPCV/Escritura
-    # (era: new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"])
-    trigger_property_check = status_exists.get("trigger_property_check")
-    if trigger_property_check is None:
-        trigger_property_check = new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"]
-
-    # trigger_deed_reminder: cria lembrete 15 dias antes da escritura
-    # (era: new_status == "escritura_agendada")
-    trigger_deed_reminder = status_exists.get("trigger_deed_reminder")
-    if trigger_deed_reminder is None:
-        trigger_deed_reminder = (new_status == "escritura_agendada")
-
-    # is_active: determina se o processo fica ativo ou inativo
-    # (era: new_status not in ["desistencias", "concluidos"])
-    is_active = status_exists.get("is_active")
-    if is_active is None:
-        is_active = new_status not in ["desistencias", "concluidos"]
+    flags = resolve_workflow_purpose_flags(status_exists, new_status)
 
     logger.info(
         f"[KANBAN-MOVE-BR] Processo {process_id} → '{new_status}'. "
-        f"Flags dinâmicas: trigger_finance={trigger_finance}, "
-        f"trigger_countdown={trigger_countdown}, "
-        f"trigger_property_check={trigger_property_check}, "
-        f"trigger_deed_reminder={trigger_deed_reminder}, "
-        f"is_active={is_active}"
+        f"Flags dinâmicas: trigger_finance={flags['trigger_finance']}, "
+        f"trigger_countdown={flags['trigger_countdown']}, "
+        f"trigger_property_check={flags['trigger_property_check']}, "
+        f"trigger_deed_reminder={flags['trigger_deed_reminder']}, "
+        f"is_active={flags['is_active']}"
     )
 
-    # Update process — is_active dinâmico (sem lista fixa inactive_statuses)
-    move_update_data = {
-        "status": new_status,
-        "is_active": is_active,
-        "updated_at": datetime.now(timezone.utc).isoformat()
-    }
+    move_update_data = build_kanban_move_update(new_status, flags["is_active"])
     inject_cdc_context(move_update_data, user)
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": move_update_data}
+        {"$set": move_update_data},
     )
 
-    # === PACOTE CW — Trello Mirror: mover cartão em background ===
-    # O cartão é movido para a coluna correspondente ao new_status.
-    # Busca o processo atualizado (tem trello_card_id) e dispara em background.
-    _trello_move_proc = {**process, "status": new_status, "trello_card_id": process.get("trello_card_id")}
-    asyncio.create_task(sync_process_to_trello(_trello_move_proc, action="move", new_status=new_status))
-
-    # === CACHE INVALIDATION: Mover processo altera KPIs (concluídos/ativos/desistências) ===
-    await invalidate_stats_cache(user_id=user.get("id"))
-    
-    # Log history
-    await log_history(process_id, user, "Moveu processo", "status", old_status, new_status)
-    
-    # === WEBSOCKET BROADCAST: Processo movido no Kanban ===
-    await broadcast_process_delta(
-        event_type=WSEventType.PROCESS_STATUS_CHANGED,
-        process_id=process_id,
-        process_number=process.get("process_number"),
-        client_name=process.get("client_name"),
-        status=new_status,
-        old_status=old_status,
-        updated_at=datetime.now(timezone.utc).isoformat()
-    )
-    
-    # Broadcast granular move event (for real-time Kanban sync)
-    moved_message = create_ws_message(
-        WSEventType.PROCESS_MOVED,
-        {
-            "process_id": str(process_id),
-            "process_number": process.get("process_number"),
-            "client_name": process.get("client_name"),
-            "new_status": new_status,
-            "old_status": old_status,
-            "user_id": str(user.get("id", "")),
-            "user_name": user.get("name", "Unknown"),
-        }
-    )
-    # Exclude the user who made the move to avoid duplicate updates
-    await manager.broadcast(moved_message, exclude_user=str(user.get("id", "")))
-    
-    # === SNAPSHOT FINANCEIRO: trigger_finance dinâmico (era: new_status == "concluidos") ===
-    if trigger_finance:
-        try:
-            await _create_finance_snapshot(process, user)
-        except Exception as snap_err:
-            # Falha no snapshot não deve impedir a mudança de estado
-            import logging as _log
-            _log.getLogger(__name__).warning(
-                f"Falha ao criar snapshot financeiro para processo {process_id}: {snap_err}"
-            )
-
-    # === ALERTAS AUTOMÁTICOS BASEADOS NAS FLAGS DINÂMICAS (PACOTE BR) ===
-
-    # 1. trigger_property_check — Verificar documentos do imóvel + alerta CPCV/Escritura
-    # (era: new_status in ["ch_aprovado", "fase_escritura", "escritura_agendada"])
-    if trigger_property_check:
-        # 1a. Verificação de docs do imóvel (era: new_status in ["ch_aprovado", "fase_escritura"])
-        property_check = await check_property_documents(process)
-        if property_check.get("active"):
-            alerts_generated.append({
-                "type": "property_docs",
-                "message": property_check.get("message"),
-                "details": property_check.get("details")
-            })
-
-        # 1b. Alerta de verificação de documentos para CPCV/Escritura
-        await notify_cpcv_or_deed_document_check(process, new_status)
-        alerts_generated.append({
-            "type": "document_verification_alert",
-            "message": "Alerta enviado aos envolvidos para verificação de documentos"
-        })
-
-    # 2. trigger_countdown — Iniciar countdown de 90 dias
-    # (era: new_status == "fase_bancaria" and old_status != "fase_bancaria")
-    if trigger_countdown and old_status != new_status:
-        # Guardar data de aprovação se ainda não existir
-        if not process.get("credit_data", {}).get("bank_approval_date"):
-            bank_approval_data = {"credit_data.bank_approval_date": datetime.now().strftime("%Y-%m-%d")}
-            inject_cdc_context(bank_approval_data, user)
-            await db.processes.update_one(
-                {"id": process_id},
-                {"$set": bank_approval_data}
-            )
-        # Notificar sobre o countdown
-        updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
-        await notify_pre_approval_countdown(updated_process)
-        alerts_generated.append({
-            "type": "countdown_started",
-            "message": "Countdown de 90 dias iniciado para pré-aprovação"
-        })
-
-    # 3. trigger_deed_reminder — Criar lembrete 15 dias antes da escritura
-    # (era: new_status == "escritura_agendada")
-    if trigger_deed_reminder:
-        if deed_date:
-            deadline_id = await create_deed_reminder(process, deed_date, user)
-            if deadline_id:
-                alerts_generated.append({
-                    "type": "deed_reminder",
-                    "message": f"Lembrete de escritura criado para 15 dias antes de {deed_date}"
-                })
-        else:
-            alerts_generated.append({
-                "type": "deed_date_needed",
-                "message": "Escritura agendada sem data. Defina a data para criar lembrete automático."
-            })
-    
-    # Send email notification if client has email (com verificação de preferências)
-    if process.get("client_email"):
-        status_doc = await db.workflow_statuses.find_one({"name": new_status}, {"_id": 0})
-        status_label = status_doc.get("label", new_status) if status_doc else new_status
-        await send_notification_with_preference_check(
-            process["client_email"],
-            "Atualização do seu processo",
-            f"O estado do seu processo foi atualizado para: {status_label}",
-            notification_type="status_change"
-        )
-    
-    # === CRIAR NOTIFICAÇÃO NA BASE DE DADOS ===
-    status_doc = await db.workflow_statuses.find_one({"name": new_status}, {"_id": 0})
-    status_label = status_doc.get("label", new_status) if status_doc else new_status
-    
-    await notify_process_status_change(
+    return await run_kanban_move_side_effects(
         process=process,
+        process_id=process_id,
+        user=user,
         old_status=old_status,
         new_status=new_status,
-        new_status_label=status_label,
-        changed_by=user
+        flags=flags,
+        deed_date=deed_date,
+        broadcast_fn=broadcast_process_delta,
+        create_finance_snapshot_fn=_create_finance_snapshot,
+        inject_cdc_fn=inject_cdc_context,
     )
-    
-    # === GATILHO: Fila de espera ao mover para estado inativo (PACOTE BR) ===
-    # Se o processo foi atribuído a um indexador e moveu para um estado inativo
-    # (is_active == False, definido dinamicamente pela flag do workflow_status),
-    # o indexador libertou um slot — verificar se há processos na fila_espera.
-    # (era: new_status in ["concluidos", "desistencias"])
-    if not is_active:
-        try:
-            from services.process_assignment import check_waitlist_for_indexer
-            import asyncio as _asyncio
-            assigned_indexer_id = process.get("assigned_indexacao_id")
-            if assigned_indexer_id:
-                _asyncio.create_task(check_waitlist_for_indexer(assigned_indexer_id))
-                logger.info(
-                    f"[KANBAN-MOVE-BR] Gatilho de fila de espera disparado para "
-                    f"indexador {assigned_indexer_id} (processo {process_id} → {new_status}, "
-                    f"is_active=False dinâmico)"
-                )
-        except Exception as waitlist_err:
-            logger.warning(f"[KANBAN-MOVE] Erro ao verificar fila de espera: {waitlist_err}")
-    
-    return {
-        "message": "Processo movido com sucesso", 
-        "new_status": new_status,
-        "alerts": alerts_generated
-    }
 
 
 # ==== DSTI AUTOMÁTICO (antes de /{process_id}) ====
