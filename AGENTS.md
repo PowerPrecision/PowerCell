@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / clients / finance)
+### Route thinning (documents / processes / emails / portal / admin / clients / finance / properties)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -39,6 +39,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Admin | `routes/admin.py` (~655; **done**) | `services/admin_*.py` (see map) | Do **not** collide with existing **route** modules `admin_ai` / `admin_storage` / `admin_encryption` / `admin_migration` / `admin_process_migration` |
 | Clients | `routes/clients.py` (~210; **done**) | `services/client_*.py` (see map) | Keep static paths (`/me`, `/registered`, `/search`, `""`, `/find-or-create`) before `/{client_id}`; do **not** collide with existing `client_match.py` / `process_clients_nm.py` / `process_my_clients.py` |
 | Finance | `routes/finance.py` (~280; **done**) | `services/finance_*.py` (see map) | Keep `/finance/processes/summary` before `/{finance_id}`; do **not** collide with existing `process_finance.py` — use `finance_process_records.py` for `process_finances` CRUD |
+| Properties | `routes/properties.py` (~245; **done**) | `services/property_*.py` (see map) | Keep static paths (`/stats`, `/by-process/{id}`) before `/{property_id}`; do **not** collide with existing `property_scraper.py` / `alerts.py` / `scraper.py` / `gov_scraper.py` |
 
 **`email_*` thinning (complete):**
 
@@ -119,7 +120,20 @@ Unit helpers: `backend/tests/unit/test_client_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_finance_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / clients / finance.
+**`property_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `property_helpers.py` | `get_next_reference` (IMO-NNN) — shared by CRUD + excel import |
+| `property_list.py` | GET `` list, `/stats`, `/by-process/{id}` |
+| `property_crud.py` | POST/GET/PATCH/DELETE property + status (uses `alerts.check_and_notify_matches_for_new_property`) |
+| `property_engagement.py` | interested clients, register-visit, photo add/remove |
+| `property_excel_import.py` | bulk excel import + `_process_excel_import` + jobs + template |
+| `property_documents.py` | property document upload / list / delete (S3) |
+
+Unit helpers: `backend/tests/unit/test_property_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / clients / finance / properties.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
