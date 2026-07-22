@@ -1092,5 +1092,45 @@ export const upsertCompanyEmailConfig = (data) =>
 export const deleteCompanyEmailConfig = (companyName) =>
   api.delete(`/admin/company-email-configs/${encodeURIComponent(companyName)}`);
 
+// ===== CLIENT REGISTRATIONS (Admin — registos do formulário público) =====
+export const getClientRegistrations = (params = {}) =>
+  api.get("/admin/client-registrations", { params });
+export const getClientRegistration = (processId) =>
+  api.get(`/admin/client-registrations/${processId}`);
+export const updateClientRegistration = (processId, data) =>
+  api.put(`/admin/client-registrations/${processId}`, data);
+export const deleteClientRegistration = (processId) =>
+  api.delete(`/admin/client-registrations/${processId}`);
+export const getClientRegistrationsStats = () =>
+  api.get("/admin/client-registrations/stats/summary");
+
+// ===== BACKGROUND JOBS (Centro de Operações — importações/análises em massa) =====
+export const getBackgroundJobs = (status) =>
+  api.get("/ai/bulk/background-jobs", { params: status ? { status } : {} });
+export const getBackgroundJob = (jobId) =>
+  api.get(`/ai/bulk/background-jobs/${jobId}`);
+export const getBackgroundJobMetrics = (days = 7) =>
+  api.get("/ai/bulk/background-jobs/metrics", { params: { days } });
+export const getBackgroundJobNotifications = (unreadOnly = true) =>
+  api.get("/ai/bulk/background-jobs/notifications", { params: { unread_only: unreadOnly } });
+export const markBackgroundJobNotificationRead = (notificationId) =>
+  api.put(`/ai/bulk/background-jobs/notifications/${notificationId}/read`);
+export const clearBackgroundJobNotifications = () =>
+  api.delete("/ai/bulk/background-jobs/notifications/clear");
+export const deleteBackgroundJob = (jobId) =>
+  api.delete(`/ai/bulk/background-jobs/${jobId}`);
+export const cancelBackgroundJob = (jobId) =>
+  api.post(`/ai/bulk/background-jobs/${jobId}/cancel`);
+export const pauseBackgroundJob = (jobId) =>
+  api.post(`/ai/bulk/background-jobs/${jobId}/pause`);
+export const resumeBackgroundJob = (jobId) =>
+  api.post(`/ai/bulk/background-jobs/${jobId}/resume`);
+export const cleanupStuckBackgroundJobs = (hours = 2) =>
+  api.post("/ai/bulk/background-jobs/cleanup-stuck", null, { params: { hours } });
+export const clearFinishedBackgroundJobs = () =>
+  api.delete("/ai/bulk/background-jobs");
+export const clearAllBackgroundJobs = () =>
+  api.post("/ai/bulk/background-jobs/clear-all");
+
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;

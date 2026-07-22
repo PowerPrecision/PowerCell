@@ -3,7 +3,6 @@
  * Permite ao admin visualizar e editar os dados dos formulários de registo público
  */
 import React, { useState, useEffect } from "react";
-import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -61,8 +60,11 @@ import {
   PageHeader
 } from "../components/admin/AdminPageShared";
 import { formatDate, formatDateTime } from "../lib/utils";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import {
+  useClientRegistrationsQuery,
+  useClientRegistrationsStatsQuery,
+  useClientRegistrationMutations,
+} from "../hooks/queries/useClientRegistrationsQuery";
 
 // Status badge component - específico para registos de clientes
 const StatusBadge = ({ status }) => {
@@ -217,7 +219,7 @@ const EditModal = ({ open, onClose, registration, onSave }) => {
     try {
       await onSave(registration.id, formData);
       onClose();
-    } catch (error) {
+    } catch {
       // Erro já tratado no onSave
     } finally {
       setSaving(false);
@@ -563,7 +565,6 @@ const ViewModal = ({ open, onClose, registration }) => {
 
 const ClientRegistrationsAdminPage = () => {
   const { token, user } = useAuth();
-  const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("");
   const [page, setPage] = useState(1);
@@ -572,60 +573,24 @@ const ClientRegistrationsAdminPage = () => {
   const [editModal, setEditModal] = useState({ open: false, registration: null });
   const [viewModal, setViewModal] = useState({ open: false, registration: null });
   const [deleteModal, setDeleteModal] = useState({ open: false, registration: null });
-  const [actionLoading, setActionLoading] = useState(false);
 
-  const listParams = { search, statusFilter, page };
-
+  // ── Dados de servidor via TanStack Query (hooks dedicados) ────
   const {
-    data: listData,
+    registrations,
+    total,
+    totalPages,
     isLoading: loading,
     isError: listError,
     refetch: fetchData,
-  } = useQuery({
-    queryKey: ["client-registrations", listParams],
-    enabled: Boolean(token),
-    queryFn: async () => {
-      const params = new URLSearchParams();
-      if (search) params.append("search", search);
-      if (statusFilter) params.append("status", statusFilter);
-      params.append("page", String(page));
-      params.append("limit", "15");
+  } = useClientRegistrationsQuery(
+    { search, statusFilter, page },
+    { enabled: Boolean(token) }
+  );
 
-      const response = await fetch(`${API_URL}/api/admin/client-registrations?${params}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error("Erro ao carregar dados");
-      }
-      const data = await response.json();
-      return {
-        registrations: data.registrations || [],
-        total: data.total || 0,
-        totalPages: data.pages || 1,
-      };
-    },
-  });
+  const { stats, refetch: fetchStats } = useClientRegistrationsStatsQuery({ enabled: Boolean(token) });
 
-  const {
-    data: stats = null,
-    refetch: fetchStats,
-  } = useQuery({
-    queryKey: ["client-registrations-stats"],
-    enabled: Boolean(token),
-    queryFn: async () => {
-      const response = await fetch(`${API_URL}/api/admin/client-registrations/stats/summary`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!response.ok) {
-        throw new Error("Erro ao carregar estatísticas");
-      }
-      return response.json();
-    },
-  });
-
-  const registrations = listData?.registrations || [];
-  const total = listData?.total || 0;
-  const totalPages = listData?.totalPages || 1;
+  const { updateRegistration, deleteRegistration } = useClientRegistrationMutations();
+  const actionLoading = deleteRegistration.isPending;
 
   useEffect(() => {
     if (listError) {
@@ -633,32 +598,16 @@ const ClientRegistrationsAdminPage = () => {
     }
   }, [listError]);
 
-  const invalidateRegistrations = () => {
-    queryClient.invalidateQueries({ queryKey: ["client-registrations"] });
-    queryClient.invalidateQueries({ queryKey: ["client-registrations-stats"] });
-  };
-
   const handleEdit = (registration) => setEditModal({ open: true, registration });
   const handleView = (registration) => setViewModal({ open: true, registration });
 
   const handleSave = async (processId, formData) => {
     try {
-      const response = await fetch(`${API_URL}/api/admin/client-registrations/${processId}`, {
-        method: "PUT",
-        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
-        body: JSON.stringify(formData),
-      });
-
-      if (response.ok) {
-        toast.success("Registo atualizado com sucesso");
-        invalidateRegistrations();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao atualizar"));
-        throw new Error();
-      }
+      await updateRegistration.mutateAsync({ processId, data: formData });
+      toast.success("Registo atualizado com sucesso");
     } catch (error) {
-      toast.error("Erro ao atualizar registo");
+      const detail = error?.response?.data?.detail;
+      toast.error(detail ? extractErrorMessage(detail, "Erro ao atualizar") : "Erro ao atualizar registo");
       throw error;
     }
   };
@@ -666,24 +615,12 @@ const ClientRegistrationsAdminPage = () => {
   const handleDelete = async () => {
     if (!deleteModal.registration) return;
 
-    setActionLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/admin/client-registrations/${deleteModal.registration.id}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-
-      if (response.ok) {
-        toast.success("Registo eliminado com sucesso");
-        setDeleteModal({ open: false, registration: null });
-        invalidateRegistrations();
-      } else {
-        toast.error("Erro ao eliminar");
-      }
-    } catch (error) {
+      await deleteRegistration.mutateAsync(deleteModal.registration.id);
+      toast.success("Registo eliminado com sucesso");
+      setDeleteModal({ open: false, registration: null });
+    } catch {
       toast.error("Erro ao eliminar registo");
-    } finally {
-      setActionLoading(false);
     }
   };
 
