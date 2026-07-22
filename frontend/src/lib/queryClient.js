@@ -214,6 +214,21 @@ export const queryKeys = {
     commissions: (params) => [...queryKeys.finance.all, 'commissions', params],
     performance: (params) => [...queryKeys.finance.all, 'performance', params],
   },
+
+  // Registos de Clientes (Admin — formulário público)
+  clientRegistrations: {
+    all: ['client-registrations'],
+    list: (params) => [...queryKeys.clientRegistrations.all, 'list', params],
+    stats: () => [...queryKeys.clientRegistrations.all, 'stats'],
+  },
+
+  // Background Jobs (Centro de Operações — importações/análises em massa)
+  backgroundJobs: {
+    all: ['background-jobs'],
+    list: (statusFilter) => [...queryKeys.backgroundJobs.all, 'list', { statusFilter }],
+    notifications: () => [...queryKeys.backgroundJobs.all, 'notifications'],
+    metrics: (days) => [...queryKeys.backgroundJobs.all, 'metrics', { days }],
+  },
 };
 
 /**
