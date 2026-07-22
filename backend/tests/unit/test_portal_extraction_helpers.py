@@ -55,3 +55,21 @@ def test_portal_modules_export_status_and_onboarding():
     assert callable(sh._get_rgpd_status)
     assert callable(oa._trigger_onboarding_check)
     assert callable(oa._auto_advance_from_pre_registo)
+
+
+def test_portal_router_is_thin_stubs_only():
+    from pathlib import Path
+
+    routes_path = Path(__file__).resolve().parents[2] / "routes" / "portal.py"
+    text = routes_path.read_text()
+    assert text.count("return await run_") >= 20
+    assert len(text.splitlines()) < 400
+
+
+def test_portal_domain_modules_export_run_entrypoints():
+    from services import portal_auth, portal_status, portal_upload_ops, portal_gov_fetch
+
+    assert callable(portal_auth.run_portal_login)
+    assert callable(portal_status.run_get_portal_status)
+    assert callable(portal_upload_ops.run_confirm_portal_upload)
+    assert callable(portal_gov_fetch.run_fetch_financas_documents)

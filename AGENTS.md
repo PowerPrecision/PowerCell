@@ -35,7 +35,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Processes | `routes/processes.py` (~664) | `services/process_*.py` | Mostly done |
 | Documents | `routes/documents.py` (~1072; was ~4623) | `services/document_*.py` | Thin stubs only — see map |
 | Emails | `routes/emails.py` (~654; **done**) | `services/email_*.py` (see map) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
-| Portal | `routes/portal.py` (~3347; thinning) | `services/portal_*.py` (see map) | Do **not** collide with existing `portal_security` / `portal_magic_link` / `portal_documents_notify`. Portal `DOCUMENT_CATEGORY_MAP` includes `Financeiros` (separate from `document_constants`) |
+| Portal | `routes/portal.py` (~221; **done**) | `services/portal_*.py` (see map) | Do **not** collide with existing `portal_security` / `portal_magic_link` / `portal_documents_notify`. Portal `DOCUMENT_CATEGORY_MAP` includes `Financeiros` (separate from `document_constants`) |
 
 **`email_*` thinning (complete):**
 
@@ -52,7 +52,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 
 Unit helpers: `backend/tests/unit/test_email_extraction_helpers.py`.
 
-**`portal_*` thinning so far:**
+**`portal_*` thinning (complete):**
 
 | Service | Responsibility |
 |---|---|
@@ -61,10 +61,17 @@ Unit helpers: `backend/tests/unit/test_email_extraction_helpers.py`.
 | `portal_profile.py` | GET/PUT `/me` + profile field allowlists |
 | `portal_status_helpers.py` | contact / RGPD / team helpers for `/status` |
 | `portal_onboarding_advance.py` | Pacote BO auto-advance after portal uploads |
+| `portal_auth.py` | login / verify / resolve / impersonate / authenticate |
+| `portal_status.py` | GET `/status` orchestration |
+| `portal_upload_ops.py` | upload-url / confirm-upload / download-url |
+| `portal_client_messages.py` | client messages (+ notify) |
+| `portal_gov_fetch.py` | Finanças/SS scrapers, MFA, jobs |
+| `portal_recommendations.py` | Smart Match recommendations |
+| `portal_client_visits.py` | visit request + list |
 
-Still in `portal.py`: auth/login, `/status` body, uploads, messages, gov scrapers, visits, recommendations.
+Unit helpers: `backend/tests/unit/test_portal_extraction_helpers.py`.
 
-**Next fat routes:** finish portal, then `admin.py` (~4037).
+**Next fat route:** `admin.py` (~4037).
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
