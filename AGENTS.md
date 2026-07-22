@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -59,6 +59,12 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Admin AI | `routes/admin_ai.py` (**done**) | `services/admin_ai_{config,models,tasks,cache,usage}.py` | **Never** create `services/admin_ai.py`; do **not** overwrite `admin_ai_data.py` / `ai_usage_tracker.py` |
 | AI | `routes/ai.py` (**done**) | `services/ai_api_*.py` (see map) | **Never** overwrite `ai_document.py` / analyzers / `ai_usage_tracker.py` — use `ai_api_*` |
 | AI analysis | `routes/ai_analysis.py` (**done**) | `services/ai_analysis_api_*.py` (see map) | **Never** overwrite analyzers; executive summary + cross-ref audit |
+| My clients | `routes/my_clients.py` (**done**) | `services/my_clients_api_*.py` (see map) | **Never** overwrite `process_my_clients.py` (GET `/processes/my-clients`); list may reuse its enrichment maps |
+| OneDrive | `routes/onedrive.py` (**done**) | `services/onedrive_*.py` (see map) | **Never** overwrite `services/onedrive.py` (Graph OAuth core) |
+| Scraper | `routes/scraper.py` (**done**) | `services/scraper_api_*.py` (see map) | **Never** overwrite `scraper.py` / `gov_scraper.py` / `property_scraper.py` |
+| Templates | `routes/templates.py` (**done**) | `services/templates_api_*.py` (see map) | **Never** overwrite `template_generator.py` |
+| Users | `routes/users.py` (**done**) | `services/users_api_*.py` (see map) | **Never** overwrite `auth.py`; keep `/me/email-config*` before `/{user_id}`; admin CRUD stays in admin |
+| Async jobs | `routes/async_jobs.py` (**done**) | `services/async_jobs_api_*.py` (see map) | Preserve rate limits; keep `/health` + `/session/*` + `/analyze` before `/{job_id}` |
 
 **`email_*` thinning (complete):**
 
@@ -386,16 +392,82 @@ Keep static `/google/callback` **before** `/{role}`. Unit helpers: `backend/test
 
 **Never** overwrite `ai_document_analyzer.py` / `ai_page_analyzer.py` / `ai_document.py`. Unit helpers: `backend/tests/unit/test_ai_analysis_api_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis.
+**`my_clients_api_*` thinning (complete) — do **not** overwrite `process_my_clients.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `my_clients_api_helpers.py` | status constants, process/stats query builders, lead row format |
+| `my_clients_api_list.py` | GET `` (list + leads + enrichment; reuses `process_my_clients` maps) |
+| `my_clients_api_stats.py` | GET `/stats` |
+
+Unit helpers: `backend/tests/unit/test_my_clients_extraction_helpers.py`.
+
+**`onedrive_*` thinning (complete) — do **not** overwrite `onedrive.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `onedrive_url_validation.py` | folder/link URL prefix checks |
+| `onedrive_status.py` | GET `/status` |
+| `onedrive_folder_url.py` | process folder URL get/save/delete |
+| `onedrive_checklist.py` | checklist generate/get |
+| `onedrive_files.py` | list client files by name (S3) |
+| `onedrive_links.py` | process link CRUD + `LinkCreate`/`LinkUpdate` |
+
+Unit helpers: `backend/tests/unit/test_onedrive_extraction_helpers.py`.
+
+**`scraper_api_*` thinning (complete) — do **not** overwrite core scrapers:**
+
+| Service | Responsibility |
+|---|---|
+| `scraper_api_models.py` | request/response models, friendly errors, site list, HTML source detect |
+| `scraper_api_scrape.py` | `/single`, `/scrape`, `/crawl` |
+| `scraper_api_ai.py` | supported-sites, analyze-with-ai, extract-html |
+| `scraper_api_cache.py` | cache stats/clear/refresh |
+
+Unit helpers: `backend/tests/unit/test_scraper_extraction_helpers.py`.
+
+**`templates_api_*` thinning (complete) — do **not** overwrite `template_generator.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `templates_api_helpers.py` | roles, `DocumentRequestData`, error/download helpers |
+| `templates_api_named.py` | webmail + named generate/download + document-request |
+| `templates_api_checklist.py` | document checklist + document-types |
+| `templates_api_generic.py` | available / generate / download / validate |
+
+Unit helpers: `backend/tests/unit/test_templates_extraction_helpers.py`.
+
+**`users_api_*` thinning (complete) — do **not** overwrite `auth.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `users_api_helpers.py` | `FORCED_SHARED_ROLES` |
+| `users_api_list.py` | GET `` + GET `/{user_id}` |
+| `users_api_email_config.py` | GET/POST `/me/email-config` + test |
+
+Unit helpers: `backend/tests/unit/test_users_extraction_helpers.py`.
+
+**`async_jobs_api_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `async_jobs_api_models.py` | Pydantic models + `ARQ_AVAILABLE` import guard |
+| `async_jobs_api_analyze.py` | POST `/analyze` + GET `/{job_id}` |
+| `async_jobs_api_session.py` | session start/analyze/status/finish |
+| `async_jobs_api_health.py` | GET `/health` |
+
+Unit helpers: `backend/tests/unit/test_async_jobs_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs.
 
 **Remaining backlog** (still fat / partial, ≥~400 lines — next candidates by size):
 
 | Route | ~Lines | Notes |
 |---|---:|---|
 | `ai_bulk.py` | 1732 | Hybrid — much logic already in `routes/ai_bulk/*`; move package → `services/ai_bulk_*` |
-| Mid-size | 377–402 | `async_jobs`, `admin_migration`, `companies_crud`, `minutas`, `user_company_roles`, `deadlines` |
+| Mid-size | ~377–400 | `admin_migration`, `companies_crud`, `minutas`, `user_company_roles`, `deadlines` |
 
-Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, `temp_link_service.py`, `gmail_oauth.py`, `ai_document.py` / analyzers, route module names).
+Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, `temp_link_service.py`, `gmail_oauth.py`, `ai_document.py` / analyzers, `onedrive.py`, `scraper.py` / `gov_scraper.py` / `property_scraper.py`, `template_generator.py`, `process_my_clients.py`, route module names).
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
