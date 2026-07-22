@@ -458,13 +458,26 @@ Unit helpers: `backend/tests/unit/test_users_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_async_jobs_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs.
+**`ai_bulk_*` thinning (complete) — leave `routes/ai_bulk/` package helpers in place:**
+
+| Service | Responsibility |
+|---|---|
+| `ai_bulk_models.py` | Pydantic request/response models |
+| `ai_bulk_helpers.py` | `read_file_with_limit`, `update_client_data`, `log_import_*` |
+| `ai_bulk_sessions.py` | import-session + aggregated session start/finish/status |
+| `ai_bulk_analyze.py` | `/analyze-single` + aggregated `/analyze` |
+| `ai_bulk_clients.py` | suggest/check/list/diagnose + analyzed-documents |
+| `ai_bulk_cache_ops.py` | nif/duplicate cache + pending-reviews |
+| `ai_bulk_import_errors.py` | get/resolve import errors (name avoids `routes.ai_bulk.import_errors`) |
+
+Package `routes/ai_bulk/` (cache/jobs/matching/utils/constants/background_jobs) stays; `from routes.ai_bulk import router` still uses the sibling stub via importlib. Unit helpers: `backend/tests/unit/test_ai_bulk_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk.
 
 **Remaining backlog** (still fat / partial, ≥~400 lines — next candidates by size):
 
 | Route | ~Lines | Notes |
 |---|---:|---|
-| `ai_bulk.py` | 1732 | Hybrid — much logic already in `routes/ai_bulk/*`; move package → `services/ai_bulk_*` |
 | Mid-size | ~377–400 | `admin_migration`, `companies_crud`, `minutas`, `user_company_roles`, `deadlines` |
 
 Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, `temp_link_service.py`, `gmail_oauth.py`, `ai_document.py` / analyzers, `onedrive.py`, `scraper.py` / `gov_scraper.py` / `property_scraper.py`, `template_generator.py`, `process_my_clients.py`, route module names).
