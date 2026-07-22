@@ -598,6 +598,9 @@ export const testUserEmailConfig = (userId) => api.post(`/admin/users/${userId}/
 export const getStats = () => api.get("/stats");
 export const getCommunicationsFeed = () => api.get("/stats/communications");
 
+// Team Performance (Admin/CEO) — desempenho da equipa por período
+export const getTeamPerformance = (params = {}) => api.get("/admin/team-performance", { params });
+
 // Activities/Comments
 export const getActivities = (processId, limit = 50) => {
   const params = {};

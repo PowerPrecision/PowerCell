@@ -192,6 +192,12 @@ export const queryKeys = {
     all: ['stats'],
     dashboard: () => [...queryKeys.stats.all, 'dashboard'],
   },
+
+  // Desempenho da Equipa (Admin/CEO)
+  teamPerformance: {
+    all: ['team-performance'],
+    range: (startDate, endDate) => [...queryKeys.teamPerformance.all, 'range', { startDate, endDate }],
+  },
   
   // Financeiro
   finance: {
