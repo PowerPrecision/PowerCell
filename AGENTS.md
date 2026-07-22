@@ -319,6 +319,36 @@ Unit helpers: `backend/tests/unit/test_public_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_stats_extraction_helpers.py`.
 
+**`shared_email_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `shared_email_helpers.py` | `ALLOWED_ROLES`, `_require_admin`, `_get_google_config`, `_build_redirect_uri` |
+| `shared_email_crud.py` | list / get / upsert / delete shared role email configs |
+| `shared_email_google.py` | `/google/callback` + `/{role}/google/login` + disconnect |
+| `shared_email_sync.py` | POST `/{role}/sync` via `gmail_api_sync_to_db` |
+
+Keep static `/google/callback` **before** `/{role}`. Unit helpers: `backend/tests/unit/test_shared_email_extraction_helpers.py`.
+
+**`temp_link_api_*` thinning (complete) — do **not** overwrite `temp_link_service.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `temp_link_api_staff.py` | create / list-by-process / cancel / delete (auth) |
+| `temp_link_api_public.py` | `/public/{token}` info/upload/download/download-all/files |
+
+**Never** overwrite `temp_link_service.py` (core `TempLinkService`). Unit helpers: `backend/tests/unit/test_temp_link_extraction_helpers.py`.
+
+**`google_auth_*` thinning (complete) — do **not** overwrite `gmail_oauth.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `google_auth_helpers.py` | `_get_google_config`, `_build_redirect_uri`, `_resolve_user` (Bearer + `?token=`) |
+| `google_auth_oauth.py` | GET `/login` + `/callback` |
+| `google_auth_status.py` | GET `/status` + DELETE `/disconnect` (per-role) |
+
+**Never** overwrite `gmail_oauth.py` / `gmail_api_service.py`. Unit helpers: `backend/tests/unit/test_google_auth_extraction_helpers.py`.
+
 **Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats.
 
 **Remaining backlog** (still fat / partial, ≥~400 lines — next candidates by size):
@@ -330,7 +360,7 @@ Unit helpers: `backend/tests/unit/test_stats_extraction_helpers.py`.
 | `admin_ai.py` | 534 | Admin AI sibling (config/models/tasks) |
 | Mid-size | 400–480 | `scraper`, `templates`, `onedrive`, `my_clients`, `users`, `async_jobs` |
 
-Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, route module names).
+Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, `temp_link_service.py`, `gmail_oauth.py`, route module names).
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
