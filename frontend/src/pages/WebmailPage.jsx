@@ -546,18 +546,40 @@ const WebmailPage = () => {
   // ============================================================
   // SYNC EMAILS (IMAP → DB)
   // ============================================================
-  // Poll job status until completed/failed, then refresh emails
+  // Poll job status until completed/failed, then refresh emails.
+  // Cap retries: in dev (no IMAP/email) or when the API is down (502),
+  // infinite polling floods the console with CORS/network noise.
   const pollJobStatus = useCallback((jobId) => {
     if (!jobId || !token) return;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 20; // ~1 min of polling
+    const MAX_NETWORK_ERRORS = 3;
+    let networkErrors = 0;
+
     const poll = async () => {
+      attempts += 1;
+      if (attempts > MAX_ATTEMPTS) {
+        setSyncing(false);
+        toast.info("Sincronização a demorar demasiado — tente novamente mais tarde.");
+        return;
+      }
       try {
         const res = await fetch(`${API_URL}/api/emails/jobs/${jobId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
-          setSyncing(false);
+          // 502/503 = backend unavailable; stop instead of hammering
+          if (res.status >= 500 || attempts >= MAX_ATTEMPTS) {
+            setSyncing(false);
+            if (res.status >= 500) {
+              toast.error("Serviço de email indisponível (verifique a configuração IMAP em dev).");
+            }
+            return;
+          }
+          setTimeout(poll, 3000);
           return;
         }
+        networkErrors = 0;
         const job = await res.json();
         if (job.status === 'completed') {
           const synced = job.result?.synced || 0;
@@ -574,7 +596,12 @@ const WebmailPage = () => {
           setTimeout(poll, 3000);
         }
       } catch {
-        // Network error — retry in 5 seconds
+        networkErrors += 1;
+        if (networkErrors >= MAX_NETWORK_ERRORS) {
+          setSyncing(false);
+          // Silent stop in console-noise scenarios (CORS/502 often appear as TypeError)
+          return;
+        }
         setTimeout(poll, 5000);
       }
     };

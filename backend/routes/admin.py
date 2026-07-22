@@ -355,7 +355,9 @@ async def get_system_error_logs(
     days: int = 7,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_system_error_logs(page, limit, severity, component, error_type, resolved, days, user)
+    return await run_get_system_error_logs(
+        user, page, limit, severity, component, error_type, resolved, days
+    )
 
 
 @router.get("/system-logs/stats")
@@ -363,7 +365,7 @@ async def get_system_logs_stats(
     days: int = 7,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_system_logs_stats(days, user)
+    return await run_get_system_logs_stats(user, days)
 
 
 @router.get("/system-logs/{error_id}")
@@ -586,7 +588,7 @@ async def get_stale_processes(
     days: int = Query(14, ge=1, le=90),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
-    return await run_get_stale_processes(days, user)
+    return await run_get_stale_processes(user, days)
 
 
 @router.get("/team-performance")
@@ -595,7 +597,7 @@ async def get_team_performance(
     end_date: Optional[str] = Query(None, description="Data de fim (YYYY-MM-DD). Por defeito, hoje"),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    return await run_get_team_performance(start_date, end_date, user)
+    return await run_get_team_performance(user, start_date, end_date)
 
 
 @router.get("/sync-database/status")
