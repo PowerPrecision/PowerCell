@@ -7,7 +7,13 @@
  * - Seletor de datas para escolher o período de análise
  * - Resumo de KPIs no topo
  *
- * @param {string} token — JWT para chamadas à API
+ * Dados de servidor geridos via TanStack Query (useTeamPerformanceQuery),
+ * mantendo apenas o período seleccionado (startDate/endDate) como estado
+ * local de UI — ver `hooks/queries/useTeamPerformanceQuery.js`.
+ *
+ * @param {string} token — JWT do utilizador autenticado; usado apenas para
+ *   condicionar a execução da query (a autenticação real é injectada
+ *   automaticamente pelo interceptor de `services/api.js`)
  */
 import { useState, useEffect } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
@@ -24,8 +30,7 @@ import { toast } from "sonner";
 import { format, subDays, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeParseISO } from "../../lib/utils";
-
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
+import { useTeamPerformanceQuery } from "../../hooks/queries/useTeamPerformanceQuery";
 
 // ── Mapeamento de roles para labels legíveis ──────────────────
 const roleLabels = {
@@ -39,49 +44,34 @@ const roleLabels = {
 };
 
 const TeamPerformanceTab = ({ token }) => {
-  // Período por defeito: última semana
+  // Período por defeito: última semana (estado local de UI)
   const [startDate, setStartDate] = useState(() => format(subDays(new Date(), 7), "yyyy-MM-dd"));
   const [endDate, setEndDate] = useState(() => format(new Date(), "yyyy-MM-dd"));
 
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
+  // ── Dados de servidor via TanStack Query ──────────────────
+  const {
+    summary,
+    users,
+    periodStart,
+    periodEnd,
+    isFetching: loading,
+    isError,
+    error,
+    refetch,
+  } = useTeamPerformanceQuery(startDate, endDate, { enabled: !!token });
 
-  // ── Buscar dados do endpoint ──────────────────────────────
-  const fetchPerformance = async (start, end) => {
-    if (!token) return;
-    setLoading(true);
-    try {
-      const params = new URLSearchParams();
-      if (start) params.set("start_date", start);
-      if (end) params.set("end_date", end);
-
-      const res = await fetch(
-        `${BACKEND_URL}/api/admin/team-performance?${params.toString()}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Erro ao carregar dados de desempenho");
-      }
-
-      const json = await res.json();
-      setData(json);
-    } catch (error) {
-      console.error("[TeamPerformance]", error);
-      toast.error(error.message || "Erro ao carregar desempenho da equipa");
-    } finally {
-      setLoading(false);
-    }
-  };
-
+  // ── Feedback de erro (toast), preservando o comportamento anterior ──
   useEffect(() => {
-    fetchPerformance(startDate, endDate);
-  }, []);
+    if (isError) {
+      console.error("[TeamPerformance]", error);
+      const message = error?.response?.data?.detail || error?.message || "Erro ao carregar desempenho da equipa";
+      toast.error(message);
+    }
+  }, [isError, error]);
 
   // ── Handler: actualizar período ───────────────────────────
   const handleRefresh = () => {
-    fetchPerformance(startDate, endDate);
+    refetch();
   };
 
   // ── Quick-range buttons ───────────────────────────────────
@@ -90,11 +80,7 @@ const TeamPerformanceTab = ({ token }) => {
     const start = format(subDays(new Date(), days), "yyyy-MM-dd");
     setStartDate(start);
     setEndDate(end);
-    fetchPerformance(start, end);
   };
-
-  const summary = data?.summary || {};
-  const users = data?.users || [];
 
   // ── Top performers (top 3 por score) ──────────────────────
   const topPerformers = [...users]
@@ -105,9 +91,9 @@ const TeamPerformanceTab = ({ token }) => {
 
   // ── Formatar período para exibição (com validação de datas) ──
   const periodLabel = (() => {
-    if (!data?.period_start) return null;
-    const start = safeParseISO(data.period_start);
-    const end = safeParseISO(data.period_end);
+    if (!periodStart) return null;
+    const start = safeParseISO(periodStart);
+    const end = safeParseISO(periodEnd);
     if (!isValid(start) || !isValid(end)) return null;
     return `${format(start, "dd/MM/yy", { locale: pt })} — ${format(end, "dd/MM/yy", { locale: pt })}`;
   })();
