@@ -280,6 +280,23 @@ Unit helpers: `backend/tests/unit/test_task_extraction_helpers.py`.
 
 **Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks.
 
+**Remaining backlog** (still fat / partial, ≥~400 lines — next candidates by size):
+
+| Route | ~Lines | Notes |
+|---|---:|---|
+| `ai_bulk.py` | 1732 | Hybrid — much logic already in `routes/ai_bulk/*`; move package → `services/ai_bulk_*` |
+| `backup.py` | 839 | Partial — core in `services/backup.py`; restore/trigger still in route |
+| `public.py` | 743 | Public registration + form-config + health |
+| `stats.py` | 669 | Dashboard/stats aggregations |
+| `shared_email.py` | 662 | Shared mailbox |
+| `temp_links.py` | 641 | Temporary document links |
+| `google_auth.py` | 638 | Google OAuth |
+| `ai.py` / `ai_analysis.py` | 589 / 572 | AI endpoints |
+| `admin_ai.py` | 534 | Admin AI sibling (config/models/tasks) |
+| Mid-size | 400–480 | `scraper`, `templates`, `onedrive`, `my_clients`, `users`, `async_jobs` |
+
+Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, route module names).
+
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
 | Service | Responsibility |
