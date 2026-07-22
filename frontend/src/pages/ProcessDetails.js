@@ -80,14 +80,6 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import {
-  updateProcess,
-  updateClient,
-  createDeadline,
-  updateDeadline,
-  deleteDeadline,
-  createActivity,
-  deleteActivity,
-  getClientS3Files,
   getS3DownloadUrl,
   deleteProcess,
   generateMagicLink,
@@ -95,6 +87,8 @@ import {
   impersonateClient,
   impersonateClientPortal,
 } from "../services/api";
+import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
+import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
 import ProcessSummaryCard from "../components/ProcessSummaryCard";
@@ -103,6 +97,7 @@ import UnifiedDocumentsPanel from "../components/UnifiedDocumentsPanel";
 import ProcessTimeline from "../components/ProcessTimeline";
 import UnifiedAuditTrail from "../components/UnifiedAuditTrail";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
+import ProcessAssignDialog from "../components/processDetails/ProcessAssignDialog";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
 import ProcessStickyHeader from "../components/ProcessStickyHeader";
@@ -162,7 +157,7 @@ import {
 import { toast } from "sonner";
 import { format, parseISO, isAfter, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
-import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
+import { hasRole, hasAnyRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -209,6 +204,12 @@ const ProcessDetails = () => {
 
   // Live TanStack queries (process + client + side panels)
   const processBundle = useProcessFullData(id);
+
+  // Mutations TanStack (silent — toasts ficam na página; payload sanitizado no hook)
+  const processMutations = useProcessMutations(id, {
+    silent: true,
+    clientId: processBundle.process?.client_id,
+  });
   
   // ── WebSocket: juntar-se à room do processo para mensagens em tempo real ──
   // portalRefreshRef aponta para o refresh do hook useProcessPortalMessages
@@ -495,30 +496,18 @@ const ProcessDetails = () => {
   const handleSaveAssignment = async () => {
     setSavingAssignment(true);
     try {
-      const params = new URLSearchParams();
-      // Enviar múltiplos consultores separados por vírgula
-      params.append("consultor_ids", selectedConsultores.filter(Boolean).join(","));
-      // Enviar múltiplos intermediários separados por vírgula
-      params.append("mediador_ids", selectedMediadores.filter(Boolean).join(","));
-      params.append("indexacao_id", selectedIndexacao || "");
-      params.append("parceiro_id", selectedParceiro || "");  // Adicionar parceiro
-      
-      const response = await fetch(`${API_URL}/api/processes/${id}/assign?${params.toString()}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
+      await processMutations.assignProcess.mutateAsync({
+        consultorIds: selectedConsultores.filter(Boolean),
+        mediadorIds: selectedMediadores.filter(Boolean),
+        indexacaoId: selectedIndexacao || "",
+        parceiroId: selectedParceiro || "",
       });
-      
-      if (response.ok) {
-        toast.success("Atribuições actualizadas com sucesso");
-        setShowAssignDialog(false);
-        fetchData();
-      } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao actualizar atribuições"));
-      }
+      toast.success("Atribuições actualizadas com sucesso");
+      setShowAssignDialog(false);
+      await fetchData();
     } catch (error) {
       console.error("Erro ao guardar atribuições:", error);
-      toast.error("Erro ao guardar atribuições");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao guardar atribuições"));
     } finally {
       setSavingAssignment(false);
     }
@@ -953,14 +942,8 @@ const ProcessDetails = () => {
     const timeoutId = setTimeout(() => {
       const saveStatusOnly = async () => {
         try {
-          await updateProcess(id, { status });
+          await processMutations.updateProcess.mutateAsync({ status });
           toast.success("Estado atualizado");
-          await queryClient.invalidateQueries({
-            queryKey: queryKeys.processes.detail(id),
-          });
-          await queryClient.invalidateQueries({
-            queryKey: queryKeys.processes.kanban({}),
-          });
         } catch (error) {
           console.error("Erro ao atualizar estado:", error);
           toast.error("Erro ao atualizar estado");
@@ -1156,27 +1139,31 @@ const ProcessDetails = () => {
         }
       }
 
-      // 4. DISPARAR OS DOIS REQUESTS EM SIMULTÂNEO (PROMISE.ALL)
-      const promises = [];
+      // 4. DISPARAR OS DOIS REQUESTS EM SIMULTÂNEO (mutations TanStack)
+      // Sanitize explícito aqui + de novo no hook (defense in depth contra
+      // documents/onedrive_links/arrays vazios a esmagarem o backend).
+      const safeProcessPayload = sanitizeProcessUpdatePayload(processUpdateData);
+      if (emailVal) safeProcessPayload.client_email = emailVal;
+      if (phoneVal) safeProcessPayload.client_phone = phoneVal;
 
-      // Update do Processo — incluir client_email/client_phone no body
-      // (o backend lê do raw_body para sincronizar com o cliente)
-      // Só incluímos se tiverem valor: evita sobrescrever campos válidos
-      // do processo com strings vazias.
-      if (emailVal) processUpdateData.client_email = emailVal;
-      if (phoneVal) processUpdateData.client_phone = phoneVal;
-      promises.push(updateProcess(id, processUpdateData));
-      
-      // Update do Cliente (apenas se houver client_id e não for role de indexação)
+      const promises = [
+        processMutations.updateProcess.mutateAsync(safeProcessPayload),
+      ];
+
       if (process.client_id && !hasRole(user, "indexacao")) {
-        promises.push(updateClient(process.client_id, clientUpdateData));
+        promises.push(
+          processMutations.updateClient.mutateAsync({
+            clientId: process.client_id,
+            data: clientUpdateData,
+          })
+        );
       }
-      
+
       await Promise.all(promises);
 
       toast.success("Processo e Cliente atualizados com sucesso!");
       setEditingCardId(null); // Exit editing mode after save
-      fetchData();
+      await fetchData();
     } catch (error) {
       console.error("Error saving:", error);
       toast.error(error.message || "Erro ao guardar alterações");
@@ -1200,9 +1187,13 @@ const ProcessDetails = () => {
         prioridade: process?.prioridade || "media",
         labels: Array.isArray(process?.labels) ? process.labels : [],
       };
-      await updateProcess(id, orgData);
+      // labels:[] é intencional (limpar etiquetas) — allowEmptyArrays
+      await processMutations.updateProcess.mutateAsync({
+        payload: orgData,
+        allowEmptyArrays: ["labels"],
+      });
       toast.success("Organização do processo guardada com sucesso!");
-      fetchData();
+      await fetchData();
     } catch (error) {
       console.error("Error saving organization:", error);
       const detail = error.response?.data?.detail;
@@ -1240,9 +1231,8 @@ const ProcessDetails = () => {
 
     setSendingComment(true);
     try {
-      await createActivity({ process_id: id, comment: newComment });
+      await processMutations.addActivity.mutateAsync({ comment: newComment });
       setNewComment("");
-      await invalidateProcessDetailsQueries(queryClient, id);
       toast.success("Comentário adicionado");
     } catch (error) {
       toast.error("Erro ao adicionar comentário");
@@ -1253,8 +1243,7 @@ const ProcessDetails = () => {
 
   const handleDeleteComment = async (activityId) => {
     try {
-      await deleteActivity(activityId);
-      await invalidateProcessDetailsQueries(queryClient, id);
+      await processMutations.deleteActivity.mutateAsync(activityId);
       toast.success("Comentário eliminado");
     } catch (error) {
       toast.error("Erro ao eliminar comentário");
@@ -1268,8 +1257,7 @@ const ProcessDetails = () => {
     }
 
     try {
-      await createDeadline({
-        process_id: id,
+      await processMutations.deadlines.create.mutateAsync({
         title: deadlineForm.title,
         description: deadlineForm.description,
         due_date: selectedDate && isValid(selectedDate) ? format(selectedDate, "yyyy-MM-dd") : null,
@@ -1279,7 +1267,6 @@ const ProcessDetails = () => {
       setIsDeadlineDialogOpen(false);
       setDeadlineForm({ title: "", description: "", due_date: "", priority: "medium" });
       setSelectedDate(null);
-      await fetchData();
     } catch (error) {
       toast.error("Erro ao criar prazo");
     }
@@ -1287,8 +1274,10 @@ const ProcessDetails = () => {
 
   const handleToggleDeadline = async (deadline) => {
     try {
-      await updateDeadline(deadline.id, { completed: !deadline.completed });
-      fetchData();
+      await processMutations.deadlines.update.mutateAsync({
+        deadlineId: deadline.id,
+        data: { completed: !deadline.completed },
+      });
     } catch (error) {
       toast.error("Erro ao atualizar prazo");
     }
@@ -1298,9 +1287,8 @@ const ProcessDetails = () => {
     if (!confirm("Tem certeza que deseja eliminar este prazo?")) return;
 
     try {
-      await deleteDeadline(deadlineId);
+      await processMutations.deadlines.remove.mutateAsync(deadlineId);
       toast.success("Prazo eliminado!");
-      fetchData();
     } catch (error) {
       toast.error("Erro ao eliminar prazo");
     }
@@ -2812,196 +2800,24 @@ const ProcessDetails = () => {
       </div>
       
       {/* Dialog para atribuir utilizadores */}
-      <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-purple-600" />
-              Gerir Atribuições
-            </DialogTitle>
-            <DialogDescription>
-              Seleccione os utilizadores a atribuir a este processo.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <p className="font-medium">{safeString(clientData?.nome || process?.client_name || personalData?.nome_completo) || 'Cliente'}</p>
-              <p className="text-sm text-muted-foreground">
-                #{safeString(process?.process_number, '—')}
-              </p>
-            </div>
-            
-            {loadingUsers ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
-                <span className="ml-2 text-sm text-muted-foreground">A carregar utilizadores...</span>
-              </div>
-            ) : (
-            <div className="space-y-4">
-              {/* Consultores - Seleção Múltipla */}
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Consultores</Label>
-                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"])
-                    .map(u => (
-                      <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
-                        <input
-                          type="checkbox"
-                          checked={selectedConsultores.includes(u.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedConsultores([...selectedConsultores, u.id]);
-                            } else {
-                              setSelectedConsultores(selectedConsultores.filter(id => id !== u.id));
-                            }
-                          }}
-                          className="rounded border-gray-300"
-                        />
-                        <span className="text-sm">{u.name}</span>
-                        <Badge variant="outline" className="text-xs ml-auto">{u.role}</Badge>
-                      </label>
-                    ))
-                  }
-                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"]).length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-2">Nenhum consultor disponível</p>
-                  )}
-                </div>
-                {selectedConsultores.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedConsultores.map(cid => {
-                      const user = appUsers.find(u => u.id === cid);
-                      return user ? (
-                        <Badge key={cid} variant="secondary" className="flex items-center gap-1">
-                          {user.name}
-                          <button
-                            onClick={() => setSelectedConsultores(selectedConsultores.filter(id => id !== cid))}
-                            className="ml-1 hover:text-destructive"
-                          >
-                            ×
-                          </button>
-                        </Badge>
-                      ) : null;
-                    })}
-                  </div>
-                )}
-              </div>
-              
-              {/* Intermediários - Seleção Múltipla */}
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Intermediários / Mediadores</Label>
-                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, ["intermediario", "intermediario", "intermediario_credito", "diretor"])
-                    .map(u => (
-                      <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
-                        <input
-                          type="checkbox"
-                          checked={selectedMediadores.includes(u.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedMediadores([...selectedMediadores, u.id]);
-                            } else {
-                              setSelectedMediadores(selectedMediadores.filter(id => id !== u.id));
-                            }
-                          }}
-                          className="rounded border-gray-300"
-                        />
-                        <span className="text-sm">{u.name}</span>
-                        <Badge variant="outline" className="text-xs ml-auto">{u.role}</Badge>
-                      </label>
-                    ))
-                  }
-                  {filterByAnyRole(appUsers, ["intermediario", "intermediario", "intermediario_credito", "diretor"]).length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-2">Nenhum intermediário disponível</p>
-                  )}
-                </div>
-                {selectedMediadores.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedMediadores.map(mid => {
-                      const user = appUsers.find(u => u.id === mid);
-                      return user ? (
-                        <Badge key={mid} variant="secondary" className="flex items-center gap-1">
-                          {user.name}
-                          <button
-                            onClick={() => setSelectedMediadores(selectedMediadores.filter(id => id !== mid))}
-                            className="ml-1 hover:text-destructive"
-                          >
-                            ×
-                          </button>
-                        </Badge>
-                      ) : null;
-                    })}
-                  </div>
-                )}
-              </div>
-              
-              {/* Indexação - Seleção Única */}
-              <div>
-                <Label className="text-sm font-medium">Indexação (Documentos)</Label>
-                <Select value={selectedIndexacao || "none"} onValueChange={(v) => setSelectedIndexacao(v === "none" ? "" : v)}>
-                  <SelectTrigger className="mt-1" data-testid="indexacao-select">
-                    <SelectValue placeholder="Seleccionar indexação..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {filterByAnyRole(appUsers, ["indexacao", "administrativo", "admin", "ceo"])
-                      .map(u => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.name} ({u.role})
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              {/* Parceiro - Seleção Única (Utilizador Fantasma) */}
-              <div>
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  Parceiro
-                  <span className="text-xs text-muted-foreground font-normal">(Utilizador fantasma - sem acesso)</span>
-                </Label>
-                <Select value={selectedParceiro || "none"} onValueChange={(v) => setSelectedParceiro(v === "none" ? "" : v)}>
-                  <SelectTrigger className="mt-1" data-testid="parceiro-select">
-                    <SelectValue placeholder="Seleccionar parceiro..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {filterByRole(appUsers, "parceiro")
-                      .map(u => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.name}
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            )}
-          </div>
-          
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowAssignDialog(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              onClick={handleSaveAssignment}
-              disabled={savingAssignment}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              {savingAssignment ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  A guardar...
-                </>
-              ) : (
-                "Guardar"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ProcessAssignDialog
+        open={showAssignDialog}
+        onOpenChange={setShowAssignDialog}
+        clientName={clientData?.nome || process?.client_name || personalData?.nome_completo}
+        processNumber={process?.process_number}
+        loadingUsers={loadingUsers}
+        appUsers={appUsers}
+        selectedConsultores={selectedConsultores}
+        setSelectedConsultores={setSelectedConsultores}
+        selectedMediadores={selectedMediadores}
+        setSelectedMediadores={setSelectedMediadores}
+        selectedIndexacao={selectedIndexacao}
+        setSelectedIndexacao={setSelectedIndexacao}
+        selectedParceiro={selectedParceiro}
+        setSelectedParceiro={setSelectedParceiro}
+        savingAssignment={savingAssignment}
+        onSave={handleSaveAssignment}
+      />
 
       {/* Dialog de Revisão de Conflitos IA */}
       <Dialog open={showAIReviewDialog} onOpenChange={setShowAIReviewDialog}>
