@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match / gov_auth / companies / alerts / storage / portal_settings / automation / announcements / changelog / portal_admin / push_notifications / activities / audit / user_branches)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -615,9 +615,130 @@ Keep `/active` and list `""` before `/{task_id}`. Unit helpers: `backend/tests/u
 
 Unit helpers: `backend/tests/unit/test_admin_encryption_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match / websocket / gdpr / annotations / ai_import_logs / task_logs / admin_encryption.
+**`gov_auth_api_*` thinning (complete):**
 
-**Remaining backlog:** optional `<350` queue is **cleared**. Only intentional leftover: `routes/ai_bulk/*` package helpers (left as-is). Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
+| Service | Responsibility |
+|---|---|
+| `gov_auth_api_helpers.py` | Mock citizen, JWT create, env config |
+| `gov_auth_api_login.py` | Start CMD / AMA OAuth redirect |
+| `gov_auth_api_callback.py` | OAuth callback → frontend with gov_token |
+| `gov_auth_api_verify.py` | Decode/verify temporary gov_token |
+
+Unit helpers: `backend/tests/unit/test_gov_auth_extraction_helpers.py`.
+
+**`companies_api_*` thinning (complete) — company email configs (distinct from `companies_crud_api_*`):**
+
+| Service | Responsibility |
+|---|---|
+| `companies_api_list.py` | List configs / available companies / get one |
+| `companies_api_mutate.py` | Create / update / delete email config |
+
+Keep `/available-companies` before `/{company_name}`. Unit helpers: `backend/tests/unit/test_companies_extraction_helpers.py`.
+
+**`alerts_api_*` thinning (complete) — do **not** overwrite `services/alerts.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `alerts_api_process.py` | Process alerts, age, pre-approval, docs, deed reminder |
+| `alerts_api_notifications.py` | List notifications + mark read |
+
+Unit helpers: `backend/tests/unit/test_alerts_extraction_helpers.py`.
+
+**`storage_api_*` thinning (complete) — do **not** overwrite `s3_storage.py` / `storage_service.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `storage_api_status.py` | Provider status (S3 / OneDrive) |
+| `storage_api_folder.py` | Process folder URL get/save/delete |
+| `storage_api_checklist.py` | Document checklist generate/get |
+
+Unit helpers: `backend/tests/unit/test_storage_extraction_helpers.py`.
+
+**`portal_settings_api_*` thinning (complete) — careful vs `portal_*`:**
+
+| Service | Responsibility |
+|---|---|
+| `portal_settings_api_helpers.py` | Defaults, `render_welcome_message`, get doc |
+| `portal_settings_api_crud.py` | Get / update / reset welcome template |
+| `portal_settings_api_preview.py` | Preview rendered welcome |
+
+Route re-exports helpers for back-compat (`routes.portal_settings` → `portal_status`). Unit helpers: `backend/tests/unit/test_portal_settings_extraction_helpers.py`.
+
+**`automation_api_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `automation_api_rules.py` | Rule models + CRUD |
+| `automation_api_meta.py` | Triggers / actions catalogs |
+
+Unit helpers: `backend/tests/unit/test_automation_extraction_helpers.py`.
+
+**`announcements_api_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `announcements_api_crud.py` | List / create / delete |
+| `announcements_api_interactions.py` | Like / read / readers |
+
+Keep `/readers/{id}` before `/{announcement_id}`. Unit helpers: `backend/tests/unit/test_announcements_extraction_helpers.py`.
+
+**`changelog_api_*` thinning (complete) — do **not** overwrite `changelog_service.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `changelog_api_list.py` | List published changelogs |
+| `changelog_api_diagnose.py` | Diagnose AI generation readiness |
+| `changelog_api_generate.py` | Generate changelog via IA |
+
+Unit helpers: `backend/tests/unit/test_changelog_extraction_helpers.py`.
+
+**`portal_admin_api_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `portal_admin_api_impersonate.py` | Staff “Ver como Cliente” impersonation |
+
+Unit helpers: `backend/tests/unit/test_portal_admin_extraction_helpers.py`.
+
+**`push_notifications_api_*` thinning (complete) — do **not** overwrite `push_notifications.py` (VAPID):**
+
+| Service | Responsibility |
+|---|---|
+| `push_notifications_api_subscribe.py` | Subscribe / unsubscribe / unsubscribe-all + models |
+| `push_notifications_api_status.py` | Subscription status |
+
+Unit helpers: `backend/tests/unit/test_push_notifications_extraction_helpers.py`.
+
+**`activities_api_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `activities_api_crud.py` | Create / list / delete (stealth guard preserved) |
+| `activities_api_history.py` | Process history list |
+
+Unit helpers: `backend/tests/unit/test_activities_extraction_helpers.py`.
+
+**`audit_api_*` thinning (complete) — do **not** overwrite `audit_trail_service.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `audit_api_trail.py` | List trail + stats |
+| `audit_api_export.py` | CSV export |
+| `audit_api_cleanup.py` | Retention cleanup |
+
+Unit helpers: `backend/tests/unit/test_audit_extraction_helpers.py`.
+
+**`user_branches_api_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `user_branches_api_crud.py` | Custom branch create / list / delete |
+
+Unit helpers: `backend/tests/unit/test_user_branches_extraction_helpers.py`.
+
+**Fat route thinning: essentially complete.** All substantive FastAPI route modules now use thin stubs + `run_*` services. Only intentional leftovers: `routes/ai_bulk/*` package helpers (left as-is) and tiny stubs already under ~100 lines. Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
+
+**Remaining backlog:** route thinning is **done** for practical purposes (only tiny stubs / intentional `ai_bulk` package left). Do not reopen fat route files to stuff logic back in.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
