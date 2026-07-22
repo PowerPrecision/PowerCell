@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / clients / finance / properties)
+### Route thinning (documents / processes / emails / portal / admin / clients / finance / properties / chat)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -40,6 +40,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Clients | `routes/clients.py` (~210; **done**) | `services/client_*.py` (see map) | Keep static paths (`/me`, `/registered`, `/search`, `""`, `/find-or-create`) before `/{client_id}`; do **not** collide with existing `client_match.py` / `process_clients_nm.py` / `process_my_clients.py` |
 | Finance | `routes/finance.py` (~280; **done**) | `services/finance_*.py` (see map) | Keep `/finance/processes/summary` before `/{finance_id}`; do **not** collide with existing `process_finance.py` — use `finance_process_records.py` for `process_finances` CRUD |
 | Properties | `routes/properties.py` (~245; **done**) | `services/property_*.py` (see map) | Keep static paths (`/stats`, `/by-process/{id}`) before `/{property_id}`; do **not** collide with existing `property_scraper.py` / `alerts.py` / `scraper.py` / `gov_scraper.py` |
+| Chat | `routes/chat.py` (~250; **done**) | `services/chat_*.py` (see map) | No prior `chat_*` services; WS notify via `websocket_manager` stays inside services |
 
 **`email_*` thinning (complete):**
 
@@ -133,7 +134,19 @@ Unit helpers: `backend/tests/unit/test_finance_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_property_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / clients / finance / properties.
+**`chat_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `chat_helpers.py` | `_block_parceiro` / `block_parceiro`, `MAX_ATTACHMENT_SIZE`, `ALLOWED_ATTACHMENT_TYPES` |
+| `chat_conversations.py` | GET `/conversations` |
+| `chat_messages.py` | messages get/send/upload/react/edit/delete + POST `/search` |
+| `chat_groups.py` | groups CRUD + leave |
+| `chat_presence.py` | typing, unread-count, online-users, chat users directory |
+
+Unit helpers: `backend/tests/unit/test_chat_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / clients / finance / properties / chat.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
