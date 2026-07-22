@@ -198,6 +198,13 @@ export const queryKeys = {
     all: ['team-performance'],
     range: (startDate, endDate) => [...queryKeys.teamPerformance.all, 'range', { startDate, endDate }],
   },
+
+  // Auditoria (RGPD — trilha de alterações)
+  audit: {
+    all: ['audit'],
+    trail: (params) => [...queryKeys.audit.all, 'trail', params],
+    stats: () => [...queryKeys.audit.all, 'stats'],
+  },
   
   // Financeiro
   finance: {
