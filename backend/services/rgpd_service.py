@@ -700,7 +700,7 @@ async def _get_rendered_rgpd_text(
     consent_data: dict
 ) -> str:
     """Obtém o template RGPD renderizado com as variáveis dinâmicas substituídas."""
-    from routes.rgpd import _get_active_rgpd_template
+    from services.rgpd_templates import _get_active_rgpd_template
     
     process = await db.processes.find_one({"id": process_id})
     if process:
@@ -738,7 +738,7 @@ async def _get_rendered_minuta_text(
     consent_data: dict
 ) -> str:
     """Obtém o template Minuta renderizado com as variáveis dinâmicas substituídas."""
-    from routes.rgpd import _get_active_minuta_template
+    from services.rgpd_minutas import _get_active_minuta_template
     
     process = await db.processes.find_one({"id": process_id})
     if process:
