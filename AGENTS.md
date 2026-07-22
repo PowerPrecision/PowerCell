@@ -754,38 +754,47 @@ Four product improvements — analyze before coding; prefer fixing wired paths o
 
 #### 1) Multi-perfil → webmail / email config
 
-**Symptom:** Header profile switcher works (`ContextSwitcher` + `X-Active-Role` / `X-Company-Id`), but personal-area webmail settings do not change with the active profile.
+**Product (owner clarification):** Each user has a company mailbox. **IMAP/SMTP come from the company**; the user only configures **email + password**. With multiple profiles, profile A and profile B often belong to **different companies** → different emails. Switching profile must load that company’s email settings.
 
-**Root cause (current design):**
-- Canonical store `user_email_configs` is unique on `(user_id, company_id)` only — **not** per role (`models/email_config.py`, `user_email_config_service.py`).
-- Resolver prefers company collection; role-keyed embeds are fallback only (`email_config_resolver.py`).
-- UI gates often use `hasRole(user, …)` (any possessed role) instead of `effectiveRole` (`ProfilePage.js`, `WebmailPage.jsx`).
-- Forced shared mailboxes for `indexacao`/`suporte` check **primary** role, not effective role.
+**Symptom:** Header profile switcher works (`ContextSwitcher` + `X-Active-Role` / `X-Company-Id`), but personal-area webmail/email form does not reliably show the other company’s config.
 
-**Plan (confirm product intent first):**
-- **A (default):** Email = one mailbox per **company**. Fix gates to `effectiveRole`; OAuth writes company key; stop advertising per-role IMAP for same company.
-- **B (if product needs it):** True per `(user_id, company_id, role)` mailboxes — schema + resolver + sync + OAuth + inbox tagging.
+**Root cause (bugs on top of correct company-scoped model):**
+- Canonical store is already `(user_id, company_id)` — matches product intent.
+- `switchActiveRole` does set `activeCompanyId` + hard reload; ProfilePage reloads `/users/me/email-config?company_id=…`.
+- UI gates often use `hasRole(user, …)` (any possessed role) instead of `effectiveRole` (`ProfilePage.js`, `WebmailPage.jsx`) → can stay locked on shared/indexação UI.
+- Forced shared mailboxes for `indexacao`/`suporte` check **primary** role, not effective role (`email_config_resolver.py`).
+- OAuth / dual-write still mixes role keys vs company keys → reads can miss the company row.
+
+**Plan (no schema change needed):**
+1. Fix gates: `effectiveRole` / `effectiveCompanyId`, not `hasRole` for webmail lock/shared.
+2. Ensure Profile + Webmail always pass/read `company_id` from active context after switch.
+3. Align OAuth + save path to write `(user_id, company_id)` only; IMAP/SMTP from company servers (user edits email+password only).
+4. Manual QA: user with 2 companies → switch profile → form shows correct email/password for that company.
 
 Key files: `ContextSwitcher.jsx`, `AuthContext.js`, `ProfilePage.js`, `EmailConfigForm.jsx`, `WebmailPage.jsx`, `users_api_email_config.py`, `email_config_resolver.py`, `user_email_config_service.py`.
 
 #### 2) IA em documentos → atualizar ficha
 
-**Goal:** Analyze uploaded docs with the model from Admin AI config (`document_analysis`), extract fields, update process/client ficha.
+**Product (owner clarification):** After documents are uploaded, clicking **Analisar com IA** must extract data and fill client/process fields. Prefer fixing the existing path — do **not** add a parallel analyzer.
 
-**What exists:** ProcessDetails → S3 “Analisar com IA” → `document_ai_analyze` → `ai_document_analyzer` (works partially). Upload OCR + `data_suggestions` path is disconnected from UI. `AIDocumentAnalyzer.js` orphaned.
+**Canonical path (already exists — improve this only):**
+`ProcessDetails` → `UnifiedDocumentsPanel` → `S3FileManager` → `POST /api/documents/ai-analyze/{processId}` → `document_ai_analyze` / `ai_document_analyzer` → `handleAIDataExtractedFromDocs` (pre-fills forms) → `POST /api/documents/ai-apply-suggestions/{id}` (persists to `processes`).
 
-**Gaps:**
-- Extractors hardcode `gpt-4o-mini` — ignore admin `ai_config.document_analysis`.
-- Two conflict stores (`data_suggestions` vs `process.ai_suggestions`); UI reads the latter, upload writes the former.
-- Field-map inconsistencies (`rendimento_mensal` vs `monthly_income`; recibo/IRS wrongly map salary → `renda_habitacao_atual`).
-- Updates hit `processes` only — no reliable sync to `clients` collection.
+**Do not duplicate / orphaned:**
+- `AIDocumentAnalyzer.js` — unused; delete or leave alone (do not wire a second UX).
+- Upload OCR → `data_suggestions` — disconnected from ProcessDetails UI; either fold into the canonical path or leave dormant.
+- `/api/ai/analyze-document*` — separate/dashboard; not the ProcessDetails button.
+
+**Gaps on the canonical path:**
+- Extractors hardcode `gpt-4o-mini` — ignore admin `ai_config.document_analysis` (must use configured AI).
+- Field-map inconsistencies between analyzer, apply map, and form (`rendimento_mensal` vs `monthly_income`, etc.).
+- Conflict UX partially split; keep `process.ai_suggestions` + existing review dialog.
 
 **Plan:**
-1. Wire `get_ai_config()["document_analysis"]` into `ai_document` / `ai_document_analyzer` / categorization (normalize model keys).
-2. Unify conflict store → `process.ai_suggestions` + existing `DataConflictResolver`.
-3. Single field map aligned with ProcessDetails hydration/apply.
-4. Empty fields auto-apply; conflicts via UI; optional client-doc sync if required.
-5. Delete or wire orphan `AIDocumentAnalyzer.js`.
+1. Wire `get_ai_config()["document_analysis"]` into the services used by `/documents/ai-analyze` only.
+2. Fix field mapping so extracted values land on the same canonical form fields ProcessDetails already maps.
+3. Ensure apply-suggestions persists and form refresh matches.
+4. Do **not** build a second “analyze” UI; ignore/orphan alternate paths unless they feed the same endpoint.
 
 #### 3) Toasts de tarefas em background
 
