@@ -42,26 +42,65 @@ async def run_get_portal_status(client_data: dict):
     """
     process = client_data.get("process")
     
-    # Para access_code_session sem processo, retornar estado pendente
+    # Para access_code_session sem processo, mostrar checklist do cliente
     if not process:
         client_id = client_data.get("client_id")
-        token_payload = client_data.get("token_payload", {})
+        client = client_data.get("client") or {}
+        client_name = client.get("nome") or ""
+
+        requested_docs = []
+        uploaded_docs = []
+        if client_id:
+            docs = await db.documents.find(
+                {
+                    "client_id": client_id,
+                    "$or": [
+                        {"process_id": None},
+                        {"process_id": ""},
+                        {"process_id": {"$exists": False}},
+                    ],
+                },
+                {"_id": 0},
+            ).to_list(200)
+            for d in docs:
+                status = (d.get("status") or "").upper()
+                entry = {
+                    "id": d.get("id"),
+                    "category": d.get("category"),
+                    "custom_label": d.get("custom_label") or d.get("notes"),
+                    "filename": d.get("filename") or d.get("original_filename"),
+                    "status": d.get("status"),
+                    "source": d.get("source"),
+                }
+                if status in ("REQUESTED", "PENDING"):
+                    requested_docs.append(entry)
+                elif status in ("RECEIVED", "UPLOADED", "SUBMITTED", "VALIDATED"):
+                    uploaded_docs.append(entry)
+
         return {
             "process": {
                 "id": None,
-                "client_name": "",
-                "status": "no_process",
-                "status_label": "Sem processo atribuído",
+                "client_name": client_name,
+                "status": "pending_documents",
+                "status_label": "Aguardando documentação",
                 "status_color": "#94a3b8",
-                "process_type": None,
+                "process_type": client.get("pending_process_type"),
             },
             "progress": {"percent": 0, "current_step": 0, "total_steps": 0},
             "stepper": [],
-            "documents": {"requested": [], "uploaded": [], "received": [], "has_pending": False},
+            "documents": {
+                "requested": requested_docs,
+                "uploaded": uploaded_docs,
+                "received": uploaded_docs,
+                "has_pending": len(requested_docs) > 0,
+            },
             "rgpd": {"status": "none", "has_rgpd": False},
             "team": {"consultores": [], "mediadores": []},
             "consultor": None,
-            "welcome_message": None,
+            "welcome_message": (
+                "Complete o seu perfil e envie a documentação solicitada. "
+                "O processo será criado automaticamente após os documentos obrigatórios."
+            ),
             "has_process": False,
             "client_id": client_id,
         }

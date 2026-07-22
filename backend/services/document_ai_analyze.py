@@ -267,6 +267,113 @@ async def _filter_already_analyzed_documents(
     return pending, skipped
 
 
+async def _build_titular_matches_for_analysis(
+    process: dict,
+    extracted_data: dict,
+    document_types: list[dict],
+    results: Optional[dict],
+) -> list[dict]:
+    """Compara extracao IA com titular 1 e 2 já definidos no processo."""
+    from services.document_titular_match import (
+        build_titular_identity_snapshot,
+        resolve_titular_match,
+    )
+    from services.encryption import decrypt_client_data
+
+    client_id = process.get("client_id")
+    second_id = process.get("second_client_id")
+    titular2_data = process.get("titular2_data") or {}
+
+    personal1 = process.get("personal_data") or {}
+    if client_id:
+        c1 = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        if c1:
+            try:
+                c1 = decrypt_client_data(c1)
+            except Exception:
+                pass
+            personal1 = {**(c1.get("dados_pessoais") or {}), **personal1}
+
+    titular1 = build_titular_identity_snapshot(
+        label="titular1",
+        client_id=client_id,
+        name=process.get("client_name"),
+        personal=personal1,
+    )
+
+    titular2 = None
+    has_t2 = bool(
+        second_id
+        or titular2_data.get("name")
+        or titular2_data.get("nome")
+        or titular2_data.get("email")
+    )
+    if has_t2:
+        personal2 = {}
+        t2_name = (
+            process.get("second_client_name")
+            or titular2_data.get("name")
+            or titular2_data.get("nome")
+        )
+        if second_id:
+            c2 = await db.clients.find_one({"id": second_id}, {"_id": 0})
+            if c2:
+                try:
+                    c2 = decrypt_client_data(c2)
+                except Exception:
+                    pass
+                personal2 = c2.get("dados_pessoais") or {}
+                t2_name = t2_name or c2.get("nome")
+        titular2 = build_titular_identity_snapshot(
+            label="titular2",
+            client_id=second_id,
+            name=t2_name,
+            personal=personal2,
+            titular2_data=titular2_data,
+        )
+
+    matches: list[dict] = []
+    analyzed_docs = (results or {}).get("documents_analyzed") or []
+
+    # Um match global com extracted_data agregado + um por documento quando possível
+    global_match = resolve_titular_match(extracted_data or {}, titular1, titular2)
+    matches.append(
+        {
+            "scope": "process_aggregate",
+            "file_name": None,
+            **global_match,
+            "titular1_name": titular1.get("name"),
+            "titular2_name": (titular2 or {}).get("name") if titular2 else None,
+            "has_second_titular": bool(titular2),
+        }
+    )
+
+    for doc_result in analyzed_docs:
+        file_name = doc_result.get("file_name") or ""
+        # Prefer fields inside doc_result / dados_extraidos
+        doc_extracted = {}
+        if isinstance(doc_result.get("dados_extraidos"), dict):
+            doc_extracted.update(doc_result["dados_extraidos"])
+        for key in ("nif", "nome", "client_name", "documento_id", "cc_number", "name"):
+            if doc_result.get(key):
+                doc_extracted[key] = doc_result[key]
+        if not doc_extracted:
+            doc_extracted = extracted_data or {}
+        m = resolve_titular_match(doc_extracted, titular1, titular2)
+        matches.append(
+            {
+                "scope": "document",
+                "file_name": file_name,
+                **m,
+                "titular1_name": titular1.get("name"),
+                "titular2_name": (titular2 or {}).get("name") if titular2 else None,
+                "has_second_titular": bool(titular2),
+            }
+        )
+
+    return matches
+
+
 async def _mark_documents_ai_analyzed(
     process_id: str,
     client_name: str,
@@ -428,6 +535,11 @@ async def run_ai_analyze_documents(
         results, documents
     )
 
+    # Match titular 1 vs 2 (2.º titular já definido no processo)
+    titular_matches = await _build_titular_matches_for_analysis(
+        process, extracted_data, document_types, results
+    )
+
     try:
         marked = await _mark_documents_ai_analyzed(
             process_id, client_name, documents, document_types
@@ -457,6 +569,10 @@ async def run_ai_analyze_documents(
         "documents": document_types,
         "suggestions": list(extracted_data.keys()),
         "analysis": results,
+        "titular_matches": titular_matches,
+        "needs_titular_choice": any(
+            m.get("needs_user_choice") for m in titular_matches
+        ),
     }
 
 
