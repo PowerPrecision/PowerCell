@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -349,7 +349,19 @@ Keep static `/google/callback` **before** `/{role}`. Unit helpers: `backend/test
 
 **Never** overwrite `gmail_oauth.py` / `gmail_api_service.py`. Unit helpers: `backend/tests/unit/test_google_auth_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats.
+**`admin_ai_*` thinning (complete) — sibling of `routes/admin_ai.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `admin_ai_config.py` | GET/PUT `/ai-config` + report recipients/config |
+| `admin_ai_models.py` | AI models CRUD |
+| `admin_ai_tasks.py` | AI tasks CRUD |
+| `admin_ai_cache.py` | GET/PUT `/cache-settings` |
+| `admin_ai_usage.py` | usage summary/by-task/by-model/trend/logs + weekly report |
+
+**Never** create `services/admin_ai.py` (route module name). Do **not** overwrite `admin_ai_data.py` (training/import logs) or `ai_usage_tracker.py`. Unit helpers: `backend/tests/unit/test_admin_ai_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai.
 
 **Remaining backlog** (still fat / partial, ≥~400 lines — next candidates by size):
 
@@ -357,10 +369,9 @@ Keep static `/google/callback` **before** `/{role}`. Unit helpers: `backend/test
 |---|---:|---|
 | `ai_bulk.py` | 1732 | Hybrid — much logic already in `routes/ai_bulk/*`; move package → `services/ai_bulk_*` |
 | `ai.py` / `ai_analysis.py` | 589 / 572 | AI endpoints |
-| `admin_ai.py` | 534 | Admin AI sibling (config/models/tasks) |
 | Mid-size | 400–480 | `scraper`, `templates`, `onedrive`, `my_clients`, `users`, `async_jobs` |
 
-Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, `temp_link_service.py`, `gmail_oauth.py`, route module names).
+Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, `temp_link_service.py`, `gmail_oauth.py`, `ai_document.py` / analyzers, route module names).
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
