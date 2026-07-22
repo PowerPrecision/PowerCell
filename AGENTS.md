@@ -25,8 +25,10 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - **Credentials in `backend/.env` are DEV-only** (owner clarification): production does not use this file — it injects secrets via the platform's secret manager. So the values present here are not production secrets; no need to treat them as a production leak or block on rotating them. Use `.env.example` as the template for required vars.
 - **Documentos IA (S3FileManager):** botões **Analisar IA** / **Renomear IA** só para `effectiveRole` ∈ `MANAGEMENT_ROLES` (`admin`, `ceo`, `diretor` — “gestor” no produto). Backend: `require_roles([ADMIN, CEO, DIRETOR])` em `/documents/ai-analyze`, `/rename-smart`, `/rename-all-smart`. Docs com `document_metadata.ai_analyzed` aparecem com badge **IA** e são saltados em re-análise. Renomear IA faz `categorize-all` antes de `rename-all-smart` para gerar nomes legíveis.
 - **Onboarding público (após Jul 2026):** registo **não** cria processo. Cria cliente + `titular2_data` no cliente + pedidos `mandatory_checklist` (SystemConfig) por `client_id`. Processo é criado só quando a checklist está completa (`onboarding_mandatory_config`). Na criação copia `titular2_data` → processo. Uploads portal sem processo → orphans Index. Pós-Index: **sempre** dual-assign consultor+intermediário. IA: `document_titular_match` compara com titular1/2 já no processo; `needs_user_choice` só se ambíguo.
+- **UI titular ambíguo:** ProcessDetails recebe `titular_matches` / `needs_titular_choice` do `ai-analyze`; dialog “Este documento é de quem?” (Titular 1 / 2 / Ignorar). Apply usa `target_titular` em `/documents/ai-apply-suggestions` → `titular2_data.*` quando 2º titular.
 - **Portal docs enviados:** upload do **cliente** (`portal/confirm-upload`) marca REQUESTED→RECEIVED. Upload da **equipa** no CRM (`document_upload` / `confirm-upload` + pós `auto_categorize`) chama `document_portal_fulfill` para o mesmo efeito no portal do cliente (match por categoria/label).
-- **Toasts BG:** sticky em `TasksContext` (`duration: Infinity`); **não** fazer `toast.dismiss` quando a tarefa sai de `/tasks/active` — o Toaster está fora do `BrowserRouter` e deve sobreviver a mudanças de página (só o utilizador fecha com X).
+- **Toasts BG:** sticky em `TasksContext` (`duration: Infinity`); **não** fazer `toast.dismiss` quando a tarefa sai de `/tasks/active` — o Toaster está fora do `BrowserRouter` e deve sobreviver a mudanças de página (só o utilizador fecha com X). `visibleToasts={8}`.
+- **ProcessDetails writes (TanStack):** load via `useProcessFullData` / `useProcessQuery`; gravações via `useProcessMutations` (`updateProcess` / `updateClient` / assign / activities / deadlines). **Nunca** enviar `documents` / `onedrive_links` / arrays vazios no PUT — `sanitizeProcessUpdatePayload` em `pages/processDetails/processUpdatePayload.js` (allow `labels:[]` só no save org). Optimistic merge nested. Dialog atribuições: `ProcessAssignDialog`. Ainda híbrido: RGPD / AI analyze-apply / magic-link usam `fetch` pontual.
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
@@ -759,9 +761,11 @@ Do **not** overwrite `ai_improvement_agent.py`. Unit helpers: `backend/tests/uni
 | Visitas URL/IA | **done** | `scraper_status` completed/error; preview PT→EN; poll pending; nav Visitas restored |
 | Toasts BG | **done** | sticky loading → morph green/red; **never auto-dismiss on nav**; dismiss via X; max 5 loading |
 | Multi-perfil webmail | **done** | `effectiveRole`/company gates; forced-shared uses effective role; OAuth prefers company key |
-| IA documentos | **done (canonical + UI)** | Analisar/Renomear IA activos no S3FileManager; só `MANAGEMENT_ROLES` (admin/CEO/diretor); docs `ai_analyzed` marcados e saltados |
+| IA documentos | **done (canonical + UI)** | Analisar/Renomear IA; `MANAGEMENT_ROLES`; `ai_analyzed`; dialog titular 1/2 se ambíguo |
+| Portal fulfill staff upload | **done** | `document_portal_fulfill` no upload CRM + auto-cat |
+| ProcessDetails mutations | **done (writes)** | `useProcessMutations` + `sanitizeProcessUpdatePayload`; load já era `useProcessFullData` |
 
-Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal visitas tab / consultor RBAC for unassigned pedidos; orphan AI paths left intentionally.
+Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal visitas tab / consultor RBAC for unassigned pedidos; orphan AI paths left intentionally; ProcessDetails ainda híbrido (RGPD / magic-link / AI fetch pontual); mais extracção de tabs do monolito.
 
 #### 1) Multi-perfil → webmail / email config — **done**
 
@@ -776,6 +780,8 @@ Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal v
 **Fixed:** model from admin config; compare/apply use `monthly_income` / `employer_name`.
 
 **UI (S3FileManager):** Analisar/Renomear IA visíveis; RBAC gestão; badge + skip `ai_analyzed`; Renomear categoriza antes de renomear.
+
+**Titular 1 vs 2:** se `needs_titular_choice`, dialog em ProcessDetails; apply com `target_titular` → `titular2_data` quando aplicável.
 
 **Gaps left:** conflict UX still split; OpenAI client may not call Gemini ids; orphan `/api/ai/analyze-document*` and upload OCR `data_suggestions` untouched.
 
