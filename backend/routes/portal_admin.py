@@ -1,42 +1,14 @@
 """
 ====================================================================
-ROTAS DE ADMIN DO PORTAL DO CLIENTE — IMPERSONATION
+ROTAS DE ADMIN DO PORTAL — IMPERSONATION — thin FastAPI stubs
 ====================================================================
-Endpoints internos (staff) para gestão do Portal do Cliente que
-NÃO estão no router público do portal (`portal.py`).
-
-Atualmente expõe apenas a funcionalidade de "Ver como Cliente"
-(impersonation) — permite a um consultor/intermediário/diretor/admin
-abrir o Portal do Cliente de um processo num novo separador,
-autenticado automaticamente, para prestar suporte ao cliente.
-
-SEGURANÇA:
-- Todos os endpoints exigem `require_staff()` (qualquer perfil interno).
-- O token gerado é um JWT normal do Portal (role=client_portal,
-  type=magic_link), pelo que o frontend do portal aceita-o sem
-  alterações. A diferenciação entre um magic link "real" e um
-  impersonate é feita pelos metadados no documento `portal_tokens`
-  (`impersonated_by`, `impersonated_by_email`) e por registos no
-  `audit_trail` + `history`.
-- O log de segurança segue o formato pedido:
-    "O utilizador X assumiu a identidade do cliente no processo Y"
-
-Autor: PowerCell Development Team
+Logic in services/portal_admin_api_*.py.
 ====================================================================
 """
-import logging
-from datetime import datetime, timezone
+from fastapi import APIRouter, Depends, Request
 
-from fastapi import APIRouter, Depends, HTTPException, Request
-
-from database import db
 from services.auth import require_staff
-from services.portal_security import PORTAL_TOKEN_VALIDITY_DAYS
-from services.portal_magic_link import issue_portal_magic_link
-from services.history import log_history
-from services.audit_trail_service import log_audit_event
-
-logger = logging.getLogger(__name__)
+from services.portal_admin_api_impersonate import run_impersonate_client_portal
 
 router = APIRouter(prefix="/portal", tags=["Portal Admin (Impersonation)"])
 
@@ -47,129 +19,5 @@ async def impersonate_client_portal(
     request: Request,
     user: dict = Depends(require_staff()),
 ):
-    """
-    Gera um link do Portal do Cliente autenticado para um membro do staff
-    "ver como cliente" (impersonation).
-
-    Fluxo:
-    1. Verificar que o processo existe (sem filtrar is_deleted, para
-       distinguir "não encontrado" de "eliminado" — alinhado com o
-       comportamento do GET /processes/{id}).
-    2. Recusar processos eliminados (o Portal recusa acessos a
-       eliminados — não faz sentido gerar um link inútil).
-    3. Gerar JWT magic_link (idêntico ao do Portal do Cliente) via
-       `create_client_magic_token`.
-    4. Gerar short_id (8 chars URL-safe) e guardar em `portal_tokens`
-       com metadados `impersonated_by` + `impersonated_by_email` para
-       auditoria.
-    5. Registar no `audit_trail` (com metadata.impersonate=True) e
-       no `history` do processo, com a mensagem:
-       "O utilizador {email} assumiu a identidade do cliente no
-       processo {process_id}".
-    6. Devolver `{"url": "...", "short_id": "...", "process_id": "...",
-       "client_name": "...", "expires_in_days": 90}`.
-
-    O URL tem o formato `{FRONTEND_URL}/portal/{short_id}` — o mesmo
-    que o magic link normal, pelo que o frontend do portal abre sem
-    alterações.
-
-    Returns:
-        dict com `url` (pronto a clicar) + metadados.
-
-    Raises:
-        HTTPException(404): Processo não encontrado.
-        HTTPException(404): Processo eliminado (com mensagem acionável).
-    """
-    # 1. Lookup do processo (sem filtro is_deleted — ver docstring)
-    process = await db.processes.find_one(
-        {"id": process_id},
-        {"_id": 0}
-    )
-    if not process:
-        raise HTTPException(status_code=404, detail="Processo não encontrado")
-
-    # 2. Recusar eliminados
-    if process.get("is_deleted"):
-        raise HTTPException(
-            status_code=404,
-            detail="Este processo foi eliminado. Restaure-o antes de usar Ver como Cliente."
-        )
-
-    client_name = process.get("client_name", "Cliente")
-    client_email = process.get("client_email", "")
-    client_id = process.get("client_id", "")
-
-    # 3–5. Gerar JWT + short_id + URL (com metadados de impersonate)
-    now = datetime.now(timezone.utc)
-    issued = await issue_portal_magic_link(
-        process_id=process_id,
-        process=process,
-        user=user,
-        request=request,
-        token_filter={"process_id": process_id, "impersonated_by": user.get("id")},
-        extra_token_fields={
-            "impersonated_by": user.get("id"),
-            "impersonated_by_email": user.get("email"),
-            "impersonated_by_name": user.get("name"),
-            "impersonated_by_role": user.get("role"),
-            "impersonated_at": now,
-            "token_type": "staff_impersonate",
-        },
-    )
-    short_id = issued["short_id"]
-    impersonate_url = issued["magic_link"]
-
-    # 6. Logs de segurança (audit_trail + history + logger)
-    audit_msg = (
-        f"O utilizador {user.get('email')} assumiu a identidade do "
-        f"cliente no processo {process_id}"
-    )
-    logger.info(f"[IMPERSONATE] {audit_msg} (cliente: {client_name})")
-
-    try:
-        await log_audit_event(
-            process_id=process_id,
-            user=user,
-            action="Impersonate — Ver como Cliente no Portal",
-            field="portal_impersonate",
-            new_value=short_id,
-            request=request,
-            source="web",
-            audit_reason="Suporte ao cliente (ver portal como cliente)",
-            metadata={
-                "impersonate": True,
-                "impersonated_by_email": user.get("email"),
-                "impersonated_by_role": user.get("role"),
-                "short_id": short_id,
-                "client_id": client_id,
-                "client_name": client_name,
-            },
-        )
-    except Exception as e:
-        logger.warning(f"[IMPERSONATE] Não foi possível registar audit_trail: {e}")
-
-    try:
-        await log_history(
-            process_id=process_id,
-            user=user,
-            action=(
-                f"Impersonate — {user.get('name', 'Staff')} assumiu a "
-                f"identidade do cliente no Portal (suporte)"
-            ),
-            field="portal_impersonate",
-            new_value=short_id,
-        )
-    except Exception as e:
-        logger.warning(f"[IMPERSONATE] Não foi possível registar history: {e}")
-
-    # 7. Resposta
-    return {
-        "url": impersonate_url,
-        "short_id": short_id,
-        "process_id": process_id,
-        "client_name": client_name,
-        "client_email": client_email,
-        "expires_in_days": PORTAL_TOKEN_VALIDITY_DAYS,
-        "impersonated_by": user.get("email"),
-        "impersonated_by_name": user.get("name"),
-    }
+    """Gera um link do Portal do Cliente autenticado para staff (impersonation)."""
+    return await run_impersonate_client_portal(process_id, request, user)
