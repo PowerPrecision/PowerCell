@@ -278,14 +278,23 @@ Unit helpers: `backend/tests/unit/test_visit_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_task_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks.
+**`backup_*` thinning (complete) — do **not** overwrite `services/backup.py` (core engine):**
+
+| Service | Responsibility |
+|---|---|
+| `backup_ops.py` | statistics / history / verify / config / status |
+| `backup_trigger.py` | POST `/trigger` + `/run-now` (+ `BackupRequest`) |
+| `backup_restore.py` | POST `/restore-from-s3` + emergency `/restore` (atomic swap) |
+
+Unit helpers: `backend/tests/unit/test_backup_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup.
 
 **Remaining backlog** (still fat / partial, ≥~400 lines — next candidates by size):
 
 | Route | ~Lines | Notes |
 |---|---:|---|
 | `ai_bulk.py` | 1732 | Hybrid — much logic already in `routes/ai_bulk/*`; move package → `services/ai_bulk_*` |
-| `backup.py` | 839 | Partial — core in `services/backup.py`; restore/trigger still in route |
 | `public.py` | 743 | Public registration + form-config + health |
 | `stats.py` | 669 | Dashboard/stats aggregations |
 | `shared_email.py` | 662 | Shared mailbox |
