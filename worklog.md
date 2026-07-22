@@ -1,4 +1,44 @@
 ---
+Task ID: processdetails-mutations-docs
+Agent: Cloud Agent (cursor/multi-profile-ai-visits-toasts-0b1c)
+Task: ProcessDetails TanStack mutations + portal fulfill + toasts sticky + titular IA + docs
+
+Date: 2026-07-22
+
+Work Log:
+- Confirmado backend `processes.py` já thinned (create-client, diagnose, portal-messages, add/remove client → `services/process_*.py`)
+- Confirmado ProcessDetails load já usa `useProcessFullData` / `useProcessQuery` (híbrido: writes ainda manuais)
+- Ligado `useProcessMutations` às gravações: updateProcess, updateClient, assign multi-assignee, activities, deadlines, auto-save status
+- Criado `processUpdatePayload.js` — sanitize para NÃO enviar documents/onedrive_links/arrays vazios (wipe no Mongo); labels:[] só no save org
+- Optimistic merge nested (`mergeProcessOptimistic`) no mutation hook
+- Actualizado `assignProcess` em `api.js` para consultor_ids/mediador_ids/parceiro_id
+- Extraído `ProcessAssignDialog.jsx` do monolito ProcessDetails
+- Toasts BG: removido toast.dismiss silencioso quando tarefa sai de `/tasks/active` (sobrevivem a mudança de página)
+- Portal: `document_portal_fulfill` — upload staff CRM marca REQUESTED→RECEIVED (cliente já fazia via confirm-upload)
+- UI titular ambíguo: dialog Titular 1/2/Ignorar; apply com target_titular → titular2_data
+- Docs sincronizados: AGENTS.md, README.md, ARCHITECTURE.md, CHANGELOG.md [2026-07-22]
+- ESLint --quiet nos ficheiros alterados: OK
+- PRs: #567/#568/#569 merged; follow-up docs+mutations em #570
+
+Stage Summary:
+- Frontend ProcessDetails writes passam por TanStack mutations com payload seguro
+- Portal checklist reflecte uploads da equipa no CRM
+- Sticky BG toasts não desaparecem na navegação
+- Documentação de produto/arquitectura/changelog/agents alinhada
+
+Files:
+- frontend/src/hooks/mutations/useProcessMutations.js
+- frontend/src/pages/ProcessDetails.js
+- frontend/src/pages/processDetails/processUpdatePayload.js (+ .test.js)
+- frontend/src/components/processDetails/ProcessAssignDialog.jsx
+- frontend/src/services/api.js
+- frontend/src/contexts/TasksContext.js
+- backend/services/document_portal_fulfill.py (+ unit tests)
+- backend/services/document_upload.py / document_direct_upload.py / document_auto_categorize.py
+- backend/services/document_ai_analyze.py (target_titular)
+- AGENTS.md, README.md, ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: 1
 Agent: Main Agent
 Task: Correções Bloco C — Validação de E-mail e Atribuição de Indexador
