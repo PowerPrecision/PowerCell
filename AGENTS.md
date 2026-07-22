@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / admin_process_migration)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -45,7 +45,8 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Diagnostics | `routes/diagnostics.py` (~150; **done**) | `services/diagnostics_*.py` (see map) | Do **not** collide with existing `process_kanban_diagnose.py` — use `diagnostics_*` prefix |
 | Leads | `routes/leads.py` (~140; **done**) | `services/lead_*.py` (see map) | Keep static paths (`/by-status`, `/consultores`, `/extract-url`, `/extract-html`, `/from-url`, `""`) before `/{lead_id}`; prefer `lead_*` (not `leads_*`) |
 | Form config | `routes/form_config.py` (**done**) | `services/form_config_*.py` (see map) | Re-exports `DEFAULT_FORM_CONFIG` / `DEFAULT_STEP_CONFIG` for `routes.public` |
-| Admin process migration | `routes/admin_process_migration.py` (**done**) | `services/admin_proc_migration_*.py` (see map) | **Never** create `services/admin_process_migration.py` (collides with the route module name) |
+| System config | `routes/system_config.py` (**done**) | `services/system_config_*.py` (see map) | **Never** overwrite existing `services/system_config.py` (core load/save/cache). Use `system_config_api` / `_connections` / `_admin_ops` / `_system_emails` |
+| RGPD | `routes/rgpd.py` (~230; **done**) | `services/rgpd_*.py` (see map) | Keep `/admin/all`, `/admin/template*`, `/admin/minuta-template*`, `/admin/stats/summary` before `/admin/{request_id}`; do **not** overwrite existing `rgpd_service.py` / `gdpr.py` — use `rgpd_helpers` / `rgpd_request` / `rgpd_public` / `rgpd_admin_list` / `rgpd_templates` / `rgpd_minutas` |
 
 **`email_*` thinning (complete):**
 
@@ -198,18 +199,34 @@ Unit helpers: `backend/tests/unit/test_lead_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_form_config_extraction_helpers.py`.
 
-**`admin_proc_migration_*` thinning (complete) — sibling of `routes/admin_process_migration.py`:**
+**`system_config_*` thinning (complete):**
 
 | Service | Responsibility |
 |---|---|
-| `admin_proc_migration_helpers.py` | `generate_client_key`, `extract_personal_from_process`, migration state helpers, `run_migration_task` |
-| `admin_proc_migration_api.py` | status / dry-run / run / rollback / reset `run_*` handlers |
+| `system_config.py` | **Existing core** — load/save/cache, `update_config_section`, companies list (**do not overwrite**) |
+| `system_config_api.py` | `CONFIG_FIELDS`, `mask_sensitive`, get/update/fields/companies/export-permission |
+| `system_config_connections.py` | POST `/test-connection/{service}` |
+| `system_config_admin_ops.py` | complete-setup, storage-info, reset-cache, reveal-secrets |
+| `system_config_system_emails.py` | system-emails CRUD + test + request models |
 
-**Never** create `services/admin_process_migration.py` (name collision with the route module).
+Unit helpers: `backend/tests/unit/test_system_config_extraction_helpers.py`.
 
-Unit helpers: `backend/tests/unit/test_admin_proc_migration_extraction_helpers.py`.
+**`rgpd_*` thinning (complete):**
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / admin_process_migration.
+| Service | Responsibility |
+|---|---|
+| `rgpd_helpers.py` | `_add_process_activity`, `_get_rgpd_or_404`, `_frontend_base_url_from_request` |
+| `rgpd_request.py` | POST `/request` + `/admin/{id}/resend` (calls `rgpd_service.create_rgpd_request` / `send_rgpd_email`) |
+| `rgpd_public.py` | validate / sign / status / data / list-by-process (calls `validate_token` / `sign_rgpd` / `get_rgpd_by_process`) |
+| `rgpd_admin_list.py` | `/admin/all`, `/admin/{id}` CRUD, `/admin/stats/summary` |
+| `rgpd_templates.py` | RGPD template CRUD + `_get_active_rgpd_template` + defaults |
+| `rgpd_minutas.py` | Minuta template CRUD + `_get_active_minuta_template` + defaults |
+
+Do **not** overwrite `rgpd_service.py` (PDF/email/token core) or `gdpr.py`. `rgpd_service` now imports active-template helpers from `rgpd_templates` / `rgpd_minutas` (routes still re-export for back-compat).
+
+Unit helpers: `backend/tests/unit/test_rgpd_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
