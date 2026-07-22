@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / clients)
+### Route thinning (documents / processes / emails / portal / admin / clients / finance)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -38,6 +38,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Portal | `routes/portal.py` (~221; **done**) | `services/portal_*.py` (see map) | Do **not** collide with existing `portal_security` / `portal_magic_link` / `portal_documents_notify`. Portal `DOCUMENT_CATEGORY_MAP` includes `Financeiros` (separate from `document_constants`) |
 | Admin | `routes/admin.py` (~655; **done**) | `services/admin_*.py` (see map) | Do **not** collide with existing **route** modules `admin_ai` / `admin_storage` / `admin_encryption` / `admin_migration` / `admin_process_migration` |
 | Clients | `routes/clients.py` (~210; **done**) | `services/client_*.py` (see map) | Keep static paths (`/me`, `/registered`, `/search`, `""`, `/find-or-create`) before `/{client_id}`; do **not** collide with existing `client_match.py` / `process_clients_nm.py` / `process_my_clients.py` |
+| Finance | `routes/finance.py` (~280; **done**) | `services/finance_*.py` (see map) | Keep `/finance/processes/summary` before `/{finance_id}`; do **not** collide with existing `process_finance.py` — use `finance_process_records.py` for `process_finances` CRUD |
 
 **`email_*` thinning (complete):**
 
@@ -105,7 +106,20 @@ Unit helpers: `backend/tests/unit/test_admin_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_client_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / clients.
+**`finance_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `finance_helpers.py` | Shared helpers + `DashboardFinanceConfigUpdate` + `FINANCE_READ_ROLES` / defaults |
+| `finance_dashboard.py` | GET/PUT `/finance/config`, summary, monthly, performance |
+| `finance_commissions.py` | `_calc_commissions_data`, commissions + CSV export |
+| `finance_configs.py` | Multi-company `finance_configs` CRUD + `_doc_to_config_response` |
+| `finance_pool.py` | Pool distribution + CSV export |
+| `finance_process_records.py` | `process_finances` summary/CRUD/status/delete (not `process_finance.py`) |
+
+Unit helpers: `backend/tests/unit/test_finance_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / clients / finance.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
