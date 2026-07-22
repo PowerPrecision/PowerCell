@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -48,6 +48,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Admin process migration | `routes/admin_process_migration.py` (**done**) | `services/admin_proc_migration_*.py` (see map) | **Never** create `services/admin_process_migration.py` (collides with the route module name) |
 | System config | `routes/system_config.py` (**done**) | `services/system_config_*.py` (see map) | **Never** overwrite existing `services/system_config.py` (core load/save/cache). Use `system_config_api` / `_connections` / `_admin_ops` / `_system_emails` |
 | RGPD | `routes/rgpd.py` (~230; **done**) | `services/rgpd_*.py` (see map) | Keep `/admin/all`, `/admin/template*`, `/admin/minuta-template*`, `/admin/stats/summary` before `/admin/{request_id}`; do **not** overwrite existing `rgpd_service.py` / `gdpr.py` — use `rgpd_helpers` / `rgpd_request` / `rgpd_public` / `rgpd_admin_list` / `rgpd_templates` / `rgpd_minutas` |
+| Auth | `routes/auth.py` (~150; **done**) | `services/auth_*_handlers.py` (see map) | **Never** overwrite existing `services/auth.py` (JWT/bcrypt/`get_current_user`). Preserve deprecated `/login` (410) + `/login-v2` + cookie-ready `Response` signatures. Re-export `get_current_user` for `routes.storage` |
 
 **`email_*` thinning (complete):**
 
@@ -238,7 +239,19 @@ Do **not** overwrite `rgpd_service.py` (PDF/email/token core) or `gdpr.py`. `rgp
 
 Unit helpers: `backend/tests/unit/test_rgpd_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration.
+**`auth_*_handlers` thinning (complete) — do not overwrite `services/auth.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `auth_register_handlers.py` | POST `/register` |
+| `auth_login_handlers.py` | deprecated POST `/login` (410) + POST `/login-v2` |
+| `auth_profile_handlers.py` | GET `/me`, GET/PUT `/preferences`, PUT `/profile` (multi-empresa merge) |
+| `auth_sessions_handlers.py` | POST `/refresh`, `/logout`, GET/DELETE `/sessions` |
+| `auth_password_handlers.py` | POST `/change-password`, `/validate-password` |
+
+Unit helpers: `backend/tests/unit/test_auth_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
