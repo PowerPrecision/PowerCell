@@ -131,9 +131,8 @@ class TestClientEncryption:
     
     def test_encrypt_client_data(self):
         """Testa encriptação de dados de cliente."""
-        # Importar do módulo de clientes
-        sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'routes'))
-        from clients import encrypt_client_data, decrypt_client_data
+        # Logic lives in services.encryption (routes/clients.py is thin stubs only)
+        from services.encryption import encrypt_client_data, decrypt_client_data
         
         client = {
             "id": "client-123",
