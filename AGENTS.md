@@ -781,7 +781,7 @@ Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal v
 
 #### 3) Toasts de tarefas em background — **done**
 
-Sticky `toast.loading` (id `bg-task-*`, `duration: Infinity`) → morph success/error; `visibleToasts={5}`.
+Sticky `toast.loading` (id `bg-task-*`, `duration: Infinity`) → morph success/error; **não** auto-dismiss quando a tarefa sai de `/tasks/active` (sobrevive a mudança de página); dismiss só via X. Cap loading 5; `visibleToasts={8}`.
 
 #### 4) Gestor de visitas + IA URL — **done (CRM path)**
 
