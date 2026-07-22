@@ -114,10 +114,67 @@ export function TasksProvider({ children }) {
   const pollingIntervalRef = useRef(null);
   const lastToastTimeRef = useRef({});
   const previousTaskIdsRef = useRef(new Set());
-  const toastedTaskIdsRef = useRef(new Set()); // Permanent dedup: tasks already toasted
+  const toastedTaskIdsRef = useRef(new Set()); // Permanent dedup: completion already toasted
+  const loadingToastIdsRef = useRef([]); // Ordered list of active loading toast ids (cap 5)
   const consecutiveFailuresRef = useRef(0);
   const circuitBreakerActiveRef = useRef(false);
   const circuitBreakerTimeoutRef = useRef(null);
+
+  const MAX_LOADING_TOASTS = 5;
+
+  const toastIdFor = (taskId) => `bg-task-${taskId}`;
+
+  /**
+   * Ensure a sticky loading toast exists for an active task (cap 5).
+   * Updates progress on the same id while the task is still pending/processing.
+   */
+  const upsertLoadingToast = useCallback((task) => {
+    const id = toastIdFor(task.task_id);
+    const queue = loadingToastIdsRef.current;
+
+    if (!queue.includes(id)) {
+      // Cap: dismiss oldest loading toast if at limit
+      while (queue.length >= MAX_LOADING_TOASTS) {
+        const oldest = queue.shift();
+        toast.dismiss(oldest);
+      }
+      queue.push(id);
+    }
+
+    toast.loading(task.title, {
+      id,
+      description: task.progress_message || "Em curso…",
+      duration: Infinity,
+    });
+  }, []);
+
+  /**
+   * Morph sticky toast to success/error and stop tracking it as loading.
+   */
+  const finalizeToast = useCallback((task, kind) => {
+    const id = toastIdFor(task.task_id);
+    loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
+
+    if (kind === "success") {
+      toast.success(`${task.title} concluída!`, {
+        id,
+        description: task.description || "A tarefa foi concluída com sucesso.",
+        duration: Infinity,
+        action: task.result_url
+          ? {
+              label: "Ver resultado",
+              onClick: () => window.open(task.result_url, "_blank"),
+            }
+          : undefined,
+      });
+    } else {
+      toast.error(`${task.title} falhou`, {
+        id,
+        description: task.error_message || "Ocorreu um erro durante a execução.",
+        duration: Infinity,
+      });
+    }
+  }, []);
 
   /**
    * Parar polling (limpa intervalo e circuit breaker timeout)
@@ -175,39 +232,47 @@ export function TasksProvider({ children }) {
       const previousTaskIds = previousTaskIdsRef.current;
       const currentTaskIds = new Set(data.tasks.map(t => t.task_id));
       
-      // Verificar tarefas concluídas recentemente
+      // Sticky toasts: loading → morph success/error (same id)
       data.tasks.forEach(task => {
-        const wasActive = previousTaskIds.has(task.task_id);
+        const wasSeen = previousTaskIds.has(task.task_id);
+        const toastId = toastIdFor(task.task_id);
+        const hadLoadingToast = loadingToastIdsRef.current.includes(toastId);
+        const isActive =
+          task.status === TaskStatus.PENDING ||
+          task.status === TaskStatus.PROCESSING;
         const isNowCompleted = task.status === TaskStatus.COMPLETED;
         const isNowFailed = task.status === TaskStatus.FAILED;
         const isUnacknowledged = !task.acknowledged_at;
-        
-        // Permanent dedup: skip if already toasted this task
+
+        if (isActive) {
+          upsertLoadingToast(task);
+          return;
+        }
+
+        // Permanent dedup: skip if already toasted completion for this task
         if (toastedTaskIdsRef.current.has(task.task_id)) return;
-        
-        if (wasActive && isUnacknowledged) {
-          // Mark as toasted permanently to prevent loops
+
+        // Only morph/complete if we showed a loading toast or saw this task while active
+        if (
+          isUnacknowledged &&
+          (isNowCompleted || isNowFailed) &&
+          (hadLoadingToast || wasSeen)
+        ) {
           toastedTaskIdsRef.current.add(task.task_id);
-          // Auto-trim the set to prevent memory leak (keep last 200)
           if (toastedTaskIdsRef.current.size > 200) {
             const arr = [...toastedTaskIdsRef.current];
             toastedTaskIdsRef.current = new Set(arr.slice(-200));
           }
-          
-          if (isNowCompleted) {
-            toast.success(`${task.title} concluída!`, {
-              description: task.description || "A tarefa foi concluída com sucesso.",
-              action: task.result_url ? {
-                label: "Ver resultado",
-                onClick: () => window.open(task.result_url, "_blank"),
-              } : undefined,
-            });
-          } else if (isNowFailed) {
-            toast.error(`${task.title} falhou`, {
-              description: task.error_message || "Ocorreu um erro durante a execução.",
-            });
-          }
+          finalizeToast(task, isNowCompleted ? "success" : "error");
         }
+      });
+
+      // Drop tracking for loading toasts whose tasks left the active list
+      const activeOrTerminalIds = new Set(data.tasks.map(t => toastIdFor(t.task_id)));
+      loadingToastIdsRef.current = loadingToastIdsRef.current.filter((id) => {
+        if (activeOrTerminalIds.has(id)) return true;
+        toast.dismiss(id);
+        return false;
       });
       
       // Actualizar estado
@@ -233,7 +298,7 @@ export function TasksProvider({ children }) {
     } finally {
       setIsLoading(false);
     }
-  }, [user, activateCircuitBreaker]);
+  }, [user, activateCircuitBreaker, upsertLoadingToast, finalizeToast]);
   
   /**
    * Confirmar visualização de uma tarefa
@@ -256,6 +321,9 @@ export function TasksProvider({ children }) {
       await api.delete(`/tasks/${taskId}/cancel`);
       setTasks(prev => prev.filter(t => t.task_id !== taskId));
       setActiveCount(prev => Math.max(0, prev - 1));
+      const id = toastIdFor(taskId);
+      loadingToastIdsRef.current = loadingToastIdsRef.current.filter((x) => x !== id);
+      toast.dismiss(id);
       toast.info("Tarefa cancelada");
     } catch (error) {
       console.error("[TasksContext] Erro ao cancelar tarefa:", error);
