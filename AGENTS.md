@@ -750,92 +750,36 @@ Do **not** overwrite `ai_improvement_agent.py`. Unit helpers: `backend/tests/uni
 
 ### Active feature plan (branch `cursor/multi-profile-ai-visits-toasts-0b1c`)
 
-Four product improvements — analyze before coding; prefer fixing wired paths over new parallel systems.
+| Item | Status | Notes |
+|---|---|---|
+| Visitas URL/IA | **done** | `scraper_status` completed/error; preview PT→EN; poll pending; nav Visitas restored |
+| Toasts BG | **done** | sticky loading → morph green/red; dismiss via X; max 5 |
+| Multi-perfil webmail | **done** | `effectiveRole`/company gates; forced-shared uses effective role; OAuth prefers company key |
+| IA documentos | **done (canonical path)** | admin `document_analysis` model + income/employer field maps on ProcessDetails Analisar-com-IA |
 
-#### 1) Multi-perfil → webmail / email config
+Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal visitas tab / consultor RBAC for unassigned pedidos; orphan AI paths left intentionally.
 
-**Product (owner clarification):** Each user has a company mailbox. **IMAP/SMTP come from the company**; the user only configures **email + password**. With multiple profiles, profile A and profile B often belong to **different companies** → different emails. Switching profile must load that company’s email settings.
+#### 1) Multi-perfil → webmail / email config — **done**
 
-**Symptom:** Header profile switcher works (`ContextSwitcher` + `X-Active-Role` / `X-Company-Id`), but personal-area webmail/email form does not reliably show the other company’s config.
+**Product:** IMAP/SMTP from company; user sets email+password; multi-profile ⇒ usually different companies ⇒ different emails.
 
-**Root cause (bugs on top of correct company-scoped model):**
-- Canonical store is already `(user_id, company_id)` — matches product intent.
-- `switchActiveRole` does set `activeCompanyId` + hard reload; ProfilePage reloads `/users/me/email-config?company_id=…`.
-- UI gates often use `hasRole(user, …)` (any possessed role) instead of `effectiveRole` (`ProfilePage.js`, `WebmailPage.jsx`) → can stay locked on shared/indexação UI.
-- Forced shared mailboxes for `indexacao`/`suporte` check **primary** role, not effective role (`email_config_resolver.py`).
-- OAuth / dual-write still mixes role keys vs company keys → reads can miss the company row.
+**Fixed:** gates use `effectiveRole`; forced-shared uses effective role; OAuth prefers `company:<id>`.
 
-**Plan (no schema change needed):**
-1. Fix gates: `effectiveRole` / `effectiveCompanyId`, not `hasRole` for webmail lock/shared.
-2. Ensure Profile + Webmail always pass/read `company_id` from active context after switch.
-3. Align OAuth + save path to write `(user_id, company_id)` only; IMAP/SMTP from company servers (user edits email+password only).
-4. Manual QA: user with 2 companies → switch profile → form shows correct email/password for that company.
+#### 2) IA em documentos → atualizar ficha — **done (canonical path)**
 
-Key files: `ContextSwitcher.jsx`, `AuthContext.js`, `ProfilePage.js`, `EmailConfigForm.jsx`, `WebmailPage.jsx`, `users_api_email_config.py`, `email_config_resolver.py`, `user_email_config_service.py`.
+**Canonical only:** ProcessDetails → S3 “Analisar com IA” → `/documents/ai-analyze` → apply-suggestions. No duplicate UI.
 
-#### 2) IA em documentos → atualizar ficha
+**Fixed:** model from admin config; compare/apply use `monthly_income` / `employer_name`.
 
-**Product (owner clarification):** After documents are uploaded, clicking **Analisar com IA** must extract data and fill client/process fields. Prefer fixing the existing path — do **not** add a parallel analyzer.
+**Gaps left:** conflict UX still split; OpenAI client may not call Gemini ids; orphan `/api/ai/analyze-document*` and upload OCR `data_suggestions` untouched.
 
-**Canonical path (already exists — improve this only):**
-`ProcessDetails` → `UnifiedDocumentsPanel` → `S3FileManager` → `POST /api/documents/ai-analyze/{processId}` → `document_ai_analyze` / `ai_document_analyzer` → `handleAIDataExtractedFromDocs` (pre-fills forms) → `POST /api/documents/ai-apply-suggestions/{id}` (persists to `processes`).
+#### 3) Toasts de tarefas em background — **done**
 
-**Do not duplicate / orphaned:**
-- `AIDocumentAnalyzer.js` — unused; delete or leave alone (do not wire a second UX).
-- Upload OCR → `data_suggestions` — disconnected from ProcessDetails UI; either fold into the canonical path or leave dormant.
-- `/api/ai/analyze-document*` — separate/dashboard; not the ProcessDetails button.
+Sticky `toast.loading` (id `bg-task-*`, `duration: Infinity`) → morph success/error; `visibleToasts={5}`.
 
-**Gaps on the canonical path:**
-- ~~Extractors hardcode `gpt-4o-mini`~~ — fixed: `ai_document_analyzer` resolves via `get_ai_config()["document_analysis"]` + `normalize_admin_model_key` (`gpt4o_mini` → `gpt-4o-mini`).
-- ~~Field-map salary → `renda_habitacao_atual`~~ — fixed: compare/apply use `monthly_income` / `employer_name` (never housing-rent field).
-- Conflict UX partially split; keep `process.ai_suggestions` + existing review dialog.
-- Alternate path `ai_document.py` (`map_recibo_to_financial_data` still maps salary → `renda_habitacao_atual`) is **not** used by ProcessDetails Analisar com IA — leave alone unless folding upload-OCR into this path.
-- Analyzer still OpenAI-only (vision/chat); if admin sets Gemini for `document_analysis`, resolve may return a Gemini id that the OpenAI client cannot call.
+#### 4) Gestor de visitas + IA URL — **done (CRM path)**
 
-**Plan:**
-1. Wire `get_ai_config()["document_analysis"]` into the services used by `/documents/ai-analyze` only.
-2. Fix field mapping so extracted values land on the same canonical form fields ProcessDetails already maps.
-3. Ensure apply-suggestions persists and form refresh matches.
-4. Do **not** build a second “analyze” UI; ignore/orphan alternate paths unless they feed the same endpoint.
-
-#### 3) Toasts de tarefas em background
-
-**Current:** `TasksContext` polls `GET /api/tasks/active` (Mongo `background_jobs`). Toasts only on complete/fail; progress lives in `TasksDropdown`. Sonner already `bottom-right` + `closeButton`.
-
-**Plan:**
-1. On first sight of `pending`/`processing` → `toast.loading` with stable `id: bg-task-${task_id}`, `duration: Infinity`.
-2. Poll updates same `id` (progress text).
-3. On complete/fail → `toast.success` / `toast.error` same `id` (morph green/red); dismiss only via X.
-4. Cap 5: `visibleToasts={5}` + drop oldest loading toast if needed.
-5. Later: unify `task_logs` writers into `background_jobs` (AI async still writes the other store).
-
-Key files: `TasksContext.js`, `TasksDropdown.js`, `App.js` Toaster, `task_api_background.py`.
-
-#### 4) Gestor de visitas + IA a partir de URL
-
-**Current:** Real manager is `VisitsPage` (`/visitas`); ProcessDetails `VisitasTab` is property association only (no scrape). Paste URL → debounce preview `POST /api/scraper/single` → create visit → background scrape.
-
-**Bugs:**
-- CRM scrape (`_run_scraper_for_visit`) never sets `scraper_status` to `completed`/`error` → UI stuck on “A extrair dados…”.
-- Preview expects EN keys; scraper returns PT (`titulo`/`preco`/…).
-- No poll while pending after create.
-- Portal visitas tab commented out; nav link to `/visitas` commented; consultor kanban RBAC hides unassigned portal requests.
-
-**Plan:**
-1. Fix scraper status + PT→EN DTO (or normalize API).
-2. Poll kanban while any visit `scraper_status === pending`.
-3. Use BackgroundTasks/ARQ + optional `background_jobs` row (ties into toast feature).
-4. Uncomment nav; fix consultor visibility for `solicitada` portal visits.
-5. Clarify VisitasTab vs VisitsPage in UI copy if needed.
-
-Key files: `VisitsPage.js`, `visit_helpers.py`, `visit_list_create.py`, `scraper_api_*`, `portal_client_visits.py`, `DashboardLayout.js`.
-
-#### Suggested implementation order
-
-1. Visitas scraper status + preview mapping (quick wins)
-2. Background task sticky toasts
-3. Multi-perfil / webmail (company-scoped email+password; fix effectiveRole/company reload bugs)
-4. Document AI on existing ProcessDetails “Analisar com IA” path only (config model + field maps; no duplicate UI)
+`_run_scraper_for_visit` sets completed/error; VisitsPage normalizes preview + polls; DashboardLayout Visitas nav restored. Portal tab / consultor RBAC for unassigned portal requests still optional.
 
 Owner clarified: email is per **company** (IMAP/SMTP from company; user sets email+password). Multiple profiles ⇒ usually different companies ⇒ different emails.
 
