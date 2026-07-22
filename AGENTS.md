@@ -26,8 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / clients / finance / properties / chat)
-
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / leads) / diagnostics)
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
 | Area | Route file | Services pattern | Notes |
@@ -42,6 +41,8 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Finance | `routes/finance.py` (~280; **done**) | `services/finance_*.py` (see map) | Keep `/finance/processes/summary` before `/{finance_id}`; do **not** collide with existing `process_finance.py` — use `finance_process_records.py` for `process_finances` CRUD |
 | Properties | `routes/properties.py` (~245; **done**) | `services/property_*.py` (see map) | Keep static paths (`/stats`, `/by-process/{id}`) before `/{property_id}`; do **not** collide with existing `property_scraper.py` / `alerts.py` / `scraper.py` / `gov_scraper.py` |
 | Chat | `routes/chat.py` (~250; **done**) | `services/chat_*.py` (see map) | No prior `chat_*` services; WS notify via `websocket_manager` stays inside services |
+| Diagnostics | `routes/diagnostics.py` (~150; **done**) | `services/diagnostics_*.py` (see map) | Do **not** collide with existing `process_kanban_diagnose.py` — use `diagnostics_*` prefix |
+| Leads | `routes/leads.py` (~140; **done**) | `services/lead_*.py` (see map) | Keep static paths (`/by-status`, `/consultores`, `/extract-url`, `/extract-html`, `/from-url`, `""`) before `/{lead_id}`; prefer `lead_*` (not `leads_*`) |
 
 **`email_*` thinning (complete):**
 
@@ -91,6 +92,19 @@ Unit helpers: `backend/tests/unit/test_portal_extraction_helpers.py`.
 | `admin_dev_ops.py` | DB indexes, sync-database, seed (`_sync_in_progress` lives here) |
 
 Unit helpers: `backend/tests/unit/test_admin_extraction_helpers.py`.
+
+**`admin_s3_*` thinning (complete) — sibling of `routes/admin_storage.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `admin_s3_client_mappings.py` | `run_auto_map_client_s3_folders` (aliases stay as route stubs → process `run_*`) |
+| `admin_s3_user_mappings.py` | user ↔ S3 folder list/get/update |
+| `admin_s3_process_mappings.py` | process ↔ S3 list/update/fix-missing/batch + `_clean_s3_folder` |
+| `admin_s3_explorer.py` | `_resolve_explorer_path`, folder contents, rename/delete/create/upload/download + request models |
+
+**Never** create `services/admin_storage.py` (name collision with `routes/admin_storage.py` called out in the admin thinning notes). Do **not** overwrite `s3_storage.py` / `storage_service.py`.
+
+Unit helpers: `backend/tests/unit/test_admin_storage_extraction_helpers.py`.
 
 **`client_*` thinning (complete):**
 
@@ -147,7 +161,31 @@ Unit helpers: `backend/tests/unit/test_property_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_chat_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / clients / finance / properties / chat.
+**`diagnostics_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `diagnostics_helpers.py` | `datetime_to_str`, `ServiceStatus`, `SystemDiagnostics`, TTL migration models |
+| `diagnostics_checks.py` | email / storage / AI / backup / notifications health checkers |
+| `diagnostics_system.py` | GET ``, `/service/{name}`, `/quick-check` |
+| `diagnostics_security.py` | encryption status, PII compliance, OpenAI privacy test-api |
+| `diagnostics_ttl.py` | POST `/migrate-ttl-fields` + GET `/ttl-status` |
+
+Unit helpers: `backend/tests/unit/test_diagnostics_extraction_helpers.py`.
+
+**`lead_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `lead_helpers.py` | `_log_system_error`, `_parse_plain_text` |
+| `lead_list.py` | GET `` list, `/by-status`, `/consultores` |
+| `lead_extract.py` | POST `/extract-url`, `/extract-html`, `/from-url` |
+| `lead_crud.py` | POST create + PATCH/status/refresh + DELETE |
+| `lead_associate.py` | POST `/{id}/associate-client` |
+
+Unit helpers: `backend/tests/unit/test_lead_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
