@@ -73,17 +73,30 @@ STANDARD_ORGANIZE_FOLDERS = [
 
 
 def build_existing_data_for_ai_compare(process: dict) -> dict:
-    """Flatten process nested fields → shape esperado pelo analyzer."""
+    """Flatten process nested fields → shape esperado pelo analyzer.
+
+    Income uses monthly_income / rendimento_mensal — never renda_habitacao_atual
+    (that field is housing rent, not salary).
+    """
     personal = process.get("personal_data", {}) or {}
     financial = process.get("financial_data", {}) or {}
     real_estate = process.get("real_estate_data", {}) or {}
+    # Canonical income on ProcessDetails form is monthly_income
+    income = (
+        financial.get("monthly_income")
+        or financial.get("rendimento_mensal")
+        or financial.get("salario_liquido")
+    )
+    employer = financial.get("employer_name") or financial.get("empresa")
     return {
         "client_name": process.get("client_name"),
         "nif": personal.get("nif") or process.get("client_nif") or process.get("nif"),
         "birth_date": personal.get("data_nascimento") or process.get("data_nascimento"),
         "documento_id": personal.get("documento_id") or process.get("cc_number"),
         "cc_number": personal.get("documento_id") or process.get("cc_number"),
-        "cc_validity": personal.get("cc_validity") or process.get("validade_cc"),
+        "cc_validity": personal.get("cc_validity")
+        or personal.get("data_validade_cc")
+        or process.get("validade_cc"),
         "nationality": personal.get("nacionalidade"),
         "gender": personal.get("sexo"),
         "address": personal.get("morada"),
@@ -91,14 +104,17 @@ def build_existing_data_for_ai_compare(process: dict) -> dict:
         "phone": personal.get("telefone") or process.get("phone"),
         "email": personal.get("email") or process.get("client_email"),
         "estado_civil": personal.get("estado_civil"),
-        "rendimento_mensal": financial.get("rendimento_mensal")
-        or financial.get("renda_habitacao_atual"),
-        "rendimento_bruto": financial.get("rendimento_bruto"),
-        "salario_liquido": financial.get("rendimento_mensal")
-        or financial.get("renda_habitacao_atual"),
-        "salario_bruto": financial.get("rendimento_bruto"),
-        "empresa": financial.get("empresa") or financial.get("employer_name"),
+        "monthly_income": income,
+        "rendimento_mensal": income,
+        "salario_liquido": income,
+        "rendimento_bruto": financial.get("rendimento_bruto")
+        or financial.get("salario_bruto"),
+        "salario_bruto": financial.get("rendimento_bruto")
+        or financial.get("salario_bruto"),
+        "employer_name": employer,
+        "empresa": employer,
         "tipo_contrato": financial.get("tipo_contrato")
+        or financial.get("employment_type")
         or ("sim" if financial.get("efetivo") == "sim" else None),
         "valor_imovel": real_estate.get("valor_imovel"),
         "localizacao": real_estate.get("localizacao"),
@@ -394,32 +410,39 @@ async def run_organize_documents_after_analysis(
     }
 
 
-# Frontend field → Mongo dot-path for apply-suggestions
+# Frontend / analyzer field → Mongo dot-path for apply-suggestions
+# Align with ProcessDetails canonical fields (monthly_income, employer_name).
+# Never map salary/income → renda_habitacao_atual (that is housing rent).
 AI_SUGGESTION_FIELD_MAP = {
     "client_name": "client_name",
     "nif": "personal_data.nif",
     "documento_id": "personal_data.documento_id",
     "cc_number": "personal_data.documento_id",
     "birth_date": "personal_data.data_nascimento",
-    "cc_validity": "personal_data.cc_validity",
+    "cc_validity": "personal_data.data_validade_cc",
+    "data_validade_cc": "personal_data.data_validade_cc",
     "nationality": "personal_data.nacionalidade",
     "gender": "personal_data.sexo",
-    "address": "personal_data.morada",
+    "address": "personal_data.morada_fiscal",
     "fiscal_address": "personal_data.morada_fiscal",
     "estado_civil": "personal_data.estado_civil",
-    "rendimento_mensal": "financial_data.rendimento_mensal",
-    "salario_liquido": "financial_data.rendimento_mensal",
+    "monthly_income": "financial_data.monthly_income",
+    "rendimento_mensal": "financial_data.monthly_income",
+    "salario_liquido": "financial_data.monthly_income",
     "rendimento_bruto": "financial_data.rendimento_bruto",
     "salario_bruto": "financial_data.rendimento_bruto",
-    "empresa": "financial_data.empresa",
-    "entidade_empregadora": "financial_data.empresa",
+    "employer_name": "financial_data.employer_name",
+    "empresa": "financial_data.employer_name",
+    "entidade_empregadora": "financial_data.employer_name",
     "tipo_contrato": "financial_data.tipo_contrato",
+    "employment_type": "financial_data.tipo_contrato",
     "categoria_profissional": "financial_data.categoria_profissional",
     "subsidiario_alimentacao": "financial_data.subsidiario_alimentacao",
+    "data_referencia": "financial_data.data_referencia",
     "valor_imovel": "real_estate_data.valor_imovel",
     "localizacao": "real_estate_data.localizacao",
     "tipologia": "real_estate_data.tipologia",
-    "area": "real_estate_data.area",
+    "area": "real_estate_data.area_bruta",
     "artigo_matricial": "real_estate_data.artigo_matricial",
 }
 

@@ -2,7 +2,8 @@
 ====================================================================
 AI Document Analyzer Service - PowerCell
 ====================================================================
-Serviço para análise de documentos com IA (GPT-4o-mini).
+Serviço para análise de documentos com IA (modelo configurável via
+admin AI config, tarefa document_analysis; default gpt-4o-mini).
 Extrai dados estruturados de documentos e compara com dados do cliente.
 
 Funcionalidades:
@@ -27,6 +28,84 @@ from dotenv import load_dotenv
 load_dotenv()
 
 logger = logging.getLogger(__name__)
+
+# Admin AI task keys (ai_tasks / seed) → OpenAI/Gemini API model ids
+# Admin UI often stores underscore keys (gpt4o_mini); the API needs hyphenated ids.
+_ADMIN_MODEL_KEY_ALIASES = {
+    "gpt4o_mini": "gpt-4o-mini",
+    "gpt4o": "gpt-4o",
+    "gpt_4o_mini": "gpt-4o-mini",
+    "gpt_4o": "gpt-4o",
+    "gemini_flash": "gemini-2.0-flash",
+    "gemini_2_0_flash": "gemini-2.0-flash",
+    "claude_sonnet": "claude-3-5-sonnet-latest",
+}
+
+
+def normalize_admin_model_key(model_key: Optional[str], default: str = "gpt-4o-mini") -> str:
+    """
+    Normaliza keys de admin (ex: gpt4o_mini) para model ids da API (ex: gpt-4o-mini).
+
+    Também aceita ids já canónicos presentes em config.AI_MODELS.
+    """
+    if not model_key or not str(model_key).strip():
+        return default
+
+    key = str(model_key).strip()
+
+    try:
+        from config import AI_MODELS
+        if key in AI_MODELS:
+            return key
+    except Exception:
+        pass
+
+    if key in _ADMIN_MODEL_KEY_ALIASES:
+        return _ADMIN_MODEL_KEY_ALIASES[key]
+
+    # Heurística: gpt4o_mini → gpt-4o-mini; gemini_2_0_flash → gemini-2.0-flash
+    lowered = key.lower().replace("-", "_")
+    if lowered in _ADMIN_MODEL_KEY_ALIASES:
+        return _ADMIN_MODEL_KEY_ALIASES[lowered]
+
+    return key
+
+
+async def resolve_document_analysis_model() -> str:
+    """
+    Resolve o modelo OpenAI/LLM para a tarefa document_analysis via admin AI config.
+
+    Ordem: get_ai_config()[document_analysis] → ai_models.model_id (DB) →
+    normalize_admin_model_key → fallback gpt-4o-mini.
+    """
+    default = "gpt-4o-mini"
+    try:
+        from services.ai_page_analyzer import get_ai_config
+        from config import AI_CONFIG_DEFAULTS
+
+        config = await get_ai_config()
+        model_key = (
+            config.get("document_analysis")
+            or AI_CONFIG_DEFAULTS.get("document_analysis")
+            or default
+        )
+
+        # Preferir model_id da coleção ai_models (admin CRUD)
+        try:
+            from database import db
+            db_model = await db.ai_models.find_one(
+                {"key": model_key}, {"_id": 0, "model_id": 1, "is_active": 1}
+            )
+            if db_model and db_model.get("model_id") and db_model.get("is_active", True):
+                return str(db_model["model_id"]).strip()
+        except Exception as db_err:
+            logger.debug(f"ai_models lookup skipped: {db_err}")
+
+        return normalize_admin_model_key(model_key, default=default)
+    except Exception as e:
+        logger.warning(f"Falha ao resolver modelo document_analysis: {e}; usando {default}")
+        return default
+
 
 # Mapeamento de tipos de documento para pastas
 DOCUMENT_CATEGORIES = {
@@ -267,6 +346,9 @@ async def analyze_document_with_ai(
                 "success": False, 
                 "error": "Chave de API não configurada. Configure OPENAI_API_KEY nas variáveis de ambiente."
             }
+
+        ai_model = await resolve_document_analysis_model()
+        logger.info(f"Análise de documento com modelo configurado: {ai_model}")
         
         # Converter para base64
         file_base64 = base64.b64encode(file_content).decode('utf-8')
@@ -327,7 +409,7 @@ async def analyze_document_with_ai(
                 if text_content.strip():
                     # Usar o texto extraído para análise (já sanitizado)
                     response = await client.chat.completions.create(
-                        model="gpt-4o-mini",
+                        model=ai_model,
                         messages=[
                             {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT + "\n\nIMPORTANTE: Retorna APENAS JSON válido, sem texto adicional antes ou depois."},
                             {"role": "user", "content": f"Analise este documento ({file_name}) extraído de um PDF. Conteúdo:\n\n{text_content}"}
@@ -345,7 +427,7 @@ async def analyze_document_with_ai(
             image_url = f"data:{mime_type};base64,{file_base64}"
             
             response = await client.chat.completions.create(
-                model="gpt-4o-mini",
+                model=ai_model,
                 messages=[
                     {"role": "system", "content": DOCUMENT_ANALYSIS_PROMPT + "\n\nIMPORTANTE: Retorna APENAS JSON válido, sem texto adicional antes ou depois."},
                     {
@@ -439,8 +521,8 @@ def compare_extracted_with_existing(
         "empty_fields": []   # Campos vazios no cliente que podem ser preenchidos
     }
     
-    # Mapeamento de campos do documento para campos do cliente
-    # Pessoais
+    # Mapeamento de campos do documento → campos canónicos ProcessDetails / apply
+    # (monthly_income / employer_name — NÃO renda_habitacao_atual, que é renda de casa)
     field_mapping = {
         "nome_completo": "client_name",
         "nome": "client_name",
@@ -455,16 +537,18 @@ def compare_extracted_with_existing(
         "morada": "address",
         "morada_fiscal": "fiscal_address",
         "estado_civil": "estado_civil",
-        # Financeiros
-        "salario_liquido": "rendimento_mensal",
-        "valor_liquido": "rendimento_mensal",
-        "rendimento_liquido": "rendimento_mensal",
+        # Financeiros → monthly_income / employer_name (canónicos na ficha)
+        "salario_liquido": "monthly_income",
+        "valor_liquido": "monthly_income",
+        "rendimento_liquido": "monthly_income",
+        "rendimento_mensal": "monthly_income",
+        "monthly_income": "monthly_income",
         "salario_bruto": "rendimento_bruto",
         "valor_bruto": "rendimento_bruto",
         "rendimento_bruto": "rendimento_bruto",
-        "entidade_empregadora": "empresa",
-        "empresa": "empresa",
-        "employer_name": "empresa",
+        "entidade_empregadora": "employer_name",
+        "empresa": "employer_name",
+        "employer_name": "employer_name",
         "tipo_contrato": "tipo_contrato",
         "categoria_profissional": "categoria_profissional",
         "data": "data_referencia",
@@ -652,6 +736,7 @@ async def analyze_multiple_documents(
             doc_confidence = analysis.get("confianca", 0.5)
             
             # Mapeamento inverso: doc_field -> client_field para encontrar confiança
+            # Alinhado com compare_extracted_with_existing (monthly_income / employer_name)
             field_mapping = {
                 "nome_completo": "client_name", "nome": "client_name",
                 "data_nascimento": "birth_date", "nif": "nif",
@@ -660,12 +745,13 @@ async def analyze_multiple_documents(
                 "naturalidade": "naturalidade", "sexo": "gender",
                 "morada": "address", "morada_fiscal": "fiscal_address",
                 "estado_civil": "estado_civil",
-                "salario_liquido": "rendimento_mensal", "valor_liquido": "rendimento_mensal",
-                "rendimento_liquido": "rendimento_mensal",
+                "salario_liquido": "monthly_income", "valor_liquido": "monthly_income",
+                "rendimento_liquido": "monthly_income", "rendimento_mensal": "monthly_income",
+                "monthly_income": "monthly_income",
                 "salario_bruto": "rendimento_bruto", "valor_bruto": "rendimento_bruto",
                 "rendimento_bruto": "rendimento_bruto",
-                "entidade_empregadora": "empresa", "empresa": "empresa",
-                "employer_name": "empresa", "tipo_contrato": "tipo_contrato",
+                "entidade_empregadora": "employer_name", "empresa": "employer_name",
+                "employer_name": "employer_name", "tipo_contrato": "tipo_contrato",
                 "categoria_profissional": "categoria_profissional",
                 "data": "data_referencia", "subsidiario_alimentacao": "subsidiario_alimentacao",
                 "valor_imovel": "valor_imovel", "valor_patrimonial": "valor_imovel",

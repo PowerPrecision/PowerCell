@@ -786,9 +786,11 @@ Key files: `ContextSwitcher.jsx`, `AuthContext.js`, `ProfilePage.js`, `EmailConf
 - `/api/ai/analyze-document*` — separate/dashboard; not the ProcessDetails button.
 
 **Gaps on the canonical path:**
-- Extractors hardcode `gpt-4o-mini` — ignore admin `ai_config.document_analysis` (must use configured AI).
-- Field-map inconsistencies between analyzer, apply map, and form (`rendimento_mensal` vs `monthly_income`, etc.).
+- ~~Extractors hardcode `gpt-4o-mini`~~ — fixed: `ai_document_analyzer` resolves via `get_ai_config()["document_analysis"]` + `normalize_admin_model_key` (`gpt4o_mini` → `gpt-4o-mini`).
+- ~~Field-map salary → `renda_habitacao_atual`~~ — fixed: compare/apply use `monthly_income` / `employer_name` (never housing-rent field).
 - Conflict UX partially split; keep `process.ai_suggestions` + existing review dialog.
+- Alternate path `ai_document.py` (`map_recibo_to_financial_data` still maps salary → `renda_habitacao_atual`) is **not** used by ProcessDetails Analisar com IA — leave alone unless folding upload-OCR into this path.
+- Analyzer still OpenAI-only (vision/chat); if admin sets Gemini for `document_analysis`, resolve may return a Gemini id that the OpenAI client cannot call.
 
 **Plan:**
 1. Wire `get_ai_config()["document_analysis"]` into the services used by `/documents/ai-analyze` only.
@@ -830,12 +832,12 @@ Key files: `VisitsPage.js`, `visit_helpers.py`, `visit_list_create.py`, `scraper
 
 #### Suggested implementation order
 
-1. Visitas scraper status + preview mapping (quick wins, unblocks UX)
+1. Visitas scraper status + preview mapping (quick wins)
 2. Background task sticky toasts
-3. Multi-perfil / webmail (needs product choice A vs B)
-4. Document AI unification (largest; depends on admin AI config wiring)
+3. Multi-perfil / webmail (company-scoped email+password; fix effectiveRole/company reload bugs)
+4. Document AI on existing ProcessDetails “Analisar com IA” path only (config model + field maps; no duplicate UI)
 
-Confirm with owner: email per **company** (A) vs per **role** (B) before schema work.
+Owner clarified: email is per **company** (IMAP/SMTP from company; user sets email+password). Multiple profiles ⇒ usually different companies ⇒ different emails.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
