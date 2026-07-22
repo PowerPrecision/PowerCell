@@ -200,6 +200,17 @@ Unit helpers: `backend/tests/unit/test_lead_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_form_config_extraction_helpers.py`.
 
+**`admin_proc_migration_*` thinning (complete) — sibling of `routes/admin_process_migration.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `admin_proc_migration_helpers.py` | `generate_client_key`, `extract_personal_from_process`, migration state helpers, `run_migration_task` |
+| `admin_proc_migration_api.py` | status / dry-run / run / rollback / reset `run_*` handlers |
+
+**Never** create `services/admin_process_migration.py` (name collision with the route module).
+
+Unit helpers: `backend/tests/unit/test_admin_proc_migration_extraction_helpers.py`.
+
 **`system_config_*` thinning (complete):**
 
 | Service | Responsibility |
@@ -227,7 +238,7 @@ Do **not** overwrite `rgpd_service.py` (PDF/email/token core) or `gdpr.py`. `rgp
 
 Unit helpers: `backend/tests/unit/test_rgpd_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd.
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
