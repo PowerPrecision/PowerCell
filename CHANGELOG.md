@@ -3,6 +3,26 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-22] — ProcessDetails mutations, portal fulfill, toasts sticky, titular IA
+
+### Adicionado
+- **`useProcessMutations` ligado ao ProcessDetails**: update processo/cliente, assign multi-assignee, atividades e prazos via TanStack Query (em vez de `api.put` soltos).
+- **`sanitizeProcessUpdatePayload` / `sanitizeClientUpdatePayload`**: bloqueiam `documents`, `onedrive_links` e arrays vazios que esmagariam dados no Mongo; `labels:[]` só no save de organização.
+- **`document_portal_fulfill`**: upload da equipa no CRM marca pedidos portal REQUESTED→RECEIVED (além do upload do cliente).
+- **Dialog titular 1/2** quando a IA devolve `needs_titular_choice`; apply com `target_titular`.
+- **`ProcessAssignDialog`**: UI de atribuições extraída do monolito ProcessDetails.
+
+### Alterado
+- **Toasts de background**: sticky (`duration: Infinity`); **não** auto-dismiss ao mudar de página / ao sair de `/tasks/active`.
+- **Onboarding público**: registo cria cliente + checklist SystemConfig; processo só após documentação obrigatória; dual-assign pós-criação.
+- **Analisar/Renomear IA**: RBAC gestão; badge `ai_analyzed`; skip re-análise.
+- Documentação: `AGENTS.md`, `README.md`, `ARCHITECTURE.md` alinhados com estes fluxos.
+
+### Corrigido
+- Args invertidos em várias rotas admin thinned (stale-processes, team-performance, logs) que causavam 500.
+
+---
+
 ## [2026-07-16] — Pacote DC: Fix Portal Access Email Template and Expose Code in CRM UI
 
 ### Corrigido

@@ -30,36 +30,21 @@ graph TB
         Pages["Páginas<br/>(~50, Lazy Loaded)"]
     end
 
-    subgraph API["🐍 Backend API — FastAPI (Python 3.11)"]
+    subgraph API["🐍 Backend API — FastAPI (Python 3.12)"]
         CORS["CORS Middleware<br/>(Fail-Secure)"]
         RateLimit["Rate Limiting<br/>(Por role: slowapi)"]
         SecurityHeaders["Security Headers<br/>(HSTS, CSP, X-Frame)"]
         SentryMW["Sentry Integration"]
         InputSanitize["Input Sanitization"]
 
-        subgraph Rotas["Rotas da API (/api)"]
-            AuthR["/auth<br/>(Login, JWT, Refresh)"]
-            ProcessesR["/processes<br/>(CRUD, Kanban, Paginated)"]
-            DocumentsR["/documents<br/>(Upload, S3 Proxy, Expiry)"]
-            TasksR["/tasks<br/>(CRUD, Tarefas)"]
-            ClientsR["/clients<br/>(CRUD, Cursor Pagination)"]
-            LeadsR["/leads<br/>(Scraping, Pipeline)"]
-            EmailsR["/emails<br/>(Gmail, Send-to-Banks, AI Drafts)"]
-            FinanceR["/finance<br/>(Comissões, Dashboard)"]
-            AIR["/ai<br/>(Análise de Docs, Confiança)"]
-            AIBulkR["/ai-bulk<br/>(Importação em Massa)"]
-            RGPD_R["/rgpd<br/>(Consentimento, Anonimização)"]
-            TempLinksR["/upload, /download<br/>(Links Temporários)"]
-            WSR["/ws<br/>(WebSocket Endpoint)"]
-            AdminR["/admin<br/>(Utilizadores, Impersonate)"]
-            AdminMigrationR["/admin/process-migration<br/>(Migração Fase 1: Cliente ↔ Processo)"]
-            AuditR["/audit<br/>(Trilha de Auditoria)"]
-            BackupR["/backup<br/>(Backups Automáticos)"]
-            SyncDBR["/admin/sync-database<br/>(Prod→Dev Restore)"]
-            AnnotationsR["/annotations<br/>(Anotações em PDFs)"]
-            SystemConfigR["/system-config<br/>(RGPD, DSTI, Emails)"]
-            ChangelogR["/system/changelog<br/>(Mural Atualizações IA)"]
-            OtherR["+30 rotas adicionais"]
+        subgraph Rotas["Rotas da API (/api) — thin stubs"]
+            AuthR["/auth"]
+            ProcessesR["/processes<br/>(→ services/process_*)"]
+            DocumentsR["/documents<br/>(→ services/document_*)"]
+            TasksR["/tasks<br/>(BG jobs + CRUD)"]
+            ClientsR["/clients"]
+            PortalR["/portal<br/>(cliente + fulfill)"]
+            OtherR["+40 rotas (ver AGENTS.md)"]
         end
 
         subgraph Servicos["Camada de Serviços"]
@@ -135,7 +120,7 @@ graph TB
 
     %% Frontend → Backend
     API_SVC -->|HTTPS + JWT| CORS
-    WSClient -->|WSS + JWT| WSR
+    WSClient -->|WSS + JWT| OtherR
 
     %% Backend Pipeline
     CORS --> RateLimitMW
@@ -152,12 +137,16 @@ graph TB
     AIConfidence --> AI_DocSvc
     RedisCache --> Redis
     TaskQueue --> Redis
-    EmailSvc --> SendGrid
+    EmailSvc --> SystemSMTP
     S3Storage --> S3
     OrganizerSvc --> S3Storage
     ScraperSvc -->|Scraping| ExternalSites["Sites Externos<br/>(Idealista)"]
-    EmailsR --> GmailAPI
+    OtherR --> GmailAPI
     TrelloAPI -.->|Opcional| OtherR
+    DocumentsR --> S3Storage
+    PortalR --> DocumentsR
+    TasksCtx --> TasksR
+    Pages --> TasksCtx
 
     %% Background Worker
     TaskQueue -->|Enqueue| ARQWorker
@@ -615,7 +604,7 @@ O script `backend/scripts/migrate_clients_to_processes.py` executa a migração 
 | **Estado Servidor** | TanStack Query v5 | Cache, mutations, optimistic updates |
 | **UI** | shadcn/ui (New York) + Tailwind CSS 4 | Componentes e estilização |
 | **Drag-Drop** | @dnd-kit/core | Kanban board interativo |
-| **Backend** | FastAPI (Python 3.11+) | API REST async com Pydantic |
+| **Backend** | FastAPI (Python 3.12) | API REST async com Pydantic |
 | **Base de Dados** | MongoDB Atlas | Persistência de dados (Motor async) |
 | **Cache** | Upstash Redis | Cache de sessões e fila de tarefas |
 | **Armazenamento** | AWS S3 | Ficheiros com pre-signed URLs |
@@ -659,6 +648,9 @@ O script `backend/scripts/migrate_clients_to_processes.py` executa a migração 
 | **Fallback Chain (Webmail)** | `sync_shared_role_emails()` — tenta `shared_role_email_configs`, depois `system_webmail` (Bloco C), depois erro |
 | **Provider-Agnostic** | Storage, Email, Webmail configuráveis via Admin Settings sem alteração de código |
 | **Thin Route + Service** | `routes/documents.py` / `routes/processes.py` — stubs FastAPI; lógica em `services/document_*.py` e `services/process_*.py` (ver `AGENTS.md`) |
+| **Safe Partial Update** | `sanitizeProcessUpdatePayload` (frontend) — omite arrays vazios / `documents` / `onedrive_links` no PUT processo |
+| **Sticky Toast** | `TasksContext` — `toast.loading` com `duration: Infinity` e id estável; sem auto-dismiss na navegação |
+| **Portal Checklist Fulfill** | `document_portal_fulfill` — upload staff CRM satisfaz REQUESTED do portal |
 
 ---
 
@@ -1055,6 +1047,46 @@ flowchart TD
 - Respeita header `Retry-After` quando presente
 - Suprime toast de erro durante retries para evitar spam
 - **Notifications Polling**: Backoff em 429 (30s → 60s → 120s → 5min), reset após 3 sucessos
+
+---
+
+## ProcessDetails + Documentos + Portal (estado actual)
+
+```mermaid
+flowchart LR
+  subgraph FE["Frontend"]
+    PD["ProcessDetails"]
+    Q["useProcessFullData<br/>TanStack Query"]
+    M["useProcessMutations"]
+    Safe["sanitizeProcessUpdatePayload"]
+    Toast["TasksContext<br/>sticky toasts"]
+  end
+
+  subgraph BE["Backend services"]
+    PU["process_update"]
+    DAI["document_ai_analyze<br/>+ titular_match"]
+    DPF["document_portal_fulfill"]
+    DU["document_upload / confirm"]
+  end
+
+  PD --> Q
+  PD --> M
+  M --> Safe --> PU
+  PD -->|Analisar IA"| DAI
+  DU -->|staff ou cliente| DPF
+  Toast -->|GET /tasks/active| BE
+```
+
+| Fluxo | Comportamento |
+|-------|----------------|
+| Load ficha | Query → hydration (`processDetailsHydration.js`) → state local editável |
+| Save ficha | Mutation + sanitize (sem `documents` / arrays vazios) → invalidação TanStack |
+| IA ambígua | Dialog titular 1/2; apply com `target_titular` → `titular2_data` |
+| Upload portal cliente | `confirm-upload` → REQUESTED→RECEIVED |
+| Upload staff CRM | `document_portal_fulfill` após upload / auto-cat → mesmo efeito no portal |
+| Onboarding | Registo = cliente + checklist SystemConfig; processo só após docs obrigatórios |
+
+Detalhe operacional e mapa `document_*` / `process_*`: **`AGENTS.md`**.
 
 ---
 

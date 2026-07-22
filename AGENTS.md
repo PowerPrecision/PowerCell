@@ -804,12 +804,14 @@ Owner clarified: email is per **company** (IMAP/SMTP from company; user sets ema
 | `document_process_resolve.py` | Flexible process/client ID resolve + S3 path ownership checks |
 | `document_expiring_dashboard.py` | Expiring-docs dashboard query/grouping |
 | `document_portal_request.py` | Portal request CRUD (staff → client) |
+| `document_portal_fulfill.py` | Staff CRM upload → REQUESTED/PENDING → RECEIVED (portal checklist) |
+| `document_titular_match.py` | Match IA extract vs titular1/2; `needs_user_choice` se ambíguo |
 | `document_auto_categorize.py` | Background IA categorize + OCR entities (**re-exported** from `routes.documents` for tests) |
 | `document_upload_conflict.py` | Pre-upload filename conflict check |
 | `document_direct_upload.py` | Pre-signed URL generate + confirm-upload |
 | `document_upload.py` | Multipart upload pipeline (MIME validate, convert, IA triage, S3, history) |
 | `document_move.py` | Move/rename conflict check + move-to-category |
-| `document_ai_analyze.py` | Multi-doc IA analyze + organize-after-analysis folders |
+| `document_ai_analyze.py` | Multi-doc IA analyze + organize-after-analysis + titular_matches / apply `target_titular` |
 | `document_delete.py` | Delete + bulk-delete with cross-process scope guard |
 | `document_proxy.py` | S3 download proxy (StreamingResponse) |
 | `document_bulk_download.py` | Multi-file ZIP download |

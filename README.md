@@ -63,16 +63,24 @@ PowerCell/
 │   │   ├── components/
 │   │   │   ├── ui/            # Componentes Shadcn UI
 │   │   │   ├── KanbanBoard.js # Quadro Kanban com drag-drop (@dnd-kit)
-│   │   │   ├── S3FileManager.js # Explorador de ficheiros + IA
+│   │   │   ├── S3FileManager.js # Explorador de ficheiros + IA (Analisar/Renomear)
 │   │   │   ├── NotificationsDropdown.js  # Polling com backoff
 │   │   │   ├── ImpersonateBanner.js      # Barra de impersonate
 │   │   │   ├── GlobalUploadProgress.js   # Progresso global de uploads
 │   │   │   ├── TasksDropdown.js          # Centro de operações
-│   │   │   └── UnifiedAuditTrail.js      # "Filme da Lead"
+│   │   │   ├── UnifiedAuditTrail.js      # "Filme da Lead"
+│   │   │   └── processDetails/           # Tabs/dialogs extraídos de ProcessDetails
+│   │   │       ├── ProcessAssignDialog.jsx
+│   │   │       ├── ProcessPersonalTab.jsx
+│   │   │       └── …
 │   │   ├── pages/             # ~50 páginas (lazy loaded)
 │   │   │   ├── PublicClientForm.js       # Formulário público dinâmico
 │   │   │   ├── AdminDashboard.js         # Dashboard admin
-│   │   │   ├── ProcessDetails.js         # Detalhes do processo
+│   │   │   ├── ProcessDetails.js         # Hub do processo (híbrido TanStack)
+│   │   │   ├── processDetails/           # Hydration, cleaners, payload seguro
+│   │   │   │   ├── processDetailsHydration.js
+│   │   │   │   ├── processFormCleaners.js
+│   │   │   │   └── processUpdatePayload.js  # Bloqueia arrays vazios / documents wipe
 │   │   │   ├── StaffDashboard.js         # Dashboard staff (consultor)
 │   │   │   ├── MyClientsPage.js          # Os Meus Processos (filtros)
 │   │   │   ├── FinanceDashboard.js       # Dashboard financeiro
@@ -86,11 +94,11 @@ PowerCell/
 │   │   │   └── ...
 │   │   ├── hooks/             # Custom hooks
 │   │   │   ├── useWebSocket.js  # WebSocket singleton + backoff
-│   │   │   ├── queries/         # TanStack Query hooks
-│   │   │   └── mutations/       # TanStack Mutation hooks
+│   │   │   ├── queries/         # TanStack Query (ex.: useProcessFullData)
+│   │   │   └── mutations/       # TanStack Mutations (ex.: useProcessMutations)
 │   │   ├── contexts/          # React Context providers
-│   │   │   ├── AuthContext.js   # Autenticação JWT + impersonate
-│   │   │   ├── TasksContext.js  # Polling + circuit breaker
+│   │   │   ├── AuthContext.js   # JWT + multi-perfil (effectiveRole / X-Active-Role)
+│   │   │   ├── TasksContext.js  # BG jobs: sticky toasts + circuit breaker
 │   │   │   ├── UploadProgressContext.js
 │   │   │   └── ThemeContext.js  # Light/Dark mode
 │   │   ├── services/
@@ -126,6 +134,8 @@ PowerCell/
 - **Análise de documentos**: Extração automática de dados do CC, IRS, recibos vencimento
 - **Confiança por campo**: Score 0.0-1.0 por campo extraído, alertas visuais para < 0.8
 - **Auto-fill**: Sugestões automáticas de preenchimento com conflitos detetados
+- **Titular 1 vs 2**: match automático contra os dois titulares do processo; se ambíguo, dialog no CRM (“Este documento é de quem?”)
+- **Analisar / Renomear IA** (S3FileManager): restrito a gestão (`admin` / `CEO` / `diretor`); docs já analisados ficam com badge e são saltados
 - **Organização automática**: Categorização e movimentação de ficheiros no S3
 - **Rascunhos de emails IA**: Geração automática de emails quando faltam documentos
 - **DSTI automático**: Cálculo da taxa de esforço a partir de dados financeiros extraídos
@@ -141,14 +151,23 @@ PowerCell/
 - Campos obrigatórios com indicador visual (* vermelho + "obrigatório")
 - Rascunho automático (localStorage)
 
-### Registo de Clientes
-- Tabela mostra por defeito apenas clientes **sem processo atribuído** (leads) e clientes com processo em **status vazio/Lead** (ainda a preencher o Portal)
-- **PACOTE DB — Fluxo de Leads**: novos registos do formulário público entram com `status = None` (Lead) e `workflow_step = None` — **não entram no Kanban ativo**. Quando o cliente submete os **Documentos Obrigatórios** via Portal, o processo transita automaticamente para a **1ª fase real do Kanban** (1º status do `workflow_statuses` que não seja `pre_registo`, `fila_espera` nem terminal).
-- A página "Registos de Clientes" está no grupo **"Visão Global"** da barra lateral (PACOTE DB — movida de "O Meu Negócio"). O perfil Indexação mantém-se sem acesso a esta página.
-- Quando o processo é criado manualmente no CRM, usa a **1ª fase real do `workflow_statuses`** (sem forçar `fila_espera`/`fase_documental`); se não houver fases configuradas, o status fica vazio.
-- Quando o processo entra no Kanban ativo, o cliente desaparece da vista principal de Registos
-- Filtro disponível para ver "Todos", "Com Processo" ou "Sem Processo"
-- Link S3 automático ao criar processo: `s3://powerprecision-docs-storage/Documentação Clientes/Nome_Do_Cliente/`
+### Tarefas em background (UX)
+- Toasts sticky no canto inferior direito (`TasksContext` + Sonner): loading → success/error no mesmo `id`
+- **Não desaparecem** ao mudar de página; fecho apenas pelo X do utilizador
+- Polling de `GET /api/tasks/active` com circuit breaker
+
+### Ficha do processo (`ProcessDetails`)
+- **Leitura**: `useProcessFullData` / `useProcessQuery` (TanStack Query) + hydration helpers
+- **Escrita**: `useProcessMutations` (update processo/cliente, assign, atividades, prazos)
+- **Payload seguro**: `sanitizeProcessUpdatePayload` — nunca envia `documents` / `onedrive_links` / arrays vazios que esmagariam dados no Mongo
+- Tabs e dialogs parcialmente extraídos (`components/processDetails/*`)
+
+### Registo de Clientes / Onboarding
+- **Registo público** cria **cliente** (+ checklist `mandatory_documents` do SystemConfig) — **não** cria processo de imediato
+- Processo é criado automaticamente quando a documentação obrigatória está completa; copia `titular2_data` e faz dual-assign (consultor + intermediário)
+- Tabela de registos mostra leads / clientes a aguardar docs; filtro "Todos" / "Com Processo" / "Sem Processo"
+- Quando o processo é criado manualmente no CRM, usa a **1ª fase real do `workflow_statuses`**
+- Link S3 automático ao criar processo: `s3://…/Documentação Clientes/Nome_Do_Cliente/`
 
 ### Os Meus Processos (`/meus-clientes`)
 - Vista personalizada por utilizador (apenas processos atribuídos)
@@ -219,12 +238,13 @@ PowerCell/
 ### Portal do Cliente
 - **Magic Link**: Acesso sem password via link curto (~50 chars, short_id)
 - **Visualização do processo**: Stepper de fases com cores dinâmicas, estado atual, consultor e mediador
-- **Upload de documentos**: Upload categorizado (13 categorias) com multi-ficheiro
-- **Pedido de documentos**: Admin solicita documentos específicos → cliente vê lista e responde
-- **Documentos carregados**: Cliente vê histórico de uploads com status (pendente, uploaded)
-- **Mapeamento S3 automático**: Categorias do portal mapeiam para pastas S3 do admin
-- **Gestão disponível para todos os roles**: Endpoints portal-requests acessíveis a 8 roles
-- **Estado do RGPD**: Quando o consentimento RGPD está assinado, o portal mostra um card verde "RGPD Assinado" com a data. Se pendente, mostra um card amarelo "RGPD Pendente"
+- **Upload de documentos**: Upload categorizado com multi-ficheiro → marca pedido como **RECEIVED** / “Enviado”
+- **Pedido de documentos**: Staff solicita documentos → cliente vê lista e responde
+- **Upload pela equipa no CRM**: também marca o pedido correspondente como recebido no portal (`document_portal_fulfill`)
+- **Documentos carregados**: Cliente vê histórico (pendente vs recebidos)
+- **Checklist obrigatória**: definida só em SystemConfig (`mandatory_documents`) — sem listas hardcoded
+- **Mapeamento S3**: uploads portal → pasta Index / categorias S3
+- **Estado do RGPD**: card verde “RGPD Assinado” ou amarelo “RGPD Pendente”
 
 ### Perfis de Utilizador e Permissões
 
@@ -662,7 +682,15 @@ O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Ren
 
 ## Histórico de Correções Recentes (dev)
 
-### OOM Fix — Render DEV (Lazy Loading + ENV Guards)
+### 2026-07 — ProcessDetails TanStack, portal fulfill, toasts sticky, titular IA
+- **ProcessDetails writes** via `useProcessMutations`; load já era `useProcessFullData`. Payload sanitizado (`processUpdatePayload.js`) para não esmagar `documents` / arrays vazios.
+- **Toasts BG sticky**: não fazem dismiss ao mudar de página (`TasksContext`).
+- **Portal**: upload do cliente **e** da equipa no CRM marcam pedidos REQUESTED → RECEIVED (`document_portal_fulfill`).
+- **IA titular 1/2**: dialog no CRM quando o match é ambíguo; apply com `target_titular`.
+- **Onboarding**: registo público não cria processo até checklist SystemConfig completa.
+- Detalhe operacional para agentes: ver `AGENTS.md` (secção Cursor Cloud).
+
+### Oom Fix — Render DEV (Lazy Loading + ENV Guards)
 - **Lazy Loading do Playwright**: Removidos todos os imports top-level de `playwright` em `gov_scraper.py`. As importações estão apenas dentro das funções que as utilizam, evitando que o Chromium seja carregado na memória ao arrancar.
 - **ENVIRONMENT guards**: Adicionadas verificações `if os.environ.get('ENVIRONMENT') != 'production'` no início de todas as funções pesadas (scraper, email sync, worker). Em DEV, retornam mock JSON em vez de executar as operações reais.
 - **Mock routes no Portal**: Os endpoints `/fetch-financas`, `/fetch-seguranca-social` e `/scraper-status` retornam respostas simuladas em DEV, impedindo o Frontend de pendurar.
