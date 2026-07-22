@@ -190,18 +190,41 @@ def process_ai_analyze_results(
     return extracted_data, conflicts, document_types
 
 
-async def _read_upload_files(files: list[UploadFile]) -> list[dict]:
+def should_skip_ai_analysis(metadata: dict | None) -> bool:
+    """Docs já analisados pela IA (extração) não precisam de nova análise."""
+    return bool(metadata and metadata.get("ai_analyzed"))
+
+
+def resolve_ai_category_from_doc_type(doc_type: str | None) -> tuple[str, str]:
+    """Mapeia tipo detectado pela IA → (categoria pasta, subcategoria legível)."""
+    raw = (doc_type or "").strip().lower()
+    if not raw:
+        return ("Outros", "Documento")
+    folder = DOCUMENT_TYPE_FOLDERS.get(raw, DOCUMENT_TYPE_FOLDERS["default"])
+    subcategory = raw.replace("_", " ").strip().title() or "Documento"
+    return (folder, subcategory)
+
+
+async def _read_upload_files(
+    files: list[UploadFile],
+    file_paths: list[str] | None = None,
+) -> list[dict]:
     documents = []
-    for file in files:
+    for idx, file in enumerate(files):
         try:
             content = await file.read()
             if len(content) == 0:
                 continue
+            source_path = None
+            if file_paths and idx < len(file_paths):
+                path = (file_paths[idx] or "").strip()
+                source_path = path or None
             documents.append(
                 {
                     "content": content,
                     "name": file.filename,
                     "mime_type": file.content_type or "application/octet-stream",
+                    "source_path": source_path,
                 }
             )
         except Exception as e:
@@ -210,11 +233,115 @@ async def _read_upload_files(files: list[UploadFile]) -> list[dict]:
     return documents
 
 
+async def _filter_already_analyzed_documents(
+    process_id: str,
+    documents: list[dict],
+) -> tuple[list[dict], int]:
+    """Remove docs com ai_analyzed=True (por s3_path)."""
+    paths = [d.get("source_path") for d in documents if d.get("source_path")]
+    if not paths:
+        return documents, 0
+
+    analyzed_paths: set[str] = set()
+    cursor = db.document_metadata.find(
+        {
+            "process_id": process_id,
+            "s3_path": {"$in": paths},
+            "ai_analyzed": True,
+        },
+        {"_id": 0, "s3_path": 1},
+    )
+    async for meta in cursor:
+        if meta.get("s3_path"):
+            analyzed_paths.add(meta["s3_path"])
+
+    if not analyzed_paths:
+        return documents, 0
+
+    pending = [
+        d
+        for d in documents
+        if not d.get("source_path") or d["source_path"] not in analyzed_paths
+    ]
+    skipped = len(documents) - len(pending)
+    return pending, skipped
+
+
+async def _mark_documents_ai_analyzed(
+    process_id: str,
+    client_name: str,
+    documents: list[dict],
+    document_types: list[dict],
+) -> int:
+    """Persiste ai_analyzed (+ categorização leve) após análise com sucesso."""
+    import uuid
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    type_by_name = {
+        (dt.get("file_name") or ""): dt for dt in (document_types or [])
+    }
+    marked = 0
+
+    for doc in documents:
+        s3_path = doc.get("source_path")
+        filename = doc.get("name") or ""
+        if not s3_path:
+            # Fallback: tentar pelo filename no processo
+            existing_by_name = await db.document_metadata.find_one(
+                {"process_id": process_id, "filename": filename},
+                {"_id": 0, "s3_path": 1},
+            )
+            s3_path = (existing_by_name or {}).get("s3_path")
+        if not s3_path:
+            continue
+
+        type_info = type_by_name.get(filename) or {}
+        doc_type = type_info.get("type")
+        category, subcategory = resolve_ai_category_from_doc_type(doc_type)
+        confidence = type_info.get("confidence")
+
+        existing = await db.document_metadata.find_one(
+            {"s3_path": s3_path}, {"_id": 0, "id": 1}
+        )
+        update_fields: dict[str, Any] = {
+            "process_id": process_id,
+            "client_name": client_name,
+            "s3_path": s3_path,
+            "filename": filename,
+            "ai_analyzed": True,
+            "ai_analyzed_at": now,
+            "updated_at": now,
+        }
+        # Categorização leve para permitir Renomear IA depois
+        if doc_type:
+            update_fields["ai_category"] = category
+            update_fields["ai_subcategory"] = subcategory
+            update_fields["is_categorized"] = True
+            update_fields["categorized_at"] = now
+            if confidence is not None:
+                update_fields["ai_confidence"] = confidence
+
+        if existing and existing.get("id"):
+            await db.document_metadata.update_one(
+                {"id": existing["id"]},
+                {"$set": update_fields},
+            )
+        else:
+            update_fields["id"] = str(uuid.uuid4())
+            update_fields["created_at"] = now
+            await db.document_metadata.insert_one(update_fields)
+        marked += 1
+
+    return marked
+
+
 async def run_ai_analyze_documents(
     process_id: str,
     files: list[UploadFile],
     *,
     user: dict,
+    file_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     """Analisa múltiplos documentos com IA e devolve comparação/sugestões."""
     start_time = time.time()
@@ -252,13 +379,33 @@ async def run_ai_analyze_documents(
         except Exception as e:
             logger.warning(f"Erro ao criar log de importação: {e}")
 
-    documents = await _read_upload_files(files)
+    documents = await _read_upload_files(files, file_paths=file_paths)
+    documents, skipped_analyzed = await _filter_already_analyzed_documents(
+        process_id, documents
+    )
+
     if not documents:
         if log_id and finalize_ai_import_log:
             try:
                 await finalize_ai_import_log(log_id, duration_ms=0)
             except Exception:
                 pass
+        if skipped_analyzed > 0:
+            return {
+                "success": True,
+                "process_id": process_id,
+                "client_name": client_name,
+                "documents_count": 0,
+                "skipped_already_analyzed": skipped_analyzed,
+                "log_id": log_id,
+                "extracted_data": {},
+                "field_confidence": {},
+                "conflicts": [],
+                "documents": [],
+                "suggestions": [],
+                "analysis": None,
+                "message": "Todos os documentos seleccionados já foram analisados pela IA",
+            }
         raise HTTPException(status_code=400, detail=ERROR_NO_VALID_FILES)
 
     existing_data = build_existing_data_for_ai_compare(process)
@@ -281,6 +428,14 @@ async def run_ai_analyze_documents(
         results, documents
     )
 
+    try:
+        marked = await _mark_documents_ai_analyzed(
+            process_id, client_name, documents, document_types
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao marcar documentos como analisados: {e}")
+        marked = 0
+
     total_duration = int((time.time() - start_time) * 1000)
     if log_id and finalize_ai_import_log:
         try:
@@ -293,6 +448,8 @@ async def run_ai_analyze_documents(
         "process_id": process_id,
         "client_name": client_name,
         "documents_count": len(documents),
+        "skipped_already_analyzed": skipped_analyzed,
+        "marked_analyzed": marked,
         "log_id": log_id,
         "extracted_data": extracted_data,
         "field_confidence": results.get("field_confidence", {}) if results else {},

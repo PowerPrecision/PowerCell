@@ -207,6 +207,38 @@ async def list_client_files(
         None,
         lambda: s3_service.list_files(effective_id, client_name, second_client_name, s3_folder)
     )
+
+    # Enriquecer com flags de análise/categorização IA (para badge na UI)
+    try:
+        meta_docs = await db.document_metadata.find(
+            {"process_id": effective_id},
+            {
+                "_id": 0,
+                "s3_path": 1,
+                "ai_analyzed": 1,
+                "ai_analyzed_at": 1,
+                "is_categorized": 1,
+                "ai_category": 1,
+            },
+        ).to_list(2000)
+        meta_by_path = {
+            m["s3_path"]: m for m in meta_docs if m.get("s3_path")
+        }
+        files_by_cat = files.get("files") if isinstance(files, dict) else None
+        if isinstance(files_by_cat, dict):
+            for _cat, file_list in files_by_cat.items():
+                if not isinstance(file_list, list):
+                    continue
+                for f in file_list:
+                    meta = meta_by_path.get(f.get("path") or "", {})
+                    f["ai_analyzed"] = bool(meta.get("ai_analyzed"))
+                    f["ai_analyzed_at"] = meta.get("ai_analyzed_at")
+                    f["is_categorized"] = bool(meta.get("is_categorized"))
+                    if meta.get("ai_category") and not f.get("ai_category"):
+                        f["ai_category"] = meta.get("ai_category")
+    except Exception as enrich_err:
+        logger.warning(f"[FILES] Falha ao enriquecer metadados IA: {enrich_err}")
+
     return files
 
 @router.post("/client/{client_id}/upload", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -714,15 +746,19 @@ async def get_expiring_documents_dashboard(
 # ANÁLISE DE DOCUMENTOS COM IA
 # ====================================================================
 
-@router.post("/ai-analyze/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.post("/ai-analyze/{process_id}", responses={400: HTTP_400_RESPONSE, 403: {"description": "Forbidden"}, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def ai_analyze_documents(
     request: Request,
     process_id: str,
     files: List[UploadFile] = File(...),
-    user: dict = Depends(get_current_user)
+    file_paths: Optional[str] = Form(None),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
 ):
     """
     Analisa documentos com IA para extração de dados.
+
+    Restrito a cargos de gestão (admin, CEO, diretor / "gestor").
+    Documentos já marcados com ai_analyzed são saltados.
     
     Funcionalidades:
     - OCR e extração de dados estruturados
@@ -735,11 +771,23 @@ async def ai_analyze_documents(
     Args:
         process_id: ID do processo/cliente
         files: Lista de ficheiros para analisar
+        file_paths: JSON opcional com paths S3 alinhados à ordem de `files`
         
     Returns:
         Resultado da análise com comparações e sugestões
     """
-    return await run_ai_analyze_documents(process_id, files, user=user)
+    parsed_paths: Optional[List[str]] = None
+    if file_paths:
+        try:
+            import json as _json
+            raw = _json.loads(file_paths)
+            if isinstance(raw, list):
+                parsed_paths = [str(p) if p is not None else "" for p in raw]
+        except (TypeError, ValueError) as e:
+            logger.warning(f"file_paths inválido no ai-analyze: {e}")
+    return await run_ai_analyze_documents(
+        process_id, files, user=user, file_paths=parsed_paths
+    )
 
 
 @router.post("/ai-apply-suggestions/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
@@ -792,14 +840,16 @@ async def organize_documents_after_analysis(
 # (generate_smart_filename → services.document_filenames)
 # ====================================================================
 
-@router.post("/rename-smart/{process_id}", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.post("/rename-smart/{process_id}", responses={400: HTTP_400_RESPONSE, 403: {"description": "Forbidden"}, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def rename_document_smart(
     process_id: str,
     data: dict,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
 ):
     """
     Renomeia um documento de forma inteligente baseado na análise IA.
+
+    Restrito a cargos de gestão (admin, CEO, diretor / "gestor").
     
     Body:
     - s3_path: Caminho actual do ficheiro no S3
@@ -816,14 +866,15 @@ async def rename_document_smart(
 
 
 
-@router.post("/rename-all-smart/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.post("/rename-all-smart/{process_id}", responses={403: {"description": "Forbidden"}, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def rename_all_documents_smart(
     process_id: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR])),
 ):
     """
     Renomeia TODOS os documentos de um processo usando nomes inteligentes IA.
     Apenas documentos já categorizados são renomeados.
+    Restrito a cargos de gestão (admin, CEO, diretor / "gestor").
     
     Returns:
     - total: Total de documentos

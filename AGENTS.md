@@ -23,6 +23,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
   `cd backend && MONGO_URL="mongodb://localhost:27017" DB_NAME="test_db_precision" JWT_SECRET="test_secret_key_123456789012345678" CORS_ORIGINS="http://localhost:3000" TESTING="true" ENVIRONMENT="dev" .venv/bin/python -m pytest tests/unit --no-cov -q`
 - Optional integrations (Redis/ARQ worker, S3, OpenAI/Gemini, email/IMAP, Sentry) all degrade gracefully and are not needed to run the app. The ARQ worker (`backend/worker.py`) only runs when `ENVIRONMENT=production`.
 - **Credentials in `backend/.env` are DEV-only** (owner clarification): production does not use this file — it injects secrets via the platform's secret manager. So the values present here are not production secrets; no need to treat them as a production leak or block on rotating them. Use `.env.example` as the template for required vars.
+- **Documentos IA (S3FileManager):** botões **Analisar IA** / **Renomear IA** só para `effectiveRole` ∈ `MANAGEMENT_ROLES` (`admin`, `ceo`, `diretor` — “gestor” no produto). Backend: `require_roles([ADMIN, CEO, DIRETOR])` em `/documents/ai-analyze`, `/rename-smart`, `/rename-all-smart`. Docs com `document_metadata.ai_analyzed` aparecem com badge **IA** e são saltados em re-análise. Renomear IA faz `categorize-all` antes de `rename-all-smart` para gerar nomes legíveis.
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
@@ -755,7 +756,7 @@ Do **not** overwrite `ai_improvement_agent.py`. Unit helpers: `backend/tests/uni
 | Visitas URL/IA | **done** | `scraper_status` completed/error; preview PT→EN; poll pending; nav Visitas restored |
 | Toasts BG | **done** | sticky loading → morph green/red; dismiss via X; max 5 |
 | Multi-perfil webmail | **done** | `effectiveRole`/company gates; forced-shared uses effective role; OAuth prefers company key |
-| IA documentos | **done (canonical path)** | admin `document_analysis` model + income/employer field maps on ProcessDetails Analisar-com-IA |
+| IA documentos | **done (canonical + UI)** | Analisar/Renomear IA activos no S3FileManager; só `MANAGEMENT_ROLES` (admin/CEO/diretor); docs `ai_analyzed` marcados e saltados |
 
 Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal visitas tab / consultor RBAC for unassigned pedidos; orphan AI paths left intentionally.
 
@@ -770,6 +771,8 @@ Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal v
 **Canonical only:** ProcessDetails → S3 “Analisar com IA” → `/documents/ai-analyze` → apply-suggestions. No duplicate UI.
 
 **Fixed:** model from admin config; compare/apply use `monthly_income` / `employer_name`.
+
+**UI (S3FileManager):** Analisar/Renomear IA visíveis; RBAC gestão; badge + skip `ai_analyzed`; Renomear categoriza antes de renomear.
 
 **Gaps left:** conflict UX still split; OpenAI client may not call Gemini ids; orphan `/api/ai/analyze-document*` and upload OCR `data_suggestions` untouched.
 

@@ -71,7 +71,7 @@ import {
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
-import { hasRole, hasAnyRole } from "../utils/roleUtils";
+import { hasRole, hasAnyRole, MANAGEMENT_ROLES } from "../utils/roleUtils";
 import {
   FileText,
   Upload,
@@ -180,7 +180,7 @@ const FileIcon = ({ filename }) => {
 };
 
 const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
-  const { token, user } = useAuth();
+  const { token, user, effectiveRole } = useAuth();
   const [files, setFiles] = useState({});
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -280,6 +280,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
   // Verificar se o utilizador é de indexacao (precisa de NIF da empresa)
   const isIndexacao = hasRole(user, "indexacao");
+
+  // Analisar / Renomear com IA — apenas cargos superiores (admin, CEO, diretor/"gestor")
+  // Usa effectiveRole (perfil activo), não hasRole, para multi-perfil.
+  const canUseAIDocumentTools = MANAGEMENT_ROLES.includes(effectiveRole);
 
   // PACOTE BL — Bloqueio de segurança: categoria "Index" (pasta cofre)
   // Apenas admin/CEO/diretor/indexacao vêem documentos da categoria "Index".
@@ -1149,22 +1153,41 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setAnnotationViewer(null);
   };
 
-  // Análise IA dos documentos
+  // Análise IA dos documentos (salta docs já marcados com ai_analyzed)
   const handleAIAnalysis = async () => {
-    const filesToAnalyze = selectedFilesForAI.length > 0 ? selectedFilesForAI : getAllFiles();
-    
-    if (filesToAnalyze.length === 0) {
+    if (!canUseAIDocumentTools) {
+      toast.error("Sem permissão para analisar documentos com IA");
+      return;
+    }
+
+    const candidates = selectedFilesForAI.length > 0 ? selectedFilesForAI : getAllFiles();
+    const alreadyAnalyzed = candidates.filter((f) => f.ai_analyzed);
+    const filesToAnalyze = candidates.filter((f) => !f.ai_analyzed && !f.path?.endsWith('/'));
+
+    if (candidates.length === 0) {
       toast.error("Não há ficheiros para analisar");
       return;
+    }
+    if (filesToAnalyze.length === 0) {
+      toast.info(
+        alreadyAnalyzed.length > 0
+          ? "Todos os documentos seleccionados já foram analisados pela IA"
+          : "Não há ficheiros para analisar"
+      );
+      return;
+    }
+    if (alreadyAnalyzed.length > 0) {
+      toast.info(`${alreadyAnalyzed.length} documento(s) já analisado(s) — a saltar`);
     }
 
     setAiAnalyzing(true);
     toast.info(`A analisar ${filesToAnalyze.length} documento(s) com IA...`);
 
     try {
-      // Criar FormData com os ficheiros
+      // Criar FormData com os ficheiros + paths S3 (para marcar / saltar no backend)
       const formData = new FormData();
-      
+      const uploadedPaths = [];
+
       // Obter o conteúdo dos ficheiros via proxy endpoint (evita CORS do S3)
       for (const file of filesToAnalyze) {
         try {
@@ -1177,6 +1200,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           if (proxyResponse.ok) {
             const blob = await proxyResponse.blob();
             formData.append('files', blob, file.name);
+            uploadedPaths.push(file.path);
           } else {
             console.warn(`Erro ao obter ficheiro ${file.name} via proxy: ${proxyResponse.status}`);
             continue;
@@ -1186,18 +1210,33 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         }
       }
 
+      if (uploadedPaths.length === 0) {
+        toast.error("Não foi possível obter ficheiros para análise");
+        return;
+      }
+      formData.append('file_paths', JSON.stringify(uploadedPaths));
+
       // Enviar para análise
       const response = await fetch(
         `${API_URL}/api/documents/ai-analyze/${processId}`,
         {
           method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
+          },
           body: formData,
         }
       );
 
       if (response.ok) {
         const result = await response.json();
+
+        if ((result.documents_count || 0) === 0 && (result.skipped_already_analyzed || 0) > 0) {
+          toast.info(result.message || "Documentos já analisados pela IA");
+          fetchFiles();
+          return;
+        }
         
         // Se temos callback, passar os dados para pré-preencher a ficha
         if (onAIDataExtracted && result.extracted_data) {
@@ -1248,7 +1287,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           toast.success(`Análise completa: ${result.documents_count} documento(s) processado(s)`);
         }
         
-        // Recarregar ficheiros para ver nova organização
+        // Recarregar ficheiros para ver nova organização + badges "Analisado"
         fetchFiles();
       } else {
         const error = await response.json();
@@ -1300,25 +1339,45 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
-  // Renomeação inteligente de documentos com IA
+  // Renomeação inteligente: categoriza com IA (se necessário) e aplica nomes legíveis
   const handleSmartRename = async () => {
-    const allFiles = getAllFiles();
+    if (!canUseAIDocumentTools) {
+      toast.error("Sem permissão para renomear documentos com IA");
+      return;
+    }
+
+    const allFiles = getAllFiles().filter((f) => !f.path?.endsWith('/'));
     if (allFiles.length === 0) {
       toast.error("Não há ficheiros para renomear");
       return;
     }
 
     setRenaming(true);
-    toast.info("A renomear documentos com nomes inteligentes...");
+    toast.info("A analisar e renomear documentos com nomes legíveis...");
 
     try {
+      // 1) Categorizar docs ainda sem categoria (necessário para gerar nomes inteligentes)
+      try {
+        await fetch(`${API_URL}/api/documents/categorize-all/${processId}`, {
+          method: 'POST',
+          headers: {
+            Authorization: `Bearer ${token}`,
+            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
+          },
+        });
+      } catch (catErr) {
+        console.warn("Categorização prévia falhou (a tentar renomear na mesma):", catErr);
+      }
+
+      // 2) Renomear com nomes inteligentes baseados na categoria IA
       const response = await fetch(
         `${API_URL}/api/documents/rename-all-smart/${processId}`,
         {
           method: 'POST',
           headers: { 
             Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
+            'Content-Type': 'application/json',
+            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
           }
         }
       );
@@ -1332,6 +1391,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           fetchFiles();
         } else if (result.skipped > 0 && result.renamed === 0) {
           toast.info("Todos os documentos já têm nomes correctos ou não estão categorizados");
+        } else if ((result.total || 0) === 0) {
+          toast.warning("Nenhum documento categorizado para renomear. Tente Analisar IA primeiro.");
         }
         
         // Mostrar diálogo com detalhes se houver resultados
@@ -1958,43 +2019,42 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   <span className="hidden xs:inline">Upload</span>
                 </Button>
               )}
-              {/* PACOTE DB — Botão "Analisar IA" temporariamente oculto (display: none).
-                  Mantido para reativação futura — não apagar. */}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleAIAnalysis}
-                disabled={aiAnalyzing || getAllFiles().length === 0}
-                data-testid="ai-analyze-btn"
-                className="bg-purple-50 hover:bg-purple-100 border-purple-200 dark:bg-purple-950/50 dark:border-purple-800 dark:hover:bg-purple-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
-                style={{ display: 'none' }}
-              >
-                {aiAnalyzing ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600 sm:mr-1" />
-                ) : (
-                  <Brain className="h-3.5 w-3.5 text-purple-600 sm:mr-1" />
-                )}
-                <span className="hidden sm:inline">Analisar</span> IA
-              </Button>
-              {/* PACOTE DB — Botão "Renomear IA" temporariamente oculto (display: none).
-                  Mantido para reativação futura — não apagar. */}
-              <Button
-                size="sm"
-                variant="outline"
-                onClick={handleSmartRename}
-                disabled={renaming || getAllFiles().length === 0}
-                data-testid="smart-rename-btn"
-                title="Renomear documentos com nomes inteligentes baseados na análise IA"
-                className="bg-amber-50 hover:bg-amber-100 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:hover:bg-amber-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
-                style={{ display: 'none' }}
-              >
-                {renaming ? (
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 sm:mr-1" />
-                ) : (
-                  <Sparkles className="h-3.5 w-3.5 text-amber-600 sm:mr-1" />
-                )}
-                <span className="hidden md:inline">Renomear</span> IA
-              </Button>
+              {/* Analisar / Renomear IA — apenas admin, CEO, diretor (gestão) */}
+              {canUseAIDocumentTools && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleAIAnalysis}
+                  disabled={aiAnalyzing || getAllFiles().length === 0}
+                  data-testid="ai-analyze-btn"
+                  className="bg-purple-50 hover:bg-purple-100 border-purple-200 dark:bg-purple-950/50 dark:border-purple-800 dark:hover:bg-purple-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
+                >
+                  {aiAnalyzing ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-purple-600 sm:mr-1" />
+                  ) : (
+                    <Brain className="h-3.5 w-3.5 text-purple-600 sm:mr-1" />
+                  )}
+                  <span className="hidden sm:inline">Analisar</span> IA
+                </Button>
+              )}
+              {canUseAIDocumentTools && (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={handleSmartRename}
+                  disabled={renaming || getAllFiles().length === 0}
+                  data-testid="smart-rename-btn"
+                  title="Analisar e renomear documentos com nomes legíveis baseados na IA"
+                  className="bg-amber-50 hover:bg-amber-100 border-amber-200 dark:bg-amber-950/50 dark:border-amber-800 dark:hover:bg-amber-900/50 whitespace-nowrap h-8 px-2 sm:px-3"
+                >
+                  {renaming ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin text-amber-600 sm:mr-1" />
+                  ) : (
+                    <Sparkles className="h-3.5 w-3.5 text-amber-600 sm:mr-1" />
+                  )}
+                  <span className="hidden md:inline">Renomear</span> IA
+                </Button>
+              )}
               {/* PACOTE DB — Botão "Organizar" temporariamente oculto (display: none).
                   Mantido para reativação futura — não apagar. */}
               <Button
@@ -2276,6 +2336,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             >
                               {file.name}
                             </span>
+                            {file.ai_analyzed && (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 h-4 px-1 bg-purple-50 text-purple-700 border-purple-200 shrink-0"
+                                title={file.ai_analyzed_at ? `Analisado pela IA em ${file.ai_analyzed_at}` : "Já analisado pela IA"}
+                              >
+                                <Brain className="h-2.5 w-2.5 mr-0.5" />
+                                IA
+                              </Badge>
+                            )}
                           </div>
 
                           {/* Categoria */}
@@ -2408,21 +2478,23 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                         <Download className="h-3 w-3 mr-1" />
                         Download
                       </Button>
-                      {/* Botão Análise IA */}
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="h-5 text-[10px] bg-purple-50 hover:bg-purple-100 border-purple-200 px-2"
-                        onClick={handleAIAnalysis}
-                        disabled={aiAnalyzing}
-                      >
-                        {aiAnalyzing ? (
-                          <Loader2 className="h-3 w-3 animate-spin mr-1" />
-                        ) : (
-                          <Brain className="h-3 w-3 mr-1" />
-                        )}
-                        Analisar
-                      </Button>
+                      {/* Botão Análise IA — apenas gestão */}
+                      {canUseAIDocumentTools && (
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          className="h-5 text-[10px] bg-purple-50 hover:bg-purple-100 border-purple-200 px-2"
+                          onClick={handleAIAnalysis}
+                          disabled={aiAnalyzing}
+                        >
+                          {aiAnalyzing ? (
+                            <Loader2 className="h-3 w-3 animate-spin mr-1" />
+                          ) : (
+                            <Brain className="h-3 w-3 mr-1" />
+                          )}
+                          Analisar
+                        </Button>
+                      )}
                       {/* Botão Eliminar Selecionados */}
                       <Button
                         size="sm"
@@ -2717,6 +2789,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               <Badge variant="outline" className="text-[10px] py-0 h-4">
                                 {file.category}
                               </Badge>
+                              {file.ai_analyzed && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] py-0 h-4 px-1 bg-purple-50 text-purple-700 border-purple-200"
+                                  title="Já analisado pela IA"
+                                >
+                                  <Brain className="h-2.5 w-2.5 mr-0.5" />
+                                  IA
+                                </Badge>
+                              )}
                               <span className="text-[10px] text-muted-foreground">
                                 {file.size_formatted}
                               </span>
@@ -2808,6 +2890,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               </button>
                               {/* Meta info */}
                               <div className="flex flex-wrap items-center gap-1">
+                                {file.ai_analyzed && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] py-0 h-4 px-1 bg-purple-50 text-purple-700 border-purple-200"
+                                    title="Já analisado pela IA"
+                                  >
+                                    <Brain className="h-2.5 w-2.5 mr-0.5" />
+                                    IA
+                                  </Badge>
+                                )}
                                 <span className="text-[10px] text-muted-foreground">
                                   {file.size_formatted}
                                 </span>
