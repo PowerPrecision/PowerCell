@@ -138,9 +138,9 @@ async def insert_staff_portal_message(message_doc: dict, *, user_email: str) -> 
 
 
 def collect_assigned_user_ids(process: dict) -> list:
-    """Delega a portal._get_all_assigned_user_ids (fonte de verdade)."""
-    from routes.portal import _get_all_assigned_user_ids
-    return _get_all_assigned_user_ids(process)
+    """Delega a portal_assigned_users (fonte de verdade)."""
+    from services.portal_assigned_users import get_all_assigned_user_ids
+    return get_all_assigned_user_ids(process)
 
 
 async def notify_team_email_portal_message(

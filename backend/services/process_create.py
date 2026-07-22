@@ -165,7 +165,7 @@ async def attach_second_client_on_create(
 async def create_default_portal_documents(process_id: str, requested_by: dict) -> int:
     """Cria pedidos de documentos padrão do portal. Returns count inserted."""
     try:
-        from routes.portal import DEFAULT_PENDING_CATEGORIES, DOCUMENT_CATEGORY_MAP
+        from services.portal_doc_categories import DEFAULT_PENDING_CATEGORIES, DOCUMENT_CATEGORY_MAP
         now_iso = datetime.now(timezone.utc).isoformat()
         default_docs = []
         for cat_key in DEFAULT_PENDING_CATEGORIES:

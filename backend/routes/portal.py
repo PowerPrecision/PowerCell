@@ -43,6 +43,7 @@ from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
 from fastapi.responses import JSONResponse
 
 from database import db
+from utils.frontend_url import get_frontend_url
 from services.portal_security import (
     get_current_client,
     PORTAL_ROLE,
@@ -423,36 +424,13 @@ async def verify_portal_login(client_id: str, data: dict):
 
 
 # ====================================================================
-# DOCUMENT CATEGORIES — Mapeamento de categorias client-facing
+# DOCUMENT CATEGORIES — from services.portal_doc_categories
 # ====================================================================
-DOCUMENT_CATEGORY_MAP = {
-    "Cartao_Cidadao": {"label": "Cartão de Cidadão", "icon": "🪪"},
-    "IRS": {"label": "Declaração de IRS", "icon": "📋"},
-    "Financeiros": {"label": "Documentos Financeiros", "icon": "📄"},
-    "Recibo_Vencimento": {"label": "Recibo de Vencimento", "icon": "💰"},
-    "Comprovativo_IBAN": {"label": "Comprovativo de IBAN", "icon": "🏦"},
-    "Certidao_Nascimento": {"label": "Certidão de Nascimento", "icon": "📄"},
-    "Atestado_Trabalho": {"label": "Atestado de Trabalho", "icon": "🏢"},
-    "Mapa_Creditos": {"label": "Mapa de Créditos", "icon": "📊"},
-    "Declaracao_Imposto_Renda": {"label": "Declaração de Imposto de Renda", "icon": "📑"},
-    "Certidao_Permanente": {"label": "Certidão Permanente", "icon": "📜"},
-    "Contrato_Promessa": {"label": "Contrato de Promessa", "icon": "📝"},
-    "Plantas_Casa": {"label": "Plantas da Casa", "icon": "🏠"},
-    "Certificado_Energetico": {"label": "Certificado Energético", "icon": "⚡"},
-    "Outros": {"label": "Outro Documento", "icon": "📎"},
-}
-
-# Categorias internas que NÃO devem ser visíveis no Portal do Cliente
-PORTAL_HIDDEN_CATEGORIES = {"Index"}
-
-# Fallback categories usadas quando o admin não criou docs REQUESTED
-DEFAULT_PENDING_CATEGORIES = [
-    "Cartao_Cidadao",
-    "IRS",
-    "Recibo_Vencimento",
-    "Comprovativo_IBAN",
-]
-
+from services.portal_doc_categories import (
+    DOCUMENT_CATEGORY_MAP,
+    PORTAL_HIDDEN_CATEGORIES,
+    DEFAULT_PENDING_CATEGORIES,
+)
 
 # ====================================================================
 # RESOLUÇÃO DE SHORT TOKEN
@@ -546,18 +524,7 @@ async def resolve_portal_token(short_id: str):
 #     "ver como cliente" — auto-login imediato.
 # ====================================================================
 
-def _resolve_frontend_url(request) -> str:
-    """Obtém a URL base do frontend (Referer > FRONTEND_URL env)."""
-    referer = request.headers.get("referer") or request.headers.get("origin")
-    if referer:
-        from urllib.parse import urlparse
-        parsed = urlparse(referer)
-        if parsed.scheme and parsed.netloc:
-            return f"{parsed.scheme}://{parsed.netloc}"
-    frontend_url = os.environ.get("FRONTEND_URL")
-    if frontend_url:
-        return frontend_url.rstrip("/")
-    return ""
+
 
 
 @router.get("/impersonate/{process_id}")
@@ -619,7 +586,7 @@ async def impersonate_client_portal(
     token = create_client_magic_token(process_id)
 
     # Construir URL com o token na query string
-    frontend_url = _resolve_frontend_url(request)
+    frontend_url = get_frontend_url(request)
     from urllib.parse import urlencode
     magic_link = f"{frontend_url}/portal?{urlencode({'token': token})}"
 
@@ -678,134 +645,19 @@ async def authenticate_portal(client_data: dict = Depends(get_current_client)):
 # PERFIL DO CLIENTE — GET /me + PUT /me
 # ====================================================================
 
-# Campos que o cliente pode atualizar no seu perfil (camada de segurança)
-PROFILE_UPDATABLE_CONTACT_FIELDS = {"email", "email_secundario", "telefone", "telefone_secundario"}
-PROFILE_UPDATABLE_PERSONAL_FIELDS = {
-    "morada_fiscal", "estado_civil", "profissao", "naturalidade",
-    "nacionalidade", "data_nascimento", "documento_id", "data_validade_cc",
-    "sexo",
-}
-# Campos SENSÍVEIS que NÃO são devolvidos ao frontend (mesmo encriptados)
-PROFILE_HIDDEN_FIELDS = {"nif", "nome_pai", "nome_mae", "altura"}
-
-
-def _decrypt_if_needed(value):
-    """Desencripta um valor se tiver o prefixo ENC:."""
-    if not value or not isinstance(value, str) or not value.startswith("ENC:"):
-        return value
-    try:
-        from services.encryption import decrypt_value
-        decrypted = decrypt_value(value)
-        return decrypted if decrypted else value
-    except Exception:
-        return value
-
-
-def _get_client_id_from_token(client_data: dict) -> Optional[str]:
-    """
-    Extrai o client_id dos dados do token do portal.
-
-    Para access_code_session com "no_process": client_id vem no payload.
-    Para outros tipos: client_id vem do campo client_id do processo.
-    """
-    # Caso 1: token access_code_session com "no_process"
-    if client_data.get("client_id"):
-        return client_data["client_id"]
-
-    # Caso 2: processo com client_id
-    process = client_data.get("process")
-    if process and process.get("client_id"):
-        return process["client_id"]
-
-    return None
+from services.portal_profile import (
+    ClientProfileUpdate,
+    run_get_client_profile,
+    run_update_client_profile,
+)
 
 
 @router.get("/me")
 async def get_client_profile(
     client_data: dict = Depends(get_current_client)
 ):
-    """
-    Retorna os dados pessoais do cliente autenticado para o formulário
-    de perfil no Portal do Cliente.
-
-    SEGURANÇA:
-    - Requer autenticação via token do portal (get_current_client)
-    - NÃO devolve campos sensíveis (NIF, nome dos pais, etc.)
-    - Desencripta campos encriptados (ENC:) antes de enviar
-    - Indica se o cliente tem processo associado (para bloqueio de edição)
-    """
-    client_id = _get_client_id_from_token(client_data)
-
-    if not client_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Não foi possível identificar o cliente. Verifique a sua autenticação."
-        )
-
-    # Buscar dados do cliente
-    client = await db.clients.find_one(
-        {"id": client_id},
-        {"_id": 0, "portal_access_code": 0, "notas": 0, "fonte": 0, "tags": 0, "created_by": 0}
-    )
-
-    if not client:
-        raise HTTPException(
-            status_code=404,
-            detail="Cliente não encontrado."
-        )
-
-    # Determinar se o cliente tem processo associado (para bloqueio de edição)
-    process_ids = client.get("process_ids", [])
-    has_process = False
-    is_data_confirmed = False
-    if process_ids:
-        # PACOTE CQ — O perfil é trancado se o processo avançar para além
-        # da fase de recolha de documentos. Avalia diretamente as Fases do
-        # Kanban (Status) em vez da flag is_indexed (que pode não estar
-        # atualizada atempadamente na BD).
-        active_process = await db.processes.find_one(
-            {
-                "id": {"$in": process_ids},
-                "is_deleted": {"$ne": True},
-                "status": {"$nin": ["pre_registo", None, "clientes_espera", "documentacao", "eliminado", "desistencias"]}
-            },
-            {"_id": 0, "id": 1}
-        )
-        has_process = active_process is not None
-
-    # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
-    dados_pessoais = client.get("dados_pessoais", {}) or {}
-    clean_dados_pessoais = {}
-    for key, value in dados_pessoais.items():
-        if key in PROFILE_HIDDEN_FIELDS:
-            continue  # Não devolver campos sensíveis
-        clean_dados_pessoais[key] = _decrypt_if_needed(value)
-
-    # Preparar dados de contacto (desencriptar campos encriptados)
-    contacto = client.get("contacto", {}) or {}
-    clean_contacto = {}
-    for key, value in contacto.items():
-        # Ocultar email_hash (campo interno para blind index)
-        if key.endswith("_hash"):
-            continue
-        clean_contacto[key] = _decrypt_if_needed(value)
-
-    return {
-        "id": client.get("id"),
-        "nome": client.get("nome", ""),
-        "contacto": clean_contacto,
-        "dados_pessoais": clean_dados_pessoais,
-        "has_process": has_process,
-        # PACOTE BM — flag de dados confirmados/congelados pela Indexação.
-        # Quando true, o Portal bloqueia todos os campos de input do perfil.
-        "is_data_confirmed": is_data_confirmed,
-    }
-
-
-class ClientProfileUpdate(BaseModel):
-    """Schema para atualização de perfil do cliente via Portal."""
-    contacto: Optional[dict] = None
-    dados_pessoais: Optional[dict] = None
+    """Retorna os dados pessoais do cliente autenticado."""
+    return await run_get_client_profile(client_data)
 
 
 @router.put("/me")
@@ -813,152 +665,10 @@ async def update_client_profile(
     data: ClientProfileUpdate,
     client_data: dict = Depends(get_current_client)
 ):
-    """
-    Atualiza os dados pessoais do cliente autenticado.
+    """Atualiza os dados pessoais do cliente autenticado."""
+    return await run_update_client_profile(data, client_data)
 
-    REGRAS DE SEGURANÇA:
-    - Requer autenticação via token do portal
-    - BLOQUEIA a atualização se o cliente já tiver um Process associado
-      → Retorna 403: 'Dados trancados. Processo já em análise.'
-    - Apenas campos permitidos são atualizados (whitelist)
-    - NIF e nome NÃO podem ser alterados pelo cliente
-    - Campos encriptados são re-encriptados antes de guardar
-    """
-    client_id = _get_client_id_from_token(client_data)
 
-    if not client_id:
-        raise HTTPException(
-            status_code=400,
-            detail="Não foi possível identificar o cliente. Verifique a sua autenticação."
-        )
-
-    # ── REGRA CRÍTICA: Verificar se o cliente tem processo associado ──
-    client = await db.clients.find_one(
-        {"id": client_id},
-        {"_id": 0, "process_ids": 1}
-    )
-
-    if not client:
-        raise HTTPException(
-            status_code=404,
-            detail="Cliente não encontrado."
-        )
-
-    process_ids = client.get("process_ids", [])
-    if process_ids:
-        # PACOTE CQ — O perfil é trancado se o processo avançar para além
-        # da fase de recolha de documentos. Avalia diretamente as Fases do
-        # Kanban (Status) em vez da flag is_indexed.
-        active_process = await db.processes.find_one(
-            {
-                "id": {"$in": process_ids},
-                "is_deleted": {"$ne": True},
-                "status": {"$nin": ["pre_registo", None, "clientes_espera", "documentacao", "eliminado", "desistencias"]}
-            },
-            {"_id": 0, "id": 1}
-        )
-        if active_process:
-            raise HTTPException(
-                status_code=403,
-                detail="Dados trancados. O seu processo já se encontra em análise."
-            )
-
-    # ── Filtrar campos permitidos (whitelist) ──
-    update_fields = {}
-    now = datetime.now(timezone.utc).isoformat()
-
-    # Processar contacto
-    if data.contacto:
-        contacto_updates = {}
-        for key, value in data.contacto.items():
-            if key in PROFILE_UPDATABLE_CONTACT_FIELDS:
-                # Encriptar campos sensíveis (email)
-                if key in ("email", "email_secundario") and value:
-                    try:
-                        from services.encryption import encrypt_value, generate_email_hash
-                        encrypted = encrypt_value(str(value).strip().lower())
-                        if encrypted:
-                            contacto_updates[key] = encrypted
-                            # Atualizar blind index para pesquisa
-                            if key == "email":
-                                email_hash = generate_email_hash(str(value).strip().lower())
-                                if email_hash:
-                                    contacto_updates["email_hash"] = email_hash
-                        else:
-                            contacto_updates[key] = str(value).strip().lower()
-                    except Exception:
-                        # Se a encriptação falhar, guardar em texto limpo (fallback)
-                        contacto_updates[key] = str(value).strip().lower()
-                else:
-                    contacto_updates[key] = value
-
-        if contacto_updates:
-            update_fields["contacto"] = contacto_updates
-
-    # Processar dados pessoais
-    if data.dados_pessoais:
-        dp_updates = {}
-        for key, value in data.dados_pessoais.items():
-            if key in PROFILE_UPDATABLE_PERSONAL_FIELDS:
-                dp_updates[key] = value
-
-        if dp_updates:
-            update_fields["dados_pessoais"] = dp_updates
-
-    if not update_fields:
-        return {"success": True, "message": "Nenhum campo para atualizar.", "updated_fields": []}
-
-    # ── Aplicar atualização no MongoDB (merge com dados existentes) ──
-    mongo_update = {"updated_at": now}
-
-    # Para contacto: usar notação dot para merge (não substituir o documento inteiro)
-    if "contacto" in update_fields:
-        for key, value in update_fields["contacto"].items():
-            mongo_update[f"contacto.{key}"] = value
-
-    # Para dados_pessoais: usar notação dot para merge
-    if "dados_pessoais" in update_fields:
-        for key, value in update_fields["dados_pessoais"].items():
-            mongo_update[f"dados_pessoais.{key}"] = value
-
-    # PACOTE CS — Data Provenance: injetar automaticamente field_metadata
-    # com source="client" para cada campo atualizado pelo cliente no Portal.
-    # Formato: {"contacto.email": {"source": "client", "updated_at": "ISO"}}
-    field_metadata_portal = {}
-    if "contacto" in update_fields:
-        for key in update_fields["contacto"]:
-            field_metadata_portal[f"contacto.{key}"] = {
-                "source": "client",
-                "updated_at": now
-            }
-    if "dados_pessoais" in update_fields:
-        for key in update_fields["dados_pessoais"]:
-            field_metadata_portal[f"dados_pessoais.{key}"] = {
-                "source": "client",
-                "updated_at": now
-            }
-    if field_metadata_portal:
-        # Merge com field_metadata existente (não apaga campos anteriores)
-        existing_fm = client.get("field_metadata") or {}
-        merged_fm = {**existing_fm, **field_metadata_portal}
-        mongo_update["field_metadata"] = merged_fm
-
-    result = await db.clients.update_one(
-        {"id": client_id},
-        {"$set": mongo_update}
-    )
-
-    updated_fields = list(update_fields.keys())
-
-    logger.info(
-        f"[PORTAL PROFILE] Cliente {client_id} atualizou perfil: {updated_fields}"
-    )
-
-    return {
-        "success": True,
-        "message": "Perfil atualizado com sucesso.",
-        "updated_fields": updated_fields,
-    }
 
 
 # ====================================================================
@@ -1265,128 +975,12 @@ async def get_portal_status(
 # HELPER: Consultor Info
 # ====================================================================
 
-async def _get_user_contact_info(user_id: str) -> dict:
-    """Obtém informações de contacto de um utilizador."""
-    if not user_id:
-        return None
-    user = await db.users.find_one(
-        {"id": user_id},
-        {"_id": 0, "password": 0}
-    )
-    if not user:
-        return None
-    return {
-        "name": user.get("name", ""),
-        "email": user.get("email", ""),
-        "phone": user.get("phone", ""),
-        "role": user.get("role", ""),
-    }
+from services.portal_status_helpers import (
+    _get_user_contact_info,
+    _get_rgpd_status,
+    _get_team_info,
+)
 
-
-async def _get_rgpd_status(process_id: str) -> dict:
-    """Obtém o estado do RGPD para o processo.
-    
-    Returns info about RGPD consent status for the client portal.
-    - signed: RGPD was signed by the client
-    - pending: RGPD was requested but not yet signed
-    - none: No RGPD request exists
-    
-    Enhanced to also return:
-    - requested_at: when the RGPD was requested
-    - requested_by_name: who requested it
-    - For pending status: whether the token is expired or still valid
-    """
-    try:
-        # Find the most recent RGPD request (signed takes priority)
-        rgpd = await db.rgpd_requests.find_one(
-            {"process_id": process_id, "status": "signed"},
-            {"_id": 0, "token": 0}
-        )
-        if rgpd:
-            return {
-                "status": "signed",
-                "has_rgpd": True,
-                "signed_at": rgpd.get("signed_at"),
-                "requested_at": rgpd.get("created_at"),
-                "requested_by_name": rgpd.get("created_by_name", ""),
-            }
-        
-        # Check for pending
-        rgpd = await db.rgpd_requests.find_one(
-            {"process_id": process_id, "status": "pending"},
-            {"_id": 0, "token": 0}
-        )
-        if rgpd:
-            # Determine if the token is still valid or expired
-            token_expired = False
-            expires_at_str = rgpd.get("token_expires_at")
-            if expires_at_str:
-                try:
-                    if expires_at_str.endswith('Z'):
-                        expires_at_str_clean = expires_at_str[:-1] + '+00:00'
-                    else:
-                        expires_at_str_clean = expires_at_str
-                    expires_at = datetime.fromisoformat(expires_at_str_clean)
-                    token_expired = expires_at < datetime.now(timezone.utc)
-                except (ValueError, TypeError):
-                    token_expired = True
-            
-            return {
-                "status": "pending",
-                "has_rgpd": True,
-                "expires_at": rgpd.get("token_expires_at"),
-                "requested_at": rgpd.get("created_at"),
-                "requested_by_name": rgpd.get("created_by_name", ""),
-                "token_expired": token_expired,
-                "token_valid": not token_expired,
-            }
-        
-        return {"status": "none", "has_rgpd": False}
-    except Exception as e:
-        logger.warning(f"Erro ao obter estado RGPD para portal: {e}")
-        return {"status": "none", "has_rgpd": False}
-
-
-async def _get_team_info(process: dict) -> dict:
-    """Obtém informações da equipa atribuída ao processo.
-
-    Retorna consultores e mediadores como listas separadas, sem duplicados.
-    """
-    # Gather consultor IDs
-    consultor_ids = list(set(filter(None, (
-        process.get("assigned_consultor_ids") or
-        ([process["assigned_consultor_id"]] if process.get("assigned_consultor_id") else [])
-    ))))
-
-    # Gather mediador IDs (excluding consultor IDs to avoid duplicates)
-    mediador_ids = list(set(filter(None, (
-        process.get("assigned_mediador_ids") or
-        ([process["assigned_mediador_id"]] if process.get("assigned_mediador_id") else [])
-    ))))
-    mediador_ids = [mid for mid in mediador_ids if mid not in consultor_ids]
-
-    # Fetch all
-    consultores = []
-    for uid in consultor_ids:
-        info = await _get_user_contact_info(uid)
-        if info:
-            consultores.append(info)
-
-    mediadores = []
-    for uid in mediador_ids:
-        info = await _get_user_contact_info(uid)
-        if info:
-            mediadores.append(info)
-
-    # Fallback: if no consultores found, show mediadores as main contacts
-    if not consultores and mediadores:
-        consultores = mediadores
-        mediadores = []
-
-    return {
-        "consultores": consultores,
-        "mediadores": mediadores,
-    }
 
 
 # ====================================================================
@@ -1809,275 +1403,13 @@ async def get_portal_download_url(
 # HELPERS: Document Creation, Notification & Onboarding
 # ====================================================================
 
-async def _trigger_onboarding_check(client_id: str):
-    """
-    Gatilho assíncrono para verificar se o cliente completou o onboarding.
+from services.portal_onboarding_advance import (
+    _trigger_onboarding_check,
+    _check_and_advance_existing_pre_registo,
+    _has_all_required_documents,
+    _auto_advance_from_pre_registo,
+)
 
-    Executado via asyncio.create_task() após cada upload de documento.
-    Se o cliente tiver todos os documentos obrigatórios, um Process
-    é criado automaticamente e os documentos são ancorados.
-
-    PACOTE BO — Auto-Avanço e Auto-Atribuição:
-    Após a verificação de onboarding, se o processo estiver em pre_registo
-    e tiver todos os documentos obrigatórios, o sistema avança automaticamente
-    para o estado seguinte e invoca assign_to_indexer para o processo cair
-    na mesa do Indexador com menos carga. O avanço é silencioso (stealth mode)
-    para não gerar ruído no histórico do cliente.
-
-    Esta função é fire-and-forget — erros são logados mas não propagados.
-    """
-    try:
-        from services.onboarding_service import check_onboarding_completion
-        result = await check_onboarding_completion(client_id)
-
-        if result.get("completed"):
-            logger.info(
-                f"[ONBOARDING] Processo criado automaticamente para "
-                f"cliente {client_id}: processo #{result.get('process_number')} "
-                f"({result.get('anchored_docs', 0)} docs ancorados)"
-            )
-            # PACOTE BO — Auto-avanço do processo recém-criado (está em pre_registo)
-            process_id = result.get("process_id")
-            if process_id:
-                await _auto_advance_from_pre_registo(process_id, client_id)
-        else:
-            missing = result.get("missing", [])
-            if missing:
-                logger.info(
-                    f"[ONBOARDING] Cliente {client_id} ainda precisa de: {missing}"
-                )
-            # PACOTE BO — Verificar se o cliente tem um processo EXISTENTE em
-            # pre_registo com todos os docs obrigatórios (Flow 1: processo criado
-            # pelo formulário público, docs ancorados diretamente ao processo).
-            # O check_onboarding_completion só procura docs órfãos (sem process_id),
-            # pelo que não detecta este caso. Precisamos de uma verificação separada.
-            await _check_and_advance_existing_pre_registo(client_id)
-    except Exception as e:
-        logger.error(f"[ONBOARDING] Erro na verificação de onboarding para {client_id}: {e}")
-
-
-async def _check_and_advance_existing_pre_registo(client_id: str):
-    """
-    PACOTE BO — Verifica se o cliente tem um processo EXISTENTE em pre_registo
-    (ou status vazio/Lead) com todos os documentos obrigatórios já submetidos
-    (ancorados ao processo).
-
-    Isto cobre o Flow 1: processo criado pelo formulário público (routes/public.py)
-    em pre_registo (PACOTE DB: status=None/Lead), onde os docs são ancorados
-    diretamente ao processo via confirm-upload. O check_onboarding_completion não
-    detecta este caso porque só procura docs órfãos (sem process_id).
-
-    Se o processo tiver todos os docs obrigatórios, avança automaticamente.
-    """
-    try:
-        client = await db.clients.find_one({"id": client_id}, {"_id": 0, "process_ids": 1})
-        if not client:
-            return
-        process_ids = client.get("process_ids", [])
-        if not process_ids:
-            return
-
-        # PACOTE DB — Procurar processo em pre_registo OU com status vazio (Lead)
-        # (novos registos do formulário público entram com status=None)
-        process = await db.processes.find_one(
-            {
-                "id": {"$in": process_ids},
-                "status": {"$in": ["pre_registo", None]},
-                "is_deleted": {"$ne": True},
-            },
-            {"_id": 0, "id": 1, "status": 1}
-        )
-        if not process:
-            return  # Não há processo em pre_registo/Lead
-
-        # Verificar se tem todos os documentos obrigatórios
-        if await _has_all_required_documents(process["id"], client_id):
-            await _auto_advance_from_pre_registo(process["id"], client_id)
-        else:
-            logger.debug(
-                f"[PACOTE-BO] Processo {process['id']} em pre_registo/Lead mas ainda "
-                f"faltam documentos obrigatórios. Cliente {client_id}."
-            )
-    except Exception as e:
-        logger.warning(f"[PACOTE-BO] Erro em _check_and_advance_existing_pre_registo: {e}")
-
-
-async def _has_all_required_documents(process_id: str, client_id: str) -> bool:
-    """
-    Verifica se o processo tem todos os documentos obrigatórios submetidos.
-
-    Reutiliza a lógica de validação do onboarding_service (DOCUMENT_REQUIREMENT_MAP
-    e REQUIREMENTS_BY_CONTRACT_TYPE) mas procura documentos ancorados AO PROCESSO
-    (com process_id definido), em vez de docs órfãos.
-    """
-    from services.onboarding_service import (
-        DOCUMENT_REQUIREMENT_MAP,
-        REQUIREMENTS_BY_CONTRACT_TYPE,
-        CONTRACT_TYPE_NORMALIZE,
-        _detect_contract_type,
-    )
-
-    # Buscar documentos do processo (submetidos pelo cliente via portal)
-    docs = await db.documents.find(
-        {
-            "process_id": process_id,
-            "status": {"$in": ["RECEIVED", "UPLOADED", "SUBMITTED", "received", "uploaded", "submitted"]},
-        },
-        {"_id": 0, "category": 1, "ai_extracted_data": 1, "extracted_data": 1, "id": 1}
-    ).to_list(100)
-
-    # Recolher categorias submetidas
-    uploaded_categories = set()
-    for doc in docs:
-        cat = doc.get("category", "")
-        if isinstance(cat, dict):
-            cat = cat.get("value", cat.get("label", ""))
-        cat_str = str(cat).strip()
-        if cat_str:
-            uploaded_categories.add(cat_str)
-
-    # Determinar tipo de contrato para saber os requisitos
-    client = await db.clients.find_one({"id": client_id})
-    contract_type = await _detect_contract_type(client_id, client or {}, docs)
-    normalized = (
-        CONTRACT_TYPE_NORMALIZE.get(contract_type.lower().strip(), contract_type.lower().strip())
-        if contract_type else "default"
-    )
-    required_groups = REQUIREMENTS_BY_CONTRACT_TYPE.get(normalized, REQUIREMENTS_BY_CONTRACT_TYPE["default"])
-
-    # Verificar cada grupo obrigatório
-    for group_name in required_groups:
-        acceptable_cats = DOCUMENT_REQUIREMENT_MAP.get(group_name, [])
-        is_satisfied = any(
-            acc_cat in uploaded_categories
-            or acc_cat.lower() in {c.lower() for c in uploaded_categories}
-            for acc_cat in acceptable_cats
-        )
-        if not is_satisfied:
-            return False
-    return True
-
-
-async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
-    """
-    PACOTE BO + DB — Auto-avanço do pre_registo/Lead para a 1ª fase REAL do
-    Kanban + assign_to_indexer.
-
-    1. Verifica que o processo está em pre_registo OU com status vazio (Lead).
-    2. Calcula a 1ª fase REAL do Kanban (1º status do workflow_statuses que
-       NÃO seja pre_registo, fila_espera, nem terminal). Em vez do "próximo
-       estado" da pipeline, vai diretamente para a 1ª fase ativa.
-    3. Avança o processo para essa fase.
-    4. Invoca assign_to_indexer(process_id, update_status=False) para o processo
-       cair na mesa do Indexador com menos carga, SEM forçar fase_documental.
-    5. O avanço é SILENCIOSO (stealth mode) — usa um system user com
-       track_history=False para não gerar ruído no histórico do cliente.
-       O assign_to_indexer gera os seus próprios logs de sistema (indexer
-       assignment), que são ações de sistema legítimas, não do cliente.
-    """
-    from services.process_assignment import assign_to_indexer
-    from services.history import log_history
-
-    # ── 1. Verificar que o processo está em pre_registo/Lead ──
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0, "status": 1, "client_name": 1})
-    if not process:
-        logger.warning(f"[PACOTE-BO] Processo {process_id} não encontrado para auto-avanço.")
-        return
-
-    current_status = process.get("status")
-    # PACOTE DB — aceitar pre_registo (legacy) OU None (novos registos)
-    if current_status not in ("pre_registo", None):
-        logger.debug(
-            f"[PACOTE-BO] Processo {process_id} não está em pre_registo/Lead "
-            f"(status={current_status}). Auto-avanço cancelado."
-        )
-        return
-
-    # ── 2. Calcular a 1ª fase REAL do Kanban ──
-    # Excluir pre_registo (Lead), fila_espera e terminais — queremos a 1ª fase
-    # ativa do Kanban onde o processo deve aparecer após submeter os docs.
-    EXCLUDED_FROM_KANBAN_START = {
-        "pre_registo", "fila_espera",
-        "concluido", "arquivo", "perdido", "desistencias",
-        # variants legacy
-        "concluidos", "desistido", "cancelado", "recusado",
-    }
-    all_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
-
-    target_status = None
-    for s in all_statuses:
-        name = s.get("name", "")
-        if name and name not in EXCLUDED_FROM_KANBAN_START:
-            target_status = name
-            break
-
-    # Fallback: se TODOS os statuses estiverem excluídos (config inválida),
-    # usar o 1º status da pipeline que não seja pre_registo.
-    if not target_status:
-        for s in all_statuses:
-            name = s.get("name", "")
-            if name and name != "pre_registo":
-                target_status = name
-                break
-
-    if not target_status:
-        logger.warning(
-            f"[PACOTE-BO] Sem fases reais no workflow_statuses para auto-avanço. "
-            f"Processo {process_id} mantém status={current_status}."
-        )
-        return
-
-    # ── 3. Avançar status (STEALTH — track_history=False para não gerar ruído) ──
-    now = datetime.now(timezone.utc).isoformat()
-    await db.processes.update_one(
-        {"id": process_id},
-        {"$set": {"status": target_status, "workflow_step": target_status, "updated_at": now}}
-    )
-
-    # Log silencioso: o system user tem track_history=False, pelo que o
-    # _is_stealth_user (Pacote BJ) retorna True e log_history retorna imediatamente
-    # sem escrever na coleção history. Isto garante que o auto-avanço não
-    # gera ruído no histórico do cliente.
-    stealth_system_user = {
-        "id": "system",
-        "name": "Sistema (Auto-avanço Portal)",
-        "role": "system",
-        "track_history": False,  # PACOTE BJ — silencia o log
-    }
-    try:
-        await log_history(
-            process_id=process_id,
-            user=stealth_system_user,
-            action=f"Auto-avanço: {current_status or 'Lead'} → {target_status} (documentos obrigatórios submetidos pelo cliente)",
-            field="status",
-            old_value=current_status or "",
-            new_value=target_status,
-        )
-    except Exception as e:
-        logger.warning(f"[PACOTE-BO] Erro ao registar histórico (stealth): {e}")
-
-    client_name = process.get("client_name", "Cliente")
-    logger.info(
-        f"[PACOTE-BO] Processo {process_id} ({client_name}) avançado de "
-        f"{current_status or 'Lead'} → {target_status}. A invocar assign_to_indexer..."
-    )
-
-    # ── 4. Invocar assign_to_indexer (PACOTE DB: update_status=False) ──
-    # assign_to_indexer atribui o processo ao indexador com menor carga.
-    # PACOTE DB: passamos update_status=False para NÃO forçar fase_documental
-    # nem fila_espera — o processo fica na 1ª fase real (target_status) e o
-    # indexador é atribuído se disponível.
-    try:
-        success, data, msg = await assign_to_indexer(process_id, update_status=False)
-        logger.info(
-            f"[PACOTE-BO] assign_to_indexer para processo {process_id}: "
-            f"success={success}, data={data}, msg={msg}"
-        )
-    except Exception as e:
-        logger.warning(
-            f"[PACOTE-BO] Erro em assign_to_indexer para processo {process_id}: {e}. "
-            f"O processo ficou em {target_status} mas sem indexador atribuído."
-        )
 
 
 async def _create_document_record(
@@ -3507,43 +2839,8 @@ async def _notify_assigned_team_fetch(process: dict, source_name: str, docs_coun
             logger.warning(f"Erro ao notificar {uid} sobre fetch {source_name}: {e}")
 
 
-def _get_all_assigned_user_ids(process: dict) -> list:
-    """Obtém lista deduplicada de TODOS os user_ids atribuídos ao processo.
+from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 
-    Inclui consultores, mediadores, indexação e parceiro.
-    Usa os campos novos (_ids) com fallback para os antigos (_id).
-    """
-    ids = set()
-    
-    # Consultores (lista nova)
-    for uid in (process.get("assigned_consultor_ids") or []):
-        if uid:
-            ids.add(uid)
-    # Consultor singular (fallback)
-    uid = process.get("assigned_consultor_id")
-    if uid:
-        ids.add(uid)
-    
-    # Mediadores (lista nova)
-    for uid in (process.get("assigned_mediador_ids") or []):
-        if uid:
-            ids.add(uid)
-    # Mediador singular (fallback)
-    uid = process.get("assigned_mediador_id")
-    if uid:
-        ids.add(uid)
-    
-    # Indexação
-    uid = process.get("assigned_indexacao_id")
-    if uid:
-        ids.add(uid)
-    
-    # Parceiro
-    uid = process.get("assigned_parceiro_id")
-    if uid:
-        ids.add(uid)
-    
-    return list(ids)
 
 
 # ====================================================================

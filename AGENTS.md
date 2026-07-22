@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails)
+### Route thinning (documents / processes / emails / portal)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -35,6 +35,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Processes | `routes/processes.py` (~664) | `services/process_*.py` | Mostly done |
 | Documents | `routes/documents.py` (~1072; was ~4623) | `services/document_*.py` | Thin stubs only — see map |
 | Emails | `routes/emails.py` (~654; **done**) | `services/email_*.py` (see map) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
+| Portal | `routes/portal.py` (~3347; thinning) | `services/portal_*.py` (see map) | Do **not** collide with existing `portal_security` / `portal_magic_link` / `portal_documents_notify`. Portal `DOCUMENT_CATEGORY_MAP` includes `Financeiros` (separate from `document_constants`) |
 
 **`email_*` thinning (complete):**
 
@@ -51,7 +52,19 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 
 Unit helpers: `backend/tests/unit/test_email_extraction_helpers.py`.
 
-**Next fat routes (not started):** `portal.py` (~4050), `admin.py` (~4037).
+**`portal_*` thinning so far:**
+
+| Service | Responsibility |
+|---|---|
+| `portal_assigned_users.py` | `get_all_assigned_user_ids` (also used by `process_portal_messages`) |
+| `portal_doc_categories.py` | Portal category map / hidden / default pending (used by `process_create`) |
+| `portal_profile.py` | GET/PUT `/me` + profile field allowlists |
+| `portal_status_helpers.py` | contact / RGPD / team helpers for `/status` |
+| `portal_onboarding_advance.py` | Pacote BO auto-advance after portal uploads |
+
+Still in `portal.py`: auth/login, `/status` body, uploads, messages, gov scrapers, visits, recommendations.
+
+**Next fat routes:** finish portal, then `admin.py` (~4037).
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
