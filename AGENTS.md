@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match / gov_auth / companies / alerts / storage / portal_settings / automation / announcements / changelog / portal_admin / push_notifications / activities / audit / user_branches)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match / gov_auth / companies / alerts / storage / portal_settings / automation / announcements / changelog / portal_admin / push_notifications / activities / audit / user_branches / ai_agent)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -736,9 +736,17 @@ Unit helpers: `backend/tests/unit/test_audit_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_user_branches_extraction_helpers.py`.
 
-**Fat route thinning: essentially complete.** All substantive FastAPI route modules now use thin stubs + `run_*` services. Only intentional leftovers: `routes/ai_bulk/*` package helpers (left as-is) and tiny stubs already under ~100 lines. Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
+**`ai_agent_api` thinning (complete):**
 
-**Remaining backlog:** route thinning is **done** for practical purposes (only tiny stubs / intentional `ai_bulk` package left). Do not reopen fat route files to stuff logic back in.
+| Service | Responsibility |
+|---|---|
+| `ai_agent_api.py` | analyze-all / analyze-single / suggestions / alerts / stats |
+
+Do **not** overwrite `ai_improvement_agent.py`. Unit helpers: `backend/tests/unit/test_ai_agent_extraction_helpers.py`.
+
+**Fat route thinning: complete.** All substantive FastAPI route modules now use thin stubs + `run_*` services. Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
+
+**Remaining backlog:** literally nothing left except intentional `routes/ai_bulk/*` package. Do not reopen fat route files to stuff logic back in.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
