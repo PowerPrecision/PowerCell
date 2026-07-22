@@ -70,8 +70,9 @@ async def run_google_login(
 
         # Guardar state na DB para verificação posterior
         # TTL de 10 minutos para o state
-        # Also persist active role for per-role OAuth
+        # Persist active role + company for per-company OAuth storage
         active_role = request.headers.get("X-Active-Role", "")
+        company_id = request.headers.get("X-Company-Id", "")
         await db.oauth_states.insert_one(
             {
                 "state": state_token,
@@ -79,6 +80,7 @@ async def run_google_login(
                 "redirect_uri": redirect_uri,
                 "email_address": email_address,
                 "active_role": active_role or None,
+                "company_id": company_id or None,
                 "created_at": datetime.now(timezone.utc).isoformat(),
                 "expires_at": (
                     datetime.now(timezone.utc).isoformat()
@@ -243,7 +245,9 @@ async def run_google_callback(
 
         # Guardar tokens
         if user_id:
-            # Determine which role sub-config to store OAuth tokens in
+            # Prefer company key when company_id is known (canonical multi-empresa).
+            # Fall back to role key only when no company context.
+            oauth_company_id = stored_state.get("company_id") if stored_state else None
             oauth_active_role = stored_state.get("active_role") if stored_state else None
 
             # Get user's primary role for comparison
@@ -252,10 +256,12 @@ async def run_google_callback(
             )
             user_primary_role = (user_doc or {}).get("role", "")
 
-            if oauth_active_role and oauth_active_role != user_primary_role:
-                storage_role = oauth_active_role
+            if oauth_company_id and oauth_company_id != "default":
+                storage_key = f"company:{oauth_company_id}"
+            elif oauth_active_role and oauth_active_role != user_primary_role:
+                storage_key = oauth_active_role
             else:
-                storage_role = "default"
+                storage_key = "default"
 
             # Load and normalize existing email_config
             from services.email_config_resolver import (
@@ -274,14 +280,14 @@ async def run_google_callback(
             else:
                 nested_existing = {}
 
-            # Get existing config for this role
+            # Get existing config for this storage key
             existing_role_config = _extract_role_email_config(
-                nested_existing, storage_role
+                nested_existing, storage_key
             )
 
             email_addr = email_address or google_email or existing_role_config.get("email_address", "")
 
-            # Build role config preserving IMAP/SMTP settings
+            # Build config preserving IMAP/SMTP settings
             new_role_config = {
                 "email_address": email_addr,
                 "imap_server": existing_role_config.get("imap_server", ""),
@@ -297,18 +303,45 @@ async def run_google_callback(
                 "oauth_connected_at": datetime.now(timezone.utc).isoformat(),
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             }
+            if oauth_company_id:
+                new_role_config["company_id"] = oauth_company_id
 
-            # Store under the role key
-            nested_existing[storage_role] = new_role_config
+            # Store under company key when known, else role/default
+            nested_existing[storage_key] = new_role_config
 
             await db.users.update_one(
                 {"id": user_id},
                 {"$set": {"email_config": nested_existing}},
             )
 
+            # Dual-write to canonical user_email_configs when company known
+            if oauth_company_id and oauth_company_id != "default":
+                try:
+                    from services.user_email_config_service import upsert_user_email_config
+                    await upsert_user_email_config(
+                        user_id=user_id,
+                        company_id=oauth_company_id,
+                        email_address=email_addr,
+                        imap_server=new_role_config.get("imap_server", ""),
+                        imap_port=new_role_config.get("imap_port", 993),
+                        smtp_server=new_role_config.get("smtp_server", ""),
+                        smtp_port=new_role_config.get("smtp_port", 465),
+                        encrypted_password=new_role_config.get("encrypted_password", ""),
+                        google_refresh_token=encrypted_refresh,
+                        google_access_token=encrypted_access,
+                        google_email=google_email or "",
+                        auth_method=new_role_config.get("auth_method", "google_oauth"),
+                        oauth_connected_at=new_role_config.get("oauth_connected_at"),
+                        is_configured=True,
+                    )
+                except Exception as e:
+                    logger.warning(
+                        f"[Google OAuth] Dual-write user_email_configs falhou: {e}"
+                    )
+
             logger.info(
                 f"[Google OAuth] Tokens guardados para user {user_id} "
-                f"(email={email_addr}, has_refresh={bool(refresh_token)})"
+                f"(key={storage_key}, email={email_addr}, has_refresh={bool(refresh_token)})"
             )
 
             # Log de auditoria
@@ -319,6 +352,8 @@ async def run_google_callback(
                     "email": email_addr,
                     "google_email": google_email,
                     "has_refresh_token": bool(refresh_token),
+                    "storage_key": storage_key,
+                    "company_id": oauth_company_id,
                 },
                 "created_at": datetime.now(timezone.utc).isoformat(),
             })

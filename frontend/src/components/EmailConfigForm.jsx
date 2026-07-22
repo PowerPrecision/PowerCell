@@ -95,9 +95,14 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   const [testResult, setTestResult] = useState(null);
   const [googleOAuthConnecting, setGoogleOAuthConnecting] = useState(false);
   const [googleOAuthConnected, setGoogleOAuthConnected] = useState(false);
+  // "user" | "company" | "system" | "shared_role" | "none"
+  const [configSource, setConfigSource] = useState("none");
 
   // Whether form fields should be disabled (configured + not editing)
   const isFieldsLocked = webmailConfigured && !isEditing;
+  // IMAP/SMTP come from the company/system — user only edits email + password
+  const serversFromCompany = configSource === "company" || configSource === "system";
+  const isServerFieldsLocked = isFieldsLocked || serversFromCompany;
 
   // Load existing config — recarregar quando companyId muda (troca de empresa)
   // O effectiveCompanyId garante reatividade quando o ContextSwitcher muda a empresa ativa.
@@ -160,10 +165,12 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
       password: "",
     });
     setHasPassword(false);
+    setConfigSource("none");
     try {
       const response = await api.get(getConfigUrl());
       const config = response.data;
       if (config && (config.is_configured || config.imap_server)) {
+        setConfigSource(config.config_source || "user");
         setEmailConfig({
           email_address: config.email_address || "",
           imap_server: config.imap_server || "",
@@ -180,18 +187,20 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         }
       } else {
         // Sem config para esta empresa — resetar formulário
+        setConfigSource(config?.config_source || "none");
         setEmailConfig({
           email_address: "",
-          imap_server: "",
-          imap_port: 993,
-          smtp_server: "",
-          smtp_port: 465,
+          imap_server: config?.imap_server || "",
+          imap_port: config?.imap_port || 993,
+          smtp_server: config?.smtp_server || "",
+          smtp_port: config?.smtp_port || 465,
           password: "",
         });
         setHasPassword(false);
         setWebmailConfigured(false);
       }
     } catch (error) {
+      setConfigSource("none");
       setWebmailConfigured(false);
       setEmailConfig({
         email_address: "",
@@ -232,6 +241,10 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
           headers: {
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
+            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
+            ...((companyId || effectiveCompanyId)
+              ? { "X-Company-Id": companyId || effectiveCompanyId }
+              : {}),
           },
         }
       );
@@ -387,15 +400,20 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   return (
     <div className="space-y-6">
-      {/* Role Indicator — only shown when user has multiple roles */}
-      {hasMultipleRoles && (
+      {/* Company / profile context — mailbox is per company, not per role */}
+      {isSelf && ((companyId && companyId !== "default") || effectiveCompanyId || hasMultipleRoles) && (
         <div className="bg-muted/50 rounded-lg p-3 mb-4">
           <p className="text-sm text-muted-foreground">
-            A configurar email para o cargo: <strong className="text-foreground">{roleLabels[effectiveRole] || effectiveRole}</strong>
+            {(companyId && companyId !== "default") || effectiveCompanyId
+              ? <>Caixa de email da empresa ativa. Defina o <strong className="text-foreground">email e a password</strong>; os servidores IMAP/SMTP vêm da empresa quando disponíveis.</>
+              : <>Defina o <strong className="text-foreground">email e a password</strong> desta conta. Os servidores IMAP/SMTP podem ser herdados da empresa.</>
+            }
           </p>
-          <p className="text-xs text-muted-foreground mt-1">
-            Cada cargo pode ter uma conta de email separada.
-          </p>
+          {hasMultipleRoles && (
+            <p className="text-xs text-muted-foreground mt-1">
+              Perfil ativo: {roleLabels[effectiveRole] || effectiveRole}. Multi-perfil costuma corresponder a empresas (e caixas) diferentes.
+            </p>
+          )}
         </div>
       )}
 
@@ -574,7 +592,12 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
           )}
         </div>
         <div className="space-y-2">
-          <Label htmlFor="ec_imap_server">Servidor IMAP</Label>
+          <Label htmlFor="ec_imap_server">
+            Servidor IMAP
+            {serversFromCompany && (
+              <span className="text-xs text-muted-foreground ml-1">(empresa)</span>
+            )}
+          </Label>
           <Input
             id="ec_imap_server"
             type="text"
@@ -583,8 +606,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, imap_server: e.target.value })
             }
             placeholder="imap.exemplo.com"
-            disabled={isFieldsLocked}
-            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
+            disabled={isServerFieldsLocked}
+            className={isServerFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
         <div className="space-y-2">
@@ -597,12 +620,17 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, imap_port: parseInt(e.target.value) || 993 })
             }
             placeholder="993"
-            disabled={isFieldsLocked}
-            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
+            disabled={isServerFieldsLocked}
+            className={isServerFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
         <div className="space-y-2">
-          <Label htmlFor="ec_smtp_server">Servidor SMTP</Label>
+          <Label htmlFor="ec_smtp_server">
+            Servidor SMTP
+            {serversFromCompany && (
+              <span className="text-xs text-muted-foreground ml-1">(empresa)</span>
+            )}
+          </Label>
           <Input
             id="ec_smtp_server"
             type="text"
@@ -611,8 +639,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, smtp_server: e.target.value })
             }
             placeholder="smtp.exemplo.com"
-            disabled={isFieldsLocked}
-            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
+            disabled={isServerFieldsLocked}
+            className={isServerFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
         <div className="space-y-2">
@@ -625,8 +653,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
               setEmailConfig({ ...emailConfig, smtp_port: parseInt(e.target.value) || 465 })
             }
             placeholder="465"
-            disabled={isFieldsLocked}
-            className={isFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
+            disabled={isServerFieldsLocked}
+            className={isServerFieldsLocked ? "bg-muted cursor-not-allowed" : ""}
           />
         </div>
       </div>

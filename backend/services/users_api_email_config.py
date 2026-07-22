@@ -29,19 +29,23 @@ async def run_get_my_email_config(
 ):
     """Obter configuração de email do utilizador logado (sem secrets)."""
     from services.email_config_resolver import resolve_email_config
-    from services.auth import get_active_company_id_async
+    from services.auth import get_active_company_id_async, get_effective_role
     from services.user_email_config_service import get_user_companies_with_config
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
-    active_role = _resolve_active_role(request, user_role)
+    # Prefer effective role (X-Active-Role) for FORCED_SHARED and nested resolution
+    effective_role = get_effective_role(request, current_user)
+    active_role = _resolve_active_role(request, user_role) or (
+        effective_role if effective_role != user_role else None
+    )
 
     header_company_id = await get_active_company_id_async(request, current_user)
     active_company_id = company_id or header_company_id
 
-    if user_role in FORCED_SHARED_ROLES:
+    if effective_role in FORCED_SHARED_ROLES:
         resolved = await resolve_email_config(
-            user_id, active_role=active_role, active_company_id=active_company_id,
+            user_id, active_role=effective_role, active_company_id=active_company_id,
         )
         return {
             "config_source": resolved.get("config_source", "none"),
@@ -58,7 +62,7 @@ async def run_get_my_email_config(
             "auth_method": resolved.get("auth_method", "none"),
             "google_email": resolved.get("google_email"),
             "oauth_connected_at": resolved.get("oauth_connected_at"),
-            "shared_role": user_role,
+            "shared_role": effective_role,
             "managed_centralized": True,
             "company_name": resolved.get("company_name"),
             "display_name": resolved.get("display_name"),
@@ -125,12 +129,13 @@ async def run_save_my_email_config(
         _extract_role_email_config,
     )
     from services.user_email_config_service import upsert_user_email_config
-    from services.auth import get_active_company_id_async
+    from services.auth import get_active_company_id_async, get_effective_role
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
+    effective_role = get_effective_role(request, current_user)
 
-    if user_role in FORCED_SHARED_ROLES:
+    if effective_role in FORCED_SHARED_ROLES:
         raise HTTPException(
             status_code=403,
             detail=(
@@ -154,6 +159,7 @@ async def run_save_my_email_config(
     else:
         storage_role = "default"
 
+    # Canonical key is (user_id, company_id) — prefer company over role when set
     if company_id != "default":
         storage_key = f"company:{company_id}"
     else:
@@ -247,18 +253,21 @@ async def run_test_my_email_config(
     """Testar ligação de email (Gmail OAuth ou IMAP/SMTP)."""
     from services.gmail_oauth import test_connection_smart
     from services.email_config_resolver import resolve_email_config_for_sync
-    from services.auth import get_active_company_id_async
+    from services.auth import get_active_company_id_async, get_effective_role
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
-    active_role = _resolve_active_role(request, user_role)
+    effective_role = get_effective_role(request, current_user)
+    active_role = _resolve_active_role(request, user_role) or (
+        effective_role if effective_role != user_role else None
+    )
 
     header_company_id = await get_active_company_id_async(request, current_user)
     active_company_id = company_id or header_company_id
 
-    if user_role in FORCED_SHARED_ROLES:
+    if effective_role in FORCED_SHARED_ROLES:
         resolved = await resolve_email_config_for_sync(
-            user_id, active_role=active_role, active_company_id=active_company_id,
+            user_id, active_role=effective_role, active_company_id=active_company_id,
         )
         if not resolved:
             raise HTTPException(

@@ -77,7 +77,7 @@ import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
-import { hasAnyRole, hasRole } from "../utils/roleUtils";
+import { hasAnyRole } from "../utils/roleUtils";
 import { safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -134,7 +134,7 @@ const getAttachmentIcon = (filename) => {
 };
 
 const WebmailPage = () => {
-  const { token, user } = useAuth();
+  const { token, user, effectiveRole } = useAuth();
   const navigate = useNavigate();
 
   // ── Multi-Tenant: active company_id from auth context ──────────
@@ -234,10 +234,11 @@ const WebmailPage = () => {
   // ROLE-BASED TABS: Initialize activeBox
   // ============================================================
   useEffect(() => {
-    if (hasRole(user, 'consultor')) setActiveBox('personal');
-    else if (hasRole(user, 'indexacao')) setActiveBox('shared_indexacao');
-    else setActiveBox('personal'); // admin/ceo/diretor/administrativo default to personal
-  }, [user?.role]);
+    // Use effectiveRole (active profile), not hasRole — multi-profile users
+    // may have indexacao as an additional role without it being the active one.
+    if (effectiveRole === 'indexacao') setActiveBox('shared_indexacao');
+    else setActiveBox('personal'); // consultor/admin/ceo/diretor/administrativo/etc.
+  }, [effectiveRole]);
 
   // Derived UI state
   const showTabs = hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo']);
@@ -258,7 +259,7 @@ const WebmailPage = () => {
       ? user.active_company_signature
       : user?.email_signature) || "";
   const pageSubtitle = !showTabs
-    ? (hasRole(user, 'indexacao') ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
+    ? (effectiveRole === 'indexacao' ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
     : null;
 
   // ============================================================
@@ -376,7 +377,7 @@ const WebmailPage = () => {
       } catch {
         // Silently fail
       }
-    } else if (hasRole(user, 'indexacao')) {
+    } else if (effectiveRole === 'indexacao') {
       try {
         const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=shared_indexacao`, { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) {
@@ -447,8 +448,8 @@ const WebmailPage = () => {
       if (customFolderId) {
         params.append("custom_folder", customFolderId);
       }
-      // Always enforce box=shared_indexacao for indexacao role
-      const effectiveBox = hasRole(user, 'indexacao') ? 'shared_indexacao' : activeBox;
+      // Always enforce box=shared_indexacao for active indexacao profile
+      const effectiveBox = effectiveRole === 'indexacao' ? 'shared_indexacao' : activeBox;
       if (effectiveBox) {
         params.append("box", effectiveBox);
       }
@@ -2305,7 +2306,7 @@ const WebmailPage = () => {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Mail className="h-3.5 w-3.5 shrink-0" />
                   <span>
-                    {hasRole(user, 'indexacao')
+                    {effectiveRole === 'indexacao'
                       ? 'Envio pela conta partilhada de Indexação.'
                       : 'Envio pela sua conta pessoal — configure em Perfil > Configuração de Webmail.'}
                   </span>

@@ -65,3 +65,116 @@ def test_forced_shared_roles_block_on_save_constant():
     from services.users_api_helpers import FORCED_SHARED_ROLES
 
     assert FORCED_SHARED_ROLES == {"indexacao", "suporte"}
+
+
+def test_forced_shared_uses_effective_role_not_primary():
+    """FORCED_SHARED must key off active/effective role, not primary JWT role."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from models.email_config import EmailConfigCreate
+    from services.users_api_email_config import run_save_my_email_config
+    from services.email_config_resolver import resolve_email_config
+
+    # ── save: primary=consultor + active=indexacao → 403 ──
+    async def _save_blocked():
+        request = MagicMock()
+        request.headers = {"X-Active-Role": "indexacao"}
+        user = {
+            "id": "u1",
+            "role": "consultor",
+            "additional_roles": ["indexacao"],
+        }
+        config = EmailConfigCreate(
+            email_address="a@b.com",
+            imap_server="imap.test",
+            smtp_server="smtp.test",
+            password="secret",
+        )
+        with pytest.raises(HTTPException) as exc:
+            await run_save_my_email_config(request, config, user)
+        assert exc.value.status_code == 403
+
+    asyncio.run(_save_blocked())
+
+    # ── save: primary=indexacao + active=consultor → NOT blocked by FORCED_SHARED ──
+    async def _save_allowed_when_not_effective_indexacao():
+        request = MagicMock()
+        request.headers = {"X-Active-Role": "consultor", "X-Company-Id": "acme"}
+        user = {
+            "id": "u1",
+            "role": "indexacao",
+            "additional_roles": ["consultor"],
+            "company": "acme",
+        }
+        config = EmailConfigCreate(
+            email_address="a@b.com",
+            imap_server="imap.test",
+            smtp_server="smtp.test",
+            password="secret",
+            company_id="acme",
+        )
+        with patch(
+            "services.user_email_config_service.upsert_user_email_config",
+            new_callable=AsyncMock,
+        ), patch(
+            "services.encryption.encryption_service.encrypt",
+            return_value="enc",
+        ), patch(
+            "services.users_api_email_config.db"
+        ) as mock_db, patch(
+            "services.auth.get_active_company_id_async",
+            new_callable=AsyncMock,
+            return_value="acme",
+        ):
+            mock_db.users.find_one = AsyncMock(return_value={"email_config": {}})
+            mock_db.users.update_one = AsyncMock()
+            result = await run_save_my_email_config(request, config, user)
+            assert result["success"] is True
+            assert result["company_id"] == "acme"
+
+    asyncio.run(_save_allowed_when_not_effective_indexacao())
+
+    # ── resolver: active_role=indexacao forces shared even if primary is consultor ──
+    async def _resolver_uses_active_role():
+        from services import email_config_resolver as ecr
+
+        user_doc = {
+            "role": "consultor",
+            "company": "acme",
+            "email_config": {},
+            "additional_roles": ["indexacao"],
+        }
+        shared = {
+            "config_source": "shared_role",
+            "shared_role": "indexacao",
+            "email_address": "idx@co.com",
+            "imap_server": "imap",
+            "imap_port": 993,
+            "smtp_server": "smtp",
+            "smtp_port": 465,
+            "has_password": True,
+            "has_google_oauth": False,
+            "auth_method": "imap_smtp",
+            "encrypted_password": "x",
+        }
+        with patch.object(ecr.db, "users") as mock_users, patch.object(
+            ecr, "_load_shared_role_config", new_callable=AsyncMock
+        ) as load_shared, patch.object(
+            ecr, "_load_company_config", new_callable=AsyncMock, return_value=None
+        ), patch.object(
+            ecr, "_load_system_config", new_callable=AsyncMock, return_value=None
+        ):
+            mock_users.find_one = AsyncMock(return_value=user_doc)
+            load_shared.return_value = shared
+            result = await resolve_email_config("u1", active_role="indexacao")
+            load_shared.assert_awaited_once_with("indexacao")
+            assert result["config_source"] == "shared_role"
+
+            load_shared.reset_mock()
+            # active consultor → do not force shared
+            result2 = await resolve_email_config("u1", active_role="consultor")
+            load_shared.assert_not_awaited()
+            assert result2["config_source"] != "shared_role"
+
+    asyncio.run(_resolver_uses_active_role())

@@ -46,7 +46,6 @@ import {
 } from "../components/ui/alert-dialog";
 import { toast } from "sonner";
 import { useAuth } from "../contexts/AuthContext";
-import { hasRole } from "../utils/roleUtils";
 import { useNavigate } from "react-router-dom";
 import api from "../services/api";
 import { formatDateTime } from "../lib/utils";
@@ -264,10 +263,10 @@ const ProfilePage = () => {
         });
       }
     };
-    if (user && !hasRole(user, "indexacao")) {
+    if (user && effectiveRole !== "indexacao" && effectiveRole !== "suporte") {
       fetchSystemCompanies();
     }
-  }, [user, userCompanies]);
+  }, [user, userCompanies, effectiveRole]);
 
   useEffect(() => {
     loadEmailConfigInfo();
@@ -758,8 +757,8 @@ const ProfilePage = () => {
         </Card>
 
         {/* ── Card 5: Configuração de Webmail ── */}
-        {hasRole(user, "indexacao") ? (
-          /* ── BLOQUEIO: Indexação — config gerida centralmente ── */
+        {effectiveRole === "indexacao" || effectiveRole === "suporte" ? (
+          /* ── BLOQUEIO: Indexação/Suporte — config gerida centralmente ── */
           <Card className="border-amber-200 bg-amber-50/50">
             <CardHeader>
               <CardTitle className="flex items-center gap-2 text-amber-800">
