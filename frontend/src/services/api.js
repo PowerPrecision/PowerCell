@@ -522,10 +522,33 @@ export const createProcess = (data) => api.post("/processes", data);
 export const searchClients = (q, limit = 10) => api.get("/clients/search", { params: { q, limit } });
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
-export const assignProcess = (id, consultorId, mediadorId, indexacaoId) => 
-  api.post(`/processes/${id}/assign`, null, {
-    params: { consultor_id: consultorId, mediador_id: mediadorId, indexacao_id: indexacaoId }
-  });
+export const assignProcess = (id, {
+  consultorIds,
+  mediadorIds,
+  indexacaoId,
+  parceiroId,
+  consultorId,
+  mediadorId,
+} = {}) => {
+  const params = {};
+  if (Array.isArray(consultorIds)) {
+    params.consultor_ids = consultorIds.filter(Boolean).join(",");
+  } else if (consultorId) {
+    params.consultor_id = consultorId;
+  }
+  if (Array.isArray(mediadorIds)) {
+    params.mediador_ids = mediadorIds.filter(Boolean).join(",");
+  } else if (mediadorId) {
+    params.mediador_id = mediadorId;
+  }
+  if (indexacaoId !== undefined && indexacaoId !== null) {
+    params.indexacao_id = indexacaoId;
+  }
+  if (parceiroId !== undefined && parceiroId !== null) {
+    params.parceiro_id = parceiroId;
+  }
+  return api.post(`/processes/${id}/assign`, null, { params });
+};
 export const getKanbanBoard = () => api.get("/processes/kanban");
 export const moveProcessKanban = (processId, newStatus) => 
   api.put(`/processes/kanban/${processId}/move`, null, {
