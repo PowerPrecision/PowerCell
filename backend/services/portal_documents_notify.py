@@ -262,26 +262,25 @@ def _build_documents_complete_html(client_name: str) -> str:
 # Geração automática de pedidos de documento (Pacote G — ponto 1)
 # ─────────────────────────────────────────────────────────────────────
 async def generate_mandatory_document_requests(
-    process_id: str,
+    process_id: Optional[str] = None,
     company_id: Optional[str] = None,
     requested_by: Optional[str] = None,
     requested_by_name: str = "Sistema",
+    client_id: Optional[str] = None,
 ) -> dict:
     """
-    Gera pedidos de documento (status=REQUESTED) para um processo com base na
-    checklist de documentos obrigatórios definida pelo CEO/Diretor no
-    SystemConfig (secção `mandatory_documents`).
+    Gera pedidos de documento (status=REQUESTED) com base na checklist
+    SystemConfig (`mandatory_documents`).
 
-    Gatilho: invocada quando um processo passa a `pre_registo` (via formulário
-    público) ou via endpoint de automação.
+    Pode ser ligado a um processo (fluxo legado/staff) OU a um cliente
+    ainda sem processo (registo público — process_id=None, client_id set).
 
-    Idempotente: se o processo já tiver pedidos gerados por esta função
-    (source="mandatory_checklist"), não volta a criar.
-
-    Returns:
-        Dict com {created, skipped, total, reason}.
+    Idempotente por process_id ou client_id + source=mandatory_checklist.
     """
     from services.system_config import get_system_config
+
+    if not process_id and not client_id:
+        return {"created": 0, "skipped": 0, "total": 0, "reason": "missing_scope"}
 
     try:
         config = await get_system_config(company_id or "default")
@@ -293,11 +292,19 @@ async def generate_mandatory_document_requests(
     if not md or not md.enabled or not md.documents:
         return {"created": 0, "skipped": 0, "total": 0, "reason": "disabled_or_empty"}
 
-    # Idempotência: já há pedidos gerados pelo checklist?
-    existing = await db.documents.count_documents({
-        "process_id": process_id,
-        "source": "mandatory_checklist",
-    })
+    # Idempotência
+    idem_query: dict = {"source": "mandatory_checklist"}
+    if process_id:
+        idem_query["process_id"] = process_id
+    else:
+        idem_query["client_id"] = client_id
+        idem_query["$or"] = [
+            {"process_id": None},
+            {"process_id": ""},
+            {"process_id": {"$exists": False}},
+        ]
+
+    existing = await db.documents.count_documents(idem_query)
     if existing > 0:
         return {
             "created": 0,
@@ -315,7 +322,7 @@ async def generate_mandatory_document_requests(
         category = (item.get("category") or "outros").strip().lower() or "outros"
         if not name:
             continue
-        docs_to_insert.append({
+        doc = {
             "id": str(uuid.uuid4()),
             "process_id": process_id,
             "category": category,
@@ -332,13 +339,17 @@ async def generate_mandatory_document_requests(
             "uploaded_at": None,
             "created_at": now_iso,
             "updated_at": now_iso,
-        })
+        }
+        if client_id:
+            doc["client_id"] = client_id
+        docs_to_insert.append(doc)
 
     if docs_to_insert:
         try:
             await db.documents.insert_many(docs_to_insert, ordered=False)
+            scope = process_id or f"client:{client_id}"
             logger.info(
-                f"[MandatoryDocs] {len(docs_to_insert)} pedidos gerados para processo {process_id}"
+                f"[MandatoryDocs] {len(docs_to_insert)} pedidos gerados para {scope}"
             )
         except Exception as e:
             logger.error(f"[MandatoryDocs] Erro ao inserir pedidos: {e}")
@@ -348,5 +359,5 @@ async def generate_mandatory_document_requests(
         "created": len(docs_to_insert),
         "skipped": 0,
         "total": len(md.documents),
-        "reason": "created",
+        "reason": "ok",
     }

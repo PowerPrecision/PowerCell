@@ -123,6 +123,19 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         if new_custom:
             merged_custom = {**existing_custom, **new_custom}
             client_updates["custom_fields"] = merged_custom
+
+        # Persistir intenção de processo + 2.º titular (processo só após docs)
+        if data.process_type:
+            client_updates["pending_process_type"] = data.process_type
+        if data.titular2_data:
+            client_updates["titular2_data"] = data.titular2_data
+        if data.personal_data and isinstance(data.personal_data, dict):
+            # Merge shallow into dados_pessoais (campos não vazios)
+            for pk, pv in data.personal_data.items():
+                if pv is not None and str(pv).strip() != "":
+                    client_updates[f"dados_pessoais.{pk}"] = pv
+        if data.real_estate_data:
+            client_updates["pending_real_estate_data"] = data.real_estate_data
         
         # Re-encriptar dados atualizados
         try:
@@ -196,9 +209,19 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             "registration_completed": True,
             "assigned_to": None,
             "assigned_at": None,
-            "lead_status": "new",  # Pendente de triagem — sem processo associado
+            "lead_status": "new",  # Pendente — processo só após docs obrigatórios
             "custom_fields": data.custom_fields if data.custom_fields else {},
+            "pending_process_type": process_type,
+            "titular2_data": data.titular2_data if data.titular2_data else {},
+            "pending_real_estate_data": data.real_estate_data if data.real_estate_data else {},
         }
+
+        # Merge personal_data do formulário em dados_pessoais
+        if data.personal_data and isinstance(data.personal_data, dict):
+            for pk, pv in data.personal_data.items():
+                if pv is not None and str(pv).strip() != "":
+                    personal_data[pk] = pv
+            client_doc["dados_pessoais"] = personal_data
         
         # RGPD: Encriptar dados sensíveis ANTES de inserir na BD
         try:
@@ -242,108 +265,42 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             logger.warning(f"Não foi possível criar pasta S3 para cliente {client_id}: {e}")
     
     # =========================================
-    # PACOTE D — CRIAÇÃO AUTOMÁTICA DE PROCESSO + EMAIL DE CONVITE
+    # REGISTO SEM PROCESSO — cliente + portal + checklist SystemConfig
     # =========================================
-    # Anteriormente: NÃO se criava processo nesta fase (triagem manual
-    # obrigatória). A partir do Pacote D, o formulário público cria
-    # automaticamente um processo e envia o email de convite para o
-    # Portal do Cliente usando o email do sistema.
-    #
-    # PACOTE DB — O processo é criado com status VAZIO (Lead), NÃO em
-    # "pre_registo". Só entra no Kanban ativo quando o cliente submete
-    # os Documentos Obrigatórios via Portal.
-    #
-    # Fluxo:
-    # 1. Criar processo com status=None (Lead), is_active=True
-    # 2. Gerar JWT magic_link (create_client_magic_token) + short_id
-    # 3. Guardar em portal_tokens (upsert por process_id)
-    # 4. Enviar email de convite via send_email(force_system=True)
-    #
-    # Nota: o staff continua a poder fazer triagem (mudar status,
-    # atribuir consultor, etc.) — o processo com status vazio NÃO aparece
-    # no Kanban ativo (ver processes.py _should_hide_pre_registo que agora
-    # também esconde status=None). O cliente recebe imediatamente o link do portal.
+    # O processo só é criado quando os documentos obrigatórios
+    # (SystemConfig.mandatory_documents) estiverem submetidos.
+    # titular2_data fica no cliente e é copiado na criação do processo.
     # =========================================
     process_id = None
     magic_link_sent = False
     try:
-        from services.process_service import get_next_process_number
-        from services.portal_security import create_client_magic_token
+        from services.portal_security import create_access_code_session_token
         from services.email_service import send_email
+        from services.portal_documents_notify import generate_mandatory_document_requests
 
-        process_number = await get_next_process_number()
-        process_id = str(uuid.uuid4())
-        now_iso = datetime.now(timezone.utc).isoformat()
-
-        process_doc = {
-            "id": process_id,
-            "process_number": process_number,
-            "client_id": client_id,
-            "client_ids": [client_id],
-            "client_name": clean_name,
-            "client_email": clean_email,
-            "client_phone": clean_phone,
-            "process_type": process_type,
-            "type": process_type,
-            # PACOTE DB — Novos registos entram com status/workflow_step VAZIOS
-            # (sem fase do Kanban). Só transitam para a 1ª fase real do Kanban
-            # quando o cliente submete os Documentos Obrigatórios via Portal
-            # (ver portal.py _auto_advance_from_pre_registo).
-            "status": None,
-            "workflow_step": None,
-            "is_active": True,
-            "is_deleted": False,
-            "fonte": "public_form",
-            "has_property": has_property,
-            "created_at": now_iso,
-            "updated_at": now_iso,
-            "created_by": "public_form",
-        }
-        await db.processes.insert_one(process_doc)
-
-        # Atualizar client.process_ids
-        await db.clients.update_one(
-            {"id": client_id},
-            {"$push": {"process_ids": process_id}}
-        )
-        logger.info(
-            f"[PUBLIC FORM] Processo {process_id} (PROC-{process_number:04d}) "
-            f"criado com status vazio (Lead) para cliente {client_id} — aguarda "
-            f"documentos obrigatórios para entrar no Kanban ativo"
+        # Pedidos de docs obrigatórios ligados ao CLIENTE (sem process_id)
+        asyncio.create_task(
+            generate_mandatory_document_requests(
+                process_id=None,
+                client_id=client_id,
+                company_id=None,
+                requested_by="public_form",
+                requested_by_name="Formulário Público",
+            )
         )
 
-        # ── Pacote G — Gerar pedidos de documentos obrigatórios ───────────
-        # Cria automaticamente os REQUESTED docs com base na checklist
-        # definida pelo CEO/Diretor no SystemConfig (secção mandatory_documents).
-        # Executa em background — não bloqueia a resposta ao cliente.
-        try:
-            from services.portal_documents_notify import generate_mandatory_document_requests
-            asyncio.create_task(
-                generate_mandatory_document_requests(
-                    process_id=process_id,
-                    company_id=process_doc.get("company") or process_doc.get("company_id"),
-                    requested_by="public_form",
-                    requested_by_name="Formulário Público",
-                )
-            )
-        except Exception as e_md:
-            logger.warning(
-                f"[PUBLIC FORM] Falha ao agendar geração de pedidos obrigatórios "
-                f"para processo {process_id}: {e_md}"
-            )
-
-        # Gerar magic link JWT + short_id
+        # Token de portal client-scoped (sem processo ainda)
         import secrets as _secrets
         from datetime import datetime as _dt, timezone as _tz
-        token = create_client_magic_token(process_id)
+        token = create_access_code_session_token("no_process", client_id)
         short_id = _secrets.token_urlsafe(6)[:8]
         await db.portal_tokens.update_one(
-            {"process_id": process_id},
+            {"client_id": client_id, "source": "public_form_auto"},
             {
                 "$set": {
                     "short_id": short_id,
                     "jwt_token": token,
-                    "process_id": process_id,
+                    "process_id": None,
                     "client_id": client_id,
                     "created_by": "public_form",
                     "source": "public_form_auto",
@@ -356,7 +313,6 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             upsert=True,
         )
 
-        # Construir URL do portal (Referer/Origin → env var FRONTEND_URL)
         from urllib.parse import urlparse
         frontend_url = ""
         referer = request.headers.get("referer") or request.headers.get("origin")
@@ -368,8 +324,6 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             frontend_url = os.environ.get("FRONTEND_URL", "").rstrip("/")
         magic_link = f"{frontend_url}/portal/{short_id}"
 
-        # PACOTE DC — Buscar o portal_access_code do cliente para incluir
-        # no email como "Código de Acesso" explícito (além do magic link).
         _portal_access_code_dc = None
         try:
             _client_doc_dc = await db.clients.find_one(
@@ -380,7 +334,6 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         except Exception as _e_dc:
             logger.warning(f"[PUBLIC FORM] Erro ao obter portal_access_code para email: {_e_dc}")
 
-        # PACOTE DC — Bloco "Código de Acesso" explícito abaixo do botão.
         _access_code_html_dc = ""
         _access_code_text_dc = ""
         if _portal_access_code_dc:
@@ -395,8 +348,6 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
                 f"insira o seguinte Código de Acesso: {_portal_access_code_dc}\n"
             )
 
-        # Enviar email de convite para o Portal do Cliente usando o
-        # email do sistema (force_system=True, system_purpose="NOTIFICATIONS")
         html_body = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
@@ -405,10 +356,11 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
                 <p style="font-size: 16px; color: #1e293b;">Olá {clean_name},</p>
                 <p style="font-size: 14px; color: #475569;">
-                    Recebemos o seu registo através do formulário público. O seu processo de crédito habitação foi criado e está em fase de pré-registo.
+                    Recebemos o seu registo. Para avançarmos, aceda ao Portal do Cliente,
+                    complete o seu perfil e envie a documentação solicitada.
                 </p>
                 <p style="font-size: 14px; color: #475569;">
-                    Aceda ao seu Portal do Cliente para acompanhar o seu processo, enviar documentos e comunicar com a sua equipa:
+                    O processo de crédito só será criado após a submissão dos documentos obrigatórios.
                 </p>
                 <div style="text-align: center; margin: 30px 0;">
                     <a href="{magic_link}" style="display: inline-block; background: #0F766E; color: white; padding: 14px 28px; border-radius: 8px; text-decoration: none; font-weight: bold; font-size: 16px;">
@@ -428,9 +380,9 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         """
         text_body = (
             f"Olá {clean_name},\n\n"
-            f"Recebemos o seu registo através do formulário público. O seu processo "
-            f"de crédito habitação foi criado e está em fase de pré-registo.\n\n"
-            f"Aceda ao seu Portal do Cliente para acompanhar o seu processo:\n"
+            f"Recebemos o seu registo. Aceda ao Portal do Cliente para completar "
+            f"o perfil e enviar a documentação solicitada.\n"
+            f"O processo só será criado após os documentos obrigatórios.\n\n"
             f"{magic_link}\n"
             f"{_access_code_text_dc}\n"
             f"Este link é válido por 90 dias.\n\n"
@@ -442,20 +394,18 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             subject=f"Bem-vindo ao seu Portal do Cliente — {clean_name}",
             body=text_body,
             body_html=html_body,
-            process_id=process_id,
+            process_id=None,
             force_system=True,
             system_purpose="NOTIFICATIONS",
         )
         magic_link_sent = True
         logger.info(
             f"[PUBLIC FORM] Email de convite do Portal enviado para {clean_email} "
-            f"(processo {process_id}, short_id {short_id})"
+            f"(cliente {client_id}, short_id {short_id}, sem processo ainda)"
         )
     except Exception as e:
-        # Não falhar o registo se o email falhar — o processo fica criado
-        # e o staff pode reenviar o link manualmente a partir do CRM.
         logger.warning(
-            f"[PUBLIC FORM] Falha ao criar processo/enviar email de convite "
+            f"[PUBLIC FORM] Falha ao preparar portal/email de convite "
             f"para cliente {client_id}: {e}"
         )
 
@@ -568,9 +518,9 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             "success": True,
             "message": "Registo criado com sucesso. A equipa entrará em contacto.",
             "client_id": client_id,
-            "process_id": process_id,  # Pacote D — processo criado com status vazio (Lead)
-            "magic_link_sent": magic_link_sent,  # Pacote D — email de convite enviado
-            "lead_status": "new",  # Pendente de triagem
+            "process_id": process_id,  # None até docs obrigatórios (SystemConfig)
+            "magic_link_sent": magic_link_sent,
+            "lead_status": "new",
             "is_new_client": is_new_client,
             "has_property": has_property,
             "email_queued": bool(job_id)

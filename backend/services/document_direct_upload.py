@@ -231,6 +231,26 @@ async def run_confirm_upload(
     except Exception as e:
         logger.warning(f"[CONFIRM-UPLOAD] Erro ao registar histórico: {e}")
 
+    portal_fulfill: dict[str, Any] = {"fulfilled": 0}
+    try:
+        from services.document_portal_fulfill import (
+            fulfill_portal_requests_on_staff_upload,
+        )
+
+        portal_fulfill = await fulfill_portal_requests_on_staff_upload(
+            process_id,
+            category=category,
+            filename=normalized_filename or original_filename,
+            s3_path=file_key,
+            content_type=content_type,
+            file_size=file_size,
+            user=user,
+        )
+    except Exception as e:
+        logger.warning(
+            f"[CONFIRM-UPLOAD] Erro ao marcar pedido portal como recebido: {e}"
+        )
+
     logger.info(f"[CONFIRM-UPLOAD] Upload confirmado: {normalized_filename}")
 
     response_data: dict[str, Any] = {
@@ -242,6 +262,7 @@ async def run_confirm_upload(
         "temporary_url": temporary_url,
         "message": "Upload registado com sucesso",
         "auto_categorization": "iniciada" if file_content else " indisponível",
+        "portal_fulfilled": portal_fulfill.get("fulfilled", 0),
     }
     if ai_categorization_detail:
         response_data["ai_categorization"] = ai_categorization_detail

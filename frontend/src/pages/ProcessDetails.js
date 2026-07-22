@@ -529,129 +529,233 @@ const ProcessDetails = () => {
   const [aiFieldConfidence, setAiFieldConfidence] = useState({});
   const [aiConflicts, setAiConflicts] = useState([]);
   const [showAIReviewDialog, setShowAIReviewDialog] = useState(false);
+  const [titularChoiceDialog, setTitularChoiceDialog] = useState({
+    open: false,
+    items: [],
+    pendingPayload: null,
+  });
+
+  const applySharedExtractedFields = (extractedData) => {
+    if (!extractedData) return;
+    const newRealEstateData = { ...realEstateData };
+    if (extractedData.valor_imovel) newRealEstateData.valor_imovel = extractedData.valor_imovel;
+    if (extractedData.localizacao) newRealEstateData.localizacao = extractedData.localizacao;
+    if (extractedData.tipologia) newRealEstateData.tipologia = extractedData.tipologia;
+    if (extractedData.area || extractedData.area_bruta) newRealEstateData.area_bruta = extractedData.area || extractedData.area_bruta;
+    if (extractedData.area_util) newRealEstateData.area_util = extractedData.area_util;
+    if (extractedData.artigo_matricial) newRealEstateData.artigo_matricial = extractedData.artigo_matricial;
+    if (extractedData.conservatoria) newRealEstateData.conservatoria = extractedData.conservatoria;
+    if (extractedData.numero_predial) newRealEstateData.numero_predial = extractedData.numero_predial;
+    if (extractedData.certificado_energetico) newRealEstateData.certificado_energetico = extractedData.certificado_energetico;
+    if (extractedData.fracao) newRealEstateData.fracao = extractedData.fracao;
+    if (extractedData.codigo_postal) newRealEstateData.codigo_postal = extractedData.codigo_postal;
+    if (extractedData.localidade) newRealEstateData.localidade = extractedData.localidade;
+    if (extractedData.freguesia) newRealEstateData.freguesia = extractedData.freguesia;
+    if (extractedData.concelho) newRealEstateData.concelho = extractedData.concelho;
+    if (extractedData.valor_patrimonial) newRealEstateData.valor_patrimonial = extractedData.valor_patrimonial;
+    if (extractedData.data_cpcv) newRealEstateData.data_cpcv = extractedData.data_cpcv;
+    if (extractedData.descricao_imovel) newRealEstateData.descricao_imovel = extractedData.descricao_imovel;
+    if (extractedData.estacionamento) newRealEstateData.estacionamento = extractedData.estacionamento;
+    if (extractedData.arrecadacao) newRealEstateData.arrecadacao = extractedData.arrecadacao;
+    setRealEstateData(newRealEstateData);
+
+    const newCreditData = { ...creditData };
+    if (extractedData.valuation_value || extractedData.valor_avaliacao) newCreditData.valuation_value = extractedData.valuation_value || extractedData.valor_avaliacao;
+    if (extractedData.valuation_date || extractedData.data_avaliacao) newCreditData.valuation_date = extractedData.valuation_date || extractedData.data_avaliacao;
+    if (extractedData.valuation_bank || extractedData.banco_avaliacao) newCreditData.valuation_bank = extractedData.valuation_bank || extractedData.banco_avaliacao;
+    if (extractedData.valuation_notes || extractedData.notas_avaliacao) newCreditData.valuation_notes = extractedData.valuation_notes || extractedData.notas_avaliacao;
+    setCreditData(newCreditData);
+  };
+
+  const applyPersonalAndFinancialToTitular = (extractedData, targetTitular) => {
+    if (!extractedData || targetTitular === "ignore") return;
+
+    const personalPatch = {};
+    if (extractedData.nif) personalPatch.nif = extractedData.nif;
+    if (extractedData.documento_id || extractedData.cc_number) personalPatch.documento_id = extractedData.documento_id || extractedData.cc_number;
+    if (extractedData.data_nascimento || extractedData.birth_date) personalPatch.data_nascimento = extractedData.data_nascimento || extractedData.birth_date;
+    if (extractedData.cc_validity || extractedData.data_validade_cc) personalPatch.data_validade_cc = extractedData.cc_validity || extractedData.data_validade_cc;
+    if (extractedData.naturalidade) personalPatch.naturalidade = extractedData.naturalidade;
+    if (extractedData.nacionalidade || extractedData.nationality) personalPatch.nacionalidade = extractedData.nacionalidade || extractedData.nationality;
+    if (extractedData.estado_civil) personalPatch.estado_civil = extractedData.estado_civil;
+    if (extractedData.sexo || extractedData.gender) personalPatch.sexo = extractedData.sexo || extractedData.gender;
+    if (extractedData.profissao || extractedData.profession) personalPatch.profissao = extractedData.profissao || extractedData.profession;
+    const addr = extractedData.morada_fiscal || extractedData.fiscal_address || extractedData.morada || extractedData.address || "";
+    if (addr) personalPatch.morada_fiscal = addr;
+    if (extractedData.codigo_postal || extractedData.postal_code) personalPatch.codigo_postal = extractedData.codigo_postal || extractedData.postal_code;
+    if (extractedData.email) personalPatch.email = extractedData.email;
+    if (extractedData.phone || extractedData.telefone) personalPatch.phone = extractedData.phone || extractedData.telefone;
+    if (extractedData.nome || extractedData.name || extractedData.client_name) {
+      personalPatch.name = extractedData.nome || extractedData.name || extractedData.client_name;
+      personalPatch.nome = personalPatch.name;
+    }
+
+    const financialPatch = {};
+    const liq = extractedData.monthly_income || extractedData.rendimento_mensal || extractedData.salario_liquido;
+    if (liq) financialPatch.monthly_income = liq;
+    const brut = extractedData.rendimento_bruto || extractedData.salario_bruto;
+    if (brut) financialPatch.rendimento_bruto = brut;
+    if (extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal) {
+      financialPatch.employer_name = extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal;
+    }
+    if (extractedData.employment_type || extractedData.tipo_contrato) {
+      financialPatch.tipo_contrato = extractedData.employment_type || extractedData.tipo_contrato;
+    }
+    if (extractedData.categoria_profissional) financialPatch.categoria_profissional = extractedData.categoria_profissional;
+    if (extractedData.subsidiario_alimentacao) financialPatch.subsidiario_alimentacao = extractedData.subsidiario_alimentacao;
+    if (extractedData.data_referencia || extractedData.reference_date) {
+      financialPatch.data_referencia = extractedData.data_referencia || extractedData.reference_date;
+    }
+    if (extractedData.employer_nif || extractedData.nif_entidade) {
+      financialPatch.employer_nif = extractedData.employer_nif || extractedData.nif_entidade;
+    }
+
+    if (targetTitular === "titular2") {
+      setTitular2Data((prev) => ({ ...prev, ...personalPatch, ...financialPatch }));
+    } else {
+      setPersonalData((prev) => ({ ...prev, ...personalPatch }));
+      setFinancialData((prev) => ({ ...prev, ...financialPatch }));
+    }
+  };
+
+  const persistAISuggestions = async (extractedData, documentsProcessed, targetTitular) => {
+    try {
+      const token = localStorage.getItem("token");
+      const applyRes = await fetch(`${API_URL}/api/documents/ai-apply-suggestions/${id}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...extractedData,
+          target_titular: targetTitular || "titular1",
+        }),
+      });
+      if (applyRes.ok) {
+        const who = targetTitular === "titular2" ? "2º titular" : "titular 1";
+        toast.success(`Campos pré-preenchidos (${who}) e guardados com dados de ${documentsProcessed} documento(s)`);
+      } else {
+        toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
+      }
+    } catch (applyErr) {
+      console.warn("Erro ao aplicar sugestões IA:", applyErr);
+      toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
+    }
+  };
+
+  const commitAIExtractedData = async (payload, targetTitular) => {
+    const { extractedData, fieldConfidence, conflicts, documentsProcessed } = payload;
+    if (!extractedData) return;
+
+    applySharedExtractedFields(extractedData);
+    applyPersonalAndFinancialToTitular(extractedData, targetTitular);
+
+    if (conflicts && conflicts.length > 0 && targetTitular !== "ignore") {
+      setShowAIReviewDialog(true);
+      toast.info(`${conflicts.length} conflito(s) detectado(s). Reveja os valores.`);
+    } else if (targetTitular !== "ignore") {
+      await persistAISuggestions(extractedData, documentsProcessed, targetTitular);
+    }
+
+    if (fieldConfidence) {
+      const lowConfidenceFields = Object.entries(fieldConfidence)
+        .filter(([_, conf]) => conf < 0.8)
+        .map(([field, conf]) => `${field} (${Math.round(conf * 100)}%)`);
+      if (lowConfidenceFields.length > 0) {
+        toast.warning(
+          `${lowConfidenceFields.length} campo(s) com baixa confiança da IA: ${lowConfidenceFields.join(", ")}. Por favor, verifique manualmente.`,
+          { duration: 8000 }
+        );
+      }
+    }
+
+    setActiveTab("personal");
+  };
 
   // Handler para dados extraídos pela IA dos documentos
-  const handleAIDataExtractedFromDocs = async ({ extractedData, fieldConfidence, conflicts, documentsProcessed, suggestions }) => {
-    // Guardar dados, confiança e conflitos
+  const handleAIDataExtractedFromDocs = async ({
+    extractedData,
+    fieldConfidence,
+    conflicts,
+    documentsProcessed,
+    suggestions,
+    titularMatches,
+    needsTitularChoice,
+  }) => {
     setAiExtractedData(extractedData);
     setAiFieldConfidence(fieldConfidence || {});
     setAiConflicts(conflicts || []);
-    
-    // Pré-preencher campos nos formulários
-    // UNIFICAÇÃO: A IA pode usar nomes variados — mapeamos sempre para o campo canónico do modelo DB
-    if (extractedData) {
-      // Dados pessoais
-      const newPersonalData = { ...personalData };
-      if (extractedData.nif) newPersonalData.nif = extractedData.nif;
-      if (extractedData.documento_id || extractedData.cc_number) newPersonalData.documento_id = extractedData.documento_id || extractedData.cc_number;
-      if (extractedData.data_nascimento || extractedData.birth_date) newPersonalData.data_nascimento = extractedData.data_nascimento || extractedData.birth_date;
-      if (extractedData.cc_validity || extractedData.data_validade_cc) newPersonalData.data_validade_cc = extractedData.cc_validity || extractedData.data_validade_cc;
-      if (extractedData.naturalidade) newPersonalData.naturalidade = extractedData.naturalidade;
-      if (extractedData.nacionalidade || extractedData.nationality) newPersonalData.nacionalidade = extractedData.nacionalidade || extractedData.nationality;
-      if (extractedData.estado_civil) newPersonalData.estado_civil = extractedData.estado_civil;
-      if (extractedData.sexo || extractedData.gender) newPersonalData.sexo = extractedData.sexo || extractedData.gender;
-      if (extractedData.profissao || extractedData.profession) newPersonalData.profissao = extractedData.profissao || extractedData.profession;
-      // UNIFICADO: morada → morada_fiscal (campo canónico do modelo)
-      const addr = extractedData.morada_fiscal || extractedData.fiscal_address || extractedData.morada || extractedData.address || "";
-      if (addr) newPersonalData.morada_fiscal = addr;
-      if (extractedData.codigo_postal || extractedData.postal_code) newPersonalData.codigo_postal = extractedData.codigo_postal || extractedData.postal_code;
-      // UNIFICADO: email/phone da IA → sincronizar com campos de topo do processo
-      if (extractedData.email) newPersonalData.email = extractedData.email;
-      if (extractedData.phone || extractedData.telefone) newPersonalData.phone = extractedData.phone || extractedData.telefone;
-      setPersonalData(newPersonalData);
-      
-      // Dados financeiros
-      const newFinancialData = { ...financialData };
-      // UNIFICADO: rendimento_mensal/salario_liquido → monthly_income (campo canónico do modelo)
-      const liq = extractedData.monthly_income || extractedData.rendimento_mensal || extractedData.salario_liquido;
-      if (liq) newFinancialData.monthly_income = liq;
-      // UNIFICADO: rendimento_bruto/salario_bruto → rendimento_bruto (campo canónico)
-      const brut = extractedData.rendimento_bruto || extractedData.salario_bruto;
-      if (brut) newFinancialData.rendimento_bruto = brut;
-      // UNIFICADO: empresa → employer_name (campo canónico)
-      if (extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal) newFinancialData.employer_name = extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal;
-      // UNIFICADO: tipo_contrato → employment_type (campo canónico)
-      if (extractedData.employment_type || extractedData.tipo_contrato) newFinancialData.tipo_contrato = extractedData.employment_type || extractedData.tipo_contrato;
-      if (extractedData.categoria_profissional) newFinancialData.categoria_profissional = extractedData.categoria_profissional;
-      if (extractedData.subsidiario_alimentacao) newFinancialData.subsidiario_alimentacao = extractedData.subsidiario_alimentacao;
-      if (extractedData.data_referencia || extractedData.reference_date) newFinancialData.data_referencia = extractedData.data_referencia || extractedData.reference_date;
-      if (extractedData.employer_nif || extractedData.nif_entidade) newFinancialData.employer_nif = extractedData.employer_nif || extractedData.nif_entidade;
-      setFinancialData(newFinancialData);
-      
-      // Dados do imóvel — IA pode extrair dados de CPCV
-      const newRealEstateData = { ...realEstateData };
-      if (extractedData.valor_imovel) newRealEstateData.valor_imovel = extractedData.valor_imovel;
-      if (extractedData.localizacao) newRealEstateData.localizacao = extractedData.localizacao;
-      if (extractedData.tipologia) newRealEstateData.tipologia = extractedData.tipologia;
-      if (extractedData.area || extractedData.area_bruta) newRealEstateData.area_bruta = extractedData.area || extractedData.area_bruta;
-      if (extractedData.area_util) newRealEstateData.area_util = extractedData.area_util;
-      if (extractedData.artigo_matricial) newRealEstateData.artigo_matricial = extractedData.artigo_matricial;
-      if (extractedData.conservatoria) newRealEstateData.conservatoria = extractedData.conservatoria;
-      if (extractedData.numero_predial) newRealEstateData.numero_predial = extractedData.numero_predial;
-      if (extractedData.certificado_energetico) newRealEstateData.certificado_energetico = extractedData.certificado_energetico;
-      if (extractedData.fracao) newRealEstateData.fracao = extractedData.fracao;
-      if (extractedData.codigo_postal) newRealEstateData.codigo_postal = extractedData.codigo_postal;
-      if (extractedData.localidade) newRealEstateData.localidade = extractedData.localidade;
-      if (extractedData.freguesia) newRealEstateData.freguesia = extractedData.freguesia;
-      if (extractedData.concelho) newRealEstateData.concelho = extractedData.concelho;
-      if (extractedData.valor_patrimonial) newRealEstateData.valor_patrimonial = extractedData.valor_patrimonial;
-      if (extractedData.data_cpcv) newRealEstateData.data_cpcv = extractedData.data_cpcv;
-      if (extractedData.descricao_imovel) newRealEstateData.descricao_imovel = extractedData.descricao_imovel;
-      if (extractedData.estacionamento) newRealEstateData.estacionamento = extractedData.estacionamento;
-      if (extractedData.arrecadacao) newRealEstateData.arrecadacao = extractedData.arrecadacao;
-      setRealEstateData(newRealEstateData);
-      
-      // Dados de crédito e avaliação bancária (Fase 3)
-      const newCreditData = { ...creditData };
-      if (extractedData.valuation_value || extractedData.valor_avaliacao) newCreditData.valuation_value = extractedData.valuation_value || extractedData.valor_avaliacao;
-      if (extractedData.valuation_date || extractedData.data_avaliacao) newCreditData.valuation_date = extractedData.valuation_date || extractedData.data_avaliacao;
-      if (extractedData.valuation_bank || extractedData.banco_avaliacao) newCreditData.valuation_bank = extractedData.valuation_bank || extractedData.banco_avaliacao;
-      if (extractedData.valuation_notes || extractedData.notas_avaliacao) newCreditData.valuation_notes = extractedData.valuation_notes || extractedData.notas_avaliacao;
-      setCreditData(newCreditData);
-      
-      // Se há conflitos, mostrar dialog de revisão
-      if (conflicts && conflicts.length > 0) {
-        setShowAIReviewDialog(true);
-        toast.info(`${conflicts.length} conflito(s) detectado(s). Reveja os valores.`);
-      } else {
-        // Sem conflitos — aplicar directamente no backend
-        try {
-          const token = localStorage.getItem('token');
-          const applyRes = await fetch(`${API_URL}/api/documents/ai-apply-suggestions/${id}`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(extractedData)
-          });
-          if (applyRes.ok) {
-            toast.success(`Campos pré-preenchidos e guardados com dados de ${documentsProcessed} documento(s)`);
-          } else {
-            toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
-          }
-        } catch (applyErr) {
-          console.warn("Erro ao aplicar sugestões IA:", applyErr);
-          toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
-        }
-      }
-      
-      // Alertar sobre campos com baixa confiança (< 0.8)
-      if (fieldConfidence) {
-        const lowConfidenceFields = Object.entries(fieldConfidence)
-          .filter(([_, conf]) => conf < 0.8)
-          .map(([field, conf]) => `${field} (${Math.round(conf * 100)}%)`);
-        if (lowConfidenceFields.length > 0) {
-          toast.warning(
-            `${lowConfidenceFields.length} campo(s) com baixa confiança da IA: ${lowConfidenceFields.join(", ")}. Por favor, verifique manualmente.`,
-            { duration: 8000 }
-          );
-        }
-      }
-      
-      // Mudar para tab pessoais para mostrar os dados
-      setActiveTab("personal");
+
+    const matches = titularMatches || [];
+    const aggregate = matches.find((m) => m.scope === "process_aggregate");
+    const docsNeedingChoice = matches.filter(
+      (m) => m.scope === "document" && m.needs_user_choice && m.has_second_titular
+    );
+
+    if (needsTitularChoice && (docsNeedingChoice.length > 0 || aggregate?.needs_user_choice)) {
+      const items =
+        docsNeedingChoice.length > 0
+          ? docsNeedingChoice.map((m) => ({
+              key: m.file_name || `doc-${m.match}`,
+              file_name: m.file_name || "Documento",
+              titular1_name: m.titular1_name || "Titular 1",
+              titular2_name: m.titular2_name || "Titular 2",
+              choice:
+                m.match === "titular2" ? "titular2" : m.match === "titular1" ? "titular1" : null,
+            }))
+          : [
+              {
+                key: "aggregate",
+                file_name: "Dados extraídos (agregado)",
+                titular1_name: aggregate?.titular1_name || "Titular 1",
+                titular2_name: aggregate?.titular2_name || "Titular 2",
+                choice: null,
+              },
+            ];
+      applySharedExtractedFields(extractedData);
+      setTitularChoiceDialog({
+        open: true,
+        items,
+        pendingPayload: {
+          extractedData,
+          fieldConfidence,
+          conflicts,
+          documentsProcessed,
+          suggestions,
+        },
+      });
+      toast.info("Há documentos ambíguos — indique se são do titular 1 ou 2.");
+      return;
     }
+
+    const target = aggregate?.match === "titular2" ? "titular2" : "titular1";
+    await commitAIExtractedData(
+      { extractedData, fieldConfidence, conflicts, documentsProcessed, suggestions },
+      target
+    );
+  };
+
+  const confirmTitularChoices = async () => {
+    const { items, pendingPayload } = titularChoiceDialog;
+    if (!pendingPayload) {
+      setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+      return;
+    }
+    const choices = items.map((i) => i.choice).filter((c) => c && c !== "ignore");
+    const t2 = choices.filter((c) => c === "titular2").length;
+    const t1 = choices.filter((c) => c === "titular1").length;
+    let target = "titular1";
+    if (choices.length === 0) target = "ignore";
+    else if (t2 > t1) target = "titular2";
+    else target = "titular1";
+
+    setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+    if (target === "ignore") {
+      toast.info("Dados de identidade ignorados. Campos do imóvel (se houver) já foram aplicados.");
+      return;
+    }
+    await commitAIExtractedData(pendingPayload, target);
   };
 
   // AI Executive Summary — generate or refresh
@@ -2992,6 +3096,96 @@ const ProcessDetails = () => {
             >
               <Check className="h-4 w-4 mr-2" />
               Confirmar Todos
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: documento ambíguo → Titular 1 / Titular 2 / Ignorar */}
+      <Dialog
+        open={titularChoiceDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+        }}
+      >
+        <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-purple-600" />
+              Este documento é de quem?
+            </DialogTitle>
+            <DialogDescription>
+              A IA não conseguiu associar com confiança. Escolha o titular para aplicar os dados de identidade
+              (o 2º titular já está definido no processo).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {titularChoiceDialog.items.map((item, idx) => (
+              <div key={item.key || idx} className="border rounded-lg p-3 space-y-2">
+                <div className="text-sm font-medium truncate">{item.file_name}</div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.choice === "titular1" ? "default" : "outline"}
+                    onClick={() =>
+                      setTitularChoiceDialog((prev) => ({
+                        ...prev,
+                        items: prev.items.map((it, i) =>
+                          i === idx ? { ...it, choice: "titular1" } : it
+                        ),
+                      }))
+                    }
+                  >
+                    Titular 1{item.titular1_name ? `: ${item.titular1_name}` : ""}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.choice === "titular2" ? "default" : "outline"}
+                    onClick={() =>
+                      setTitularChoiceDialog((prev) => ({
+                        ...prev,
+                        items: prev.items.map((it, i) =>
+                          i === idx ? { ...it, choice: "titular2" } : it
+                        ),
+                      }))
+                    }
+                  >
+                    Titular 2{item.titular2_name ? `: ${item.titular2_name}` : ""}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.choice === "ignore" ? "secondary" : "ghost"}
+                    onClick={() =>
+                      setTitularChoiceDialog((prev) => ({
+                        ...prev,
+                        items: prev.items.map((it, i) =>
+                          i === idx ? { ...it, choice: "ignore" } : it
+                        ),
+                      }))
+                    }
+                  >
+                    Ignorar
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setTitularChoiceDialog({ open: false, items: [], pendingPayload: null })}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmTitularChoices}
+              disabled={titularChoiceDialog.items.some((it) => !it.choice)}
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Aplicar
             </Button>
           </DialogFooter>
         </DialogContent>

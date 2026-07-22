@@ -15,65 +15,49 @@ logger = logging.getLogger(__name__)
 
 async def _trigger_onboarding_check(client_id: str):
     """
-    Gatilho assíncrono para verificar se o cliente completou o onboarding.
-
-    Executado via asyncio.create_task() após cada upload de documento.
-    Se o cliente tiver todos os documentos obrigatórios, um Process
-    é criado automaticamente e os documentos são ancorados.
-
-    PACOTE BO — Auto-Avanço e Auto-Atribuição:
-    Após a verificação de onboarding, se o processo estiver em pre_registo
-    e tiver todos os documentos obrigatórios, o sistema avança automaticamente
-    para o estado seguinte e invoca assign_to_indexer para o processo cair
-    na mesa do Indexador com menos carga. O avanço é silencioso (stealth mode)
-    para não gerar ruído no histórico do cliente.
-
-    Esta função é fire-and-forget — erros são logados mas não propagados.
+    Após upload no portal: se checklist SystemConfig completa → criar processo
+    (com titular2 do cliente) + avançar para Index.
     """
     try:
-        from services.onboarding_service import check_onboarding_completion
-        result = await check_onboarding_completion(client_id)
+        from services.onboarding_mandatory_config import (
+            is_mandatory_checklist_complete,
+            create_process_from_client_onboarding,
+        )
 
-        if result.get("completed"):
-            logger.info(
-                f"[ONBOARDING] Processo criado automaticamente para "
-                f"cliente {client_id}: processo #{result.get('process_number')} "
-                f"({result.get('anchored_docs', 0)} docs ancorados)"
-            )
-            # PACOTE BO — Auto-avanço do processo recém-criado (está em pre_registo)
-            process_id = result.get("process_id")
-            if process_id:
-                await _auto_advance_from_pre_registo(process_id, client_id)
-        else:
-            missing = result.get("missing", [])
-            if missing:
+        # 1) Cliente ainda sem processo — criar quando checklist completa
+        client = await db.clients.find_one(
+            {"id": client_id}, {"_id": 0, "process_ids": 1}
+        )
+        process_ids = (client or {}).get("process_ids") or []
+
+        if not process_ids:
+            if await is_mandatory_checklist_complete(client_id=client_id):
+                result = await create_process_from_client_onboarding(client_id)
+                if result.get("completed") and result.get("process_id"):
+                    logger.info(
+                        f"[ONBOARDING-CFG] Processo criado para cliente {client_id}: "
+                        f"{result.get('process_id')} (titular2={result.get('has_titular2')})"
+                    )
+                    await _auto_advance_from_pre_registo(
+                        result["process_id"], client_id
+                    )
+            else:
                 logger.info(
-                    f"[ONBOARDING] Cliente {client_id} ainda precisa de: {missing}"
+                    f"[ONBOARDING-CFG] Cliente {client_id}: checklist ainda incompleta"
                 )
-            # PACOTE BO — Verificar se o cliente tem um processo EXISTENTE em
-            # pre_registo com todos os docs obrigatórios (Flow 1: processo criado
-            # pelo formulário público, docs ancorados diretamente ao processo).
-            # O check_onboarding_completion só procura docs órfãos (sem process_id),
-            # pelo que não detecta este caso. Precisamos de uma verificação separada.
-            await _check_and_advance_existing_pre_registo(client_id)
+            return
+
+        # 2) Já tem processo (legado Lead/pre_registo) — avançar se checklist OK
+        await _check_and_advance_existing_pre_registo(client_id)
     except Exception as e:
         logger.error(f"[ONBOARDING] Erro na verificação de onboarding para {client_id}: {e}")
 
 
 async def _check_and_advance_existing_pre_registo(client_id: str):
-    """
-    PACOTE BO — Verifica se o cliente tem um processo EXISTENTE em pre_registo
-    (ou status vazio/Lead) com todos os documentos obrigatórios já submetidos
-    (ancorados ao processo).
-
-    Isto cobre o Flow 1: processo criado pelo formulário público (routes/public.py)
-    em pre_registo (PACOTE DB: status=None/Lead), onde os docs são ancorados
-    diretamente ao processo via confirm-upload. O check_onboarding_completion não
-    detecta este caso porque só procura docs órfãos (sem process_id).
-
-    Se o processo tiver todos os docs obrigatórios, avança automaticamente.
-    """
+    """Avança Lead/pre_registo quando checklist SystemConfig estiver completa."""
     try:
+        from services.onboarding_mandatory_config import is_mandatory_checklist_complete
+
         client = await db.clients.find_one({"id": client_id}, {"_id": 0, "process_ids": 1})
         if not client:
             return
@@ -81,86 +65,38 @@ async def _check_and_advance_existing_pre_registo(client_id: str):
         if not process_ids:
             return
 
-        # PACOTE DB — Procurar processo em pre_registo OU com status vazio (Lead)
-        # (novos registos do formulário público entram com status=None)
         process = await db.processes.find_one(
             {
                 "id": {"$in": process_ids},
                 "status": {"$in": ["pre_registo", None]},
                 "is_deleted": {"$ne": True},
             },
-            {"_id": 0, "id": 1, "status": 1}
+            {"_id": 0, "id": 1, "status": 1},
         )
         if not process:
-            return  # Não há processo em pre_registo/Lead
+            return
 
-        # Verificar se tem todos os documentos obrigatórios
-        if await _has_all_required_documents(process["id"], client_id):
+        complete = await is_mandatory_checklist_complete(process_id=process["id"])
+        if not complete:
+            # Fallback: checklist ainda no client_id (antes de ancorar)
+            complete = await is_mandatory_checklist_complete(client_id=client_id)
+        if complete:
             await _auto_advance_from_pre_registo(process["id"], client_id)
         else:
             logger.debug(
-                f"[PACOTE-BO] Processo {process['id']} em pre_registo/Lead mas ainda "
-                f"faltam documentos obrigatórios. Cliente {client_id}."
+                f"[PACOTE-BO] Processo {process['id']} em Lead mas checklist incompleta"
             )
     except Exception as e:
         logger.warning(f"[PACOTE-BO] Erro em _check_and_advance_existing_pre_registo: {e}")
 
 
 async def _has_all_required_documents(process_id: str, client_id: str) -> bool:
-    """
-    Verifica se o processo tem todos os documentos obrigatórios submetidos.
+    """Compat: delega à checklist SystemConfig (sem hardcode por tipo de contrato)."""
+    from services.onboarding_mandatory_config import is_mandatory_checklist_complete
 
-    Reutiliza a lógica de validação do onboarding_service (DOCUMENT_REQUIREMENT_MAP
-    e REQUIREMENTS_BY_CONTRACT_TYPE) mas procura documentos ancorados AO PROCESSO
-    (com process_id definido), em vez de docs órfãos.
-    """
-    from services.onboarding_service import (
-        DOCUMENT_REQUIREMENT_MAP,
-        REQUIREMENTS_BY_CONTRACT_TYPE,
-        CONTRACT_TYPE_NORMALIZE,
-        _detect_contract_type,
-    )
-
-    # Buscar documentos do processo (submetidos pelo cliente via portal)
-    docs = await db.documents.find(
-        {
-            "process_id": process_id,
-            "status": {"$in": ["RECEIVED", "UPLOADED", "SUBMITTED", "received", "uploaded", "submitted"]},
-        },
-        {"_id": 0, "category": 1, "ai_extracted_data": 1, "extracted_data": 1, "id": 1}
-    ).to_list(100)
-
-    # Recolher categorias submetidas
-    uploaded_categories = set()
-    for doc in docs:
-        cat = doc.get("category", "")
-        if isinstance(cat, dict):
-            cat = cat.get("value", cat.get("label", ""))
-        cat_str = str(cat).strip()
-        if cat_str:
-            uploaded_categories.add(cat_str)
-
-    # Determinar tipo de contrato para saber os requisitos
-    client = await db.clients.find_one({"id": client_id})
-    contract_type = await _detect_contract_type(client_id, client or {}, docs)
-    normalized = (
-        CONTRACT_TYPE_NORMALIZE.get(contract_type.lower().strip(), contract_type.lower().strip())
-        if contract_type else "default"
-    )
-    required_groups = REQUIREMENTS_BY_CONTRACT_TYPE.get(normalized, REQUIREMENTS_BY_CONTRACT_TYPE["default"])
-
-    # Verificar cada grupo obrigatório
-    for group_name in required_groups:
-        acceptable_cats = DOCUMENT_REQUIREMENT_MAP.get(group_name, [])
-        is_satisfied = any(
-            acc_cat in uploaded_categories
-            or acc_cat.lower() in {c.lower() for c in uploaded_categories}
-            for acc_cat in acceptable_cats
-        )
-        if not is_satisfied:
-            return False
-    return True
-
+    if await is_mandatory_checklist_complete(process_id=process_id):
+        return True
+    return await is_mandatory_checklist_complete(client_id=client_id)
 
 async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     """

@@ -355,7 +355,9 @@ async def get_system_error_logs(
     days: int = 7,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_system_error_logs(page, limit, severity, component, error_type, resolved, days, user)
+    return await run_get_system_error_logs(
+        user, page, limit, severity, component, error_type, resolved, days
+    )
 
 
 @router.get("/system-logs/stats")
@@ -363,7 +365,7 @@ async def get_system_logs_stats(
     days: int = 7,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_system_logs_stats(days, user)
+    return await run_get_system_logs_stats(user, days)
 
 
 @router.get("/system-logs/{error_id}")
@@ -388,7 +390,7 @@ async def resolve_system_error(
     data: dict = None,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_resolve_system_error(error_id, data, user)
+    return await run_resolve_system_error(error_id, user, data)
 
 
 @router.post("/system-logs/bulk-resolve")
@@ -411,7 +413,7 @@ async def cleanup_old_system_logs(
     days: int = 90,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_cleanup_old_system_logs(days, user)
+    return await run_cleanup_old_system_logs(user, days)
 
 
 @router.get("/db/indexes")
@@ -430,7 +432,7 @@ async def get_ai_import_logs(
     client_name: str = None,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_ai_import_logs(page, limit, status, days, client_name, user)
+    return await run_get_ai_import_logs(user, page, limit, status, days, client_name)
 
 
 @router.post("/ai-import-logs/{log_id}/resolve")
@@ -455,7 +457,7 @@ async def get_ai_import_logs_grouped(
     status: str = None,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_ai_import_logs_grouped(days, status, user)
+    return await run_get_ai_import_logs_grouped(user, days, status)
 
 
 @router.get("/ai-import-logs-v2")
@@ -468,7 +470,9 @@ async def get_ai_import_logs_v2(
     document_type: str = None,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_ai_import_logs_v2(page, limit, status, days, client_name, document_type, user)
+    return await run_get_ai_import_logs_v2(
+        user, page, limit, status, days, client_name, document_type
+    )
 
 
 @router.get("/ai-import-logs-v2/{log_id}")
@@ -535,7 +539,7 @@ async def list_client_registrations(
     source: str = None,
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    return await run_list_client_registrations(page, limit, search, status, source, user)
+    return await run_list_client_registrations(user, page, limit, search, status, source)
 
 
 @router.get("/client-registrations/{process_id}")
@@ -578,7 +582,7 @@ async def get_audit_logs(
     entity: Optional[str] = Query(None),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    return await run_get_audit_logs(limit, skip, action, entity, user)
+    return await run_get_audit_logs(user, limit, skip, action, entity)
 
 
 @router.get("/stale-processes")
@@ -586,7 +590,7 @@ async def get_stale_processes(
     days: int = Query(14, ge=1, le=90),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
 ):
-    return await run_get_stale_processes(days, user)
+    return await run_get_stale_processes(user, days)
 
 
 @router.get("/team-performance")
@@ -595,7 +599,7 @@ async def get_team_performance(
     end_date: Optional[str] = Query(None, description="Data de fim (YYYY-MM-DD). Por defeito, hoje"),
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
-    return await run_get_team_performance(start_date, end_date, user)
+    return await run_get_team_performance(user, start_date, end_date)
 
 
 @router.get("/sync-database/status")

@@ -280,7 +280,7 @@ const DashboardLayout = ({ children, title }) => {
         },
         // PACOTE BU — Menus temporariamente ocultos:
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
-        // { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Visitas", icon: Calendar, href: "/visitas" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ],
     };
@@ -423,7 +423,7 @@ const DashboardLayout = ({ children, title }) => {
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
         { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
         // PACOTE BU — Menus temporariamente ocultos:
-        // { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Visitas", icon: Calendar, href: "/visitas" },
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ];

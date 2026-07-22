@@ -144,6 +144,21 @@ async def _run_scraper_for_visit(visit_id: str, url: str):
         from services.property_scraper import extract_property_data
         scraped_result = await extract_property_data(url)
 
+        # source == "error" is a soft failure from the scraper — treat as error
+        if scraped_result.source == "error":
+            raw = getattr(scraped_result, "raw_data", None) or {}
+            err_msg = raw.get("error") or "Falha ao extrair dados do imóvel"
+            await db.visits.update_one(
+                {"id": visit_id},
+                {"$set": {
+                    "scraper_status": "error",
+                    "scraper_error": str(err_msg),
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                }}
+            )
+            logger.warning(f"[VISITS] Scraper retornou erro para visita {visit_id}: {err_msg}")
+            return
+
         scraped_data = {
             "title": scraped_result.title,
             "price": scraped_result.price,
@@ -165,11 +180,13 @@ async def _run_scraper_for_visit(visit_id: str, url: str):
         update_fields = {
             "scraped_data": scraped_data,
             "scraped_url": url,
+            "scraper_status": "completed",
+            "scraper_error": None,
             "updated_at": datetime.now(timezone.utc).isoformat(),
         }
 
         # Auto-popular campos da visita com dados extraídos
-        if scraped_data.get("title") and not scraped_result.source == "error":
+        if scraped_data.get("title"):
             update_fields["property_title"] = scraped_data["title"]
 
         if scraped_data.get("price"):
@@ -201,6 +218,7 @@ async def _run_scraper_for_visit(visit_id: str, url: str):
             await db.visits.update_one(
                 {"id": visit_id},
                 {"$set": {
+                    "scraper_status": "error",
                     "scraper_error": str(e),
                     "updated_at": datetime.now(timezone.utc).isoformat(),
                 }}

@@ -23,6 +23,10 @@ The update script already installs all dependencies (frontend yarn deps and the 
   `cd backend && MONGO_URL="mongodb://localhost:27017" DB_NAME="test_db_precision" JWT_SECRET="test_secret_key_123456789012345678" CORS_ORIGINS="http://localhost:3000" TESTING="true" ENVIRONMENT="dev" .venv/bin/python -m pytest tests/unit --no-cov -q`
 - Optional integrations (Redis/ARQ worker, S3, OpenAI/Gemini, email/IMAP, Sentry) all degrade gracefully and are not needed to run the app. The ARQ worker (`backend/worker.py`) only runs when `ENVIRONMENT=production`.
 - **Credentials in `backend/.env` are DEV-only** (owner clarification): production does not use this file — it injects secrets via the platform's secret manager. So the values present here are not production secrets; no need to treat them as a production leak or block on rotating them. Use `.env.example` as the template for required vars.
+- **Documentos IA (S3FileManager):** botões **Analisar IA** / **Renomear IA** só para `effectiveRole` ∈ `MANAGEMENT_ROLES` (`admin`, `ceo`, `diretor` — “gestor” no produto). Backend: `require_roles([ADMIN, CEO, DIRETOR])` em `/documents/ai-analyze`, `/rename-smart`, `/rename-all-smart`. Docs com `document_metadata.ai_analyzed` aparecem com badge **IA** e são saltados em re-análise. Renomear IA faz `categorize-all` antes de `rename-all-smart` para gerar nomes legíveis.
+- **Onboarding público (após Jul 2026):** registo **não** cria processo. Cria cliente + `titular2_data` no cliente + pedidos `mandatory_checklist` (SystemConfig) por `client_id`. Processo é criado só quando a checklist está completa (`onboarding_mandatory_config`). Na criação copia `titular2_data` → processo. Uploads portal sem processo → orphans Index. Pós-Index: **sempre** dual-assign consultor+intermediário. IA: `document_titular_match` compara com titular1/2 já no processo; `needs_user_choice` só se ambíguo.
+- **Portal docs enviados:** upload do **cliente** (`portal/confirm-upload`) marca REQUESTED→RECEIVED. Upload da **equipa** no CRM (`document_upload` / `confirm-upload` + pós `auto_categorize`) chama `document_portal_fulfill` para o mesmo efeito no portal do cliente (match por categoria/label).
+- **Toasts BG:** sticky em `TasksContext` (`duration: Infinity`); **não** fazer `toast.dismiss` quando a tarefa sai de `/tasks/active` — o Toaster está fora do `BrowserRouter` e deve sobreviver a mudanças de página (só o utilizador fecha com X).
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
@@ -750,83 +754,40 @@ Do **not** overwrite `ai_improvement_agent.py`. Unit helpers: `backend/tests/uni
 
 ### Active feature plan (branch `cursor/multi-profile-ai-visits-toasts-0b1c`)
 
-Four product improvements — analyze before coding; prefer fixing wired paths over new parallel systems.
+| Item | Status | Notes |
+|---|---|---|
+| Visitas URL/IA | **done** | `scraper_status` completed/error; preview PT→EN; poll pending; nav Visitas restored |
+| Toasts BG | **done** | sticky loading → morph green/red; **never auto-dismiss on nav**; dismiss via X; max 5 loading |
+| Multi-perfil webmail | **done** | `effectiveRole`/company gates; forced-shared uses effective role; OAuth prefers company key |
+| IA documentos | **done (canonical + UI)** | Analisar/Renomear IA activos no S3FileManager; só `MANAGEMENT_ROLES` (admin/CEO/diretor); docs `ai_analyzed` marcados e saltados |
 
-#### 1) Multi-perfil → webmail / email config
+Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal visitas tab / consultor RBAC for unassigned pedidos; orphan AI paths left intentionally.
 
-**Symptom:** Header profile switcher works (`ContextSwitcher` + `X-Active-Role` / `X-Company-Id`), but personal-area webmail settings do not change with the active profile.
+#### 1) Multi-perfil → webmail / email config — **done**
 
-**Root cause (current design):**
-- Canonical store `user_email_configs` is unique on `(user_id, company_id)` only — **not** per role (`models/email_config.py`, `user_email_config_service.py`).
-- Resolver prefers company collection; role-keyed embeds are fallback only (`email_config_resolver.py`).
-- UI gates often use `hasRole(user, …)` (any possessed role) instead of `effectiveRole` (`ProfilePage.js`, `WebmailPage.jsx`).
-- Forced shared mailboxes for `indexacao`/`suporte` check **primary** role, not effective role.
+**Product:** IMAP/SMTP from company; user sets email+password; multi-profile ⇒ usually different companies ⇒ different emails.
 
-**Plan (confirm product intent first):**
-- **A (default):** Email = one mailbox per **company**. Fix gates to `effectiveRole`; OAuth writes company key; stop advertising per-role IMAP for same company.
-- **B (if product needs it):** True per `(user_id, company_id, role)` mailboxes — schema + resolver + sync + OAuth + inbox tagging.
+**Fixed:** gates use `effectiveRole`; forced-shared uses effective role; OAuth prefers `company:<id>`.
 
-Key files: `ContextSwitcher.jsx`, `AuthContext.js`, `ProfilePage.js`, `EmailConfigForm.jsx`, `WebmailPage.jsx`, `users_api_email_config.py`, `email_config_resolver.py`, `user_email_config_service.py`.
+#### 2) IA em documentos → atualizar ficha — **done (canonical path)**
 
-#### 2) IA em documentos → atualizar ficha
+**Canonical only:** ProcessDetails → S3 “Analisar com IA” → `/documents/ai-analyze` → apply-suggestions. No duplicate UI.
 
-**Goal:** Analyze uploaded docs with the model from Admin AI config (`document_analysis`), extract fields, update process/client ficha.
+**Fixed:** model from admin config; compare/apply use `monthly_income` / `employer_name`.
 
-**What exists:** ProcessDetails → S3 “Analisar com IA” → `document_ai_analyze` → `ai_document_analyzer` (works partially). Upload OCR + `data_suggestions` path is disconnected from UI. `AIDocumentAnalyzer.js` orphaned.
+**UI (S3FileManager):** Analisar/Renomear IA visíveis; RBAC gestão; badge + skip `ai_analyzed`; Renomear categoriza antes de renomear.
 
-**Gaps:**
-- Extractors hardcode `gpt-4o-mini` — ignore admin `ai_config.document_analysis`.
-- Two conflict stores (`data_suggestions` vs `process.ai_suggestions`); UI reads the latter, upload writes the former.
-- Field-map inconsistencies (`rendimento_mensal` vs `monthly_income`; recibo/IRS wrongly map salary → `renda_habitacao_atual`).
-- Updates hit `processes` only — no reliable sync to `clients` collection.
+**Gaps left:** conflict UX still split; OpenAI client may not call Gemini ids; orphan `/api/ai/analyze-document*` and upload OCR `data_suggestions` untouched.
 
-**Plan:**
-1. Wire `get_ai_config()["document_analysis"]` into `ai_document` / `ai_document_analyzer` / categorization (normalize model keys).
-2. Unify conflict store → `process.ai_suggestions` + existing `DataConflictResolver`.
-3. Single field map aligned with ProcessDetails hydration/apply.
-4. Empty fields auto-apply; conflicts via UI; optional client-doc sync if required.
-5. Delete or wire orphan `AIDocumentAnalyzer.js`.
+#### 3) Toasts de tarefas em background — **done**
 
-#### 3) Toasts de tarefas em background
+Sticky `toast.loading` (id `bg-task-*`, `duration: Infinity`) → morph success/error; **não** auto-dismiss quando a tarefa sai de `/tasks/active` (sobrevive a mudança de página); dismiss só via X. Cap loading 5; `visibleToasts={8}`.
 
-**Current:** `TasksContext` polls `GET /api/tasks/active` (Mongo `background_jobs`). Toasts only on complete/fail; progress lives in `TasksDropdown`. Sonner already `bottom-right` + `closeButton`.
+#### 4) Gestor de visitas + IA URL — **done (CRM path)**
 
-**Plan:**
-1. On first sight of `pending`/`processing` → `toast.loading` with stable `id: bg-task-${task_id}`, `duration: Infinity`.
-2. Poll updates same `id` (progress text).
-3. On complete/fail → `toast.success` / `toast.error` same `id` (morph green/red); dismiss only via X.
-4. Cap 5: `visibleToasts={5}` + drop oldest loading toast if needed.
-5. Later: unify `task_logs` writers into `background_jobs` (AI async still writes the other store).
+`_run_scraper_for_visit` sets completed/error; VisitsPage normalizes preview + polls; DashboardLayout Visitas nav restored. Portal tab / consultor RBAC for unassigned portal requests still optional.
 
-Key files: `TasksContext.js`, `TasksDropdown.js`, `App.js` Toaster, `task_api_background.py`.
-
-#### 4) Gestor de visitas + IA a partir de URL
-
-**Current:** Real manager is `VisitsPage` (`/visitas`); ProcessDetails `VisitasTab` is property association only (no scrape). Paste URL → debounce preview `POST /api/scraper/single` → create visit → background scrape.
-
-**Bugs:**
-- CRM scrape (`_run_scraper_for_visit`) never sets `scraper_status` to `completed`/`error` → UI stuck on “A extrair dados…”.
-- Preview expects EN keys; scraper returns PT (`titulo`/`preco`/…).
-- No poll while pending after create.
-- Portal visitas tab commented out; nav link to `/visitas` commented; consultor kanban RBAC hides unassigned portal requests.
-
-**Plan:**
-1. Fix scraper status + PT→EN DTO (or normalize API).
-2. Poll kanban while any visit `scraper_status === pending`.
-3. Use BackgroundTasks/ARQ + optional `background_jobs` row (ties into toast feature).
-4. Uncomment nav; fix consultor visibility for `solicitada` portal visits.
-5. Clarify VisitasTab vs VisitsPage in UI copy if needed.
-
-Key files: `VisitsPage.js`, `visit_helpers.py`, `visit_list_create.py`, `scraper_api_*`, `portal_client_visits.py`, `DashboardLayout.js`.
-
-#### Suggested implementation order
-
-1. Visitas scraper status + preview mapping (quick wins, unblocks UX)
-2. Background task sticky toasts
-3. Multi-perfil / webmail (needs product choice A vs B)
-4. Document AI unification (largest; depends on admin AI config wiring)
-
-Confirm with owner: email per **company** (A) vs per **role** (B) before schema work.
+Owner clarified: email is per **company** (IMAP/SMTP from company; user sets email+password). Multiple profiles ⇒ usually different companies ⇒ different emails.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 

@@ -192,6 +192,31 @@ async def auto_categorize_document_background(
             await db.document_metadata.insert_one(metadata)
             logger.info("[AUTO-CAT] Metadados criados")
 
+        # Após categorização IA, tentar satisfazer pedido portal pendente
+        # (útil quando o upload staff foi para Index/Outros e só agora há categoria)
+        try:
+            from services.document_portal_fulfill import (
+                fulfill_portal_requests_on_staff_upload,
+            )
+
+            fulfill_cat = (
+                result.get("subcategory")
+                or ai_category
+                or result.get("category")
+                or ""
+            )
+            await fulfill_portal_requests_on_staff_upload(
+                process_id,
+                category=fulfill_cat,
+                filename=filename,
+                s3_path=s3_path,
+                user={"id": "system_auto_cat", "name": "Categorização IA"},
+            )
+        except Exception as fulfill_err:
+            logger.warning(
+                f"[AUTO-CAT] Portal fulfill skip: {type(fulfill_err).__name__}: {fulfill_err}"
+            )
+
         logger.info("[AUTO-CAT] Categorização concluída")
 
     except Exception as e:

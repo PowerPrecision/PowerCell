@@ -898,7 +898,7 @@ function App() {
         <ImpersonateBanner />
         <GlobalUploadProgress />
       </BrowserRouter>
-      <Toaster position="bottom-right" richColors closeButton offset="20px" />
+      <Toaster position="bottom-right" richColors closeButton offset="20px" visibleToasts={8} />
       </TasksProvider>
       </UploadProgressProvider>
     </AuthProvider>

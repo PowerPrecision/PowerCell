@@ -73,17 +73,30 @@ STANDARD_ORGANIZE_FOLDERS = [
 
 
 def build_existing_data_for_ai_compare(process: dict) -> dict:
-    """Flatten process nested fields → shape esperado pelo analyzer."""
+    """Flatten process nested fields → shape esperado pelo analyzer.
+
+    Income uses monthly_income / rendimento_mensal — never renda_habitacao_atual
+    (that field is housing rent, not salary).
+    """
     personal = process.get("personal_data", {}) or {}
     financial = process.get("financial_data", {}) or {}
     real_estate = process.get("real_estate_data", {}) or {}
+    # Canonical income on ProcessDetails form is monthly_income
+    income = (
+        financial.get("monthly_income")
+        or financial.get("rendimento_mensal")
+        or financial.get("salario_liquido")
+    )
+    employer = financial.get("employer_name") or financial.get("empresa")
     return {
         "client_name": process.get("client_name"),
         "nif": personal.get("nif") or process.get("client_nif") or process.get("nif"),
         "birth_date": personal.get("data_nascimento") or process.get("data_nascimento"),
         "documento_id": personal.get("documento_id") or process.get("cc_number"),
         "cc_number": personal.get("documento_id") or process.get("cc_number"),
-        "cc_validity": personal.get("cc_validity") or process.get("validade_cc"),
+        "cc_validity": personal.get("cc_validity")
+        or personal.get("data_validade_cc")
+        or process.get("validade_cc"),
         "nationality": personal.get("nacionalidade"),
         "gender": personal.get("sexo"),
         "address": personal.get("morada"),
@@ -91,14 +104,17 @@ def build_existing_data_for_ai_compare(process: dict) -> dict:
         "phone": personal.get("telefone") or process.get("phone"),
         "email": personal.get("email") or process.get("client_email"),
         "estado_civil": personal.get("estado_civil"),
-        "rendimento_mensal": financial.get("rendimento_mensal")
-        or financial.get("renda_habitacao_atual"),
-        "rendimento_bruto": financial.get("rendimento_bruto"),
-        "salario_liquido": financial.get("rendimento_mensal")
-        or financial.get("renda_habitacao_atual"),
-        "salario_bruto": financial.get("rendimento_bruto"),
-        "empresa": financial.get("empresa") or financial.get("employer_name"),
+        "monthly_income": income,
+        "rendimento_mensal": income,
+        "salario_liquido": income,
+        "rendimento_bruto": financial.get("rendimento_bruto")
+        or financial.get("salario_bruto"),
+        "salario_bruto": financial.get("rendimento_bruto")
+        or financial.get("salario_bruto"),
+        "employer_name": employer,
+        "empresa": employer,
         "tipo_contrato": financial.get("tipo_contrato")
+        or financial.get("employment_type")
         or ("sim" if financial.get("efetivo") == "sim" else None),
         "valor_imovel": real_estate.get("valor_imovel"),
         "localizacao": real_estate.get("localizacao"),
@@ -174,18 +190,41 @@ def process_ai_analyze_results(
     return extracted_data, conflicts, document_types
 
 
-async def _read_upload_files(files: list[UploadFile]) -> list[dict]:
+def should_skip_ai_analysis(metadata: dict | None) -> bool:
+    """Docs já analisados pela IA (extração) não precisam de nova análise."""
+    return bool(metadata and metadata.get("ai_analyzed"))
+
+
+def resolve_ai_category_from_doc_type(doc_type: str | None) -> tuple[str, str]:
+    """Mapeia tipo detectado pela IA → (categoria pasta, subcategoria legível)."""
+    raw = (doc_type or "").strip().lower()
+    if not raw:
+        return ("Outros", "Documento")
+    folder = DOCUMENT_TYPE_FOLDERS.get(raw, DOCUMENT_TYPE_FOLDERS["default"])
+    subcategory = raw.replace("_", " ").strip().title() or "Documento"
+    return (folder, subcategory)
+
+
+async def _read_upload_files(
+    files: list[UploadFile],
+    file_paths: list[str] | None = None,
+) -> list[dict]:
     documents = []
-    for file in files:
+    for idx, file in enumerate(files):
         try:
             content = await file.read()
             if len(content) == 0:
                 continue
+            source_path = None
+            if file_paths and idx < len(file_paths):
+                path = (file_paths[idx] or "").strip()
+                source_path = path or None
             documents.append(
                 {
                     "content": content,
                     "name": file.filename,
                     "mime_type": file.content_type or "application/octet-stream",
+                    "source_path": source_path,
                 }
             )
         except Exception as e:
@@ -194,11 +233,222 @@ async def _read_upload_files(files: list[UploadFile]) -> list[dict]:
     return documents
 
 
+async def _filter_already_analyzed_documents(
+    process_id: str,
+    documents: list[dict],
+) -> tuple[list[dict], int]:
+    """Remove docs com ai_analyzed=True (por s3_path)."""
+    paths = [d.get("source_path") for d in documents if d.get("source_path")]
+    if not paths:
+        return documents, 0
+
+    analyzed_paths: set[str] = set()
+    cursor = db.document_metadata.find(
+        {
+            "process_id": process_id,
+            "s3_path": {"$in": paths},
+            "ai_analyzed": True,
+        },
+        {"_id": 0, "s3_path": 1},
+    )
+    async for meta in cursor:
+        if meta.get("s3_path"):
+            analyzed_paths.add(meta["s3_path"])
+
+    if not analyzed_paths:
+        return documents, 0
+
+    pending = [
+        d
+        for d in documents
+        if not d.get("source_path") or d["source_path"] not in analyzed_paths
+    ]
+    skipped = len(documents) - len(pending)
+    return pending, skipped
+
+
+async def _build_titular_matches_for_analysis(
+    process: dict,
+    extracted_data: dict,
+    document_types: list[dict],
+    results: Optional[dict],
+) -> list[dict]:
+    """Compara extracao IA com titular 1 e 2 já definidos no processo."""
+    from services.document_titular_match import (
+        build_titular_identity_snapshot,
+        resolve_titular_match,
+    )
+    from services.encryption import decrypt_client_data
+
+    client_id = process.get("client_id")
+    second_id = process.get("second_client_id")
+    titular2_data = process.get("titular2_data") or {}
+
+    personal1 = process.get("personal_data") or {}
+    if client_id:
+        c1 = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        if c1:
+            try:
+                c1 = decrypt_client_data(c1)
+            except Exception:
+                pass
+            personal1 = {**(c1.get("dados_pessoais") or {}), **personal1}
+
+    titular1 = build_titular_identity_snapshot(
+        label="titular1",
+        client_id=client_id,
+        name=process.get("client_name"),
+        personal=personal1,
+    )
+
+    titular2 = None
+    has_t2 = bool(
+        second_id
+        or titular2_data.get("name")
+        or titular2_data.get("nome")
+        or titular2_data.get("email")
+    )
+    if has_t2:
+        personal2 = {}
+        t2_name = (
+            process.get("second_client_name")
+            or titular2_data.get("name")
+            or titular2_data.get("nome")
+        )
+        if second_id:
+            c2 = await db.clients.find_one({"id": second_id}, {"_id": 0})
+            if c2:
+                try:
+                    c2 = decrypt_client_data(c2)
+                except Exception:
+                    pass
+                personal2 = c2.get("dados_pessoais") or {}
+                t2_name = t2_name or c2.get("nome")
+        titular2 = build_titular_identity_snapshot(
+            label="titular2",
+            client_id=second_id,
+            name=t2_name,
+            personal=personal2,
+            titular2_data=titular2_data,
+        )
+
+    matches: list[dict] = []
+    analyzed_docs = (results or {}).get("documents_analyzed") or []
+
+    # Um match global com extracted_data agregado + um por documento quando possível
+    global_match = resolve_titular_match(extracted_data or {}, titular1, titular2)
+    matches.append(
+        {
+            "scope": "process_aggregate",
+            "file_name": None,
+            **global_match,
+            "titular1_name": titular1.get("name"),
+            "titular2_name": (titular2 or {}).get("name") if titular2 else None,
+            "has_second_titular": bool(titular2),
+        }
+    )
+
+    for doc_result in analyzed_docs:
+        file_name = doc_result.get("file_name") or ""
+        # Prefer fields inside doc_result / dados_extraidos
+        doc_extracted = {}
+        if isinstance(doc_result.get("dados_extraidos"), dict):
+            doc_extracted.update(doc_result["dados_extraidos"])
+        for key in ("nif", "nome", "client_name", "documento_id", "cc_number", "name"):
+            if doc_result.get(key):
+                doc_extracted[key] = doc_result[key]
+        if not doc_extracted:
+            doc_extracted = extracted_data or {}
+        m = resolve_titular_match(doc_extracted, titular1, titular2)
+        matches.append(
+            {
+                "scope": "document",
+                "file_name": file_name,
+                **m,
+                "titular1_name": titular1.get("name"),
+                "titular2_name": (titular2 or {}).get("name") if titular2 else None,
+                "has_second_titular": bool(titular2),
+            }
+        )
+
+    return matches
+
+
+async def _mark_documents_ai_analyzed(
+    process_id: str,
+    client_name: str,
+    documents: list[dict],
+    document_types: list[dict],
+) -> int:
+    """Persiste ai_analyzed (+ categorização leve) após análise com sucesso."""
+    import uuid
+    from datetime import datetime, timezone
+
+    now = datetime.now(timezone.utc).isoformat()
+    type_by_name = {
+        (dt.get("file_name") or ""): dt for dt in (document_types or [])
+    }
+    marked = 0
+
+    for doc in documents:
+        s3_path = doc.get("source_path")
+        filename = doc.get("name") or ""
+        if not s3_path:
+            # Fallback: tentar pelo filename no processo
+            existing_by_name = await db.document_metadata.find_one(
+                {"process_id": process_id, "filename": filename},
+                {"_id": 0, "s3_path": 1},
+            )
+            s3_path = (existing_by_name or {}).get("s3_path")
+        if not s3_path:
+            continue
+
+        type_info = type_by_name.get(filename) or {}
+        doc_type = type_info.get("type")
+        category, subcategory = resolve_ai_category_from_doc_type(doc_type)
+        confidence = type_info.get("confidence")
+
+        existing = await db.document_metadata.find_one(
+            {"s3_path": s3_path}, {"_id": 0, "id": 1}
+        )
+        update_fields: dict[str, Any] = {
+            "process_id": process_id,
+            "client_name": client_name,
+            "s3_path": s3_path,
+            "filename": filename,
+            "ai_analyzed": True,
+            "ai_analyzed_at": now,
+            "updated_at": now,
+        }
+        # Categorização leve para permitir Renomear IA depois
+        if doc_type:
+            update_fields["ai_category"] = category
+            update_fields["ai_subcategory"] = subcategory
+            update_fields["is_categorized"] = True
+            update_fields["categorized_at"] = now
+            if confidence is not None:
+                update_fields["ai_confidence"] = confidence
+
+        if existing and existing.get("id"):
+            await db.document_metadata.update_one(
+                {"id": existing["id"]},
+                {"$set": update_fields},
+            )
+        else:
+            update_fields["id"] = str(uuid.uuid4())
+            update_fields["created_at"] = now
+            await db.document_metadata.insert_one(update_fields)
+        marked += 1
+
+    return marked
+
+
 async def run_ai_analyze_documents(
     process_id: str,
     files: list[UploadFile],
     *,
     user: dict,
+    file_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     """Analisa múltiplos documentos com IA e devolve comparação/sugestões."""
     start_time = time.time()
@@ -236,13 +486,33 @@ async def run_ai_analyze_documents(
         except Exception as e:
             logger.warning(f"Erro ao criar log de importação: {e}")
 
-    documents = await _read_upload_files(files)
+    documents = await _read_upload_files(files, file_paths=file_paths)
+    documents, skipped_analyzed = await _filter_already_analyzed_documents(
+        process_id, documents
+    )
+
     if not documents:
         if log_id and finalize_ai_import_log:
             try:
                 await finalize_ai_import_log(log_id, duration_ms=0)
             except Exception:
                 pass
+        if skipped_analyzed > 0:
+            return {
+                "success": True,
+                "process_id": process_id,
+                "client_name": client_name,
+                "documents_count": 0,
+                "skipped_already_analyzed": skipped_analyzed,
+                "log_id": log_id,
+                "extracted_data": {},
+                "field_confidence": {},
+                "conflicts": [],
+                "documents": [],
+                "suggestions": [],
+                "analysis": None,
+                "message": "Todos os documentos seleccionados já foram analisados pela IA",
+            }
         raise HTTPException(status_code=400, detail=ERROR_NO_VALID_FILES)
 
     existing_data = build_existing_data_for_ai_compare(process)
@@ -265,6 +535,19 @@ async def run_ai_analyze_documents(
         results, documents
     )
 
+    # Match titular 1 vs 2 (2.º titular já definido no processo)
+    titular_matches = await _build_titular_matches_for_analysis(
+        process, extracted_data, document_types, results
+    )
+
+    try:
+        marked = await _mark_documents_ai_analyzed(
+            process_id, client_name, documents, document_types
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao marcar documentos como analisados: {e}")
+        marked = 0
+
     total_duration = int((time.time() - start_time) * 1000)
     if log_id and finalize_ai_import_log:
         try:
@@ -277,6 +560,8 @@ async def run_ai_analyze_documents(
         "process_id": process_id,
         "client_name": client_name,
         "documents_count": len(documents),
+        "skipped_already_analyzed": skipped_analyzed,
+        "marked_analyzed": marked,
         "log_id": log_id,
         "extracted_data": extracted_data,
         "field_confidence": results.get("field_confidence", {}) if results else {},
@@ -284,6 +569,10 @@ async def run_ai_analyze_documents(
         "documents": document_types,
         "suggestions": list(extracted_data.keys()),
         "analysis": results,
+        "titular_matches": titular_matches,
+        "needs_titular_choice": any(
+            m.get("needs_user_choice") for m in titular_matches
+        ),
     }
 
 
@@ -394,42 +683,68 @@ async def run_organize_documents_after_analysis(
     }
 
 
-# Frontend field → Mongo dot-path for apply-suggestions
+# Frontend / analyzer field → Mongo dot-path for apply-suggestions
+# Align with ProcessDetails canonical fields (monthly_income, employer_name).
+# Never map salary/income → renda_habitacao_atual (that is housing rent).
 AI_SUGGESTION_FIELD_MAP = {
     "client_name": "client_name",
     "nif": "personal_data.nif",
     "documento_id": "personal_data.documento_id",
     "cc_number": "personal_data.documento_id",
     "birth_date": "personal_data.data_nascimento",
-    "cc_validity": "personal_data.cc_validity",
+    "cc_validity": "personal_data.data_validade_cc",
+    "data_validade_cc": "personal_data.data_validade_cc",
     "nationality": "personal_data.nacionalidade",
     "gender": "personal_data.sexo",
-    "address": "personal_data.morada",
+    "address": "personal_data.morada_fiscal",
     "fiscal_address": "personal_data.morada_fiscal",
     "estado_civil": "personal_data.estado_civil",
-    "rendimento_mensal": "financial_data.rendimento_mensal",
-    "salario_liquido": "financial_data.rendimento_mensal",
+    "monthly_income": "financial_data.monthly_income",
+    "rendimento_mensal": "financial_data.monthly_income",
+    "salario_liquido": "financial_data.monthly_income",
     "rendimento_bruto": "financial_data.rendimento_bruto",
     "salario_bruto": "financial_data.rendimento_bruto",
-    "empresa": "financial_data.empresa",
-    "entidade_empregadora": "financial_data.empresa",
+    "employer_name": "financial_data.employer_name",
+    "empresa": "financial_data.employer_name",
+    "entidade_empregadora": "financial_data.employer_name",
     "tipo_contrato": "financial_data.tipo_contrato",
+    "employment_type": "financial_data.tipo_contrato",
     "categoria_profissional": "financial_data.categoria_profissional",
     "subsidiario_alimentacao": "financial_data.subsidiario_alimentacao",
+    "data_referencia": "financial_data.data_referencia",
     "valor_imovel": "real_estate_data.valor_imovel",
     "localizacao": "real_estate_data.localizacao",
     "tipologia": "real_estate_data.tipologia",
-    "area": "real_estate_data.area",
+    "area": "real_estate_data.area_bruta",
     "artigo_matricial": "real_estate_data.artigo_matricial",
 }
 
 
-def map_ai_suggestions_to_mongo_update(suggestions: dict) -> dict:
-    """Converte sugestões frontend → campos com dot-notation Mongo."""
+def map_ai_suggestions_to_mongo_update(
+    suggestions: dict, *, target_titular: str = "titular1"
+) -> dict:
+    """Converte sugestões frontend → campos com dot-notation Mongo.
+
+    target_titular=titular2 → identidade/financeiros vão para `titular2_data.*`
+    (imóvel/crédito partilhados mantêm-se no processo).
+    """
     update_data = {}
+    target = (target_titular or "titular1").lower()
     for field, value in suggestions.items():
-        if field in AI_SUGGESTION_FIELD_MAP:
-            update_data[AI_SUGGESTION_FIELD_MAP[field]] = value
+        if field in ("target_titular",):
+            continue
+        if field not in AI_SUGGESTION_FIELD_MAP:
+            continue
+        path = AI_SUGGESTION_FIELD_MAP[field]
+        if target == "titular2":
+            if path.startswith("personal_data."):
+                path = "titular2_data." + path.split(".", 1)[1]
+            elif path.startswith("financial_data."):
+                path = "titular2_data." + path.split(".", 1)[1]
+            elif path == "client_name":
+                path = "titular2_data.name"
+            # real_estate / credit: keep on process
+        update_data[path] = value
     return update_data
 
 
@@ -464,7 +779,10 @@ async def run_apply_ai_suggestions(
             detail=f"Não tem permissões para alterar este processo. {reason}",
         )
 
-    update_data = map_ai_suggestions_to_mongo_update(suggestions)
+    target_titular = str(suggestions.get("target_titular") or "titular1")
+    update_data = map_ai_suggestions_to_mongo_update(
+        suggestions, target_titular=target_titular
+    )
     if not update_data:
         return {
             "success": True,
@@ -478,12 +796,14 @@ async def run_apply_ai_suggestions(
 
     await db.processes.update_one({"id": process_id}, {"$set": mongo_update})
     logger.info(
-        f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)}"
+        f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)} "
+        f"(titular={target_titular})"
     )
     return {
         "success": True,
         "updated_fields": len(update_data),
         "fields": list(update_data.keys()),
+        "target_titular": target_titular,
     }
 
 

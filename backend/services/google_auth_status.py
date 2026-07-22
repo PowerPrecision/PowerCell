@@ -15,11 +15,22 @@ from database import db
 logger = logging.getLogger(__name__)
 
 
+def _resolve_storage_key(request: Request, user_role: str) -> str:
+    """Prefer company:<id> when X-Company-Id is set; else role/default."""
+    company_id = (request.headers.get("X-Company-Id") or "").strip()
+    if company_id and company_id != "default":
+        return f"company:{company_id}"
+    active_role_header = request.headers.get("X-Active-Role", "")
+    if active_role_header and active_role_header != user_role:
+        return active_role_header
+    return "default"
+
+
 async def run_google_oauth_status(request: Request, current_user: dict) -> dict:
     """
     Verifica o estado da ligação Google OAuth do utilizador.
 
-    Suporta per-role configs: lê X-Active-Role header.
+    Prefers company key when X-Company-Id is present; falls back to role.
     """
     from services.email_config_resolver import (
         _extract_role_email_config,
@@ -40,11 +51,15 @@ async def run_google_oauth_status(request: Request, current_user: dict) -> dict:
             "has_refresh_token": False,
         }
 
-    # Determine active role and extract config
-    active_role_header = request.headers.get("X-Active-Role", "")
-    active_role = active_role_header if active_role_header and active_role_header != user_role else None
+    storage_key = _resolve_storage_key(request, user_role)
     raw_config = user["email_config"]
-    config = _extract_role_email_config(raw_config, active_role)
+
+    # Prefer explicit company key when nested
+    if storage_key.startswith("company:") and isinstance(raw_config.get(storage_key), dict):
+        config = raw_config[storage_key]
+    else:
+        active_role = storage_key if storage_key != "default" else None
+        config = _extract_role_email_config(raw_config, active_role)
 
     refresh_token_enc = config.get("google_refresh_token", "")
 
@@ -63,7 +78,7 @@ async def run_google_oauth_disconnect(request: Request, current_user: dict) -> d
     Remove os tokens Google OAuth do utilizador.
     Mantém a configuração IMAP/SMTP existente (para fallback).
 
-    Suporta per-role configs: limpa OAuth tokens apenas da sub-config do role ativo.
+    Prefers company key when X-Company-Id is present.
     """
     from services.email_config_resolver import (
         _is_nested_email_config,
@@ -71,13 +86,7 @@ async def run_google_oauth_disconnect(request: Request, current_user: dict) -> d
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
-
-    # Determine active role
-    active_role_header = request.headers.get("X-Active-Role", "")
-    if active_role_header and active_role_header != user_role:
-        storage_role = active_role_header
-    else:
-        storage_role = "default"
+    storage_role = _resolve_storage_key(request, user_role)
 
     # Load existing config
     existing_user = await db.users.find_one(
@@ -94,7 +103,7 @@ async def run_google_oauth_disconnect(request: Request, current_user: dict) -> d
     else:
         nested_config = {"default": raw_config}
 
-    # Clear OAuth fields from the role-specific sub-config
+    # Clear OAuth fields from the company/role-specific sub-config
     role_config = nested_config.get(storage_role)
     if role_config and isinstance(role_config, dict):
         role_config["google_refresh_token"] = ""
@@ -130,7 +139,7 @@ async def run_google_oauth_disconnect(request: Request, current_user: dict) -> d
     await db.audit_logs.insert_one({
         "action": "google_oauth_disconnected",
         "user_id": user_id,
-        "details": {},
+        "details": {"storage_key": storage_role},
         "created_at": datetime.now(timezone.utc).isoformat(),
     })
 

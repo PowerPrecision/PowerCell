@@ -260,59 +260,32 @@ async def auto_assign_after_indexacao(
     process_ref: str,
 ) -> tuple[Any, bool]:
     """
-    Dupla auto-atribuição (pre_registo) ou consultor least-busy.
+    Após indexação: atribui SEMPRE consultor + intermediário (least-busy).
 
-    Returns:
-        (consultant_result, is_pre_registo_transition)
+    Antes só fazia dual-assign se ainda estivesse em Lead/pre_registo;
+    caso contrário só tentava consultor. O produto exige ambos.
     """
     consultant_result = None
+    # Manter flag para resposta/API (Lead na altura do mark-indexed)
     is_pre_registo_transition = current_status in ("pre_registo", None)
 
-    if is_pre_registo_transition:
-        try:
-            from services.process_assignment import dual_auto_assign_on_pre_registo_transition
-            dual_result = await dual_auto_assign_on_pre_registo_transition(
-                process_id=process_id,
-                company_id=process.get("company_id"),
-                indexador_user_id=user.get("id"),
-            )
-            consultant_result = dual_result
-            logger.info(
-                f"[INDEXACAO-DUAL] Dupla auto-atribuição disparada "
-                f"(pre_registo → pipeline): "
-                f"consultor={dual_result.get('consultant_name', 'N/A')}, "
-                f"intermediario={dual_result.get('mediador_name', 'N/A')}"
-            )
-        except Exception as dual_err:
-            logger.warning(f"[INDEXACAO-DUAL] Erro na dupla auto-atribuição: {dual_err}")
-        return consultant_result, is_pre_registo_transition
-
     try:
-        from services.process_assignment import assign_to_least_busy_consultant
-        existing_consultor = (
-            process.get("assigned_consultor_id") or process.get("consultant_id")
+        from services.process_assignment import dual_auto_assign_on_pre_registo_transition
+        dual_result = await dual_auto_assign_on_pre_registo_transition(
+            process_id=process_id,
+            company_id=process.get("company_id") or process.get("company"),
+            indexador_user_id=user.get("id"),
         )
-        if not existing_consultor:
-            logger.info(
-                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} sem consultor. "
-                f"A invocar auto-atribuição..."
-            )
-            success, data, msg = await assign_to_least_busy_consultant(process_id)
-            if success:
-                consultant_result = data
-                logger.info(f"[INDEXACAO-AUTOASSIGN] Auto-atribuição concluída: {msg}")
-            else:
-                logger.warning(f"[INDEXACAO-AUTOASSIGN] Falha na auto-atribuição: {msg}")
-        else:
-            logger.info(
-                f"[INDEXACAO-AUTOASSIGN] Processo {process_ref} já tem consultor "
-                f"({process.get('consultor_name') or existing_consultor}). "
-                f"A manter atribuição existente."
-            )
-    except Exception as assign_err:
-        logger.warning(
-            f"[INDEXACAO-AUTOASSIGN] Erro na auto-atribuição de consultor: {assign_err}"
+        consultant_result = dual_result
+        logger.info(
+            f"[INDEXACAO-DUAL] Dupla auto-atribuição após indexação "
+            f"(status_antes={current_status}): "
+            f"consultor={dual_result.get('consultant_name', 'N/A')}, "
+            f"intermediario={dual_result.get('mediador_name', 'N/A')}"
         )
+    except Exception as dual_err:
+        logger.warning(f"[INDEXACAO-DUAL] Erro na dupla auto-atribuição: {dual_err}")
+
     return consultant_result, is_pre_registo_transition
 
 

@@ -234,13 +234,28 @@ class TestAiAnalyzeHelpers:
             {
                 "client_name": "Ana",
                 "personal_data": {"nif": "123456789"},
-                "financial_data": {"rendimento_mensal": 1000},
+                "financial_data": {
+                    "monthly_income": 1000,
+                    "renda_habitacao_atual": 500,  # housing rent — must NOT become income
+                },
                 "real_estate_data": {"valor_imovel": 200000},
             }
         )
         assert data["nif"] == "123456789"
+        assert data["monthly_income"] == 1000
         assert data["rendimento_mensal"] == 1000
         assert data["valor_imovel"] == 200000
+
+    def test_build_existing_data_ignores_renda_habitacao_as_income(self):
+        from services.document_ai_analyze import build_existing_data_for_ai_compare
+
+        data = build_existing_data_for_ai_compare(
+            {
+                "financial_data": {"renda_habitacao_atual": 750},
+            }
+        )
+        assert data["monthly_income"] is None
+        assert data["rendimento_mensal"] is None
 
     def test_process_ai_analyze_results(self):
         from services.document_ai_analyze import process_ai_analyze_results
@@ -320,12 +335,34 @@ class TestBatch7Helpers:
         from services.document_ai_analyze import map_ai_suggestions_to_mongo_update
 
         mapped = map_ai_suggestions_to_mongo_update(
-            {"nif": "123", "valor_imovel": 1, "unknown": "x"}
+            {
+                "nif": "123",
+                "valor_imovel": 1,
+                "unknown": "x",
+                "monthly_income": 2500,
+                "empresa": "ACME Lda",
+                "renda_habitacao_atual": 500,  # must NOT be applied as income
+            }
         )
         assert mapped["personal_data.nif"] == "123"
         assert mapped["real_estate_data.valor_imovel"] == 1
+        assert mapped["financial_data.monthly_income"] == 2500
+        assert mapped["financial_data.employer_name"] == "ACME Lda"
         assert "unknown" not in mapped
+        assert "financial_data.renda_habitacao_atual" not in mapped
+        assert "renda_habitacao_atual" not in mapped
 
+    def test_map_ai_suggestions_rendimento_mensal_alias(self):
+        from services.document_ai_analyze import map_ai_suggestions_to_mongo_update
+
+        mapped = map_ai_suggestions_to_mongo_update({"rendimento_mensal": 1800})
+        assert mapped == {"financial_data.monthly_income": 1800}
+
+    def test_map_ai_suggestions_salario_liquido_alias(self):
+        from services.document_ai_analyze import map_ai_suggestions_to_mongo_update
+
+        mapped = map_ai_suggestions_to_mongo_update({"salario_liquido": 1900})
+        assert mapped == {"financial_data.monthly_income": 1900}
     def test_serialize_metadata_doc(self):
         from services.document_queries import serialize_metadata_doc
 
