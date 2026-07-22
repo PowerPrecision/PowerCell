@@ -1,76 +1,39 @@
 """
 ====================================================================
-ROTAS DE ANOTAÇÕES DE DOCUMENTOS - CREDITOIMO
+ROTAS DE ANOTAÇÕES — thin FastAPI stubs
 ====================================================================
-Endpoints para o sistema de anotações contextuais em documentos.
-
-Funcionalidades:
-- Criar anotações em documentos
-- Listar anotações por documento ou processo
-- Atualizar e eliminar anotações
-- Resolver/reabrir anotações
-- Estatísticas de anotações por processo
+Logic in services/annotations_api_*.py.
+Do **not** overwrite services/annotation_service.py.
+Keep /document and /process/{id}* before /{annotation_id}.
 ====================================================================
 """
-import logging
-from typing import Optional
+from fastapi import APIRouter, Depends, Query
 
-from fastapi import APIRouter, Depends, HTTPException, Query
-
-from models.annotation import (
-    AnnotationCreate,
-    AnnotationUpdate,
-    AnnotationResponse,
-    ANNOTATION_TYPES,
-    VALID_ANNOTATION_TYPES,
-)
+from models.annotation import AnnotationCreate, AnnotationUpdate, AnnotationResponse
 from services.auth import get_current_user
-from services import annotation_service
-from utils.input_sanitization import sanitize_string, sanitize_name, sanitize_email, sanitize_html, sanitize_url, log_sanitization_rejection
+from services.annotations_api_list import (
+    run_get_document_annotations,
+    run_get_process_annotations,
+    run_get_annotation_stats,
+)
+from services.annotations_api_crud import (
+    run_create_annotation,
+    run_update_annotation,
+    run_delete_annotation,
+    run_resolve_annotation,
+)
 
 router = APIRouter(prefix="/annotations", tags=["annotations"])
-logger = logging.getLogger(__name__)
 
-
-# ====================================================================
-# POST / - Criar anotação
-# ====================================================================
 
 @router.post("/", response_model=AnnotationResponse)
 async def create_annotation(
     data: AnnotationCreate,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Cria uma nova anotação num documento.
+    """Cria uma nova anotação num documento."""
+    return await run_create_annotation(data, user)
 
-    Requer autenticação. A anotação fica associada ao utilizador atual.
-    """
-    try:
-        # Sanitize user inputs before saving
-        dump = data.model_dump()
-        if dump.get("comment"):
-            dump["comment"] = sanitize_string(dump["comment"], max_length=5000)
-        if dump.get("document_name"):
-            dump["document_name"] = sanitize_string(dump["document_name"], max_length=1000)
-
-        annotation = await annotation_service.create_annotation(
-            data=dump,
-            author_id=user["id"],
-            author_name=user.get("name", user.get("email", "Utilizador")),
-        )
-        return annotation
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except Exception as e:
-        logger.error(f"Erro ao criar anotação: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro ao criar anotação")
-
-
-# ====================================================================
-# GET /document - Anotações de um documento
-# ====================================================================
 
 @router.get("/document")
 async def get_document_annotations(
@@ -78,26 +41,18 @@ async def get_document_annotations(
     process_id: str = Query(..., description="ID do processo"),
     user: dict = Depends(get_current_user),
 ):
-    """
-    Retorna todas as anotações de um documento específico.
-
-    Ordenadas por página e depois por data de criação.
-    """
-    try:
-        annotations = await annotation_service.get_document_annotations(
-            document_path=document_path,
-            process_id=process_id,
-        )
-        return annotations
-
-    except Exception as e:
-        logger.error(f"Erro ao obter anotações do documento: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro ao obter anotações do documento")
+    """Retorna todas as anotações de um documento específico."""
+    return await run_get_document_annotations(document_path, process_id)
 
 
-# ====================================================================
-# GET /process/{process_id} - Anotações de um processo
-# ====================================================================
+@router.get("/process/{process_id}/stats")
+async def get_annotation_stats(
+    process_id: str,
+    user: dict = Depends(get_current_user),
+):
+    """Retorna estatísticas de anotações para um processo."""
+    return await run_get_annotation_stats(process_id)
+
 
 @router.get("/process/{process_id}")
 async def get_process_annotations(
@@ -105,26 +60,9 @@ async def get_process_annotations(
     include_resolved: bool = Query(True, description="Incluir anotações resolvidas"),
     user: dict = Depends(get_current_user),
 ):
-    """
-    Retorna todas as anotações de um processo.
+    """Retorna todas as anotações de um processo."""
+    return await run_get_process_annotations(process_id, include_resolved)
 
-    Pode filtrar anotações resolvidas com include_resolved=false.
-    """
-    try:
-        annotations = await annotation_service.get_process_annotations(
-            process_id=process_id,
-            include_resolved=include_resolved,
-        )
-        return annotations
-
-    except Exception as e:
-        logger.error(f"Erro ao obter anotações do processo {process_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro ao obter anotações do processo")
-
-
-# ====================================================================
-# PUT /{annotation_id} - Actualizar anotação
-# ====================================================================
 
 @router.put("/{annotation_id}", response_model=AnnotationResponse)
 async def update_annotation(
@@ -132,72 +70,18 @@ async def update_annotation(
     data: AnnotationUpdate,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Atualiza uma anotação existente.
+    """Atualiza uma anotação existente."""
+    return await run_update_annotation(annotation_id, data, user)
 
-    Campos atualizáveis: comment, annotation_type, color, resolved.
-    """
-    try:
-        # Sanitize user inputs before updating
-        update_data = data.model_dump(exclude_none=True)
-        if update_data.get("comment"):
-            update_data["comment"] = sanitize_string(update_data["comment"], max_length=5000)
-
-        updated = await annotation_service.update_annotation(
-            annotation_id=annotation_id,
-            data=update_data,
-            user_id=user["id"],
-        )
-
-        if not updated:
-            raise HTTPException(status_code=404, detail="Anotação não encontrada")
-
-        return updated
-
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao atualizar anotação {annotation_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro ao atualizar anotação")
-
-
-# ====================================================================
-# DELETE /{annotation_id} - Eliminar anotação
-# ====================================================================
 
 @router.delete("/{annotation_id}")
 async def delete_annotation(
     annotation_id: str,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Elimina uma anotação.
+    """Elimina uma anotação."""
+    return await run_delete_annotation(annotation_id, user)
 
-    Apenas o autor da anotação ou um administrador pode eliminar.
-    """
-    try:
-        success = await annotation_service.delete_annotation(
-            annotation_id=annotation_id,
-            user_id=user["id"],
-        )
-
-        if not success:
-            raise HTTPException(status_code=404, detail="Anotação não encontrada ou sem permissão para eliminar")
-
-        return {"success": True}
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao eliminar anotação {annotation_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro ao eliminar anotação")
-
-
-# ====================================================================
-# PUT /{annotation_id}/resolve - Alternar resolução
-# ====================================================================
 
 @router.put("/{annotation_id}/resolve", response_model=AnnotationResponse)
 async def resolve_annotation(
@@ -205,56 +89,5 @@ async def resolve_annotation(
     body: dict,
     user: dict = Depends(get_current_user),
 ):
-    """
-    Alterna o estado de resolução de uma anotação.
-
-    Corpo do pedido: {"resolved": true/false}
-    """
-    try:
-        resolved = body.get("resolved")
-        if resolved is None or not isinstance(resolved, bool):
-            raise HTTPException(
-                status_code=400,
-                detail="Campo 'resolved' é obrigatório e deve ser booleano (true/false)"
-            )
-
-        updated = await annotation_service.resolve_annotation(
-            annotation_id=annotation_id,
-            user_id=user["id"],
-            user_name=user.get("name", user.get("email", "Utilizador")),
-            resolved=resolved,
-        )
-
-        if not updated:
-            raise HTTPException(status_code=404, detail="Anotação não encontrada")
-
-        return updated
-
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error(f"Erro ao resolver anotação {annotation_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro ao atualizar estado da anotação")
-
-
-# ====================================================================
-# GET /process/{process_id}/stats - Estatísticas de anotações
-# ====================================================================
-
-@router.get("/process/{process_id}/stats")
-async def get_annotation_stats(
-    process_id: str,
-    user: dict = Depends(get_current_user),
-):
-    """
-    Retorna estatísticas de anotações para um processo.
-
-    Inclui contagens totais, por estado (resolvida/pendente) e por tipo.
-    """
-    try:
-        stats = await annotation_service.get_annotation_stats(process_id=process_id)
-        return stats
-
-    except Exception as e:
-        logger.error(f"Erro ao obter estatísticas do processo {process_id}: {e}", exc_info=True)
-        raise HTTPException(status_code=500, detail="Erro ao obter estatísticas de anotações")
+    """Alterna o estado de resolução de uma anotação."""
+    return await run_resolve_annotation(annotation_id, body, user)
