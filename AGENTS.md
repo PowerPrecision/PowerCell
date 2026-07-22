@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -56,6 +56,8 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Google auth | `routes/google_auth.py` (~60; **done**) | `services/google_auth_*.py` (see map) | **Never** overwrite `gmail_oauth.py` / `gmail_api_service.py` — use `google_auth_*` |
 | Public | `routes/public.py` (~51; **done**) | `services/public_*.py` (see map) | Preserve rate limits on stubs; **never** overwrite `euribor_service.py`; form defaults from `form_config_defaults` (not via routes — circular import) |
 | Stats | `routes/stats.py` (~47; **done**) | `services/stats_*.py` (see map) | Do **not** collide with `analytics_service.py`; `/health` (no auth) is the monitoring endpoint |
+| Admin AI | `routes/admin_ai.py` (**done**) | `services/admin_ai_{config,models,tasks,cache,usage}.py` | **Never** create `services/admin_ai.py`; do **not** overwrite `admin_ai_data.py` / `ai_usage_tracker.py` |
+| AI | `routes/ai.py` (**done**) | `services/ai_api_*.py` (see map) | **Never** overwrite `ai_document.py` / analyzers / `ai_usage_tracker.py` — use `ai_api_*` |
 
 **`email_*` thinning (complete):**
 
@@ -361,14 +363,26 @@ Keep static `/google/callback` **before** `/{role}`. Unit helpers: `backend/test
 
 **Never** create `services/admin_ai.py` (route module name). Do **not** overwrite `admin_ai_data.py` (training/import logs) or `ai_usage_tracker.py`. Unit helpers: `backend/tests/unit/test_admin_ai_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai.
+**`ai_api_*` thinning (complete) — sibling of `routes/ai.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `ai_api_helpers.py` | `VALID_DOCUMENT_TYPES`, `map_extracted_data` |
+| `ai_api_analyze.py` | sync analyze + OneDrive/S3 analyze + supported-documents |
+| `ai_api_reset.py` | POST `/reset-client-data` |
+| `ai_api_async.py` | async analyze + background worker |
+| `ai_api_bulk.py` | bulk analysis async + background worker |
+
+**Never** overwrite `ai_document.py` / `ai_document_analyzer.py` / `ai_page_analyzer.py` / `ai_usage_tracker.py` / `ai_improvement_agent.py`. Unit helpers: `backend/tests/unit/test_ai_api_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai.
 
 **Remaining backlog** (still fat / partial, ≥~400 lines — next candidates by size):
 
 | Route | ~Lines | Notes |
 |---|---:|---|
 | `ai_bulk.py` | 1732 | Hybrid — much logic already in `routes/ai_bulk/*`; move package → `services/ai_bulk_*` |
-| `ai.py` / `ai_analysis.py` | 589 / 572 | AI endpoints |
+| `ai_analysis.py` | 572 | Executive summary / cross-ref audit |
 | Mid-size | 400–480 | `scraper`, `templates`, `onedrive`, `my_clients`, `users`, `async_jobs` |
 
 Prefer the same stub + `run_*` pattern; avoid colliding with existing core services (`backup.py`, `auth.py`, `euribor_service.py`, `analytics_service.py`, `temp_link_service.py`, `gmail_oauth.py`, `ai_document.py` / analyzers, route module names).
