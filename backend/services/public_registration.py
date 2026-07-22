@@ -518,9 +518,9 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             "success": True,
             "message": "Registo criado com sucesso. A equipa entrará em contacto.",
             "client_id": client_id,
-            "process_id": process_id,  # Pacote D — processo criado com status vazio (Lead)
-            "magic_link_sent": magic_link_sent,  # Pacote D — email de convite enviado
-            "lead_status": "new",  # Pendente de triagem
+            "process_id": process_id,  # None até docs obrigatórios (SystemConfig)
+            "magic_link_sent": magic_link_sent,
+            "lead_status": "new",
             "is_new_client": is_new_client,
             "has_property": has_property,
             "email_queued": bool(job_id)
