@@ -229,14 +229,10 @@ export function TasksProvider({ children }) {
       }
       
       // Detectar tarefas que mudaram de estado
-      const previousTaskIds = previousTaskIdsRef.current;
       const currentTaskIds = new Set(data.tasks.map(t => t.task_id));
       
       // Sticky toasts: loading → morph success/error (same id)
       data.tasks.forEach(task => {
-        const wasSeen = previousTaskIds.has(task.task_id);
-        const toastId = toastIdFor(task.task_id);
-        const hadLoadingToast = loadingToastIdsRef.current.includes(toastId);
         const isActive =
           task.status === TaskStatus.PENDING ||
           task.status === TaskStatus.PROCESSING;
@@ -252,12 +248,9 @@ export function TasksProvider({ children }) {
         // Permanent dedup: skip if already toasted completion for this task
         if (toastedTaskIdsRef.current.has(task.task_id)) return;
 
-        // Only morph/complete if we showed a loading toast or saw this task while active
-        if (
-          isUnacknowledged &&
-          (isNowCompleted || isNowFailed) &&
-          (hadLoadingToast || wasSeen)
-        ) {
+        // Morph sticky toast on terminal status. Same toast id survives navigation
+        // (Toaster is outside BrowserRouter). Always morph — deterministic id.
+        if (isUnacknowledged && (isNowCompleted || isNowFailed)) {
           toastedTaskIdsRef.current.add(task.task_id);
           if (toastedTaskIdsRef.current.size > 200) {
             const arr = [...toastedTaskIdsRef.current];
@@ -267,12 +260,12 @@ export function TasksProvider({ children }) {
         }
       });
 
-      // Drop tracking for loading toasts whose tasks left the active list
+      // Tasks that left /tasks/active without a terminal toast: NEVER auto-dismiss.
+      // Sticky BG toasts must survive page changes and list churn; user closes via X.
       const activeOrTerminalIds = new Set(data.tasks.map(t => toastIdFor(t.task_id)));
       loadingToastIdsRef.current = loadingToastIdsRef.current.filter((id) => {
         if (activeOrTerminalIds.has(id)) return true;
-        toast.dismiss(id);
-        return false;
+        return false; // stop tracking for the loading cap — keep toast visible
       });
       
       // Actualizar estado

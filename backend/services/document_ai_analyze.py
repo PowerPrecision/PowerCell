@@ -720,12 +720,31 @@ AI_SUGGESTION_FIELD_MAP = {
 }
 
 
-def map_ai_suggestions_to_mongo_update(suggestions: dict) -> dict:
-    """Converte sugestões frontend → campos com dot-notation Mongo."""
+def map_ai_suggestions_to_mongo_update(
+    suggestions: dict, *, target_titular: str = "titular1"
+) -> dict:
+    """Converte sugestões frontend → campos com dot-notation Mongo.
+
+    target_titular=titular2 → identidade/financeiros vão para `titular2_data.*`
+    (imóvel/crédito partilhados mantêm-se no processo).
+    """
     update_data = {}
+    target = (target_titular or "titular1").lower()
     for field, value in suggestions.items():
-        if field in AI_SUGGESTION_FIELD_MAP:
-            update_data[AI_SUGGESTION_FIELD_MAP[field]] = value
+        if field in ("target_titular",):
+            continue
+        if field not in AI_SUGGESTION_FIELD_MAP:
+            continue
+        path = AI_SUGGESTION_FIELD_MAP[field]
+        if target == "titular2":
+            if path.startswith("personal_data."):
+                path = "titular2_data." + path.split(".", 1)[1]
+            elif path.startswith("financial_data."):
+                path = "titular2_data." + path.split(".", 1)[1]
+            elif path == "client_name":
+                path = "titular2_data.name"
+            # real_estate / credit: keep on process
+        update_data[path] = value
     return update_data
 
 
@@ -760,7 +779,10 @@ async def run_apply_ai_suggestions(
             detail=f"Não tem permissões para alterar este processo. {reason}",
         )
 
-    update_data = map_ai_suggestions_to_mongo_update(suggestions)
+    target_titular = str(suggestions.get("target_titular") or "titular1")
+    update_data = map_ai_suggestions_to_mongo_update(
+        suggestions, target_titular=target_titular
+    )
     if not update_data:
         return {
             "success": True,
@@ -774,12 +796,14 @@ async def run_apply_ai_suggestions(
 
     await db.processes.update_one({"id": process_id}, {"$set": mongo_update})
     logger.info(
-        f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)}"
+        f"Campos atualizados via IA para processo: {sanitize_for_log(process_id)} "
+        f"(titular={target_titular})"
     )
     return {
         "success": True,
         "updated_fields": len(update_data),
         "fields": list(update_data.keys()),
+        "target_titular": target_titular,
     }
 
 

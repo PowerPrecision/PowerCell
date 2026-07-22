@@ -1268,13 +1268,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             console.warn("Erro ao organizar documentos:", orgError);
           }
           
-          // Passar dados extraídos para o componente pai
+          // Passar dados extraídos para o componente pai (inclui match titular 1/2)
           onAIDataExtracted({
             extractedData: result.extracted_data,
             fieldConfidence: result.field_confidence || {},
             conflicts: result.conflicts || [],
             documentsProcessed: result.documents_count,
-            suggestions: result.suggestions || []
+            suggestions: result.suggestions || [],
+            titularMatches: result.titular_matches || [],
+            needsTitularChoice: !!result.needs_titular_choice,
           });
           
           toast.success(`Análise completa! ${result.documents_count} documento(s) processado(s). Verifique os campos pré-preenchidos.`);
