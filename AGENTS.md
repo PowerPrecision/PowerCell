@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal)
+### Route thinning (documents / processes / emails / portal / admin)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -36,6 +36,7 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Documents | `routes/documents.py` (~1072; was ~4623) | `services/document_*.py` | Thin stubs only — see map |
 | Emails | `routes/emails.py` (~654; **done**) | `services/email_*.py` (see map) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
 | Portal | `routes/portal.py` (~221; **done**) | `services/portal_*.py` (see map) | Do **not** collide with existing `portal_security` / `portal_magic_link` / `portal_documents_notify`. Portal `DOCUMENT_CATEGORY_MAP` includes `Financeiros` (separate from `document_constants`) |
+| Admin | `routes/admin.py` (~655; **done**) | `services/admin_*.py` (see map) | Do **not** collide with existing **route** modules `admin_ai` / `admin_storage` / `admin_encryption` / `admin_migration` / `admin_process_migration` |
 
 **`email_*` thinning (complete):**
 
@@ -71,7 +72,22 @@ Unit helpers: `backend/tests/unit/test_email_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_portal_extraction_helpers.py`.
 
-**Next fat route:** `admin.py` (~4037).
+**`admin_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `admin_helpers.py` | `_safe_float`, `_audit_log` |
+| `admin_permissions.py` | permissions + capabilities |
+| `admin_workflow.py` | workflow statuses + S3 CORS diagnostic |
+| `admin_users.py` | user CRUD, impersonate, notif prefs, user email-config |
+| `admin_process_ops.py` | fix-duplicates, migrate numbers, sync process emails |
+| `admin_ai_data.py` | AI training + AI import logs |
+| `admin_observability.py` | system logs, jobs health, client registrations, audit, team performance |
+| `admin_dev_ops.py` | DB indexes, sync-database, seed (`_sync_in_progress` lives here) |
+
+Unit helpers: `backend/tests/unit/test_admin_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
