@@ -557,9 +557,67 @@ Unit helpers: `backend/tests/unit/test_restore_extraction_helpers.py`.
 
 Keep `/process/{id}` before `/client/...` / `/property/...` / `/lead/...`. Unit helpers: `backend/tests/unit/test_match_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match.
+**`websocket_api_*` thinning (complete) — do **not** overwrite `websocket_manager.py`:**
 
-**Remaining backlog:** ≥350 mid-size queue is **cleared** (including optional `search` / `restore` / `match`). Next optional candidates are **only <350** (e.g. `websocket` ~324, and `routes/ai_bulk/*` package helpers left intentionally). Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
+| Service | Responsibility |
+|---|---|
+| `websocket_api_helpers.py` | JWT verify + disconnect detection |
+| `websocket_api_notifications.py` | `/ws/notifications` loop (ping, read, rooms, locks) |
+| `websocket_api_status.py` | GET `/ws/status` |
+
+Unit helpers: `backend/tests/unit/test_websocket_extraction_helpers.py`.
+
+**`gdpr_api_*` thinning (complete) — do **not** overwrite `gdpr.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `gdpr_api_models.py` | `AnonymizeRequest` / `BatchAnonymizeRequest` |
+| `gdpr_api_read.py` | statistics / eligible / audit / config |
+| `gdpr_api_mutate.py` | anonymize / batch / export |
+
+Unit helpers: `backend/tests/unit/test_gdpr_extraction_helpers.py`.
+
+**`annotations_api_*` thinning (complete) — do **not** overwrite `annotation_service.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `annotations_api_list.py` | document / process list + stats |
+| `annotations_api_crud.py` | create / update / delete / resolve |
+
+Keep `/document` and `/process/{id}/stats` before `/{annotation_id}`. Unit helpers: `backend/tests/unit/test_annotations_extraction_helpers.py`.
+
+**`ai_import_logs_api_*` thinning (complete) — do **not** overwrite `admin_ai_data.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `ai_import_logs_api_helpers.py` | create / update / finalize (used by bulk/analyzer) |
+| `ai_import_logs_api_list.py` | list + `/stats` |
+| `ai_import_logs_api_detail.py` | get / delete |
+
+Route re-exports helpers for back-compat (`routes.ai_import_logs`). Keep `/stats` before `/{log_id}`. Unit helpers: `backend/tests/unit/test_ai_import_logs_extraction_helpers.py`.
+
+**`task_logs_api_*` thinning (complete) — do **not** overwrite `task_log_service.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `task_logs_api_list.py` | `/active` + list |
+| `task_logs_api_actions.py` | get / acknowledge / cancel / delete |
+
+Keep `/active` and list `""` before `/{task_id}`. Unit helpers: `backend/tests/unit/test_task_logs_extraction_helpers.py`.
+
+**`admin_encryption_api_*` thinning (complete) — never create `services/admin_encryption.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `admin_encryption_api_status.py` | GET `/status` |
+| `admin_encryption_api_migrate.py` | `/migrate` + `/migrate-sync` |
+| `admin_encryption_api_verify.py` | `/verify/{id}` + `/encrypt-process/{id}` |
+
+Unit helpers: `backend/tests/unit/test_admin_encryption_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match / websocket / gdpr / annotations / ai_import_logs / task_logs / admin_encryption.
+
+**Remaining backlog:** optional `<350` queue is **cleared**. Only intentional leftover: `routes/ai_bulk/*` package helpers (left as-is). Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
