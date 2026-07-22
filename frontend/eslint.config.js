@@ -29,6 +29,16 @@ export default [
   // Base JS rules
   js.configs.recommended,
 
+  // Unit tests (Vitest/Jest-style globals: describe/it/expect)
+  {
+    files: ['**/*.{test,spec}.{js,jsx}'],
+    languageOptions: {
+      globals: {
+        ...globals.jest,
+      },
+    },
+  },
+
   // React + JSX rules
   {
     files: ['**/*.{js,jsx}'],

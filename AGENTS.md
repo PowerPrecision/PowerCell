@@ -23,10 +23,10 @@ The update script already installs all dependencies (frontend yarn deps and the 
   `cd backend && MONGO_URL="mongodb://localhost:27017" DB_NAME="test_db_precision" JWT_SECRET="test_secret_key_123456789012345678" CORS_ORIGINS="http://localhost:3000" TESTING="true" ENVIRONMENT="dev" .venv/bin/python -m pytest tests/unit --no-cov -q`
 - Optional integrations (Redis/ARQ worker, S3, OpenAI/Gemini, email/IMAP, Sentry) all degrade gracefully and are not needed to run the app. The ARQ worker (`backend/worker.py`) only runs when `ENVIRONMENT=production`.
 - **Credentials in `backend/.env` are DEV-only** (owner clarification): production does not use this file — it injects secrets via the platform's secret manager. So the values present here are not production secrets; no need to treat them as a production leak or block on rotating them. Use `.env.example` as the template for required vars.
-- CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
+- CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes)
+### Route thinning (documents / processes / emails / portal)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -34,6 +34,44 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 |---|---|---|---|
 | Processes | `routes/processes.py` (~664) | `services/process_*.py` | Mostly done |
 | Documents | `routes/documents.py` (~1072; was ~4623) | `services/document_*.py` | Thin stubs only — see map |
+| Emails | `routes/emails.py` (~654; **done**) | `services/email_*.py` (see map) | Keep static paths before `/{email_id}`; do **not** collide with existing `email_service.py` / `email_draft_service.py` |
+| Portal | `routes/portal.py` (~221; **done**) | `services/portal_*.py` (see map) | Do **not** collide with existing `portal_security` / `portal_magic_link` / `portal_documents_notify`. Portal `DOCUMENT_CATEGORY_MAP` includes `Financeiros` (separate from `document_constants`) |
+
+**`email_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `email_template_vars.py` | `_extract_email_variables`, `_build_professional_email_html` |
+| `email_enrich.py` | `enrich_email` (client_name / created_by_name) |
+| `email_labels_folders.py` | Labels/folders CRUD + `validate_hex_color` + move-to-folder |
+| `email_documentation.py` | document-recipients, preview-template, preview/send-documentation |
+| `email_mailbox_ops.py` | Attachments upload/download/preview + mark/unmark + per-email labels |
+| `email_templates_drafts.py` | Reply templates, unread notifications, auto-drafts |
+| `email_webmail.py` | Webmail list/stats/sync, accounts, test-connection, jobs |
+| `email_process_crud.py` | Search/timeline, process emails/sync, send, CRUD, monitored (`_sync_status` lives here) |
+
+Unit helpers: `backend/tests/unit/test_email_extraction_helpers.py`.
+
+**`portal_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `portal_assigned_users.py` | `get_all_assigned_user_ids` (also used by `process_portal_messages`) |
+| `portal_doc_categories.py` | Portal category map / hidden / default pending (used by `process_create`) |
+| `portal_profile.py` | GET/PUT `/me` + profile field allowlists |
+| `portal_status_helpers.py` | contact / RGPD / team helpers for `/status` |
+| `portal_onboarding_advance.py` | Pacote BO auto-advance after portal uploads |
+| `portal_auth.py` | login / verify / resolve / impersonate / authenticate |
+| `portal_status.py` | GET `/status` orchestration |
+| `portal_upload_ops.py` | upload-url / confirm-upload / download-url |
+| `portal_client_messages.py` | client messages (+ notify) |
+| `portal_gov_fetch.py` | Finanças/SS scrapers, MFA, jobs |
+| `portal_recommendations.py` | Smart Match recommendations |
+| `portal_client_visits.py` | visit request + list |
+
+Unit helpers: `backend/tests/unit/test_portal_extraction_helpers.py`.
+
+**Next fat route:** `admin.py` (~4037).
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 

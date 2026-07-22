@@ -6,7 +6,7 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 
 ## Tecnologias
 
-- **Backend**: FastAPI (Python 3.11) + Motor (async MongoDB)
+- **Backend**: FastAPI (Python 3.12) + Motor (async MongoDB)
 - **Frontend**: React 19 + Vite + Tailwind CSS 4 + Shadcn UI (New York style) + @hello-pangea/dnd
 - **Base de dados**: MongoDB Atlas (via Motor async driver)
 - **Armazenamento**: AWS S3 (pre-signed URLs)
@@ -17,7 +17,7 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 - **Email**: SMTP transacional (SystemConfig) + IMAP sync (per-user + shared Google OAuth)
 - **Monitorização**: Sentry (frontend + backend)
 - **Acessibilidade**: axe-core (testes automáticos em dev)
-- **CI/CD**: GitHub Actions (Node.js 24 + Python 3.11)
+- **CI/CD**: GitHub Actions (Node.js 24 + Python 3.12)
 - **Deploy**: Render (backend) + Vercel (frontend)
 
 ## Estrutura do Projeto
@@ -103,7 +103,7 @@ PowerCell/
 │   ├── vercel.json            # SPA rewrite + security headers
 │   └── public/
 ├── .github/workflows/
-│   └── ci.yml                 # CI/CD pipeline (Node 24 + Python 3.11)
+│   └── ci.yml                 # CI/CD pipeline (Node 24 + Python 3.12)
 ├── memory/
 │   └── PRD.md                 # Product Requirements Document
 ├── ARCHITECTURE.md            # Diagramas e padrões de design
@@ -497,7 +497,7 @@ flowchart TD
 
 ### Pré-requisitos
 
-- **Python 3.11+** com pip
+- **Python 3.12+** com pip
 - **Node.js 18+** (recomendado 24) com npm/yarn
 - **MongoDB Atlas** (ou instância local) — connection string SRV
 - **Conta AWS** (para S3) — opcional mas recomendado
