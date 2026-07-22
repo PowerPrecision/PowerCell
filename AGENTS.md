@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / admin_process_migration)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -44,6 +44,8 @@ Fat FastAPI routers are being split into thin `@router` stubs + `backend/service
 | Chat | `routes/chat.py` (~250; **done**) | `services/chat_*.py` (see map) | No prior `chat_*` services; WS notify via `websocket_manager` stays inside services |
 | Diagnostics | `routes/diagnostics.py` (~150; **done**) | `services/diagnostics_*.py` (see map) | Do **not** collide with existing `process_kanban_diagnose.py` — use `diagnostics_*` prefix |
 | Leads | `routes/leads.py` (~140; **done**) | `services/lead_*.py` (see map) | Keep static paths (`/by-status`, `/consultores`, `/extract-url`, `/extract-html`, `/from-url`, `""`) before `/{lead_id}`; prefer `lead_*` (not `leads_*`) |
+| Form config | `routes/form_config.py` (**done**) | `services/form_config_*.py` (see map) | Re-exports `DEFAULT_FORM_CONFIG` / `DEFAULT_STEP_CONFIG` for `routes.public` |
+| Admin process migration | `routes/admin_process_migration.py` (**done**) | `services/admin_proc_migration_*.py` (see map) | **Never** create `services/admin_process_migration.py` (collides with the route module name) |
 
 **`email_*` thinning (complete):**
 
@@ -186,7 +188,28 @@ Unit helpers: `backend/tests/unit/test_diagnostics_extraction_helpers.py`.
 
 Unit helpers: `backend/tests/unit/test_lead_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads.
+**`form_config_*` thinning (complete):**
+
+| Service | Responsibility |
+|---|---|
+| `form_config_defaults.py` | `DEFAULT_FORM_CONFIG`, `DEFAULT_STEP_CONFIG` |
+| `form_config_fields.py` | GET/PUT `/fields`, custom-field CRUD, `/reset` + request models |
+| `form_config_templates.py` | System templates + templates list/preview/save/activate/duplicate/delete |
+
+Unit helpers: `backend/tests/unit/test_form_config_extraction_helpers.py`.
+
+**`admin_proc_migration_*` thinning (complete) — sibling of `routes/admin_process_migration.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `admin_proc_migration_helpers.py` | `generate_client_key`, `extract_personal_from_process`, migration state helpers, `run_migration_task` |
+| `admin_proc_migration_api.py` | status / dry-run / run / rollback / reset `run_*` handlers |
+
+**Never** create `services/admin_process_migration.py` (name collision with the route module).
+
+Unit helpers: `backend/tests/unit/test_admin_proc_migration_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / admin_process_migration.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
