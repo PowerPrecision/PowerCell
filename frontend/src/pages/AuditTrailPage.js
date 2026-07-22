@@ -9,7 +9,6 @@
  */
 
 import React, { useState, useEffect } from "react";
-import { useQuery } from "@tanstack/react-query";
 import DashboardLayout from "../layouts/DashboardLayout";
 import {
   Card,
@@ -50,9 +49,11 @@ import {
   ChevronRight,
   FileText,
 } from "lucide-react";
-import { getAuditTrail, getAuditStats, exportAuditTrail, cleanupAuditTrail } from "../services/api";
+import { exportAuditTrail, cleanupAuditTrail } from "../services/api";
 import { toast } from "../hooks/use-toast";
 import { formatDateTime } from "../lib/utils";
+import { useAuditTrailQuery, buildAuditTrailFilterParams } from "../hooks/queries/useAuditTrailQuery";
+import { useAuditStatsQuery } from "../hooks/queries/useAuditStatsQuery";
 
 // Mapeamento de cores para badges de origem
 const sourceConfig = {
@@ -71,30 +72,6 @@ function truncate(str, maxLen = 60) {
   return str.substring(0, maxLen) + "...";
 }
 
-function buildAuditParams({
-  page,
-  filterProcessId,
-  filterSource,
-  filterDateFrom,
-  filterDateTo,
-  filterAction,
-}) {
-  const params = {
-    page,
-    page_size: 50,
-  };
-  if (filterProcessId.trim()) params.process_id = filterProcessId.trim();
-  if (filterSource && filterSource !== "all") params.source = filterSource;
-  if (filterDateFrom) params.date_from = new Date(filterDateFrom).toISOString();
-  if (filterDateTo) {
-    const d = new Date(filterDateTo);
-    d.setHours(23, 59, 59, 999);
-    params.date_to = d.toISOString();
-  }
-  if (filterAction.trim()) params.action_type = filterAction.trim();
-  return params;
-}
-
 const AuditTrailPage = ({ embedded = false }) => {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout title="Auditoria">{children}</DashboardLayout>;
   const [exporting, setExporting] = useState(false);
@@ -107,7 +84,15 @@ const AuditTrailPage = ({ embedded = false }) => {
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterAction, setFilterAction] = useState("");
 
-  const auditParams = buildAuditParams({
+  // ── Dados de servidor via TanStack Query (hooks dedicados) ────
+  const {
+    events,
+    totalPages,
+    total,
+    isLoading: loading,
+    isError: trailError,
+    refetch: fetchAuditTrail,
+  } = useAuditTrailQuery({
     page,
     filterProcessId,
     filterSource,
@@ -116,37 +101,7 @@ const AuditTrailPage = ({ embedded = false }) => {
     filterAction,
   });
 
-  const {
-    data: trailData,
-    isLoading: loading,
-    isError: trailError,
-    refetch: fetchAuditTrail,
-  } = useQuery({
-    queryKey: ["audit-trail", auditParams],
-    queryFn: async () => {
-      const response = await getAuditTrail(auditParams);
-      return {
-        events: response.data.items || [],
-        totalPages: response.data.total_pages || 0,
-        total: response.data.total || 0,
-      };
-    },
-  });
-
-  const {
-    data: stats = null,
-    refetch: fetchStats,
-  } = useQuery({
-    queryKey: ["audit-stats"],
-    queryFn: async () => {
-      const response = await getAuditStats();
-      return response.data;
-    },
-  });
-
-  const events = trailData?.events || [];
-  const totalPages = trailData?.totalPages || 0;
-  const total = trailData?.total || 0;
+  const { stats, refetch: fetchStats } = useAuditStatsQuery();
 
   useEffect(() => {
     if (trailError) {
@@ -163,19 +118,17 @@ const AuditTrailPage = ({ embedded = false }) => {
     setPage(1);
   }, [filterProcessId, filterSource, filterDateFrom, filterDateTo, filterAction]);
 
-  // Exportar CSV
+  // Exportar CSV — reutiliza os mesmos filtros da listagem (sem paginação)
   const handleExport = async () => {
     setExporting(true);
     try {
-      const params = {};
-      if (filterProcessId.trim()) params.process_id = filterProcessId.trim();
-      if (filterSource && filterSource !== "all") params.source = filterSource;
-      if (filterDateFrom) params.date_from = new Date(filterDateFrom).toISOString();
-      if (filterDateTo) {
-        const d = new Date(filterDateTo);
-        d.setHours(23, 59, 59, 999);
-        params.date_to = d.toISOString();
-      }
+      const params = buildAuditTrailFilterParams({
+        filterProcessId,
+        filterSource,
+        filterDateFrom,
+        filterDateTo,
+        filterAction,
+      });
 
       const response = await exportAuditTrail(params);
       const url = window.URL.createObjectURL(new Blob([response.data]));
