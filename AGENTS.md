@@ -26,7 +26,7 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
-### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines)
+### Route thinning (documents / processes / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / admin_process_migration / rgpd / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match)
 
 Fat FastAPI routers are being split into thin `@router` stubs + `backend/services/*` modules. Prefer editing the service, not stuffing logic back into the route file.
 
@@ -524,9 +524,42 @@ Keep static `/migrate*`, `/set-active-company` before `/{role_id}`. Unit helpers
 
 Keep `/my-deadlines` and `/calendar` before `/{deadline_id}`. Unit helpers: `backend/tests/unit/test_deadlines_extraction_helpers.py`.
 
-**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines.
+**`search_api_*` thinning (complete) — do **not** overwrite `utils/search_filters.py`:**
 
-**Remaining backlog:** mid-size (≥~377) queue is **cleared**. Next optional candidates are **<350 lines** only (e.g. `search`, `restore`, `match`, `websocket`, `routes/ai_bulk/*` package helpers left intentionally). Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
+| Service | Responsibility |
+|---|---|
+| `search_api_helpers.py` | `normalize_text` |
+| `search_api_global.py` | GET `/global` (processes + clients + tasks) |
+| `search_api_processes.py` | GET `/processes` |
+| `search_api_suggestions.py` | GET `/suggestions` |
+
+Unit helpers: `backend/tests/unit/test_search_extraction_helpers.py`.
+
+**`restore_api_*` thinning (complete) — do **not** overwrite `backup_restore.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `restore_api_helpers.py` | `TERMINAL_STATUSES` |
+| `restore_api_process.py` | POST `/processes/{id}/restore` (+ cascade) |
+| `restore_api_document.py` | POST `/documents/{id}/restore` (main + trash) |
+| `restore_api_task.py` | POST `/tasks/{id}/restore` |
+| `restore_api_list.py` | GET `/deleted/items` |
+
+Unit helpers: `backend/tests/unit/test_restore_extraction_helpers.py`.
+
+**`match_api_*` thinning (complete) — do **not** overwrite `client_match.py`:**
+
+| Service | Responsibility |
+|---|---|
+| `match_api_smart.py` | GET `/process/{process_id}` (smart match + scoring) |
+| `match_api_client.py` | `/client/{id}/all|properties|leads|summary` wrappers |
+| `match_api_property.py` | `/property/{id}/clients` + `/lead/{id}/clients` wrappers |
+
+Keep `/process/{id}` before `/client/...` / `/property/...` / `/lead/...`. Unit helpers: `backend/tests/unit/test_match_extraction_helpers.py`.
+
+**Fat route thinning: complete** for processes / documents / emails / portal / admin / admin_storage / clients / finance / properties / chat / diagnostics / leads / form_config / system_config / rgpd / admin_process_migration / auth / visits / tasks / backup / shared_email / temp_links / google_auth / public / stats / admin_ai / ai / ai_analysis / my_clients / onedrive / scraper / templates / users / async_jobs / ai_bulk / admin_migration / companies_crud / minutas / user_company_roles / deadlines / search / restore / match.
+
+**Remaining backlog:** ≥350 mid-size queue is **cleared** (including optional `search` / `restore` / `match`). Next optional candidates are **only <350** (e.g. `websocket` ~324, and `routes/ai_bulk/*` package helpers left intentionally). Large line counts on already-thinned stubs (`documents`, `emails`, `admin`, `processes`) are many thin endpoint declarations — edit the matching `services/*` modules, not the route file.
 
 **`document_*` service map (keep `@router` names stable — rate-limit / integration tests scrape handler names in `routes/documents.py`):**
 
