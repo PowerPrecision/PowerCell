@@ -3,9 +3,9 @@
  * Extraído de ProcessDetails.js — recebe o estado do hook useProcessPortalMessages.
  */
 import { useRef } from "react";
-import { Card, CardContent } from "../ui/card";
-import { Button } from "../ui/button";
-import { Textarea } from "../ui/textarea";
+import { Card, CardContent } from "../../ui/card";
+import { Button } from "../../ui/button";
+import { Textarea } from "../../ui/textarea";
 import {
   MessageSquare,
   RefreshCw,
@@ -13,10 +13,10 @@ import {
   Send,
 } from "lucide-react";
 import { pt } from "date-fns/locale";
-import { safeString } from "../../utils/safeString";
-import { safeFormat } from "../../lib/utils";
+import { safeString } from "../../../utils/safeString";
+import { safeFormat } from "../../../lib/utils";
 
-export default function ProcessPortalMessagesTab({
+export default function PortalMessagesTab({
   messages = [],
   loading = false,
   newMessage = "",

@@ -1,27 +1,27 @@
 /**
- * ProcessPersonalTab — extraído de ProcessDetails.js (tab personal).
+ * PersonalInfoTab — extraído de ProcessDetails.js (tab personal).
  * Mantém o JSX original; estado e permissões vêm por props.
  */
-import { Card, CardContent } from "../ui/card";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Badge } from "../ui/badge";
+import { Card, CardContent } from "../../ui/card";
+import { Input } from "../../ui/input";
+import { Label } from "../../ui/label";
+import { Badge } from "../../ui/badge";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
-import { AIBadge } from "../ui/AIBadge";
-import SecondTitularCard from "../SecondTitularCard";
+} from "../../ui/select";
+import { AIBadge } from "../../ui/AIBadge";
+import SecondTitularCard from "../../SecondTitularCard";
 import { User, Phone, CreditCard, Users, MapPin } from "lucide-react";
-import { formatDateForInput } from "../../pages/processDetails/processFormCleaners";
-import { validateNIF } from "../../utils/validateNIF";
-import { safeString } from "../../utils/safeString";
-import { safeNumber } from "../dashboard/DashboardShared";
+import { formatDateForInput } from "../../../pages/processDetails/processFormCleaners";
+import { validateNIF } from "../../../utils/validateNIF";
+import { safeString } from "../../../utils/safeString";
+import { safeNumber } from "../../dashboard/DashboardShared";
 
-export default function ProcessPersonalTab({
+export default function PersonalInfoTab({
   personalData, setPersonalData, process, setProcess, clientId, nifError, setNifError, editingCardId, canEditPersonal, CardHeaderWithEdit, getConfidenceIndicator, getFieldMetaFor, fetchData, financialData,
 }) {
   return (

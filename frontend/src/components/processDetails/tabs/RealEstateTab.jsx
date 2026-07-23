@@ -1,22 +1,22 @@
 /**
- * ProcessRealEstateTab — extraído de ProcessDetails.js (tab realestate).
+ * RealEstateTab — extraído de ProcessDetails.js (tab realestate).
  * Mantém o JSX original; estado e permissões vêm por props.
  */
-import { Card, CardContent } from "../ui/card";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
+import { Card, CardContent } from "../../ui/card";
+import { Input } from "../../ui/input";
+import { Label } from "../../ui/label";
+import { Textarea } from "../../ui/textarea";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
-import { AIBadge } from "../ui/AIBadge";
+} from "../../ui/select";
+import { AIBadge } from "../../ui/AIBadge";
 import { Building2, Search, MapPin, FileSignature, Users } from "lucide-react";
 
-export default function ProcessRealEstateTab({
+export default function RealEstateTab({
   financialData, setFinancialData, realEstateData, setRealEstateData, editingCardId, canEditRealEstate, CardHeaderWithEdit, getFieldMetaFor, shouldCardBeCollapsed,
 }) {
   return (

@@ -92,8 +92,6 @@ import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayl
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
 import ProcessSummaryCard from "../components/ProcessSummaryCard";
-import EmailHistoryPanel from "../components/EmailHistoryPanel";
-import UnifiedDocumentsPanel from "../components/UnifiedDocumentsPanel";
 import ProcessTimeline from "../components/ProcessTimeline";
 import UnifiedAuditTrail from "../components/UnifiedAuditTrail";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
@@ -107,7 +105,6 @@ import AutoDSTIBadge from "../components/AutoDSTIBadge";
 import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
-import PortalDocumentRequests from "../components/PortalDocumentRequests";
 import {
   ArrowLeft,
   User,
@@ -150,7 +147,6 @@ import {
   X,
   Search,
   RefreshCw,
-  BrainCircuit,
   Home,
   Shield,
 } from "lucide-react";
@@ -178,23 +174,28 @@ import {
   cleanFinancialDataForSubmit,
 } from "./processDetails/processFormCleaners";
 import { validateNIF } from "../utils/validateNIF";
-import VisitasTab from "../components/processDetails/VisitasTab";
-import ProcessPortalMessagesTab from "../components/processDetails/ProcessPortalMessagesTab";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
 import { queryKeys, invalidateProcessDetailsQueries } from "../lib/queryClient";
 import { useProcessFullData } from "../hooks/queries/useProcessQuery";
 import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
-import ProcessPersonalTab from "../components/processDetails/ProcessPersonalTab";
-import ProcessFinancialTab from "../components/processDetails/ProcessFinancialTab";
-import ProcessRealEstateTab from "../components/processDetails/ProcessRealEstateTab";
-import ProcessCreditTab from "../components/processDetails/ProcessCreditTab";
+// Sub-componentes das abas — cada um é responsável apenas pelo seu domínio
+// (SRP); ProcessDetails.js fica como orquestrador do layout + estado.
+import PersonalInfoTab from "../components/processDetails/tabs/PersonalInfoTab";
+import FinancialTab from "../components/processDetails/tabs/FinancialTab";
+import RealEstateTab from "../components/processDetails/tabs/RealEstateTab";
+import CreditTab from "../components/processDetails/tabs/CreditTab";
+import DocumentsTab from "../components/processDetails/tabs/DocumentsTab";
+import EmailsTab from "../components/processDetails/tabs/EmailsTab";
+import VisitasTab from "../components/processDetails/tabs/VisitasTab";
+import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
+import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 
 // eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
-// Constantes/helpers: processDetailsConstants, processFormCleaners, validateNIF, VisitasTab
+// Constantes/helpers: processDetailsConstants, processFormCleaners, validateNIF
 
 const ProcessDetails = () => {
   const { id } = useParams();
@@ -2222,7 +2223,7 @@ const ProcessDetails = () => {
 
                   {/* ── FASE 3: Tab Dados do Cliente ── */}
                   <TabsContent value="personal" className="mt-4">
-                    <ProcessPersonalTab
+                    <PersonalInfoTab
                       personalData={personalData}
                       setPersonalData={setPersonalData}
                       process={process}
@@ -2242,7 +2243,7 @@ const ProcessDetails = () => {
 
                   {/* Financial Data Tab */}
                   <TabsContent value="financial" className="mt-4">
-                    <ProcessFinancialTab
+                    <FinancialTab
                       titular2Data={titular2Data}
                       setTitular2Data={setTitular2Data}
                       financialData={financialData}
@@ -2266,7 +2267,7 @@ const ProcessDetails = () => {
 
                   {/* Real Estate Tab */}
                   <TabsContent value="realestate" className="space-y-4 mt-4">
-                    <ProcessRealEstateTab
+                    <RealEstateTab
                       financialData={financialData}
                       setFinancialData={setFinancialData}
                       realEstateData={realEstateData}
@@ -2281,7 +2282,7 @@ const ProcessDetails = () => {
 
                   {/* Credit Tab */}
                   <TabsContent value="credit" className="space-y-4 mt-4">
-                    <ProcessCreditTab
+                    <CreditTab
                       realEstateData={realEstateData}
                       creditData={creditData}
                       setCreditData={setCreditData}
@@ -2296,160 +2297,25 @@ const ProcessDetails = () => {
 
                   {/* Documents Tab - Destaque para fácil acesso */}
                   <TabsContent value="documents" className="mt-4">
-                    <div className="space-y-4">
-                      {/* Header com info — só visível para admin e CEO */}
-                      {hasAnyRole(user, ["admin", "ceo"]) && (
-                      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
-                            <FolderOpen className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-amber-800 dark:text-amber-200">Gestão de Documentos</h3>
-                            <p className="text-sm text-amber-600 dark:text-amber-400">
-                              Faça upload de ficheiros ou adicione links externos (Google Drive, OneDrive, etc.)
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      )}
-
-                      {/* PACOTE DB — AI Executive Summary temporariamente oculto (display: none).
-                          O Card é mantido para reativação futura — não apagar.
-                          Originalmente: só visível para admin e CEO. */}
-                      {/* eslint-disable-next-line no-constant-binary-expression -- feature flag off until AI summary is re-enabled */}
-                      {hasAnyRole(user, ["admin", "ceo"]) && false && (
-                      <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10" style={{ display: 'none' }}>
-                        <CardContent className="pt-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg">
-                                <BrainCircuit className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                              </div>
-                              <div>
-                                <h3 className="font-semibold text-sm text-indigo-800 dark:text-indigo-200">Resumo Executivo IA</h3>
-                                <p className="text-xs text-indigo-600 dark:text-indigo-400">
-                                  Auditoria cruzada entre dados declarados e documentos
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {aiAnalysisDate && (
-                                <span className="text-xs text-muted-foreground hidden sm:inline">
-                                  {safeFormat(aiAnalysisDate, "dd/MM/yyyy HH:mm", { locale: pt })}
-                                </span>
-                              )}
-                              {aiSummary && !aiAnalysisLoading ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleAiAnalysis(true)}
-                                  className="border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:text-indigo-300"
-                                >
-                                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                                  Atualizar
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleAiAnalysis(true)}
-                                  disabled={aiAnalysisLoading}
-                                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                                >
-                                  {aiAnalysisLoading ? (
-                                    <>
-                                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                                      A cruzar dados e a ler documentos...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                                      {aiSummary ? "Atualizar Análise IA" : "Analisar IA (Auditoria)"}
-                                    </>
-                                  )}
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Loading state */}
-                          {aiAnalysisLoading && (
-                            <div className="mt-4 flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
-                              <div className="flex gap-1">
-                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                              </div>
-                              <p className="text-sm text-indigo-700 dark:text-indigo-300">
-                                A IA está a cruzar os dados do formulário com os documentos extraídos...
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Summary result */}
-                          {aiSummary && !aiAnalysisLoading && (
-                            <div className="mt-4 p-4 bg-white dark:bg-gray-900 border rounded-lg max-h-[600px] overflow-y-auto">
-                              <div className="prose prose-sm dark:prose-invert max-w-none">
-                                {renderAiSummary(aiSummary)}
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                      )}
-
-                      {/* Painel de Documentos Unificado */}
-                      <Card className="border-amber-200 dark:border-amber-800">
-                        <CardContent className="pt-6">
-                          <UnifiedDocumentsPanel 
-                            key={documentsRefreshKey}
-                            processId={id}
-                            clientName={process?.client_name}
-                            onAIDataExtracted={handleAIDataExtractedFromDocs}
-                          />
-                        </CardContent>
-                      </Card>
-
-                      {/* Pedidos de Documentos do Portal */}
-                      <PortalDocumentRequests
-                        processId={id}
-                        onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}
-                      />
-                    </div>
+                    <DocumentsTab
+                      hasAnyRole={hasAnyRole}
+                      user={user}
+                      aiSummary={aiSummary}
+                      aiAnalysisLoading={aiAnalysisLoading}
+                      aiAnalysisDate={aiAnalysisDate}
+                      handleAiAnalysis={handleAiAnalysis}
+                      renderAiSummary={renderAiSummary}
+                      documentsRefreshKey={documentsRefreshKey}
+                      id={id}
+                      process={process}
+                      handleAIDataExtractedFromDocs={handleAIDataExtractedFromDocs}
+                      setDocumentsRefreshKey={setDocumentsRefreshKey}
+                    />
                   </TabsContent>
 
                   {/* Emails Tab - Histórico de Emails do Processo */}
                   <TabsContent value="emails" className="mt-4">
-                    <div className="space-y-4">
-                      {/* Header com info */}
-                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg">
-                            <Send className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-blue-800 dark:text-blue-200">Histórico de Emails</h3>
-                            <p className="text-sm text-blue-600 dark:text-blue-400">
-                              Emails associados a este processo
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Painel de Emails */}
-                      <Card className="border-blue-200 dark:border-blue-800">
-                        <CardContent className="pt-6">
-                          <EmailHistoryPanel 
-                            processId={id}
-                            clientEmail={savedProcessRef.current?.client_email || process?.client_email}
-                            clientName={savedProcessRef.current?.client_name || process?.client_name}
-                            compact={false}
-                            maxHeight="500px"
-                            token={token}
-                          />
-                        </CardContent>
-                      </Card>
-                    </div>
+                    <EmailsTab id={id} savedProcessRef={savedProcessRef} process={process} token={token} />
                   </TabsContent>
 
                   {/* Visitas / Imóveis Tab */}
@@ -2459,7 +2325,7 @@ const ProcessDetails = () => {
 
                   {/* Mensagens do Portal Tab */}
                   <TabsContent value="mensagens" className="mt-4">
-                    <ProcessPortalMessagesTab
+                    <PortalMessagesTab
                       messages={portal.messages}
                       loading={portal.loading}
                       newMessage={portal.newMessage}
@@ -2661,125 +2527,20 @@ const ProcessDetails = () => {
 
                   {/* Deadlines Tab */}
                   <TabsContent value="deadlines" className="p-4 pt-2">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-medium">Prazos</h3>
-                      {canManageDeadlines && (
-                        <Dialog open={isDeadlineDialogOpen} onOpenChange={setIsDeadlineDialogOpen}>
-                          <DialogTrigger asChild>
-                            <Button size="sm" variant="outline" data-testid="add-deadline-btn">
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent aria-describedby="deadline-dialog-description" className="sm:max-w-md w-[calc(100vw-2rem)]">
-                            <DialogHeader>
-                              <DialogTitle>Novo Prazo</DialogTitle>
-                              <DialogDescription id="deadline-dialog-description">
-                                Crie um novo prazo para este processo.
-                              </DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-4">
-                              <div className="space-y-2">
-                                <Label>Título</Label>
-                                <Input
-                                  value={deadlineForm.title}
-                                  onChange={(e) => setDeadlineForm({ ...deadlineForm, title: e.target.value })}
-                                  placeholder="Ex: Entregar documentos"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Descrição</Label>
-                                <Textarea
-                                  value={deadlineForm.description}
-                                  onChange={(e) => setDeadlineForm({ ...deadlineForm, description: e.target.value })}
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Data Limite</Label>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button variant="outline" className="w-full justify-start text-left font-normal">
-                                      <CalendarIcon className="mr-2 h-4 w-4" />
-                                      {selectedDate && isValid(selectedDate) ? format(selectedDate, "PPP", { locale: pt }) : "Selecione"}
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-auto p-0">
-                                    <Calendar mode="single" selected={selectedDate} onSelect={setSelectedDate} locale={pt} />
-                                  </PopoverContent>
-                                </Popover>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Prioridade</Label>
-                                <Select
-                                  value={deadlineForm.priority}
-                                  onValueChange={(value) => setDeadlineForm({ ...deadlineForm, priority: value })}
-                                >
-                                  <SelectTrigger><SelectValue /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="low">Baixa</SelectItem>
-                                    <SelectItem value="medium">Média</SelectItem>
-                                    <SelectItem value="high">Alta</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                            <DialogFooter>
-                              <Button onClick={handleCreateDeadline}>Criar Prazo</Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
-                      )}
-                    </div>
-
-                    <Calendar
-                      mode="single"
-                      selected={selectedDate}
-                      locale={pt}
-                      modifiers={{ deadline: deadlineDates }}
-                      modifiersStyles={{
-                        deadline: { backgroundColor: "hsl(var(--primary))", color: "white", borderRadius: "4px" },
-                      }}
-                      className="rounded-md border mb-4"
+                    <DeadlinesTab
+                      canManageDeadlines={canManageDeadlines}
+                      isDeadlineDialogOpen={isDeadlineDialogOpen}
+                      setIsDeadlineDialogOpen={setIsDeadlineDialogOpen}
+                      deadlineForm={deadlineForm}
+                      setDeadlineForm={setDeadlineForm}
+                      selectedDate={selectedDate}
+                      setSelectedDate={setSelectedDate}
+                      handleCreateDeadline={handleCreateDeadline}
+                      deadlineDates={deadlineDates}
+                      deadlines={deadlines}
+                      handleToggleDeadline={handleToggleDeadline}
+                      handleDeleteDeadline={handleDeleteDeadline}
                     />
-
-                    <ScrollArea className="h-[200px]">
-                      {deadlines.length === 0 ? (
-                        <p className="text-center text-muted-foreground text-sm py-4">Sem prazos</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {deadlines.map((deadline) => (
-                            <div
-                              key={deadline.id}
-                              className={`flex items-center justify-between p-2 rounded-md ${deadline.completed ? "bg-muted/30" : "bg-muted/50"}`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => handleToggleDeadline(deadline)}
-                                  className={`h-4 w-4 rounded border flex items-center justify-center ${
-                                    deadline.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300"
-                                  }`}
-                                  disabled={!canManageDeadlines}
-                                >
-                                  {deadline.completed && <Check className="h-3 w-3" />}
-                                </button>
-                                <div>
-                                  <p className={`text-sm ${deadline.completed ? "line-through text-muted-foreground" : ""}`}>
-                                    {safeString(deadline.title)}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground font-mono">
-                                    {safeFormat(deadline.due_date, "dd/MM/yyyy")}
-                                  </p>
-                                </div>
-                              </div>
-                              {canManageDeadlines && (
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDeleteDeadline(deadline.id)}>
-                                  <Trash2 className="h-3 w-3 text-destructive" />
-                                </Button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </ScrollArea>
                   </TabsContent>
 
                   {/* History Tab */}

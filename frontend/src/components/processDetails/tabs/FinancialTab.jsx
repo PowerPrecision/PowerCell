@@ -1,29 +1,29 @@
 /**
- * ProcessFinancialTab — extraído de ProcessDetails.js (tab financial).
+ * FinancialTab — extraído de ProcessDetails.js (tab financial).
  * Mantém o JSX original; estado e permissões vêm por props.
  */
-import { Card, CardContent } from "../ui/card";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Badge } from "../ui/badge";
-import { Button } from "../ui/button";
-import { Switch } from "../ui/switch";
+import { Card, CardContent } from "../../ui/card";
+import { Input } from "../../ui/input";
+import { Label } from "../../ui/label";
+import { Badge } from "../../ui/badge";
+import { Button } from "../../ui/button";
+import { Switch } from "../../ui/switch";
 import {
   Select,
   SelectContent,
   SelectItem,
   SelectTrigger,
   SelectValue,
-} from "../ui/select";
-import { AIBadge } from "../ui/AIBadge";
-import AutoDSTIBadge from "../AutoDSTIBadge";
+} from "../../ui/select";
+import { AIBadge } from "../../ui/AIBadge";
+import AutoDSTIBadge from "../../AutoDSTIBadge";
 import {
   Briefcase, CreditCard, Database, User, Eye, EyeOff, Pencil, Plus, X, Check, AlertCircle,
 } from "lucide-react";
-import { BANK_LIST, getBankColor } from "../../pages/processDetails/processDetailsConstants";
-import { safeString } from "../../utils/safeString";
+import { BANK_LIST, getBankColor } from "../../../pages/processDetails/processDetailsConstants";
+import { safeString } from "../../../utils/safeString";
 
-export default function ProcessFinancialTab({
+export default function FinancialTab({
   titular2Data, setTitular2Data, financialData, setFinancialData, process, editingCardId, editingCreditField, setEditingCreditField, showPortalSenha, setShowPortalSenha, showSegSocialSenha, setShowSegSocialSenha, canEditFinancial, CardHeaderWithEdit, getFieldMetaFor, token, id, shouldCardBeCollapsed,
 }) {
   return (

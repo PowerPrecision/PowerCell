@@ -5,12 +5,12 @@
  * Só é montado quando o tab "visitas" está activo, por isso carrega dados no mount.
  */
 import { useState, useEffect, useCallback } from "react";
-import { useAuth } from "../../contexts/AuthContext";
-import { Card, CardContent } from "../ui/card";
-import { Button } from "../ui/button";
-import { Badge } from "../ui/badge";
-import { Input } from "../ui/input";
-import { ScrollArea } from "../ui/scroll-area";
+import { useAuth } from "../../../contexts/AuthContext";
+import { Card, CardContent } from "../../ui/card";
+import { Button } from "../../ui/button";
+import { Badge } from "../../ui/badge";
+import { Input } from "../../ui/input";
+import { ScrollArea } from "../../ui/scroll-area";
 import {
   Dialog,
   DialogContent,
@@ -18,7 +18,7 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-} from "../ui/dialog";
+} from "../../ui/dialog";
 import {
   Home,
   Building2,
@@ -31,8 +31,8 @@ import {
   User,
 } from "lucide-react";
 import { toast } from "sonner";
-import { safeString } from "../../utils/safeString";
-import { extractErrorMessage } from "../../utils/extractErrorMessage";
+import { safeString } from "../../../utils/safeString";
+import { extractErrorMessage } from "../../../utils/extractErrorMessage";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
