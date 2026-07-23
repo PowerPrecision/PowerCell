@@ -10,7 +10,7 @@
  * @widget TasksPanel — Gestão de tarefas com prioridades e prazos
  * @widget Email KPI Card — Emails não lidos (personal box)
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -19,8 +19,8 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
-  Users, Eye, Plus, AlertTriangle, Building2, Mail,
-  TrendingUp, CheckCircle, XCircle, FileX, ClipboardList, Rss, Calendar,
+  Users, Eye, Plus, AlertTriangle, Mail,
+  TrendingUp, CheckCircle, XCircle, ClipboardList, Rss, Calendar,
   MessageSquare, Inbox, ArrowRight, Megaphone
 } from "lucide-react";
 import {

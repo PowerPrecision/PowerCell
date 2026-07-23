@@ -18,7 +18,7 @@
  *   - Após 15 min de inactividade → logout automático
  *   - Ao fechar a aba → limpa storage (obriga novo login)
  */
-import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { toast } from 'sonner';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import useSlidingSession from '../hooks/useSlidingSession';

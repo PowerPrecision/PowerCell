@@ -13,7 +13,7 @@ import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeLabel } from "./dashboard/DashboardShared";
-import { safeDateStr, safeFormat, safeDate, safeParseISO } from "../lib/utils";
+import { safeFormat, safeDate, safeParseISO } from "../lib/utils";
 
 // Cores de fallback mapeadas a partir do nome da cor da BD
 const COLOR_MAP = {

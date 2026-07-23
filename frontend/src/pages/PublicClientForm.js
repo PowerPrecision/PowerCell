@@ -46,7 +46,7 @@ import {
 import DynamicFormField from "../components/DynamicFormField";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical, Play, ClipboardList } from "lucide-react";
+import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, AlertCircle, Eye, FlaskConical, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";

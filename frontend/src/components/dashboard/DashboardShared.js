@@ -2,15 +2,13 @@
  * Componentes partilhados para Dashboards (Consultor e Mediador)
  * Elimina código duplicado entre ConsultorDashboard e MediadorDashboard
  */
-import React, { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
-import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../ui/tabs";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../ui/table";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
 import {
@@ -21,12 +19,10 @@ import {
   SelectValue,
 } from "../ui/select";
 import {
-  FileText, Search, Clock, ArrowRight, Eye,
-  AlertTriangle, Calendar, Plus, Loader2, Sparkles, FolderOpen
+  FileText, Search, ArrowRight, Calendar, Loader2, Sparkles, FolderOpen
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, differenceInDays } from "date-fns";
-import { pt } from "date-fns/locale";
+import { differenceInDays } from "date-fns";
 import { safeDateStr, safeParseISO, formatDate as formatDateUtil } from "../../lib/utils";
 import { getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses, createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument } from "../../services/api";
 

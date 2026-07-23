@@ -5,7 +5,7 @@
 import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
@@ -45,8 +45,6 @@ import {
   CheckCircle,
   Eye,
   Trash2,
-  RefreshCw,
-  Filter,
   ChevronLeft,
   ChevronRight,
   ChevronDown,
@@ -64,9 +62,7 @@ import {
   TrendingUp,
   Loader2,
   CheckSquare,
-  Square,
   List,
-  LayoutGrid,
 } from "lucide-react";
 import { Checkbox } from "../components/ui/checkbox";
 import { toast } from "sonner";

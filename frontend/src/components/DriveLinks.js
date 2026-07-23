@@ -22,7 +22,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog";
-import { FolderOpen, Plus, Trash2, ExternalLink, Loader2, Link as LinkIcon, Save, Cloud, HardDrive } from "lucide-react";
+import { Plus, Trash2, ExternalLink, Loader2, Link as LinkIcon, Save, Cloud, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 import { getProcessOneDriveLinks, addProcessOneDriveLink, deleteProcessOneDriveLink } from "../services/api";
 

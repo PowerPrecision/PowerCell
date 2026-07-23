@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -32,7 +32,6 @@ import {
   Loader2
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
-import { getTTLStatus, migrateTTLFields } from "../services/api";
 import { toast } from "../hooks/use-toast";
 import { formatDateTime } from "../lib/utils";
 

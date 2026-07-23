@@ -5,7 +5,7 @@
  * Separada do FormManagementPage para evitar partilha de rota/componente.
  * Disponivel para admin, ceo e administrativo.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -44,13 +44,11 @@ import {
 import { toast } from "sonner";
 import { formatDate } from "../lib/utils";
 import {
-  FileText,
   Plus,
   Search,
   Edit,
   Trash2,
   Copy,
-  Download,
   Clock,
   User,
   Tag,

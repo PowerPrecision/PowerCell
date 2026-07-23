@@ -13,7 +13,7 @@
  * @context {AuthContext} — Consumes token, user for verifying permissions and API calls
  * @route /admin/email-accounts — Página acessível apenas a admin/ceo
  */
-import React, { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";

@@ -2,7 +2,7 @@
  * LeadsKanban - Gestão de Leads de Imóveis
  * Quadro Kanban para gerir leads/visitas de imóveis
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -32,20 +32,14 @@ import {
 import { toast } from "sonner";
 import {
   Plus,
-  Link as LinkIcon,
   Loader2,
   MapPin,
-  Euro,
-  Home,
-  Phone,
   User,
   ExternalLink,
   Trash2,
   Edit,
-  GripVertical,
   Search,
   Building,
-  Maximize2,
   Users,
   Sparkles,
   ClipboardPaste,

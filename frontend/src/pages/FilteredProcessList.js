@@ -3,18 +3,17 @@
  * Página para mostrar processos filtrados por status/critério
  */
 import { useState, useEffect } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { ScrollArea } from "../components/ui/scroll-area";
 import {
-  ArrowLeft, Search, Eye, Loader2, Users, CheckCircle,
-  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame,
-  MessageSquare, Trash2
+  ArrowLeft, Search, Eye, Users, CheckCircle,
+  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame, Trash2
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";

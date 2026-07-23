@@ -3,7 +3,7 @@
  * Permite ao admin visualizar e editar os dados dos formulários RGPD assinados
  * Inclui aba de edição do template legal RGPD
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { sanitizeHtml } from "../utils/sanitize";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";

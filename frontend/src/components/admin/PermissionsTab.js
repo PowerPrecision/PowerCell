@@ -18,7 +18,6 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { Switch } from "../ui/switch";
 import { Input } from "../ui/input";
-import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,

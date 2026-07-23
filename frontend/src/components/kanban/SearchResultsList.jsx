@@ -5,7 +5,7 @@
  * Mostrado quando o utilizador pesquisa com pelo menos 2 caracteres
  * e selecciona o modo de vista "lista".
  */
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent, CardHeader, CardTitle } from '../ui/card';
 import { Badge } from '../ui/badge';

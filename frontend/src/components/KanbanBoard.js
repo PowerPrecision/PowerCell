@@ -42,7 +42,6 @@ import { ScrollArea, ScrollBar } from './ui/scroll-area';
 import { toast } from 'sonner';
 import { hasAnyRole } from '../utils/roleUtils';
 import { safeDateStr } from '../lib/utils';
-import { Bell, BellOff } from 'lucide-react';
 
 // React Query hooks
 import { useKanbanQuery } from '../hooks/queries/useKanbanQuery';

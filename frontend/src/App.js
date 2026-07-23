@@ -10,7 +10,7 @@ import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { hasRole, hasAnyRole, hasPermission, STAFF_ROLES } from "./utils/roleUtils";
+import { hasRole, hasPermission, STAFF_ROLES } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";

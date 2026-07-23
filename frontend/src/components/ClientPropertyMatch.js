@@ -1,7 +1,7 @@
 /**
  * ClientPropertyMatch - Sugestões de imóveis compatíveis com o cliente
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -14,7 +14,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "./ui/dialog";
-import { toast } from "sonner";
 import {
   Sparkles,
   Home,

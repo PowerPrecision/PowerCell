@@ -35,7 +35,7 @@
  * // Acesso via layout protegido — visível para roles admin e CEO
  * // Tabs técnicas exclusivas do admin
  */
-import { useState, useEffect, lazy, Suspense } from "react";
+import { useState, lazy, Suspense } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Button } from "../components/ui/button";

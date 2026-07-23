@@ -10,11 +10,10 @@ import { useState, useEffect, useRef } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
 import {
   Upload,
-  File,
   CheckCircle,
   AlertCircle,
   Loader2,

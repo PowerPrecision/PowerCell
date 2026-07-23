@@ -13,7 +13,7 @@ import { useState, useEffect, useMemo } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Label } from "../components/ui/label";
@@ -50,7 +50,6 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
-  Filter,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;

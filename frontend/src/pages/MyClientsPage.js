@@ -27,8 +27,7 @@ import {
 import { getMyClients, getWorkflowStatuses, getExportPermission } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText,
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download,
-  MessageSquare, Trash2
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download, Trash2
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 // PACOTE CP — ClientDetailsModal reutilizável

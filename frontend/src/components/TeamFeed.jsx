@@ -1,5 +1,5 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { useState, useEffect, useRef, useCallback } from "react";
+import { Card, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
 import { Avatar, AvatarFallback } from "../components/ui/avatar";
@@ -10,10 +10,10 @@ import { Badge } from "../components/ui/badge";
 import { useAuth } from "../contexts/AuthContext";
 import { getAnnouncements, createAnnouncement } from "../services/api";
 import { Megaphone, Send, Loader2, MessageSquare, AlertCircle } from "lucide-react";
-import { isToday, isYesterday, format, parseISO } from "date-fns";
+import { isToday, isYesterday, format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { toast } from "sonner";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeParseISO } from "../lib/utils";
 
 // ── Helper Functions ──────────────────────────────────────────────
 

@@ -9,7 +9,7 @@
  * - Navegação por setas
  */
 import { useState, useEffect, useMemo } from "react";
-import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -26,10 +26,9 @@ import {
 } from "./ui/dropdown-menu";
 import { 
   Mail, Send, Inbox, Clock, X, ChevronLeft, ChevronRight,
-  Paperclip, User, Star, StarOff, Bookmark, BookmarkX,
+  Paperclip, User, Star,
   AlertCircle, CheckCircle, Download, Eye, EyeOff, Reply,
-  Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet,
-  Sparkles, Copy, ExternalLink, Tag
+  Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet, Copy, Tag
 } from "lucide-react";
 import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";

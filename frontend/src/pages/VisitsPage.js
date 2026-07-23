@@ -37,7 +37,6 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import {
-  Calendar as CalendarIcon,
   Clock,
   MapPin,
   User,
@@ -49,9 +48,7 @@ import {
   Loader2,
   Search,
   Filter,
-  ChevronRight,
   Users,
-  ArrowRight,
   Inbox,
   ExternalLink,
   Home,
@@ -60,10 +57,9 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isToday, isTomorrow, isPast } from "date-fns";
+import { format, isToday, isTomorrow, isPast } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr, safeParseISO } from "../lib/utils";
-import { hasAnyRole, STAFF_ROLES } from "../utils/roleUtils";
+import { safeParseISO } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 

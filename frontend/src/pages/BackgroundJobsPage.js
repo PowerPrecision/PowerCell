@@ -4,7 +4,7 @@
  * Suporta: Cancelar, Pausar e Retomar jobs
  * Inclui: Dashboard de métricas, notificações de jobs stuck, logs detalhados
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";

@@ -8,8 +8,8 @@
  * O progresso é gerido globalmente pelo UploadProgressContext, permitindo
  * que o utilizador navegue para outras páginas enquanto o upload continua.
  */
-import { useState, useRef, useCallback } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { useState, useRef } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
@@ -28,7 +28,6 @@ import {
   FolderUp,
   CheckCircle,
   XCircle,
-  AlertTriangle,
   FileText,
   Users,
   RefreshCw,

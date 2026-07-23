@@ -18,7 +18,6 @@ import {
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
-import { Badge } from "./ui/badge";
 import { Checkbox } from "./ui/checkbox";
 import { ScrollArea } from "./ui/scroll-area";
 import {
@@ -32,11 +31,7 @@ import {
   Upload,
   Download,
   Link2,
-  Copy,
-  Clock,
-  XCircle,
   Loader2,
-  ExternalLink,
   FileText,
   FileImage,
   File,

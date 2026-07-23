@@ -18,7 +18,7 @@ import { Textarea } from "./ui/textarea";
 import { Badge } from "./ui/badge";
 import { Label } from "./ui/label";
 import { ScrollArea } from "./ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   Dialog,
   DialogContent,
@@ -48,18 +48,18 @@ import {
 } from "./ui/dropdown-menu";
 import { Checkbox } from "./ui/checkbox";
 import { 
-  Mail, Send, Inbox, Plus, Loader2, Clock, User, 
-  Paperclip, MoreVertical, Trash2, Eye, ChevronDown, ChevronUp, RefreshCw,
-  Settings, X, AtSign, Maximize2, ExternalLink, Link, Search,
-  Star, StarOff, Bookmark, BookmarkX, Archive, ArchiveRestore,
+  Mail, Send, Inbox, Plus, Loader2, Clock, 
+  Paperclip, MoreVertical, Trash2, Eye, RefreshCw,
+  Settings, X, AtSign, ExternalLink, Link, Search,
+  Star, StarOff,
   Filter, Calendar, FileText, Download, Image, FileSpreadsheet,
-  AlertCircle, CheckCircle, Reply, Copy, Edit3, ChevronLeft, ChevronRight,
-  Sparkles, Tag, EyeOff
+  AlertCircle, CheckCircle, Copy,
+  Sparkles, EyeOff
 } from "lucide-react";
 import { toast } from "sonner";
-import { isAfter, isBefore, subDays, startOfDay, endOfDay } from "date-fns";
+import { isAfter, isBefore, startOfDay, endOfDay } from "date-fns";
 import { pt } from "date-fns/locale";
-import { getProcessEmails, getEmailStats, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails, addMonitoredEmail, removeMonitoredEmail } from "../services/api";
+import { getProcessEmails, createEmail, deleteEmail, syncProcessEmails, getMonitoredEmails, addMonitoredEmail, removeMonitoredEmail } from "../services/api";
 import EmailViewerModal from "./EmailViewerModal";
 import { safeFormat, safeParseISO } from "../lib/utils";
 

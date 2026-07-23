@@ -54,7 +54,6 @@ import DashboardLayout from "../layouts/DashboardLayout";
 import EmailConfigForm from "../components/EmailConfigForm";
 import RichTextEditor from "../components/ui/RichTextEditor";
 import {
-  User,
   Lock,
   Monitor,
   Trash2,
@@ -67,7 +66,6 @@ import {
   MapPin,
   ArrowLeft,
   Mail,
-  RefreshCw,
   Loader2,
   AlertTriangle,
   Info,

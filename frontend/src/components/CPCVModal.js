@@ -2,7 +2,7 @@
  * CPCVModal - Modal para gerar Contrato Promessa Compra e Venda
  * Permite preencher dados do CPCV e imprimir o documento com minuta
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -15,9 +15,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
-import { Separator } from "./ui/separator";
 import {
   Select,
   SelectContent,
@@ -33,7 +31,6 @@ import {
   User,
   Users,
   CreditCard,
-  Calendar,
   FileText,
   Eye,
   AlertCircle,

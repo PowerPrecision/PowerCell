@@ -37,7 +37,6 @@ import {
   DialogTrigger,
 } from "../components/ui/dialog";
 import { Separator } from "../components/ui/separator";
-import { Switch } from "../components/ui/switch";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -54,15 +53,12 @@ import {
   Zap,
   DollarSign,
   CheckCircle,
-  Info,
   Plus,
   Pencil,
   Settings2,
   Bell,
-  X,
   TrendingUp,
   Activity,
-  Clock,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;

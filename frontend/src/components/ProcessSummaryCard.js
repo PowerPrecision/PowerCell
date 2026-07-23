@@ -6,8 +6,7 @@ import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { safeNumber } from "./dashboard/DashboardShared";
 import { 
-  User, Phone, Mail, MapPin, Euro, Building2, 
-  Calendar, Clock, Users, Percent
+  User, Phone, MapPin, Euro, Building2, Clock, Users, Percent
 } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";

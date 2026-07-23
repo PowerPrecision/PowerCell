@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
-import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
+import useWebSocket from "../hooks/useWebSocket";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -38,7 +38,6 @@ import {
   Send,
   Star,
   FileText,
-  Archive,
   Plus,
   Search,
   RefreshCw,
@@ -53,7 +52,6 @@ import {
   X,
   Loader2,
   ArrowLeft,
-  AtSign,
   Image,
   FileSpreadsheet,
   File,

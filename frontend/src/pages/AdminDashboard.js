@@ -32,19 +32,15 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { ScrollArea } from "../components/ui/scroll-area";
 import { useAuth } from "../contexts/AuthContext";
-import { 
-  FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
+import { FileText, 
   Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
-  TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight,
+  TrendingUp, DollarSign, Target, Activity, ChevronRight,
   MessageSquare, Inbox, BarChart3
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO } from "date-fns";
-import { pt } from "date-fns/locale";
 import { 
-  getStats, getUsers, getWorkflowStatuses, getOneDriveStatus, 
+  getStats, getUsers, getWorkflowStatuses, 
   getProcesses, getCalendarDeadlines, createDeadline, deleteDeadline, getUpcomingExpiries,
   getActivities, getCommunicationsFeed
 } from "../services/api";
@@ -55,7 +51,6 @@ import KanbanBoard from "../components/KanbanBoard";
 import LeadsKanban from "../components/LeadsKanban";
 import CalendarTab from "../components/admin/CalendarTab";
 import DocumentsTab from "../components/admin/DocumentsTab";
-import UsersTab from "../components/admin/UsersTab";
 import ClientSearchTab from "../components/admin/ClientSearchTab";
 import CreateEventDialog from "../components/admin/CreateEventDialog";
 import AIAnalysisTab from "../components/admin/AIAnalysisTab";
@@ -64,7 +59,7 @@ import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
 import TeamPerformanceTab from "../components/admin/TeamPerformanceTab";
-import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 const AdminDashboard = () => {
   const navigate = useNavigate();

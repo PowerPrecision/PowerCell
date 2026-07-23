@@ -2,7 +2,7 @@
  * BackupsPage - Gestão de Backups
  * Interface para administradores criarem e restaurarem backups
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -23,8 +23,6 @@ import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
 import {
   Database,
-  Download,
-  Upload,
   RefreshCw,
   CheckCircle,
   XCircle,

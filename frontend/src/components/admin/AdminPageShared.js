@@ -2,9 +2,7 @@
  * Componentes partilhados para páginas de Administração
  * Elimina duplicação de código entre RGPDAdminPage e ClientRegistrationsAdminPage
  */
-import React from "react";
 import { Card, CardContent } from "../ui/card";
-import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
 import { safeString } from "../../utils/safeString";
 import {

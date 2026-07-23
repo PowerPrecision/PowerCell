@@ -2,11 +2,11 @@
  * AIInsightsPage - Página de Insights e Sugestões de IA
  * Mostra análise preditiva e prescritiva dos processos
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea } from "../components/ui/scroll-area";
@@ -24,11 +24,8 @@ import {
   AlertTriangle,
   Lightbulb,
   TrendingUp,
-  Users,
   Clock,
   RefreshCw,
-  Loader2,
-  ChevronRight,
   AlertCircle,
   CheckCircle2,
   ArrowUpRight,

@@ -7,7 +7,7 @@
  * Step 1: Dados pessoais + Política de Privacidade + Consentimentos
  * Step 2: Minuta de Exclusividade + Assinatura
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { sanitizeHtml } from '../utils/sanitize';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';

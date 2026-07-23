@@ -25,7 +25,6 @@ import {
   Plus,
   Edit,
   Trash2,
-  GripVertical,
   Loader2,
   Workflow,
   ArrowUp,

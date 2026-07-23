@@ -22,7 +22,6 @@
  * // Lendo do field_metadata:
  * <AIBadge {...(client.field_metadata?.["dados_pessoais.nif"] || {})} />
  */
-import * as React from "react";
 import { Sparkles, User } from "lucide-react";
 import { Badge } from "./badge";
 import {

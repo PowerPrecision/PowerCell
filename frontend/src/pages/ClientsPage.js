@@ -33,7 +33,6 @@ import {
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
 import { safeDateStr } from "../lib/utils";
-import { getErrorMessage } from "../utils/errorFormatter";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Users,
@@ -46,7 +45,6 @@ import {
   Hash,
   Eye,
   Trash2,
-  Link2,
   RefreshCw,
   ArrowUpDown,
   ArrowUp,
@@ -55,7 +53,6 @@ import {
   CheckCircle,
   XCircle,
   Flame,
-  AlertTriangle,
   Download,
 } from "lucide-react";
 import {
@@ -65,8 +62,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
-import SmartClientSearch from "../components/SmartClientSearch";
+import { TableSkeleton } from "../components/ui/skeletons";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import CreateProcessModal from "../components/CreateProcessModal";
 import CreateClientModal from "../components/kanban/CreateClientModal";

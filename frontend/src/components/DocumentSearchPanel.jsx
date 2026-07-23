@@ -2,7 +2,7 @@
  * DocumentSearchPanel - Pesquisa e Categorização de Documentos
  * Permite pesquisar documentos por conteúdo e ver categorias IA
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
@@ -32,7 +32,6 @@ import {
   Search,
   FileText,
   Loader2,
-  Download,
   Tag,
   FolderOpen,
   Sparkles,
@@ -40,7 +39,6 @@ import {
   Filter,
   X,
   AlertCircle,
-  CheckCircle,
   Clock,
 } from "lucide-react";
 

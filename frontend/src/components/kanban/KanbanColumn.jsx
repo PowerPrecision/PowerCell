@@ -23,7 +23,7 @@
  * @param {number} completedDays - Filtro de dias para concluídos (default 30, 0 = sem limite)
  * @param {Function} onCompletedDaysChange - Callback para alterar o filtro de dias
  */
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';

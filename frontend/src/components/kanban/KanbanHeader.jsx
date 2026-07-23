@@ -8,7 +8,7 @@
  * - Gerir estado de pesquisa e filtros
  * - Fornecer controlos de navegação horizontal
  */
-import React, { memo, useCallback, useState } from 'react';
+import { memo, useCallback, useState } from 'react';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { 

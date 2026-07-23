@@ -29,7 +29,6 @@ import {
   User,
   Lock,
   Bell,
-  Palette,
   Settings,
   Save,
   Eye,
@@ -38,7 +37,6 @@ import {
   Phone,
   Building2,
   Shield,
-  Workflow,
   Loader2,
 } from "lucide-react";
 import WorkflowEditor from "../components/WorkflowEditor";

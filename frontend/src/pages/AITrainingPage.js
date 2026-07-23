@@ -2,10 +2,10 @@
  * AITrainingPage - Página de Treino do Agente IA
  * Permite configurar instruções personalizadas para o agente de análise de documentos
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
@@ -45,8 +45,6 @@ import {
   Copy,
   Eye,
   Edit,
-  CheckCircle,
-  XCircle,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;

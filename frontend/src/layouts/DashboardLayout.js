@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate, Link, useLocation } from "react-router-dom";
@@ -34,22 +34,14 @@ import {
   X,
   User,
   Building2,
-  CreditCard,
   BarChart3,
   Cog,
   Home,
   LayoutGrid,
   Search,
-  Sparkles,
-  AlertCircle,
-  AlertTriangle,
   Database,
-  FileArchive,
-  Brain,
   ChevronDown,
   ChevronRight,
-  Bell,
-  Wrench,
   Sun,
   Moon,
   Keyboard,
@@ -57,11 +49,8 @@ import {
   Activity,
   TrendingUp,
   FileSignature,
-  Zap,
   Shield,
   ClipboardList,
-  DollarSign,
-  Lock,
   Mail,
   Eye,
 } from "lucide-react";
@@ -74,7 +63,7 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, STAFF_ROLES, ADMIN_PANEL_ROLES, MANAGEMENT_ROLES } from "../utils/roleUtils";
+import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS } from "../utils/roleUtils";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;

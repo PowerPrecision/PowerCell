@@ -19,9 +19,8 @@ import { Switch } from "../components/ui/switch";
 import { Label } from "../components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { 
-  Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
-  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
+  Search, Eye, FileText, Phone, Mail, Filter,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
   Flame, X, ClipboardCheck, CheckCircle2, Download, RotateCcw, Trash2
 } from "lucide-react";
 import { toast } from "sonner";

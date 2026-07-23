@@ -1,7 +1,7 @@
 /**
  * Shared config field/section UI for SystemConfigPage dynamic tabs.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";

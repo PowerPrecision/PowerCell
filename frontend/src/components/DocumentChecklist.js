@@ -2,7 +2,7 @@
  * DocumentChecklist - Checklist de documentos do sistema de armazenamento
  * Verifica se os documentos esperados estão na pasta do cliente
  */
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Button } from "./ui/button";

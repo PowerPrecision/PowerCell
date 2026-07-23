@@ -38,7 +38,6 @@
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
-import { queryClient } from "../lib/queryClient";
 
 const AuthContext = createContext(null);
 

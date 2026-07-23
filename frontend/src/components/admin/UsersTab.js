@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Users, UserPlus, CheckCircle, XCircle, Edit, Mail, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../contexts/AuthContext";
-import { hasRole, filterByRole, filterByAnyRole, countByRole } from "../../utils/roleUtils";
+import { hasRole, countByRole } from "../../utils/roleUtils";
 
 const roleLabels = { 
   admin: "Administrador", 

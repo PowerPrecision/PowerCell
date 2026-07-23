@@ -29,9 +29,9 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../com
 import { Loader2, Send, Heart, Eye, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { hasRole } from "../utils/roleUtils";
-import { formatDistanceToNow, parseISO } from "date-fns";
+import { formatDistanceToNow } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeParseISO } from "../lib/utils";
 
 // ============== HOOK: useIntersectionObserver (Auto-Read) ==============
 /**

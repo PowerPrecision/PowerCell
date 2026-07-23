@@ -7,7 +7,7 @@
  * - Executar migração completa
  * - Testar migração com cliente específico
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -36,7 +36,6 @@ import {
   AlertTriangle,
   Loader2,
   Play,
-  RefreshCw,
   Search,
   Key,
   Hash,
@@ -44,7 +43,6 @@ import {
   Server,
 } from "lucide-react";
 import {
-  StatCard,
   LoadingState,
   AccessRestricted,
   PageHeader,

@@ -13,13 +13,11 @@
  */
 import { useState, useEffect, useRef, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
 import { Avatar, AvatarFallback } from "./ui/avatar";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   Popover,
   PopoverContent,
@@ -31,14 +29,9 @@ import {
   DialogHeader,
   DialogTitle,
   DialogDescription,
-  DialogFooter,
 } from "./ui/dialog";
-import {
-  DropdownMenu,
-  DropdownMenuContent,
-  DropdownMenuItem,
-  DropdownMenuTrigger,
-} from "./ui/dropdown-menu";
+
+
 import { Textarea } from "./ui/textarea";
 import { Label } from "./ui/label";
 import {
@@ -53,12 +46,10 @@ import {
   Plus,
   Paperclip,
   Smile,
-  MoreVertical,
   Reply,
   Trash2,
   Edit2,
   Search as SearchIcon,
-  ArrowLeft,
   Check,
   FileText,
   Image as ImageIcon,
@@ -68,11 +59,10 @@ import {
   Crown,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isToday, isYesterday } from "date-fns";
+import { format, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
-import EmojiPicker from "./EmojiPicker";
 import { hasRole } from "../utils/roleUtils";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeParseISO } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 

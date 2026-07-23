@@ -6,8 +6,6 @@ import { Card, CardContent } from "../../ui/card";
 import { Input } from "../../ui/input";
 import { Label } from "../../ui/label";
 import { Badge } from "../../ui/badge";
-import { Button } from "../../ui/button";
-import { Switch } from "../../ui/switch";
 import {
   Select,
   SelectContent,
@@ -18,7 +16,7 @@ import {
 import { AIBadge } from "../../ui/AIBadge";
 import AutoDSTIBadge from "../../AutoDSTIBadge";
 import {
-  Briefcase, CreditCard, Database, User, Eye, EyeOff, Pencil, Plus, X, Check, AlertCircle,
+  Briefcase, CreditCard, Database, User, Eye, EyeOff, Pencil, Plus, AlertCircle,
 } from "lucide-react";
 import { BANK_LIST, getBankColor } from "../../../pages/processDetails/processDetailsConstants";
 import { safeString } from "../../../utils/safeString";

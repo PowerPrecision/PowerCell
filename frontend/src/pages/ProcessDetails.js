@@ -33,18 +33,16 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { safeLabel, safeNumber } from "../components/dashboard/DashboardShared";
+import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
 import DashboardLayout from "../layouts/DashboardLayout";
-import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import useWebSocket from "../hooks/useWebSocket";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { Switch } from "../components/ui/switch";
-import { Calendar } from "../components/ui/calendar";
 import { ScrollArea } from "../components/ui/scroll-area";
 import {
   Select,
@@ -60,11 +58,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Separator } from "../components/ui/separator";
-import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -84,7 +80,6 @@ import {
   deleteProcess,
   generateMagicLink,
   sendMagicLinkEmail,
-  impersonateClient,
   impersonateClientPortal,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
@@ -102,7 +97,7 @@ import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
-import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
+import { getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
 import {
@@ -111,9 +106,7 @@ import {
   Briefcase,
   Building2,
   CreditCard,
-  Calendar as CalendarIcon,
   Clock,
-  Plus,
   Check,
   Trash2,
   Loader2,
@@ -122,51 +115,38 @@ import {
   History,
   Send,
   FolderOpen,
-  File,
-  Download,
-  ChevronRight,
   ChevronDown,
-  ChevronUp,
   ExternalLink,
   Link as LinkIcon,
   Users,
   Sparkles,
   Mail,
-  Phone,
-  MapPin,
   FileSignature,
   AlertTriangle,
   CheckCircle,
-  Pencil,
   Database,
   Calculator,
   TrendingUp,
   Lock,
   Eye,
-  EyeOff,
   X,
-  Search,
-  RefreshCw,
   Home,
   Shield,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isAfter, isValid } from "date-fns";
+import { format, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { safeDateStr, safeParseISO, safeFormat, safeDate } from "../lib/utils";
+import { safeParseISO, safeFormat, safeDate } from "../lib/utils";
 
 import {
   statusColors,
-  BANK_LIST,
-  getBankColor,
   typeLabels,
 } from "./processDetails/processDetailsConstants";
 import {
-  formatDateForInput,
   cleanPersonalDataForSubmit,
   cleanTitular2DataForSubmit,
   cleanRealEstateDataForSubmit,
@@ -177,7 +157,7 @@ import { validateNIF } from "../utils/validateNIF";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
-import { queryKeys, invalidateProcessDetailsQueries } from "../lib/queryClient";
+import { invalidateProcessDetailsQueries } from "../lib/queryClient";
 import { useProcessFullData } from "../hooks/queries/useProcessQuery";
 import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
 // Sub-componentes das abas — cada um é responsável apenas pelo seu domínio

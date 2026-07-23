@@ -5,7 +5,7 @@
  * Combina: alterações de status, comentários/atividades, uploads de documentos,
  * envio de emails, atribuições, etc.
  */
-import React, { useState, useMemo } from "react";
+import { useState, useMemo } from "react";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";

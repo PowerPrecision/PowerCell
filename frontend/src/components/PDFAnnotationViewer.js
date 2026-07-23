@@ -47,7 +47,6 @@ import {
   Filter,
   Pin,
   Eye,
-  EyeOff,
   PanelRightOpen,
   PanelRightClose,
   Loader2,

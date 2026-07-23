@@ -4,7 +4,7 @@
  * Extraído de SystemConfigPage.js (tab "rgpd"): edição do texto legal,
  * pré-visualização com variáveis e histórico de versões.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Badge } from "../../components/ui/badge";
@@ -13,7 +13,6 @@ import { hasAnyRole } from "../../utils/roleUtils";
 import { safeString } from "../../utils/safeString";
 import { formatDateTime } from "../../lib/utils";
 import { toast } from "sonner";
-import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import {
   Loader2,
   Info,

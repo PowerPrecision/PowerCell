@@ -48,7 +48,6 @@ import {
   Edit,
   Trash2,
   Copy,
-  Download,
   Clock,
   User,
   Tag,

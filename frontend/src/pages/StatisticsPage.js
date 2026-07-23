@@ -14,13 +14,12 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { 
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, 
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  FunnelChart, Funnel, LabelList
+  BarChart, Bar, PieChart, Pie, Cell, 
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from "recharts";
 import { 
-  TrendingUp, TrendingDown, Users, FileText, CheckCircle, 
-  Clock, AlertCircle, Euro, Calendar, Target, Building, Trophy, Loader2
+  TrendingUp, TrendingDown, FileText, CheckCircle, 
+  Clock, Euro, Target, Building, Trophy, Loader2
 } from "lucide-react";
 import { getStats, getProcesses, getUsers } from "../services/api";
 import { toast } from "sonner";

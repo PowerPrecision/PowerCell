@@ -12,7 +12,7 @@
  * - Estado local isolado
  * - Não causa re-renders no KanbanBoard
  */
-import React, { memo, useState, useCallback, useEffect } from 'react';
+import { memo, useState, useCallback, useEffect } from 'react';
 import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import {
   Dialog,

@@ -2,8 +2,8 @@
  * PropertiesPage - Gestão de Imóveis Angariados
  * Lista, cria e edita imóveis listados pela agência
  */
-import React, { useState, useEffect, useCallback, useRef } from 'react';
-import { Plus, Search, MapPin, Home, Ruler, User, Building2, MoreHorizontal, Trash2, Edit, Upload, FileSpreadsheet, Loader2, ExternalLink, AlertTriangle, Link as LinkIcon, Calendar } from 'lucide-react';
+import { useState, useEffect, useCallback, useRef } from 'react';
+import { Plus, Search, MapPin, Home, Ruler, User, Building2, MoreHorizontal, Trash2, Edit, FileSpreadsheet, Loader2, ExternalLink, AlertTriangle, Calendar } from 'lucide-react';
 import { Link } from 'react-router-dom';
 import DashboardLayout from '../layouts/DashboardLayout';
 import { Card, CardContent } from '../components/ui/card';

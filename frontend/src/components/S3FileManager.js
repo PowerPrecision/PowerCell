@@ -35,7 +35,7 @@
  *   }}
  * />
  */
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
@@ -84,7 +84,6 @@ import {
   Briefcase,
   Building2,
   CreditCard,
-  MoreVertical,
   FileImage,
   FileSpreadsheet,
   File,
@@ -103,21 +102,17 @@ import {
   Settings2,
   ChevronDown,
   ChevronUp,
-  ChevronRight,
   Save,
   LayoutGrid,
   List,
   HardDrive,
   Eye,
   ExternalLink,
-  ZoomIn,
-  ZoomOut,
   Pencil,
   FolderSync,
   MessageSquare,
 } from "lucide-react";
 import { Input } from "./ui/input";
-import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeDate, safeFormat } from "../lib/utils";
 

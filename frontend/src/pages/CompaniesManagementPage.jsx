@@ -16,7 +16,6 @@ import {
   uploadCompanyLogo,
   getCompanyEmailConfig,
   upsertCompanyEmailConfig,
-  deleteCompanyEmailConfig,
 } from "../services/api";
 import { toast } from "sonner";
 import {

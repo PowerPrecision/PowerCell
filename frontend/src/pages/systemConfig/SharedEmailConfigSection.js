@@ -1,7 +1,7 @@
 /**
  * SharedEmailConfigSection — Google OAuth/IMAP por role.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
