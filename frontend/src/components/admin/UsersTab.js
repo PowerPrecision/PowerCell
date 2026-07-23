@@ -29,7 +29,7 @@ const roleColors = {
   administrativo: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 };
 
-const UsersTab = ({ users, onImpersonate }) => {
+const UsersTab = ({ users }) => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
 
@@ -51,7 +51,7 @@ const UsersTab = ({ users, onImpersonate }) => {
       } else {
         toast.error('Erro ao iniciar visualização');
       }
-    } catch (error) {
+    } catch {
       toast.error('Erro ao iniciar visualização');
     }
   };

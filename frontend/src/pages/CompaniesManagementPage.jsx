@@ -85,7 +85,6 @@ const CompaniesManagementPage = ({ embedded = false }) => {
   const [deleteDialogOpen, setDeleteDialogOpen] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   // PACOTE BF: config IMAP/SMTP unificada no form (estados de loading removidos)
-  const [emailConfigSaving, setEmailConfigSaving] = useState(false);
 
   const fileInputRef = useRef(null);
 

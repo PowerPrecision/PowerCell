@@ -13,7 +13,7 @@ import { pt } from "date-fns/locale";
 import { safeParseISO, safeFormat } from "../lib/utils";
 import { safeString, safeStringArray } from "../utils/safeString";
 
-const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, consultorNames, mediadorNames }) => {
+const ProcessSummaryCard = ({ process, consultorName, mediadorName, consultorNames, mediadorNames }) => {
   if (!process) return null;
 
   // Usar arrays se disponíveis, senão usar nomes únicos

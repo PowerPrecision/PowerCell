@@ -116,7 +116,7 @@ export default function RGPDTab({ token, user }) {
       } else {
         toast.error("Erro ao guardar o template");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar o template RGPD");
     } finally {
       setSaving(false);
@@ -139,7 +139,7 @@ export default function RGPDTab({ token, user }) {
         fetchTemplate();
         fetchVersions();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao restaurar o template padrão");
     } finally {
       setSaving(false);

@@ -88,12 +88,11 @@ const ChatPanel = ({ open, onOpenChange }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [searching, setSearching] = useState(false);
   const [unreadCount, setUnreadCount] = useState({ total: 0, direct: 0, group: 0 });
-  const [typingUsers, setTypingUsers] = useState({});
+  const [typingUsers] = useState({});
   const [replyTo, setReplyTo] = useState(null);
   const [editingMessage, setEditingMessage] = useState(null);
-  const [showEmojiPicker, setShowEmojiPicker] = useState(false);
   const [showReactionsFor, setShowReactionsFor] = useState(null);
-  const [groups, setGroups] = useState([]);
+  const [, setGroups] = useState([]);
   const [newGroupName, setNewGroupName] = useState("");
   const [newGroupDescription, setNewGroupDescription] = useState("");
   const [selectedMembers, setSelectedMembers] = useState([]);

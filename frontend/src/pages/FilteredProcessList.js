@@ -36,37 +36,6 @@ const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|elimin
  * chegassem como undefined (backend não as injetou), a verificação
  * !hasUnreadMessages && !hasNewDocuments podia ter comportamento inesperado.
  */
-const NotificationDots = ({ hasUnreadMessages, hasNewDocuments }) => {
-  const unread = Boolean(hasUnreadMessages);
-  const newDocs = Boolean(hasNewDocuments);
-  if (!unread && !newDocs) return null;
-  return (
-    <span className="inline-flex items-center gap-1 ml-1.5 align-middle" data-testid="notification-dots">
-      {unread && (
-        <span
-          className="relative flex h-2.5 w-2.5"
-          title="Mensagens não lidas do cliente"
-          role="img"
-          aria-label="Mensagens não lidas"
-        >
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
-        </span>
-      )}
-      {newDocs && (
-        <span
-          className="relative flex h-2.5 w-2.5"
-          title="Novos documentos do cliente"
-          role="img"
-          aria-label="Novos documentos"
-        >
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-        </span>
-      )}
-    </span>
-  );
-};
 
 const filterConfig = {
   active: {

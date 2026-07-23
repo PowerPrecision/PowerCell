@@ -140,7 +140,7 @@ const UsersManagementPage = ({ embedded = false }) => {
     }
     setFormLoading(true);
     try {
-      const response = await createUser(formData);
+      await createUser(formData);
       toast.success("Utilizador criado com sucesso");
       // Mostrar a password após criação
       if (formData.password) {
@@ -770,7 +770,7 @@ const UsersManagementPage = ({ embedded = false }) => {
                                 try {
                                   await impersonate(user.id);
                                   toast.success(`A ver como ${user.name}`);
-                                } catch (error) {
+                                } catch {
                                   toast.error("Erro ao iniciar visualização");
                                 }
                               }}

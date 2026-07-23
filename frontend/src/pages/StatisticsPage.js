@@ -33,7 +33,7 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 const StatisticsPage = () => {
   const { user, token } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({});
+  const [, setStats] = useState({});
   const [processes, setProcesses] = useState([]);
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(user?.id);

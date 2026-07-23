@@ -128,7 +128,7 @@ const KanbanBoard = ({
   // O estado do completedDays vive isolado NESTE hook, NÃO no estado global.
   // Isto impede que a mudança de período nos Concluídos provoque re-render
   // de todo o quadro. A query dos Concluídos tem cache key independente.
-  const { completedDays, setCompletedDays, resetCompletedDays } = useCompletedDaysFilter();
+  const { completedDays, setCompletedDays } = useCompletedDaysFilter();
   
   // === ESTADO DE DRAG & DROP ===
   const [draggingCard, setDraggingCard] = useState(null);
@@ -152,7 +152,7 @@ const KanbanBoard = ({
   const [showProcessDialog, setShowProcessDialog] = useState(false);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
   const [showAssignDialog, setShowAssignDialog] = useState(false);
-  const [assigningProcess, setAssigningProcess] = useState(null);
+  const [assigningProcess] = useState(null);
   
   // Verificar se o utilizador pode criar processos (qualquer staff)
   const canCreateProcess = hasAnyRole(user, ['admin', 'ceo', 'consultor', 'intermediario', 'administrativo', 'diretor', 'indexacao']);
@@ -163,12 +163,10 @@ const KanbanBoard = ({
 
   // QUERY 1: Colunas ACTIVAS (sem completedDays — não re-fetch quando o filtro muda)
   const {
-    kanbanData,
     columns: activeColumns,
     totalProcesses,
     isLoading,
     isFetching,
-    isError,
     refetch,
   } = useKanbanQuery({
     token,
@@ -180,7 +178,6 @@ const KanbanBoard = ({
   const {
     columns: completedColumns,
     isFetching: isFetchingCompleted,
-    isLoading: isLoadingCompleted,
   } = useKanbanCompletedQuery({
     token,
     ...filters,
@@ -555,7 +552,7 @@ const KanbanBoard = ({
         process={selectedProcess}
         isLockedByOther={selectedProcess ? !!lockedProcesses[selectedProcess.id] && lockedProcesses[selectedProcess.id]?.user_id !== user?.id : false}
         lockedBy={selectedProcess ? lockedProcesses[selectedProcess.id]?.user_name : undefined}
-        onProcessUpdate={(processId, updates) => {
+        onProcessUpdate={() => {
           // Atualizar o processo nas colunas locais e refetch para garantir consistência
           refetch();
         }}

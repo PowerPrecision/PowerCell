@@ -59,7 +59,7 @@ const PRIORITY_COLORS = {
 };
 
 const AIInsightsPage = () => {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);

@@ -77,7 +77,7 @@ const StatusBadge = ({ status }) => {
   );
 };
 
-const DocumentChecklist = ({ processId, clientName, onUpdate }) => {
+const DocumentChecklist = ({ processId, onUpdate }) => {
   const { token } = useAuth();
   const [checklist, setChecklist] = useState(null);
   const [loading, setLoading] = useState(true);

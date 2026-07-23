@@ -16,7 +16,6 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
-import { Progress } from "../components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
 import {
   Dialog,
@@ -74,20 +73,6 @@ const MigrationStatCard = ({ title, value, percentage, icon: Icon, color, descri
 );
 
 // Barra de progresso de migração
-const MigrationProgress = ({ migrated, total }) => {
-  const percentage = total > 0 ? Math.round((migrated / total) * 100) : 0;
-  
-  return (
-    <div className="space-y-2">
-      <div className="flex justify-between text-sm">
-        <span>Progresso da Migração</span>
-        <span>{migrated} de {total} clientes</span>
-      </div>
-      <Progress value={percentage} className="h-2" />
-      <p className="text-xs text-muted-foreground text-right">{percentage}%</p>
-    </div>
-  );
-};
 
 // Página principal
 const RGPDMigrationPage = () => {

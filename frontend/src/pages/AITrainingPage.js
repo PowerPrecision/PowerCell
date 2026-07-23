@@ -216,7 +216,7 @@ const AITrainingPage = () => {
         const data = await response.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar entrada");
     } finally {
       setSaving(false);
@@ -239,7 +239,7 @@ const AITrainingPage = () => {
         toast.success("Entrada eliminada");
         fetchEntries();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar");
     }
   };
@@ -260,7 +260,7 @@ const AITrainingPage = () => {
         toast.success(entry.is_active ? "Entrada desactivada" : "Entrada activada");
         fetchEntries();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao actualizar");
     }
   };
@@ -305,7 +305,7 @@ const AITrainingPage = () => {
         setGeneratedPrompt(data.prompt || "Nenhuma entrada activa.");
         setIsPromptDialogOpen(true);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao gerar prompt");
     }
   };

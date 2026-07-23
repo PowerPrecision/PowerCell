@@ -1167,7 +1167,7 @@ const FinanceDashboard = () => {
   const [monthly, setMonthly] = useState(null);
   const [commissions, setCommissions] = useState(null);
   const [performance, setPerformance] = useState(null);
-  const [config, setConfig] = useState(null);
+  const [, setConfig] = useState(null);
   const [distributionModel, setDistributionModel] = useState("individual_split");
   const [commissionsReceiptConsultant, setCommissionsReceiptConsultant] = useState(null);
 

@@ -8,7 +8,6 @@
 
 import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
-import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -38,7 +37,6 @@ import {
 import { getNotifications, markNotificationRead } from "../services/api";
 import { safeDateStr } from "../lib/utils";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Ícones por tipo de notificação
 const notificationIcons = {
@@ -98,7 +96,6 @@ const notificationLabels = {
 };
 
 export default function NotificationsPage() {
-  const { token, user } = useAuth();
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(true);
@@ -169,7 +166,7 @@ export default function NotificationsPage() {
       if (notification.process_id) {
         navigate(`/process/${notification.process_id}`);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao marcar notificação");
     }
   };
@@ -188,7 +185,7 @@ export default function NotificationsPage() {
       );
       setSelectedIds([]);
       toast.success(`${selectedIds.length} notificações marcadas como lidas`);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao marcar notificações");
     } finally {
       setProcessing(false);

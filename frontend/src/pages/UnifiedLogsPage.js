@@ -229,25 +229,6 @@ const SystemLogsTab = ({ token }) => {
     fetchStats();
   }, [fetchLogs]);
 
-  const handleMarkAsRead = async (ids) => {
-    try {
-      const response = await fetch(`${API_URL}/api/admin/system-logs/mark-read`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ error_ids: ids }),
-      });
-      if (response.ok) {
-        toast.success("Marcados como lidos");
-        fetchLogs();
-        setSelectedIds([]);
-      }
-    } catch (error) {
-      toast.error("Erro ao marcar como lidos");
-    }
-  };
 
   const handleBulkResolve = async () => {
     if (selectedIds.length === 0) return;
@@ -267,7 +248,7 @@ const SystemLogsTab = ({ token }) => {
         fetchLogs();
         fetchStats();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao resolver em massa");
     }
   };
@@ -291,7 +272,7 @@ const SystemLogsTab = ({ token }) => {
         fetchLogs();
         fetchStats();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao resolver todos os erros");
     }
   };
@@ -332,7 +313,7 @@ const SystemLogsTab = ({ token }) => {
         fetchLogs();
         fetchStats();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao resolver");
     } finally {
       setResolving(false);
@@ -841,7 +822,7 @@ const ImportLogsTab = ({ token }) => {
         setSelectedIds([]);
         fetchLogs();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao resolver em massa");
     }
   };
@@ -871,7 +852,7 @@ const ImportLogsTab = ({ token }) => {
           setSelectedLog({ ...selectedLog, resolved: true });
         }
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao marcar como resolvido");
     }
   };

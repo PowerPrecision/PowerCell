@@ -88,7 +88,7 @@ const WorkflowEditor = () => {
       setLoading(true);
       const response = await getWorkflowStatuses();
       setStatuses(response.data.sort((a, b) => a.order - b.order));
-    } catch (error) {
+    } catch {
       toast.error("Erro ao carregar estados");
     } finally {
       setLoading(false);
@@ -203,7 +203,7 @@ const WorkflowEditor = () => {
       ]);
       fetchStatuses();
       toast.success("Ordem atualizada");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao reordenar");
     }
   };

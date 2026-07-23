@@ -74,7 +74,7 @@ const KanbanCard = memo(({
     onDragStart?.(e, process, columnName);
   }, [onDragStart, process, columnName]);
 
-  const handleClick = useCallback((e) => {
+  const handleClick = useCallback(() => {
     // Não navegar se estiver arrastando
     if (!draggingCard) {
       onCardClick?.(process);

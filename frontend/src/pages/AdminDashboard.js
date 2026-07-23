@@ -66,16 +66,16 @@ const AdminDashboard = () => {
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({});
+  const [, setStats] = useState({});
   const [users, setUsers] = useState([]);
   const [processes, setProcesses] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
-  const [storageStatus, setStorageStatus] = useState(null);
+  const [, setStorageStatus] = useState(null);
   const [calendarDeadlines, setCalendarDeadlines] = useState([]);
   const [upcomingExpiries, setUpcomingExpiries] = useState([]);
   const [staleStats, setStaleStats] = useState(null);
   const [showStaleList, setShowStaleList] = useState(false);
-  const [recentActivities, setRecentActivities] = useState([]);
+  const [, setRecentActivities] = useState([]);
   const [commsFeed, setCommsFeed] = useState({ portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 });
 
   // ── Derived data com fallbacks defensivos (Bloco B: anti-crash) ──

@@ -28,7 +28,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { ROLE_LABELS, ROLE_COLORS, SUPER_ADMIN_ROLES } from "../../utils/roleUtils";
-import { useAuth } from "../../contexts/AuthContext";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -36,8 +35,6 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const EDITABLE_ROLES = ["diretor", "administrativo", "consultor", "intermediario", "indexacao"];
 
 const PermissionsTab = () => {
-  const { user: currentUser } = useAuth();
-
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [capabilities, setCapabilities] = useState({});

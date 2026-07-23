@@ -218,7 +218,7 @@ const TasksPanel = ({
       await completeTask(taskId);
       toast.success("Tarefa concluída");
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao concluir tarefa");
     }
   };
@@ -228,7 +228,7 @@ const TasksPanel = ({
       await reopenTask(taskId);
       toast.success("Tarefa reaberta");
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao reabrir tarefa");
     }
   };
@@ -291,7 +291,7 @@ const TasksPanel = ({
         toast.success("Resposta registada");
         setTaskResponse("");
       }
-    } catch (error) {
+    } catch {
       // Se falhar, ainda assim fechar o modal (funcionalidade em desenvolvimento)
       toast.success("Resposta registada");
       setTaskResponse("");

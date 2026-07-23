@@ -512,7 +512,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         const data = await response.json().catch(() => ({}));
         toast.error(extractErrorMessage(data.detail, "Erro ao gerar pré-visualização"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao gerar pré-visualização");
     } finally {
       setPreviewLoading(false);

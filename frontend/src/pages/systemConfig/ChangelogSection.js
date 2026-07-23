@@ -41,7 +41,7 @@ function markdownToHtml(md) {
   return html;
 }
 
-export default function ChangelogSection({ token }) {
+export default function ChangelogSection() {
   const [changelogs, setChangelogs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [generating, setGenerating] = useState(false);

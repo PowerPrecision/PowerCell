@@ -115,7 +115,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
     try {
       await onSave(rgpd.id, formData);
       onClose();
-    } catch (error) {
+    } catch {
       // Erro já tratado no onSave
     } finally {
       setSaving(false);
@@ -509,7 +509,7 @@ const RGPDTemplateTab = () => {
         }
         toast.success("Template restaurado para o valor padrão");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao restaurar o template padrão");
     }
   };
@@ -688,7 +688,7 @@ const RGPDTemplateTab = () => {
 // ============ ABA: PEDIDOS RGPD ============
 
 const RGPDPedidosTab = () => {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState([]);
   const [stats, setStats] = useState(null);
@@ -767,7 +767,7 @@ const RGPDPedidosTab = () => {
         const data = await response.json();
         setViewModal({ open: true, rgpd: data.rgpd, process: data.process });
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao carregar detalhes");
     }
   };
@@ -815,7 +815,7 @@ const RGPDPedidosTab = () => {
       } else {
         toast.error("Erro ao eliminar");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar RGPD");
     } finally {
       setActionLoading(false);
@@ -837,7 +837,7 @@ const RGPDPedidosTab = () => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao reenviar"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao reenviar email");
     } finally {
       setActionLoading(false);
@@ -1068,7 +1068,7 @@ const MinutaTemplateTab = () => {
         }
         toast.success("Minuta restaurada para o valor padrão");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao restaurar a minuta padrão");
     }
   };

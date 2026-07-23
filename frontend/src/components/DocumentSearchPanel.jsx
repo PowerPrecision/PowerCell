@@ -61,7 +61,7 @@ const getCategoryColor = (category) => {
   return CATEGORY_COLORS[category] || CATEGORY_COLORS["Outros"];
 };
 
-const DocumentSearchPanel = ({ processId, clientName }) => {
+const DocumentSearchPanel = ({ processId }) => {
   const { token } = useAuth();
   const [searchQuery, setSearchQuery] = useState("");
   const [searchResults, setSearchResults] = useState([]);

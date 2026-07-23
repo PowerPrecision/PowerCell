@@ -39,7 +39,6 @@ import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
 import { safeDateStr } from "../lib/utils";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const notificationIcons = {
   new_registration: UserPlus,
@@ -133,7 +132,7 @@ const NotificationsDropdown = () => {
         osc2.start();
         osc2.stop(audioContext.currentTime + 0.15);
       }, 150);
-    } catch (e) {
+    } catch {
       // Audio not available
     }
   }, [soundEnabled]);
@@ -362,7 +361,7 @@ const NotificationsDropdown = () => {
       setNotifications(prev => prev.map(n => ({ ...n, read: true })));
       setUnreadCount(0);
       toast.success("Todas as notificações marcadas como lidas");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao marcar notificações");
     }
   };

@@ -74,7 +74,7 @@ const PREFERENCE_LABELS = {
 
 export default function NotificationSettingsPage({ embedded = false }) {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const queryClient = useQueryClient();
 
   const [saving, setSaving] = useState(false);
@@ -134,7 +134,7 @@ export default function NotificationSettingsPage({ embedded = false }) {
         setSelectedUser(data);
         setShowDialog(true);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao carregar preferências");
     }
   };
@@ -161,7 +161,7 @@ export default function NotificationSettingsPage({ embedded = false }) {
       } else {
         toast.error("Erro ao guardar preferências");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setSaving(false);
@@ -195,7 +195,7 @@ export default function NotificationSettingsPage({ embedded = false }) {
       } else {
         toast.error("Erro ao actualizar utilizadores");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setSaving(false);

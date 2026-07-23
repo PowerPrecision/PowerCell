@@ -859,7 +859,7 @@ const PropertiesPage = () => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, 'Erro ao eliminar'));
       }
-    } catch (error) {
+    } catch {
       toast.error('Erro ao eliminar imóvel');
     }
   };
@@ -876,7 +876,7 @@ const PropertiesPage = () => {
         fetchProperties();
         fetchStats();
       }
-    } catch (error) {
+    } catch {
       toast.error('Erro ao actualizar estado');
     }
   };

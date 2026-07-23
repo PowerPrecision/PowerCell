@@ -158,7 +158,7 @@ const BackupsPage = ({ embedded = false }) => {
       } else {
         throw new Error("Erro ao iniciar backup");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao iniciar backup");
       setBackupInProgress(false);
     }
@@ -185,7 +185,7 @@ const BackupsPage = ({ embedded = false }) => {
           toast.warning("Verificação concluída - Existem problemas");
         }
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao verificar backups");
     } finally {
       setVerifying(false);
@@ -220,7 +220,7 @@ const BackupsPage = ({ embedded = false }) => {
         const detail = data.detail || data.errors?.join("; ") || "Erro desconhecido";
         toast.error(`Erro no restauro: ${detail}`);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de ligação ao restaurar backup");
     } finally {
       setRestoring(false);

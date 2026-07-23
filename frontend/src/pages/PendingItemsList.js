@@ -63,7 +63,7 @@ const PendingItemsList = () => {
       await completeTask(taskId);
       toast.success("Tarefa concluída");
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao concluir tarefa");
     }
   };

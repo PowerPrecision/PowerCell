@@ -81,7 +81,7 @@ const AutoDSTIBadge = ({ processId, token, compact = false, showDetails = true }
       } else {
         setError("Erro ao calcular DSTI");
       }
-    } catch (err) {
+    } catch {
       // Silenciar erros de rede
       setDsti(null);
     } finally {

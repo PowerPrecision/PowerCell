@@ -63,8 +63,7 @@ const EmailViewerModal = ({
   onMarkEmail,
   onUnmarkEmail,
   token,
-  clientName,
-  processId
+  clientName
 }) => {
   const [currentEmail, setCurrentEmail] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -178,7 +177,7 @@ const EmailViewerModal = ({
             window.open(data.preview_url, '_blank');
           }
         }
-      } catch (error) {
+      } catch {
         console.error("Preview não disponível");
       }
     }
@@ -228,7 +227,7 @@ const EmailViewerModal = ({
         try {
           const errData = await response.json();
           detail = errData.detail || errData.message || errData.error || detail;
-        } catch (_) {
+        } catch {
           /* resposta sem corpo JSON — manter mensagem genérica */
         }
         throw new Error(detail);

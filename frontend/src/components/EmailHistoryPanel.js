@@ -52,7 +52,7 @@ import {
   Paperclip, MoreVertical, Trash2, Eye, RefreshCw,
   Settings, X, AtSign, ExternalLink, Link, Search,
   Star, StarOff,
-  Filter, Calendar, FileText, Download, Image, FileSpreadsheet,
+  Filter, Calendar, FileText, Download,
   AlertCircle, CheckCircle, Copy,
   Sparkles, EyeOff
 } from "lucide-react";
@@ -66,21 +66,8 @@ import { safeFormat, safeParseISO } from "../lib/utils";
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Tamanhos de arquivo
-const formatFileSize = (bytes) => {
-  if (!bytes) return "";
-  if (bytes < 1024) return bytes + " B";
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + " KB";
-  return (bytes / (1024 * 1024)).toFixed(1) + " MB";
-};
 
 // Ícone por tipo de anexo
-const getAttachmentIcon = (contentType) => {
-  if (!contentType) return FileText;
-  if (contentType.includes("image")) return Image;
-  if (contentType.includes("pdf")) return FileText;
-  if (contentType.includes("spreadsheet") || contentType.includes("excel")) return FileSpreadsheet;
-  return FileText;
-};
 
 const EmailHistoryPanel = ({ 
   processId, 
@@ -99,7 +86,6 @@ const EmailHistoryPanel = ({
   const [isSettingsOpen, setIsSettingsOpen] = useState(false);
   const [isFilterOpen, setIsFilterOpen] = useState(false);
   const [creating, setCreating] = useState(false);
-  const [expandedEmail, setExpandedEmail] = useState(null);
   
   // Modal de visualização
   const [isViewerOpen, setIsViewerOpen] = useState(false);
@@ -134,7 +120,6 @@ const EmailHistoryPanel = ({
   // Templates
   const [templates, setTemplates] = useState([]);
   const [isTemplateDialogOpen, setIsTemplateDialogOpen] = useState(false);
-  const [selectedTemplate, setSelectedTemplate] = useState(null);
   const [previewTemplate, setPreviewTemplate] = useState(null);
   
   // Anexos
@@ -320,7 +305,7 @@ const EmailHistoryPanel = ({
       }));
       
       toast.success(`Email marcado como ${markType}`);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao marcar email");
     }
   };
@@ -347,7 +332,7 @@ const EmailHistoryPanel = ({
       }));
       
       toast.success("Marcação removida");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao remover marcação");
     }
   };
@@ -374,30 +359,12 @@ const EmailHistoryPanel = ({
         a.click();
         window.URL.revokeObjectURL(url);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao descarregar anexo");
     }
   };
 
   // Preview de anexo
-  const previewAttachment = async (emailId, attachment) => {
-    try {
-      const response = await fetch(
-        `${API_URL}/api/emails/${emailId}/attachments/${attachment.id}/preview`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        setAttachmentPreview({
-          ...attachment,
-          previewUrl: data.preview_url
-        });
-      }
-    } catch (error) {
-      toast.error("Preview não disponível");
-    }
-  };
 
   // Pré-visualizar template com dados fictícios
   const MOCK_DATA = {
@@ -466,7 +433,7 @@ const EmailHistoryPanel = ({
       setIsTemplateDialogOpen(false);
       setIsCreateDialogOpen(true);
       toast.success("Template aplicado");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao aplicar template");
     }
   };
@@ -494,7 +461,7 @@ const EmailHistoryPanel = ({
       await removeMonitoredEmail(processId, email);
       toast.success("Email removido da monitorização");
       fetchMonitoredEmails();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao remover email");
     }
   };
@@ -514,7 +481,7 @@ const EmailHistoryPanel = ({
       if (!response.ok) throw new Error("Erro na pesquisa");
       const data = await response.json();
       setSearchResults(data.emails || []);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao pesquisar emails");
     } finally {
       setSearching(false);
@@ -605,7 +572,7 @@ const EmailHistoryPanel = ({
             } else {
               setSyncing(false);
             }
-          } catch (e) {
+          } catch {
             setSyncing(false);
           }
         };
@@ -615,7 +582,7 @@ const EmailHistoryPanel = ({
         fetchData();
         setSyncing(false);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao sincronizar emails");
       setSyncing(false);
     }
@@ -657,7 +624,7 @@ const EmailHistoryPanel = ({
         notes: ""
       });
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao registar email");
     } finally {
       setCreating(false);
@@ -670,7 +637,7 @@ const EmailHistoryPanel = ({
       await deleteEmail(emailId);
       toast.success("Email eliminado");
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar email");
     }
   };

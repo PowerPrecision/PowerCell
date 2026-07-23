@@ -99,7 +99,6 @@ const ContextSwitcher = () => {
   if (!hasMultipleRoles && !hasMultipleCompanies) return null;
 
   const currentLabel = ROLE_LABELS[effectiveRole] || effectiveRole;
-  const currentIcon = ROLE_ICONS[effectiveRole] || "👤";
 
   return (
     <div className="flex items-center gap-1.5">

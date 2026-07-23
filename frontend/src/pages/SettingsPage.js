@@ -74,7 +74,7 @@ const SettingsPage = () => {
     email_document_expiry: true,
     email_deadline_reminder: true,
   });
-  const [loadingPreferences, setLoadingPreferences] = useState(true);
+  const [, setLoadingPreferences] = useState(true);
   
   // Estado de loading
   const [loading, setLoading] = useState(false);
@@ -207,7 +207,7 @@ const SettingsPage = () => {
       } else {
         throw new Error("Erro ao guardar preferências");
       }
-    } catch (error) {
+    } catch {
       toast.error("Não foi possível guardar as preferências");
     } finally {
       setLoading(false);

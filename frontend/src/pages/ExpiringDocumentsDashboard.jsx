@@ -41,7 +41,7 @@ import { formatDate } from "../lib/utils";
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const ExpiringDocumentsDashboard = () => {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(true);

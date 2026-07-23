@@ -73,13 +73,6 @@ const StatusColors = {
 /**
  * Labels por status
  */
-const StatusLabels = {
-  pending: "Aguardando",
-  processing: "Em processamento",
-  completed: "Concluído",
-  failed: "Falhou",
-  cancelled: "Cancelado",
-};
 
 /**
  * Formatar data de prazo com indicação visual de atraso.
@@ -253,7 +246,7 @@ const TaskItem = ({ task, onAcknowledge, onCancel }) => {
 /**
  * Componente principal do dropdown de tarefas
  */
-const TasksDropdown = ({ compact = false }) => {
+const TasksDropdown = () => {
   const {
     tasks,
     activeCount,

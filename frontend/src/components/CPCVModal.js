@@ -40,23 +40,6 @@ import { toast } from "sonner";
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Cores dos bancos portugueses
-const BANK_COLORS = {
-  "ABANCA": "bg-red-500 text-white",
-  "BBVA": "bg-blue-600 text-white",
-  "BEST": "bg-green-600 text-white",
-  "BIG": "bg-orange-500 text-white",
-  "BPI": "bg-yellow-400 text-yellow-900",
-  "CGD": "bg-red-600 text-white",
-  "Crédito Agrícola": "bg-green-500 text-white",
-  "CTT": "bg-red-400 text-white",
-  "Millennium bcp": "bg-red-500 text-white",
-  "Novo Banco": "bg-gray-700 text-white",
-  "Popular": "bg-blue-500 text-white",
-  "Santander Totta": "bg-red-600 text-white",
-  "Bankinter": "bg-blue-800 text-white",
-  "ActivoBank": "bg-teal-500 text-white",
-  "Eurobic": "bg-red-500 text-white",
-};
 
 // Helper component for field errors
 const FieldError = ({ children }) => (
@@ -415,7 +398,7 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
       } else {
         throw new Error("Erro ao guardar");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar dados CPCV");
     } finally {
       setLoading(false);

@@ -60,7 +60,7 @@ export default function TempLinkDownloadPage() {
           setFiles(filesData.files || []);
         }
       }
-    } catch (err) {
+    } catch {
       setError("Erro ao verificar o link. Tente novamente.");
     } finally {
       setLoading(false);

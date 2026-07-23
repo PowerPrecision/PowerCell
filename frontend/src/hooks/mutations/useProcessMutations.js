@@ -53,7 +53,7 @@ export function useMoveProcessMutation(addPendingMove, removePendingMove, option
   const { onSuccess, onError, onSettled, filters = {} } = options;
 
   return useMutation({
-    mutationFn: async ({ processId, newStatus, oldStatus }) => {
+    mutationFn: async ({ processId, newStatus }) => {
       const response = await moveProcessKanban(processId, newStatus);
       return response.data;
     },

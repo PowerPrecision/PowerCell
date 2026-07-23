@@ -129,7 +129,7 @@ const formatPrice = (price) => {
 // ════════════════════════════════════════════════════════════════
 // VISIT CARD — Cartão individual de visita (v2 com dados do scraper)
 // ════════════════════════════════════════════════════════════════
-function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
+function VisitCard({ visit, onStatusChange, onSchedule }) {
   const status = visit.status || "agendada";
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.agendada;
   const past = isVisitPast(visit.scheduled_date) && status === "agendada";
@@ -141,7 +141,6 @@ function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
   const propertyPhoto = visit.property_photo || scraped.photo_url;
   const propertyPrice = visit.scraped_price || scraped.price;
   const propertyTypology = visit.scraped_typology || scraped.typology;
-  const propertyLocation = visit.property_address?.municipality || scraped.location || "";
   const propertyAddress = [
     visit.property_address?.street,
     visit.property_address?.municipality || scraped.location,
@@ -834,7 +833,7 @@ function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
 // VISITS PAGE — Página Principal
 // ════════════════════════════════════════════════════════════════
 const VisitsPage = () => {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);

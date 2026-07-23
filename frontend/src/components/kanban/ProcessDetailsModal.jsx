@@ -305,7 +305,6 @@ const ProcessDetailsModal = memo(({
 
   if (!process) return null;
 
-  const readOnly = !isEditing || isLockedByOther;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

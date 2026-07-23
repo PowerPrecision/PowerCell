@@ -88,7 +88,7 @@ export function UndoToastContent({
       await onUndo?.();
       toast.success('Ação desfeita');
       onDismiss?.();
-    } catch (error) {
+    } catch {
       toast.error('Erro ao desfazer');
     } finally {
       setIsUndoing(false);

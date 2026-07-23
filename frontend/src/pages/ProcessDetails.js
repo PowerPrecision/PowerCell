@@ -76,7 +76,6 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import {
-  getS3DownloadUrl,
   deleteProcess,
   generateMagicLink,
   sendMagicLinkEmail,
@@ -221,8 +220,6 @@ const ProcessDetails = () => {
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
-  const [oneDriveFiles, setOneDriveFiles] = useState([]);
-  const [currentFolder, setCurrentFolder] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("personal");
@@ -343,7 +340,7 @@ const ProcessDetails = () => {
         const data = await response.json();
         setRgpdStatus(data);
       }
-    } catch (error) {
+    } catch {
       // RGPD status check failed silently — not critical
     } finally {
       setRgpdLoading(false);
@@ -966,18 +963,7 @@ const ProcessDetails = () => {
   }, [id]);
 
   // Legacy OneDrive functions - kept for compatibility but use S3FileManager instead
-  const loadOneDriveFolder = async (subfolder = "") => {
-    // Deprecated - S3FileManager handles this now
-  };
 
-  const handleDownloadFile = async (filePath) => {
-    try {
-      const res = await getS3DownloadUrl(id, filePath);
-      window.open(res.data.url, "_blank");
-    } catch (e) {
-      toast.error("Erro ao obter link de download");
-    }
-  };
 
   // Função para executar o save após confirmação
   // FASE 3: Gravação separada — dados pessoais vão para /clients/{id}, dados de negócio para /processes/{id}
@@ -1153,7 +1139,7 @@ const ProcessDetails = () => {
   };
 
   // Guardar apenas os dados da Organização do Processo (notas, prioridade, etiquetas)
-  const [savingOrg, setSavingOrg] = useState(false);
+  const [, setSavingOrg] = useState(false);
   const handleSaveOrganization = async () => {
     if (isProcessLocked) {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
@@ -1214,7 +1200,7 @@ const ProcessDetails = () => {
       await processMutations.addActivity.mutateAsync({ comment: newComment });
       setNewComment("");
       toast.success("Comentário adicionado");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao adicionar comentário");
     } finally {
       setSendingComment(false);
@@ -1225,7 +1211,7 @@ const ProcessDetails = () => {
     try {
       await processMutations.deleteActivity.mutateAsync(activityId);
       toast.success("Comentário eliminado");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar comentário");
     }
   };
@@ -1247,7 +1233,7 @@ const ProcessDetails = () => {
       setIsDeadlineDialogOpen(false);
       setDeadlineForm({ title: "", description: "", due_date: "", priority: "medium" });
       setSelectedDate(null);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao criar prazo");
     }
   };
@@ -1258,7 +1244,7 @@ const ProcessDetails = () => {
         deadlineId: deadline.id,
         data: { completed: !deadline.completed },
       });
-    } catch (error) {
+    } catch {
       toast.error("Erro ao atualizar prazo");
     }
   };
@@ -1269,7 +1255,7 @@ const ProcessDetails = () => {
     try {
       await processMutations.deadlines.remove.mutateAsync(deadlineId);
       toast.success("Prazo eliminado!");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar prazo");
     }
   };
@@ -1297,7 +1283,6 @@ const ProcessDetails = () => {
   const userRole = user?.role?.toLowerCase() || "";
   const roleLabels = ROLE_LABELS; // Rótulos legíveis para exibição no banner retroativo
   const userPermissions = user?.permissions || {};
-  const userPages = userPermissions?.pages || [];
   const userActions = userPermissions?.actions || [];
   
   // Permissões baseadas em actions (se disponíveis) ou fallback para role
@@ -1321,16 +1306,6 @@ const ProcessDetails = () => {
   const canManageTasks = userActions.length > 0 
     ? userActions.includes("manage_tasks") 
     : ["admin", "ceo", "consultor", "intermediario", "diretor", "administrativo"].includes(userRole);
-  const canUploadDocs = userActions.length > 0 
-    ? userActions.includes("upload_docs") 
-    : true; // Por defeito todos podem upload
-  const canUseChat = userActions.length > 0 
-    ? userActions.includes("use_chat") 
-    : true; // Por defeito todos podem usar chat
-  const canAssignUsers = userActions.length > 0 
-    ? userActions.includes("assign_process_users") 
-    : ["admin", "ceo", "diretor"].includes(userRole);
-  
   // Modo de visualização (read-only) quando não tem edit_process
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
   // EXCEPÇÃO: admin e CEO NUNCA sofrem lock — podem editar processos concluídos retroativamente

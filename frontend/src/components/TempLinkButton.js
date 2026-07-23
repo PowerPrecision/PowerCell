@@ -170,7 +170,6 @@ const TempLinkButton = ({ processId, clientName, clientEmail }) => {
     }
   };
 
-  const handleCopyLink = (url) => safeCopyToClipboard(url);
 
   const toggleFileSelection = (filePath) => {
     setSelectedFiles(prev => {

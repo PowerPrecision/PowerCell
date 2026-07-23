@@ -152,7 +152,7 @@ export default function CompanyEmailConfigSection() {
         const data = await res.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setSaving(false);
@@ -177,7 +177,7 @@ export default function CompanyEmailConfigSection() {
       } else {
         toast.error("Erro ao remover");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setDeletingCompany(null);

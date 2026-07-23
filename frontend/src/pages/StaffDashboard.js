@@ -180,7 +180,7 @@ const StaffDashboard = () => {
           setDstiAlerts(data);
         }
       }
-    } catch (err) {
+    } catch {
       // Silenciar - DSTI pode estar desactivado
     }
   };
@@ -206,7 +206,7 @@ const StaffDashboard = () => {
       await sendAutoDraft(draftId);
       toast.success("Rascunho enviado com sucesso!");
       fetchDrafts();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao enviar rascunho");
     } finally {
       setSendingDraft(null);
@@ -219,7 +219,7 @@ const StaffDashboard = () => {
       await deleteAutoDraft(draftId);
       toast.success("Rascunho descartado");
       fetchDrafts();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao descartar rascunho");
     }
   };

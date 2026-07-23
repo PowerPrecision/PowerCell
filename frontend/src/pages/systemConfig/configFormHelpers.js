@@ -276,7 +276,7 @@ export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onT
       await onSave(sectionKey, localConfig);
       setHasChanges(false);
       toast.success("Configuração guardada", { id: "config-save" });
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar", { id: "config-save" });
     } finally {
       setSaving(false);
@@ -293,7 +293,7 @@ export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onT
       } else {
         toast.error(result.message);
       }
-    } catch (error) {
+    } catch {
       setTestResult({ success: false, message: "Erro ao testar" });
     } finally {
       setTesting(false);

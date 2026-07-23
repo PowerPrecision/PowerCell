@@ -140,7 +140,6 @@ export default function ClientsPage() {
   const setPhaseFilter = (v) => updateParam("phase", v);
   const setAssignmentFilter = (v) => updateParam("assignment", v);
   const setIndexacaoFilter = (v) => updateParam("indexacao", v);
-  const setShowDeleted = (v) => updateParam("show_deleted", v ? "true" : "");
 
   // Search local state — o input só dispara a pesquisa ao submeter o formulário
   // (Enter ou botão “Pesquisar”), evitando pesquisas automáticas a cada tecla
@@ -149,8 +148,6 @@ export default function ClientsPage() {
   useEffect(() => {
     setSearchInput(searchTerm);
   }, [searchTerm]);
-  const setSortField = (v) => updateParam("sort", v);
-  const setSortOrder = (v) => updateParam("order", v);
   
   const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
   const [showCreateModal, setShowCreateModal] = useState(false);

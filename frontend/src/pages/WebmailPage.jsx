@@ -202,7 +202,7 @@ const WebmailPage = () => {
   // Labels state
   const [labels, setLabels] = useState([]);
   const [selectedLabel, setSelectedLabel] = useState(null);
-  const [labelsLoading, setLabelsLoading] = useState(false);
+  const [, setLabelsLoading] = useState(false);
 
   // Multi-select state
   const [selectedEmails, setSelectedEmails] = useState(new Set());
@@ -676,7 +676,7 @@ const WebmailPage = () => {
             setLastSyncTime(new Date());
             pollJobStatus(fallbackData.job_id);
             return;
-          } catch (fallbackError) {
+          } catch {
             if (!wasInitialLoad) toast.error(data.error || "Erro na sincronização");
             setSyncing(false);
             return;
@@ -896,7 +896,7 @@ const WebmailPage = () => {
         try {
           const errData = await response.json();
           detail = errData.detail || errData.message || errData.error || detail;
-        } catch (_) {
+        } catch {
           /* resposta sem corpo JSON — manter mensagem genérica */
         }
         throw new Error(detail);

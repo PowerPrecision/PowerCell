@@ -45,12 +45,6 @@ const serviceIcons = {
   notifications: Bell
 };
 
-const statusColors = {
-  ok: "bg-green-500",
-  warning: "bg-yellow-500", 
-  error: "bg-red-500",
-  not_configured: "bg-gray-400"
-};
 
 const statusLabels = {
   ok: "Operacional",
@@ -234,7 +228,7 @@ const DiagnosticsPage = ({ embedded = false }) => {
     fetchTTLStatus();
   }, [token]);
 
-  const handleConfigure = (service) => {
+  const handleConfigure = () => {
     navigate("/configuracoes");
   };
 

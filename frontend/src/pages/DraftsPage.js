@@ -90,7 +90,7 @@ const generateId = () => `draft_${Date.now()}_${Math.random().toString(36).subst
 
 const DraftsPage = () => {
   const [drafts, setDrafts] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("all");
   const [dialogOpen, setDialogOpen] = useState(false);
@@ -148,7 +148,7 @@ const DraftsPage = () => {
     try {
       await navigator.clipboard.writeText(draft.conteudo);
       toast.success("Conteudo copiado para a area de transferencia");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao copiar");
     }
   };

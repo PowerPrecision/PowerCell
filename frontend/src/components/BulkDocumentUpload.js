@@ -75,7 +75,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
   const [fileStatuses, setFileStatuses] = useState({});
   const [summary, setSummary] = useState(null);
   const [clientsList, setClientsList] = useState([]);
-  const [loadingClients, setLoadingClients] = useState(false);
+  const [, setLoadingClients] = useState(false);
   const [currentFile, setCurrentFile] = useState(null);
 
   // Verificar se é admin (ou se tem forceClientId definido - qualquer user com acesso ao processo pode enviar)
@@ -240,7 +240,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
         return data.exists;
       }
       return false;
-    } catch (error) {
+    } catch {
       return false;
     }
   };

@@ -172,7 +172,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
       fetchDocuments();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
-    } catch (err) {
+    } catch {
       toast.error("Erro ao atualizar estado");
     } finally {
       setActionLoading(null);
@@ -187,7 +187,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
       fetchDocuments();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
-    } catch (err) {
+    } catch {
       toast.error("Erro ao atualizar estado");
     } finally {
       setActionLoading(null);
@@ -203,7 +203,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
       fetchDocuments();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
-    } catch (err) {
+    } catch {
       toast.error("Erro ao remover pedido");
     } finally {
       setActionLoading(null);
@@ -453,8 +453,6 @@ function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isRece
   const StatusIcon = statusCfg.icon;
 
   const displayName = safeString(doc.custom_label) || catInfo.label;
-  // Ensure doc.id is always a string for React key usage
-  const docId = safeString(doc.id, String(doc.id || Math.random()));
 
   return (
     <div className={`flex items-center gap-2.5 p-2.5 rounded-lg border transition-colors ${

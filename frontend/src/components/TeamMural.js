@@ -296,7 +296,7 @@ const TeamMural = () => {
       setNewMessage("");
       toast.success("Mensagem publicada!");
       fetchAnnouncements();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao publicar mensagem");
     } finally {
       setPublishing(false);

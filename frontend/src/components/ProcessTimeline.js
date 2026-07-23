@@ -5,7 +5,6 @@
  * Usa as fases dinâmicas da BD (workflow_statuses) em vez de dados hardcoded.
  */
 import React, { useState, useEffect, useCallback, useMemo } from "react";
-import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
@@ -120,8 +119,7 @@ const TimelineConnector = ({ isCompleted }) => (
   </div>
 );
 
-const ProcessTimeline = ({ processId, currentStatus, history, workflowStatuses }) => {
-  const { token } = useAuth();
+const ProcessTimeline = ({ currentStatus, history, workflowStatuses }) => {
   const [timelineData, setTimelineData] = useState([]);
   const [loading, setLoading] = useState(true);
 

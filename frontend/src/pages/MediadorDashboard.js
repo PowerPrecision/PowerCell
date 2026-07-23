@@ -62,7 +62,6 @@ const MediadorDashboard = () => {
 
   // Dashboard data hook
   const {
-    processes,
     filteredProcesses,
     workflowStatuses,
     upcomingExpiries,

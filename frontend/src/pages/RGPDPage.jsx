@@ -230,7 +230,7 @@ const toDisplayDate = (value) => {
 // ====================================================================
 // SIGNATURE PAD COMPONENT
 // ====================================================================
-function SignaturePad({ onSignatureChange, signature }) {
+function SignaturePad({ onSignatureChange }) {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
@@ -406,7 +406,7 @@ export default function RGPDPage() {
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [step, setStep] = useState(1);
-  const [tokenData, setTokenData] = useState(null);
+  const [, setTokenData] = useState(null);
   const [formData, setFormData] = useState(null);
 
   // Form fields

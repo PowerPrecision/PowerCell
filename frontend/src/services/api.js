@@ -262,7 +262,6 @@ api.interceptors.response.use(
     if (status === 401) {
       // Não mostrar toast para tentativas de login falhadas
       const isLoginAttempt = config.url?.includes("/auth/login");
-      const isStopImpersonate = config.url?.includes("/stop-impersonate");
       
       // Se estiver em modo impersonate e existe originalToken, tentar restaurar
       const originalToken = localStorage.getItem("originalToken");

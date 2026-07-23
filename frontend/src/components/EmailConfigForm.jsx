@@ -199,7 +199,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         setHasPassword(false);
         setWebmailConfigured(false);
       }
-    } catch (error) {
+    } catch {
       setConfigSource("none");
       setWebmailConfigured(false);
       setEmailConfig({
@@ -275,7 +275,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
       setTimeout(() => {
         setGoogleOAuthConnecting(false);
       }, 120000);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao iniciar autenticação Google");
       setGoogleOAuthConnecting(false);
     }

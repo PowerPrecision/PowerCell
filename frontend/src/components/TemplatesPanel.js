@@ -166,7 +166,7 @@ const TemplatesPanel = ({ processId, token }) => {
       setCopied(true);
       toast.success('Copiado para a área de transferência!');
       setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
+    } catch {
       toast.error('Erro ao copiar');
     }
   };
