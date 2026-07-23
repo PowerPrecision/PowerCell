@@ -881,6 +881,97 @@ class S3Service:
             return (False, None)
 
 
+    def ensure_client_folder_mapping(
+        self,
+        client_id: str,
+        client_name: str,
+        second_client_name: str = None,
+        existing_s3_folder: str = None,
+    ) -> Dict:
+        """
+        Garante, de forma robusta e idempotente, que existe um mapeamento
+        de pasta S3 válido para um cliente/processo.
+
+        Usado tanto pelos fluxos normais de criação (onboarding, criação de
+        processo) como pelo script de recuperação
+        ``backend/scripts/hotfix_restore_s3_mappings.py`` para reparar
+        mapeamentos em falta em clientes já existentes.
+
+        Ordem de resolução:
+        1. Se ``existing_s3_folder`` for fornecido e a pasta ainda existir
+           no S3, é reutilizado sem qualquer alteração (não recria nada).
+        2. Caso contrário, procura uma pasta já existente para o cliente
+           por nome (case-insensitive / fuzzy), para evitar duplicados.
+        3. Se não encontrar nenhuma, cria a estrutura de pastas padrão.
+
+        Esta função NUNCA escreve na base de dados — apenas devolve o
+        caminho resolvido/criado no S3. A persistência (via ``$set``
+        estrito na chave `s3_folder`) é responsabilidade de quem chama.
+
+        Args:
+            client_id: ID do processo/cliente (usado como referência interna).
+            client_name: Nome do primeiro titular.
+            second_client_name: Nome do segundo titular (opcional).
+            existing_s3_folder: Mapeamento atual guardado na BD, se existir.
+
+        Returns:
+            dict com:
+            - success (bool): True se há um caminho S3 válido para usar.
+            - s3_folder (str | None): Caminho da pasta base no S3.
+            - created (bool): True se uma pasta NOVA foi criada agora.
+            - reused_existing (bool): True se o mapeamento existente foi
+              validado e reutilizado sem alterações.
+        """
+        result = {
+            "success": False,
+            "s3_folder": None,
+            "created": False,
+            "reused_existing": False,
+        }
+
+        if not self.is_configured():
+            logger.error("S3 não configurado — não é possível garantir mapeamento.")
+            return result
+
+        if not client_name or not client_name.strip():
+            logger.warning(f"Cliente {client_id} sem nome válido — não é possível criar pasta S3.")
+            return result
+
+        # 1. Reutilizar mapeamento existente se ainda for válido
+        clean_existing = existing_s3_folder.strip() if existing_s3_folder else None
+        if clean_existing and clean_existing.lower() not in ("undefined", "null", "none"):
+            try:
+                if self._folder_exists(clean_existing):
+                    result.update(success=True, s3_folder=clean_existing, reused_existing=True)
+                    return result
+            except Exception as e:
+                logger.warning(f"Erro ao validar mapeamento S3 existente para {client_id}: {e}")
+
+        # 2. Procurar pasta já existente por nome (evita duplicados)
+        try:
+            found = self._find_client_folder_combined(client_name, second_client_name)
+            if found:
+                logger.info(f"[ENSURE-S3-MAPPING] Pasta existente encontrada para {client_name}: {found}")
+                result.update(success=True, s3_folder=found, reused_existing=True)
+                return result
+        except Exception as e:
+            logger.warning(f"Erro ao procurar pasta existente para {client_id}: {e}")
+
+        # 3. Nenhuma pasta encontrada — criar estrutura nova
+        try:
+            success, folder_path = self.initialize_client_folders(
+                client_id, client_name, second_client_name
+            )
+            if success and folder_path:
+                logger.info(f"[ENSURE-S3-MAPPING] Pasta criada para {client_name}: {folder_path}")
+                result.update(success=True, s3_folder=folder_path, created=True)
+            else:
+                logger.error(f"[ENSURE-S3-MAPPING] Falha ao criar pasta S3 para cliente {client_id}")
+        except Exception as e:
+            logger.error(f"[ENSURE-S3-MAPPING] Erro inesperado ao criar pasta S3 para {client_id}: {e}", exc_info=True)
+
+        return result
+
     def get_file_content(self, object_name: str, max_size_mb: int = 20) -> Optional[bytes]:
         """
         Obtém o conteúdo de um ficheiro do S3.

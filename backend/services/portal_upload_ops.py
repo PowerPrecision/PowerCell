@@ -120,6 +120,7 @@ async def run_generate_portal_upload_url(data: dict, client_data: dict):
         storage_id = process_id
         client_name = process.get("client_name") or client.get("nome") or "cliente"
         s3_folder = process.get("s3_folder")
+        target_collection = db.processes
     else:
         if not client_id:
             raise HTTPException(
@@ -129,6 +130,33 @@ async def run_generate_portal_upload_url(data: dict, client_data: dict):
         storage_id = client_id
         client_name = client.get("nome") or "cliente"
         s3_folder = client.get("s3_folder")
+        target_collection = db.clients
+
+    # ── HOTFIX — Garantir mapeamento S3 (nunca deixar o cliente sem pasta) ──
+    # Se ainda não há `s3_folder` guardado (no processo OU no cliente), resolve
+    # /cria a pasta de forma robusta e persiste o mapeamento (via $set estrito,
+    # apenas nesta chave) para que os próximos uploads/listagens sejam
+    # consistentes e não dependam de matching por nome (fuzzy) a cada pedido.
+    if not s3_folder:
+        titular2_upload = (process or {}).get("titular2_data") or {}
+        second_client_name = (process or {}).get("second_client_name") or titular2_upload.get("nome") or titular2_upload.get("name")
+        mapping = await asyncio.to_thread(
+            s3_service.ensure_client_folder_mapping,
+            storage_id,
+            client_name,
+            second_client_name,
+            s3_folder,
+        )
+        if mapping.get("success") and mapping.get("s3_folder"):
+            s3_folder = mapping["s3_folder"]
+            await target_collection.update_one(
+                {"id": storage_id},
+                {"$set": {"s3_folder": s3_folder}}
+            )
+            logger.info(
+                f"[PORTAL][HOTFIX-S3-MAPPING] Mapeamento S3 {'criado' if mapping.get('created') else 'recuperado'} "
+                f"para {'processo' if process else 'cliente'} {storage_id}: {s3_folder}"
+            )
 
     result = s3_service.generate_upload_presigned_url(
         client_id=storage_id,
