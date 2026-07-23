@@ -688,6 +688,132 @@ PROFILE_UPDATABLE_PERSONAL_FIELDS = {
 # Campos SENSÍVEIS que NÃO são devolvidos ao frontend (mesmo encriptados)
 PROFILE_HIDDEN_FIELDS = {"nif", "nome_pai", "nome_mae", "altura"}
 
+# ── CRÍTICO — HOTFIX MAPEAMENTOS S3 ──────────────────────────────────────
+# Campos de topo-de-nível que o Portal do Cliente NUNCA pode escrever,
+# independentemente do que vier no payload do pedido. Isto protege os
+# mapeamentos internos S3 (pasta/mapping) e as relações com processos,
+# que só devem ser geridos pelo backend/admin — nunca pelo cliente final.
+# Usado como rede de segurança (defense-in-depth) sobre o whitelist já
+# aplicado a `contacto` e `dados_pessoais`.
+PORTAL_PROTECTED_CLIENT_FIELDS = {
+    "id", "_id", "process_ids", "processes",
+    "s3_folder", "s3_folder_path", "s3_mapping_id", "s3_mapping",
+    "s3_mapping_updated_at", "s3_mapping_updated_by",
+    "role", "is_active", "created_at", "created_by",
+}
+
+
+def _assert_no_protected_fields(mongo_update: dict) -> dict:
+    """
+    Rede de segurança final antes de qualquer escrita no MongoDB a partir
+    do Portal do Cliente.
+
+    Remove (e regista em log de aviso) qualquer chave de topo-de-nível —
+    incluindo notação com ponto, ex. "s3_folder.x" — que corresponda a um
+    campo protegido. Isto garante que, mesmo que um bug futuro introduza
+    um campo não-whitelisted no update, os mapeamentos S3 e as relações
+    com processos nunca são apagados ou sobrescritos pelo cliente.
+    """
+    safe_update = {}
+    for key, value in mongo_update.items():
+        top_level_key = key.split(".", 1)[0]
+        if top_level_key in PORTAL_PROTECTED_CLIENT_FIELDS:
+            logger.error(
+                f"[PORTAL PROFILE][BLOQUEADO] Tentativa de escrever campo protegido "
+                f"'{key}' via Portal do Cliente foi ignorada."
+            )
+            continue
+        safe_update[key] = value
+    return safe_update
+
+
+def build_portal_profile_mongo_update(
+    data: "ClientProfileUpdate",
+    existing_client: dict,
+    now: str,
+) -> dict:
+    """
+    Constrói o dicionário de atualização MongoDB para o Portal do Cliente.
+
+    REGRAS DE SEGURANÇA (hotfix mapeamentos S3):
+    - Usa ESTRITAMENTE `$set` com notação de ponto por campo individual
+      (nunca substitui sub-documentos inteiros nem o documento completo).
+    - Apenas os campos em PROFILE_UPDATABLE_CONTACT_FIELDS e
+      PROFILE_UPDATABLE_PERSONAL_FIELDS podem ser escritos.
+    - Aplica `_assert_no_protected_fields` como rede de segurança final,
+      garantindo que `s3_folder`, `process_ids` e outros campos internos
+      NUNCA são tocados a partir deste endpoint.
+
+    Args:
+        data: Payload validado do pedido (whitelist já aplicado ao nível
+            dos sub-campos de `contacto` e `dados_pessoais`).
+        existing_client: Documento atual do cliente (usado para merge de
+            `field_metadata` sem perder histórico de campos não alterados).
+        now: Timestamp ISO 8601 a usar em `updated_at` / `field_metadata`.
+
+    Returns:
+        dict: Pronto a ser usado como `{"$set": update}` num `update_one`.
+            Vazio (exceto `updated_at`) se não houver campos válidos.
+    """
+    update_fields = {}
+
+    contacto_updates = {}
+    if data.contacto:
+        for key, value in data.contacto.items():
+            if key not in PROFILE_UPDATABLE_CONTACT_FIELDS:
+                continue
+            if key in ("email", "email_secundario") and value:
+                try:
+                    from services.encryption import encrypt_value, generate_email_hash
+                    encrypted = encrypt_value(str(value).strip().lower())
+                    if encrypted:
+                        contacto_updates[key] = encrypted
+                        if key == "email":
+                            email_hash = generate_email_hash(str(value).strip().lower())
+                            if email_hash:
+                                contacto_updates["email_hash"] = email_hash
+                    else:
+                        contacto_updates[key] = str(value).strip().lower()
+                except Exception:
+                    contacto_updates[key] = str(value).strip().lower()
+            else:
+                contacto_updates[key] = value
+        if contacto_updates:
+            update_fields["contacto"] = contacto_updates
+
+    dp_updates = {}
+    if data.dados_pessoais:
+        for key, value in data.dados_pessoais.items():
+            if key in PROFILE_UPDATABLE_PERSONAL_FIELDS:
+                dp_updates[key] = value
+        if dp_updates:
+            update_fields["dados_pessoais"] = dp_updates
+
+    if not update_fields:
+        return {}
+
+    mongo_update = {"updated_at": now}
+
+    for key, value in update_fields.get("contacto", {}).items():
+        mongo_update[f"contacto.{key}"] = value
+
+    for key, value in update_fields.get("dados_pessoais", {}).items():
+        mongo_update[f"dados_pessoais.{key}"] = value
+
+    field_metadata_portal = {}
+    for key in update_fields.get("contacto", {}):
+        field_metadata_portal[f"contacto.{key}"] = {"source": "client", "updated_at": now}
+    for key in update_fields.get("dados_pessoais", {}):
+        field_metadata_portal[f"dados_pessoais.{key}"] = {"source": "client", "updated_at": now}
+
+    if field_metadata_portal:
+        existing_fm = (existing_client or {}).get("field_metadata") or {}
+        mongo_update["field_metadata"] = {**existing_fm, **field_metadata_portal}
+
+    # Rede de segurança final: nunca deixar sair campos protegidos daqui,
+    # mesmo que a lógica acima seja alterada no futuro sem cuidado.
+    return _assert_no_protected_fields(mongo_update)
+
 
 def _decrypt_if_needed(value):
     """Desencripta um valor se tiver o prefixo ENC:."""
@@ -833,9 +959,13 @@ async def update_client_profile(
         )
 
     # ── REGRA CRÍTICA: Verificar se o cliente tem processo associado ──
+    # NOTA: a projeção inclui apenas os campos efetivamente necessários
+    # (process_ids para a verificação de bloqueio, field_metadata para o
+    # merge de proveniência). NUNCA projetar/usar campos internos como
+    # s3_folder — este endpoint não deve ler nem escrever mapeamentos S3.
     client = await db.clients.find_one(
         {"id": client_id},
-        {"_id": 0, "process_ids": 1}
+        {"_id": 0, "process_ids": 1, "field_metadata": 1}
     )
 
     if not client:
@@ -863,92 +993,27 @@ async def update_client_profile(
                 detail="Dados trancados. O seu processo já se encontra em análise."
             )
 
-    # ── Filtrar campos permitidos (whitelist) ──
-    update_fields = {}
+    # ── Construir atualização segura (whitelist + $set granular) ──
+    # CRÍTICO (hotfix mapeamentos S3): a atualização usa ESTRITAMENTE $set
+    # com chaves individuais (notação de ponto) para os campos que o
+    # cliente tem permissão para editar. Nunca substitui o documento
+    # completo nem sub-documentos inteiros, por isso `s3_folder`,
+    # `process_ids` e outras relações internas nunca são tocados aqui.
     now = datetime.now(timezone.utc).isoformat()
+    mongo_update = build_portal_profile_mongo_update(data, client, now)
 
-    # Processar contacto
-    if data.contacto:
-        contacto_updates = {}
-        for key, value in data.contacto.items():
-            if key in PROFILE_UPDATABLE_CONTACT_FIELDS:
-                # Encriptar campos sensíveis (email)
-                if key in ("email", "email_secundario") and value:
-                    try:
-                        from services.encryption import encrypt_value, generate_email_hash
-                        encrypted = encrypt_value(str(value).strip().lower())
-                        if encrypted:
-                            contacto_updates[key] = encrypted
-                            # Atualizar blind index para pesquisa
-                            if key == "email":
-                                email_hash = generate_email_hash(str(value).strip().lower())
-                                if email_hash:
-                                    contacto_updates["email_hash"] = email_hash
-                        else:
-                            contacto_updates[key] = str(value).strip().lower()
-                    except Exception:
-                        # Se a encriptação falhar, guardar em texto limpo (fallback)
-                        contacto_updates[key] = str(value).strip().lower()
-                else:
-                    contacto_updates[key] = value
-
-        if contacto_updates:
-            update_fields["contacto"] = contacto_updates
-
-    # Processar dados pessoais
-    if data.dados_pessoais:
-        dp_updates = {}
-        for key, value in data.dados_pessoais.items():
-            if key in PROFILE_UPDATABLE_PERSONAL_FIELDS:
-                dp_updates[key] = value
-
-        if dp_updates:
-            update_fields["dados_pessoais"] = dp_updates
-
-    if not update_fields:
+    if not mongo_update:
         return {"success": True, "message": "Nenhum campo para atualizar.", "updated_fields": []}
 
-    # ── Aplicar atualização no MongoDB (merge com dados existentes) ──
-    mongo_update = {"updated_at": now}
-
-    # Para contacto: usar notação dot para merge (não substituir o documento inteiro)
-    if "contacto" in update_fields:
-        for key, value in update_fields["contacto"].items():
-            mongo_update[f"contacto.{key}"] = value
-
-    # Para dados_pessoais: usar notação dot para merge
-    if "dados_pessoais" in update_fields:
-        for key, value in update_fields["dados_pessoais"].items():
-            mongo_update[f"dados_pessoais.{key}"] = value
-
-    # PACOTE CS — Data Provenance: injetar automaticamente field_metadata
-    # com source="client" para cada campo atualizado pelo cliente no Portal.
-    # Formato: {"contacto.email": {"source": "client", "updated_at": "ISO"}}
-    field_metadata_portal = {}
-    if "contacto" in update_fields:
-        for key in update_fields["contacto"]:
-            field_metadata_portal[f"contacto.{key}"] = {
-                "source": "client",
-                "updated_at": now
-            }
-    if "dados_pessoais" in update_fields:
-        for key in update_fields["dados_pessoais"]:
-            field_metadata_portal[f"dados_pessoais.{key}"] = {
-                "source": "client",
-                "updated_at": now
-            }
-    if field_metadata_portal:
-        # Merge com field_metadata existente (não apaga campos anteriores)
-        existing_fm = client.get("field_metadata") or {}
-        merged_fm = {**existing_fm, **field_metadata_portal}
-        mongo_update["field_metadata"] = merged_fm
+    updated_fields = [
+        key for key in ("contacto", "dados_pessoais")
+        if any(k.startswith(f"{key}.") for k in mongo_update)
+    ]
 
     result = await db.clients.update_one(
         {"id": client_id},
         {"$set": mongo_update}
     )
-
-    updated_fields = list(update_fields.keys())
 
     logger.info(
         f"[PORTAL PROFILE] Cliente {client_id} atualizou perfil: {updated_fields}"
@@ -1455,6 +1520,32 @@ async def generate_portal_upload_url(
 
     client_name = process.get("client_name", "cliente")
     s3_folder = process.get("s3_folder")
+
+    # ── HOTFIX — Garantir mapeamento S3 (nunca deixar o cliente sem pasta) ──
+    # Se o processo ainda não tem `s3_folder` guardado, resolve/cria a
+    # pasta de forma robusta e persiste o mapeamento (via $set estrito,
+    # apenas nesta chave) para que os próximos uploads/listagens sejam
+    # consistentes e não dependam de matching por nome (fuzzy).
+    if not s3_folder:
+        titular2_upload = process.get("titular2_data") or {}
+        second_client_name = process.get("second_client_name") or titular2_upload.get("nome") or titular2_upload.get("name")
+        mapping = await asyncio.to_thread(
+            s3_service.ensure_client_folder_mapping,
+            process_id,
+            client_name,
+            second_client_name,
+            s3_folder,
+        )
+        if mapping.get("success") and mapping.get("s3_folder"):
+            s3_folder = mapping["s3_folder"]
+            await db.processes.update_one(
+                {"id": process_id},
+                {"$set": {"s3_folder": s3_folder}}
+            )
+            logger.info(
+                f"[PORTAL][HOTFIX-S3-MAPPING] Mapeamento S3 {'criado' if mapping.get('created') else 'recuperado'} "
+                f"para processo {process_id}: {s3_folder}"
+            )
 
     result = s3_service.generate_upload_presigned_url(
         client_id=process_id,
