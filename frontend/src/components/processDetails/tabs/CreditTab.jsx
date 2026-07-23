@@ -1,18 +1,18 @@
 /**
- * ProcessCreditTab — extraído de ProcessDetails.js (tab credit).
+ * CreditTab — extraído de ProcessDetails.js (tab credit).
  * Mantém o JSX original; estado e permissões vêm por props.
  */
-import { Card, CardContent } from "../ui/card";
-import { Input } from "../ui/input";
-import { Label } from "../ui/label";
-import { Textarea } from "../ui/textarea";
-import { Switch } from "../ui/switch";
-import { AIBadge } from "../ui/AIBadge";
+import { Card, CardContent } from "../../ui/card";
+import { Input } from "../../ui/input";
+import { Label } from "../../ui/label";
+import { Textarea } from "../../ui/textarea";
+import { Switch } from "../../ui/switch";
+import { AIBadge } from "../../ui/AIBadge";
 import { CreditCard, Building2, Shield } from "lucide-react";
-import { formatDateForInput } from "../../pages/processDetails/processFormCleaners";
-import { safeNumber } from "../dashboard/DashboardShared";
+import { formatDateForInput } from "../../../pages/processDetails/processFormCleaners";
+import { safeNumber } from "../../dashboard/DashboardShared";
 
-export default function ProcessCreditTab({
+export default function CreditTab({
   realEstateData, creditData, setCreditData, editingCardId, canEditCredit, CardHeaderWithEdit, getFieldMetaFor, shouldCardBeCollapsed, collapsedCards,
 }) {
   return (
