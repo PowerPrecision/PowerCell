@@ -4,6 +4,7 @@
  */
 import React, { useState, useEffect } from "react";
 import { useAuth } from "../contexts/AuthContext";
+import { hasAnyRole } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -624,10 +625,14 @@ const ClientRegistrationsAdminPage = () => {
     }
   };
 
-  // Verificar acesso
-  const accessDenied = <AccessRestricted userRole={user?.role} />;
-  if (accessDenied) {
-    return <DashboardLayout>{accessDenied}</DashboardLayout>;
+  // Verificar acesso (backend só permite admin/ceo em /admin/client-registrations)
+  const CLIENT_REGISTRATIONS_ALLOWED_ROLES = ["admin", "ceo"];
+  if (!hasAnyRole(user, CLIENT_REGISTRATIONS_ALLOWED_ROLES)) {
+    return (
+      <DashboardLayout>
+        <AccessRestricted userRole={user?.role} allowedRoles={CLIENT_REGISTRATIONS_ALLOWED_ROLES} />
+      </DashboardLayout>
+    );
   }
 
   return (
