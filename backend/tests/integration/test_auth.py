@@ -16,7 +16,7 @@ class TestAuthEndpoints:
     @pytest.fixture
     def mock_db(self):
         """Mock do banco de dados."""
-        with patch('routes.auth.db') as mock:
+        with patch('services.auth_login_handlers.db') as mock:
             yield mock
     
     @pytest.mark.asyncio
