@@ -192,7 +192,6 @@ import VisitasTab from "../components/processDetails/tabs/VisitasTab";
 import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 
-// eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 // Constantes/helpers: processDetailsConstants, processFormCleaners, validateNIF

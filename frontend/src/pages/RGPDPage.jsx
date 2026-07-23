@@ -12,7 +12,6 @@ import { sanitizeHtml } from '../utils/sanitize';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
-// eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 import { Button } from '../components/ui/button';

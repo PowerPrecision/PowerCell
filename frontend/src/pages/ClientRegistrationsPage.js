@@ -199,7 +199,7 @@ const ClientRegistrationsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]);
 
   useEffect(() => {
     fetchClients();
