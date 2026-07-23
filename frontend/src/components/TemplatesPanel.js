@@ -3,7 +3,7 @@
  * Permite gerar e descarregar minutas preenchidas automaticamente
  * e aceder aos webmails para envio de emails
  */
-import React, { useState } from 'react';
+import { useState } from 'react';
 import axios from 'axios';
 import { 
   FileText, 
@@ -166,7 +166,7 @@ const TemplatesPanel = ({ processId, token }) => {
       setCopied(true);
       toast.success('Copiado para a área de transferência!');
       setTimeout(() => setCopied(false), 2000);
-    } catch (error) {
+    } catch {
       toast.error('Erro ao copiar');
     }
   };

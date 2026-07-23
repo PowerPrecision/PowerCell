@@ -228,7 +228,7 @@ export function useKanbanRealtime(options = {}) {
   }, [handleProcessCreated, handleProcessStatusChanged, handleProcessUpdated, handleProcessAssigned]);
 
   // Conectar ao WebSocket
-  const { isConnected, on, off, sendMessage } = useWebSocket({
+  const { isConnected, on, sendMessage } = useWebSocket({
     onProcessUpdate: handleProcessUpdate,
     autoConnect: true,
   });

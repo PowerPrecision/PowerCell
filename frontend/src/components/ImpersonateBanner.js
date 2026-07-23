@@ -23,7 +23,7 @@ export default function ImpersonateBanner() {
     try {
       await stopImpersonating();
       toast.success("Voltou à sua conta de administrador");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao terminar sessão de visualização");
     }
   };

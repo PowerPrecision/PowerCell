@@ -20,7 +20,7 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import {
-  Table, TableBody, TableCell, TableHead, TableHeader, TableRow, TableCaption
+  Table, TableBody, TableCell, TableHead, TableHeader, TableRow
 } from "../ui/table";
 import {
   Users, TrendingUp, CheckCircle, AlertTriangle, Clock, Loader2,

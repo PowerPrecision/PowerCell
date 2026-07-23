@@ -7,14 +7,13 @@
  * 2. Bookmarklet Avançado - Abre o CRM automaticamente com dados
  * 3. Colar HTML - Copiar página e colar aqui
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useSearchParams } from "react-router-dom";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Textarea } from "../components/ui/textarea";
-import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { ScrollArea } from "../components/ui/scroll-area";
@@ -25,7 +24,6 @@ import {
   Sparkles,
   Loader2,
   CheckCircle,
-  ExternalLink,
   BookmarkPlus,
   ClipboardPaste,
   MapPin,
@@ -38,7 +36,6 @@ import {
   Zap,
   Car,
   Thermometer,
-  Calendar,
   Hash,
   Mail,
   FileText,

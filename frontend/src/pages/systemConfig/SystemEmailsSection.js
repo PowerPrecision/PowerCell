@@ -3,8 +3,8 @@
  *
  * Extraído de SystemConfigPage.js (tab "system_emails").
  */
-import React, { useState, useEffect, useCallback } from "react";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
+import { useState, useEffect, useCallback } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
 import { Label } from "../../components/ui/label";
@@ -84,7 +84,7 @@ export default function SystemEmailsSection({ token }) {
         (data || []).forEach((c) => { map[c.purpose] = c; });
         setConfigs(map);
       }
-    } catch (e) {
+    } catch {
       // silent
     } finally {
       setLoading(false);
@@ -119,7 +119,6 @@ export default function SystemEmailsSection({ token }) {
     try {
       const body = { ...form };
       if (!body.password) delete body.password; // don't send empty password
-      const isUpdate = configs[editingPurpose]?.has_password && !body.password;
 
       const res = await fetch(`${API_URL}/api/system-config/system-emails/${editingPurpose}`, {
         method: configs[editingPurpose] ? "PUT" : "POST",
@@ -134,7 +133,7 @@ export default function SystemEmailsSection({ token }) {
         const err = await res.json().catch(() => ({}));
         toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
       }
-    } catch (e) {
+    } catch {
       toast.error("Erro de ligação");
     } finally {
       setSaving(false);
@@ -151,7 +150,7 @@ export default function SystemEmailsSection({ token }) {
       });
       const data = await res.json().catch(() => ({}));
       setTestResult({ purpose, success: data.success, message: data.message });
-    } catch (e) {
+    } catch {
       setTestResult({ purpose, success: false, message: "Erro de ligação" });
     } finally {
       setTesting(null);
@@ -170,7 +169,7 @@ export default function SystemEmailsSection({ token }) {
         fetchConfigs();
         if (editingPurpose === purpose) setEditingPurpose(null);
       }
-    } catch (e) {
+    } catch {
       toast.error("Erro ao eliminar");
     }
   };

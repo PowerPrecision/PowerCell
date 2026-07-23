@@ -22,7 +22,7 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "./ui/dialog";
-import { FolderOpen, Plus, Trash2, ExternalLink, Loader2, Link as LinkIcon, Save, Cloud, HardDrive } from "lucide-react";
+import { Plus, Trash2, ExternalLink, Loader2, Link as LinkIcon, Save, Cloud, HardDrive } from "lucide-react";
 import { toast } from "sonner";
 import { getProcessOneDriveLinks, addProcessOneDriveLink, deleteProcessOneDriveLink } from "../services/api";
 
@@ -163,7 +163,7 @@ const DriveLinks = ({ processId, clientName }) => {
         const data = await response.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar link"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar link da pasta");
     } finally {
       setLoadingFolder(false);
@@ -184,7 +184,7 @@ const DriveLinks = ({ processId, clientName }) => {
         toast.success("Link removido");
         setSavedFolderUrl(null);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao remover link");
     }
   };
@@ -217,7 +217,7 @@ const DriveLinks = ({ processId, clientName }) => {
       await deleteProcessOneDriveLink(processId, linkId);
       toast.success("Link eliminado");
       fetchLinks();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar link");
     }
   };

@@ -19,9 +19,8 @@ import { Switch } from "../components/ui/switch";
 import { Label } from "../components/ui/label";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { 
-  Search, Eye, FileText, Phone, Mail, MapPin, Euro, Filter,
-  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2,
-  User, Users, Archive, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
+  Search, Eye, FileText, Phone, Mail, Filter,
+  ChevronLeft, ChevronRight, ChevronsLeft, ChevronsRight, Loader2, ArrowUpDown, ArrowUp, ArrowDown, Plus, Shield,
   Flame, X, ClipboardCheck, CheckCircle2, Download, RotateCcw, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
@@ -48,7 +47,7 @@ const ProcessesPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, token, effectiveRole } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
   
@@ -219,7 +218,7 @@ const ProcessesPage = () => {
       const filename = `PowerCell_Processos_${new Date().toISOString().slice(0,10)}.xlsx`;
       XLSX.writeFile(wb, filename);
       toast.success(`${exportData.length} processos exportados com sucesso!`);
-    } catch (err) {
+    } catch {
       toast.error('Erro ao exportar Excel');
     } finally {
       setExporting(false);
@@ -448,15 +447,6 @@ const ProcessesPage = () => {
     setPagination(prev => ({ ...prev, page }));
     setSearchParams(prev => {
       prev.set("page", page.toString());
-      return prev;
-    }, { replace: true });
-  }, [setSearchParams]);
-
-  const changePageSize = useCallback((size) => {
-    setPagination(prev => ({ ...prev, page: 1, size }));
-    setSearchParams(prev => {
-      prev.set("page", "1");
-      prev.set("size", size.toString());
       return prev;
     }, { replace: true });
   }, [setSearchParams]);

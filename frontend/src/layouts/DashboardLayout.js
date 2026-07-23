@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate, Link, useLocation } from "react-router-dom";
@@ -34,22 +34,14 @@ import {
   X,
   User,
   Building2,
-  CreditCard,
   BarChart3,
   Cog,
   Home,
   LayoutGrid,
   Search,
-  Sparkles,
-  AlertCircle,
-  AlertTriangle,
   Database,
-  FileArchive,
-  Brain,
   ChevronDown,
   ChevronRight,
-  Bell,
-  Wrench,
   Sun,
   Moon,
   Keyboard,
@@ -57,11 +49,8 @@ import {
   Activity,
   TrendingUp,
   FileSignature,
-  Zap,
   Shield,
   ClipboardList,
-  DollarSign,
-  Lock,
   Mail,
   Eye,
 } from "lucide-react";
@@ -74,7 +63,7 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, STAFF_ROLES, ADMIN_PANEL_ROLES, MANAGEMENT_ROLES } from "../utils/roleUtils";
+import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS } from "../utils/roleUtils";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -94,7 +83,7 @@ const EMPTY_HANDLERS = {};
 
 const DashboardLayout = ({ children, title }) => {
   const { user, logout, effectiveRole, isImpersonating } = useAuth();
-  const { theme, toggleTheme, isDark } = useTheme();
+  const { toggleTheme, isDark } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -173,9 +162,6 @@ const DashboardLayout = ({ children, title }) => {
     const dashboardExecutivoRoutes = ["/admin/desempenho"];
     // Rotas do grupo Gestão e Operações
     const gestaoRoutes = ["/estatisticas", "/performance-balcoes", "/rascunhos"];
-    // Verificar se /rascunhos está acessível por capability
-    const hasDraftAccess = hasPermission(user, "DRAFT_VIEW");
-    
     return {
       "meu-negocio": meuNegocioRoutes.some(r => path.startsWith(r)),
       "visao-global": visaoGlobalRoutes.some(r => path.startsWith(r)),
@@ -230,18 +216,6 @@ const DashboardLayout = ({ children, title }) => {
     const isAdmin = userRole === "admin";
     const isCeo = userRole === "ceo";
     const canSeeAdminPanel = isAdmin || isCeo; // Botão Painel de Administração
-    const canSeeGestao = ["admin", "ceo", "diretor"].includes(userRole);
-
-    // Permissões personalizadas (se definidas)
-    const userPermissions = user?.permissions || {};
-    const userPages = userPermissions?.pages || [];
-
-    // Se o utilizador tem permissões definidas, verificar acesso
-    const hasPageAccess = (page) => {
-      if (userPages.length === 0) return true; // Sem permissões = acesso total
-      return userPages.includes(page);
-    };
-
     // ====================================================================
     // DASHBOARD
     // — admin e CEO: aponta para /admin (Painel de Administração)

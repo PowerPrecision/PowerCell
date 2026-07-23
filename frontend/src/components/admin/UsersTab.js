@@ -9,7 +9,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Users, UserPlus, CheckCircle, XCircle, Edit, Mail, Eye } from "lucide-react";
 import { toast } from "sonner";
 import { useAuth } from "../../contexts/AuthContext";
-import { hasRole, filterByRole, filterByAnyRole, countByRole } from "../../utils/roleUtils";
+import { hasRole, countByRole } from "../../utils/roleUtils";
 
 const roleLabels = { 
   admin: "Administrador", 
@@ -29,7 +29,7 @@ const roleColors = {
   administrativo: "bg-amber-100 text-amber-800 dark:bg-amber-900/30 dark:text-amber-400",
 };
 
-const UsersTab = ({ users, onImpersonate }) => {
+const UsersTab = ({ users }) => {
   const navigate = useNavigate();
   const { user: currentUser } = useAuth();
 
@@ -51,7 +51,7 @@ const UsersTab = ({ users, onImpersonate }) => {
       } else {
         toast.error('Erro ao iniciar visualização');
       }
-    } catch (error) {
+    } catch {
       toast.error('Erro ao iniciar visualização');
     }
   };

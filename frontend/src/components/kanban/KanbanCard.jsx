@@ -19,12 +19,12 @@
  * @param {Function} onCardClick - Handler de clique no cartão
  * @param {Function} onViewProcess - Handler para ver processo completo
  */
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Card, CardContent } from '../ui/card';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
-import { GripVertical, Eye, User, Phone, Mail, Lock, Users, Flame, AlertTriangle, CheckCircle2, MessageSquare, FileText } from 'lucide-react';
+import { GripVertical, Eye, User, Phone, Mail, Lock, Flame, CheckCircle2, MessageSquare, FileText } from 'lucide-react';
 import { safeString } from '../../utils/safeString';
 import { formatDate } from '../../lib/utils';
 
@@ -74,7 +74,7 @@ const KanbanCard = memo(({
     onDragStart?.(e, process, columnName);
   }, [onDragStart, process, columnName]);
 
-  const handleClick = useCallback((e) => {
+  const handleClick = useCallback(() => {
     // Não navegar se estiver arrastando
     if (!draggingCard) {
       onCardClick?.(process);

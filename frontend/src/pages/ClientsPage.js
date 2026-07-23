@@ -33,7 +33,6 @@ import {
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
 import { safeDateStr } from "../lib/utils";
-import { getErrorMessage } from "../utils/errorFormatter";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Users,
@@ -46,7 +45,6 @@ import {
   Hash,
   Eye,
   Trash2,
-  Link2,
   RefreshCw,
   ArrowUpDown,
   ArrowUp,
@@ -55,7 +53,6 @@ import {
   CheckCircle,
   XCircle,
   Flame,
-  AlertTriangle,
   Download,
 } from "lucide-react";
 import {
@@ -65,8 +62,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { TableSkeleton, StatsCardSkeleton } from "../components/ui/skeletons";
-import SmartClientSearch from "../components/SmartClientSearch";
+import { TableSkeleton } from "../components/ui/skeletons";
 import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import CreateProcessModal from "../components/CreateProcessModal";
 import CreateClientModal from "../components/kanban/CreateClientModal";
@@ -144,7 +140,6 @@ export default function ClientsPage() {
   const setPhaseFilter = (v) => updateParam("phase", v);
   const setAssignmentFilter = (v) => updateParam("assignment", v);
   const setIndexacaoFilter = (v) => updateParam("indexacao", v);
-  const setShowDeleted = (v) => updateParam("show_deleted", v ? "true" : "");
 
   // Search local state — o input só dispara a pesquisa ao submeter o formulário
   // (Enter ou botão “Pesquisar”), evitando pesquisas automáticas a cada tecla
@@ -153,8 +148,6 @@ export default function ClientsPage() {
   useEffect(() => {
     setSearchInput(searchTerm);
   }, [searchTerm]);
-  const setSortField = (v) => updateParam("sort", v);
-  const setSortOrder = (v) => updateParam("order", v);
   
   const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
   const [showCreateModal, setShowCreateModal] = useState(false);

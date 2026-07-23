@@ -7,12 +7,11 @@
  * Step 1: Dados pessoais + Política de Privacidade + Consentimentos
  * Step 2: Minuta de Exclusividade + Assinatura
  */
-import React, { useState, useEffect, useRef, useCallback } from 'react';
+import { useState, useEffect, useRef, useCallback } from 'react';
 import { sanitizeHtml } from '../utils/sanitize';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
-// eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || '';
 
 import { Button } from '../components/ui/button';
@@ -231,7 +230,7 @@ const toDisplayDate = (value) => {
 // ====================================================================
 // SIGNATURE PAD COMPONENT
 // ====================================================================
-function SignaturePad({ onSignatureChange, signature }) {
+function SignaturePad({ onSignatureChange }) {
   const canvasRef = useRef(null);
   const [isDrawing, setIsDrawing] = useState(false);
   const [hasSignature, setHasSignature] = useState(false);
@@ -407,7 +406,7 @@ export default function RGPDPage() {
   const [success, setSuccess] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [step, setStep] = useState(1);
-  const [tokenData, setTokenData] = useState(null);
+  const [, setTokenData] = useState(null);
   const [formData, setFormData] = useState(null);
 
   // Form fields

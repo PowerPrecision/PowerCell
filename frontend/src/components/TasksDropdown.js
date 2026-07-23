@@ -7,8 +7,8 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState } from "react";
-import { useTasks, TaskStatus, TaskTypeLabels } from "../contexts/TasksContext";
+import { useState } from "react";
+import { useTasks, TaskTypeLabels } from "../contexts/TasksContext";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
@@ -20,20 +20,15 @@ import {
   SheetTitle,
   SheetTrigger,
 } from "./ui/sheet";
-import {
-  Popover,
-  PopoverContent,
-  PopoverTrigger,
-} from "./ui/popover";
+
+
 import {
   Activity,
   CheckCircle2,
   XCircle,
-  Clock,
   Loader2,
   X,
   ExternalLink,
-  ChevronRight,
   FileText,
   Brain,
   Mail,
@@ -42,7 +37,6 @@ import {
   FileSpreadsheet,
   CloudUpload,
   Zap,
-  AlertTriangle,
   User,
   CalendarClock,
 } from "lucide-react";
@@ -79,13 +73,6 @@ const StatusColors = {
 /**
  * Labels por status
  */
-const StatusLabels = {
-  pending: "Aguardando",
-  processing: "Em processamento",
-  completed: "Concluído",
-  failed: "Falhou",
-  cancelled: "Cancelado",
-};
 
 /**
  * Formatar data de prazo com indicação visual de atraso.
@@ -259,7 +246,7 @@ const TaskItem = ({ task, onAcknowledge, onCancel }) => {
 /**
  * Componente principal do dropdown de tarefas
  */
-const TasksDropdown = ({ compact = false }) => {
+const TasksDropdown = () => {
   const {
     tasks,
     activeCount,

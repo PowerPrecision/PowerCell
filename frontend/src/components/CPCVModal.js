@@ -2,7 +2,7 @@
  * CPCVModal - Modal para gerar Contrato Promessa Compra e Venda
  * Permite preencher dados do CPCV e imprimir o documento com minuta
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -15,9 +15,7 @@ import { Button } from "./ui/button";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Textarea } from "./ui/textarea";
-import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
-import { Separator } from "./ui/separator";
 import {
   Select,
   SelectContent,
@@ -33,7 +31,6 @@ import {
   User,
   Users,
   CreditCard,
-  Calendar,
   FileText,
   Eye,
   AlertCircle,
@@ -43,23 +40,6 @@ import { toast } from "sonner";
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Cores dos bancos portugueses
-const BANK_COLORS = {
-  "ABANCA": "bg-red-500 text-white",
-  "BBVA": "bg-blue-600 text-white",
-  "BEST": "bg-green-600 text-white",
-  "BIG": "bg-orange-500 text-white",
-  "BPI": "bg-yellow-400 text-yellow-900",
-  "CGD": "bg-red-600 text-white",
-  "Crédito Agrícola": "bg-green-500 text-white",
-  "CTT": "bg-red-400 text-white",
-  "Millennium bcp": "bg-red-500 text-white",
-  "Novo Banco": "bg-gray-700 text-white",
-  "Popular": "bg-blue-500 text-white",
-  "Santander Totta": "bg-red-600 text-white",
-  "Bankinter": "bg-blue-800 text-white",
-  "ActivoBank": "bg-teal-500 text-white",
-  "Eurobic": "bg-red-500 text-white",
-};
 
 // Helper component for field errors
 const FieldError = ({ children }) => (
@@ -418,7 +398,7 @@ const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, r
       } else {
         throw new Error("Erro ao guardar");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar dados CPCV");
     } finally {
       setLoading(false);

@@ -4,7 +4,7 @@
  * Wrapper do React Quill com estilos consistentes com Tailwind/Shadcn.
  * Suporta tabelas responsivas, formatação rica e é completamente reutilizável.
  */
-import React, { useMemo, useCallback } from 'react';
+import { useMemo, useCallback } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'quill/dist/quill.snow.css';
 import { sanitizeEmailHtml } from '../../utils/sanitize';

@@ -1,7 +1,7 @@
 /**
  * SharedEmailConfigSection — Google OAuth/IMAP por role.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -106,7 +106,7 @@ export default function SharedEmailConfigSection() {
         toast.error("Popup bloqueado. Permita popups para este site.");
         setAuthenticating(null);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao iniciar autenticação Google");
       setAuthenticating(null);
     }
@@ -127,7 +127,7 @@ export default function SharedEmailConfigSection() {
         const data = await res.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao sincronizar"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao sincronizar");
     } finally {
       setSyncing(null);
@@ -147,7 +147,7 @@ export default function SharedEmailConfigSection() {
       } else {
         toast.error("Erro ao desconectar");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao desconectar");
     }
   };

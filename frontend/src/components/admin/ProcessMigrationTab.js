@@ -47,7 +47,7 @@ import {
 } from "../../services/api";
 import { toast } from "../../hooks/use-toast";
 
-const ProcessMigrationTab = ({ embedded = false }) => {
+const ProcessMigrationTab = () => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(null); // 'dry-run' | 'run' | 'rollback'

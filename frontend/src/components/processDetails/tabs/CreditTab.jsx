@@ -13,7 +13,7 @@ import { formatDateForInput } from "../../../pages/processDetails/processFormCle
 import { safeNumber } from "../../dashboard/DashboardShared";
 
 export default function CreditTab({
-  realEstateData, creditData, setCreditData, editingCardId, canEditCredit, CardHeaderWithEdit, getFieldMetaFor, shouldCardBeCollapsed, collapsedCards,
+  realEstateData, creditData, setCreditData, editingCardId, canEditCredit, CardHeaderWithEdit, getFieldMetaFor, shouldCardBeCollapsed,
 }) {
   return (
     <>

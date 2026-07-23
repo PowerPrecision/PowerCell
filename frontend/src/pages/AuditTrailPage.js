@@ -8,14 +8,13 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";

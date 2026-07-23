@@ -4,7 +4,7 @@
  * Extraído de SystemConfigPage.js (tab "maintenance"): índices DB,
  * limpeza jobs/logs, migração de números, mapeamento S3 e sync Prod→Dev.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -55,7 +55,7 @@ export default function MaintenanceSection({ token, user }) {
       } else {
         toast.error("Erro ao reparar índices");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setRepairingIndexes(false);
@@ -87,7 +87,7 @@ export default function MaintenanceSection({ token, user }) {
       if (data.success) {
         toast.success(`${data.deleted_count || 0} jobs antigos removidos`);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao limpar jobs");
     } finally {
       setCleaningJobs(false);
@@ -105,7 +105,7 @@ export default function MaintenanceSection({ token, user }) {
       if (data.success) {
         toast.success(`${data.deleted_count || 0} logs antigos removidos`);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao limpar logs");
     } finally {
       setCleaningLogs(false);
@@ -126,7 +126,6 @@ export default function MaintenanceSection({ token, user }) {
   
   // Estado para Sincronização Prod → Dev
   const [syncing, setSyncing] = useState(false);
-  const [showSyncModal, setShowSyncModal] = useState(false);
   const [showSyncConfirmModal, setShowSyncConfirmModal] = useState(false);
   const [syncStatus, setSyncStatus] = useState(null);
   const [syncPolling, setSyncPolling] = useState(false);
@@ -152,7 +151,7 @@ export default function MaintenanceSection({ token, user }) {
       } else {
         toast.info(data.message || "Todos os processos já têm número atribuído");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao migrar números de processo");
     } finally {
       setMigratingProcessNumbers(false);
@@ -170,7 +169,7 @@ export default function MaintenanceSection({ token, user }) {
       setS3MappingData(data);
       // Limpar selecções anteriores
       setSelectedMappings({});
-    } catch (error) {
+    } catch {
       toast.error("Erro ao carregar mapeamentos S3");
     } finally {
       setLoadingS3Mapping(false);
@@ -199,7 +198,7 @@ export default function MaintenanceSection({ token, user }) {
       } else {
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar mapeamento"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar mapeamento");
     } finally {
       setSavingS3Mapping(false);
@@ -271,7 +270,6 @@ export default function MaintenanceSection({ token, user }) {
       const data = await response.json();
       
       if (response.ok) {
-        const total = (data.mapped || 0) + (data.skipped || 0);
         if (data.mapped > 0) {
           toast.success(`${data.mapped} processos mapeados automaticamente (${data.skipped} já mapeados ou sem correspondência)`);
         } else {
@@ -284,7 +282,7 @@ export default function MaintenanceSection({ token, user }) {
       } else {
         toast.error(extractErrorMessage(data.detail, "Erro no auto-mapeamento"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao auto-mapear clientes");
     } finally {
       setAutoMapping(false);
@@ -311,7 +309,7 @@ export default function MaintenanceSection({ token, user }) {
       } else {
         toast.error(extractErrorMessage(data.detail, "Erro ao corrigir nomes"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao corrigir nomes de clientes");
     } finally {
       setFixingNames(false);
@@ -319,35 +317,6 @@ export default function MaintenanceSection({ token, user }) {
   };
 
   // Guardar todos os mapeamentos alterados (legado - manter para compatibilidade)
-  const saveAllS3Mappings = async () => {
-    setSavingS3Mapping(true);
-    try {
-      const mappings = Object.entries(selectedMappings).map(([userId, s3Folder]) => ({
-        user_id: userId,
-        s3_folder: s3Folder || null
-      }));
-
-      const response = await fetch(`${API_URL}/api/admin/user-s3-mappings/bulk`, {
-        method: "POST",
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json"
-        },
-        body: JSON.stringify(mappings)
-      });
-      const data = await response.json();
-      if (data.success) {
-        toast.success(`${data.updated} mapeamentos actualizados`);
-        loadS3MappingData();
-      } else {
-        toast.error("Erro ao guardar mapeamentos");
-      }
-    } catch (error) {
-      toast.error("Erro ao guardar mapeamentos");
-    } finally {
-      setSavingS3Mapping(false);
-    }
-  };
 
   // ─── Sincronização Prod → Dev ───
   const isDevEnvironment = process.env.REACT_APP_ENVIRONMENT === "development" || 
@@ -397,7 +366,7 @@ export default function MaintenanceSection({ token, user }) {
       } else {
         toast.error(extractErrorMessage(data.detail, "Erro ao iniciar sincronização"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão ao iniciar sincronização");
     } finally {
       setSyncing(false);

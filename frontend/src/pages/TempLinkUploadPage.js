@@ -7,14 +7,13 @@
  * ====================================================================
  */
 import { useState, useEffect, useRef } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams } from "react-router-dom";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Button } from "../components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Progress } from "../components/ui/progress";
 import {
   Upload,
-  File,
   CheckCircle,
   AlertCircle,
   Loader2,
@@ -30,7 +29,6 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 export default function TempLinkUploadPage() {
   const { token } = useParams();
-  const navigate = useNavigate();
 
   const [loading, setLoading] = useState(true);
   const [linkInfo, setLinkInfo] = useState(null);
@@ -59,7 +57,7 @@ export default function TempLinkUploadPage() {
       } else {
         setLinkInfo(data);
       }
-    } catch (err) {
+    } catch {
       setError("Erro ao verificar o link. Tente novamente.");
     } finally {
       setLoading(false);
@@ -180,7 +178,7 @@ export default function TempLinkUploadPage() {
 
       xhr.open("POST", `${API_URL}/api/temp-links/public/${token}/upload`);
       xhr.send(formData);
-    } catch (err) {
+    } catch {
       toast.error("Erro ao carregar ficheiros");
       setUploading(false);
     }

@@ -54,7 +54,6 @@ import DashboardLayout from "../layouts/DashboardLayout";
 import EmailConfigForm from "../components/EmailConfigForm";
 import RichTextEditor from "../components/ui/RichTextEditor";
 import {
-  User,
   Lock,
   Monitor,
   Trash2,
@@ -67,7 +66,6 @@ import {
   MapPin,
   ArrowLeft,
   Mail,
-  RefreshCw,
   Loader2,
   AlertTriangle,
   Info,
@@ -118,7 +116,7 @@ const ProfilePage = () => {
 
   // Estados para config de email (herança)
   const [emailConfigInfo, setEmailConfigInfo] = useState(null);
-  const [loadingEmailConfig, setLoadingEmailConfig] = useState(false);
+  const [, setLoadingEmailConfig] = useState(false);
 
   // MULTI-EMPRESA: seletor de empresa para config de email pessoal
   // Sincronizado com o ContextSwitcher — quando o utilizador troca de
@@ -231,7 +229,7 @@ const ProfilePage = () => {
       if (response.data.available_companies) {
         setEmailCompanies(response.data.available_companies);
       }
-    } catch (error) {
+    } catch {
       setEmailConfigInfo(null);
     } finally {
       setLoadingEmailConfig(false);
@@ -255,7 +253,7 @@ const ProfilePage = () => {
           const merged = new Set([...prev, ...userCompanyIds, ...systemCompanies]);
           return [...merged];
         });
-      } catch (err) {
+      } catch {
         // Fallback: usar apenas as empresas do utilizador
         setEmailCompanies(prev => {
           const merged = new Set([...prev, ...userCompanies.map(c => c.company_id)]);
@@ -403,7 +401,7 @@ const ProfilePage = () => {
         description: "A sessão foi terminada com sucesso.",
       });
       loadSessions();
-    } catch (error) {
+    } catch {
       toast.error("Não foi possível terminar a sessão.");
     } finally {
       setRevokingSession(false);
@@ -420,7 +418,7 @@ const ProfilePage = () => {
         description: "Todas as outras sessões foram terminadas.",
       });
       loadSessions();
-    } catch (error) {
+    } catch {
       toast.error("Não foi possível terminar as sessões.");
     } finally {
       setRevokingSession(false);

@@ -35,7 +35,7 @@
  *   }}
  * />
  */
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
@@ -84,7 +84,6 @@ import {
   Briefcase,
   Building2,
   CreditCard,
-  MoreVertical,
   FileImage,
   FileSpreadsheet,
   File,
@@ -103,21 +102,17 @@ import {
   Settings2,
   ChevronDown,
   ChevronUp,
-  ChevronRight,
   Save,
   LayoutGrid,
   List,
   HardDrive,
   Eye,
   ExternalLink,
-  ZoomIn,
-  ZoomOut,
   Pencil,
   FolderSync,
   MessageSquare,
 } from "lucide-react";
 import { Input } from "./ui/input";
-import { format } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeDate, safeFormat } from "../lib/utils";
 
@@ -230,7 +225,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [draggedFile, setDraggedFile] = useState(null);
   const [draggedFiles, setDraggedFiles] = useState([]); // Múltiplos ficheiros selecionados
   const [dropTarget, setDropTarget] = useState(null);
-  const [moving, setMoving] = useState(false);
+  const [, setMoving] = useState(false);
   const [dragCounter, setDragCounter] = useState(0); // Contador para drag enter/leave correto
   
   // Estado para conflito de nomes ao mover/renomear
@@ -450,24 +445,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   };
 
   // Inicializar pastas
-  const initializeFolders = async () => {
-    try {
-      const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/init-folders`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.ok) {
-        toast.success("Estrutura de pastas criada");
-        fetchFiles();
-      }
-    } catch (error) {
-      console.error("Erro ao criar pastas:", error);
-    }
-  };
 
   // Verificar NIF da empresa
   const checkEmpresaNif = async (nif) => {
@@ -576,7 +553,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           toast.error(`${file.name}: ${errorMsg}`);
           errorCount++;
         }
-      } catch (error) {
+      } catch {
         toast.error(`Erro de conexão ao enviar ${file.name}`);
         errorCount++;
       }
@@ -801,7 +778,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           toast.error(`${file.name}: ${errorMsg}`);
           errorCount++;
         }
-      } catch (error) {
+      } catch {
         toast.error(`Erro de conexão ao enviar ${file.name}`);
         errorCount++;
       }
@@ -893,7 +870,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         const error = await response.json().catch(() => ({}));
         toast.error(extractErrorMessage(error.detail, "Erro ao eliminar ficheiro"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar ficheiro");
     } finally {
       setDeleting(false);
@@ -1616,7 +1593,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setDropTarget(category);
   };
 
-  const handleDragLeave = (e, category) => {
+  const handleDragLeave = (e) => {
     e.preventDefault();
     setDragCounter(prev => prev - 1);
     // Só limpar o dropTarget quando sairmos completamente
@@ -1704,7 +1681,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
   const handleDrop = async (e, targetCategory) => {
     e.preventDefault();
-    const previousDropTarget = dropTarget;
     setDropTarget(null);
     setDragCounter(0);
     

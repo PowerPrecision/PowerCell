@@ -33,18 +33,16 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { safeLabel, safeNumber } from "../components/dashboard/DashboardShared";
+import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
 import DashboardLayout from "../layouts/DashboardLayout";
-import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import useWebSocket from "../hooks/useWebSocket";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { Switch } from "../components/ui/switch";
-import { Calendar } from "../components/ui/calendar";
 import { ScrollArea } from "../components/ui/scroll-area";
 import {
   Select,
@@ -60,11 +58,9 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Separator } from "../components/ui/separator";
-import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,11 +76,9 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import {
-  getS3DownloadUrl,
   deleteProcess,
   generateMagicLink,
   sendMagicLinkEmail,
-  impersonateClient,
   impersonateClientPortal,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
@@ -102,7 +96,7 @@ import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
-import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
+import { getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
 import {
@@ -111,9 +105,7 @@ import {
   Briefcase,
   Building2,
   CreditCard,
-  Calendar as CalendarIcon,
   Clock,
-  Plus,
   Check,
   Trash2,
   Loader2,
@@ -122,51 +114,38 @@ import {
   History,
   Send,
   FolderOpen,
-  File,
-  Download,
-  ChevronRight,
   ChevronDown,
-  ChevronUp,
   ExternalLink,
   Link as LinkIcon,
   Users,
   Sparkles,
   Mail,
-  Phone,
-  MapPin,
   FileSignature,
   AlertTriangle,
   CheckCircle,
-  Pencil,
   Database,
   Calculator,
   TrendingUp,
   Lock,
   Eye,
-  EyeOff,
   X,
-  Search,
-  RefreshCw,
   Home,
   Shield,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isAfter, isValid } from "date-fns";
+import { format, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { safeDateStr, safeParseISO, safeFormat, safeDate } from "../lib/utils";
+import { safeParseISO, safeFormat, safeDate } from "../lib/utils";
 
 import {
   statusColors,
-  BANK_LIST,
-  getBankColor,
   typeLabels,
 } from "./processDetails/processDetailsConstants";
 import {
-  formatDateForInput,
   cleanPersonalDataForSubmit,
   cleanTitular2DataForSubmit,
   cleanRealEstateDataForSubmit,
@@ -177,7 +156,7 @@ import { validateNIF } from "../utils/validateNIF";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
-import { queryKeys, invalidateProcessDetailsQueries } from "../lib/queryClient";
+import { invalidateProcessDetailsQueries } from "../lib/queryClient";
 import { useProcessFullData } from "../hooks/queries/useProcessQuery";
 import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
 // Sub-componentes das abas — cada um é responsável apenas pelo seu domínio
@@ -192,7 +171,6 @@ import VisitasTab from "../components/processDetails/tabs/VisitasTab";
 import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 
-// eslint-disable-next-line no-undef
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 // Constantes/helpers: processDetailsConstants, processFormCleaners, validateNIF
@@ -242,8 +220,6 @@ const ProcessDetails = () => {
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
-  const [oneDriveFiles, setOneDriveFiles] = useState([]);
-  const [currentFolder, setCurrentFolder] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("personal");
@@ -364,7 +340,7 @@ const ProcessDetails = () => {
         const data = await response.json();
         setRgpdStatus(data);
       }
-    } catch (error) {
+    } catch {
       // RGPD status check failed silently — not critical
     } finally {
       setRgpdLoading(false);
@@ -987,18 +963,7 @@ const ProcessDetails = () => {
   }, [id]);
 
   // Legacy OneDrive functions - kept for compatibility but use S3FileManager instead
-  const loadOneDriveFolder = async (subfolder = "") => {
-    // Deprecated - S3FileManager handles this now
-  };
 
-  const handleDownloadFile = async (filePath) => {
-    try {
-      const res = await getS3DownloadUrl(id, filePath);
-      window.open(res.data.url, "_blank");
-    } catch (e) {
-      toast.error("Erro ao obter link de download");
-    }
-  };
 
   // Função para executar o save após confirmação
   // FASE 3: Gravação separada — dados pessoais vão para /clients/{id}, dados de negócio para /processes/{id}
@@ -1174,7 +1139,7 @@ const ProcessDetails = () => {
   };
 
   // Guardar apenas os dados da Organização do Processo (notas, prioridade, etiquetas)
-  const [savingOrg, setSavingOrg] = useState(false);
+  const [, setSavingOrg] = useState(false);
   const handleSaveOrganization = async () => {
     if (isProcessLocked) {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
@@ -1235,7 +1200,7 @@ const ProcessDetails = () => {
       await processMutations.addActivity.mutateAsync({ comment: newComment });
       setNewComment("");
       toast.success("Comentário adicionado");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao adicionar comentário");
     } finally {
       setSendingComment(false);
@@ -1246,7 +1211,7 @@ const ProcessDetails = () => {
     try {
       await processMutations.deleteActivity.mutateAsync(activityId);
       toast.success("Comentário eliminado");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar comentário");
     }
   };
@@ -1268,7 +1233,7 @@ const ProcessDetails = () => {
       setIsDeadlineDialogOpen(false);
       setDeadlineForm({ title: "", description: "", due_date: "", priority: "medium" });
       setSelectedDate(null);
-    } catch (error) {
+    } catch {
       toast.error("Erro ao criar prazo");
     }
   };
@@ -1279,7 +1244,7 @@ const ProcessDetails = () => {
         deadlineId: deadline.id,
         data: { completed: !deadline.completed },
       });
-    } catch (error) {
+    } catch {
       toast.error("Erro ao atualizar prazo");
     }
   };
@@ -1290,7 +1255,7 @@ const ProcessDetails = () => {
     try {
       await processMutations.deadlines.remove.mutateAsync(deadlineId);
       toast.success("Prazo eliminado!");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar prazo");
     }
   };
@@ -1318,7 +1283,6 @@ const ProcessDetails = () => {
   const userRole = user?.role?.toLowerCase() || "";
   const roleLabels = ROLE_LABELS; // Rótulos legíveis para exibição no banner retroativo
   const userPermissions = user?.permissions || {};
-  const userPages = userPermissions?.pages || [];
   const userActions = userPermissions?.actions || [];
   
   // Permissões baseadas em actions (se disponíveis) ou fallback para role
@@ -1342,16 +1306,6 @@ const ProcessDetails = () => {
   const canManageTasks = userActions.length > 0 
     ? userActions.includes("manage_tasks") 
     : ["admin", "ceo", "consultor", "intermediario", "diretor", "administrativo"].includes(userRole);
-  const canUploadDocs = userActions.length > 0 
-    ? userActions.includes("upload_docs") 
-    : true; // Por defeito todos podem upload
-  const canUseChat = userActions.length > 0 
-    ? userActions.includes("use_chat") 
-    : true; // Por defeito todos podem usar chat
-  const canAssignUsers = userActions.length > 0 
-    ? userActions.includes("assign_process_users") 
-    : ["admin", "ceo", "diretor"].includes(userRole);
-  
   // Modo de visualização (read-only) quando não tem edit_process
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
   // EXCEPÇÃO: admin e CEO NUNCA sofrem lock — podem editar processos concluídos retroativamente

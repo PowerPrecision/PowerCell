@@ -15,9 +15,8 @@ import {
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { 
-  Search, FileText, User, CheckSquare, 
-  Building2, Loader2, ArrowRight, Users, FolderOpen,
-  Archive, AlertCircle
+  Search, FileText, User, CheckSquare, Loader2, ArrowRight, FolderOpen,
+  Archive
 } from "lucide-react";
 import api from "../services/api";
 

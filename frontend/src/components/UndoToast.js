@@ -11,7 +11,7 @@
  *   duration={5000}
  * />
  */
-import React, { useEffect, useState, useCallback } from 'react';
+import { useEffect, useState, useCallback } from 'react';
 import { toast } from 'sonner';
 import { Undo2, X, Check, AlertCircle } from 'lucide-react';
 import { cn } from '../utils/cn';
@@ -88,7 +88,7 @@ export function UndoToastContent({
       await onUndo?.();
       toast.success('Ação desfeita');
       onDismiss?.();
-    } catch (error) {
+    } catch {
       toast.error('Erro ao desfazer');
     } finally {
       setIsUndoing(false);

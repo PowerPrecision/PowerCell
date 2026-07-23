@@ -27,17 +27,12 @@
  * <SystemConfigPage />
  * // Acesso via rota protegida: /admin/config?tab=storage
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
-import { Badge } from "../components/ui/badge";
-import { Switch } from "../components/ui/switch";
-import { Textarea } from "../components/ui/textarea";
 // Tabs removed — replaced with vertical master-detail layout
 import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
 import MaintenanceSection from "./systemConfig/MaintenanceSection";
@@ -48,7 +43,6 @@ import { ConfigSection, SECTION_ICONS } from "./systemConfig/configFormHelpers";
 import PortalSettingsSection from "./systemConfig/PortalSettingsSection";
 import MandatoryDocumentsSection from "./systemConfig/MandatoryDocumentsSection";
 import ChangelogSection from "./systemConfig/ChangelogSection";
-import RichTextEditor from "../components/ui/RichTextEditor";
 import {
   Select,
   SelectContent,
@@ -56,52 +50,17 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
-import { hasAnyRole, hasRole } from "../utils/roleUtils";
-import { safeString } from "../utils/safeString";
-import { formatDate, formatDateTime } from "../lib/utils";
+import { hasAnyRole } from "../utils/roleUtils";
 import { toast } from "sonner";
-import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { getSystemChangelogs, generateChangelogAI, diagnoseChangelog, createAnnouncement } from "../services/api";
-import { sanitizeHtml } from "../utils/sanitize";
 import {
   Settings,
-  Cloud,
-  Mail,
-  Sparkles,
-  Building,
   Building2,
-  Save,
-  Loader2,
-  CheckCircle,
   XCircle,
   RefreshCw,
-  TestTube,
-  Eye,
-  EyeOff,
   Wrench,
-  Database,
-  AlertTriangle,
-  Trash2,
-  Users,
-  FolderOpen,
-  Link,
-  UserCheck,
   FileEdit,
   FileSignature,
-  History,
-  Info,
-  RotateCcw,
-  Plus,
-  ShieldCheck,
-  MailCheck,
-  Plug,
-  HardDrive,
-  Globe,
-  Zap,
-  Pencil,
   MessageSquare,
-  X,
   Megaphone,
 } from "lucide-react";
 

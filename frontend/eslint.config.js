@@ -75,6 +75,10 @@ export default [
       'react/react-in-jsx-scope': 'off', // React 19+ não precisa
       'react/prop-types': 'off', // TypeScript/zod handles this
       'react/display-name': 'warn',
+      // CRITICAL: sem esta regra, no-unused-vars não sabe que um componente
+      // usado apenas em JSX (ex: `<Foo />`) está "usado" — dá falsos positivos
+      // que, se "corrigidos", apagam componentes que estão realmente em uso.
+      'react/jsx-uses-vars': 'error',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
 

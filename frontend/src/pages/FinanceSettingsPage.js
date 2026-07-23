@@ -69,10 +69,6 @@ const formatCurrency = (value) => {
   }).format(value);
 };
 
-const formatPct = (value) => {
-  if (value == null || isNaN(value)) return "0%";
-  return `${Number(value).toFixed(1)}%`;
-};
 
 // ====================================================================
 // MAIN COMPONENT

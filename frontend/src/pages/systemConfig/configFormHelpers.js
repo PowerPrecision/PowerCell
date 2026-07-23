@@ -1,7 +1,7 @@
 /**
  * Shared config field/section UI for SystemConfigPage dynamic tabs.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
 import { Input } from "../../components/ui/input";
@@ -276,7 +276,7 @@ export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onT
       await onSave(sectionKey, localConfig);
       setHasChanges(false);
       toast.success("Configuração guardada", { id: "config-save" });
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar", { id: "config-save" });
     } finally {
       setSaving(false);
@@ -293,7 +293,7 @@ export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onT
       } else {
         toast.error(result.message);
       }
-    } catch (error) {
+    } catch {
       setTestResult({ success: false, message: "Erro ao testar" });
     } finally {
       setTesting(false);

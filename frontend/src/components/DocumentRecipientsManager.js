@@ -42,7 +42,7 @@ import { sanitizeHtml } from '../utils/sanitize';
  * />
  * // Usado dentro de SystemConfigPage como tab
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Card,
@@ -56,7 +56,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { Switch } from "./ui/switch";
-import { Textarea } from "./ui/textarea";
 import {
   Dialog,
   DialogContent,
@@ -83,13 +82,10 @@ import {
   Trash2,
   Building2,
   Mail,
-  Check,
   X,
   Save,
   Loader2,
-  GripVertical,
   Eye,
-  AlertCircle,
 } from "lucide-react";
 import { toast } from "sonner";
 import ReactQuill from 'react-quill-new';
@@ -516,7 +512,7 @@ const DocumentRecipientsManager = ({ token, user }) => {
         const data = await response.json().catch(() => ({}));
         toast.error(extractErrorMessage(data.detail, "Erro ao gerar pré-visualização"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao gerar pré-visualização");
     } finally {
       setPreviewLoading(false);

@@ -6,15 +6,14 @@ import { Card, CardContent } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { safeNumber } from "./dashboard/DashboardShared";
 import { 
-  User, Phone, Mail, MapPin, Euro, Building2, 
-  Calendar, Clock, Users, Percent
+  User, Phone, MapPin, Euro, Building2, Clock, Users, Percent
 } from "lucide-react";
 import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeParseISO, safeFormat } from "../lib/utils";
 import { safeString, safeStringArray } from "../utils/safeString";
 
-const ProcessSummaryCard = ({ process, statusInfo, consultorName, mediadorName, consultorNames, mediadorNames }) => {
+const ProcessSummaryCard = ({ process, consultorName, mediadorName, consultorNames, mediadorNames }) => {
   if (!process) return null;
 
   // Usar arrays se disponíveis, senão usar nomes únicos

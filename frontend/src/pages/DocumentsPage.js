@@ -5,7 +5,6 @@
  * Redireciona para o dashboard com uma mensagem se não houver contexto.
  * Para gestão de documentos de um processo específico, use ProcessDetails.
  */
-import React from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Database, FolderOpen } from "lucide-react";

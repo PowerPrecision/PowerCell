@@ -9,7 +9,7 @@
  * @widget TasksPanel — Gestão de tarefas com prioridades e prazos
  * @widget Email KPI Card — Emails não lidos (personal box)
  */
-import React, { useMemo, useState, useEffect } from "react";
+import { useMemo, useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -32,7 +32,6 @@ import {
   AIAnalysisTab,
   useDashboardData,
   useDocumentManagement,
-  TYPE_LABELS,
   DOCUMENT_TYPES_MEDIADOR,
   formatDate
 } from "../components/dashboard/DashboardShared";
@@ -63,7 +62,6 @@ const MediadorDashboard = () => {
 
   // Dashboard data hook
   const {
-    processes,
     filteredProcesses,
     workflowStatuses,
     upcomingExpiries,

@@ -1,7 +1,7 @@
 /**
  * CompanyEmailConfigSection — SMTP por empresa.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useAuth } from "../../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../../components/ui/card";
 import { Button } from "../../components/ui/button";
@@ -152,7 +152,7 @@ export default function CompanyEmailConfigSection() {
         const data = await res.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setSaving(false);
@@ -177,7 +177,7 @@ export default function CompanyEmailConfigSection() {
       } else {
         toast.error("Erro ao remover");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setDeletingCompany(null);

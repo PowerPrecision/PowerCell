@@ -43,7 +43,7 @@ const BASE_POLLING_INTERVAL = 5000;
 // Intervalo quando não há tarefas ativas (30 segundos)
 const IDLE_POLLING_INTERVAL = 30000;
 // Tempo mínimo entre toasts para a mesma tarefa
-const TOAST_DEBOUNCE_MS = 60000; // 60s — evita loops de toast entre polls (backend auto-acknowledge é a defesa primária)
+// 60s — evita loops de toast entre polls (backend auto-acknowledge é a defesa primária)
 // Circuit breaker: número de falhas consecutivas antes de parar polling
 const MAX_CONSECUTIVE_FAILURES = 3;
 // Circuit breaker: tempo de espera antes de retomar polling após circuit breaker (60s)
@@ -108,11 +108,10 @@ export function TasksProvider({ children }) {
   const [activeCount, setActiveCount] = useState(0);
   const [completedUnacknowledged, setCompletedUnacknowledged] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
-  const [lastFetchTime, setLastFetchTime] = useState(null);
+  const [, setLastFetchTime] = useState(null);
   
   // Referências para controlo
   const pollingIntervalRef = useRef(null);
-  const lastToastTimeRef = useRef({});
   const previousTaskIdsRef = useRef(new Set());
   const toastedTaskIdsRef = useRef(new Set()); // Permanent dedup: completion already toasted
   const loadingToastIdsRef = useRef([]); // Ordered list of active loading toast ids (cap 5)

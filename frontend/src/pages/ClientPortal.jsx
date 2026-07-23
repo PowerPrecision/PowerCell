@@ -18,7 +18,7 @@
  *   - Após 15 min de inactividade → logout automático
  *   - Ao fechar a aba → limpa storage (obriga novo login)
  */
-import React, { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
+import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { toast } from 'sonner';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import useSlidingSession from '../hooks/useSlidingSession';
@@ -148,8 +148,6 @@ function stepColor(colorStr) {
 // ====================================================================
 function WorkflowStepper({ stepper }) {
   if (!stepper || stepper.length === 0) return null;
-
-  const completedCount = stepper.filter(s => s.is_completed || s.is_current).length;
 
   return (
     <div className="w-full overflow-x-auto" style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}>
@@ -399,7 +397,7 @@ function CredentialsDialog({ open, onOpenChange, source, onSuccess }) {
   const [mfaCode, setMfaCode] = useState('');
   const [mfaSubmitting, setMfaSubmitting] = useState(false);
   const [scraperJobId, setScraperJobId] = useState(null);
-  const [mfaPollCount, setMfaPollCount] = useState(0);
+  const [, setMfaPollCount] = useState(0);
 
   const isFinancas = source === 'financas';
   const idLabel = isFinancas ? 'NIF' : 'NISS';
@@ -1057,7 +1055,7 @@ function DocumentsPanel({ documents, onUploadSuccess }) {
                         } else {
                           toast.error(extractErrorMessage(data.detail, 'Erro ao gerar link de download.'));
                         }
-                      } catch (err) {
+                      } catch {
                         toast.error('Erro de ligação ao tentar descarregar.');
                       }
                     }}
@@ -1690,196 +1688,6 @@ function IframeDetector({ children }) {
 // ====================================================================
 // PORTAL LOGIN SCREEN — Ecrã de login obrigatório
 // ====================================================================
-function PortalLoginScreen({ onLoginSuccess, client_id }) {
-  const [nif, setNif] = useState('');
-  const [processNumber, setProcessNumber] = useState('');
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(null);
-  const [showNif, setShowNif] = useState(false);
-
-  const handleSubmit = async (e) => {
-    e?.preventDefault();
-    setError(null);
-
-    const cleanNif = nif.replace(/\D/g, '');
-    if (cleanNif.length !== 9) {
-      setError('O NIF deve conter exatamente 9 dígitos.');
-      return;
-    }
-    if (!processNumber || isNaN(Number(processNumber))) {
-      setError('O Número do Processo é obrigatório e deve ser um número.');
-      return;
-    }
-
-    setLoading(true);
-    try {
-      // Determinar o client_id para o endpoint de verificação
-      // Pode vir da URL ou do localStorage (após resolver magic link)
-      const cid = client_id || localStorage.getItem('portal_client_id');
-
-      if (!cid) {
-        setError('Identificação do cliente não encontrada. Aceda através do link fornecido pelo consultor.');
-        setLoading(false);
-        return;
-      }
-
-      const res = await fetchWithRetry(`${BACKEND_URL}/portal/${cid}/verify`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          nif: cleanNif,
-          process_number: Number(processNumber),
-        }),
-      });
-
-      let data;
-      try {
-        data = await res.json();
-      } catch {
-        if (res.status === 503) {
-          setError('O servidor está a iniciar. Aguarde uns segundos e tente novamente.');
-          return;
-        }
-        setError('Erro inesperado. Tente novamente.');
-        return;
-      }
-
-      if (res.ok && data.token) {
-        // Guardar o token de sessão verificada no localStorage
-        // (persiste entre tabs e reloads, ao contrário de localStorage)
-        localStorage.setItem('portal_token', data.token);
-        localStorage.setItem('portal_verified', 'true');
-        localStorage.setItem('portal_client_name', data.client_name || '');
-        localStorage.setItem('portal_process_id', data.process_id || '');
-        if (cid) localStorage.setItem('portal_client_id', cid);
-
-        if (onLoginSuccess) {
-          onLoginSuccess(data.token);
-        }
-      } else {
-        setError(typeof data.detail === 'string' ? data.detail : 'Credenciais inválidas. Verifique o seu NIF e Número de Processo.');
-      }
-    } catch (err) {
-      setError(err.message || 'Erro de ligação. Tente novamente.');
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 via-gray-50 to-gray-100 flex items-center justify-center p-4">
-      <div className="w-full max-w-md">
-        {/* Logo */}
-        <div className="flex items-center justify-center mb-8">
-          <img
-            src="/PowerCell-default.png"
-            alt="PowerCell"
-            className="h-14 w-auto object-contain"
-          />
-        </div>
-
-        {/* Login Card */}
-        <div className="bg-white rounded-2xl shadow-xl border border-gray-100 p-8">
-          {/* Header */}
-          <div className="text-center mb-6">
-            <div className="w-16 h-16 bg-gradient-to-br from-emerald-500 to-teal-600 rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg">
-              <Shield className="w-8 h-8 text-white" />
-            </div>
-            <h1 className="text-xl font-bold text-gray-900">Portal do Cliente</h1>
-            <p className="text-sm text-gray-500 mt-1">
-              Introduza as suas credenciais para aceder ao seu processo
-            </p>
-          </div>
-
-          {/* Security notice */}
-          <div className="flex items-start gap-2 bg-emerald-50 border border-emerald-200 rounded-lg p-3 mb-5">
-            <Shield className="w-4 h-4 text-emerald-600 mt-0.5 flex-shrink-0" />
-            <p className="text-xs text-emerald-700">
-              <strong>Acesso seguro.</strong> Os seus dados são encriptados e nunca são partilhados.
-            </p>
-          </div>
-
-          <form onSubmit={handleSubmit} className="space-y-4">
-            {/* NIF */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                NIF (Número de Identificação Fiscal)
-              </label>
-              <input
-                type="text"
-                value={nif}
-                onChange={(e) => setNif(e.target.value.replace(/\D/g, '').slice(0, 9))}
-                placeholder="123456789"
-                className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
-                inputMode="numeric"
-                disabled={loading}
-                autoFocus
-              />
-              <p className="text-[10px] text-gray-400 mt-1">9 dígitos do seu Cartão de Cidadão</p>
-            </div>
-
-            {/* Número do Processo */}
-            <div>
-              <label className="text-sm font-medium text-gray-700 mb-1.5 block">
-                Número do Processo
-              </label>
-              <input
-                type="text"
-                value={processNumber}
-                onChange={(e) => setProcessNumber(e.target.value.replace(/\D/g, ''))}
-                placeholder="Ex: 1001"
-                className="w-full px-4 py-3 text-sm border border-gray-200 rounded-xl focus:outline-none focus:ring-2 focus:ring-emerald-400 focus:border-transparent transition-all"
-                inputMode="numeric"
-                disabled={loading}
-              />
-              <p className="text-[10px] text-gray-400 mt-1">
-                Fornecido pelo seu consultor (ex: nº do processo no CRM)
-              </p>
-            </div>
-
-            {/* Error message */}
-            {error && (
-              <div className="flex items-start gap-2 text-xs text-red-600 bg-red-50 rounded-xl px-4 py-3 border border-red-200">
-                <AlertCircle className="w-4 h-4 mt-0.5 flex-shrink-0" />
-                <span>{error}</span>
-              </div>
-            )}
-
-            {/* Submit button */}
-            <button
-              type="submit"
-              disabled={loading || nif.length !== 9 || !processNumber}
-              className="w-full py-3 text-sm font-semibold bg-gradient-to-r from-emerald-600 to-teal-600 text-white rounded-xl hover:from-emerald-700 hover:to-teal-700 disabled:opacity-50 disabled:cursor-not-allowed transition-all shadow-md hover:shadow-lg flex items-center justify-center gap-2"
-            >
-              {loading ? (
-                <>
-                  <Loader2 className="w-4 h-4 animate-spin" />
-                  A verificar...
-                </>
-              ) : (
-                <>
-                  <Shield className="w-4 h-4" />
-                  Entrar no Portal
-                </>
-              )}
-            </button>
-          </form>
-        </div>
-
-        {/* Footer */}
-        <div className="text-center mt-6">
-          <p className="text-xs text-gray-400">
-            Não tem as suas credenciais? Contacte o seu consultor.
-          </p>
-          <div className="flex items-center justify-center gap-1.5 mt-2 text-xs text-gray-400">
-            <Shield className="w-3 h-3" />
-            <span>Ligação segura e encriptada</span>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-}
 
 // ====================================================================
 // MAIN CLIENT PORTAL
@@ -1946,7 +1754,7 @@ export default function ClientPortal() {
       }
     })();
   }, [autoLoginAttempted]);
-  const [clientId, setClientId] = useState(null);
+  const [, setClientId] = useState(null);
 
   const rawToken = useRef(window.location.pathname.split('/portal/')[1]);
 
@@ -2289,7 +2097,7 @@ export default function ClientPortal() {
   }, [data?.welcome_message]);
 
   // ── Login Gate — Se não está verificado, mostrar ecrã de login ──
-  const handleLoginSuccess = useCallback((token) => {
+  const handleLoginSuccess = useCallback(() => {
     // Login verificado — o useEffect [isVerified, refreshKey] vai carregar os dados
     setIsVerified(true);
     // Registar actividade para o sliding session

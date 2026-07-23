@@ -19,12 +19,6 @@ import { safeString } from "../../utils/safeString";
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
 /** Normaliza acentos para comparação local (fallback) */
-function normalizeAccents(str) {
-  return str
-    ?.normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toLowerCase() || "";
-}
 
 const ClientSearchTab = ({ workflowStatuses }) => {
   const navigate = useNavigate();

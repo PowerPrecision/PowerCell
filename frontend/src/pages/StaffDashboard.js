@@ -18,12 +18,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
-import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Dialog, DialogContent, DialogDescription, DialogHeader, DialogTitle, DialogFooter } from "../components/ui/dialog";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { Textarea } from "../components/ui/textarea";
-import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, AlertTriangle, ShieldAlert, Mail, Send, Trash2, Edit3, ChevronRight, AlertCircle, Rss } from "lucide-react";
+import { Loader2, LayoutGrid, Calendar, Users, FileText, FileX, CheckCircle, XCircle, TrendingUp, ClipboardList, Plus, ShieldAlert, Mail, Send, Trash2, ChevronRight, AlertCircle, Rss } from "lucide-react";
 import TasksPanel from "../components/TasksPanel";
 import { toast } from "sonner";
 import { getStats, getUsers, getUpcomingExpiries, getCalendarDeadlines, createClientProcess, createClient, getAutoDrafts, sendAutoDraft, deleteAutoDraft, getWebmailStats } from "../services/api";
@@ -182,7 +180,7 @@ const StaffDashboard = () => {
           setDstiAlerts(data);
         }
       }
-    } catch (err) {
+    } catch {
       // Silenciar - DSTI pode estar desactivado
     }
   };
@@ -208,7 +206,7 @@ const StaffDashboard = () => {
       await sendAutoDraft(draftId);
       toast.success("Rascunho enviado com sucesso!");
       fetchDrafts();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao enviar rascunho");
     } finally {
       setSendingDraft(null);
@@ -221,7 +219,7 @@ const StaffDashboard = () => {
       await deleteAutoDraft(draftId);
       toast.success("Rascunho descartado");
       fetchDrafts();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao descartar rascunho");
     }
   };

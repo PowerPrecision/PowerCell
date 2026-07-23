@@ -23,7 +23,7 @@ import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { hasAnyRole } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
@@ -63,7 +63,6 @@ import {
   Search,
   RefreshCw,
   Folder,
-  FolderOpen,
   FileText,
   FileImage,
   FileSpreadsheet,
@@ -77,7 +76,6 @@ import {
   FolderPlus,
   AlertCircle,
   Loader2,
-  Home,
   ArrowUp,
   Settings,
   CloudOff,
@@ -155,7 +153,6 @@ const FilesExplorerPage = () => {
   // S3 configuration state
   const [s3Configured, setS3Configured] = useState(null); // null = loading, true/false
   const [configDialog, setConfigDialog] = useState({ open: false });
-  const [configLoading, setConfigLoading] = useState(false);
 
   const fileInputRef = useRef(null);
   const searchTimeoutRef = useRef(null);
@@ -273,7 +270,7 @@ const FilesExplorerPage = () => {
           toast.error(`${file.name}: ${extractErrorMessage(err.detail, "Erro")}`);
           errorCount++;
         }
-      } catch (err) {
+      } catch {
         toast.error(`Erro ao enviar ${file.name}`);
         errorCount++;
       }
@@ -315,7 +312,7 @@ const FilesExplorerPage = () => {
         const err = await res.json().catch(() => ({}));
         toast.error(extractErrorMessage(err.detail, "Erro ao fazer download"));
       }
-    } catch (err) {
+    } catch {
       toast.error("Erro ao fazer download");
     }
   };
@@ -433,37 +430,6 @@ const FilesExplorerPage = () => {
   };
 
   // ── Save S3 Configuration ─────────────────────────────────────────────
-  const handleSaveConfig = async (settings) => {
-    setConfigLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/admin/settings`, {
-        method: "PUT",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({
-          s3_bucket: settings.bucket,
-          s3_region: settings.region,
-          s3_access_key: settings.accessKey,
-          s3_secret_key: settings.secretKey,
-        }),
-      });
-      if (res.ok) {
-        toast.success("Configuração S3 guardada com sucesso");
-        setConfigDialog({ open: false });
-        setS3Configured(null);
-        fetchContents(currentPath);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(extractErrorMessage(err.detail, "Erro ao guardar configuração"));
-      }
-    } catch {
-      toast.error("Erro de ligação ao servidor");
-    } finally {
-      setConfigLoading(false);
-    }
-  };
 
   // ── Search ────────────────────────────────────────────────────────────────
   const handleSearch = (value) => {

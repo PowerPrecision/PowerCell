@@ -14,7 +14,7 @@
  *   undoLabel: 'Desfazer'
  * });
  */
-import { useCallback, useRef } from 'react';
+import { useCallback } from 'react';
 import { toast } from 'sonner';
 
 // Tempo padrão para desfazer (5 segundos)
@@ -29,8 +29,6 @@ const pendingActions = new Map();
  * @returns {Object} { executeWithUndo, cancelUndo }
  */
 export function useUndo() {
-  const timeoutRef = useRef(null);
-
   /**
    * Executa uma ação com possibilidade de desfazer.
    * 

@@ -9,7 +9,7 @@
  * - Navegação por setas
  */
 import { useState, useEffect, useMemo } from "react";
-import { Dialog, DialogContent, DialogTitle, DialogDescription, DialogFooter } from "./ui/dialog";
+import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
@@ -26,10 +26,9 @@ import {
 } from "./ui/dropdown-menu";
 import { 
   Mail, Send, Inbox, Clock, X, ChevronLeft, ChevronRight,
-  Paperclip, User, Star, StarOff, Bookmark, BookmarkX,
+  Paperclip, User, Star,
   AlertCircle, CheckCircle, Download, Eye, EyeOff, Reply,
-  Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet,
-  Sparkles, Copy, ExternalLink, Tag
+  Forward, Archive, MoreVertical, Image, FileText, FileSpreadsheet, Copy, Tag
 } from "lucide-react";
 import { pt } from "date-fns/locale";
 import { sanitizeEmailHtml } from "../utils/sanitize";
@@ -64,8 +63,7 @@ const EmailViewerModal = ({
   onMarkEmail,
   onUnmarkEmail,
   token,
-  clientName,
-  processId
+  clientName
 }) => {
   const [currentEmail, setCurrentEmail] = useState(null);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -179,7 +177,7 @@ const EmailViewerModal = ({
             window.open(data.preview_url, '_blank');
           }
         }
-      } catch (error) {
+      } catch {
         console.error("Preview não disponível");
       }
     }
@@ -229,7 +227,7 @@ const EmailViewerModal = ({
         try {
           const errData = await response.json();
           detail = errData.detail || errData.message || errData.error || detail;
-        } catch (_) {
+        } catch {
           /* resposta sem corpo JSON — manter mensagem genérica */
         }
         throw new Error(detail);

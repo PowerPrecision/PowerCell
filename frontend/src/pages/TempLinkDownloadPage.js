@@ -13,7 +13,6 @@ import { Card, CardContent } from "../components/ui/card";
 import {
   Download,
   File,
-  CheckCircle,
   AlertCircle,
   Loader2,
   Clock,
@@ -61,7 +60,7 @@ export default function TempLinkDownloadPage() {
           setFiles(filesData.files || []);
         }
       }
-    } catch (err) {
+    } catch {
       setError("Erro ao verificar o link. Tente novamente.");
     } finally {
       setLoading(false);

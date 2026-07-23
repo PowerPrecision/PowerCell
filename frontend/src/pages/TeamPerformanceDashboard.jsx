@@ -27,7 +27,7 @@ import {
 import DashboardLayout from "../layouts/DashboardLayout";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Legend, Cell,
+  Legend,
 } from "recharts";
 import { format, subDays, startOfWeek, startOfMonth, endOfWeek, endOfMonth } from "date-fns";
 import { pt } from "date-fns/locale";

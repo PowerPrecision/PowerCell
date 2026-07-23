@@ -158,7 +158,7 @@ class WebSocketManager {
       const url = new URL(backendUrl);
       const wsProtocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
       return `${wsProtocol}//${url.host}/api/ws/notifications?token=${this.token}`;
-    } catch (e) {
+    } catch {
       const wsProtocol = backendUrl.startsWith('https') ? 'wss' : 'ws';
       const wsUrl = backendUrl.replace(/^https?:\/\//, `${wsProtocol}://`);
       return `${wsUrl}/api/ws/notifications?token=${this.token}`;
@@ -216,7 +216,7 @@ class WebSocketManager {
             });
           }
         }
-      } catch (e) {
+      } catch {
         // Silent fail
       }
     }, POLLING_INTERVAL);
@@ -295,7 +295,6 @@ class WebSocketManager {
   updateToken(newToken) {
     if (!newToken || newToken === this.token) return;
 
-    const oldToken = this.token;
     this.token = newToken;
 
     // If currently connected, reconnect with new token

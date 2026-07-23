@@ -8,7 +8,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -41,7 +41,7 @@ import { formatDate } from "../lib/utils";
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const ExpiringDocumentsDashboard = () => {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const navigate = useNavigate();
   
   const [loading, setLoading] = useState(true);

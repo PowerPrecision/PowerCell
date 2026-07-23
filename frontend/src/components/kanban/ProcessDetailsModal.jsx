@@ -15,7 +15,7 @@
  * - Estado isolado do componente pai
  * - Não causa re-renders no KanbanBoard
  */
-import React, { memo, useCallback, useState, useEffect, useRef } from 'react';
+import { memo, useCallback, useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { extractErrorMessage } from '../../utils/extractErrorMessage';
 import {
@@ -51,7 +51,7 @@ import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits, 
 import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { hasAnyRole } from '../../utils/roleUtils';
-import { safeDateStr, formatDate, formatDateTime } from '../../lib/utils';
+import { formatDate, formatDateTime } from '../../lib/utils';
 
 // ── Helpers ────────────────────────────────────────────────────────
 const formatCurrency = (value) => {
@@ -305,7 +305,6 @@ const ProcessDetailsModal = memo(({
 
   if (!process) return null;
 
-  const readOnly = !isEditing || isLockedByOther;
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>

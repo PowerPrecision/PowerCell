@@ -37,7 +37,6 @@ import {
   DialogTrigger,
 } from "../components/ui/dialog";
 import { Separator } from "../components/ui/separator";
-import { Switch } from "../components/ui/switch";
 import { toast } from "sonner";
 import {
   Sparkles,
@@ -54,15 +53,12 @@ import {
   Zap,
   DollarSign,
   CheckCircle,
-  Info,
   Plus,
   Pencil,
   Settings2,
   Bell,
-  X,
   TrendingUp,
   Activity,
-  Clock,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -99,7 +95,7 @@ const AIConfigPage = ({ embedded = false }) => {
   const [models, setModels] = useState([]);
   const [tasks, setTasks] = useState([]);
   const [loadingModels, setLoadingModels] = useState(false);
-  const [loadingTasks, setLoadingTasks] = useState(false);
+  const [, setLoadingTasks] = useState(false);
   
   // Estado do cache
   const [cacheStats, setCacheStats] = useState(null);
@@ -313,7 +309,7 @@ const AIConfigPage = ({ embedded = false }) => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao guardar modelo"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     }
   };
@@ -335,7 +331,7 @@ const AIConfigPage = ({ embedded = false }) => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao eliminar modelo"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     }
   };
@@ -369,7 +365,7 @@ const AIConfigPage = ({ embedded = false }) => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao guardar tarefa"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     }
   };
@@ -391,7 +387,7 @@ const AIConfigPage = ({ embedded = false }) => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao eliminar tarefa"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     }
   };
@@ -413,7 +409,7 @@ const AIConfigPage = ({ embedded = false }) => {
       } else {
         toast.error("Erro ao guardar configurações");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     }
   };
@@ -1024,7 +1020,7 @@ const AIConfigPage = ({ embedded = false }) => {
                     </CardHeader>
                     <CardContent>
                       <div className="h-24 flex items-end gap-1">
-                        {usageTrend.slice(-30).map((day, i) => {
+                        {usageTrend.slice(-30).map((day) => {
                           const maxCalls = Math.max(...usageTrend.map(d => d.total_calls)) || 1;
                           const height = (day.total_calls / maxCalls) * 100;
                           return (

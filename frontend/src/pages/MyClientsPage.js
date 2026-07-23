@@ -27,8 +27,7 @@ import {
 import { getMyClients, getWorkflowStatuses, getExportPermission } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText,
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download,
-  MessageSquare, Trash2
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download, Trash2
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 // PACOTE CP — ClientDetailsModal reutilizável
@@ -65,35 +64,6 @@ const getContrastColor = (bgColor) => {
  * azul = mensagens não lidas, verde = novos documentos do portal.
  * Renderiza apenas se houver sinal positivo (sem ruído visual).
  */
-const NotificationDots = ({ hasUnreadMessages, hasNewDocuments }) => {
-  if (!hasUnreadMessages && !hasNewDocuments) return null;
-  return (
-    <span className="inline-flex items-center gap-1 ml-1.5 align-middle" data-testid="notification-dots">
-      {hasUnreadMessages && (
-        <span
-          className="relative flex h-2.5 w-2.5"
-          title="Mensagens não lidas do cliente"
-          role="img"
-          aria-label="Mensagens não lidas"
-        >
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
-        </span>
-      )}
-      {hasNewDocuments && (
-        <span
-          className="relative flex h-2.5 w-2.5"
-          title="Novos documentos do cliente"
-          role="img"
-          aria-label="Novos documentos"
-        >
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-        </span>
-      )}
-    </span>
-  );
-};
 
 const MyClientsPage = () => {
   const { user } = useAuth();

@@ -20,13 +20,8 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "./ui/select";
+
+
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -39,7 +34,6 @@ import {
   ExternalLink, Send, MessageSquare, XCircle, Activity, CheckCheck
 } from "lucide-react";
 import { toast } from "sonner";
-import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
@@ -224,7 +218,7 @@ const TasksPanel = ({
       await completeTask(taskId);
       toast.success("Tarefa concluída");
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao concluir tarefa");
     }
   };
@@ -234,7 +228,7 @@ const TasksPanel = ({
       await reopenTask(taskId);
       toast.success("Tarefa reaberta");
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao reabrir tarefa");
     }
   };
@@ -297,7 +291,7 @@ const TasksPanel = ({
         toast.success("Resposta registada");
         setTaskResponse("");
       }
-    } catch (error) {
+    } catch {
       // Se falhar, ainda assim fechar o modal (funcionalidade em desenvolvimento)
       toast.success("Resposta registada");
       setTaskResponse("");

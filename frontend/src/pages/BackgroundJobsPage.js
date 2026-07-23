@@ -4,7 +4,7 @@
  * Suporta: Cancelar, Pausar e Retomar jobs
  * Inclui: Dashboard de métricas, notificações de jobs stuck, logs detalhados
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -139,13 +139,6 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
   const isCompleted = job.status === "success" || job.status === "completed";
 
   // Cor da barra de progresso baseada no estado
-  const progressColor = isRunning
-    ? "bg-blue-500"
-    : isPaused
-    ? "bg-amber-500"
-    : isCompleted
-    ? "bg-green-500"
-    : "bg-red-500";
 
   return (
     <Card className={`transition-all ${isRunning ? 'border-blue-300 shadow-md dark:border-blue-700' : isPaused ? 'border-amber-300 dark:border-amber-700' : isCompleted ? 'border-green-200 dark:border-green-800' : ''}`}>
