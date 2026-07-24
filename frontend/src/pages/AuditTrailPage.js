@@ -49,7 +49,7 @@ import {
   FileText,
 } from "lucide-react";
 import { exportAuditTrail, cleanupAuditTrail } from "../services/api";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
 import { useAuditTrailQuery, buildAuditTrailFilterParams } from "../hooks/queries/useAuditTrailQuery";
 import { useAuditStatsQuery } from "../hooks/queries/useAuditStatsQuery";
@@ -104,9 +104,7 @@ const AuditTrailPage = ({ embedded = false }) => {
 
   useEffect(() => {
     if (trailError) {
-      toast({
-        variant: "destructive",
-        title: "Erro",
+      toast.error("Erro", {
         description: "Não foi possível carregar os registos de auditoria.",
       });
     }
@@ -138,12 +136,10 @@ const AuditTrailPage = ({ embedded = false }) => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      toast({ title: "Exportação concluída", description: "Ficheiro CSV descarregado com sucesso." });
+      toast.success("Exportação concluída", { description: "Ficheiro CSV descarregado com sucesso." });
     } catch (error) {
       console.error("Erro ao exportar:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro",
+      toast.error("Erro", {
         description: "Não foi possível exportar os registos.",
       });
     } finally {
@@ -157,17 +153,14 @@ const AuditTrailPage = ({ embedded = false }) => {
     try {
       const response = await cleanupAuditTrail();
       const deleted = response.data.deleted_count;
-      toast({
-        title: "Limpeza concluída",
+      toast.success("Limpeza concluída", {
         description: `${deleted} registos antigos foram eliminados.`,
       });
       fetchAuditTrail();
       fetchStats();
     } catch (error) {
       console.error("Erro na limpeza:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro",
+      toast.error("Erro", {
         description: "Não foi possível efectuar a limpeza.",
       });
     }

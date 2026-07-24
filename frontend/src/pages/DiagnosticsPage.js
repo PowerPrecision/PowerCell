@@ -32,7 +32,7 @@ import {
   Loader2
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -204,20 +204,12 @@ const DiagnosticsPage = ({ embedded = false }) => {
       const data = await response.json();
       setMigrationResult(data);
       
-      toast({
-        title: "Migração Concluída",
-        description: data.message,
-        variant: data.total_migrated > 0 ? "default" : "default",
-      });
+      toast.success("Migração Concluída", { description: data.message });
       
       // Refrescar estado TTL
       await fetchTTLStatus();
     } catch (err) {
-      toast({
-        title: "Erro na Migração",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast.error("Erro na Migração", { description: err.message });
     } finally {
       setMigrating(false);
     }
