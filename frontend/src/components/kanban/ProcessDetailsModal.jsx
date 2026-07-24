@@ -52,12 +52,11 @@ import { toast } from 'sonner';
 import { useAuth } from '../../contexts/AuthContext';
 import { hasAnyRole } from '../../utils/roleUtils';
 import { formatDate, formatDateTime } from '../../lib/utils';
+import { formatCurrency as formatCurrencyShared } from '../../utils/formatCurrency';
 
 // ── Helpers ────────────────────────────────────────────────────────
-const formatCurrency = (value) => {
-  if (value == null) return '—';
-  return Number(value).toLocaleString('pt-PT') + '€';
-};
+const formatCurrency = (value) =>
+  formatCurrencyShared(value, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
 const ESTADO_CIVIL_OPTIONS = [
   'Solteiro', 'Casado', 'Divorciado', 'Viúvo', 'União de Facto', 'Separado',
@@ -988,7 +987,7 @@ const ProcessDetailsModal = memo(({
                           {propPrice && (
                             <span className="text-[11px] font-semibold text-amber-700">
                               <Euro className="h-3 w-3 inline mr-0.5" />
-                              {typeof propPrice === 'number' ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(propPrice) : String(propPrice)}
+                              {typeof propPrice === 'number' ? formatCurrencyShared(propPrice) : String(propPrice)}
                             </span>
                           )}
                           {propTypology && (
@@ -1302,7 +1301,7 @@ const ProcessDetailsModal = memo(({
                       <p className="text-muted-foreground text-xs">Preço</p>
                       <p className="font-semibold text-amber-700 flex items-center gap-1">
                         <Euro className="h-3.5 w-3.5" />
-                        {typeof propPrice === 'number' ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(propPrice) : String(propPrice)}
+                        {typeof propPrice === 'number' ? formatCurrencyShared(propPrice) : String(propPrice)}
                       </p>
                     </div>
                   )}

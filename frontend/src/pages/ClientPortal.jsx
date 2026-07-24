@@ -59,6 +59,7 @@ import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
 import { formatDate, safeDate } from '../lib/utils';
+import { formatCurrency } from '../utils/formatCurrency';
 import ClientPortalLogin from './ClientPortalLogin';
 import SimulatorCH from '../components/portal/SimulatorCH';
 
@@ -2552,7 +2553,7 @@ export default function ClientPortal() {
                             {visit.scraped_data?.price && (
                               <p className="text-sm font-bold text-emerald-600 mt-0.5">
                                 {typeof visit.scraped_data.price === 'number'
-                                  ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(visit.scraped_data.price)
+                                  ? formatCurrency(visit.scraped_data.price)
                                   : visit.scraped_data.price}
                               </p>
                             )}
@@ -2632,7 +2633,7 @@ export default function ClientPortal() {
                         {/* Price */}
                         {rec.price && (
                           <p className="text-base font-bold text-emerald-600 mt-1">
-                            {new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(rec.price)}
+                            {formatCurrency(rec.price)}
                           </p>
                         )}
                         {/* Location */}

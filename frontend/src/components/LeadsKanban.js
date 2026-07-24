@@ -7,6 +7,7 @@ import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { parseBackendError } from "../utils/errorFormatter";
+import { formatCurrency } from "../utils/formatCurrency";
 import {
   Dialog,
   DialogContent,
@@ -74,14 +75,8 @@ const LeadCard = ({ lead, onEdit, onDelete, onRefreshPrice, onShowSuggestions })
     setIsDragging(false);
   };
 
-  const formatPrice = (price) => {
-    if (!price) return "N/D";
-    return new Intl.NumberFormat("pt-PT", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
+  const formatPrice = (price) =>
+    formatCurrency(price, { fallback: "N/D", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   const handleRefreshPrice = async () => {
     setIsRefreshing(true);
@@ -188,14 +183,8 @@ const LeadCard = ({ lead, onEdit, onDelete, onRefreshPrice, onShowSuggestions })
 const LeadListItem = ({ lead, onEdit, onDelete, onRefreshPrice, onShowSuggestions, onStatusChange }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  const formatPrice = (price) => {
-    if (!price) return "N/D";
-    return new Intl.NumberFormat("pt-PT", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
+  const formatPrice = (price) =>
+    formatCurrency(price, { fallback: "N/D", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   const handleRefreshPrice = async (e) => {
     e.stopPropagation();

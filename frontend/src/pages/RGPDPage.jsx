@@ -9,6 +9,7 @@
  */
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { sanitizeHtml } from '../utils/sanitize';
+import { validateNIF as validateNIFShared } from '../utils/validateNIF';
 import { useParams } from 'react-router-dom';
 import { toast } from 'sonner';
 
@@ -142,25 +143,9 @@ const CONSENTS = [
 // ====================================================================
 // NIF VALIDATION
 // ====================================================================
-const validateNIF = (nif) => {
-  const cleaned = nif.replace(/\D/g, '');
-  if (cleaned.length !== 9) return false;
-
-  // Validate first digit: 1, 2, 3, 5, 6, 8, or 9 (for individuals and some entities)
-  const firstDigit = parseInt(cleaned[0], 10);
-  if (![1, 2, 3, 5, 6, 8, 9].includes(firstDigit)) return false;
-
-  // Checksum validation
-  const checkDigit = parseInt(cleaned[8], 10);
-  let sum = 0;
-  for (let i = 0; i < 8; i++) {
-    sum += parseInt(cleaned[i], 10) * (9 - i);
-  }
-  const remainder = sum % 11;
-  const expectedDigit = remainder < 2 ? 0 : 11 - remainder;
-
-  return checkDigit === expectedDigit;
-};
+// Delega o checksum para o utilitário partilhado; mantém a permissão de NIFs
+// de empresa (comportamento original desta página, para pessoas e outras entidades).
+const validateNIF = (nif) => validateNIFShared(nif, { allowCompanyNIF: true }).valid;
 
 // ====================================================================
 // CC (CARTÃO DE CIDADÃO) VALIDATION

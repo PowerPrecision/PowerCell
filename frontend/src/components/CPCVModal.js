@@ -3,6 +3,7 @@
  * Permite preencher dados do CPCV e imprimir o documento com minuta
  */
 import { useState, useEffect } from "react";
+import { validateNIF as validateNIFShared } from "../utils/validateNIF";
 import {
   Dialog,
   DialogContent,
@@ -49,22 +50,11 @@ const FieldError = ({ children }) => (
   </p>
 );
 
-// Validar NIF português
+// Validar NIF português (delega o checksum para o utilitário partilhado; permite
+// NIFs de empresa porque vendedor/comprador de um CPCV podem ser pessoas colectivas)
 const validateNIF = (nif) => {
-  if (!nif) return { valid: true };
-  const cleanNif = nif.replace(/[^\d]/g, '');
-  if (cleanNif.length !== 9) return { valid: false, message: "NIF deve ter 9 dígitos" };
-  
-  const digits = cleanNif.split('').map(Number);
-  const weights = [9, 8, 7, 6, 5, 4, 3, 2];
-  const sum = digits.slice(0, 8).reduce((acc, d, i) => acc + d * weights[i], 0);
-  const remainder = sum % 11;
-  const checkDigit = remainder > 1 ? 11 - remainder : 0;
-  
-  if (checkDigit !== digits[8]) {
-    return { valid: false, message: "NIF inválido" };
-  }
-  return { valid: true };
+  const { valid, error } = validateNIFShared(nif, { allowCompanyNIF: true });
+  return { valid, message: error };
 };
 
 const CPCVModal = ({ open, onOpenChange, process, personalData, financialData, realEstateData, token }) => {

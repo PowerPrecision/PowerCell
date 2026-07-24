@@ -96,19 +96,13 @@ import {
   Legend,
 } from "recharts";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
+import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
 
 // ====================================================================
 // HELPERS
 // ====================================================================
 
-const formatCurrency = (value) => {
-  if (value == null || isNaN(value)) return "0,00 €";
-  return new Intl.NumberFormat("pt-PT", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-  }).format(value);
-};
+const formatCurrency = (value) => formatCurrencyShared(value, { fallback: "0,00 €" });
 
 const formatNumber = (value) => {
   if (value == null || isNaN(value)) return "0";

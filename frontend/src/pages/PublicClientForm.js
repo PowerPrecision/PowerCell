@@ -51,6 +51,7 @@ import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";
 import { cn, safeDateStr } from "../lib/utils";
+import { validateNIF as validateNIFShared } from "../utils/validateNIF";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
@@ -1606,24 +1607,11 @@ export default function PublicClientForm({ previewMode = false }) {
     );
   }, [formData, fieldErrors, updateField, setFormData, toggleCaracteristica, toggleBanco, updateBancoValor, toggleContasAbertas, toggleBancoSimulacoes, checkDependsOn, allFieldsConfig]);
 
-  // Validação de NIF português
+  // Validação de NIF português (delega o checksum para o utilitário partilhado)
   const validateNIF = (nif) => {
     if (!nif) return { valid: false, message: "NIF é obrigatório" };
-    const cleanNif = nif.replace(/[^\d]/g, '');
-    if (cleanNif.length !== 9) return { valid: false, message: "NIF deve ter 9 dígitos" };
-    if (!/^\d{9}$/.test(cleanNif)) return { valid: false, message: "NIF deve conter apenas números" };
-    
-    // Validar checksum
-    const digits = cleanNif.split('').map(Number);
-    const weights = [9, 8, 7, 6, 5, 4, 3, 2];
-    const sum = digits.slice(0, 8).reduce((acc, d, i) => acc + d * weights[i], 0);
-    const remainder = sum % 11;
-    const checkDigit = remainder > 1 ? 11 - remainder : 0;
-    
-    if (checkDigit !== digits[8]) {
-      return { valid: false, message: "NIF inválido (dígito de controlo incorreto)" };
-    }
-    return { valid: true };
+    const { valid, error } = validateNIFShared(nif);
+    return { valid, message: error };
   };
 
   // Validação de email

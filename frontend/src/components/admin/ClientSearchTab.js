@@ -5,7 +5,7 @@
  * Agora utiliza a API de pesquisa global do backend (/api/search/global) que faz
  * pesquisa accent-insensitive em processos E clientes registados.
  */
-import { useState, useEffect, useRef, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
@@ -15,6 +15,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from ".
 import { Search, Eye, Loader2 } from "lucide-react";
 import { safeLabel } from "../dashboard/DashboardShared";
 import { safeString } from "../../utils/safeString";
+import { useDebounce } from "../../hooks/useDebounce";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -26,7 +27,7 @@ const ClientSearchTab = ({ workflowStatuses }) => {
   const [results, setResults] = useState({ processes: [], clients: [] });
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
-  const debounceRef = useRef(null);
+  const debouncedSearchTerm = useDebounce(searchTerm, 300);
 
   const fetchResults = useCallback(async (term) => {
     if (term.length < 2) {
@@ -61,17 +62,8 @@ const ClientSearchTab = ({ workflowStatuses }) => {
   }, []);
 
   useEffect(() => {
-    if (debounceRef.current) {
-      clearTimeout(debounceRef.current);
-    }
-    debounceRef.current = setTimeout(() => {
-      fetchResults(searchTerm);
-    }, 300);
-
-    return () => {
-      if (debounceRef.current) clearTimeout(debounceRef.current);
-    };
-  }, [searchTerm, fetchResults]);
+    fetchResults(debouncedSearchTerm);
+  }, [debouncedSearchTerm, fetchResults]);
 
   const totalResults = results.processes.length + results.clients.length;
 

@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { searchClients, updateProcess, createClient } from "../services/api";
 import { queryKeys } from "../lib/queryClient";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { useDebounce } from "../hooks/useDebounce";
 import { Card, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
@@ -34,7 +35,7 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
   const [loading, setLoading] = useState(false);
   const [linking, setLinking] = useState(false);
   const containerRef = useRef(null);
-  const debounceRef = useRef(null);
+  const debouncedQuery = useDebounce(query, 300);
 
   // ── Criação inline de novo cliente ──
   const [showNewClientForm, setShowNewClientForm] = useState(false);
@@ -79,11 +80,13 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
     }
   }, [processData?.client_id]);
 
+  // Disparar pesquisa quando o valor com debounce mudar
+  useEffect(() => {
+    if (isSearching) search(debouncedQuery);
+  }, [debouncedQuery, isSearching, search]);
+
   const handleInputChange = (e) => {
-    const value = e.target.value;
-    setQuery(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => search(value), 300);
+    setQuery(e.target.value);
   };
 
   // Ligar cliente como 2º titular

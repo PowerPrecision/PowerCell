@@ -21,6 +21,7 @@ import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
 import { safeDateStr, safeFormat } from "../lib/utils";
 import { safeString } from "../utils/safeString";
+import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
 // PACOTE CH — ClientDetailsModal reutilizável
 import ClientDetailsModal from "../components/ClientDetailsModal";
 
@@ -278,11 +279,7 @@ const FilteredProcessList = () => {
 
   const formatCurrency = (value) => {
     if (!value) return "-";
-    return new Intl.NumberFormat('pt-PT', { 
-      style: 'currency', 
-      currency: 'EUR',
-      maximumFractionDigits: 0 
-    }).format(value);
+    return formatCurrencyShared(value, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
   /**
