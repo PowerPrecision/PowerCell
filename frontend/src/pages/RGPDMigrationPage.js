@@ -46,30 +46,25 @@ import {
   AccessRestricted,
   PageHeader,
 } from "../components/admin/AdminPageShared";
+import { StatCard } from "../components/shared/StatCard";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-// Componente de estatística de migração
-const MigrationStatCard = ({ title, value, percentage, icon: Icon, color, description }) => (
-  <Card>
-    <CardContent className="pt-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <p className="text-2xl font-bold">{value}</p>
-          {percentage !== undefined && (
-            <p className="text-xs text-muted-foreground mt-1">{percentage}% do total</p>
-          )}
-          {description && (
-            <p className="text-xs text-muted-foreground mt-1">{description}</p>
-          )}
-        </div>
-        <div className={`p-3 rounded-full ${color}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-    </CardContent>
-  </Card>
+// Thin adapter: migration cards use shared StatCard + percentage subtitle
+const MigrationStatCard = ({ title, value, percentage, icon, color, description }) => (
+  <StatCard
+    variant="inline"
+    title={title}
+    value={value}
+    icon={icon}
+    bgColor={color || "bg-secondary"}
+    subtitle={
+      percentage !== undefined
+        ? `${percentage}% do total${description ? ` · ${description}` : ""}`
+        : description
+    }
+  />
 );
 
 // Barra de progresso de migração

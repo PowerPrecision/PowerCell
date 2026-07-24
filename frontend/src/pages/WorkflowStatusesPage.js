@@ -34,7 +34,7 @@ const WorkflowStatusesPage = ({ embedded = false }) => {
   }
 
   return wrapLayout(
-    <div className="space-y-4 md:space-y-6 p-4 md:p-6">
+    <div className="space-y-4 md:space-y-6">
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">

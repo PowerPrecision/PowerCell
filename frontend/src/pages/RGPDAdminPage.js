@@ -39,7 +39,6 @@ import { safeNumber } from "../components/dashboard/DashboardShared";
 import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
 import {
   FileText,
-  Loader2,
   CheckCircle,
   XCircle,
   Clock,
@@ -65,27 +64,21 @@ import {
   AdminSearchFilter,
   PageHeader,
 } from "../components/admin/AdminPageShared";
+import { StatusBadge as SharedStatusBadge } from "../components/shared/StatusBadge";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-// Status badge component - específico para RGPD
-const StatusBadge = ({ status }) => {
-  const config = {
-    pending: { label: "Pendente", color: "bg-yellow-100 text-yellow-800 border-yellow-300", icon: Clock },
-    signed: { label: "Assinado", color: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle },
-    expired: { label: "Expirado", color: "bg-red-100 text-red-800 border-red-300", icon: XCircle },
-    cancelled: { label: "Cancelado", color: "bg-gray-100 text-gray-800 border-gray-300", icon: XCircle },
-  };
-
-  const { label, color, icon: Icon } = config[status] || config.pending;
-
-  return (
-    <Badge variant="outline" className={`${color} flex items-center gap-1`}>
-      <Icon className="h-3 w-3" />
-      {label}
-    </Badge>
-  );
+const RGPD_STATUS_MAP = {
+  pending: { label: "Pendente", className: "bg-accent/15 text-foreground border-accent/30", icon: Clock },
+  signed: { label: "Assinado", className: "bg-secondary text-secondary-foreground border-border", icon: CheckCircle },
+  expired: { label: "Expirado", className: "bg-destructive/10 text-destructive border-destructive/20", icon: XCircle },
+  cancelled: { label: "Cancelado", className: "bg-muted text-muted-foreground border-border", icon: XCircle },
 };
+
+const StatusBadge = ({ status }) => (
+  <SharedStatusBadge status={status} statusMap={RGPD_STATUS_MAP} />
+);
 
 // Opções de status para filtro
 const RGPD_STATUS_OPTIONS = [

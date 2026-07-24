@@ -28,11 +28,12 @@ import {
   FileText,
   FolderOpen,
   RefreshCw,
-  Loader2,
   ClipboardList,
   Upload,
   Info,
 } from "lucide-react";
+import { StatusBadge as SharedStatusBadge } from "./shared/StatusBadge";
+import { Spinner } from "./ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -40,42 +41,29 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 const StatusIcon = ({ status }) => {
   switch (status) {
     case "presente":
-      return <CheckCircle className="h-5 w-5 text-green-500" />;
+      return <CheckCircle className="h-5 w-5 text-primary" />;
     case "em_falta":
-      return <XCircle className="h-5 w-5 text-red-500" />;
+      return <XCircle className="h-5 w-5 text-destructive" />;
     case "expirado":
-      return <AlertTriangle className="h-5 w-5 text-orange-500" />;
+      return <AlertTriangle className="h-5 w-5 text-destructive" />;
     case "a_expirar":
-      return <Clock className="h-5 w-5 text-yellow-500" />;
+      return <Clock className="h-5 w-5 text-accent-foreground" />;
     default:
-      return <FileText className="h-5 w-5 text-gray-400" />;
+      return <FileText className="h-5 w-5 text-muted-foreground" />;
   }
 };
 
-// Badge de status
-const StatusBadge = ({ status }) => {
-  const variants = {
-    presente: "bg-green-100 text-green-700 border-green-200",
-    em_falta: "bg-red-100 text-red-700 border-red-200",
-    expirado: "bg-orange-100 text-orange-700 border-orange-200",
-    a_expirar: "bg-yellow-100 text-yellow-700 border-yellow-200",
-    nao_verificado: "bg-gray-100 text-gray-700 border-gray-200",
-  };
-
-  const labels = {
-    presente: "Presente",
-    em_falta: "Em Falta",
-    expirado: "Expirado",
-    a_expirar: "A Expirar",
-    nao_verificado: "Não Verificado",
-  };
-
-  return (
-    <Badge variant="outline" className={variants[status] || variants.nao_verificado}>
-      {labels[status] || status}
-    </Badge>
-  );
+const DOC_STATUS_MAP = {
+  presente: { label: "Presente", className: "bg-secondary text-secondary-foreground border-border" },
+  em_falta: { label: "Em Falta", className: "bg-destructive/10 text-destructive border-destructive/20" },
+  expirado: { label: "Expirado", className: "bg-destructive/10 text-destructive border-destructive/20" },
+  a_expirar: { label: "A Expirar", className: "bg-accent/15 text-foreground border-accent/30" },
+  nao_verificado: { label: "Não Verificado", className: "bg-muted text-muted-foreground border-border" },
 };
+
+const StatusBadge = ({ status }) => (
+  <SharedStatusBadge status={status} statusMap={DOC_STATUS_MAP} />
+);
 
 const DocumentChecklist = ({ processId, onUpdate }) => {
   const { token } = useAuth();
@@ -177,7 +165,7 @@ const DocumentChecklist = ({ processId, onUpdate }) => {
     return (
       <Card>
         <CardContent className="flex items-center justify-center py-8">
-          <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+          <Spinner size="md" className="text-muted-foreground" />
         </CardContent>
       </Card>
     );
@@ -372,7 +360,7 @@ const DocumentChecklist = ({ processId, onUpdate }) => {
               disabled={generating || !filesInput.trim()}
             >
               {generating ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
+                <Spinner size="sm" className="mr-2" />
               ) : (
                 <CheckCircle className="h-4 w-4 mr-2" />
               )}

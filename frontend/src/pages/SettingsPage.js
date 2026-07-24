@@ -37,11 +37,12 @@ import {
   Phone,
   Building2,
   Shield,
-  Loader2,
 } from "lucide-react";
 import WorkflowEditor from "../components/WorkflowEditor";
 import NotificationSettings from "../components/NotificationSettings";
 import BulkDocumentUpload from "../components/BulkDocumentUpload";
+import { PageHeader } from "../components/shared/PageHeader";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -227,14 +228,13 @@ const SettingsPage = () => {
   };
 
   return (
-    <DashboardLayout title="Definições">
-      <div className="p-4 md:p-6">
-        <div className="mb-6">
-          <h1 className="text-2xl font-bold text-foreground">Definições</h1>
-          <p className="text-muted-foreground">
-            Gerir as configurações da sua conta e preferências
-          </p>
-        </div>
+    <DashboardLayout>
+      <div className="space-y-6">
+        <PageHeader
+          icon={Settings}
+          title="Definições"
+          description="Gerir as configurações da sua conta e preferências"
+        />
 
         <Tabs defaultValue="perfil" className="space-y-6">
           <TabsList className="bg-muted border border-border">
@@ -525,7 +525,7 @@ const SettingsPage = () => {
                       className="bg-teal-600 hover:bg-teal-700"
                     >
                       {loading ? (
-                        <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                        <Spinner size="sm" className="mr-2" />
                       ) : (
                         <Save className="h-4 w-4 mr-2" />
                       )}

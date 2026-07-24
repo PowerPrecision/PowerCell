@@ -9,7 +9,6 @@ import {
   ArrowUp,
   ArrowDown,
   RefreshCw,
-  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -18,6 +17,8 @@ import { FullPageSkeleton } from "../components/ui/skeletons";
 import { useTheme } from "../contexts/ThemeContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
+import { PageHeader } from "../components/shared/PageHeader";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -197,29 +198,25 @@ export default function BranchPerformancePage() {
 
   return (
     <DashboardLayout title="Performance de Balcões">
-    <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto overflow-visible">
+    <div className="space-y-6 max-w-7xl mx-auto overflow-visible">
       {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 relative z-10 overflow-visible">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Building2 className="h-6 w-6 text-primary" />
-            Performance de Balcoes
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Analise de eficiencia dos parceiros bancarios
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={fetchData}
-          disabled={loading}
-          className="w-fit"
-        >
-          {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-          Atualizar
-        </Button>
-      </div>
+      <PageHeader
+        icon={Building2}
+        title="Performance de Balcoes"
+        description="Analise de eficiencia dos parceiros bancarios"
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchData}
+            disabled={loading}
+            className="w-fit"
+          >
+            {loading ? <Spinner size="sm" className="mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Atualizar
+          </Button>
+        }
+      />
 
       {/* ── Top Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

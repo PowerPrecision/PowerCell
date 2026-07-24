@@ -25,7 +25,6 @@ import {
   ArrowUpRight,
   ArrowDownRight,
   Minus,
-  Loader2,
   ChevronLeft,
   ChevronRight,
   CreditCard,
@@ -69,6 +68,9 @@ import {
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole } from "../utils/roleUtils";
+import { StatCard } from "../components/shared/StatCard";
+import { StatusBadge as SharedStatusBadge } from "../components/shared/StatusBadge";
+import { Spinner } from "../components/ui/Spinner";
 import {
   // Legacy dashboard APIs
   getFinanceSummary,
@@ -116,10 +118,10 @@ const formatPct = (value) => {
 
 // Mapeamento de status para labels e cores em pt-PT
 const STATUS_MAP = {
-  pending:  { label: "Pendente",  color: "bg-amber-100 text-amber-800 border-amber-200", dot: "bg-amber-500" },
-  invoiced: { label: "Faturado",  color: "bg-sky-100 text-sky-800 border-sky-200",       dot: "bg-sky-500" },
-  paid:     { label: "Pago",      color: "bg-emerald-100 text-emerald-800 border-emerald-200", dot: "bg-emerald-500" },
-  cancelled:{ label: "Cancelado", color: "bg-gray-100 text-gray-600 border-gray-200",     dot: "bg-gray-400" },
+  pending:  { label: "Pendente",  className: "bg-accent/15 text-foreground border-accent/30" },
+  invoiced: { label: "Faturado",  className: "bg-primary/10 text-primary border-primary/20" },
+  paid:     { label: "Pago",      className: "bg-secondary text-secondary-foreground border-border" },
+  cancelled:{ label: "Cancelado", className: "bg-muted text-muted-foreground border-border" },
 };
 
 // Próximo status no ciclo
@@ -190,27 +192,45 @@ const FinanceTooltip = ({ active, payload, label }) => {
 // STAT CARD (Legacy — preservado para tabs Imobiliária/Crédito)
 // ====================================================================
 
-const FinanceStatCard = ({ title, value, subtitle, icon: Icon, color, variation, iconBg }) => (
-  <Card>
-    <CardContent className="p-5">
-      <div className="flex items-center justify-between">
-        <div className="flex-1 min-w-0">
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className={`text-2xl font-bold mt-1 ${color || ""}`}>{value}</p>
-          <div className="mt-1">
-            {subtitle && (
-              <p className="text-xs text-muted-foreground truncate">{subtitle}</p>
-            )}
-            {variation !== undefined && <VariationIndicator value={variation} />}
+// STAT CARD — adapter over shared StatCard; preserves variation indicator when present
+const FinanceStatCard = ({ title, value, subtitle, icon: Icon, color, variation, iconBg }) => {
+  if (variation === undefined) {
+    return (
+      <StatCard
+        variant="inline"
+        title={title}
+        value={value}
+        subtitle={subtitle}
+        icon={Icon}
+        color={color}
+        bgColor={iconBg || "bg-secondary"}
+      />
+    );
+  }
+  return (
+    <Card>
+      <CardContent className="p-5">
+        <div className="flex items-center justify-between">
+          <div className="flex-1 min-w-0">
+            <p className="text-sm text-muted-foreground">{title}</p>
+            <p className={`text-2xl font-bold mt-1 ${color || ""}`}>{value}</p>
+            <div className="mt-1">
+              {subtitle && (
+                <p className="text-xs text-muted-foreground truncate">{subtitle}</p>
+              )}
+              <VariationIndicator value={variation} />
+            </div>
           </div>
+          {Icon && (
+            <div className={`p-3 rounded-xl ${iconBg || "bg-secondary"}`}>
+              <Icon className={`h-6 w-6 ${color || "text-primary"}`} />
+            </div>
+          )}
         </div>
-        <div className={`p-3 rounded-xl ${iconBg || "bg-purple-50"}`}>
-          <Icon className={`h-6 w-6 ${color || "text-purple-600"}`} />
-        </div>
-      </div>
-    </CardContent>
-  </Card>
-);
+      </CardContent>
+    </Card>
+  );
+};
 
 // ====================================================================
 // KPI CARD — Premium (Fase 2)
@@ -256,15 +276,9 @@ const KpiCard = ({ title, value, subtitle, icon: Icon, accent = "purple" }) => {
 // STATUS BADGE — Componente de Estado
 // ====================================================================
 
-const StatusBadge = ({ status }) => {
-  const s = STATUS_MAP[status] || STATUS_MAP.pending;
-  return (
-    <span className={`inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium border ${s.color}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${s.dot}`} />
-      {s.label}
-    </span>
-  );
-};
+const StatusBadge = ({ status }) => (
+  <SharedStatusBadge status={status} statusMap={STATUS_MAP} />
+);
 
 // ====================================================================
 // RECEIPT MODAL — Recibo de Vencimento Individual
@@ -490,7 +504,7 @@ const PoolDistributionPanel = ({ companyId }) => {
                 disabled={exporting || loading}
               >
                 {exporting ? (
-                  <Loader2 className="h-4 w-4 animate-spin" />
+                  <Spinner size="sm" />
                 ) : (
                   <Download className="h-4 w-4" />
                 )}
@@ -526,7 +540,7 @@ const PoolDistributionPanel = ({ companyId }) => {
       <CardContent>
         {loading && !poolData ? (
           <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-6 w-6 animate-spin text-emerald-600" />
+            <Spinner size="md" className="text-primary" />
             <span className="ml-2 text-muted-foreground">A calcular distribuição...</span>
           </div>
         ) : error ? (
@@ -942,7 +956,7 @@ const ProcessFinancesTab = ({ companyId }) => {
   if (loading) {
     return (
       <div className="flex items-center justify-center py-12">
-        <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
+        <Spinner size="md" className="text-primary" />
         <span className="ml-2 text-muted-foreground">A carregar registos financeiros...</span>
       </div>
     );
@@ -1097,7 +1111,7 @@ const ProcessFinancesTab = ({ companyId }) => {
                       </td>
                       <td className="py-3 px-3 text-center">
                         {updatingId === f.id ? (
-                          <Loader2 className="h-4 w-4 animate-spin mx-auto text-purple-600" />
+                          <Spinner size="sm" className="mx-auto text-primary" />
                         ) : (
                           <button
                             onClick={() => handleStatusChange(f.id, NEXT_STATUS[f.status])}
@@ -1233,7 +1247,7 @@ const FinanceDashboard = () => {
       <DashboardLayout>
         <div className="w-full max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex items-center gap-3">
-            <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
+            <Spinner size="md" className="text-primary" />
             <span className="text-muted-foreground">A carregar dados financeiros...</span>
           </div>
         </div>
