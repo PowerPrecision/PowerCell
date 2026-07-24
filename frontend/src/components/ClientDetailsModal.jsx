@@ -56,6 +56,7 @@ import {
 } from "lucide-react";
 import { safeString } from "../utils/safeString";
 import { formatDate, formatDateTime } from "../lib/utils";
+import { formatCurrency } from "../utils/formatCurrency";
 import { resendPortalAccess } from "../services/api";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -255,7 +256,7 @@ const ClientDetailsModal = ({
                       <div>
                         <p className="text-xs text-muted-foreground">Rendimento Mensal</p>
                         <p className="text-sm font-medium">
-                          {new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(safeString(client.dados_financeiros.rendimento_mensal))}
+                          {formatCurrency(safeString(client.dados_financeiros.rendimento_mensal))}
                         </p>
                       </div>
                     </div>

@@ -39,7 +39,7 @@
  * });
  */
 import axios from "axios";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 // ====================================================================
@@ -245,9 +245,7 @@ api.interceptors.response.use(
     // ERRO DE REDE (sem response do servidor)
     // ================================================================
     if (!response) {
-      toast({
-        variant: "destructive",
-        title: "Erro de Conexão",
+      toast.error("Erro de Conexão", {
         description: "Não foi possível conectar ao servidor. Verifique a sua conexão.",
       });
       return Promise.reject(error);
@@ -273,8 +271,7 @@ api.interceptors.response.use(
         localStorage.removeItem("originalToken");
         
         // Mostrar toast a informar
-        toast({
-          title: "Sessão de Visualização Terminada",
+        toast.info("Sessão de Visualização Terminada", {
           description: "Voltou à sua conta de administrador.",
         });
         
@@ -318,9 +315,7 @@ api.interceptors.response.use(
         const isOnPortal = window.location.pathname.startsWith('/portal');
 
         if (!isOnPortal) {
-          toast({
-            variant: "destructive",
-            title: "Sessão Expirada",
+          toast.error("Sessão Expirada", {
             description: "A sua sessão expirou. Por favor, faça login novamente.",
           });
         }
@@ -345,9 +340,7 @@ api.interceptors.response.use(
     // 403 - PROIBIDO (Sem permissão)
     // ================================================================
     if (status === 403) {
-      toast({
-        variant: "destructive",
-        title: "Acesso Negado",
+      toast.error("Acesso Negado", {
         description: "Não tem permissão para realizar esta ação.",
       });
       return Promise.reject(error);
@@ -390,9 +383,7 @@ api.interceptors.response.use(
       // Only show toast if this URL wasn't already showing one (avoid spam)
       if (!retryingUrls.has(urlKey)) {
         const retryAfter = response.headers["retry-after"] || "alguns segundos";
-        toast({
-          variant: "destructive",
-          title: "Demasiados Pedidos",
+        toast.error("Demasiados Pedidos", {
           description: `O sistema está ocupado. Tente novamente em ${retryAfter}.`,
         });
       }
@@ -423,9 +414,7 @@ api.interceptors.response.use(
         validationMessage = data.detail;
       }
       
-      toast({
-        variant: "destructive",
-        title: "Erro de Validação",
+      toast.error("Erro de Validação", {
         description: validationMessage,
       });
       return Promise.reject(error);
@@ -443,11 +432,7 @@ api.interceptors.response.use(
         ? "Ocorreu um erro interno. Contacte o suporte se o problema persistir."
         : serverDetail;
 
-      toast({
-        variant: "destructive",
-        title: "Erro de Servidor",
-        description,
-      });
+      toast.error("Erro de Servidor", { description });
 
       // Log do erro para debugging
       console.error("[API] Server error:", {
@@ -464,11 +449,7 @@ api.interceptors.response.use(
     // OUTROS ERROS (400, etc.)
     // ================================================================
     if (status >= 400) {
-      toast({
-        variant: "destructive",
-        title: "Erro",
-        description: errorMessage,
-      });
+      toast.error("Erro", { description: errorMessage });
     }
     
     return Promise.reject(error);

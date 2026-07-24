@@ -33,6 +33,7 @@ import {
 import { toast } from "sonner";
 import { safeString } from "../../../utils/safeString";
 import { extractErrorMessage } from "../../../utils/extractErrorMessage";
+import { formatCurrency } from "../../../utils/formatCurrency";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -65,7 +66,7 @@ const propertyTypeLabels = {
 
 const formatPrice = (value) => {
   if (!value && value !== 0) return "—";
-  return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(value);
+  return formatCurrency(value);
 };
 
 export default function VisitasTab({ processId }) {

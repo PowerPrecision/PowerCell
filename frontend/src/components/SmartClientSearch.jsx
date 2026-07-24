@@ -7,6 +7,7 @@
  */
 import { useState, useRef, useEffect, useCallback } from "react";
 import { searchClients } from "../services/api";
+import { useDebounce } from "../hooks/useDebounce";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
 import { Loader2, Search, UserPlus, X } from "lucide-react";
@@ -32,7 +33,7 @@ const SmartClientSearch = ({ onClientSelect, selectedClient, onClearClient }) =>
   const [newClient, setNewClient] = useState({ name: "", email: "", phone: "", nif: "" });
   const [selectedIndex, setSelectedIndex] = useState(-1);
   const containerRef = useRef(null);
-  const debounceRef = useRef(null);
+  const debouncedQuery = useDebounce(query, 300);
 
   // Fechar dropdown ao clicar fora
   useEffect(() => {
@@ -65,6 +66,11 @@ const SmartClientSearch = ({ onClientSelect, selectedClient, onClearClient }) =>
       setLoading(false);
     }
   }, []);
+
+  // Disparar pesquisa quando o valor com debounce mudar
+  useEffect(() => {
+    search(debouncedQuery);
+  }, [debouncedQuery, search]);
 
   // Se tem cliente selecionado, não mostrar pesquisa
   if (selectedClient) {
@@ -104,9 +110,6 @@ const SmartClientSearch = ({ onClientSelect, selectedClient, onClearClient }) =>
     const value = e.target.value;
     setQuery(value);
     setShowNewClientForm(false);
-
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => search(value), 300);
   };
 
   const handleSelectClient = (client) => {

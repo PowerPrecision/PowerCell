@@ -14,6 +14,7 @@
 import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { formatCurrency } from "../utils/formatCurrency";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -121,7 +122,7 @@ const isVisitPast = (isoDate) => {
 const formatPrice = (price) => {
   if (!price) return null;
   if (typeof price === 'number') {
-    return new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(price);
+    return formatCurrency(price);
   }
   return String(price);
 };
@@ -583,7 +584,7 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
                     <span className="truncate">{p.title || "Sem título"}</span>
                     {p.financials?.asking_price && (
                       <span className="ml-2 text-muted-foreground text-xs">
-                        {new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(p.financials.asking_price)}
+                        {formatCurrency(p.financials.asking_price)}
                       </span>
                     )}
                   </SelectItem>

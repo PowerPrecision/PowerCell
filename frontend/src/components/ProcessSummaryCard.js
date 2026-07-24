@@ -12,6 +12,7 @@ import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeParseISO, safeFormat } from "../lib/utils";
 import { safeString, safeStringArray } from "../utils/safeString";
+import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
 
 const ProcessSummaryCard = ({ process, consultorName, mediadorName, consultorNames, mediadorNames }) => {
   if (!process) return null;
@@ -31,11 +32,7 @@ const ProcessSummaryCard = ({ process, consultorName, mediadorName, consultorNam
   // Formatar valor
   const formatCurrency = (value) => {
     if (!value) return "N/D";
-    return new Intl.NumberFormat('pt-PT', { 
-      style: 'currency', 
-      currency: 'EUR',
-      maximumFractionDigits: 0 
-    }).format(safeNumber(value));
+    return formatCurrencyShared(safeNumber(value), { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
   return (

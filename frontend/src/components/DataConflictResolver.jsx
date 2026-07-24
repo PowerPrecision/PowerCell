@@ -17,6 +17,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "./ui/dialog";
+import { formatCurrency } from "../utils/formatCurrency";
 import { 
   AlertTriangle, Check, X, FileText, ArrowRight, 
   Sparkles, Shield, Loader2, ChevronDown, ChevronUp
@@ -136,10 +137,7 @@ const DataConflictResolver = ({
       return <span className="text-muted-foreground italic">Vazio</span>;
     }
     if (typeof value === "number") {
-      return new Intl.NumberFormat("pt-PT", {
-        style: "currency",
-        currency: "EUR"
-      }).format(value);
+      return formatCurrency(value);
     }
     return String(value);
   };

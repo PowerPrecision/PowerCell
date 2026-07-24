@@ -17,6 +17,7 @@ import { Badge } from "../components/ui/badge";
 import { FullPageSkeleton } from "../components/ui/skeletons";
 import { useTheme } from "../contexts/ThemeContext";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -26,13 +27,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 /** Formata um número como moeda europeia (ex: 250.000,00 €) */
 function formatCurrency(value) {
-  if (value == null || isNaN(value)) return "0,00 €";
-  return new Intl.NumberFormat("pt-PT", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+  return formatCurrencyShared(value, { fallback: "0,00 €" });
 }
 
 /** Formata percentagem com 1 casa decimal */
