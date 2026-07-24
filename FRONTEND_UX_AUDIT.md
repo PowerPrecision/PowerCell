@@ -256,16 +256,21 @@ Ordem pensada para minimizar risco: primeiro o que é seguro/reversível e destr
 10. Substituir os `formatDate` locais (13 ficheiros) pelas funções já existentes em `lib/utils.js`.
 11. Extrair um hook `useDebounce` partilhado e aplicá-lo em `SmartClientSearch`, `SecondTitularCard`, `admin/ClientSearchTab`.
 
-### Fase 4 — Consolidar componentes base repetidos (médio risco)
-12. Escolher **uma** implementação canónica de `StatCard` e de `StatusBadge` (recomendação: promover a versão de `DashboardShared.js` para `components/ui/` ou `components/shared/`, por ser a mais genérica) e migrar todos os consumidores (`AdminPageShared`, `FinanceDashboard`, `RGPDMigrationPage`, `RGPDAdminPage`, `ClientRegistrationsAdminPage`, `DocumentChecklist`, `TempLinksManager`).
-13. Criar um `<Spinner>` simples (wrapper fino sobre `Loader2`) em `components/ui/` e substituir progressivamente os 109 usos de `<Loader2 className="animate-spin">` à mão (pode ser feito por página, sem pressa).
-14. Decidir se as ~14 primitivas Shadcn não usadas (`drawer`, `command`, `context-menu`, etc.) ficam reservadas para o próximo redesign (muitas delas são exatamente o que o redesign de UX vai precisar para simplificar filtros/menus) ou se são removidas — não apagar sem consultar o plano de redesign.
+### Fase 4 — Consolidar componentes base repetidos (médio risco) — **done** (PR #594)
+12. ✅ Implementação canónica de `StatCard` / `StatusBadge` em `components/shared/`; consumidores principais migrados (`AdminPageShared`, `FinanceDashboard`, `RGPDMigrationPage`, `RGPDAdminPage`, `DocumentChecklist`). `TempLinksManager` / restantes podem seguir o mesmo padrão.
+13. ✅ `<Spinner>` em `components/ui/Spinner.jsx`; substituído nas páginas principais (Dashboards, RGPD, Finance, Settings, Statistics, checklist). Restantes ~100 usos podem migrar progressivamente.
+14. Decidir se as ~14 primitivas Shadcn não usadas ficam reservadas para o próximo redesign — **ainda em aberto**.
 
-### Fase 5 — Padronizar layout de página (mais transversal, fazer por último)
-15. Criar um componente `PageHeader` único (herdar/generalizar o já existente em `AdminPageShared.js`) e definir a política oficial: título só aparece uma vez (decidir: cabeçalho fixo da layout OU cabeçalho de conteúdo, não os dois).
-16. Definir e documentar 1–2 convenções oficiais de wrapper de página (ex.: `"space-y-6"` sem padding extra, já que a `DashboardLayout` trata do padding) e remover o "double padding" identificado em `SettingsPage`, `StatisticsPage`, etc.
-17. Definir 1–2 receitas oficiais de grelha de KPIs (ex.: `grid-cols-2 sm:grid-cols-4 lg:grid-cols-{N}`) e migrar as páginas com padrões divergentes.
-18. Decidir a política de largura máxima de conteúdo (full-bleed vs. `max-w-7xl mx-auto`) e aplicá-la de forma consistente às páginas de dashboard/lista.
+### Fase 5 — Padronizar layout de página — **done** (parcial, PR #594)
+15. ✅ `PageHeader` canónico em `components/shared/PageHeader.jsx` (+ re-export em AdminPageShared). Política: preferir título de conteúdo via `PageHeader`; evitar duplicar o mesmo `h1` + `DashboardLayout title`.
+16. ✅ Wrapper oficial: `"space-y-6"` (sem padding extra). Double padding removido em `SettingsPage`, `StatisticsPage`, `WorkflowStatusesPage`, `BranchPerformancePage`.
+17. Receitas oficiais de grelha de KPIs — **ainda em aberto** (ConsultorDashboard deixou de depender da grelha de 7 KPIs).
+18. Política de largura máxima — **ainda em aberto**.
+
+### ConsultorDashboard redesign (Progressive Disclosure) — **done** (PR #594)
+- Zona 1: card full-width “Tarefas Pendentes” (prazos + tarefas + rascunhos)
+- Zona 2: funil recharts clicável (Novo / Em Análise / Aprovado / Concluído)
+- Zona 3: Tabs (Clientes, Mural/Feed, Novidades; docs/IA atrás de tabs)
 
 ### Fase 6 — Reforçar os tokens de cor (o mais transversal — fazer com o redesign, não antes)
 19. Como esta é a mudança de maior superfície (143 ficheiros), **não tentar corrigir tudo de uma vez**: à medida que cada ecrã for redesenhado (conforme o plano de UX/UI já aprovado), substituir as cores cruas (`bg-blue-*`, `text-gray-*`) pelos tokens semânticos ou por variantes de `Badge`/`Alert` já existentes, e remover a regra `!important` correspondente em `index.css` assim que deixar de ser necessária.
