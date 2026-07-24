@@ -19,12 +19,13 @@ import {
 } from "recharts";
 import { 
   TrendingUp, TrendingDown, FileText, CheckCircle, 
-  Clock, Euro, Target, Building, Trophy, Loader2
+  Clock, Euro, Target, Building, Trophy
 } from "lucide-react";
 import { getStats, getProcesses, getUsers } from "../services/api";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -150,10 +151,10 @@ const StatisticsPage = () => {
     <DashboardLayout title="Estatísticas e Análise">
       {loading ? (
         <div className="flex items-center justify-center py-24">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <Spinner size="lg" className="text-muted-foreground" />
         </div>
       ) : (
-      <div className="space-y-4 md:space-y-6 p-4 md:p-6">
+      <div className="space-y-4 md:space-y-6">
         {/* Filtros */}
         <div className="flex flex-wrap gap-4">
           {canViewAllStats && (

@@ -19,12 +19,15 @@ import {
   SelectValue,
 } from "../ui/select";
 import {
-  FileText, Search, ArrowRight, Calendar, Loader2, Sparkles, FolderOpen
+  FileText, Search, ArrowRight, Calendar, Sparkles, FolderOpen
 } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInDays } from "date-fns";
 import { safeDateStr, safeParseISO, formatDate as formatDateUtil } from "../../lib/utils";
 import { getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses, createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument } from "../../services/api";
+import { StatCard as SharedStatCard } from "../shared/StatCard";
+import { StatusBadge as SharedStatusBadge } from "../shared/StatusBadge";
+import { Spinner, LoadingSpinner as SharedLoadingSpinner } from "../ui/Spinner";
 
 // ====================================================================
 // HELPERS
@@ -126,55 +129,11 @@ export const formatDate = (dateString) => {
 // COMPONENTES PARTILHADOS
 // ====================================================================
 
-/**
- * Card de estatísticas do dashboard
- */
-export const StatCard = ({ icon: Icon, iconColor, bgColor, value, label, onClick }) => (
-  <Card
-    className={`border-border ${onClick ? 'cursor-pointer hover:shadow-md transition-shadow' : ''}`}
-    {...(onClick ? { onClick } : {})}
-  >
-    <CardContent className="pt-6">
-      <div className="flex items-center gap-4">
-        <div className={`p-3 ${bgColor} rounded-lg`}>
-          <Icon className={`h-6 w-6 ${iconColor}`} />
-        </div>
-        <div>
-          <p className="text-2xl font-bold">{value}</p>
-          <p className="text-sm text-muted-foreground">{label}</p>
-        </div>
-      </div>
-    </CardContent>
-  </Card>
-);
+/** @deprecated Import from `components/shared/StatCard` — re-export for back-compat */
+export const StatCard = SharedStatCard;
 
-/**
- * Badge de estado do workflow
- */
-export const StatusBadge = ({ status, workflowStatuses }) => {
-  const statusInfo = workflowStatuses.find(s => s.name === status);
-  if (!statusInfo) return <Badge variant="outline">{status}</Badge>;
-  
-  const colorClasses = {
-    yellow: "bg-yellow-100 text-yellow-800",
-    blue: "bg-blue-100 text-blue-800",
-    orange: "bg-orange-100 text-orange-800",
-    green: "bg-green-100 text-green-800",
-    red: "bg-red-100 text-red-800",
-    purple: "bg-purple-100 text-purple-800",
-  };
-  
-  // Safely extract label — it should be a string but may be an object {value, label}
-  const label = typeof statusInfo.label === 'object' && statusInfo.label !== null
-    ? (statusInfo.label.label || statusInfo.label.value || String(statusInfo.label))
-    : (statusInfo.label || status);
-  
-  return (
-    <Badge className={`${colorClasses[statusInfo.color] || "bg-gray-100 text-gray-800"} border`}>
-      {statusInfo.order || ''} - {label}
-    </Badge>
-  );
-};
+/** @deprecated Import from `components/shared/StatusBadge` — re-export for back-compat */
+export const StatusBadge = SharedStatusBadge;
 
 /**
  * Filtros de pesquisa e estado
@@ -335,7 +294,7 @@ export const AddExpiryDialog = ({ isOpen, onClose, formData, setFormData, onSubm
         </div>
         <DialogFooter>
           <Button type="submit" disabled={loading}>
-            {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Adicionar"}
+            {loading ? <Spinner size="sm" /> : "Adicionar"}
           </Button>
         </DialogFooter>
       </form>
@@ -343,14 +302,8 @@ export const AddExpiryDialog = ({ isOpen, onClose, formData, setFormData, onSubm
   </Dialog>
 );
 
-/**
- * Componente de loading
- */
-export const LoadingSpinner = () => (
-  <div className="flex items-center justify-center h-64">
-    <Loader2 className="h-8 w-8 animate-spin text-primary" />
-  </div>
-);
+/** @deprecated Import from `components/ui/Spinner` — re-export for back-compat */
+export const LoadingSpinner = SharedLoadingSpinner;
 
 /**
  * Tab de análise IA - seleção de cliente
@@ -463,8 +416,8 @@ export const AIAnalysisTab = ({
               </div>
             ))}
             {isAnalyzing && (
-              <div className="flex items-center justify-center py-4">
-                <Loader2 className="h-5 w-5 animate-spin mr-2" />
+              <div className="flex items-center justify-center py-4 gap-2">
+                <Spinner size="sm" className="text-primary" />
                 <span>A analisar documento...</span>
               </div>
             )}
