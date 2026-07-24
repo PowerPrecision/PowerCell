@@ -33,7 +33,7 @@ import ClientPortal from "./pages/ClientPortal";
 // PÁGINAS PESADAS COM CODE SPLITTING (lazy loading)
 // ====================================================================
 // Páginas lazy-loaded para reduzir o bundle inicial:
-// - KanbanPage: importa bibliotecas de drag-drop (@dnd-kit)
+// - KanbanPage: usa drag-drop HTML5 nativo (sem biblioteca externa)
 // - ProcessDetails: 164KB (o maior componente da aplicação!)
 const ConsultorDashboard = React.lazy(() => import("./pages/ConsultorDashboard"));
 const KanbanPage = React.lazy(() => import("./pages/KanbanPage"));
