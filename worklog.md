@@ -3079,3 +3079,146 @@ Stage Summary:
   - frontend/src/components/kanban/ProcessDetailsModal.jsx (secção Acesso ao Portal + botão Reenviar + estado)
 - Resultado: (1) Email do portal tem bloco "Código de Acesso" explícito e incondicional abaixo do botão, com referência a www.powercell.pt/portal. (2) GET /clients/{id} e GET /processes/{id} devolvem portal_access {portal_access_code, short_id, magic_link, has_active_token}. (3) Novo POST /clients/{id}/resend-portal-access delega para send_magic_link_email. (4) ClientDetailsModal e ProcessDetailsModal mostram secção "Acesso ao Portal do Cliente" com código + link + botão Reenviar.
 - Token novo (PAT GitHub renovado) ativo e com permissões de escrita — push confirmado.
+
+
+---
+Task ID: frontend-ux-audit-fases-1-3
+Agent: Cloud Agent (cursor/frontend-tech-debt-cleanup-440a)
+Task: Aplicar Fases 1–3 do FRONTEND_UX_AUDIT.md — remover código morto, unificar notificações, centralizar lógica duplicada.
+
+Date: 2026-07-24
+
+Work Log:
+- Fase 1 (código morto): apagadas 9 páginas órfãs sem importadores (StaffDashboard, IdealistaImportPage, FinanceSettingsPage, ClientRegistrationsAdminPage, EmailSearchPage, MediadorDashboard, ImportErrorsPage, RegisterPage, DocumentsPage); apagados hooks/componentes mortos (useOnClickOutside, useScrollToElement, useUndo, UndoToast); removidas dependências @dnd-kit/core, @dnd-kit/sortable, @dnd-kit/utilities (Kanban usa DnD HTML5 nativo); removido bloco duplicado de `::-webkit-scrollbar` em index.css.
+- Fase 2 (notificações unificadas): migrados os 4 pontos que ainda usavam o toast Radix nunca montado (`hooks/use-toast`) para `sonner` — `services/api.js` (erros HTTP globais), `DiagnosticsPage`, `AuditTrailPage`, `ProcessMigrationTab`. Bug real corrigido: estas notificações nunca apareciam no ecrã. Apagados `components/ui/toast.jsx`, `toaster.jsx`, `hooks/use-toast.js`; removidas dependências `@radix-ui/react-toast` e `next-themes`; `components/ui/sonner.jsx` passa a consumir o `ThemeContext` interno em vez de `next-themes` (nunca tinha `<ThemeProvider>` montado).
+- Fase 3 (lógica duplicada centralizada): criado `utils/formatCurrency.js` (EUR, pt-PT) substituindo 7 definições locais + usos inline de `Intl.NumberFormat`; `utils/validateNIF.js` reforçado com checksum módulo 11 (já existente em 3 formulários, agora delegam nele com `allowCompanyNIF`); criado `hooks/useDebounce.js` partilhado substituindo cópias manuais de `setTimeout`/`clearTimeout`.
+- PR #592 (`cursor/frontend-tech-debt-cleanup-440a`) mesclado em `dev`.
+
+Stage Summary:
+- Base para as fases seguintes (4–6): app sem código morto, um único sistema de toasts (sonner), utilitários de formatação/validação centralizados prontos para reutilização (ex.: `formatCurrency` viria a ser usado pela Calculadora de Prestações).
+
+Files:
+- Removidos: 9 páginas + 4 hooks/componentes + 3 ficheiros `ui/toast*`
+- `frontend/src/services/api.js`, `DiagnosticsPage.js`, `AuditTrailPage.js`, `ProcessMigrationTab.js`, `components/ui/sonner.jsx`
+- `frontend/src/utils/formatCurrency.js` (novo), `utils/validateNIF.js`, `hooks/useDebounce.js` (novo)
+- `frontend/package.json` (dependências removidas)
+
+
+---
+Task ID: frontend-ux-audit-fases-4-5-consultordashboard
+Agent: Cloud Agent (cursor/frontend-phases-4-5-dashboard-c0b0)
+Task: Aplicar Fases 4–5 do FRONTEND_UX_AUDIT.md — componentes partilhados canónicos + redesign do ConsultorDashboard.
+
+Date: 2026-07-24
+
+Work Log:
+- Criados componentes partilhados canónicos: `components/shared/StatCard.jsx`, `components/shared/StatusBadge.jsx`, `components/shared/PageHeader.jsx`, `components/ui/Spinner.jsx`, `components/ui/EmptyState.jsx`.
+- Migrados para os usar: `DocumentChecklist.js`, `admin/AdminPageShared.js`, `dashboard/DashboardShared.js`, `BranchPerformancePage.js`, `FinanceDashboard.js`, `RGPDAdminPage.js`, `RGPDMigrationPage.js`, `SettingsPage.js`, `StatisticsPage.js`, `WorkflowStatusesPage.js` — remove double padding herdado do layout antigo.
+- `ConsultorDashboard.js` redesenhado de raiz (825 linhas alteradas) em 3 zonas com Progressive Disclosure: foco (o que precisa de atenção agora), funil (pipeline visual), tabs (exploração secundária).
+- PR #594 (`cursor/frontend-phases-4-5-dashboard-c0b0`) mesclado em `dev`; `FRONTEND_UX_AUDIT.md` atualizado a marcar Fases 4–5 como concluídas.
+
+Stage Summary:
+- `StatCard`/`StatusBadge`/`Spinner`/`EmptyState`/`PageHeader` tornam-se a base reutilizada por todas as páginas subsequentes (incluído o redesign do `ProcessDetails` e a `CalculatorsPage`).
+- `ConsultorDashboard` deixa de ser uma parede de cartões — Progressive Disclosure aplicada ao dashboard mais usado pelos consultores.
+
+Files:
+- Novos: `components/shared/StatCard.jsx`, `StatusBadge.jsx`, `PageHeader.jsx`, `components/ui/Spinner.jsx`, `EmptyState.jsx`
+- `pages/ConsultorDashboard.js` (redesign completo), `DocumentChecklist.js`, `admin/AdminPageShared.js`, `dashboard/DashboardShared.js`, `BranchPerformancePage.js`, `FinanceDashboard.js`, `RGPDAdminPage.js`, `RGPDMigrationPage.js`, `SettingsPage.js`, `StatisticsPage.js`, `WorkflowStatusesPage.js`
+- `FRONTEND_UX_AUDIT.md`
+
+
+---
+Task ID: frontend-eslint-tailwind-color-guard
+Agent: Cloud Agent (cursor/eslint-tailwind-color-guard-a50a)
+Task: Fase 6 do FRONTEND_UX_AUDIT.md — safety net de ESLint contra cores Tailwind cruas (Dark Mode).
+
+Date: 2026-07-24
+
+Work Log:
+- Adicionada regra `no-restricted-syntax` (nível `warn`) em `frontend/eslint.config.js` que deteta utilities de cor crua do Tailwind (`bg-gray-*`, `text-blue-*`, `bg-red-*`, etc.) em `className`/`class` e em chamadas `cn()`/`clsx()`/`classnames()`/`cva()`.
+- Motivo: cores cruas têm luminosidade fixa e não respondem à classe `.dark`; a app deve usar sempre os tokens semânticos do Shadcn (`bg-primary`, `text-muted-foreground`, `bg-destructive`, `border-border`, …).
+- Confirmado que os ficheiros do redesign das Fases 4–5 (ConsultorDashboard, EmptyState, PageHeader, StatCard, StatusBadge, Spinner) já estavam limpos — 0 avisos.
+- Código legado NÃO foi alterado (~2708 avisos, propositado — nível `warn` não bloqueia o CI, que só falha em `error` via `--quiet`); o objetivo é impedir que código NOVO reintroduza o padrão, não reescrever o legado de uma vez.
+- PR #596 (`cursor/eslint-tailwind-color-guard-a50a`) mesclado em `dev`.
+
+Stage Summary:
+- A partir desta PR, qualquer ficheiro novo ou fortemente reescrito (ex.: `ProcessDetails` redesign, `MortgageSimulator`) é obrigado a usar tokens Shadcn — verificado sistematicamente com `yarn eslint <ficheiros> --quiet` antes de cada merge.
+
+Files:
+- `frontend/eslint.config.js` (39 linhas adicionadas, 1 ficheiro)
+
+
+---
+Task ID: process-details-progressive-disclosure-e90c
+Agent: Cloud Agent (cursor/process-details-progressive-disclosure-e90c + cursor/optimize-process-history-activity-space-beb3)
+Task: Redesenhar ProcessDetails com Progressive Disclosure (PageHeader + grid 2/3+1/3 + cartões de contexto) e consolidar o separador Histórico (formulário em Dialog, timeline compacta).
+
+Date: 2026-07-25
+
+Work Log:
+- Título manual do `ProcessDetails` substituído pelo `PageHeader` partilhado (com `StatusBadge` junto ao título, via novo slot opcional `titleBadge`); ações principais (RGPD, CPCV, Simulações, Status, Eliminar) alinhadas à direita do header.
+- Conteúdo reestruturado num grid `grid-cols-1 lg:grid-cols-3`: 2/3 esquerda = Tabs Shadcn "Resumo"/"Documentos"/"Histórico"; 1/3 direita = novos `ClientContextCard.jsx` (titular, NIF, contactos) e `AssignmentContextCard.jsx` (consultor/mediador responsável + prazos críticos + botão "Gerir" → `ProcessAssignDialog`), seguidos de Tarefas e do accordion de Imóveis Compatíveis já existentes.
+- Novo `tabs/HistoryTab.jsx`: timeline de fases + "Atividades Recentes" + "Filme da Lead" (auditoria unificada).
+- `ProcessStickyHeader.js` removido por completo (341 linhas — substituído pelo cabeçalho + cartões de contexto fixos), eliminando código morto e vários avisos de cores Tailwind cruas.
+- Follow-up (PR #599/#600): formulário "Registar Atividade" movido de inline para dentro de um `Dialog` (fecha automaticamente após submissão com sucesso); lista "Atividades Recentes" compactada (padding/tamanhos de texto reduzidos) e `ScrollArea` com altura fixa aumentada para `h-[500px]`.
+- Todo o código novo usa tokens semânticos do Shadcn (sem disparar `no-restricted-syntax`); `yarn lint` e `yarn build` confirmados sem novos erros/avisos.
+- PRs #597/#598 (redesign) e #599/#600 (activity dialog + timeline compacta) mesclados em `dev`.
+
+Stage Summary:
+- `ProcessDetails` deixa de ser um monolito de secções sempre visíveis — segue agora as normas de Progressive Disclosure definidas em `FRONTEND_GUIDELINES.md` (que viria a ser criado no PR seguinte, #601/#602).
+- Separador Histórico consolidado como único local para atividades/timeline — sem duplicação com o Resumo.
+
+Files:
+- Novos: `components/processDetails/AssignmentContextCard.jsx`, `ClientContextCard.jsx`, `tabs/HistoryTab.jsx`
+- Removido: `components/ProcessStickyHeader.js`
+- `pages/ProcessDetails.js` (584 linhas alteradas), `components/shared/PageHeader.jsx` (slot `titleBadge`)
+
+
+---
+Task ID: ux-finalization-mortgage-calculator-cb85
+Agent: Cloud Agent (cursor/ux-finalization-mortgage-calculator-cb85)
+Task: Mover Prioridade para AssignmentContextCard + corrigir race condition + adicionar Calculadora de Prestações de Crédito Habitação ao CRM + consolidar documentação de normas UX/UI.
+
+Date: 2026-07-25
+
+Work Log:
+- Removido o cartão isolado de Prioridade no separador Resumo (ocupava espaço desproporcional para um único metadado); Prioridade passa a viver como `DropdownMenu` + `Badge` compacto dentro do `AssignmentContextCard` (coluna direita), junto da equipa atribuída.
+- Corrigida race condition em `handleSaveOrganization`: aceitar overrides explícitos evita enviar o valor antigo de prioridade/etiquetas ao backend quando o save é disparado no mesmo handler que o `setState`.
+- Extraído o motor de cálculo do simulador de crédito habitação (sistema francês de amortização + TAEG por bisseção) de `components/portal/SimulatorCH.jsx` para `utils/mortgageCalculations.js` (`calcularPrestacaoMensal`, `calcularTAEG`, `simularCreditoHabitacao`), puro e reutilizável fora do Portal do Cliente.
+- Novo `components/calculators/MortgageSimulator.jsx`: layout 2 colunas (Inputs à esquerda — Capital/Prazo/Taxa com `Slider`+`Input`; Resultado em destaque à direita — prestação mensal + TAEG + detalhe da simulação), `Switch` "Incluir Seguros" com Progressive Disclosure para os campos Seguro de Vida e Multirriscos, tokens Shadcn, `formatCurrency` centralizado.
+- Nova `pages/CalculatorsPage.js` na rota `/calculadoras` (STAFF_ROLES) com acesso rápido a DSTI e Risco de Crédito (dialogs já existentes); item de sidebar em "Comunicações e Ficheiros" (oculto para indexação).
+- Documentação: novo `FRONTEND_GUIDELINES.md` (Progressive Disclosure, layout 2/3+1/3, eliminação de cartões redundantes, formulários em Dialog/Sheet, `EmptyState`/`PageHeader` globais, `sonner` com `closeButton`, regra ESLint `no-restricted-syntax`, utilitários centralizados); `ARCHITECTURE.md` documenta a regra de escrita `$set` no MongoDB (partial update) e a proteção dos mapeamentos S3; `README.md` atualizado com a secção "Finalização UX + Calculadora de Prestações".
+- `yarn eslint --quiet` e `yarn build` confirmados sem erros nos ficheiros novos/alterados.
+- PRs #601 (feature) e #602 (merge/finalização) mesclados em `dev`.
+
+Stage Summary:
+- Ficha do processo (Resumo) fica limpa de metadados de baixo valor informativo; Histórico é o único local para atividades/timeline (ver entrada anterior).
+- CRM ganha uma Calculadora de Prestações própria (sem depender do Portal do Cliente), com o mesmo motor de cálculo do simulador do Portal — validado manualmente via `computerUse` (toggle de seguros, alteração de capital, cálculo da prestação) antes do merge.
+- `FRONTEND_GUIDELINES.md` passa a ser a referência única para normas de UX/UI do frontend — deve ser lido antes de tocar em páginas densas.
+
+Files:
+- Novos: `components/calculators/MortgageSimulator.jsx`, `utils/mortgageCalculations.js`, `pages/CalculatorsPage.js`, `FRONTEND_GUIDELINES.md`
+- `components/processDetails/AssignmentContextCard.jsx`, `pages/ProcessDetails.js`, `layouts/DashboardLayout.js`, `App.js`, `ARCHITECTURE.md`, `README.md`
+
+
+---
+Task ID: sync-docs-frontend-ux-audit-09f4
+Agent: Cloud Agent (cursor/sync-docs-frontend-ux-audit-09f4)
+Task: Auditar e sincronizar a documentação do CRM (AGENTS.md, CHANGELOG.md, worklog.md) com as últimas modificações mescladas em dev.
+
+Date: 2026-07-25
+
+Work Log:
+- Utilizador perguntou se a documentação estava atualizada com as modificações recentes (Calculadora de Prestações + finalização UX). Auditoria cruzada de `git log` contra `README.md`, `ARCHITECTURE.md`, `FRONTEND_GUIDELINES.md`, `AGENTS.md`, `CHANGELOG.md` e `worklog.md`.
+- Confirmado: `README.md` e `FRONTEND_GUIDELINES.md` já estavam corretos e completos (atualizados no próprio PR #601/#602).
+- Identificado: `AGENTS.md` e `CHANGELOG.md` paravam no commit `cc37aa7` (PR #570, 2026-07-22) — não mencionavam nenhum dos PRs #590–#602 (Fases 1–6 da auditoria frontend, redesign ProcessDetails, Prioridade no AssignmentContextCard, Calculadora de Prestações).
+- `AGENTS.md`: adicionados 5 bullets em "Non-obvious gotchas" (pointer para `FRONTEND_GUIDELINES.md`, regra ESLint, redesign ProcessDetails, Calculadoras) + nova tabela "Frontend UX Audit + Calculadoras" com o estado de cada fase/PR.
+- `CHANGELOG.md`: nova entrada `[2026-07-25]` cobrindo os PRs #590–#602.
+- `worklog.md`: identificado como igualmente desatualizado (última entrada de conteúdo real era "Pacote DC", ~2026-07-16) — utilizador confirmou querer sincronizar também este ficheiro; adicionadas 6 novas entradas retroativas (uma por PR/conjunto de PRs) seguindo o formato existente (Task ID/Agent/Task/Date/Work Log/Stage Summary/Files), cobrindo Fases 1–3, Fases 4–5+ConsultorDashboard, Fase 6 ESLint, redesign ProcessDetails+Activity Dialog, e Prioridade+Calculadora+docs — mais esta própria entrada.
+
+Stage Summary:
+- Os 3 documentos de referência para agentes/desenvolvedores (`AGENTS.md`, `CHANGELOG.md`, `worklog.md`) ficam alinhados com o estado real do código em `dev` até ao PR #602 (+ esta sincronização, #603).
+- Nenhuma alteração de código — apenas documentação.
+
+Files:
+- `AGENTS.md`, `CHANGELOG.md`, `worklog.md`
