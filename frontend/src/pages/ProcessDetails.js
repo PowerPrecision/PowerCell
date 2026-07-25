@@ -43,7 +43,6 @@ import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { ScrollArea } from "../components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -86,13 +85,12 @@ import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayl
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
 import ProcessSummaryCard from "../components/ProcessSummaryCard";
-import ProcessTimeline from "../components/ProcessTimeline";
-import UnifiedAuditTrail from "../components/UnifiedAuditTrail";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import ProcessAssignDialog from "../components/processDetails/ProcessAssignDialog";
+import ClientContextCard from "../components/processDetails/ClientContextCard";
+import AssignmentContextCard from "../components/processDetails/AssignmentContextCard";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
-import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
@@ -105,7 +103,8 @@ import {
   Briefcase,
   Building2,
   CreditCard,
-  Clock,
+  CalendarClock,
+  ClipboardList,
   Check,
   Trash2,
   Loader2,
@@ -134,17 +133,13 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, isValid } from "date-fns";
-import { pt } from "date-fns/locale";
 import { hasRole, hasAnyRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { safeParseISO, safeFormat, safeDate } from "../lib/utils";
+import { safeParseISO } from "../lib/utils";
 
-import {
-  statusColors,
-  typeLabels,
-} from "./processDetails/processDetailsConstants";
+import { typeLabels } from "./processDetails/processDetailsConstants";
 import {
   cleanPersonalDataForSubmit,
   cleanTitular2DataForSubmit,
@@ -170,6 +165,9 @@ import EmailsTab from "../components/processDetails/tabs/EmailsTab";
 import VisitasTab from "../components/processDetails/tabs/VisitasTab";
 import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
+import HistoryTab from "../components/processDetails/tabs/HistoryTab";
+import { PageHeader } from "../components/shared/PageHeader";
+import { StatusBadge } from "../components/shared/StatusBadge";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -223,7 +221,8 @@ const ProcessDetails = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("personal");
-  const [sideTab, setSideTab] = useState("deadlines");
+  // Separadores de topo (Progressive Disclosure): Resumo / Documentos / Histórico
+  const [mainTab, setMainTab] = useState("resumo");
 
   // Mensagens do Portal — estado/polling vivem no hook (badge do tab precisa de unread)
   const portal = useProcessPortalMessages(id, { isActive: activeTab === "mensagens" });
@@ -1507,14 +1506,6 @@ const ProcessDetails = () => {
 
   return (
     <DashboardLayout title="Detalhes do Processo">
-      {/* Header Fixo - Sempre visível durante scroll */}
-      <ProcessStickyHeader
-        process={process}
-        personalData={personalData}
-        financialData={financialData}
-        statusInfo={currentStatusInfo}
-      />
-
       <div className="space-y-6">
         {/* Aviso de processo bloqueado ou em modo retroativo */}
         {isProcessLocked && (
@@ -1537,49 +1528,32 @@ const ProcessDetails = () => {
           </div>
         )}
 
-        {/* Header */}
-        <div className="flex flex-col gap-4">
-          {/* Linha 1: Nome e Badge do Status */}
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-xl font-semibold truncate">
-                  Processo #{safeString(process?.process_number || '')} — {safeString(clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome) || 'Cliente'}
-                </h2>
-                <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
-                  {safeLabel(currentStatusInfo.label)}
-                </Badge>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {typeLabels[safeString(process.process_type)] || safeString(process.process_type)}
-                {process?.process_number && (
-                  <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono">
-                    Nº {safeString(process.process_number)}
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-          
-          {/* Linha 2: Botões de Ação */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pl-0 sm:pl-12">
-            {/* Botão para Gerir Atribuições - disponível para todos os staff */}
-            {userRole !== "cliente" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-purple-600 border-purple-200 hover:bg-purple-50 h-8 px-2 sm:px-3"
-                onClick={openAssignDialog}
-                data-testid="assign-users-btn"
-              >
-                <Users className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="hidden sm:inline">Atribuições</span>
-              </Button>
-            )}
-            
+        {/* Header (Progressive Disclosure): PageHeader partilhado + StatusBadge
+            junto ao título; ações principais alinhadas à direita. A gestão de
+            atribuições passou para o Cartão de Atribuição (coluna direita) —
+            fica junto da informação que edita, em vez de solta no cabeçalho. */}
+        <div className="flex items-start gap-2">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Voltar" className="mt-0.5 shrink-0">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div className="flex-1 min-w-0">
+            <PageHeader
+              title={`Processo #${safeString(process?.process_number || '')} — ${safeString(clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome) || 'Cliente'}`}
+              titleBadge={
+                <StatusBadge status={process.status} workflowStatuses={safeStatusOptions} showOrder={false} />
+              }
+              description={
+                <span className="flex items-center gap-2 flex-wrap">
+                  <span>{typeLabels[safeString(process.process_type)] || safeString(process.process_type)}</span>
+                  {process?.process_number && (
+                    <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
+                      Nº {safeString(process.process_number)}
+                    </span>
+                  )}
+                </span>
+              }
+              actions={
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* Dialog RGPD */}
             <Dialog open={rgpdDialogOpen} onOpenChange={setRgpdDialogOpen}>
               <DialogContent>
@@ -1913,229 +1887,149 @@ const ProcessDetails = () => {
                 <span className="hidden sm:inline">Eliminar</span>
               </Button>
             )}
+                </div>
+              }
+            />
           </div>
         </div>
 
-        {/* Alertas do Processo */}
+        {/* Alertas do Processo — sempre visível, independente do separador ativo */}
         <ProcessAlerts processId={id} className="mb-2" />
 
-        {/* Resumo do Processo */}
-        <ProcessSummaryCard
-          process={process}
-          statusInfo={currentStatusInfo}
-          consultorNames={safeStringArray(process.consultor_names)}
-          mediadorNames={safeStringArray(process.mediador_names)}
-          consultorName={process.consultor_name || process.assigned_consultor_name}
-          mediadorName={process.mediador_name || process.assigned_mediador_name}
-        />
-
-        {/* ═══════ PACOTE BC: Layout reestruturado ═══════
-            Ordem visual exata:
-            1. Timeline (full width)
-            2. Cartão meta-dados: Etiquetas + Prioridade (full width)
-            3. Grid 2 colunas: Input (esquerda) + Atividades Recentes (direita) */}
-
-        {/* ── 1. Timeline (full width) ── */}
-        <ProcessTimeline
-          processId={id}
-          currentStatus={process.status}
-          history={history}
-          workflowStatuses={workflowStatuses}
-        />
-
-        {/* ── 2. Cartão meta-dados: Etiquetas + Prioridade (full width) ── */}
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex flex-wrap items-center gap-4">
-              {/* Prioridade */}
-              <div className="flex items-center gap-2">
-                <Label className="text-xs text-muted-foreground">Prioridade</Label>
-                <Select
-                  value={process?.prioridade || "media"}
-                  onValueChange={(value) => {
-                    setProcess(prev => ({ ...prev, prioridade: value }));
-                    if (canEditPersonal && !isProcessLocked) handleSaveOrganization();
-                  }}
-                  disabled={!canEditPersonal || isProcessLocked}
-                >
-                  <SelectTrigger className="h-8 w-28 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="baixa"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Baixa</span></SelectItem>
-                    <SelectItem value="media"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Média</span></SelectItem>
-                    <SelectItem value="alta"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-red-500" />Alta</span></SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {/* Etiquetas */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Label className="text-xs text-muted-foreground">Etiquetas</Label>
-                {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
-                  <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
-                    {safeString(label)}
-                    {canEditPersonal && (
-                      <button
-                        onClick={() => setProcess(prev => ({ ...prev, labels: (prev.labels || []).filter((_, i) => i !== idx) }))}
-                        className="ml-0.5 hover:text-destructive"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </Badge>
-                ))}
-                {canEditPersonal && (
-                  <Input
-                    value={newLabel}
-                    onChange={(e) => setNewLabel(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newLabel.trim()) {
-                        e.preventDefault();
-                        setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
-                        setNewLabel("");
-                        if (!isProcessLocked) handleSaveOrganization();
-                      }
-                    }}
-                    className="h-7 w-28 text-xs"
-                    placeholder="Nova etiqueta"
-                  />
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ── 3. Grid 2 colunas: Input (esquerda) + Atividades (direita) ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Lado Esquerdo: Registar Atividade / Nota */}
-          {!isProcessLocked && (
-            <Card className="border-violet-200 dark:border-violet-900">
-              <CardHeader className="pb-2 py-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-violet-600" />
-                  Registar Atividade / Nota
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0 pb-3">
-                <div className="flex gap-2">
-                  <Textarea
-                    placeholder="Escreva uma nota ou registo de atividade para este processo..."
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    className="flex-1 min-h-[60px] text-sm resize-none"
-                    data-testid="quick-note-input"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        handleSendComment();
-                      }
-                    }}
-                  />
-                  <Button
-                    onClick={handleSendComment}
-                    disabled={sendingComment || !newComment.trim()}
-                    size="sm"
-                    data-testid="quick-note-submit"
-                    className="bg-violet-600 hover:bg-violet-700"
-                  >
-                    {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1.5">Cmd/Ctrl+Enter para enviar rápido</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Lado Direito: Atividades Recentes / Histórico */}
-          <Card>
-            <CardHeader className="pb-2 py-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                Atividades Recentes
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0 pb-3">
-              <ScrollArea className="h-[300px]">
-                <div className="space-y-2 pr-2">
-                  {activities.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-4 text-xs">Sem registos. Adicione a primeira nota à esquerda.</p>
-                  ) : (
-                    /* PACOTE BH: Ordenação descendente por data (mais recentes primeiro).
-                       Antes usava-se apenas .reverse() que inverte a ordem do array tal como
-                       vem do backend — frágil e incorreto se a ordem de origem mudar.
-                       Agora ordena-se por created_at (fallback timestamp) de forma descendente,
-                       com tratamento defensivo de datas inválidas (items sem data vão para o fim). */
-                    [...activities].sort((a, b) => {
-                      const dateA = safeDate(a.created_at || a.timestamp);
-                      const dateB = safeDate(b.created_at || b.timestamp);
-                      if (!dateA && !dateB) return 0;
-                      if (!dateA) return 1;  // items sem data ficam no fim
-                      if (!dateB) return -1;
-                      return dateB - dateA;  // descendente — mais recentes primeiro
-                    }).map((activity) => (
-                      <div key={activity.id} className="p-2 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
-                        <div className="flex items-start justify-between gap-1">
-                          <div className="flex-1 min-w-0">
-                            <span className="font-medium">{safeString(activity.user_name)}</span>
-                            <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{safeString(activity.comment)}</p>
-                            <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
-                          </div>
-                          {(activity.user_id === user.id || hasRole(user, "admin")) && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
-                              <Trash2 className="h-3 w-3 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* PACOTE BC: Cartão "Organização do Processo" removido. */}
-
-        {/* TAREFA 2: Resolver conflitos de dados IA */}
-        <DataConflictResolver
-          processId={id}
-          suggestions={aiSuggestions}
-          isDataConfirmed={isDataConfirmed}
-          onResolve={(suggestionId) => {
-            setAiSuggestions(prev => prev.filter(s => s.id !== suggestionId));
-            fetchData();
-          }}
-          onConfirmData={(confirmed) => {
-            setIsDataConfirmed(confirmed);
-            fetchData();
-          }}
-          token={token}
-        />
-
+        {/* ═══════ Layout Progressive Disclosure ═══════
+            Esquerda (2/3): Tabs Resumo / Documentos / Histórico — esconde a
+            complexidade em separadores por tarefa.
+            Direita (1/3): Contexto fixo — Cliente + Atribuição sempre visíveis,
+            independentemente do separador ativo à esquerda. */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Content */}
+          {/* ── Coluna Esquerda: Ação & Exploração (2/3) ── */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Banner de modo de visualização para roles sem edit_process (exceto indexacao que edita financeiros) */}
-            {isViewMode && !isProcessLocked && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
-                <p className="text-sm text-amber-800 dark:text-amber-200">
-                  <strong>Modo de visualização.</strong> Não tem permissões para editar os dados base do processo. Pode gerir documentos, tarefas, chat e atribuição de utilizadores.
-                </p>
-              </div>
-            )}
+            <Tabs value={mainTab} onValueChange={setMainTab}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="resumo" className="gap-1.5">
+                  <ClipboardList className="h-4 w-4" />
+                  Resumo
+                </TabsTrigger>
+                <TabsTrigger value="documentos" className="gap-1.5">
+                  <FolderOpen className="h-4 w-4" />
+                  Documentos
+                </TabsTrigger>
+                <TabsTrigger value="historico" className="gap-1.5">
+                  <History className="h-4 w-4" />
+                  Histórico
+                </TabsTrigger>
+              </TabsList>
 
-            {/* Layout normal do processo (todas as roles) */}
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="text-lg">Dados do Processo</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Tabs value={activeTab} onValueChange={(v) => { setEditingCardId(null); setActiveTab(v); }}>
-                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-9 gap-1 h-auto p-1">
-                    {/* ── DADOS DO CLIENTE ── */}
-                    <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
+              {/* ── Separador: Resumo — formulários principais + dados críticos ── */}
+              <TabsContent value="resumo" className="space-y-6 mt-4">
+                {/* Banner de modo de visualização para roles sem edit_process (exceto indexacao que edita financeiros) */}
+                {isViewMode && !isProcessLocked && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
+                    <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      <strong>Modo de visualização.</strong> Não tem permissões para editar os dados base do processo. Pode gerir documentos, tarefas, chat e atribuição de utilizadores.
+                    </p>
+                  </div>
+                )}
+
+                {/* Resumo do Processo */}
+                <ProcessSummaryCard
+                  process={process}
+                  statusInfo={currentStatusInfo}
+                  consultorNames={safeStringArray(process.consultor_names)}
+                  mediadorNames={safeStringArray(process.mediador_names)}
+                  consultorName={process.consultor_name || process.assigned_consultor_name}
+                  mediadorName={process.mediador_name || process.assigned_mediador_name}
+                />
+
+                {/* Cartão meta-dados: Etiquetas + Prioridade */}
+                <Card>
+                  <CardContent className="pt-4 pb-4">
+                    <div className="flex flex-wrap items-center gap-4">
+                      {/* Prioridade */}
+                      <div className="flex items-center gap-2">
+                        <Label className="text-xs text-muted-foreground">Prioridade</Label>
+                        <Select
+                          value={process?.prioridade || "media"}
+                          onValueChange={(value) => {
+                            setProcess(prev => ({ ...prev, prioridade: value }));
+                            if (canEditPersonal && !isProcessLocked) handleSaveOrganization();
+                          }}
+                          disabled={!canEditPersonal || isProcessLocked}
+                        >
+                          <SelectTrigger className="h-8 w-28 text-xs">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="baixa"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Baixa</span></SelectItem>
+                            <SelectItem value="media"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Média</span></SelectItem>
+                            <SelectItem value="alta"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-red-500" />Alta</span></SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {/* Etiquetas */}
+                      <div className="flex items-center gap-1.5 flex-wrap">
+                        <Label className="text-xs text-muted-foreground">Etiquetas</Label>
+                        {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
+                          <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
+                            {safeString(label)}
+                            {canEditPersonal && (
+                              <button
+                                onClick={() => setProcess(prev => ({ ...prev, labels: (prev.labels || []).filter((_, i) => i !== idx) }))}
+                                className="ml-0.5 hover:text-destructive"
+                              >
+                                <X className="h-3 w-3" />
+                              </button>
+                            )}
+                          </Badge>
+                        ))}
+                        {canEditPersonal && (
+                          <Input
+                            value={newLabel}
+                            onChange={(e) => setNewLabel(e.target.value)}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter" && newLabel.trim()) {
+                                e.preventDefault();
+                                setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
+                                setNewLabel("");
+                                if (!isProcessLocked) handleSaveOrganization();
+                              }
+                            }}
+                            className="h-7 w-28 text-xs"
+                            placeholder="Nova etiqueta"
+                          />
+                        )}
+                      </div>
+                    </div>
+                  </CardContent>
+                </Card>
+
+                {/* Resolver conflitos de dados IA */}
+                <DataConflictResolver
+                  processId={id}
+                  suggestions={aiSuggestions}
+                  isDataConfirmed={isDataConfirmed}
+                  onResolve={(suggestionId) => {
+                    setAiSuggestions(prev => prev.filter(s => s.id !== suggestionId));
+                    fetchData();
+                  }}
+                  onConfirmData={(confirmed) => {
+                    setIsDataConfirmed(confirmed);
+                    fetchData();
+                  }}
+                  token={token}
+                />
+
+                {/* Formulários principais do processo, organizados por domínio */}
+                <Card className="border-border">
+                  <CardHeader>
+                    <CardTitle className="text-lg">Dados do Processo</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Tabs value={activeTab} onValueChange={(v) => { setEditingCardId(null); setActiveTab(v); }}>
+                      <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
+                        {/* ── DADOS DO CLIENTE ── */}
+                        <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
                       <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Cliente</span>
                     </TabsTrigger>
@@ -2152,9 +2046,9 @@ const ProcessDetails = () => {
                       <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Crédito</span>
                     </TabsTrigger>
-                    <TabsTrigger value="documents" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
-                      <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Docs</span>
+                    <TabsTrigger value="prazos" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                      <CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Prazos</span>
                     </TabsTrigger>
                     <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
                       <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -2249,21 +2143,21 @@ const ProcessDetails = () => {
                     />
                   </TabsContent>
 
-                  {/* Documents Tab - Destaque para fácil acesso */}
-                  <TabsContent value="documents" className="mt-4">
-                    <DocumentsTab
-                      hasAnyRole={hasAnyRole}
-                      user={user}
-                      aiSummary={aiSummary}
-                      aiAnalysisLoading={aiAnalysisLoading}
-                      aiAnalysisDate={aiAnalysisDate}
-                      handleAiAnalysis={handleAiAnalysis}
-                      renderAiSummary={renderAiSummary}
-                      documentsRefreshKey={documentsRefreshKey}
-                      id={id}
-                      process={process}
-                      handleAIDataExtractedFromDocs={handleAIDataExtractedFromDocs}
-                      setDocumentsRefreshKey={setDocumentsRefreshKey}
+                  {/* Prazos Tab — calendário e lista de prazos críticos do processo */}
+                  <TabsContent value="prazos" className="mt-4">
+                    <DeadlinesTab
+                      canManageDeadlines={canManageDeadlines}
+                      isDeadlineDialogOpen={isDeadlineDialogOpen}
+                      setIsDeadlineDialogOpen={setIsDeadlineDialogOpen}
+                      deadlineForm={deadlineForm}
+                      setDeadlineForm={setDeadlineForm}
+                      selectedDate={selectedDate}
+                      setSelectedDate={setSelectedDate}
+                      handleCreateDeadline={handleCreateDeadline}
+                      deadlineDates={deadlineDates}
+                      deadlines={deadlines}
+                      handleToggleDeadline={handleToggleDeadline}
+                      handleDeleteDeadline={handleDeleteDeadline}
                     />
                   </TabsContent>
 
@@ -2414,12 +2308,58 @@ const ProcessDetails = () => {
                 )}
               </CardContent>
             </Card>
+              </TabsContent>
+
+              {/* ── Separador: Documentos — gestor de ficheiros S3 do cliente ── */}
+              <TabsContent value="documentos" className="mt-4">
+                <DocumentsTab
+                  hasAnyRole={hasAnyRole}
+                  user={user}
+                  aiSummary={aiSummary}
+                  aiAnalysisLoading={aiAnalysisLoading}
+                  aiAnalysisDate={aiAnalysisDate}
+                  handleAiAnalysis={handleAiAnalysis}
+                  renderAiSummary={renderAiSummary}
+                  documentsRefreshKey={documentsRefreshKey}
+                  id={id}
+                  process={process}
+                  handleAIDataExtractedFromDocs={handleAIDataExtractedFromDocs}
+                  setDocumentsRefreshKey={setDocumentsRefreshKey}
+                />
+              </TabsContent>
+
+              {/* ── Separador: Histórico — changelog, notas e cronologia de atividades ── */}
+              <TabsContent value="historico" className="mt-4">
+                <HistoryTab
+                  processId={id}
+                  process={process}
+                  history={history}
+                  workflowStatuses={workflowStatuses}
+                  activities={activities}
+                  newComment={newComment}
+                  setNewComment={setNewComment}
+                  sendingComment={sendingComment}
+                  handleSendComment={handleSendComment}
+                  handleDeleteComment={handleDeleteComment}
+                  user={user}
+                  isProcessLocked={isProcessLocked}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
 
-          {/* Sidebar - Organizada com Accordions */}
-          <div className="space-y-3">
-            {/* PACOTE AQ: Cartão "Atividade" movido para o topo do layout
-                (agora integrado no cartão "Atividade & Notas" com a Timeline). */}
+          {/* ── Coluna Direita: Contexto Fixo (1/3) — Cliente + Atribuição sempre visíveis ── */}
+          <div className="space-y-4">
+            <ClientContextCard process={process} personalData={personalData} clientData={clientData} />
+
+            <AssignmentContextCard
+              process={process}
+              consultorNames={safeStringArray(process.consultor_names)}
+              mediadorNames={safeStringArray(process.mediador_names)}
+              deadlines={deadlines}
+              onManageAssignment={openAssignDialog}
+              canManageAssignment={userRole !== "cliente"}
+            />
 
             {/* Tarefas - visível se tem manage_tasks */}
             {canManageTasks && (
@@ -2461,54 +2401,6 @@ const ProcessDetails = () => {
               </AccordionItem>
 
             </Accordion>
-            )}
-
-            {/* Side Tabs - Prazos e Histórico - visível se NÃO for modo de visualização */}
-            {!isViewMode && (
-            <Card className="border-border">
-              <CardContent className="p-0">
-                <Tabs value={sideTab} onValueChange={setSideTab}>
-                  <TabsList className="w-full grid grid-cols-2 rounded-none rounded-t-md h-9">
-                    <TabsTrigger value="deadlines" className="gap-1 text-xs">
-                      <Clock className="h-3 w-3" />
-                      Prazos
-                    </TabsTrigger>
-                    <TabsTrigger value="history" className="gap-1 text-xs">
-                      <History className="h-3 w-3" />
-                      Histórico
-                    </TabsTrigger>
-                  </TabsList>
-
-                  {/* Deadlines Tab */}
-                  <TabsContent value="deadlines" className="p-4 pt-2">
-                    <DeadlinesTab
-                      canManageDeadlines={canManageDeadlines}
-                      isDeadlineDialogOpen={isDeadlineDialogOpen}
-                      setIsDeadlineDialogOpen={setIsDeadlineDialogOpen}
-                      deadlineForm={deadlineForm}
-                      setDeadlineForm={setDeadlineForm}
-                      selectedDate={selectedDate}
-                      setSelectedDate={setSelectedDate}
-                      handleCreateDeadline={handleCreateDeadline}
-                      deadlineDates={deadlineDates}
-                      deadlines={deadlines}
-                      handleToggleDeadline={handleToggleDeadline}
-                      handleDeleteDeadline={handleDeleteDeadline}
-                    />
-                  </TabsContent>
-
-                  {/* History Tab */}
-                  <TabsContent value="history" className="p-4 pt-2">
-                    <h3 className="font-medium mb-3">Filme da Lead</h3>
-                    <UnifiedAuditTrail 
-                      history={history} 
-                      activities={activities}
-                      maxHeight="400px"
-                    />
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
             )}
           </div>
         </div>
