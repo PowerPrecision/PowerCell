@@ -86,6 +86,7 @@ const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
 const TemplatesPage = React.lazy(() => import("./pages/TemplatesPage"));
 const FilesExplorerPage = React.lazy(() => import("./pages/FilesExplorerPage"));
 const BranchPerformancePage = React.lazy(() => import("./pages/BranchPerformancePage"));
+const CalculatorsPage = React.lazy(() => import("./pages/CalculatorsPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -757,6 +758,18 @@ function App() {
               <ProtectedRoute allowedRoles={["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario"]}>
                 <RouteBoundary name="Minutas">
                   <MinutasPage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Calculadoras - Staff (simulações financeiras) */}
+          <Route
+            path="/calculadoras"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <RouteBoundary name="Calculadoras">
+                  <CalculatorsPage />
                 </RouteBoundary>
               </ProtectedRoute>
             }

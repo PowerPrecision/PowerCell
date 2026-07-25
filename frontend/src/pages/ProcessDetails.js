@@ -1139,7 +1139,12 @@ const ProcessDetails = () => {
 
   // Guardar apenas os dados da Organização do Processo (notas, prioridade, etiquetas)
   const [, setSavingOrg] = useState(false);
-  const handleSaveOrganization = async () => {
+  // `overrides` permite passar o valor recém-alterado explicitamente em vez de
+  // depender de `process` (a closure desta função fica "presa" ao valor de
+  // `process` do render em que foi definida — chamar handleSaveOrganization()
+  // logo após um setProcess() no mesmo handler enviaria o valor ANTIGO, já
+  // que o setState ainda não tinha sido aplicado nesse render).
+  const handleSaveOrganization = async (overrides = {}) => {
     if (isProcessLocked) {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
       return;
@@ -1151,6 +1156,7 @@ const ProcessDetails = () => {
         notes: process?.notes || "",
         prioridade: process?.prioridade || "media",
         labels: Array.isArray(process?.labels) ? process.labels : [],
+        ...overrides,
       };
       // labels:[] é intencional (limpar etiquetas) — allowEmptyArrays
       await processMutations.updateProcess.mutateAsync({
@@ -1942,31 +1948,12 @@ const ProcessDetails = () => {
                   mediadorName={process.mediador_name || process.assigned_mediador_name}
                 />
 
-                {/* Cartão meta-dados: Etiquetas + Prioridade */}
+                {/* Cartão meta-dados: Etiquetas (Prioridade passou para o Cartão de
+                    Atribuição, na coluna direita — deixa de ocupar espaço isolado
+                    no Resumo, ver AssignmentContextCard) */}
                 <Card>
                   <CardContent className="pt-4 pb-4">
                     <div className="flex flex-wrap items-center gap-4">
-                      {/* Prioridade */}
-                      <div className="flex items-center gap-2">
-                        <Label className="text-xs text-muted-foreground">Prioridade</Label>
-                        <Select
-                          value={process?.prioridade || "media"}
-                          onValueChange={(value) => {
-                            setProcess(prev => ({ ...prev, prioridade: value }));
-                            if (canEditPersonal && !isProcessLocked) handleSaveOrganization();
-                          }}
-                          disabled={!canEditPersonal || isProcessLocked}
-                        >
-                          <SelectTrigger className="h-8 w-28 text-xs">
-                            <SelectValue />
-                          </SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="baixa"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Baixa</span></SelectItem>
-                            <SelectItem value="media"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Média</span></SelectItem>
-                            <SelectItem value="alta"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-red-500" />Alta</span></SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
                       {/* Etiquetas */}
                       <div className="flex items-center gap-1.5 flex-wrap">
                         <Label className="text-xs text-muted-foreground">Etiquetas</Label>
@@ -1990,9 +1977,10 @@ const ProcessDetails = () => {
                             onKeyDown={(e) => {
                               if (e.key === "Enter" && newLabel.trim()) {
                                 e.preventDefault();
+                                const nextLabels = [...(process?.labels || []), newLabel.trim()];
                                 setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
                                 setNewLabel("");
-                                if (!isProcessLocked) handleSaveOrganization();
+                                if (!isProcessLocked) handleSaveOrganization({ labels: nextLabels });
                               }
                             }}
                             className="h-7 w-28 text-xs"
@@ -2359,6 +2347,12 @@ const ProcessDetails = () => {
               deadlines={deadlines}
               onManageAssignment={openAssignDialog}
               canManageAssignment={userRole !== "cliente"}
+              priority={process?.prioridade || "media"}
+              onPriorityChange={(value) => {
+                setProcess(prev => ({ ...prev, prioridade: value }));
+                if (canEditPersonal && !isProcessLocked) handleSaveOrganization({ prioridade: value });
+              }}
+              canEditPriority={canEditPersonal && !isProcessLocked}
             />
 
             {/* Tarefas - visível se tem manage_tasks */}
