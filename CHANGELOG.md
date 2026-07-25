@@ -3,6 +3,29 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Auditoria UX/UI (Fases 1–6), redesign ProcessDetails/ConsultorDashboard, Calculadora de Prestações
+
+### Adicionado
+- **ESLint safety net contra cores Tailwind cruas (Fase 6, #596)**: nova regra `no-restricted-syntax` (nível `warn`, gate do CI apenas em `error`) em `frontend/eslint.config.js` que deteta utilities de cor crua do Tailwind (`bg-gray-*`, `text-blue-*`, `bg-red-*`, etc.) em `className`/`class` e em `cn()`/`clsx()`/`classnames()`/`cva()`, forçando o uso de tokens semânticos do Shadcn (`bg-primary`, `text-muted-foreground`, `bg-destructive`, …) que respeitam o Dark Mode. Código legado não foi alterado (~2700 avisos intencionais).
+- **`FRONTEND_GUIDELINES.md`**: novo documento que consolida as normas de UX/UI do frontend — Progressive Disclosure, layout 2/3+1/3, eliminação de cartões redundantes para metadados simples, formulários secundários em `Dialog`/`Sheet`, `EmptyState`/`PageHeader` canónicos, regra ESLint de cores, e utilitários centralizados (`formatCurrency`, `validateNIF`, `mortgageCalculations`).
+- **Calculadora de Prestações no CRM (`/calculadoras`, #601)**: nova secção `CalculatorsPage.js` com `components/calculators/MortgageSimulator.jsx` — simula a prestação mensal (sistema francês de amortização) a partir de Capital, Prazo e Taxa de Juro/Spread, com toggle `Switch` "Incluir Seguros" que revela progressivamente Seguro de Vida e Multirriscos. Motor de cálculo extraído para `utils/mortgageCalculations.js` (`calcularPrestacaoMensal`, `calcularTAEG`, `simularCreditoHabitacao`) a partir do simulador do Portal do Cliente (`components/portal/SimulatorCH.jsx`), reutilizável fora do Portal. Inclui acesso rápido a DSTI e Risco de Crédito (dialogs já existentes).
+- **Componentes partilhados canónicos (Fases 4–5, #594)**: `StatCard`, `StatusBadge`, `Spinner`, `EmptyState`, `PageHeader` promovidos para `components/shared/`; migração de Dashboards/RGPD/Finance para os usar; `PageHeader` estendido com slot opcional `titleBadge`.
+
+### Alterado
+- **Redesign `ProcessDetails` com Progressive Disclosure (#597, #599)**: título manual substituído pelo `PageHeader` partilhado (com `StatusBadge` junto ao título); conteúdo reestruturado num grid `grid-cols-1 lg:grid-cols-3` — 2/3 esquerda: Tabs "Resumo"/"Documentos"/"Histórico"; 1/3 direita: novos `ClientContextCard` (titular/NIF/contactos) e `AssignmentContextCard` (consultor/mediador + prazos críticos + botão "Gerir"), seguidos de Tarefas e Imóveis Compatíveis. `ProcessStickyHeader` removido (substituído pelo cabeçalho + cartões de contexto).
+- **Separador Histórico consolidado**: formulário "Registar Atividade" movido para dentro de um `Dialog` (antes inline); timeline de atividades compactada num `ScrollArea` de altura fixa (`h-[500px]`); "Filme da Lead" mantido no mesmo separador.
+- **Cartão "Prioridade" eliminado do Resumo**: deixou de ocupar um `Card` isolado; passou a `DropdownMenu` + `Badge` compacto dentro do `AssignmentContextCard` (coluna direita).
+- **Redesign `ConsultorDashboard` (#594)**: 3 zonas (foco, funil, tabs), progressive disclosure; remove double padding herdado do layout antigo.
+
+### Corrigido
+- Race condition em `handleSaveOrganization` (`ProcessDetails`): aceitar overrides explícitos evita enviar valores antigos de prioridade/etiquetas ao backend quando o save é disparado no mesmo handler que o `setState`.
+
+### Técnico
+- Documentação sincronizada: `AGENTS.md` (bullets de gotchas + tabela "Frontend UX Audit + Calculadoras"), `README.md`, `FRONTEND_GUIDELINES.md` (novo), `CHANGELOG.md`.
+- PRs: #590 (Fase 0/auditoria), #592 (Fases 1–3), #594 (Fases 4–5 + ConsultorDashboard), #596 (Fase 6 ESLint), #597/#598 (ProcessDetails redesign), #599/#600 (Activity Dialog), #601/#602 (Prioridade + Calculadora + docs).
+
+---
+
 ## [2026-07-22] — ProcessDetails mutations, portal fulfill, toasts sticky, titular IA
 
 ### Adicionado
