@@ -1,19 +1,75 @@
 /**
  * AssignmentContextCard — Card de contexto fixo (coluna direita) com a
- * equipa responsável pelo processo e os prazos mais críticos.
+ * equipa responsável pelo processo, a prioridade e os prazos mais críticos.
  *
  * PORQUÊ: Substitui o antigo botão "Atribuições" solto no cabeçalho — a
  * gestão de atribuições passa a viver junto da informação que ela edita,
- * sempre visível independentemente do separador ativo.
+ * sempre visível independentemente do separador ativo. A Prioridade
+ * (antigo cartão isolado no Resumo) segue a mesma lógica: é um metadado
+ * compacto do processo, por isso vive aqui como um badge/dropdown em vez
+ * de ocupar uma secção própria.
  */
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
 import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
-import { Users, UserCog, Clock, AlertTriangle } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
+import { Users, UserCog, Clock, AlertTriangle, ChevronDown } from "lucide-react";
 import { differenceInCalendarDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeString } from "../../utils/safeString";
 import { safeParseISO, safeFormat } from "../../lib/utils";
+
+const PRIORITY_OPTIONS = [
+  { value: "baixa", label: "Baixa", badgeVariant: "outline" },
+  { value: "media", label: "Média", badgeVariant: "secondary" },
+  { value: "alta", label: "Alta", badgeVariant: "destructive" },
+];
+
+function PrioritySelector({ value, onChange, disabled }) {
+  const current = PRIORITY_OPTIONS.find((o) => o.value === value) || PRIORITY_OPTIONS[1];
+
+  if (disabled) {
+    return (
+      <Badge variant={current.badgeVariant} className="text-xs font-normal" data-testid="priority-badge-readonly">
+        {current.label}
+      </Badge>
+    );
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="rounded-md focus:outline-none focus:ring-2 focus:ring-ring focus:ring-offset-2"
+        data-testid="priority-selector-trigger"
+      >
+        <Badge variant={current.badgeVariant} className="text-xs font-normal gap-1 cursor-pointer">
+          {current.label}
+          <ChevronDown className="h-3 w-3 opacity-70" />
+        </Badge>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-36">
+        <DropdownMenuLabel className="text-xs text-muted-foreground">Prioridade</DropdownMenuLabel>
+        {PRIORITY_OPTIONS.map((opt) => (
+          <DropdownMenuItem
+            key={opt.value}
+            onSelect={() => onChange(opt.value)}
+            data-testid={`priority-option-${opt.value}`}
+          >
+            <Badge variant={opt.badgeVariant} className="text-xs font-normal">
+              {opt.label}
+            </Badge>
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function TeamRow({ label, names }) {
   return (
@@ -41,6 +97,9 @@ export default function AssignmentContextCard({
   deadlines = [],
   onManageAssignment,
   canManageAssignment,
+  priority = "media",
+  onPriorityChange,
+  canEditPriority = false,
 }) {
   const indexacaoName = safeString(process?.indexacao_name);
   const parceiroName = safeString(process?.parceiro_name);
@@ -75,6 +134,14 @@ export default function AssignmentContextCard({
         )}
       </CardHeader>
       <CardContent className="pt-0 space-y-1">
+        <div className="flex items-center justify-between gap-2 py-1">
+          <span className="text-xs text-muted-foreground shrink-0">Prioridade</span>
+          <PrioritySelector
+            value={priority}
+            onChange={onPriorityChange}
+            disabled={!canEditPriority}
+          />
+        </div>
         <TeamRow label="Consultor(es)" names={consultorNames} />
         <TeamRow label="Mediador(es)" names={mediadorNames} />
         {indexacaoName && <TeamRow label="Indexação" names={[indexacaoName]} />}
