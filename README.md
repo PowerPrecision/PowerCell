@@ -161,6 +161,15 @@ PowerCell/
 - **Escrita**: `useProcessMutations` (update processo/cliente, assign, atividades, prazos)
 - **Payload seguro**: `sanitizeProcessUpdatePayload` — nunca envia `documents` / `onedrive_links` / arrays vazios que esmagariam dados no Mongo
 - Tabs e dialogs parcialmente extraídos (`components/processDetails/*`)
+- **Separador Resumo limpo**: só dados críticos do processo (Cliente, Financeiros, Imóvel, Crédito, Prazos) — sem atividades/histórico (Progressive Disclosure, ver `FRONTEND_GUIDELINES.md`)
+- **Prioridade compacta**: deixou de ter um `Card` isolado no Resumo — vive como `DropdownMenu` + `Badge` dentro do `AssignmentContextCard` (coluna direita)
+- **Separador Histórico**: timeline de fases + "Atividades Recentes" (`ScrollArea` com altura fixa) + formulário "Registar Atividade" atrás de um `Dialog` + "Filme da Lead" (auditoria unificada)
+
+### Calculadoras (`/calculadoras`)
+- **Calculadora de Prestações (Crédito Habitação)**: `components/calculators/MortgageSimulator.jsx` — simula a prestação mensal (sistema francês de amortização) a partir de Capital, Prazo e Taxa de Juro/Spread, com toggle "Incluir Seguros" (`Switch`) que revela progressivamente Seguro de Vida e Multirriscos
+- Motor de cálculo isolado em `utils/mortgageCalculations.js` (reutilizado do simulador do Portal do Cliente, `components/portal/SimulatorCH.jsx`)
+- Layout 2 colunas (Inputs / Resultado em destaque), tokens Shadcn (`bg-primary`, `text-muted-foreground`, etc.), valores monetários via `formatCurrency`
+- Acesso rápido a DSTI e Risco de Crédito (dialogs já existentes) na mesma página
 
 ### Registo de Clientes / Onboarding
 - **Registo público** cria **cliente** (+ checklist `mandatory_documents` do SystemConfig) — **não** cria processo de imediato
@@ -442,6 +451,7 @@ flowchart TD
 | `/leads` | LeadsPage | Leads |
 | `/meus-clientes` | MyClientsPage | Os Meus Processos |
 | `/financeiro` | FinanceDashboard | Dashboard financeiro |
+| `/calculadoras` | CalculatorsPage | Calculadoras (Prestação de Crédito Habitação, DSTI, Risco) |
 | `/automation` | AutomationPage | Motor de automação No-Code |
 | `/gestao-formulario` | FormManagementPage | Gestão do formulário |
 | `/workflow-estados` | WorkflowStatusesPage | Gestão de estados do workflow |
@@ -681,6 +691,13 @@ O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Ren
 - **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretos, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Configurações do Sistema (`/configuracoes`).
 
 ## Histórico de Correções Recentes (dev)
+
+### 2026-07 — Finalização UX (Prioridade, Resumo/Histórico), Calculadora de Prestações
+- **Toast com botão X**: `<Toaster closeButton />` confirmado em `App.js` — todos os toasts (incluindo os "sticky" de tarefas em background) têm sempre uma forma manual de fechar.
+- **Cartão "Prioridade" eliminado**: deixou de ocupar um `Card` isolado no separador Resumo do `ProcessDetails`; passou a um `DropdownMenu` + `Badge` compacto dentro do `AssignmentContextCard` (coluna direita) — ver `components/processDetails/AssignmentContextCard.jsx`.
+- **Resumo limpo / Histórico consolidado**: confirmado que "Atividades Recentes" e o formulário "Registar Atividade" vivem exclusivamente no separador Histórico (`HistoryTab.jsx`), com o formulário atrás de um `Dialog` e a lista dentro de um `ScrollArea` de altura fixa (`h-[500px]`) — sem duplicação no Resumo.
+- **Calculadora de Prestações no CRM**: nova secção `/calculadoras` (`CalculatorsPage.js`) com `MortgageSimulator.jsx` (Capital, Prazo, Taxa de Juro/Spread, toggle "Incluir Seguros" com Progressive Disclosure para Seguro de Vida/Multirriscos). Motor de cálculo extraído para `utils/mortgageCalculations.js` a partir do simulador do Portal do Cliente (`components/portal/SimulatorCH.jsx`). Inclui acesso rápido a DSTI e Risco de Crédito.
+- **Documentação**: novo `FRONTEND_GUIDELINES.md` consolida as normas de UX/UI (Progressive Disclosure, layout 2/3+1/3, tokens Shadcn, `sonner`, ESLint `no-restricted-syntax`, utilitários centralizados); `ARCHITECTURE.md` documenta a regra de escrita `$set` no MongoDB e a proteção dos mapeamentos S3.
 
 ### 2026-07 — ProcessDetails TanStack, portal fulfill, toasts sticky, titular IA
 - **ProcessDetails writes** via `useProcessMutations`; load já era `useProcessFullData`. Payload sanitizado (`processUpdatePayload.js`) para não esmagar `documents` / arrays vazios.
