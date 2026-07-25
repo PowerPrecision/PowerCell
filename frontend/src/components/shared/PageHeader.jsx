@@ -11,6 +11,7 @@ import { cn } from "@/lib/utils";
 /**
  * @param {React.ComponentType} [icon]
  * @param {string} title
+ * @param {React.ReactNode} [titleBadge] — rendered inline right after the title (e.g. a StatusBadge)
  * @param {string|React.ReactNode} [description]
  * @param {Function} [onRefresh]
  * @param {React.ReactNode} [actions] — right-side actions (alternative to onRefresh)
@@ -20,6 +21,7 @@ import { cn } from "@/lib/utils";
 export function PageHeader({
   icon: Icon,
   title,
+  titleBadge,
   description,
   onRefresh,
   actions,
@@ -29,9 +31,10 @@ export function PageHeader({
   return (
     <div className={cn("flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3", className)}>
       <div className="min-w-0">
-        <Heading className="text-2xl font-bold flex items-center gap-2 text-foreground">
+        <Heading className="text-2xl font-bold flex items-center gap-2 flex-wrap text-foreground">
           {Icon && <Icon className="h-6 w-6 shrink-0 text-primary" aria-hidden="true" />}
           <span className="truncate">{title}</span>
+          {titleBadge}
         </Heading>
         {description ? (
           typeof description === "string" ? (
