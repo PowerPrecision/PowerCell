@@ -53,6 +53,7 @@ import {
   ClipboardList,
   Mail,
   Eye,
+  Calculator,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -306,6 +307,11 @@ const DashboardLayout = ({ children, title }) => {
           icon: Database,
           href: "/ficheiros",
         },
+        {
+          label: "Calculadoras",
+          icon: Calculator,
+          href: "/calculadoras",
+        },
       ],
     };
 
@@ -352,12 +358,13 @@ const DashboardLayout = ({ children, title }) => {
     // NÃO vê: Dashboard, Estatísticas, Gestão, Configuração
     // ====================================================================
     if (userRole === "indexacao") {
-      // Comunicações sem Minutas (restrito a outros roles)
+      // Comunicações sem Minutas nem Calculadoras (restrito a outros roles —
+      // indexação não lida com simulações financeiras de crédito)
       const indexacaoComunicacoes = {
         id: "comunicacoes",
         label: "Comunicações e Ficheiros",
         icon: Mail,
-        items: comunicacoesGroup.items.filter(i => i.href !== "/minutas"),
+        items: comunicacoesGroup.items.filter(i => i.href !== "/minutas" && i.href !== "/calculadoras"),
       };
       // PACOTE DB — Visão Global do indexacao SEM "Registos de Clientes"
       // (restrição mantida: indexacao não necessita de acesso a registos de clientes)
