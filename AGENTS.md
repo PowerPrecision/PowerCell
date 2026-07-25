@@ -29,6 +29,10 @@ The update script already installs all dependencies (frontend yarn deps and the 
 - **Portal docs enviados:** upload do **cliente** (`portal/confirm-upload`) marca REQUESTED→RECEIVED. Upload da **equipa** no CRM (`document_upload` / `confirm-upload` + pós `auto_categorize`) chama `document_portal_fulfill` para o mesmo efeito no portal do cliente (match por categoria/label).
 - **Toasts BG:** sticky em `TasksContext` (`duration: Infinity`); **não** fazer `toast.dismiss` quando a tarefa sai de `/tasks/active` — o Toaster está fora do `BrowserRouter` e deve sobreviver a mudanças de página (só o utilizador fecha com X). `visibleToasts={8}`.
 - **ProcessDetails writes (TanStack):** load via `useProcessFullData` / `useProcessQuery`; gravações via `useProcessMutations` (`updateProcess` / `updateClient` / assign / activities / deadlines). **Nunca** enviar `documents` / `onedrive_links` / arrays vazios no PUT — `sanitizeProcessUpdatePayload` em `pages/processDetails/processUpdatePayload.js` (allow `labels:[]` só no save org). Optimistic merge nested. Dialog atribuições: `ProcessAssignDialog`. Ainda híbrido: RGPD / AI analyze-apply / magic-link usam `fetch` pontual.
+- **Frontend UX/UI norms → ver `FRONTEND_GUIDELINES.md`** (Progressive Disclosure, layout 2/3+1/3, eliminação de cartões redundantes para metadados simples, `Dialog`/`Sheet` para formulários secundários, `EmptyState`/`PageHeader` canónicos, regra ESLint de cores, utilitários centralizados). Ler antes de tocar em `ProcessDetails`, dashboards ou qualquer página densa.
+- **ESLint `no-restricted-syntax` (Dark Mode safe colors):** `frontend/eslint.config.js` bloqueia (nível `warn`; **CI usa `--quiet`**, i.e. só falha em `error`) classes Tailwind de cor cruas (`bg-gray-500`, `text-blue-600`, `border-red-500`, etc.) em `className`/`class`/`cn()`/`clsx()`/`classnames()`/`cva()`. Código novo usa sempre tokens semânticos do Shadcn (`bg-primary`, `text-muted-foreground`, `bg-destructive`, `border-border`, …). Código legado (~2700 avisos) fica como aviso — não bloqueia CI, não copiar padrão para ficheiros novos.
+- **ProcessDetails redesign (Progressive Disclosure, PR #597–#601):** `PageHeader` partilhado com `titleBadge` (Status) + ações à direita; grid `grid-cols-1 lg:grid-cols-3` — 2/3 esquerda = Tabs (Resumo/Documentos/Histórico), 1/3 direita = `ClientContextCard` + `AssignmentContextCard` (consultor/mediador + prazos + Prioridade como `DropdownMenu`+`Badge`, botão "Gerir" → `ProcessAssignDialog`) + Tarefas + Imóveis Compatíveis. Separador Histórico (`HistoryTab.jsx`) consolida timeline de fases + "Atividades Recentes" (`ScrollArea` `h-[500px]`) + formulário "Registar Atividade" atrás de um `Dialog` + "Filme da Lead". `ProcessStickyHeader` removido (substituído pelo novo cabeçalho + cartões de contexto).
+- **Calculadoras (`/calculadoras`):** `CalculatorsPage.js` → `components/calculators/MortgageSimulator.jsx` (Capital/Prazo/Taxa, toggle `Switch` "Incluir Seguros" com Progressive Disclosure para Seguro de Vida/Multirriscos) + acesso rápido a DSTI/Risco (dialogs existentes). Motor de cálculo puro em `utils/mortgageCalculations.js` (`calcularPrestacaoMensal` / `calcularTAEG` / `simularCreditoHabitacao`), extraído de `components/portal/SimulatorCH.jsx` (Portal do Cliente) — reutilizar este utilitário em vez de duplicar a matemática.
 - CI (`.github/workflows/main.yml`): frontend (ESLint `--quiet` blocking + Vite build), backend (flake8 + pytest on **Python 3.12** — required by `numpy==2.5.1`), security (bandit + pip-audit), and **E2E smoke** (Playwright `e2e/smoke.spec.js` against local mongo + uvicorn + `yarn dev`).
 - **Frontend E2E (Playwright)**: smoke runs in CI. Full suite locally: `cd frontend && npx playwright install chromium`, then `PLAYWRIGHT_BASE_URL=http://localhost:3000 yarn playwright test --project=chromium` (with backend on `:8001`). Use `PLAYWRIGHT_SKIP_WEBSERVER=1` if Vite is already running. Specs that need data (e.g. `e2e/undo-delete.spec.js`) provision via API and clean up after.
 
@@ -766,6 +770,21 @@ Do **not** overwrite `ai_improvement_agent.py`. Unit helpers: `backend/tests/uni
 | ProcessDetails mutations | **done (writes)** | `useProcessMutations` + `sanitizeProcessUpdatePayload`; load já era `useProcessFullData` |
 
 Optional follow-ups: Gemini-only admin picks on OpenAI analyzer client; portal visitas tab / consultor RBAC for unassigned pedidos; orphan AI paths left intentionally; ProcessDetails ainda híbrido (RGPD / magic-link / AI fetch pontual); mais extracção de tabs do monolito.
+
+### Frontend UX Audit + Calculadoras (PRs #590–#602, `FRONTEND_UX_AUDIT.md`) — done
+
+| Fase / Item | Status | Notes |
+|---|---|---|
+| Fase 1 — código morto | **done** | Remoção de componentes/rotas/imports não usados (#592) |
+| Fase 2 — notificações unificadas | **done** | Sistema único `sonner`; sem libs de toast paralelas (#592) |
+| Fase 3 — lógica duplicada centralizada | **done** | `formatCurrency`, `validateNIF`, helpers repetidos → `utils/` (#592) |
+| Fase 4–5 — componentes partilhados + ConsultorDashboard | **done** | `StatCard`/`StatusBadge`/`Spinner`/`EmptyState`/`PageHeader` canónicos em `components/shared/`; migração de Dashboards/RGPD/Finance; remove double padding; `ConsultorDashboard` redesenhado em 3 zonas (foco, funil, tabs) (#594) |
+| Fase 6 — ESLint `no-restricted-syntax` (cores Tailwind cruas) | **done** | Ver bullet em "Non-obvious gotchas"; regra `warn`, gate CI só em `error` (#596) |
+| ProcessDetails Progressive Disclosure | **done** | Ver bullet em "Non-obvious gotchas" — `PageHeader` + grid 2/3+1/3 + `ClientContextCard`/`AssignmentContextCard`/`HistoryTab` (#597, #599) |
+| Prioridade → `AssignmentContextCard` | **done** | Deixa de ter `Card` isolado no Resumo; vive como `DropdownMenu`+`Badge` (#601) |
+| Calculadora de Prestações (`/calculadoras`) | **done** | Ver bullet em "Non-obvious gotchas" — `MortgageSimulator.jsx` + `mortgageCalculations.js` (#601) |
+
+Norma de referência para todo este pacote: `FRONTEND_GUIDELINES.md` (criado em #601/#602, consolida Progressive Disclosure + regra ESLint + utilitários centralizados — ler antes de editar UI densa).
 
 #### 1) Multi-perfil → webmail / email config — **done**
 
