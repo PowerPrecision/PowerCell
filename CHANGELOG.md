@@ -3,6 +3,39 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DH: Progressive Disclosure + Agenda (Prazo/Evento) + Portal Events
+
+### Adicionado
+- **Modelo de Agenda dual (Prazo/Evento)**: o modelo `Deadline` (`models/deadline.py`) ganhou 3 campos: `type` (`"deadline"` | `"event"`), `visible_to_client` (bool, default False), `reminder_time` (`List[str]` com valores `"1h"`, `"3h"`, `"1d"`, `"3d"`, `"7d"`). Validadores Pydantic para dedup e rejeição de valores inválidos.
+- **Novo tipo de notificação `EVENT_REMINDER`** em `NotificationType` (`models/enums.py`).
+- **Endpoint `GET /api/portal/events`**: retorna eventos visíveis ao cliente (`visible_to_client=True`, não concluídos, `due_date >= hoje`), ordenados por data. Novo serviço `services/portal_events.py`.
+- **Secção "Próximos Eventos" no Portal do Cliente** (`ClientPortal.jsx`): card na TOP SECTION que lista eventos visíveis com Badge (Prazo/Evento) e data. Oculta quando vazia; `EmptyState` quando não há eventos.
+- **Calculadora de Prestações no menu Simulações** (`ProcessDetails.js`): novo item "Simulação de Crédito Habitação" no dropdown de Simulações que abre um `Sheet` lateral com o `MortgageSimulator`.
+
+### Corrigido
+- **Cron de deadlines SILENTIOSAMENTE BROKEN**: `check_upcoming_deadlines` (`scheduled_tasks.py`) queries `{"date": ...}` (campo inexistente — deveria ser `due_date`) e itera `deadline.get("participants", [])` (campo inexistente — deveria ser `assigned_user_ids`). O cron encontrava 0 deadlines e notificava 0 utilizadores. Reescrito com: query correta `due_date`, iteração `assigned_user_ids`, branching por `type` (deadline → `DEADLINE_APPROACHING`/`DEADLINE_MISSED`; event → `EVENT_REMINDER`), respeito por `reminder_time`, idempotência via `sent_reminders` array.
+- **`notify_deadline_reminder`** (`realtime_notifications.py`): lia `participants` (inexistente) — corrigido para `assigned_user_ids`.
+- **`assigned_user_ids` não persistido em update**: `DeadlineUpdate` declarava o campo mas `run_update_deadline` nunca o processava. Agora processado.
+- **Mapeamentos de notificação**: `NOTIFICATION_TYPE_MAP` (`notification_service.py`) e `NOTIFICATION_TYPE_TO_PREF_KEY` (`realtime_notifications.py`) não mapeavam `deadline_approaching`, `deadline_missed`, `event_reminder` — agora mapeados.
+
+### Alterado
+- **Progressive Disclosure em 7 cartões vazios**: cartões que não tinham dados ficavam abertos a ocupar ecrã. Agora recolhem por omissão quando vazios (mostrando apenas o cabeçalho + "Sem dados preenchidos"):
+  - FinancialTab: "Situação Financeira" + "Situação Profissional"
+  - RealEstateTab: "Características do Imóvel" + "Localização" + "Dados do CPCV" + "Dados do Vendedor"
+  - CreditTab: "Avaliação Bancária"
+  - Usa o pattern inline existente (`collapsible` prop + `isCardEmpty` + `shouldCardBeCollapsed`) — 7 novos cases em `isCardEmpty`.
+- **DeadlinesTab → "Agenda"**: renomeada de "Prazos" para "Agenda". Formulário de criação estendido com: Select de tipo (Prazo Limite vs Marcação), Select de lembrete (1h/1d/3d/7d antes), Switch "Visível no Portal do Cliente" com description de ajuda. Listagem mostra Badge (Prazo/Evento), ícone Sino (se tem alerta), ícone Olho (se partilhado com cliente). `EmptyState` canónico substitui o `<p>Sem prazos</p>` ad-hoc.
+
+### Documentação
+- **`ARCHITECTURE.md`**: nova secção "Agenda — Dualidade Prazo/Evento" com modelo de dados, tabela de comportamento por tipo, diagrama Mermaid do fluxo (staff → cron → notificações + portal → cliente).
+
+### Técnico
+- **Backend modificado** (8 ficheiros): `models/deadline.py` (3 campos + validadores), `models/enums.py` (EVENT_REMINDER), `services/deadlines_api_crud.py` (persistência + bugfix assigned_user_ids), `services/scheduled_tasks.py` (cron reescrito), `services/notification_service.py` (mapeamentos), `services/realtime_notifications.py` (mapeamentos + bugfix participants), `services/portal_events.py` (NOVO), `routes/portal.py` (novo endpoint).
+- **Frontend modificado** (6 ficheiros): `pages/ProcessDetails.js` (7 isCardEmpty cases + deadlineForm + Agenda label + MortgageSimulator Sheet), `tabs/FinancialTab.jsx` (2 cartões collapsible), `tabs/RealEstateTab.jsx` (4 cartões collapsible + Badge import fix), `tabs/CreditTab.jsx` (1 cartão collapsible), `tabs/DeadlinesTab.jsx` (Agenda evolution), `pages/ClientPortal.jsx` (Próximos Eventos).
+- **Documentação** (1 ficheiro): `ARCHITECTURE.md`.
+- **Validação**: `py_compile` ✓ (8 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (6 frontend, 0 erros).
+- **Dependências**: Nenhuma nova — `Collapsible`, `Switch`, `Sheet`, `EmptyState`, `Badge`, `Bell`, `Eye`, `CalendarClock` já existem em Shadcn/lucide-react.
+
 ## [2026-07-25] — Pacote DG: RGPD PDF Multi-página + Clientes Sem Lifecycle
 
 ### Corrigido

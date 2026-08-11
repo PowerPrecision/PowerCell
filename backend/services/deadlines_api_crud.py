@@ -56,6 +56,10 @@ async def run_create_deadline(data: DeadlineCreate, user: dict):
         "assigned_user_ids": assigned_users,
         "assigned_consultor_id": data.assigned_consultor_id,
         "assigned_mediador_id": data.assigned_mediador_id,
+        # PACOTE DH — Agenda: tipo, visibilidade no portal e lembretes.
+        "type": data.type,
+        "visible_to_client": data.visible_to_client,
+        "reminder_time": data.reminder_time,
     }
 
     await db.deadlines.insert_one(deadline_doc)
@@ -125,6 +129,18 @@ async def run_update_deadline(
         update_data["assigned_consultor_id"] = data.assigned_consultor_id
     if data.assigned_mediador_id is not None:
         update_data["assigned_mediador_id"] = data.assigned_mediador_id
+
+    # PACOTE DH — Bugfix: assigned_user_ids estava no schema mas nunca era persistido no update.
+    if data.assigned_user_ids is not None:
+        update_data["assigned_user_ids"] = data.assigned_user_ids
+
+    # PACOTE DH — Agenda: novos campos no update parcial.
+    if data.type is not None:
+        update_data["type"] = data.type
+    if data.visible_to_client is not None:
+        update_data["visible_to_client"] = data.visible_to_client
+    if data.reminder_time is not None:
+        update_data["reminder_time"] = data.reminder_time
 
     if update_data:
         await db.deadlines.update_one(

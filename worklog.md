@@ -3348,3 +3348,36 @@ Stage Summary:
   - frontend/src/pages/ClientsPage.js (removidos Status/Phase Selects + coluna Fase + badges Inativo; adicionada coluna Processos; título "Clientes Registados")
   - ARCHITECTURE.md (2 secções)
 - Resultado: (1) PDF RGPD pré-preenchido usa template dinâmico com paginação automática (2+ páginas), linhas em branco para campos nulos, checkboxes vazias ☐, data/local em branco. (2) Clientes eliminados não aparecem em nenhuma listagem/pesquisa. (3) ClientsPage é uma lista unificada "Clientes Registados" com coluna "Nº Processos" — sem tabs de lifecycle. (4) Docs atualizadas.
+
+
+---
+Task ID: Pacote DH (Progressive Disclosure + Agenda + Portal Events + MortgageSimulator)
+Agent: Main Agent (Z.ai Code Assistant) + 4 subagentes (2 Explore + 2 Implementação)
+Task: 6 alterações — Collapsible em cartões vazios, evolução deadline→Agenda (type/visible_to_client/reminder_time), cron fix, DeadlinesTab→Agenda UI, Portal events, MortgageSimulator no Simulações.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 84dc856f = Pacote DG).
+- 2 subagentes Explore: DH-1-Explore (frontend — 7 cartões não-collapsible, DeadlinesTab, Simulações dropdown, ClientPortal layout) + DH-2-Explore (backend — deadline model, cron SILENTIOSAMENTE BROKEN query date vs due_date + participants vs assigned_user_ids, portal auth pattern).
+- 2 subagentes Implementação: DH-Backend (8 ficheiros — 3 campos deadline + EVENT_REMINDER + cron reescrito + bugfixes + portal_events.py NOVO) + DH-Frontend (6 ficheiros — 7 isCardEmpty cases + 7 cartões collapsible + DeadlinesTab→Agenda + MortgageSimulator Sheet + ClientPortal Próximos Eventos).
+- Validação final: py_compile ✓ (8 backend), flake8 0 erros, bun build ✓ (6 frontend).
+- Documentação: ARCHITECTURE.md secção "Agenda — Dualidade Prazo/Evento" + CHANGELOG.
+- Verificação de tokens: 0 ocorrências de padrão de token no diff.
+
+Stage Summary:
+- 15 ficheiros modificados (8 backend + 6 frontend + 1 doc):
+  - backend/models/deadline.py (type + visible_to_client + reminder_time + validadores)
+  - backend/models/enums.py (EVENT_REMINDER)
+  - backend/services/deadlines_api_crud.py (persistência + bugfix assigned_user_ids)
+  - backend/services/scheduled_tasks.py (cron REESCRITO — fix date→due_date + participants→assigned_user_ids + type branching + reminder_time + sent_reminders idempotência)
+  - backend/services/notification_service.py (mapeamentos deadline_approaching/missed/event_reminder)
+  - backend/services/realtime_notifications.py (mapeamentos + bugfix participants→assigned_user_ids)
+  - backend/services/portal_events.py (NOVO — run_get_portal_events)
+  - backend/routes/portal.py (novo endpoint GET /portal/events)
+  - frontend/src/pages/ProcessDetails.js (7 isCardEmpty cases + deadlineForm extendido + tab label Agenda + MortgageSimulator Sheet)
+  - frontend/src/components/processDetails/tabs/FinancialTab.jsx (2 cartões collapsible)
+  - frontend/src/components/processDetails/tabs/RealEstateTab.jsx (4 cartões collapsible + Badge import fix)
+  - frontend/src/components/processDetails/tabs/CreditTab.jsx (1 cartão collapsible)
+  - frontend/src/components/processDetails/tabs/DeadlinesTab.jsx (Agenda evolution: type Select + reminder Select + visible_to_client Switch + Badge/Bell/Eye icons + EmptyState)
+  - frontend/src/pages/ClientPortal.jsx (Próximos Eventos section com fetchEvents)
+  - ARCHITECTURE.md (secção Agenda dualidade)
+- Resultado: (1) 7 cartões vazios recolhem por omissão (Progressive Disclosure). (2) Modelo Deadline evoluiu para Agenda dual (deadline|event) com visible_to_client e reminder_time. (3) Cron de deadlines FIXED (era silenciosamente no-op) + type-based alerts. (4) DeadlinesTab → "Agenda" com formulário completo e ícones. (5) Portal do Cliente tem secção "Próximos Eventos". (6) MortgageSimulator acessível via Simulações dropdown. (7) Docs atualizadas.

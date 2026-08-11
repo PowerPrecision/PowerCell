@@ -28,6 +28,8 @@ NOTIFICATION_TYPE_TO_PREF_KEY = {
     "task_assigned": "inapp_task_assigned",
     "deadline_approaching": "inapp_deadline_reminder",
     "deadline_missed": "inapp_deadline_reminder",
+    # PACOTE DH — Agenda: lembrete de evento reusa a preferência inapp_deadline_reminder.
+    "event_reminder": "inapp_deadline_reminder",
 }
 
 # Cache simples de preferências (por user_id)
@@ -292,16 +294,16 @@ async def notify_deadline_reminder(deadline: dict, minutes_before: int = 30):
         deadline: Dados do prazo/evento
         minutes_before: Minutos antes do evento
     """
-    # Notificar participantes
-    participants = deadline.get("participants", [])
+    # PACOTE DH — Bugfix: ler assigned_user_ids (campo correcto do schema) em vez de participants.
+    assigned_user_ids = deadline.get("assigned_user_ids", []) or []
     
-    if not participants:
+    if not assigned_user_ids:
         return
     
     title = f"⏰ Lembrete: {deadline.get('title', 'Evento')}"
     message = f"O evento começa em {minutes_before} minutos"
     
-    for user_id in participants:
+    for user_id in assigned_user_ids:
         await send_realtime_notification(
             user_id=user_id,
             title=title,
@@ -318,7 +320,8 @@ async def notify_deadline_reminder(deadline: dict, minutes_before: int = 30):
                     {
                         "deadline_id": deadline.get("id"),
                         "title": deadline.get("title"),
-                        "date": deadline.get("date"),
+                        # PACOTE DH — usar due_date (campo correcto) com fallback para date (legacy).
+                        "date": deadline.get("due_date") or deadline.get("date"),
                         "minutes_before": minutes_before
                     }
                 ),

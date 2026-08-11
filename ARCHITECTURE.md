@@ -1420,3 +1420,57 @@ O ecrã de Clientes é uma **lista unificada de "Clientes Registados"** — sem 
 ### Soft-delete de Clientes
 
 Todas as queries de listagem/pesquisa de clientes filtram ativamente `is_deleted: {"$ne": True}` (defense-in-depth com `status: {"$ne": "eliminado"}`). O soft-delete (`client_delete.py`) define `is_deleted: True`, `deleted_at: <timestamp>`, `is_active: False`, `status: "eliminado"` — todos os 4 campos para compatibilidade.
+
+---
+
+## Agenda — Dualidade Prazo/Evento (Pacote DH)
+
+O modelo de **Agenda** (coleção `deadlines`) evoluiu para suportar dois tipos de entradas com comportamentos distintos: **prazos limite** (deadlines) e **marcações** (events). Esta dualidade reflete a realidade do negócio — nem tudo no calendário é um prazo; muitas vezes é uma marcação (ex: Escritura, reunião com banco).
+
+### Modelo de dados
+
+```python
+# models/deadline.py
+class DeadlineCreate(BaseModel):
+    title: str
+    description: Optional[str]
+    due_date: str  # ISO "yyyy-MM-dd"
+    priority: str = "medium"
+    type: Literal["deadline", "event"] = "deadline"       # PACOTE DH
+    visible_to_client: bool = False                        # PACOTE DH
+    reminder_time: Optional[List[str]] = None              # PACOTE DH — ["1h","3h","1d","3d","7d"]
+```
+
+| Campo | Tipo | Descrição |
+|---|---|---|
+| `type` | `"deadline"` \| `"event"` | Distingue prazos limite de marcações |
+| `visible_to_client` | `bool` | Se `True`, o evento aparece na agenda do Portal do Cliente |
+| `reminder_time` | `List[str]` | Configurações de lembrete: `"1h"`, `"3h"`, `"1d"`, `"3d"`, `"7d"` (multi-select) |
+
+### Lógica de alertas baseada no tipo
+
+O cron `check_upcoming_deadlines` (`services/scheduled_tasks.py`, corre a cada 1h em PROD) comporta-se de forma diferente conforme o `type`:
+
+| Type | Comportamento | Defaults `reminder_time` |
+|---|---|---|
+| **`deadline`** | Dispara `DEADLINE_APPROACHING` (urgência) nos dias configurados + `DEADLINE_MISSED` se atrasado | `["1d", "3d"]` |
+| **`event`** | Dispara `EVENT_REMINDER` (lembrete) respeitando `reminder_time` | `["1h", "1d"]` |
+
+Ambos usam `notification_service.send_notification_with_preference_check` para email + `realtime_notifications.notify_deadline_reminder` para in-app/WebSocket. A idempotência é garantida por um array `sent_reminders` no documento da deadline — cada lembrete só é enviado uma vez por janela.
+
+### Portal do Cliente — eventos visíveis
+
+O endpoint `GET /api/portal/events` retorna apenas eventos onde `visible_to_client == True`, `completed != True`, e `due_date >= today`. O frontend (`ClientPortal.jsx`) mostra uma secção "Próximos Eventos" na TOP SECTION — oculta quando vazia, com `EmptyState` quando não há eventos.
+
+```mermaid
+flowchart LR
+    Staff["Staff cria entrada na Agenda"] -->|"type: deadline/event"| DB[(deadlines)]
+    DB -->|"cron 1h"| Cron["check_upcoming_deadlines"]
+    Cron -->|"type=deadline"| Alert["DEADLINE_APPROACHING/MISS<br/>(urgência)"]
+    Cron -->|"type=event"| Reminder["EVENT_REMINDER<br/>(lembrete)"]
+    Alert --> Notif["notification_service"]
+    Reminder --> Notif
+    Notif --> Consultor["Consultor (email + in-app)"]
+    DB -->|"visible_to_client=true"| Portal["GET /portal/events"]
+    Portal --> ClientUI["ClientPortal — Próximos Eventos"]
+```

@@ -1,5 +1,9 @@
-from pydantic import BaseModel
-from typing import Optional, List
+from pydantic import BaseModel, field_validator
+from typing import Optional, List, Literal
+
+
+# PACOTE DH — Opções válidas para reminder_time (multi-select de lembretes).
+REMINDER_TIME_OPTIONS = {"1h", "3h", "1d", "3d", "7d"}
 
 
 class DeadlineCreate(BaseModel):
@@ -13,6 +17,49 @@ class DeadlineCreate(BaseModel):
     assigned_consultor_id: Optional[str] = None
     assigned_mediador_id: Optional[str] = None
 
+    # PACOTE DH — Agenda: tipo (deadline|event), visibilidade no portal e lembretes.
+    type: Literal["deadline", "event"] = "deadline"
+    visible_to_client: bool = False
+    reminder_time: Optional[List[str]] = None  # Valores: "1h", "3h", "1d", "3d", "7d"
+
+    @field_validator("reminder_time", mode="before")
+    @classmethod
+    def _validate_reminder_time(cls, v):
+        """PACOTE DH — Validar e deduplicar reminder_time."""
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("reminder_time deve ser uma lista")
+        invalid = [x for x in v if x not in REMINDER_TIME_OPTIONS]
+        if invalid:
+            raise ValueError(
+                f"reminder_time inválido: {invalid}. "
+                f"Valores válidos: {sorted(REMINDER_TIME_OPTIONS)}"
+            )
+        # Deduplicar preservando a ordem de inserção.
+        seen = set()
+        deduped = []
+        for x in v:
+            if x not in seen:
+                seen.add(x)
+                deduped.append(x)
+        return deduped
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _validate_type(cls, v):
+        """PACOTE DH — Normalizar type para lowercase (compatibilidade com inputs legacy)."""
+        if v is None:
+            return "deadline"
+        if isinstance(v, str):
+            v_lower = v.lower()
+            if v_lower not in ("deadline", "event"):
+                raise ValueError(
+                    f"type inválido: {v!r}. Valores válidos: 'deadline', 'event'"
+                )
+            return v_lower
+        return v
+
 
 class DeadlineUpdate(BaseModel):
     title: Optional[str] = None
@@ -23,6 +70,48 @@ class DeadlineUpdate(BaseModel):
     assigned_user_ids: Optional[List[str]] = None
     assigned_consultor_id: Optional[str] = None
     assigned_mediador_id: Optional[str] = None
+
+    # PACOTE DH — Agenda: campos opcionais para update parcial.
+    type: Optional[Literal["deadline", "event"]] = None
+    visible_to_client: Optional[bool] = None
+    reminder_time: Optional[List[str]] = None
+
+    @field_validator("reminder_time", mode="before")
+    @classmethod
+    def _validate_reminder_time(cls, v):
+        """PACOTE DH — Validar e deduplicar reminder_time no update."""
+        if v is None:
+            return None
+        if not isinstance(v, list):
+            raise ValueError("reminder_time deve ser uma lista")
+        invalid = [x for x in v if x not in REMINDER_TIME_OPTIONS]
+        if invalid:
+            raise ValueError(
+                f"reminder_time inválido: {invalid}. "
+                f"Valores válidos: {sorted(REMINDER_TIME_OPTIONS)}"
+            )
+        seen = set()
+        deduped = []
+        for x in v:
+            if x not in seen:
+                seen.add(x)
+                deduped.append(x)
+        return deduped
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _validate_type(cls, v):
+        """PACOTE DH — Normalizar type no update (None mantém-se None)."""
+        if v is None:
+            return None
+        if isinstance(v, str):
+            v_lower = v.lower()
+            if v_lower not in ("deadline", "event"):
+                raise ValueError(
+                    f"type inválido: {v!r}. Valores válidos: 'deadline', 'event'"
+                )
+            return v_lower
+        return v
 
 
 class DeadlineResponse(BaseModel):
@@ -42,3 +131,8 @@ class DeadlineResponse(BaseModel):
     status: Optional[str] = None
     assigned_user_id: Optional[str] = None
     assigned_user_name: Optional[str] = None
+
+    # PACOTE DH — Agenda: novos campos na resposta (defaults para retrocompatibilidade).
+    type: Literal["deadline", "event"] = "deadline"
+    visible_to_client: bool = False
+    reminder_time: Optional[List[str]] = None

@@ -48,6 +48,10 @@ NOTIFICATION_TYPE_MAP = {
     "urgent": "email_urgent_only",
     "daily_summary": "email_daily_summary",
     "weekly_report": "email_weekly_report",
+    # PACOTE DH — Agenda: novos tipos de notificação (deadline/event reminders).
+    "deadline_approaching": "email_deadline_reminder",
+    "deadline_missed": "email_urgent_only",
+    "event_reminder": "email_deadline_reminder",
 }
 
 

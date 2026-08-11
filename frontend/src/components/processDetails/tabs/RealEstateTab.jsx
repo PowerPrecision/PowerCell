@@ -14,6 +14,8 @@ import {
   SelectValue,
 } from "../../ui/select";
 import { AIBadge } from "../../ui/AIBadge";
+// PACOTE DH — Badge necessário para a lista de características (localização)
+import { Badge } from "../../ui/badge";
 import { Building2, Search, MapPin, FileSignature, Users } from "lucide-react";
 
 export default function RealEstateTab({
@@ -87,9 +89,11 @@ export default function RealEstateTab({
                         </Card>
 
                         {/* ====== Grupo A: Características do Imóvel ====== */}
+                        {/* PACOTE DH — tornou-se colapsável (progressive disclosure) */}
                         <Card className={`border-l-4 border-l-green-500 ${editingCardId !== 'realestate_caracteristicas' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Características do Imóvel" cardKey="realestate_caracteristicas" icon={Building2} canEdit={canEditRealEstate} />
+                            <CardHeaderWithEdit title="Características do Imóvel" cardKey="realestate_caracteristicas" icon={Building2} canEdit={canEditRealEstate} collapsible />
+                            {!shouldCardBeCollapsed('realestate_caracteristicas') && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Tipo de Imóvel</Label>
@@ -276,13 +280,17 @@ export default function RealEstateTab({
                                 />
                               </div>
                             </div>
+                            )}
                           </CardContent>
                         </Card>
 
                         {/* ====== Grupo B: Localização ====== */}
+                        {/* PACOTE DH — tornou-se colapsável (progressive disclosure) */}
                         <Card className={`border-l-4 border-l-blue-500 ${editingCardId !== 'realestate_localizacao' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Localização" cardKey="realestate_localizacao" icon={MapPin} canEdit={canEditRealEstate} />
+                            <CardHeaderWithEdit title="Localização" cardKey="realestate_localizacao" icon={MapPin} canEdit={canEditRealEstate} collapsible />
+                            {!shouldCardBeCollapsed('realestate_localizacao') && (
+                            <>
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Localização Pretendida</Label>
@@ -398,13 +406,17 @@ export default function RealEstateTab({
                                 rows={2}
                               />
                             </div>
+                            </>
+                            )}
                           </CardContent>
                         </Card>
 
                         {/* ====== Grupo C: Dados do CPCV e Prazos ====== */}
+                        {/* PACOTE DH — tornou-se colapsável (progressive disclosure) */}
                         <Card className={`border-l-4 border-l-amber-500 ${editingCardId !== 'realestate_cpcv' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Dados do CPCV e Prazos" cardKey="realestate_cpcv" icon={FileSignature} canEdit={canEditRealEstate} />
+                            <CardHeaderWithEdit title="Dados do CPCV e Prazos" cardKey="realestate_cpcv" icon={FileSignature} canEdit={canEditRealEstate} collapsible />
+                            {!shouldCardBeCollapsed('realestate_cpcv') && (
                             <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                               {/* Valores Financeiros do CPCV (Fase 3) */}
                               <div className="space-y-1">
@@ -513,13 +525,16 @@ export default function RealEstateTab({
                                 />
                               </div>
                             </div>
+                            )}
                           </CardContent>
                         </Card>
 
                         {/* Dados do Proprietário (existente) */}
+                        {/* PACOTE DH — tornou-se colapsável (progressive disclosure) */}
                         <Card className={`border-l-4 border-l-orange-500 ${editingCardId !== 'realestate_vendedor' ? 'read-only-card' : ''}`}>
                           <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Dados do Proprietário / Vendedor" cardKey="realestate_vendedor" icon={Users} canEdit={canEditRealEstate} />
+                            <CardHeaderWithEdit title="Dados do Proprietário / Vendedor" cardKey="realestate_vendedor" icon={Users} canEdit={canEditRealEstate} collapsible />
+                            {!shouldCardBeCollapsed('realestate_vendedor') && (
                             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                               <div className="space-y-1">
                                 <Label className="text-xs text-muted-foreground">Nome</Label>
@@ -553,6 +568,7 @@ export default function RealEstateTab({
                                 />
                               </div>
                             </div>
+                            )}
                           </CardContent>
                         </Card>
 

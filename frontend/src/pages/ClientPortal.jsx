@@ -54,6 +54,8 @@ import {
   Download,
   Calculator,
   ShieldCheck,
+  // PACOTE DH — ícones para a secção "Próximos Eventos"
+  Bell,
 } from 'lucide-react';
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
@@ -61,6 +63,8 @@ import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/
 // PACOTE DE — Lista de ficheiros anexados por categoria (append, nunca replace)
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+// PACOTE DH — EmptyState canónico para a secção "Próximos Eventos" vazia
+import { EmptyState } from '@/components/ui/EmptyState';
 import { formatDate, safeDate } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import ClientPortalLogin from './ClientPortalLogin';
@@ -2036,6 +2040,35 @@ export default function ClientPortal() {
   const [requestingVisit, setRequestingVisit] = useState(false);
   const [visitRequestResult, setVisitRequestResult] = useState(null);
 
+  // PACOTE DH — Próximos Eventos (Agenda do processo visível no Portal).
+  // Só eventos/prazos marcados com visible_to_client=true aparecem aqui.
+  const [events, setEvents] = useState([]);
+  const [eventsLoading, setEventsLoading] = useState(true);
+
+  const fetchEvents = useCallback(async () => {
+    const token = getPortalToken();
+    if (!token) return;
+    try {
+      const res = await fetch(`${BACKEND_URL}/portal/events`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      if (res.ok) {
+        const data = await res.json();
+        setEvents(Array.isArray(data.events) ? data.events : []);
+      }
+    } catch {
+      // silently fail — não bloquear o portal por causa dos eventos
+    } finally {
+      setEventsLoading(false);
+    }
+  }, []);
+
+  // CORREÇÃO: Só buscar eventos quando isVerified === true (igual às visitas).
+  useEffect(() => {
+    if (!isVerified) return;
+    fetchEvents();
+  }, [isVerified, fetchEvents]);
+
   const fetchMessages = useCallback(async () => {
     const token = getPortalToken();
     if (!token) return;
@@ -2301,6 +2334,64 @@ export default function ClientPortal() {
               <h3 className="text-base font-bold text-gray-800 mb-3">Etapas do Processo</h3>
               <WorkflowStepper stepper={stepper} />
             </div>
+
+            {/* PACOTE DH — Próximos Eventos (Agenda do processo visível no Portal).
+                Só se renderiza quando há eventos OU ainda estamos a carregar —
+                se estiver vazia, a secção fica oculta (evita ruído visual). */}
+            {(events.length > 0 || eventsLoading) && (
+              <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
+                <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
+                  <CalendarClock className="w-5 h-5 text-emerald-500" />
+                  Próximos Eventos
+                </h3>
+                {eventsLoading ? (
+                  <div className="flex items-center gap-2 text-sm text-gray-500">
+                    <Loader2 className="w-4 h-4 animate-spin" /> A carregar eventos...
+                  </div>
+                ) : events.length === 0 ? (
+                  <EmptyState
+                    icon={CalendarClock}
+                    title="Sem eventos"
+                    message="Não há eventos agendados para o seu processo."
+                  />
+                ) : (
+                  <div className="space-y-2">
+                    {events.map((ev) => (
+                      <div
+                        key={ev.id}
+                        className="flex items-center gap-3 p-3 rounded-xl border border-gray-100"
+                      >
+                        <Badge variant={ev.type === 'event' ? 'secondary' : 'outline'}>
+                          {ev.type === 'event' ? 'Evento' : 'Prazo'}
+                        </Badge>
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-semibold text-gray-800 truncate">
+                            {ev.title}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {ev.due_date
+                              ? new Date(ev.due_date).toLocaleDateString('pt-PT', {
+                                  day: '2-digit',
+                                  month: 'long',
+                                  year: 'numeric',
+                                })
+                              : '—'}
+                          </p>
+                        </div>
+                        {/* PACOTE DH — ícones indicadores (lembrete) */}
+                        {ev.reminder_time && (
+                          <Bell
+                            className="w-4 h-4 text-gray-400 shrink-0"
+                            aria-label="Tem lembrete configurado"
+                            title="Tem lembrete configurado"
+                          />
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
           </div>
 
           {/* ═══ LEFT COLUMN: Tabs — Documentos / O Meu Perfil / As Minhas Visitas ═══ */}

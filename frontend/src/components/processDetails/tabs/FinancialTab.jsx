@@ -133,9 +133,11 @@ export default function FinancialTab({
                       </Card>
                       
                       {/* Situação Financeira */}
+                      {/* PACOTE DH — tornou-se colapsável (progressive disclosure) */}
                       <Card className={`border-l-4 border-l-blue-500 ${editingCardId !== 'financial_situacao' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Situação Financeira" cardKey="financial_situacao" icon={CreditCard} canEdit={canEditFinancial} />
+                          <CardHeaderWithEdit title="Situação Financeira" cardKey="financial_situacao" icon={CreditCard} canEdit={canEditFinancial} collapsible />
+                          {!shouldCardBeCollapsed('financial_situacao') && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Contrato Efetivo?</Label>
@@ -232,6 +234,7 @@ export default function FinancialTab({
                               </Select>
                             </div>
                           </div>
+                          )}
                         </CardContent>
                       </Card>
 
@@ -677,9 +680,11 @@ export default function FinancialTab({
                       )}
                       
                       {/* Emprego */}
+                      {/* PACOTE DH — tornou-se colapsável (progressive disclosure) */}
                       <Card className={`border-l-4 border-l-purple-500 ${editingCardId !== 'financial_profissional' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Situação Profissional" cardKey="financial_profissional" icon={User} canEdit={canEditFinancial} />
+                          <CardHeaderWithEdit title="Situação Profissional" cardKey="financial_profissional" icon={User} canEdit={canEditFinancial} collapsible />
+                          {!shouldCardBeCollapsed('financial_profissional') && (
                           <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Tipo de Emprego</Label>
@@ -777,6 +782,7 @@ export default function FinancialTab({
                               />
                             </div>
                           </div>
+                          )}
                         </CardContent>
                       </Card>
                     </div>

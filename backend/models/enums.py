@@ -152,6 +152,8 @@ class NotificationType(str, Enum):
     # Prazos
     DEADLINE_APPROACHING = "deadline_approaching"
     DEADLINE_MISSED = "deadline_missed"
+    # PACOTE DH — Agenda: lembrete de evento (visível no portal).
+    EVENT_REMINDER = "event_reminder"
     
     # Emails
     EMAIL_RECEIVED = "email_received"
