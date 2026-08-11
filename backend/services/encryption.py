@@ -45,10 +45,13 @@ except ImportError:
 
 
 # Campos sensíveis por secção
+# PACOTE DD — adicionado `iban` e `conta_bancaria` a financial_data (PII bancário
+# RGPD). Mantém consistência com encrypt_sensitive_data/decrypt_sensitive_data
+# em services/process_service.py (caminho live usado pelas rotas).
 SENSITIVE_FIELDS = {
     "personal_data": ["nif", "documento_id", "morada_fiscal", "phone"],
     "titular2_data": ["nif", "documento_id", "phone"],
-    "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
+    "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif", "iban", "conta_bancaria"],
     "vendedor": ["nif", "documento_id", "phone"],
     "intermediario": ["nif", "phone"],
     "co_buyers": ["nif", "documento_id", "phone"],

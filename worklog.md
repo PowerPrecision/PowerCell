@@ -3222,3 +3222,39 @@ Stage Summary:
 
 Files:
 - `AGENTS.md`, `CHANGELOG.md`, `worklog.md`
+
+
+---
+Task ID: Pacote DD (Limpeza de UI, Desencriptação de Dados e Preparação de IA)
+Agent: Main Agent (Z.ai Code Assistant) + 2 subagentes (Backend + Frontend)
+Task: 6 alterações — bug encriptação backend, reposicionamento calculadoras, limpeza UX ProcessDetails, closeButton toast, pipeline IA data_validade, atualização docs.
+
+Work Log:
+- Lido /home/z/my-project/worklog.md (Pacote DC pushed, commit c404a08). Re-clonado /home/z/powercell (base 2a9f7942 — houve merges recentes PR #603/#604 com refatoração UX).
+- Lido FRONTEND_GUIDELINES.md (Progressive Disclosure, tokens Shadcn, sonner, regra ESLint cores cruas) e ARCHITECTURE.md.
+- Subagente DD-1-Explore (Explore): identificou 4 endpoints sem decrypt (search_api_global, process_clients_nm, client_process_ops, restore_api_process) + security gap em document_ai_analyze (apply-suggestions sem encrypt) + IBAN não encriptado.
+- Subagente DD-Backend (general-purpose): implementou 8 ficheiros backend — decrypt em 4 endpoints, _encrypt_mongo_update_paths() para apply-suggestions, IBAN em financial_data, _extract_validade_from_ocr() fallback para expiry_date. py_compile + flake8 0 erros.
+- Subagente DD-Frontend (general-purpose): implementou 7 ficheiros frontend — Sheet global MortgageSimulator no TopNav, ScrollArea tarefas, AutoDSTIBadge null quando !calculable, etiquetas como Badges no PageHeader, co_buyers movidos para SecondTitularCard, closeButton nos 3 toasts. bun build 0 erros.
+- Validação final: py_compile ✓ (8 backend), flake8 0 erros, bun build ✓ (7 frontend).
+- Documentação: FRONTEND_GUIDELINES.md secção 8 (Padrões consolidados Pacote DD), ARCHITECTURE.md secção Pipeline de IA (extração + validade + encriptação). CHANGELOG atualizado.
+
+Stage Summary:
+- 17 ficheiros modificados (8 backend + 7 frontend + 2 docs):
+  - backend/services/search_api_global.py (decrypt_client_data)
+  - backend/services/process_clients_nm.py (decrypt_client_data)
+  - backend/services/client_process_ops.py (decrypt_sensitive_data)
+  - backend/services/restore_api_process.py (decrypt_sensitive_data)
+  - backend/services/document_ai_analyze.py (_encrypt_mongo_update_paths)
+  - backend/services/process_service.py (iban + conta_bancaria em financial_data)
+  - backend/services/encryption.py (iban + conta_bancaria em SENSITIVE_FIELDS)
+  - backend/services/document_auto_categorize.py (_extract_validade_from_ocr fallback)
+  - frontend/src/App.js (rota /calculadoras comentada)
+  - frontend/src/layouts/DashboardLayout.js (sidebar link removido + Sheet MortgageSimulator no TopNav)
+  - frontend/src/pages/ProcessDetails.js (ScrollArea tarefas + etiquetas Badges no PageHeader + cartão etiquetas removido)
+  - frontend/src/components/AutoDSTIBadge.js (compact null quando !is_calculable)
+  - frontend/src/components/processDetails/tabs/PersonalInfoTab.jsx (cartão co_buyers removido)
+  - frontend/src/components/SecondTitularCard.jsx (CoBuyersSection movida para dentro + tokens Shadcn)
+  - frontend/src/contexts/TasksContext.js (closeButton: true nos 3 toasts)
+  - FRONTEND_GUIDELINES.md (secção 8)
+  - ARCHITECTURE.md (secção Pipeline de IA)
+- Resultado: (1) NIF/telefone/CC/IBAN desencriptados em todos os endpoints; apply-suggestions encripta PII; IBAN encriptado em repouso. (2) Calculadora acessível via ícone no TopNav (Sheet global), sem rota/sidebar. (3) Tarefas com scroll interno; AutoDSTIBadge oculto quando N/A; etiquetas como badges no header; 2º titular consolidado num cartão. (4) Toasts sticky com botão fechar. (5) IA extrai data_validade via fallback OCR→categorização para dashboard documentos a expirar. (6) Docs atualizadas com padrões consolidados.

@@ -86,7 +86,8 @@ const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
 const TemplatesPage = React.lazy(() => import("./pages/TemplatesPage"));
 const FilesExplorerPage = React.lazy(() => import("./pages/FilesExplorerPage"));
 const BranchPerformancePage = React.lazy(() => import("./pages/BranchPerformancePage"));
-const CalculatorsPage = React.lazy(() => import("./pages/CalculatorsPage"));
+// PACOTE DD — removido (Calculadoras passou a Sheet global no DashboardLayout)
+// const CalculatorsPage = React.lazy(() => import("./pages/CalculatorsPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -763,7 +764,7 @@ function App() {
             }
           />
 
-          {/* Calculadoras - Staff (simulações financeiras) */}
+          {/* PACOTE DD — removido (Calculadoras passou a Sheet global no DashboardLayout)
           <Route
             path="/calculadoras"
             element={
@@ -774,6 +775,7 @@ function App() {
               </ProtectedRoute>
             }
           />
+          */}
 
           {/* RGPD Admin - Redirecionar para página dedicada */}
           <Route

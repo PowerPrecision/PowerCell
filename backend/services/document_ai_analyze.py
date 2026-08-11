@@ -748,6 +748,63 @@ def map_ai_suggestions_to_mongo_update(
     return update_data
 
 
+def _encrypt_mongo_update_paths(mongo_update: dict) -> dict:
+    """Encripta campos sensíveis num dict de dot-paths Mongo (PACOTE DD).
+
+    O ``mongo_update`` produzido por ``map_ai_suggestions_to_mongo_update`` é
+    um dict flat com chaves como ``personal_data.nif`` ou
+    ``financial_data.iban``. Antes de ser aplicado via
+    ``db.processes.update_one({"$set": mongo_update})``, este helper converte
+    para estrutura aninhada, aplica ``encrypt_sensitive_data`` (que encripta
+    as secções sensíveis e gera blind indexes de pesquisa) e volta a achatá-lo
+    para dot-paths.
+
+    Campos não sensíveis (ex: ``updated_at``, ``personal_data.nome``,
+    ``financial_data.monthly_income``) são preservados inalterados.
+
+    Args:
+        mongo_update: Dict flat com dot-paths Mongo (chaves como
+            ``personal_data.nif``).
+
+    Returns:
+        Dict flat com dot-paths Mongo, com campos sensíveis encriptados
+        (prefixo ``ENC:``) e blind indexes adicionados (ex:
+        ``personal_data.nif_hash``).
+    """
+    if not mongo_update:
+        return mongo_update
+
+    from services.process_service import encrypt_sensitive_data
+
+    # 1. Converter dot-paths para estrutura aninhada
+    nested: dict = {}
+    for path, value in mongo_update.items():
+        parts = path.split(".")
+        current = nested
+        for part in parts[:-1]:
+            if not isinstance(current.get(part), dict):
+                current[part] = {}
+            current = current[part]
+        current[parts[-1]] = value
+
+    # 2. Aplicar encriptação (preserva campos não sensíveis, encripta PII,
+    #    adiciona blind indexes para pesquisa)
+    encrypted_nested = encrypt_sensitive_data(nested)
+
+    # 3. Achatar de volta para dot-paths Mongo
+    def _flatten(d: dict, prefix: str = "") -> dict:
+        result: dict = {}
+        for k, v in d.items():
+            key = f"{prefix}.{k}" if prefix else k
+            if isinstance(v, dict):
+                result.update(_flatten(v, key))
+            else:
+                result[key] = v
+        return result
+
+    return _flatten(encrypted_nested)
+
+
 async def run_apply_ai_suggestions(
     process_id: str,
     suggestions: dict | None,
@@ -793,6 +850,11 @@ async def run_apply_ai_suggestions(
     mongo_update = dict(update_data)
     mongo_update["updated_at"] = datetime.now(timezone.utc).isoformat()
     mongo_update["updated_by"] = user.get("id")
+
+    # PACOTE DD — encriptar campos sensíveis (NIF, documento_id, IBAN, senhas)
+    # antes de persistir via $set. Sem isto, a IA aplicada via "apply-suggestions"
+    # gravava PII em plain text na BD (vulnerabilidade RGPD).
+    mongo_update = _encrypt_mongo_update_paths(mongo_update)
 
     await db.processes.update_one({"id": process_id}, {"$set": mongo_update})
     logger.info(

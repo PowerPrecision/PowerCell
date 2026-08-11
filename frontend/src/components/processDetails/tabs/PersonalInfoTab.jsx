@@ -19,7 +19,8 @@ import { User, Phone, CreditCard, Users, MapPin } from "lucide-react";
 import { formatDateForInput } from "../../../pages/processDetails/processFormCleaners";
 import { validateNIF } from "../../../utils/validateNIF";
 import { safeString } from "../../../utils/safeString";
-import { safeNumber } from "../../dashboard/DashboardShared";
+// PACOTE DD — safeNumber deixou de ser usado após mover co_buyers/co_applicants para SecondTitularCard
+// import { safeNumber } from "../../dashboard/DashboardShared";
 
 export default function PersonalInfoTab({
   personalData, setPersonalData, process, setProcess, clientId, nifError, setNifError, editingCardId, canEditPersonal, CardHeaderWithEdit, getConfidenceIndicator, getFieldMetaFor, fetchData, financialData,
@@ -351,116 +352,8 @@ export default function PersonalInfoTab({
                       </Card>
                       
                       {/* 2º Titular — Componente com pesquisa e ficha */}
-                      <SecondTitularCard process={process} onUpdate={fetchData} />
-                      
-                      {/* 2º Titular / Fiador */}
-                      {(process?.co_buyers?.length > 0 || process?.co_applicants?.length > 0) && (
-                        <Card className="border-l-4 border-l-indigo-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <Users className="h-4 w-4 text-indigo-500" />
-                              2º Titular / Fiador
-                              <Badge variant="secondary" className="ml-2">
-                                {(process?.co_buyers?.length || 0) + (process?.co_applicants?.length || 0)} pessoa(s)
-                              </Badge>
-                            </h4>
-                            <div className="space-y-3">
-                              {/* Co-Buyers (do CPCV) */}
-                              {Array.isArray(process?.co_buyers) && process.co_buyers.map((buyer, index) => (
-                                <div key={`buyer-${index}`} className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Badge variant="outline" className="text-xs">
-                                      Comprador {index + 1}
-                                    </Badge>
-                                    {buyer.estado_civil && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {safeString(buyer.estado_civil)}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                    {buyer.nome && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Nome:</span>
-                                        <p className="font-medium">{safeString(buyer.nome)}</p>
-                                      </div>
-                                    )}
-                                    {buyer.nif && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">NIF:</span>
-                                        <p className="font-medium">{safeString(buyer.nif)}</p>
-                                      </div>
-                                    )}
-                                    {buyer.email && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Email:</span>
-                                        <p className="font-medium">{safeString(buyer.email)}</p>
-                                      </div>
-                                    )}
-                                    {buyer.telefone && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Telefone:</span>
-                                        <p className="font-medium">{safeString(buyer.telefone)}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                              
-                              {/* Co-Applicants (do IRS/Simulação) */}
-                              {Array.isArray(process?.co_applicants) && process.co_applicants.map((applicant, index) => (
-                                <div key={`applicant-${index}`} className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Badge variant="outline" className="text-xs">
-                                      {index === 0 ? "Titular" : "Cônjuge/Proponente " + (index + 1)}
-                                    </Badge>
-                                    {applicant.rendimento_mensal && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {safeNumber(applicant.rendimento_mensal).toLocaleString('pt-PT')}€/mês
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                    {applicant.nome && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Nome:</span>
-                                        <p className="font-medium">{safeString(applicant.nome)}</p>
-                                      </div>
-                                    )}
-                                    {applicant.nif && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">NIF:</span>
-                                        <p className="font-medium">{safeString(applicant.nif)}</p>
-                                      </div>
-                                    )}
-                                    {applicant.data_nascimento && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Data Nascimento:</span>
-                                        <p className="font-medium">{safeString(applicant.data_nascimento)}</p>
-                                      </div>
-                                    )}
-                                    {applicant.entidade_patronal && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Empresa:</span>
-                                        <p className="font-medium">{safeString(applicant.entidade_patronal)}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                              
-                              {/* Rendimento Agregado */}
-                              {financialData?.rendimento_agregado && (
-                                <div className="mt-3 p-2 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
-                                  <p className="text-sm font-medium text-green-700 dark:text-green-400">
-                                    Rendimento Agregado: {safeNumber(financialData.rendimento_agregado).toLocaleString('pt-PT')}€/mês
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )}
+                      {/* PACOTE DD — co_buyers/co_applicants movidos para SecondTitularCard (cartão consolidado) */}
+                      <SecondTitularCard process={process} onUpdate={fetchData} financialData={financialData} />
                     </div>
     </>
   );

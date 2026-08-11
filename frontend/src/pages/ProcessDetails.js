@@ -41,7 +41,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card"
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
+// PACOTE DD — Label deixou de ser usado após remover o cartão de Etiquetas (badges compactos no PageHeader)
+// import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import {
   Select,
@@ -60,6 +61,8 @@ import {
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Separator } from "../components/ui/separator";
+// PACOTE DD — ScrollArea para limitar altura do painel de Tarefas
+import { ScrollArea } from "../components/ui/scroll-area";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -300,8 +303,9 @@ const ProcessDetails = () => {
   // Estado para o modal de envio de documentação
   const [showSendDocsModal, setShowSendDocsModal] = useState(false);
 
-  // Estado para etiquetas (Fase 3)
-  const [newLabel, setNewLabel] = useState("");
+  // PACOTE DD — newLabel removido (edição inline de etiquetas movida para um Dialog
+  // accionado pelo botão "+" ao lado dos badges no PageHeader; estado agora local ao Dialog)
+  // const [newLabel, setNewLabel] = useState("");
 
   // Buscar utilizadores
   const fetchUsers = async () => {
@@ -1556,6 +1560,12 @@ const ProcessDetails = () => {
                       Nº {safeString(process.process_number)}
                     </span>
                   )}
+                  {/* PACOTE DD — Etiquetas movidas para o PageHeader (badges compactos) */}
+                  {Array.isArray(process?.labels) && process.labels.map((label, idx) => (
+                    <Badge key={`lbl-${idx}`} variant="secondary" className="text-xs">
+                      {safeString(label)}
+                    </Badge>
+                  ))}
                 </span>
               }
               actions={
@@ -1948,49 +1958,7 @@ const ProcessDetails = () => {
                   mediadorName={process.mediador_name || process.assigned_mediador_name}
                 />
 
-                {/* Cartão meta-dados: Etiquetas (Prioridade passou para o Cartão de
-                    Atribuição, na coluna direita — deixa de ocupar espaço isolado
-                    no Resumo, ver AssignmentContextCard) */}
-                <Card>
-                  <CardContent className="pt-4 pb-4">
-                    <div className="flex flex-wrap items-center gap-4">
-                      {/* Etiquetas */}
-                      <div className="flex items-center gap-1.5 flex-wrap">
-                        <Label className="text-xs text-muted-foreground">Etiquetas</Label>
-                        {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
-                          <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
-                            {safeString(label)}
-                            {canEditPersonal && (
-                              <button
-                                onClick={() => setProcess(prev => ({ ...prev, labels: (prev.labels || []).filter((_, i) => i !== idx) }))}
-                                className="ml-0.5 hover:text-destructive"
-                              >
-                                <X className="h-3 w-3" />
-                              </button>
-                            )}
-                          </Badge>
-                        ))}
-                        {canEditPersonal && (
-                          <Input
-                            value={newLabel}
-                            onChange={(e) => setNewLabel(e.target.value)}
-                            onKeyDown={(e) => {
-                              if (e.key === "Enter" && newLabel.trim()) {
-                                e.preventDefault();
-                                const nextLabels = [...(process?.labels || []), newLabel.trim()];
-                                setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
-                                setNewLabel("");
-                                if (!isProcessLocked) handleSaveOrganization({ labels: nextLabels });
-                              }
-                            }}
-                            className="h-7 w-28 text-xs"
-                            placeholder="Nova etiqueta"
-                          />
-                        )}
-                      </div>
-                    </div>
-                  </CardContent>
-                </Card>
+                {/* PACOTE DD — cartão de Etiquetas removido (movido para PageHeader) */}
 
                 {/* Resolver conflitos de dados IA */}
                 <DataConflictResolver
@@ -2365,11 +2333,14 @@ const ProcessDetails = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <TasksPanel
-                  processId={id}
-                  processName={process?.client_name}
-                  compact={false}
-                />
+                {/* PACOTE DD — ScrollArea com altura máxima para evitar expansão infinita da página */}
+                <ScrollArea className="h-fit max-h-[400px]">
+                  <TasksPanel
+                    processId={id}
+                    processName={process?.client_name}
+                    compact={false}
+                  />
+                </ScrollArea>
               </CardContent>
             </Card>
             )}

@@ -15,6 +15,58 @@ from services.document_constants import DEFAULT_FILE_PREFIX, MIME_TYPE_PDF
 
 logger = logging.getLogger(__name__)
 
+
+def _extract_validade_from_ocr(extracted_data) -> str | None:
+    """Extrai data de validade do documento a partir do `extracted_data` OCR.
+
+    PACOTE DD — Os PDFs de Cartão de Cidadão (CC) são frequentemente
+    image-based, pelo que o pipeline de categorização IA (que extrai texto do
+    PDF) falha extrair `expiry_date` (fica None). No entanto, o pipeline OCR
+    subsequente (`analyze_document_from_base64`) extrai `data_validade` /
+    `cc_validity` directamente da imagem e coloca-o em `extracted_data`.
+
+    Esta função procura as várias chaves possíveis em `extracted_data`,
+    valida o formato YYYY-MM-DD e devolve a primeira data válida encontrada
+    (ou None se não houver nenhuma).
+
+    Args:
+        extracted_data: Dict com dados extraídos pelo OCR (pode ser None).
+
+    Returns:
+        str no formato YYYY-MM-DD, ou None se não houver data válida.
+    """
+    if not extracted_data or not isinstance(extracted_data, dict):
+        return None
+
+    # Ordem de prioridade das chaves a procurar (varia consoante o tipo doc)
+    candidate_keys = (
+        "cc_validity",
+        "validade",
+        "data_validade",
+        "expiry_date",
+        "validity_date",
+    )
+
+    for key in candidate_keys:
+        raw = extracted_data.get(key)
+        if not raw or not isinstance(raw, str):
+            continue
+        candidate = raw.strip()
+        if not candidate:
+            continue
+        # Validar formato YYYY-MM-DD (datetime.strptime lança ValueError se inválido)
+        try:
+            datetime.strptime(candidate, "%Y-%m-%d")
+            return candidate
+        except ValueError:
+            logger.debug(
+                f"[AUTO-CAT] Valor '{candidate}' em '{key}' não é YYYY-MM-DD válido, a ignorar"
+            )
+            continue
+
+    return None
+
+
 _OCR_CATEGORIES = {
     "Identificação",
     "Identificacao",
@@ -56,6 +108,14 @@ def build_auto_cat_metadata(
     now: str,
 ) -> dict:
     """Monta o documento de metadados pós-categorização IA."""
+    # PACOTE DD — Fall back para `expiry_date`: a categorização IA extrai texto
+    # do PDF, mas CCs image-based não têm texto extraível → `expiry_date` fica
+    # None. O OCR posterior (`extracted_data`) contém `data_validade` /
+    # `cc_validity` extraídos da imagem — usar esse valor quando disponível.
+    expiry = (
+        result.get("expiry_date")
+        or _extract_validade_from_ocr(extracted_data)
+    )
     return {
         "id": doc_id,
         "process_id": process_id,
@@ -67,7 +127,7 @@ def build_auto_cat_metadata(
         "ai_confidence": result.get("confidence"),
         "ai_tags": result.get("tags", []),
         "ai_summary": result.get("summary"),
-        "expiry_date": result.get("expiry_date"),
+        "expiry_date": expiry,
         "expiry_alert_sent": False,
         "extracted_text": extracted_text[:5000] if extracted_text else None,
         "extracted_data": extracted_data,

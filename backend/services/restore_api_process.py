@@ -85,6 +85,12 @@ async def run_restore_process(process_id: str, user: dict):
 
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
 
+    # PACOTE DD — desencriptar campos sensíveis (NIF, documento_id, telefone,
+    # senhas, IBAN) antes de devolver ao frontend para evitar hashes "ENC:".
+    # Import inline para evitar dependência circular com restore_api_helpers.
+    from services.process_service import decrypt_sensitive_data
+    updated = decrypt_sensitive_data(updated)
+
     return {
         "success": True,
         "message": "Processo restaurado com sucesso",

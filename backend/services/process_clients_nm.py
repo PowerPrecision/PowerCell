@@ -308,6 +308,8 @@ async def run_get_process_clients(process_id: str) -> dict[str, Any]:
     from fastapi import HTTPException
 
     from database import db
+    # PACOTE DD — desencriptar clientes (NIF/telefone) antes de devolver à UI
+    from services.encryption import decrypt_client_data
 
     process = await db.processes.find_one({"id": process_id})
     if not process:
@@ -321,4 +323,7 @@ async def run_get_process_clients(process_id: str) -> dict[str, Any]:
         {"id": {"$in": client_ids}},
         {"_id": 0},
     ).to_list(length=10)
+    # PACOTE DD — desencriptar campos sensíveis (NIF/telefone/documento_id)
+    # para o frontend não receber hashes "ENC:".
+    clients = [decrypt_client_data(c) for c in clients]
     return build_process_clients_payload(process=process, clients=clients)

@@ -144,6 +144,7 @@ export function TasksProvider({ children }) {
       id,
       description: task.progress_message || "Em curso…",
       duration: Infinity,
+      closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
     });
   }, []);
 
@@ -159,6 +160,7 @@ export function TasksProvider({ children }) {
         id,
         description: task.description || "A tarefa foi concluída com sucesso.",
         duration: Infinity,
+        closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
         action: task.result_url
           ? {
               label: "Ver resultado",
@@ -171,6 +173,7 @@ export function TasksProvider({ children }) {
         id,
         description: task.error_message || "Ocorreu um erro durante a execução.",
         duration: Infinity,
+        closeButton: true, // PACOTE DD — utilizador pode fechar manualmente
       });
     }
   }, []);

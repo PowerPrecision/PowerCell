@@ -307,7 +307,13 @@ async def run_get_client_processes(
         query,
         {"_id": 0}
     ).sort("created_at", -1).to_list(length=50)
-    
+
+    # PACOTE DD — desencriptar campos sensíveis (NIF, documento_id, telefone,
+    # senhas, IBAN) de cada processo antes de devolver ao frontend para evitar
+    # hashes "ENC:" na UI. Import inline para evitar dependência circular.
+    from services.process_service import decrypt_sensitive_data
+    processes = [decrypt_sensitive_data(p) for p in processes]
+
     # Adicionar client_role a cada processo
     for p in processes:
         if p.get("second_client_id") == client_id and p.get("client_id") != client_id:

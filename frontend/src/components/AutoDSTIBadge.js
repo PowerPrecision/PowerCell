@@ -111,6 +111,8 @@ const AutoDSTIBadge = ({ processId, token, compact = false, showDetails = true }
 
   // Compacto: apenas badge
   if (compact) {
+    // PACOTE DD — ocultar badge quando DSTI não é calculável (em vez de mostrar "N/A")
+    if (!dsti.is_calculable) return null;
     return (
       <TooltipProvider>
         <Tooltip>
@@ -131,7 +133,7 @@ const AutoDSTIBadge = ({ processId, token, compact = false, showDetails = true }
                   DSTI: {dsti.dsti_pct}% | Esforço Global: {dsti.effort_rate_pct}%
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Créditos: {dsti.components.prestacao_creditos_mensal}€ / 
+                  Créditos: {dsti.components.prestacao_creditos_mensal}€ /
                   Rend. Bruto: {dsti.components.rendimento_bruto_total}€
                 </p>
               </>

@@ -13,6 +13,7 @@ from services.encryption import (
     generate_nif_hash,
     generate_email_hash,
     generate_telefone_hash,
+    decrypt_client_data,  # PACOTE DD — desencriptar clientes na pesquisa global
 )
 from utils.input_sanitization import sanitize_string
 from utils.search_filters import (
@@ -169,10 +170,14 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
         ).limit(limit).to_list(limit)
 
         # Formatar resultados dos clientes
+        # PACOTE DD — desencriptar campos sensíveis (NIF, telefone, documento_id)
+        # antes de devolver ao frontend para evitar hashes "ENC:" na UI.
         formatted_clients = []
         for client in clients:
+            decrypted_client = decrypt_client_data(client)
+
             # Se tem processos, usar o primeiro processo válido para navegação
-            process_ids = client.get("process_ids", [])
+            process_ids = decrypted_client.get("process_ids", [])
             first_process_id = None
 
             # Verificar se o primeiro processo existe realmente
@@ -186,14 +191,14 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
                     first_process_id = process_ids[0]
 
             formatted_clients.append({
-                "id": client.get("id"),
-                "client_name": client.get("nome"),
-                "personal_data": client.get("dados_pessoais", {}),
-                "contacto": client.get("contacto", {}),
+                "id": decrypted_client.get("id"),
+                "client_name": decrypted_client.get("nome"),
+                "personal_data": decrypted_client.get("dados_pessoais", {}),
+                "contacto": decrypted_client.get("contacto", {}),
                 "has_process": bool(first_process_id),
                 "process_count": len(process_ids),
                 "first_process_id": first_process_id,
-                "status": client.get("fase_principal", {}).get("status") or client.get("status"),
+                "status": decrypted_client.get("fase_principal", {}).get("status") or decrypted_client.get("status"),
             })
 
         results["clients"] = formatted_clients

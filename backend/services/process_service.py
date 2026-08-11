@@ -698,17 +698,21 @@ def encrypt_sensitive_data(data: dict) -> dict:
     sections = {
         "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
         "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha"],
-        "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
+        # PACOTE DD — IBAN e conta_bancaria passam a ser encriptados em repouso
+        # (identificador bancário é PII RGPD). Dados plain-text existentes
+        # continuam acessíveis: decrypt_sensitive_data passa-through valores
+        # sem prefixo "ENC:" (ver decrypt_field).
+        "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif", "iban", "conta_bancaria"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
         "intermediario": ["nif", "phone", "telefone"],
     }
-    
+
     for section, fields in sections.items():
         if section in result and isinstance(result[section], dict):
             for field in fields:
                 if field in result[section] and result[section][field]:
                     result[section][field] = encryption_service.encrypt(str(result[section][field]))
-    
+
     # Encriptar listas de 2º Titular / Fiador
     for list_field in ["co_buyers", "co_applicants"]:
         if list_field in result and isinstance(result[list_field], list):
@@ -718,7 +722,7 @@ def encrypt_sensitive_data(data: dict) -> dict:
                     for field in list_fields:
                         if field in item and item[field]:
                             result[list_field][i][field] = encryption_service.encrypt(str(item[field]))
-    
+
     return result
 
 
@@ -763,7 +767,10 @@ def decrypt_sensitive_data(data: dict) -> dict:
     sections = {
         "personal_data": ["nif", "documento_id", "morada_fiscal", "phone", "telefone"],
         "titular2_data": ["nif", "documento_id", "phone", "telefone", "portal_financas_utilizador", "portal_financas_senha", "seg_social_utilizador", "seg_social_senha"],
-        "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif"],
+        # PACOTE DD — IBAN e conta_bancaria passam a ser desencriptados em leitura
+        # (simétrico a encrypt_sensitive_data). Valores plain-text legacy são
+        # retornados inalterados (decrypt_field retorna valor se não começar por "ENC:").
+        "financial_data": ["portal_financas_senha", "seg_social_senha", "employer_nif", "iban", "conta_bancaria"],
         "vendedor": ["nif", "documento_id", "phone", "telefone"],
         "intermediario": ["nif", "phone", "telefone"],
     }
