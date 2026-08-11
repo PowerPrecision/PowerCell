@@ -1180,3 +1180,73 @@ Quando o utilizador aplica sugestões de IA (`run_apply_ai_suggestions` em `docu
 
 `financial_data.iban` e `financial_data.conta_bancaria` foram adicionados à lista de campos sensíveis em `encrypt_sensitive_data` / `decrypt_sensitive_data` (`process_service.py`) e em `SENSITIVE_FIELDS` (`encryption.py`). IBANs existentes em plain text passam through `decrypt_sensitive_data` sem alteração (não há migração); novos writes são encriptados.
 
+
+---
+
+## Portal do Cliente — Upload Múltiplo com Append (Pacote DE)
+
+O Portal do Cliente permite uploads faseados por categoria. Cada categoria (Recibos de Vencimento, Extratos Bancários, IRS, Identificação, etc.) mantém um array `attached_files` que cresce com cada upload — **nunca** se substitui ficheiros anteriores.
+
+```mermaid
+flowchart TD
+    Client["Cliente no Portal"] -->|"1. POST /portal/upload-url"| Backend1["run_generate_portal_upload_url<br/>(presigned S3 PUT URL)"]
+    Backend1 -->|"upload_url + file_key"| Client
+    Client -->|"2. PUT direto para S3"| S3["AWS S3<br/>(pasta Index)"]
+    Client -->|"3. POST /portal/confirm-upload<br/>{file_key, category, document_id}"| Backend2["run_confirm_portal_upload"]
+    Backend2 -->|"verifica S3 file_exists"| S3
+    Backend2 -->|"$set: status=RECEIVED<br/>$push: attached_files[+file_entry]"| DB[(MongoDB<br/>documents)]
+    DB -->|"attached_files[]"| PortalStatus["GET /portal/status<br/>→ frontend mostra lista"]
+```
+
+### Lógica de Append (`attached_files`)
+
+Cada documento pedido (REQUESTED) tem um array `attached_files` que acumula todos os ficheiros carregados pelo cliente para essa categoria:
+
+```python
+# services/portal_upload_ops.py — run_confirm_portal_upload
+file_entry = {
+    "file_id": str(uuid.uuid4()),
+    "filename": original_filename,
+    "s3_path": file_key,
+    "file_size": file_size,
+    "content_type": content_type,
+    "uploaded_at": now,
+    "uploaded_by": "portal_client",
+}
+await db.documents.update_one(match_q, {
+    "$set": {"status": "RECEIVED", ...},  # status + top-level fields (backward compat)
+    "$push": {"attached_files": file_entry},  # APPEND — nunca replace
+})
+```
+
+Os campos top-level (`filename`, `s3_path`, `file_size`) são atualizados para refletir o upload mais recente (backward compat com serializers que leem estes campos), mas o array `attached_files` preserva o histórico completo de todos os uploads. O mesmo padrão aplica-se a `fulfill_portal_requests_on_staff_upload` (`document_portal_fulfill.py`) para uploads do staff.
+
+### Presigned URLs (não List[UploadFile])
+
+O upload usa o padrão presigned S3: o backend gera uma URL de upload assinada (5 min de validade), o cliente faz PUT direto para S3, depois confirma com o backend. O backend **nunca** recebe bytes de ficheiros — isto evita gargalos de bandwidth e limites de body do FastAPI. **Não** usar `List[UploadFile]` (regressão arquitetural).
+
+---
+
+## Documentos Legais Gerados — RGPD PDF Pré-preenchido (Pacote DE)
+
+Documentos legais gerados pelo sistema (RGPD, Minuta, CPCV) são sempre pré-preenchidos no backend com os dados reais do cliente/processo. O frontend não pré-preenche — apenas descarrega o PDF pronto.
+
+### Endpoint `GET /api/rgpd/pdf/{process_id}`
+
+Gera um PDF do RGPD com o template ativo, substituindo placeholders (`{{NOME}}`, `{{CONTRIBUINTE}}`, `{{MORADA}}`, etc.) pelos dados desencriptados do cliente:
+
+```mermaid
+flowchart LR
+    Endpoint["GET /rgpd/pdf/{process_id}"] --> Service["services/rgpd_pdf.py<br/>run_generate_prefilled_rgpd_pdf"]
+    Service -->|"fetch + decrypt_sensitive_data"| Process["process.personal_data<br/>{nif, morada_fiscal, documento_id}"]
+    Service -->|"build consent_data"| Consent["{nome, contribuinte,<br/>morada, ...}"]
+    Consent --> Render["_get_rendered_rgpd_text<br/>(template + placeholders)"]
+    Render --> PDF["_generate_rgpd_pdf_bytes<br/>(reportlab Canvas A4)"]
+    PDF --> Response["StreamingResponse<br/>application/pdf"]
+    Service -.->|"audit"| Activity["activities<br/>'RGPD descarregado'"]
+```
+
+- **Reutilização**: usa `_get_rendered_rgpd_text` e `_generate_rgpd_pdf_bytes` de `services/rgpd_service.py` (mesma pipeline dos PDFs assinados digitalmente).
+- **Dados**: `consent_data` é construído a partir de `process.personal_data` (desencriptado via `decrypt_sensitive_data`), com fallback para strings vazias quando campos não existem.
+- **Auth**: `require_staff()` — o PDF expõe PII do cliente.
+- **Filename**: `RGPD_{safe_client_name}.pdf` (normalizado, sem acentos/caracteres especiais).

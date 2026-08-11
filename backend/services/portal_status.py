@@ -268,6 +268,11 @@ async def run_get_portal_status(client_data: dict):
             "icon": cat_info["icon"],
             "received_at": doc.get("reviewed_at", doc.get("updated_at", "")),
             "s3_path": doc.get("s3_path") or doc.get("file_key"),
+            # PACOTE DE — histórico completo de ficheiros anexados a esta
+            # categoria/pedido (cada upload acrescentado via $push no backend).
+            # Permite ao frontend listar todos os ficheiros por categoria em
+            # vez de mostrar apenas o mais recente (campo `s3_path` top-level).
+            "attached_files": doc.get("attached_files") or [],
         })
 
     # ── Fallback: se não há docs REQUESTED, calcular pendentes por categoria ──

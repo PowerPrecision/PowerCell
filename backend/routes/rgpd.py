@@ -6,12 +6,15 @@ Logic in services/rgpd_*.py (do **not** collide with existing rgpd_service.py / 
 from typing import Optional
 
 from fastapi import APIRouter, Depends, Request
+from fastapi.responses import StreamingResponse
 
 from models.rgpd import (
     RGPDCreate, RGPDResponse, RGPDStatusResponse,
     RGPDConsentData, RGPDPublicView,
 )
 from services.auth import get_current_user, require_staff, require_management
+# PACOTE DE — serviço de geração de PDF RGPD pré-preenchido
+from services.rgpd_pdf import run_generate_prefilled_rgpd_pdf
 
 from services.rgpd_helpers import (
     _add_process_activity,
@@ -113,6 +116,24 @@ async def list_rgpd_requests(
     user: dict = Depends(get_current_user)
 ):
     return await run_list_rgpd_requests(process_id, user)
+
+
+# PACOTE DE — download de PDF RGPD PRÉ-PREENCHIDO (sem assinatura digital).
+# Staff descarrega o PDF com os dados reais do cliente (Nome, NIF, Morada, etc.)
+# para impressão + assinatura manual. Reusa `_get_rendered_rgpd_text` +
+# `_generate_rgpd_pdf_bytes` de services/rgpd_service.py.
+@router.get("/pdf/{process_id}")
+async def download_prefilled_rgpd_pdf(
+    process_id: str,
+    user: dict = Depends(require_staff())
+):
+    import io
+    pdf_bytes, filename = await run_generate_prefilled_rgpd_pdf(process_id, user)
+    return StreamingResponse(
+        io.BytesIO(pdf_bytes),
+        media_type="application/pdf",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
 
 
 # ============ ADMIN — static paths before /admin/{request_id} ============

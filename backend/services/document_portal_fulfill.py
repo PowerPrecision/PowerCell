@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import uuid
 from datetime import datetime, timezone
 from typing import Any, Optional
 
@@ -213,6 +214,24 @@ async def fulfill_portal_requests_on_staff_upload(
     if file_size is not None:
         update_fields["file_size"] = file_size
 
+    # PACOTE DE — APPEND logic: cada upload da equipa é acrescentado ao array
+    # `attached_files` do pedido REQUESTED (nunca substitui uploads anteriores).
+    # Mantêm-se os campos top-level com $set para retrocompatibilidade —
+    # serializadores lêem esses campos directamente (devem reflectir o
+    # upload MAIS RECENTE). O array `attached_files` preserva o histórico.
+    file_entry = {
+        "file_id": str(uuid.uuid4()),
+        "filename": filename,
+        "original_filename": filename,
+        "s3_path": s3_path or "",
+        "file_size": file_size if file_size is not None else 0,
+        "content_type": content_type or "",
+        "uploaded_at": now,
+        "uploaded_by": user_id,
+        "uploaded_by_name": user_name,
+        "source": "staff_crm_upload",
+    }
+
     # Match directo por document_id (pedido específico)
     if document_id:
         result = await db.documents.update_one(
@@ -221,7 +240,11 @@ async def fulfill_portal_requests_on_staff_upload(
                 "process_id": process_id,
                 "status": {"$in": list(_PENDING)},
             },
-            {"$set": update_fields},
+            {
+                "$set": update_fields,
+                # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
+                "$push": {"attached_files": file_entry},
+            },
         )
         if result.modified_count:
             logger.info(
@@ -265,7 +288,11 @@ async def fulfill_portal_requests_on_staff_upload(
 
     result = await db.documents.update_one(
         {"id": doc_id, "process_id": process_id, "status": {"$in": list(_PENDING)}},
-        {"$set": update_fields},
+        {
+            "$set": update_fields,
+            # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
+            "$push": {"attached_files": file_entry},
+        },
     )
     if result.modified_count:
         logger.info(

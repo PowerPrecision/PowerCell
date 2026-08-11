@@ -3,6 +3,31 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DE: Download RGPD PDF + Upload Múltiplo Portal
+
+### Adicionado
+- **Download do RGPD em PDF pré-preenchido**: novo endpoint `GET /api/rgpd/pdf/{process_id}` que gera um PDF do RGPD com o template ativo, substituindo placeholders (`{{NOME}}`, `{{CONTRIBUINTE}}`, `{{MORADA}}`, etc.) pelos dados reais desencriptados do cliente. Reutiliza `_get_rendered_rgpd_text` + `_generate_rgpd_pdf_bytes` (reportlab) de `services/rgpd_service.py`. Novo serviço `services/rgpd_pdf.py` (`run_generate_prefilled_rgpd_pdf`). Response: `StreamingResponse` (`application/pdf`, `Content-Disposition: attachment`). Audit: regista atividade "RGPD pré-preenchido descarregado".
+- **Upload Múltiplo Global no Portal do Cliente**: o cliente pode carregar múltiplos ficheiros para qualquer categoria, de forma faseada (1 hoje, 2 amanhã), sem perder os anteriores.
+
+### Corrigido
+- **Bug REPLACE em uploads do Portal**: `run_confirm_portal_upload` (`portal_upload_ops.py`) fazia `$set` que sobrescrevia os metadados do ficheiro anterior quando o cliente carregava um 2º ficheiro para a mesma categoria — o 1º ficheiro ficava órfão no S3. Agora faz `$set` (status → RECEIVED + campos top-level para backward compat) + `$push` (novo `file_entry` para array `attached_files`). Mesma correção em `fulfill_portal_requests_on_staff_upload` (`document_portal_fulfill.py`).
+
+### Alterado
+- **Botão RGPD → DropdownMenu**: o botão de RGPD no `PageHeader` do `ProcessDetails` passou a um `DropdownMenu` com 2 opções: "Solicitar Consentimento" (envia email — comportamento anterior) e "Descarregar PDF (Assinatura Manual)" (download do PDF pré-preenchido). Padrão blob (`responseType: "blob"` + `createObjectURL` + `link.click()`).
+- **UI de upload do Portal**: o input de ficheiro (`multiple={true}`) está **sempre visível** (não se esconde após o primeiro upload — o label muda para "➕ Adicionar ficheiros"). Adicionada `ScrollArea` com `Badge`s mostrando a lista de ficheiros anexados por categoria (filename + tamanho + botão de download por ficheiro). O badge de contagem lê `doc.attached_files.length` do backend (persistente após refetch).
+- **Serializers**: `run_get_portal_status` (`portal_status.py`) e `serialize_portal_document` (`document_portal_request.py`) agora incluem `attached_files` no payload — o frontend e o CRM podem listar todos os ficheiros por categoria.
+
+### Documentação
+- **`FRONTEND_GUIDELINES.md`**: nova secção 9 "Portal do Cliente e Documentos Legais (Pacote DE)" — regras: Portal usa sempre lógica de append em arrays de documentos (múltiplos uploads por categoria); documentos legais gerados vêm sempre pré-preenchidos do backend; presigned URLs (não List[UploadFile]).
+- **`ARCHITECTURE.md`**: novas secções "Portal do Cliente — Upload Múltiplo com Append (Pacote DE)" (diagrama do fluxo presigned URL + lógica `$push attached_files`) e "Documentos Legais Gerados — RGPD PDF Pré-preenchido (Pacote DE)" (diagrama do endpoint + reutilização da pipeline de PDF).
+
+### Técnico
+- **Backend modificado** (6 ficheiros): `services/rgpd_pdf.py` (novo), `routes/rgpd.py` (novo endpoint), `services/portal_upload_ops.py` (APPEND), `services/document_portal_fulfill.py` (APPEND), `services/portal_status.py` (attached_files no payload), `services/document_portal_request.py` (attached_files no serializer).
+- **Frontend modificado** (3 ficheiros): `services/api.js` (helper `downloadRGPDF`), `pages/ProcessDetails.js` (DropdownMenu RGPD + handler download), `pages/ClientPortal.jsx` (botão sempre visível + ScrollArea de ficheiros anexados).
+- **Documentação** (2 ficheiros): `FRONTEND_GUIDELINES.md`, `ARCHITECTURE.md`.
+- **Validação**: `py_compile` ✓ (6 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (3 frontend, 0 erros).
+- **Dependências**: Nenhuma nova — `reportlab` já estava instalado; `ScrollArea`, `Badge`, `FileDown`, `Download`, `FileText` já existem em Shadcn/lucide-react.
+
 ## [2026-07-25] — Pacote DD: Limpeza de UI, Desencriptação de Dados e Preparação de IA
 
 ### Corrigido

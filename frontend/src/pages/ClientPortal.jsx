@@ -58,6 +58,9 @@ import {
 import { Sheet, SheetContent, SheetHeader, SheetTitle, SheetDescription } from '@/components/ui/sheet';
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from '@/components/ui/dialog';
 import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from '@/components/ui/accordion';
+// PACOTE DE — Lista de ficheiros anexados por categoria (append, nunca replace)
+import { ScrollArea } from '@/components/ui/scroll-area';
+import { Badge } from '@/components/ui/badge';
 import { formatDate, safeDate } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import ClientPortalLogin from './ClientPortalLogin';
@@ -329,13 +332,20 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
           {doc.notes && <p className="text-xs text-gray-400 truncate">{typeof doc.notes === 'string' ? doc.notes : JSON.stringify(doc.notes)}</p>}
         </div>
 
-        {!uploading && !result?.success && (
+        {/* PACOTE DE — Botão de upload SEMPRE visível (permite uploads faseados).
+            Label muda para "Adicionar ficheiros" após o 1º upload (quando já existem
+            ficheiros anexados). O input multiple={true} mantém-se (já suporta
+            múltiplos ficheiros por batch). */}
+        {!uploading && (
           <>
             <input ref={fileInputRef} type="file" className="hidden" accept=".pdf,.jpg,.jpeg,.png,.doc,.docx" multiple={true}
               onChange={handleFileChange} />
             <button onClick={() => fileInputRef.current?.click()}
               className="flex-shrink-0 px-3 py-1.5 text-xs font-medium bg-emerald-600 text-white rounded-lg hover:bg-emerald-700 transition-colors flex items-center gap-1">
-              <Upload className="w-3.5 h-3.5" /> Submeter
+              <Upload className="w-3.5 h-3.5" />
+              {doc.attached_files && doc.attached_files.length > 0
+                ? '➕ Adicionar ficheiros'
+                : 'Submeter'}
             </button>
           </>
         )}
@@ -347,16 +357,74 @@ function DocumentUploadItem({ doc, onUploadSuccess }) {
           </div>
         )}
 
-        {result?.success && (
-          <div className="flex-shrink-0 flex items-center gap-1 text-emerald-600">
-            <CheckCircle2 className="w-4 h-4" />
+        {/* PACOTE DE — Badge persistente com contagem total de ficheiros anexados
+            (lê do backend, sobrevive a refetches; substitui o badge transitório
+            "Enviado" que só mostrava a contagem do último batch). */}
+        {doc.attached_files && doc.attached_files.length > 0 && (
+          <Badge className="bg-secondary text-secondary-foreground">
+            {doc.attached_files.length} ficheiro(s) anexado(s)
+          </Badge>
+        )}
+
+        {/* Feedback transitório de erros do último batch (mantém-se) */}
+        {result?.success && result?.errorCount && (
+          <div className="flex-shrink-0 flex items-center gap-1 text-red-600">
+            <AlertCircle className="w-4 h-4" />
             <span className="text-xs font-medium">
-              {result.count > 1 ? `${result.count} ficheiros` : 'Enviado'}
-              {result.errorCount ? ` (${result.errorCount} erro${result.errorCount > 1 ? 's' : ''})` : ''}
+              {result.errorCount} erro{result.errorCount > 1 ? 's' : ''} no último envio
             </span>
           </div>
         )}
       </div>
+
+      {/* PACOTE DE — Lista de ficheiros anexados por categoria (append, nunca replace).
+          Mostra todos os ficheiros já submetidos para este pedido/categoria,
+          com tamanho e botão de download individual. Usa tokens Shadcn para
+          suportar dark mode (não introduz novas cores cruas). */}
+      {doc.attached_files && doc.attached_files.length > 0 && (
+        <ScrollArea className="h-fit max-h-[200px] mt-2 rounded-md border border-border">
+          <div className="p-2 space-y-1.5">
+            {doc.attached_files.map((file, idx) => (
+              <div key={file.file_id || idx} className="flex items-center justify-between gap-2 p-1.5 rounded bg-secondary/30">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
+                  <FileText className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+                  <span className="text-xs truncate text-foreground">{file.filename || file.original_filename}</span>
+                </div>
+                <div className="flex items-center gap-1 shrink-0">
+                  {file.file_size && (
+                    <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                      {(file.file_size / 1024).toFixed(0)} KB
+                    </Badge>
+                  )}
+                  <button
+                    className="h-6 w-6 inline-flex items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
+                    onClick={async () => {
+                      try {
+                        const token = getPortalToken();
+                        if (!token) { toast.error('Sessão expirada.'); return; }
+                        const res = await fetchWithRetry(
+                          `${BACKEND_URL}/portal/download-url?file_key=${encodeURIComponent(file.s3_path)}`,
+                          { headers: { Authorization: `Bearer ${token}` } }
+                        );
+                        if (res.ok) {
+                          const data = await res.json().catch(() => ({}));
+                          const dlUrl = data.url || data.download_url;
+                          if (dlUrl) window.open(dlUrl, '_blank', 'noopener');
+                        }
+                      } catch {
+                        // silent — erros de download são melhor tratados via toast global
+                      }
+                    }}
+                    title="Descarregar ficheiro"
+                  >
+                    <Download className="h-3 w-3" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </ScrollArea>
+      )}
 
       {/* Progress bar */}
       {uploading && (

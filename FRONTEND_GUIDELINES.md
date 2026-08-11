@@ -145,3 +145,23 @@ toast.loading(task.title, {
 });
 ```
 
+---
+
+## 9. Portal do Cliente e Documentos Legais (Pacote DE)
+
+### Portal do Cliente — sempre lógica de "append" em arrays de documentos
+
+O Portal do Cliente **nunca** substitui ficheiros previamente carregados pelo cliente. Cada categoria de documento (Recibos de Vencimento, Extratos Bancários, IRS, Identificação, etc.) mantém um array `attached_files` que cresce com cada upload — o cliente pode enviar ficheiros faseados (1 hoje, 2 amanhã) sem perder os anteriores.
+
+- **Backend**: `run_confirm_portal_upload` (`services/portal_upload_ops.py`) faz `$set` (status → RECEIVED) + `$push` (novo `file_entry` para `attached_files`). Os campos top-level (`filename`, `s3_path`) são atualizados para refletir o upload mais recente (backward compat), mas o array `attached_files` preserva o histórico completo. O mesmo padrão aplica-se a `fulfill_portal_requests_on_staff_upload` (`document_portal_fulfill.py`).
+- **Frontend**: o input de ficheiro tem `multiple={true}` e está **sempre visível** (o botão não se esconde após o primeiro upload — muda o label para "➕ Adicionar ficheiros"). A lista de ficheiros anexados é mostrada numa `ScrollArea` com `Badge`s (filename + tamanho + botão de download por ficheiro).
+- **Presigned URLs**: o upload usa o padrão presigned S3 (client → S3 direto, backend nunca recebe bytes). **Não** usar `List[UploadFile]` — seria uma regressão arquitetural.
+
+### Documentos legais gerados — sempre pré-preenchidos do backend
+
+Documentos legais gerados pelo sistema (RGPD, Minuta, CPCV) **devem** vir pré-preenchidos com os dados reais do cliente/processo quando o staff os descarrega para assinatura manual. O backend é a única fonte de verdade para os dados — o frontend não pré-preenche nada.
+
+- **RGPD PDF**: `GET /api/rgpd/pdf/{process_id}` gera um PDF com o template ativo do RGPD, substituindo os placeholders (`{{NOME}}`, `{{CONTRIBUINTE}}`, `{{MORADA}}`, etc.) pelos dados desencriptados do cliente. Usa `reportlab` (já instalado) e reutiliza `_get_rendered_rgpd_text` + `_generate_rgpd_pdf_bytes` de `services/rgpd_service.py`.
+- **Frontend**: o botão de RGPD no `PageHeader` do `ProcessDetails` é um `DropdownMenu` com 2 opções: "Solicitar Consentimento" (envia email com link) e "Descarregar PDF (Assinatura Manual)" (download do PDF pré-preenchido). O download usa o padrão blob (`responseType: "blob"` + `createObjectURL` + `link.click()`).
+
+

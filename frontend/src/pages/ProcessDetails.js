@@ -82,6 +82,8 @@ import {
   generateMagicLink,
   sendMagicLinkEmail,
   impersonateClientPortal,
+  // PACOTE DE — Download RGPD pré-preenchido (PDF para assinatura manual)
+  downloadRGPDF,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
@@ -123,6 +125,7 @@ import {
   Sparkles,
   Mail,
   FileSignature,
+  FileDown,
   AlertTriangle,
   CheckCircle,
   Database,
@@ -366,6 +369,43 @@ const ProcessDetails = () => {
     }
     setRgpdCustomMessage("");
     setRgpdDialogOpen(true);
+  };
+
+  // PACOTE DE — Download RGPD PDF pré-preenchido (assinatura manual)
+  // Chama GET /api/rgpd/pdf/{process_id} (backend já implementa) e descarrega
+  // o PDF com nome seguro baseado no nome do cliente (sem acentos/espaços).
+  const handleDownloadRgpdPdf = async () => {
+    try {
+      const res = await downloadRGPDF(id);
+      const url = window.URL.createObjectURL(new Blob([res.data]));
+      const link = document.createElement("a");
+      link.href = url;
+      const safeName = (process?.client_name || "cliente")
+        .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
+        .replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
+      link.setAttribute("download", `RGPD_${safeName}.pdf`);
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      window.URL.revokeObjectURL(url);
+      toast.success("RGPD pré-preenchido descarregado.");
+    } catch (error) {
+      // O endpoint devolve JSON de erro (não blob) quando falha — tentamos ler
+      // como texto e fazer parse do detail. Se falhar o parse, fallback p/ message.
+      let detail = error?.message || "Erro ao gerar PDF do RGPD.";
+      try {
+        const raw = error?.response?.data;
+        if (raw instanceof Blob) {
+          const txt = await raw.text();
+          try { detail = JSON.parse(txt)?.detail || detail; } catch { detail = txt || detail; }
+        } else if (raw?.detail) {
+          detail = raw.detail;
+        }
+      } catch {
+        // mantém o detail default
+      }
+      toast.error(detail);
+    }
   };
 
   // Helper: formata erros Pydantic (FastAPI 422) num único texto legível
@@ -1604,43 +1644,59 @@ const ProcessDetails = () => {
               </DialogContent>
             </Dialog>
 
-            {/* Botão RGPD */}
+            {/* PACOTE DE — RGPD DropdownMenu: Solicitar + Download PDF (Assinatura Manual) */}
             {userRole !== "indexacao" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className={`h-8 px-2 sm:px-3 ${
-                  rgpdStatus?.status === 'signed' 
-                    ? 'text-green-600 border-green-200 hover:bg-green-50' 
-                    : rgpdStatus?.status === 'pending'
-                    ? 'text-yellow-600 border-yellow-200 hover:bg-yellow-50'
-                    : 'text-red-600 border-red-200 hover:bg-red-50'
-                }`}
-                onClick={handleRequestRgpd}
-                disabled={rgpdSending || rgpdLoading}
-                title={
-                  rgpdStatus?.status === 'signed' 
-                    ? 'RGPD assinado' 
-                    : rgpdStatus?.status === 'pending'
-                    ? 'Aguardando assinatura'
-                    : 'Solicitar RGPD'
-                }
-              >
-                {rgpdSending || rgpdLoading ? (
-                  <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
-                ) : rgpdStatus?.status === 'signed' ? (
-                  <CheckCircle className="h-3.5 w-3.5 sm:mr-1" />
-                ) : (
-                  <FileSignature className="h-3.5 w-3.5 sm:mr-1" />
-                )}
-                <span className="hidden sm:inline">
-                  {rgpdStatus?.status === 'signed' 
-                    ? 'RGPD Assinado' 
-                    : rgpdStatus?.status === 'pending'
-                    ? 'RGPD Pendente'
-                    : 'RGPD'}
-                </span>
-              </Button>
+              <DropdownMenu>
+                <DropdownMenuTrigger asChild>
+                  <Button
+                    variant="outline"
+                    size="sm"
+                    className={`h-8 px-2 sm:px-3 ${
+                      rgpdStatus?.status === 'signed'
+                        ? 'text-green-600 border-green-200 hover:bg-green-50'
+                        : rgpdStatus?.status === 'pending'
+                        ? 'text-yellow-600 border-yellow-200 hover:bg-yellow-50'
+                        : 'text-red-600 border-red-200 hover:bg-red-50'
+                    }`}
+                    disabled={rgpdSending || rgpdLoading}
+                    title="RGPD"
+                  >
+                    {rgpdSending || rgpdLoading ? (
+                      <Loader2 className="h-3.5 w-3.5 sm:mr-1 animate-spin" />
+                    ) : rgpdStatus?.status === 'signed' ? (
+                      <CheckCircle className="h-3.5 w-3.5 sm:mr-1" />
+                    ) : (
+                      <FileSignature className="h-3.5 w-3.5 sm:mr-1" />
+                    )}
+                    <span className="hidden sm:inline">
+                      {rgpdStatus?.status === 'signed'
+                        ? 'RGPD Assinado'
+                        : rgpdStatus?.status === 'pending'
+                        ? 'RGPD Pendente'
+                        : 'RGPD'}
+                    </span>
+                    <ChevronDown className="h-3.5 w-3.5 sm:ml-1" />
+                  </Button>
+                </DropdownMenuTrigger>
+                <DropdownMenuContent align="start" className="w-60">
+                  <DropdownMenuLabel>RGPD</DropdownMenuLabel>
+                  <DropdownMenuItem
+                    className="gap-2 cursor-pointer"
+                    onClick={handleRequestRgpd}
+                  >
+                    <Mail className="h-4 w-4" />
+                    Solicitar Consentimento
+                  </DropdownMenuItem>
+                  <DropdownMenuSeparator />
+                  <DropdownMenuItem
+                    className="gap-2 cursor-pointer"
+                    onClick={handleDownloadRgpdPdf}
+                  >
+                    <FileDown className="h-4 w-4" />
+                    Descarregar PDF (Assinatura Manual)
+                  </DropdownMenuItem>
+                </DropdownMenuContent>
+              </DropdownMenu>
             )}
             
             {/* Botão CPCV */}
