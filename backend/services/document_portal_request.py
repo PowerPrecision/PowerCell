@@ -301,6 +301,11 @@ def serialize_portal_document(doc: dict) -> dict:
         "updated_at": doc.get("updated_at"),
         "uploaded_at": doc.get("uploaded_at"),
         "reviewed_at": doc.get("reviewed_at"),
+        # PACOTE DE — histórico completo de ficheiros anexados a este
+        # pedido/categoria (cada upload acrescentado via $push no backend).
+        # Permite ao staff ver todos os ficheiros já submetidos para a mesma
+        # categoria, em vez de apenas o mais recente (campo `filename`/`s3_path`).
+        "attached_files": doc.get("attached_files") or [],
     }
 
 

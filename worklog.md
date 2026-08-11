@@ -3258,3 +3258,34 @@ Stage Summary:
   - FRONTEND_GUIDELINES.md (secção 8)
   - ARCHITECTURE.md (secção Pipeline de IA)
 - Resultado: (1) NIF/telefone/CC/IBAN desencriptados em todos os endpoints; apply-suggestions encripta PII; IBAN encriptado em repouso. (2) Calculadora acessível via ícone no TopNav (Sheet global), sem rota/sidebar. (3) Tarefas com scroll interno; AutoDSTIBadge oculto quando N/A; etiquetas como badges no header; 2º titular consolidado num cartão. (4) Toasts sticky com botão fechar. (5) IA extrai data_validade via fallback OCR→categorização para dashboard documentos a expirar. (6) Docs atualizadas com padrões consolidados.
+
+
+---
+Task ID: Pacote DE (Download RGPD PDF + Upload Múltiplo Portal)
+Agent: Main Agent (Z.ai Code Assistant) + 2 subagentes Explore + 2 subagentes Implementação
+Task: 2 melhorias críticas — RGPD PDF pré-preenchido para assinatura manual + upload múltiplo global no Portal com lógica APPEND.
+
+Work Log:
+- Re-clonado /home/z/powercell (base c766822b = Pacote DD).
+- Subagente DE-1-Explore (Explore): analisou RGPD backend (routes/rgpd.py, services/rgpd_templates.py, rgpd_service.py, models/rgpd.py) + frontend (ProcessDetails RGPD button, RGPDPage, api.js). Confirmou: reportlab já instalado, _build_rgpd_pdf + _get_rendered_rgpd_text já existem, template usa placeholders {{NOME}} etc., botão RGPD em ProcessDetails:1607-1644.
+- Subagente DE-2-Explore (Explore): analisou portal upload (routes/portal.py, services/portal_upload_ops.py, document_portal_fulfill.py, portal_status.py, document_portal_request.py, ClientPortal.jsx). Confirmou: presigned URL pattern (não List[UploadFile]), input multiple={true} já existe, bug REPLACE em run_confirm_portal_upload ($set sobrescreve ficheiro anterior), botão esconde após sucesso, sem lista de ficheiros anexados.
+- Subagente DE-Backend (general-purpose): 6 ficheiros — novo services/rgpd_pdf.py (run_generate_prefilled_rgpd_pdf), novo endpoint GET /rgpd/pdf/{process_id} em routes/rgpd.py, APPEND ($set + $push attached_files) em portal_upload_ops.py + document_portal_fulfill.py, attached_files em portal_status.py + document_portal_request.py. py_compile + flake8 0 erros.
+- Subagente DE-Frontend (general-purpose): 3 ficheiros — downloadRGPDF helper em api.js, DropdownMenu RGPD com 2 opções (Solicitar + Download PDF) em ProcessDetails.js, botão upload sempre visível + ScrollArea com Badges de ficheiros anexados em ClientPortal.jsx. bun build 0 erros.
+- Validação final: py_compile ✓ (6 backend), flake8 0 erros, bun build ✓ (3 frontend).
+- Documentação: FRONTEND_GUIDELINES.md secção 9 (Portal + Documentos Legais), ARCHITECTURE.md 2 novas secções (Upload Múltiplo Append + RGPD PDF Pré-preenchido). CHANGELOG atualizado.
+- Verificação de tokens: grep por padrão de token no diff staged = 0 ocorrências reais.
+
+Stage Summary:
+- 11 ficheiros modificados (6 backend + 3 frontend + 2 docs):
+  - backend/services/rgpd_pdf.py (NOVO — run_generate_prefilled_rgpd_pdf)
+  - backend/routes/rgpd.py (novo endpoint GET /rgpd/pdf/{process_id})
+  - backend/services/portal_upload_ops.py (APPEND: $set + $push attached_files)
+  - backend/services/document_portal_fulfill.py (APPEND: $set + $push attached_files)
+  - backend/services/portal_status.py (attached_files no payload)
+  - backend/services/document_portal_request.py (attached_files no serializer)
+  - frontend/src/services/api.js (helper downloadRGPDF)
+  - frontend/src/pages/ProcessDetails.js (DropdownMenu RGPD + handleDownloadRgpdPdf)
+  - frontend/src/pages/ClientPortal.jsx (botão sempre visível + ScrollArea ficheiros anexados)
+  - FRONTEND_GUIDELINES.md (secção 9)
+  - ARCHITECTURE.md (2 secções: Upload Múltiplo + RGPD PDF)
+- Resultado: (1) Staff pode descarregar PDF do RGPD pré-preenchido com dados do cliente via DropdownMenu no ProcessDetails. (2) Cliente pode carregar múltiplos ficheiros por categoria no Portal, de forma faseada, com lista visual de ficheiros anexados (ScrollArea + Badges). Backend faz APPEND ($push attached_files) — nunca replace. (3) Docs atualizadas com regras: Portal sempre append; documentos legais sempre pré-preenchidos do backend.

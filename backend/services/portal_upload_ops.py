@@ -197,7 +197,7 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
     Sem processo: ancora ao client_id (órfão) até checklist completa criar o processo.
     Com processo: ancora ao process_id. Categoria forçada a Index.
     """
-    import uuid
+    # PACOTE DE — `uuid` já importado no topo do módulo; não re-importar aqui.
 
     process = client_data.get("process")
     client = client_data.get("client") or {}
@@ -251,6 +251,25 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
         elif client_id:
             match_q["client_id"] = client_id
 
+        # PACOTE DE — APPEND logic: cada upload do portal é acrescentado ao
+        # array `attached_files` (nunca substitui/apaga uploads anteriores).
+        # Mantêm-se os campos top-level (`filename`, `s3_path`, `file_size`,
+        # `content_type`, etc.) com $set para retrocompatibilidade —
+        # `serialize_portal_document` e `run_get_portal_status` leem esses
+        # campos directamente e devem continuar a reflectir o upload MAIS
+        # RECENTE. O array `attached_files` preserva o histórico completo
+        # (todos os ficheiros já submetidos para esta categoria).
+        file_entry = {
+            "file_id": str(uuid.uuid4()),
+            "filename": original_filename,
+            "original_filename": original_filename,
+            "s3_path": file_key,
+            "file_size": file_size,
+            "content_type": content_type,
+            "uploaded_at": now,
+            "uploaded_by": "portal_client",
+        }
+
         update_fields = {
             "status": "RECEIVED",
             "filename": original_filename,
@@ -271,7 +290,14 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
         if process_id:
             update_fields["process_id"] = process_id
 
-        update_result = await db.documents.update_one(match_q, {"$set": update_fields})
+        update_result = await db.documents.update_one(
+            match_q,
+            {
+                "$set": update_fields,
+                # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
+                "$push": {"attached_files": file_entry},
+            },
+        )
 
         if update_result.matched_count > 0:
             doc_id = document_id

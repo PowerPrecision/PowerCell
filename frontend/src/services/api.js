@@ -819,6 +819,9 @@ export const exportPoolDistributionCSV = (params = {}) => api.get("/finance/pool
 export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
 export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", { content });
 
+// PACOTE DE — Download RGPD pré-preenchido (PDF para assinatura manual)
+export const downloadRGPDF = (processId) => api.get(`/rgpd/pdf/${processId}`, { responseType: "blob" });
+
 // ===== MINUTA TEMPLATE =====
 export const getMinutaTemplate = () => api.get("/rgpd/admin/minuta-template");
 export const updateMinutaTemplate = (content) => api.put("/rgpd/admin/minuta-template", { content });
