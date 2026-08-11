@@ -51,7 +51,10 @@ NOTIFICATION_TYPE_MAP = {
 }
 
 
-async def get_user_notification_prefs(user_email: str) -> Dict[str, Any]:
+async def get_user_notification_prefs(
+    user_email: str,
+    company_id: Optional[str] = None
+) -> Dict[str, Any]:
     """
     Obtém as preferências de notificação de um utilizador, aplicando merge
     com valores por defeito para garantir compatibilidade retroativa.
@@ -61,8 +64,18 @@ async def get_user_notification_prefs(user_email: str) -> Dict[str, Any]:
     nas suas preferências. O merge garante que novos campos assumem o
     valor seguro (normalmente False) sem eliminar preferências antigas.
 
+    PACOTE DF — Per-UCR: Se `company_id` for fornecido, procura primeiro
+    o campo `notification_preferences` na UCR (user_company_roles,
+    keyed por user_id + company_id). Se existir (não-None/não-vazio),
+    usa essas preferências. Caso contrário, cai para o store global
+    (db.notification_preferences) para backward compat. Isto permite
+    que cada empresa tenha as suas próprias preferências sem quebrar
+    consumidores que ainda não passam `company_id`.
+
     Args:
         user_email: Email do utilizador para procurar preferências.
+        company_id: ID da empresa ativa (opcional). Quando None ou
+            "default", usa apenas o store global.
 
     Returns:
         Dict[str, Any]: Preferências completas (defaults + personalização).
@@ -71,37 +84,59 @@ async def get_user_notification_prefs(user_email: str) -> Dict[str, Any]:
     user = await db.users.find_one({"email": user_email}, {"_id": 0, "id": 1})
     if not user:
         return DEFAULT_NOTIFICATION_PREFS
-    
-    # Obter preferências
+
+    # ── PACOTE DF — Tentar ler da UCR ativa primeiro (single find_one) ──
+    # Hot path: usamos projection para trazer apenas o campo necessário.
+    if company_id and company_id != "default":
+        try:
+            ucr_doc = await db.user_company_roles.find_one(
+                {"user_id": user["id"], "company_id": company_id},
+                {"_id": 0, "notification_preferences": 1}
+            )
+            if ucr_doc and ucr_doc.get("notification_preferences"):
+                return {**DEFAULT_NOTIFICATION_PREFS, **ucr_doc["notification_preferences"]}
+        except Exception as e:
+            logger.warning(
+                f"[notification_prefs] Erro ao ler UCR para user_id={user['id']}, "
+                f"company_id={company_id!r}: {e}. A usar store global."
+            )
+
+    # Obter preferências globais (fallback)
     prefs = await db.notification_preferences.find_one(
-        {"user_id": user["id"]}, 
+        {"user_id": user["id"]},
         {"_id": 0}
     )
-    
+
     if not prefs:
         return DEFAULT_NOTIFICATION_PREFS
-    
+
     # Merge com defaults (para campos novos)
     return {**DEFAULT_NOTIFICATION_PREFS, **prefs}
 
 
 async def should_send_email(
-    user_email: str, 
+    user_email: str,
     notification_type: str,
-    is_urgent: bool = False
+    is_urgent: bool = False,
+    company_id: Optional[str] = None
 ) -> bool:
     """
     Verifica se deve enviar email para um utilizador baseado nas preferências.
-    
+
+    PACOTE DF — Per-UCR: `company_id` opcional propaga para
+    `get_user_notification_prefs` para resolver preferências por empresa.
+    Quando None, mantém o comportamento legacy (store global).
+
     Args:
         user_email: Email do destinatário
         notification_type: Tipo de notificação (new_process, status_change, etc.)
         is_urgent: Se é uma notificação urgente
-    
+        company_id: ID da empresa ativa (opcional, PACOTE DF per-UCR)
+
     Returns:
         True se deve enviar, False caso contrário
     """
-    prefs = await get_user_notification_prefs(user_email)
+    prefs = await get_user_notification_prefs(user_email, company_id=company_id)
     
     # Utilizadores de teste nunca recebem emails
     if prefs.get("is_test_user", False):
@@ -130,7 +165,8 @@ async def send_notification_with_preference_check(
     body: str,
     notification_type: str = "urgent",
     is_urgent: bool = False,
-    html_body: str = None
+    html_body: str = None,
+    company_id: Optional[str] = None
 ) -> bool:
     """
     Envia email apenas se o destinatário tem a preferência desse tipo
@@ -143,6 +179,11 @@ async def send_notification_with_preference_check(
     - Urgências bypassam preferências normais para garantir entrega.
     - Simplifica auditoria: toda a lógica de filtragem está num só lugar.
 
+    PACOTE DF — Per-UCR: `company_id` opcional propaga para
+    `should_send_email` → `get_user_notification_prefs`, permitindo
+    preferências por empresa (UCR ativa). Callers que não passam
+    `company_id` mantêm comportamento legacy (store global).
+
     Args:
         to_email: Email do destinatário.
         subject: Assunto do email.
@@ -150,13 +191,14 @@ async def send_notification_with_preference_check(
         notification_type: Tipo de notificação (ver NOTIFICATION_TYPE_MAP).
         is_urgent: Se True, bypass preferências não-urgentes.
         html_body: Corpo do email em HTML (opcional, para emails formatados).
+        company_id: ID da empresa ativa (opcional, PACOTE DF per-UCR).
 
     Returns:
         bool: True se o email foi enviado, False se bloqueado por
             preferências ou erro no envio.
     """
     # Verificar preferências
-    if not await should_send_email(to_email, notification_type, is_urgent):
+    if not await should_send_email(to_email, notification_type, is_urgent, company_id=company_id):
         logger.info(f"Notificação '{notification_type}' não enviada para {to_email} (preferências)")
         return False
     

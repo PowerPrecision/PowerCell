@@ -546,17 +546,23 @@ email_service = EmailService()
 # FUNÇÕES DE CONVENIÊNCIA (Retrocompatibilidade)
 # ====================================================================
 async def send_email_notification(
-    to_email: str, 
-    subject: str, 
-    body: str, 
+    to_email: str,
+    subject: str,
+    body: str,
     html_body: str = None,
     notification_type: str = "general",
-    check_preferences: bool = True
+    check_preferences: bool = True,
+    company_id: Optional[str] = None
 ) -> bool:
     """
     Função de conveniência para enviar emails.
     Mantém compatibilidade com código existente.
-    
+
+    PACOTE DF — Per-UCR: `company_id` opcional propaga para
+    `_check_email_preference`, permitindo resolver preferências por
+    empresa (UCR ativa) com fallback ao store global. Callers que
+    não passam `company_id` mantêm comportamento legacy.
+
     Args:
         to_email: Email de destino
         subject: Assunto do email
@@ -564,10 +570,11 @@ async def send_email_notification(
         html_body: Corpo em HTML (opcional)
         notification_type: Tipo de notificação para verificar preferências
         check_preferences: Se deve verificar preferências (default: True)
+        company_id: ID da empresa ativa (opcional, PACOTE DF per-UCR)
     """
     # Verificar preferências de notificação
     if check_preferences:
-        should_send = await _check_email_preference(to_email, notification_type)
+        should_send = await _check_email_preference(to_email, notification_type, company_id=company_id)
         if not should_send:
             logger.info(f"[EMAIL] Skipped (preference disabled) to {to_email}, type: {notification_type}")
             return True  # Retorna True para não causar erros no código chamador
@@ -582,42 +589,89 @@ async def send_email_notification(
     return result.success
 
 
-async def _check_email_preference(email: str, notification_type: str) -> bool:
+async def _check_email_preference(
+    email: str,
+    notification_type: str,
+    company_id: Optional[str] = None
+) -> bool:
     """
     Verifica se o utilizador quer receber este tipo de email.
-    
+
+    PACOTE DF — Per-UCR: Se `company_id` for fornecido, procura primeiro
+    o campo `notification_preferences` na UCR (user_company_roles,
+    keyed por user_id + company_id). Se existir, usa essas preferências.
+    Caso contrário, cai para o store global (db.notification_preferences).
+
     Args:
         email: Email do utilizador
         notification_type: Tipo de notificação (new_process, status_change, etc.)
-        
+        company_id: ID da empresa ativa (opcional, PACOTE DF per-UCR)
+
     Returns:
         True se deve enviar, False se não deve
     """
     try:
         from database import db
-        
+
         # Encontrar utilizador pelo email
         user = await db.users.find_one({"email": email}, {"id": 1})
         if not user:
             # Utilizador não encontrado - pode ser cliente externo, enviar
             return True
-        
-        # Buscar preferências
+
+        # ── PACOTE DF — Tentar ler da UCR ativa primeiro (single find_one) ──
+        if company_id and company_id != "default":
+            try:
+                ucr_doc = await db.user_company_roles.find_one(
+                    {"user_id": user["id"], "company_id": company_id},
+                    {"_id": 0, "notification_preferences": 1}
+                )
+                if ucr_doc and ucr_doc.get("notification_preferences"):
+                    # Tem preferências por-UCR — usar estas.
+                    prefs = ucr_doc["notification_preferences"]
+                    # Se é utilizador de teste, não enviar emails
+                    if prefs.get("is_test_user", False):
+                        return False
+                    # Mapear tipo de notificação para preferência
+                    type_to_pref = {
+                        "new_process": "email_new_process",
+                        "status_change": "email_status_change",
+                        "document_upload": "email_document_upload",
+                        "task_assigned": "email_task_assigned",
+                        "deadline_reminder": "email_deadline_reminder",
+                        "daily_summary": "email_daily_summary",
+                        "weekly_report": "email_weekly_report",
+                        "urgent": "email_urgent_only",
+                    }
+                    pref_key = type_to_pref.get(notification_type)
+                    if pref_key:
+                        return prefs.get(pref_key, False)
+                    # Para tipos não mapeados, verificar se só quer urgentes
+                    if prefs.get("email_urgent_only", True):
+                        return notification_type == "urgent"
+                    return True
+            except Exception as e:
+                logger.warning(
+                    f"[email_v2._check_email_preference] Erro ao ler UCR para "
+                    f"user_id={user['id']}, company_id={company_id!r}: {e}. A usar store global."
+                )
+
+        # Buscar preferências globais (fallback)
         prefs = await db.notification_preferences.find_one(
-            {"user_id": user["id"]}, 
+            {"user_id": user["id"]},
             {"_id": 0}
         )
-        
+
         if not prefs:
             # Sem preferências definidas - usar defaults (não enviar a maioria)
             # Por default, só enviamos emails importantes
             important_types = ["deadline_reminder", "urgent", "daily_summary", "weekly_report"]
             return notification_type in important_types
-        
+
         # Se é utilizador de teste, não enviar emails
         if prefs.get("is_test_user", False):
             return False
-        
+
         # Mapear tipo de notificação para preferência
         type_to_pref = {
             "new_process": "email_new_process",
@@ -629,18 +683,18 @@ async def _check_email_preference(email: str, notification_type: str) -> bool:
             "weekly_report": "email_weekly_report",
             "urgent": "email_urgent_only",
         }
-        
+
         pref_key = type_to_pref.get(notification_type, None)
-        
+
         if pref_key:
             return prefs.get(pref_key, False)
-        
+
         # Para tipos não mapeados, verificar se só quer urgentes
         if prefs.get("email_urgent_only", True):
             return notification_type == "urgent"
-        
+
         return True
-        
+
     except Exception as e:
         logger.error(f"Error checking email preference: {e}")
         # Em caso de erro, enviar para não perder emails importantes

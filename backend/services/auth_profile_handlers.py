@@ -206,10 +206,17 @@ async def run_get_me(request, user: dict):
     return response
 
 
-async def run_update_preferences(data: dict, user: dict):
+async def run_update_preferences(data: dict, request, user: dict):
     """
     Atualiza as preferências de notificação do utilizador.
     Sanitiza todas as chaves e valores string para prevenir stored XSS.
+
+    PACOTE DF — Per-UCR: Se houver empresa ativa (X-Company-Id), as
+    preferências são gravadas em `user_company_roles.notification_preferences`
+    (keyed por user_id + company_id). Se não houver contexto de empresa,
+    mantém o comportamento legacy e grava no documento global do user
+    (`users.notification_preferences`). O consumidor (notification_service /
+    email_v2) aplica fallback automático: UCR > global.
     """
     user_id = user["id"]
 
@@ -241,6 +248,51 @@ async def run_update_preferences(data: dict, user: dict):
         else:
             sanitized_notifications[key] = bool(value)
 
+    # ── PACOTE DF — Resolver empresa ativa para gravação por-UCR ──
+    # Se houver contexto de empresa (header X-Company-Id ou user.company),
+    # gravar preferências no documento UCR. Caso contrário, manter o
+    # comportamento legacy (gravação no documento global do user).
+    active_company_id = None
+    try:
+        active_company_id = await get_active_company_id_async(request, user)
+    except Exception as e:
+        logger.warning(f"[auth/preferences] Erro ao resolver empresa ativa: {e}")
+
+    # Sentinel "default" ou None → sem UCR específica → gravação global legacy
+    if active_company_id and active_company_id != "default":
+        try:
+            ucr_update = {
+                "notification_preferences": sanitized_notifications,
+                "updated_at": datetime.now(timezone.utc).isoformat()
+            }
+            ucr_result = await db.user_company_roles.update_one(
+                {"user_id": user_id, "company_id": active_company_id},
+                {"$set": ucr_update},
+                upsert=True
+            )
+            logger.info(
+                f"[auth/preferences] UCR gravação: company_id={active_company_id!r}, "
+                f"matched={ucr_result.matched_count}, modified={ucr_result.modified_count}, "
+                f"upserted={ucr_result.upserted_id}"
+            )
+            # Também gravar no global como backward-compat para consumidores
+            # que ainda não tenham sido actualizados para o padrão per-UCR.
+            await db.users.update_one(
+                {"id": user_id},
+                {"$set": {
+                    "notification_preferences": sanitized_notifications,
+                    "updated_at": datetime.now(timezone.utc).isoformat()
+                }}
+            )
+            return {"success": True, "message": "Preferências atualizadas", "scope": "ucr", "company_id": active_company_id}
+        except Exception as e:
+            logger.warning(
+                f"[auth/preferences] Erro ao gravar preferências na UCR "
+                f"(company_id={active_company_id!r}): {e}. A tentar global."
+            )
+            # Fall-through para gravação global
+
+    # ── Gravação global (legacy / fallback) ──
     update_data = {
         "notification_preferences": sanitized_notifications,
         "updated_at": datetime.now(timezone.utc).isoformat()
@@ -254,18 +306,48 @@ async def run_update_preferences(data: dict, user: dict):
     if result.modified_count == 0:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
 
-    return {"success": True, "message": "Preferências atualizadas"}
+    return {"success": True, "message": "Preferências atualizadas", "scope": "global"}
 
 
-async def run_get_preferences(user: dict):
+async def run_get_preferences(request, user: dict):
     """
     Retorna as preferências de notificação do utilizador atual.
+
+    PACOTE DF — Per-UCR: Lê primeiro da UCR ativa (user_company_roles.
+    notification_preferences) se houver contexto de empresa; caso a UCR
+    não tenha o campo (None/vazio), cai para o store global
+    (`users.notification_preferences`) para backward compat.
     """
+    user_id = user["id"]
+
+    # ── PACOTE DF — Tentar ler da UCR ativa primeiro ──
+    active_company_id = None
+    try:
+        active_company_id = await get_active_company_id_async(request, user)
+    except Exception as e:
+        logger.warning(f"[auth/preferences] Erro ao resolver empresa ativa: {e}")
+
+    if active_company_id and active_company_id != "default":
+        try:
+            ucr_doc = await db.user_company_roles.find_one(
+                {"user_id": user_id, "company_id": active_company_id},
+                {"_id": 0, "notification_preferences": 1}
+            )
+            if ucr_doc and ucr_doc.get("notification_preferences"):
+                return {
+                    "notifications": ucr_doc["notification_preferences"],
+                    "scope": "ucr",
+                    "company_id": active_company_id
+                }
+        except Exception as e:
+            logger.warning(f"[auth/preferences] Erro ao ler UCR: {e}")
+
+    # ── Fallback: ler do store global ──
     user_data = await db.users.find_one({"id": user["id"]}, {"_id": 0, "notification_preferences": 1})
 
     notifications = user_data.get("notification_preferences", {}) if user_data else {}
 
-    return {"notifications": notifications}
+    return {"notifications": notifications, "scope": "global"}
 
 
 async def run_update_profile(data: dict, request, user: dict):

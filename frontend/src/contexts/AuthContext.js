@@ -222,11 +222,22 @@ export function AuthProvider({ children }) {
             applyBrandTheme(matchingCompany.company_name || userData.company);
           }
         } else {
-          // Sem empresas na tabela — usar campo company como fallback
-          const fallbackId = userData.company || "default";
-          setActiveCompanyId(fallbackId);
-          localStorage.setItem("active_company_id", fallbackId);
-          sessionStorage.setItem("activeCompanyId", fallbackId);
+          // PACOTE DF — remove "default" fallback; se não há UCRs reais,
+          // activeCompanyId fica null. A página de Perfil e o ContextSwitcher
+          // lidam com este caso (mostram mensagem "sem perfis atribuídos").
+          // Não escrever "null" no localStorage — seria interpretado como
+          // string "null" pelo interceptor api.js.
+          const fallbackId = userData.company || null;
+          if (fallbackId) {
+            setActiveCompanyId(fallbackId);
+            localStorage.setItem("active_company_id", fallbackId);
+            sessionStorage.setItem("activeCompanyId", fallbackId);
+          } else {
+            // PACOTE DF — limpar state e storage para não reutilizar lixo
+            setActiveCompanyId(null);
+            localStorage.removeItem("active_company_id");
+            sessionStorage.removeItem("activeCompanyId");
+          }
         }
         activeCompanyInitialized.current = true;
       }
