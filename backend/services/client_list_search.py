@@ -62,7 +62,8 @@ async def run_search_clients(
         {"dados_pessoais.nif": simple_regex},
     ]
 
-    query = {"$or": or_conditions}
+    # PACOTE DG — excluir clientes eliminados (soft-delete) do autocomplete.
+    query = {"$or": or_conditions, "is_deleted": {"$ne": True}}
 
     clients = await db.clients.find(
         query,
@@ -233,8 +234,11 @@ async def run_list_clients(
                     process_query = indexacao_query
         
         # Filtro de eliminados (soft delete)
+        # PACOTE DG — usar is_deleted como filtro principal (defesa em
+        # profundidade: manter também o filtro de status="eliminado" para
+        # documentos legados com inconsistência de campos).
         if deleted_only:
-            deleted_query = {"status": "eliminado"}
+            deleted_query = {"is_deleted": True, "status": "eliminado"}
             if process_query:
                 if "$and" in process_query:
                     process_query["$and"].append(deleted_query)
@@ -243,7 +247,7 @@ async def run_list_clients(
             else:
                 process_query = deleted_query
         elif exclude_deleted:
-            deleted_query = {"status": {"$ne": "eliminado"}}
+            deleted_query = {"is_deleted": {"$ne": True}, "status": {"$ne": "eliminado"}}
             if process_query:
                 if "$and" in process_query:
                     process_query["$and"].append(deleted_query)
@@ -427,14 +431,17 @@ async def run_list_clients(
         process_query = {"$and": [process_query, search_filter]}
     
     # Filtro de eliminados (soft delete) - non-show_all path
+    # PACOTE DG — usar is_deleted como filtro principal (defesa em
+    # profundidade: manter também o filtro de status="eliminado" para
+    # documentos legados com inconsistência de campos).
     if deleted_only:
-        deleted_query = {"status": "eliminado"}
+        deleted_query = {"is_deleted": True, "status": "eliminado"}
         if "$and" in process_query:
             process_query["$and"].append(deleted_query)
         else:
             process_query = {"$and": [process_query, deleted_query]}
     elif exclude_deleted:
-        deleted_query = {"status": {"$ne": "eliminado"}}
+        deleted_query = {"is_deleted": {"$ne": True}, "status": {"$ne": "eliminado"}}
         if "$and" in process_query:
             process_query["$and"].append(deleted_query)
         else:

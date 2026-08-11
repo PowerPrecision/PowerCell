@@ -1338,3 +1338,85 @@ Isto permite que um consultor tenha notificações de email ativas para a Power 
 ### O que NÃO é per-UCR (tech debt)
 
 - **OneDrive**: system-level apenas (env var `ONEDRIVE_SHARED_LINK`), sem store per-user. Defer para futuro.
+
+---
+
+## PDFs Gerados para Assinatura Manual (Pacote DG)
+
+Documentos legais gerados para assinatura manual (RGPD, Minuta, CPCV) seguem regras estritas para serem imprimíveis e preenchíveis à caneta:
+
+### Template dinâmico + paginação automática
+
+O template do RGPD é **dinâmico** (editado pelo admin via `SmartRichEditor` em `RGPDAdminPage`, armazenado em `rgpd_template_versions` ou cache em `system_config`). Pode ser plain text ou HTML/Rich Text. O gerador de PDF lê o template ativo via `_get_active_rgpd_template()` e substitui os placeholders (`{{NOME}}`, `{{CONTRIBUINTE}}`, `{{MORADA}}`, etc.) pelos dados do cliente.
+
+O PDF é gerado com `reportlab.platypus` (`SimpleDocTemplate` + `Paragraph` + `Spacer` + `HRFlowable`), que suporta **quebras de página automáticas** — quando um Flowable não cabe na página atual, uma nova página é criada. Isto é essencial porque o RGPD tem 11 secções e pode ocupar várias páginas.
+
+```python
+# services/rgpd_pdf.py — _build_prefilled_rgpd_pdf
+doc = SimpleDocTemplate(buffer, pagesize=A4, ...)
+story = []
+for line in rgpd_text.split("\n"):
+    story.append(Paragraph(line, body_style))  # auto-paginates
+doc.build(story)  # SimpleDocTemplate handles page breaks
+```
+
+A fonte **DejaVuSans** (TTF) é registada para suportar acentos portugueses (ã, ç, é) e o caractere Unicode `☐` (U+2610, checkbox vazia). Fallback para Helvetica se a fonte não estiver disponível.
+
+### Fallbacks para campos nulos — linhas em branco
+
+Quando um dado do cliente falta (ex: morada, NIF, código postal), o PDF **não** imprime "N/A". Em vez disso, imprime uma linha em branco contínua (`___________________`) para o cliente preencher à caneta:
+
+```python
+# services/rgpd_pdf.py
+def _blank_line(width: int = 30) -> str:
+    return "_" * width
+
+consent_data = {
+    "nome": process.get("client_name") or _blank_line(50),
+    "contribuinte": personal.get("nif") or _blank_line(15),
+    "morada": personal.get("morada_fiscal") or _blank_line(60),
+    ...
+}
+```
+
+### Data e Local em branco
+
+A data e o local de assinatura **não** são pré-preenchidos. O placeholder `{{DATA_ASSINATURA}}` é substituído por `___/___/______` e o local por `___________________` — o cliente preenche à caneta no momento da assinatura.
+
+### Checkboxes vazias
+
+Os 4 pontos de consentimento (A/B/C/D) usam checkboxes **vazias** (`☐`) para o cliente picar fisicamente:
+
+```
+A) Autorizo o tratamento dos meus dados pessoais...
+   ☐ Autorizo     ☐ Não Autorizo
+```
+
+O caractere `☐` (U+2610) é suportado pela fonte DejaVuSans. No fluxo de assinatura digital (`sign_rgpd`), a checkbox escolhida torna-se `☑` (U+2611) — mas no PDF pré-preenchido para assinatura manual, ambas ficam vazias.
+
+---
+
+## Entidade "Cliente" — sem lifecycle (Pacote DG)
+
+A entidade **Cliente** **não possui estado de ciclo de vida** (Ativo/Concluído/Inativo). O conceito de fases/status pertence apenas aos **Processos**. Um cliente é sempre um "Cliente Registado" — o que muda é o número e estado dos seus processos.
+
+| Entidade | Tem `status`? | Tem `fase`? | Lifecycle |
+|---|---|---|---|
+| **Cliente** | ❌ Não | ❌ Não | Apenas `is_deleted` (soft delete) |
+| **Processo** | ✅ Sim (16 fases) | ✅ Sim (`workflow_statuses`) | `pre_registo` → `clientes_espera` → ... → `concluido` |
+
+### Listagem de Clientes
+
+O ecrã de Clientes é uma **lista unificada de "Clientes Registados"** — sem tabs/filtros de Ativos/Concluídos. A métrica útil exibida por cliente é o **número de processos associados** (`client.process_ids.length`), não uma fase.
+
+```jsx
+// ClientsPage.js — coluna "Processos" (Pacote DG)
+<Badge variant="secondary" className="gap-1">
+  <FileText className="h-3 w-3" />
+  {client.process_ids?.length || 0} Processos
+</Badge>
+```
+
+### Soft-delete de Clientes
+
+Todas as queries de listagem/pesquisa de clientes filtram ativamente `is_deleted: {"$ne": True}` (defense-in-depth com `status: {"$ne": "eliminado"}`). O soft-delete (`client_delete.py`) define `is_deleted: True`, `deleted_at: <timestamp>`, `is_active: False`, `status: "eliminado"` — todos os 4 campos para compatibilidade.

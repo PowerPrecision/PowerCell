@@ -9,7 +9,7 @@
 
 import { useState, useEffect, useCallback, useMemo } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { safeLabel } from "../components/dashboard/DashboardShared";
+// PACOTE DG — removido import `safeLabel` (dropdown de Fase removido; clientes não têm fase).
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
@@ -50,8 +50,7 @@ import {
   ArrowUp,
   ArrowDown,
   Filter,
-  CheckCircle,
-  XCircle,
+  // PACOTE DG — removidos ícones `CheckCircle` e `XCircle` (dropdown de Status removido).
   Flame,
   Download,
 } from "lucide-react";
@@ -70,37 +69,8 @@ import { getExportPermission } from "../services/api";
 
 const API_URL = (process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com") + "/api";
 
-/**
- * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
- * Garante contraste legível independentemente da cor do badge.
- */
-const getContrastColor = (bgColor) => {
-  if (!bgColor) return '#ffffff';
-
-  // Mapeamento de nomes de cor para hex
-  const namedColors = {
-    yellow: '#EAB308',
-    orange: '#F97316',
-    blue: '#3B82F6',
-    green: '#22C55E',
-    red: '#EF4444',
-    purple: '#A855F7',
-    gray: '#6B7280',
-    grey: '#6B7280',
-  };
-
-  let hex = namedColors[bgColor?.toLowerCase()] || bgColor;
-  if (!hex.startsWith('#')) return '#ffffff';
-
-  const clean = hex.replace('#', '');
-  const r = parseInt(clean.substring(0, 2), 16);
-  const g = parseInt(clean.substring(2, 4), 16);
-  const b = parseInt(clean.substring(4, 6), 16);
-
-  // Fórmula de luminosidade relativa (WCAG)
-  const luminance = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
-  return luminance > 0.55 ? '#1a1a1a' : '#ffffff';
-};
+// PACOTE DG — removida função `getContrastColor` (só era usada para colorir badges de Fase,
+// que foram removidos; clientes não têm lifecycle states).
 
 export default function ClientsPage() {
   const navigate = useNavigate();
@@ -117,8 +87,8 @@ export default function ClientsPage() {
   const searchTerm = searchParams.get("search") || "";
   const sortField = searchParams.get("sort") || "created_at";
   const sortOrder = searchParams.get("order") || "desc";
-  const statusFilter = searchParams.get("status") || "all";
-  const phaseFilter = searchParams.get("phase") || "all";
+  // PACOTE DG — removidos filtros `statusFilter` (Ativos/Inativos/Eliminados) e `phaseFilter`
+  // (workflow). Clientes não têm lifecycle states — apenas Processos têm.
   const assignmentFilter = searchParams.get("assignment") || "all";
   const indexacaoFilter = searchParams.get("indexacao") || "all";
   const showDeleted = searchParams.get("show_deleted") === "true";
@@ -136,8 +106,7 @@ export default function ClientsPage() {
   };
   
   const setSearchTerm = (v) => updateParam("search", v);
-  const setStatusFilter = (v) => updateParam("status", v);
-  const setPhaseFilter = (v) => updateParam("phase", v);
+  // PACOTE DG — removidos setters `setStatusFilter` e `setPhaseFilter` (filtros removidos).
   const setAssignmentFilter = (v) => updateParam("assignment", v);
   const setIndexacaoFilter = (v) => updateParam("indexacao", v);
 
@@ -149,7 +118,7 @@ export default function ClientsPage() {
     setSearchInput(searchTerm);
   }, [searchTerm]);
   
-  const [availablePhases, setAvailablePhases] = useState([]); // Lista de fases disponíveis
+  // PACOTE DG — removido state `availablePhases` (era populado pelo backend para o dropdown de Fase).
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [showProcessDialog, setShowProcessDialog] = useState(false);
   const [processModalClient, setProcessModalClient] = useState(null);
@@ -178,14 +147,9 @@ export default function ClientsPage() {
       params.append("show_all", "true"); // Mostrar todos os clientes da empresa
       params.append("limit", "500"); // Aumentar limite para ver todos
       if (searchTerm) params.append("search", searchTerm);
-      // Filtro por processos activos
-      if (statusFilter === "active") params.append("has_active_process", "true");
-      if (statusFilter === "inactive") params.append("has_active_process", "false");
-      if (statusFilter === "deleted") {
-        params.append("deleted_only", "true");
-      }
-      // Filtro por fase
-      if (phaseFilter && phaseFilter !== "all") params.append("status_filter", phaseFilter);
+      // PACOTE DG — removidos params `has_active_process`, `deleted_only`, `status_filter`
+      // (filtros de lifecycle/fase não se aplicam a clientes). Mantém-se `exclude_deleted=true`
+      // abaixo para o backend continuar a filtrar clientes eliminados por defeito.
       // Filtro por atribuição
       if (assignmentFilter && assignmentFilter !== "all") params.append("assignment_filter", assignmentFilter);
       // Filtro por indexação
@@ -200,7 +164,7 @@ export default function ClientsPage() {
       if (response.ok) {
         const data = await response.json();
         setClients(data.clients || []);
-        setAvailablePhases(data.available_statuses || []);
+        // PACOTE DG — removido `setAvailablePhases(data.available_statuses || [])` (dropdown de Fase removido).
       } else {
         const errorData = await response.json().catch(() => ({}));
         toast.error(extractErrorMessage(errorData.detail, "Erro ao carregar clientes"));
@@ -211,7 +175,8 @@ export default function ClientsPage() {
     } finally {
       setLoading(false);
     }
-  }, [searchTerm, statusFilter, phaseFilter, assignmentFilter, indexacaoFilter, showDeleted]);
+  // PACOTE DG — deps array: removidos `statusFilter` e `phaseFilter` (filtros removidos).
+  }, [searchTerm, assignmentFilter, indexacaoFilter, showDeleted]);
 
   useEffect(() => {
     fetchClients();
@@ -251,11 +216,10 @@ export default function ClientsPage() {
       if (sortField === "nif") {
         return (c.dados_pessoais?.nif || "").toLowerCase();
       }
-      if (sortField === "fase") {
-        return (c.fase_principal?.status_label || "").toLowerCase();
-      }
+      // PACOTE DG — removido case `fase` (clientes não têm fase). Sort por `process_count`
+      // agora usa `process_ids.length` (total de processos), alinhado com a nova coluna "Processos".
       if (sortField === "process_count") {
-        return c.active_processes_count || 0;
+        return c.process_ids?.length || 0;
       }
       if (sortField === "nome") {
         return (c.nome || "").toLowerCase();
@@ -416,14 +380,15 @@ export default function ClientsPage() {
 
 
   return (
-    <DashboardLayout title="Todos os Clientes">
+    <DashboardLayout title="Clientes Registados">
       <div className="space-y-4 md:space-y-6" data-testid="clients-page">
         {/* Header */}
         <div className="flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
           <div>
             <h1 className="text-2xl font-bold flex items-center gap-2">
               <Users className="h-6 w-6 text-primary" />
-              Todos os Clientes
+              {/* PACOTE DG — título renomeado de "Todos os Clientes" para "Clientes Registados". */}
+              Clientes Registados
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
               Gerir todos os clientes da empresa
@@ -489,51 +454,8 @@ export default function ClientsPage() {
                   </Button>
                 </form>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                <Select value={statusFilter} onValueChange={setStatusFilter}>
-                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="status-filter">
-                    <SelectValue placeholder="Status" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">
-                      <div className="flex items-center gap-2">
-                        <Users className="h-4 w-4" />
-                        Todos os Clientes
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="active">
-                      <div className="flex items-center gap-2">
-                        <CheckCircle className="h-4 w-4 text-green-600" />
-                        Clientes Ativos
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="inactive">
-                      <div className="flex items-center gap-2">
-                        <XCircle className="h-4 w-4 text-gray-400" />
-                        Clientes Inativos
-                      </div>
-                    </SelectItem>
-                    <SelectItem value="deleted">
-                      <div className="flex items-center gap-2">
-                        <Trash2 className="h-4 w-4 text-red-400" />
-                        Clientes Eliminados
-                      </div>
-                    </SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={phaseFilter} onValueChange={setPhaseFilter}>
-                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="phase-filter">
-                    <Filter className="h-4 w-4 mr-2" />
-                    <SelectValue placeholder="Fase" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas as Fases</SelectItem>
-                    {availablePhases.map((phase) => (
-                      <SelectItem key={phase.name} value={phase.name}>
-                        {safeLabel(phase.label)}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
+                {/* PACOTE DG — removidos dropdowns de Status (Ativos/Inativos/Eliminados) e Fase (workflow).
+                    Clientes não têm lifecycle states — apenas Processos têm. */}
                 <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
                   <SelectTrigger className="w-full sm:w-[150px]" data-testid="assignment-filter">
                     <Users className="h-4 w-4 mr-2" />
@@ -583,7 +505,7 @@ export default function ClientsPage() {
                     <SelectItem value="process_count_asc">Menos Processos</SelectItem>
                     <SelectItem value="contacto_asc">Contacto (A-Z)</SelectItem>
                     <SelectItem value="nif_asc">NIF (A-Z)</SelectItem>
-                    <SelectItem value="fase_asc">Fase (A-Z)</SelectItem>
+                    {/* PACOTE DG — removido sort option `fase_asc` "Fase (A-Z)" (clientes não têm fase). */}
                     <SelectItem value="updated_at_desc">Última Atualização</SelectItem>
                   </SelectContent>
                 </Select>
@@ -612,9 +534,10 @@ export default function ClientsPage() {
                 </div>
                 <div>
                   <p className="text-2xl font-bold">
-                    {clients.filter((c) => c.active_processes_count > 0).length}
+                    {/* PACOTE DG — métrica agora usa `process_ids.length` (total de processos, não só ativos). */}
+                    {clients.reduce((s, c) => s + (c.process_ids?.length || 0), 0)}
                   </p>
-                  <p className="text-xs text-muted-foreground">Com Processos Activos</p>
+                  <p className="text-xs text-muted-foreground">Total de Processos</p>
                 </div>
               </div>
             </CardContent>
@@ -683,11 +606,7 @@ export default function ClientsPage() {
                             {isAlta && <span className="mr-1">🔥</span>}
                             {client.nome}
                           </button>
-                          {(!client.is_active || !client.active_processes_count || client.active_processes_count === 0) && (
-                            <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px] mt-0.5">
-                              Inativo
-                            </Badge>
-                          )}
+                          {/* PACOTE DG — removido badge "Inativo" (clientes não têm estado activo/inactivo). */}
                           {client.contacto?.email && (
                             <p className="text-xs text-muted-foreground truncate">{client.contacto.email}</p>
                           )}
@@ -699,33 +618,11 @@ export default function ClientsPage() {
                             <Flame className="h-2.5 w-2.5" /> Alta
                           </Badge>
                         )}
-                        {client.active_processes?.length > 0 ? (
-                          <div className="flex flex-wrap gap-1 justify-end">
-                            {client.active_processes.map((ap, i) => (
-                              <Badge
-                                key={i}
-                                className="text-[10px]"
-                                style={{
-                                  backgroundColor: ap.status_color || '#6B7280',
-                                  color: getContrastColor(ap.status_color),
-                                }}
-                                title={`${ap.ref} — ${ap.status_label}`}
-                              >
-                                {ap.ref}: {ap.status_label}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : client.fase_principal ? (
-                          <Badge 
-                            className="text-[10px]"
-                            style={{ 
-                              backgroundColor: client.fase_principal.status_color || '#6B7280',
-                              color: getContrastColor(client.fase_principal.status_color),
-                            }}
-                          >
-                            {client.fase_principal.status_label}
-                          </Badge>
-                        ) : null}
+                        {/* PACOTE DG — badge "Fase" substituído por badge "Processos" (total de processos do cliente). */}
+                        <Badge variant="secondary" className="gap-1 text-[10px]">
+                          <FileText className="h-3 w-3" />
+                          {client.process_ids?.length || 0} Processo{(client.process_ids?.length || 0) !== 1 ? 's' : ''}
+                        </Badge>
                       </div>
                     </div>
                     <div className="flex items-center justify-between text-xs text-muted-foreground">
@@ -802,15 +699,8 @@ export default function ClientsPage() {
                           <SortIcon field="nif" />
                         </span>
                       </TableHead>
-                      <TableHead 
-                        className="cursor-pointer hover:bg-muted select-none" 
-                        onClick={() => toggleSort("fase")}
-                      >
-                        <span className="flex items-center">
-                          Fase
-                          <SortIcon field="fase" />
-                        </span>
-                      </TableHead>
+                      {/* PACOTE DG — coluna "Fase" substituída por "Processos" (clientes não têm fase). */}
+                      <TableHead className="text-center">Processos</TableHead>
                       <TableHead className="text-right">Acções</TableHead>
                     </TableRow>
                   </TableHeader>
@@ -846,11 +736,7 @@ export default function ClientsPage() {
                                   <Flame className="h-3 w-3" /> Prioridade Alta
                                 </Badge>
                               )}
-                              {(!client.is_active || !client.active_processes_count || client.active_processes_count === 0) && (
-                                <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px]">
-                                  Inativo
-                                </Badge>
-                              )}
+                              {/* PACOTE DG — removido badge "Inativo" (clientes não têm estado activo/inactivo). */}
                             </div>
                             {client.fonte && (
                               <Badge variant="outline" className="text-xs mt-1">
@@ -888,41 +774,12 @@ export default function ClientsPage() {
                           <span className="text-muted-foreground text-sm">-</span>
                         )}
                       </TableCell>
-                      <TableCell>
-                        {client.active_processes?.length > 0 ? (
-                          <div className="flex flex-wrap gap-1">
-                            {client.active_processes.map((ap, i) => (
-                              <Badge
-                                key={i}
-                                style={{
-                                  backgroundColor: ap.status_color || '#6B7280',
-                                  color: getContrastColor(ap.status_color),
-                                  fontSize: '11px'
-                                }}
-                                title={`${ap.ref} — ${ap.status_label}`}
-                              >
-                                {ap.ref}: {ap.status_label}
-                              </Badge>
-                            ))}
-                          </div>
-                        ) : client.fase_principal ? (
-                          <div className="flex flex-col gap-1">
-                            <Badge 
-                              style={{ 
-                                backgroundColor: client.fase_principal.status_color || '#6B7280',
-                                color: getContrastColor(client.fase_principal.status_color),
-                                fontSize: '11px'
-                              }}
-                            >
-                              {client.fase_principal.status_label}
-                            </Badge>
-                            {!client.fase_principal.is_active && (
-                              <span className="text-xs text-muted-foreground">(Inactivo)</span>
-                            )}
-                          </div>
-                        ) : (
-                          <span className="text-muted-foreground text-sm">-</span>
-                        )}
+                      {/* PACOTE DG — cell "Fase" substituída por cell "Processos" com Badge secundário (token semântico). */}
+                      <TableCell className="text-center">
+                        <Badge variant="secondary" className="gap-1">
+                          <FileText className="h-3 w-3" />
+                          {client.process_ids?.length || 0} Processo{(client.process_ids?.length || 0) !== 1 ? 's' : ''}
+                        </Badge>
                       </TableCell>
                       <TableCell className="text-right">
                         <DropdownMenu>

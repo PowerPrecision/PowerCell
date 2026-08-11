@@ -152,7 +152,8 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
         else:
             client_search_conditions.append({"contacto.telefone": simple_regex})
 
-        client_query = {"$or": client_search_conditions}
+        # PACOTE DG — excluir clientes eliminados (soft-delete) da pesquisa global.
+        client_query = {"$or": client_search_conditions, "is_deleted": {"$ne": True}}
 
         clients = await db.clients.find(
             client_query,

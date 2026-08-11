@@ -319,8 +319,13 @@ async def run_get_process_clients(process_id: str) -> dict[str, Any]:
     if not client_ids:
         return {"clients": [], "total": 0}
 
+    # PACOTE DG — excluir clientes eliminados (soft-delete) da lista de
+    # clientes associados a um processo (defesa em profundidade).
     clients = await db.clients.find(
-        {"id": {"$in": client_ids}},
+        {"$and": [
+            {"id": {"$in": client_ids}},
+            {"is_deleted": {"$ne": True}},
+        ]},
         {"_id": 0},
     ).to_list(length=10)
     # PACOTE DD — desencriptar campos sensíveis (NIF/telefone/documento_id)

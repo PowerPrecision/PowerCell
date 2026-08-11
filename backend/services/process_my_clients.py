@@ -221,8 +221,9 @@ async def fetch_orphan_leads_for_my_clients(
     if role not in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
         return []
     from services.encryption import decrypt_clients_list
+    # PACOTE DG — excluir clientes eliminados (soft-delete) da lista de leads órfãos.
     leads_cursor = await db.clients.find(
-        leads_query_builder(user_id),
+        {"$and": [leads_query_builder(user_id), {"is_deleted": {"$ne": True}}]},
         LEAD_CLIENTS_PROJECTION,
     ).to_list(500)
     leads_cursor = decrypt_clients_list(leads_cursor)

@@ -3320,3 +3320,31 @@ Stage Summary:
   - ARCHITECTURE.md (secção Separação User vs Role)
   - FRONTEND_GUIDELINES.md (secção 10)
 - Resultado: (1) Perfis fantasma eliminados — tabs geradas 100% de user.companies. (2) "Conta principal" removida — sem "default" sintético. (3) Área Pessoal dividida: Conta Global (login, password, sessões) + uma aba por UCR (dados profissionais, assinatura, webmail). (4) Backend: notification_preferences per-UCR com fallback global; display_name no modelo UCR. (5) Docs atualizadas com separação estrita User vs Role.
+
+
+---
+Task ID: Pacote DG (RGPD PDF Multi-página + Clientes Sem Lifecycle)
+Agent: Main Agent (Z.ai Code Assistant) + 4 subagentes (2 Explore + 2 Implementação)
+Task: Corrigir PDF RGPD (paginação + template dinâmico + linhas em branco + checkboxes vazias + sem data/local) + filtrar clientes eliminados + remover lifecycle de clientes no frontend.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 5c88507b = Pacote DF).
+- 2 subagentes Explore: DG-1-Explore (RGPD PDF — confirmou 5 flaws: _build_rgpd_pdf ignora rgpd_text, sem paginação, N/A, data pré-preenchida, checkboxes pré-picas) + DG-2-Explore (client listing — confirmou 6 serviços sem is_deleted filter + ClientsPage com tabs/fase errados).
+- 2 subagentes Implementação: DG-Backend (8 ficheiros — novo builder platypus + is_deleted filter em 6 serviços) + DG-Frontend (1 ficheiro — ClientsPage sem tabs/fase + coluna Processos). Smoke test confirma paginação em 2 páginas.
+- Validação final: py_compile ✓ (8 backend), flake8 0 erros, bun build ✓ (1 frontend).
+- Documentação: ARCHITECTURE.md 2 secções (PDF assinatura manual + Cliente sem lifecycle) + CHANGELOG.
+- Verificação de tokens: 0 ocorrências de padrão de token no diff.
+
+Stage Summary:
+- 10 ficheiros modificados (8 backend + 1 frontend + 1 doc):
+  - backend/services/rgpd_pdf.py (NOVO builder _build_prefilled_rgpd_pdf com platypus + DejaVuSans + _blank_line + CONSENT_OPTIONS_DG)
+  - backend/services/rgpd_service.py (get_tipo_documento_label sem N/A + placeholders MORADA_EMPRESA/CONTACTO_EMPRESA/NOME_EMPRESA)
+  - backend/services/client_list_search.py (is_deleted filter em search + list)
+  - backend/services/search_api_global.py (is_deleted filter)
+  - backend/services/process_my_clients.py (is_deleted filter)
+  - backend/services/process_kanban_enrichment.py (is_deleted filter)
+  - backend/services/process_clients_nm.py (is_deleted filter)
+  - backend/services/my_clients_api_list.py (verificado — já tinha filter)
+  - frontend/src/pages/ClientsPage.js (removidos Status/Phase Selects + coluna Fase + badges Inativo; adicionada coluna Processos; título "Clientes Registados")
+  - ARCHITECTURE.md (2 secções)
+- Resultado: (1) PDF RGPD pré-preenchido usa template dinâmico com paginação automática (2+ páginas), linhas em branco para campos nulos, checkboxes vazias ☐, data/local em branco. (2) Clientes eliminados não aparecem em nenhuma listagem/pesquisa. (3) ClientsPage é uma lista unificada "Clientes Registados" com coluna "Nº Processos" — sem tabs de lifecycle. (4) Docs atualizadas.

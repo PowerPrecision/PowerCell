@@ -3,6 +3,35 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DG: RGPD PDF Multi-página + Clientes Sem Lifecycle
+
+### Corrigido
+- **RGPD PDF cortava texto e desformatava**: o endpoint `GET /api/rgpd/pdf/{process_id}` usava `reportlab Canvas` (baixo nível) que não paginava automaticamente e **ignorava o template dinâmico** (usava texto hardcoded). Novo builder `_build_prefilled_rgpd_pdf` em `services/rgpd_pdf.py` usa `reportlab.platypus` (`SimpleDocTemplate` + `Paragraph` + `Spacer` + `HRFlowable`) com **paginação automática** — o template de 11 secções ocupa agora 2+ páginas sem cortes. Fonte **DejaVuSans** (TTF) registada para suportar acentos portugueses e `☐` (Unicode).
+- **"N/A" em campos nulos**: quando um dado do cliente falta (morada, NIF, etc.), o PDF imprime agora uma **linha em branco contínua** (`___________________`) para preenchimento à caneta, em vez de "N/A" ou string vazia. `get_tipo_documento_label` retorna `""` (em vez de "N/A") para campos vazios.
+- **Data e Local pré-preenchidos**: `{{DATA_ASSINATURA}}` substituído por `___/___/______` e o local por `___________________` — o cliente preenche à caneta.
+- **Checkboxes pré-picas**: os 4 pontos de consentimento (A/B/C/D) usam agora checkboxes **vazias** `☐` (U+2610) para o cliente picar fisicamente. Antes, o `consent_data` sintético (sem `consent_a/b/c/d`) fazia com que "Não Autorizo" ficasse picado em todas as opções.
+- **Placeholders `{{MORADA_EMPRESA}}`/`{{CONTACTO_EMPRESA}}` não substituídos**: `_get_rendered_rgpd_text` agora substitui estes placeholders (antes só o fazia o renderer da Minuta). `{{NOME_EMPRESA}}` também substituído a partir de `system_config`.
+- **Clientes eliminados apareciam na listagem**: 6 serviços de listagem/pesquisa não filtravam `is_deleted`. Adicionado `"is_deleted": {"$ne": True}` (defense-in-depth com `status: {"$ne": "eliminado"}`) em: `client_list_search.py` (search + list), `search_api_global.py`, `process_my_clients.py`, `process_kanban_enrichment.py`, `process_clients_nm.py`.
+
+### Alterado
+- **ClientsPage — sem tabs de Ativos/Concluídos**: removidos o Status Select (Todos/Ativos/Inativos/Eliminados) e o Phase Select (fases do workflow). Clientes não têm lifecycle — apenas Processos têm. O ecrã é agora uma **lista unificada de "Clientes Registados"**.
+- **Coluna "Fase" removida**: a tabela deixou de mostrar `client.fase_principal.status_label` (que era uma fase de processo apresentada como atributo do cliente). Substituída por uma coluna **"Processos"** com `<Badge variant="secondary">{process_ids.length} Processos</Badge>`.
+- **Badges "Inativo" removidos** (mobile + desktop) — o conceito não se aplica a clientes.
+- **Stat card renomeado**: "Com Processos Activos" → "Total de Processos" (soma de `process_ids.length` de todos os clientes).
+- **Sort option `fase_asc` removida**; `getSortValue` para `process_count` agora usa `process_ids.length` (total, não só ativos).
+- `ClientsPage.js` reduzida de 997 → 855 linhas (remoção de dropdowns, estado, e helpers não usados).
+
+### Documentação
+- **`ARCHITECTURE.md`**: 2 novas secções: (1) "PDFs Gerados para Assinatura Manual" — template dinâmico + paginação automática (platypus), fallbacks de linhas em branco, checkboxes vazias `☐`, fonte DejaVuSans; (2) "Entidade Cliente — sem lifecycle" — tabela Cliente vs Processo (lifecycle), listagem unificada, soft-delete.
+
+### Técnico
+- **Backend modificado** (8 ficheiros): `services/rgpd_pdf.py` (novo builder platypus + helpers), `services/rgpd_service.py` (get_tipo_documento_label + placeholders empresa), `services/client_list_search.py` (is_deleted filter), `services/search_api_global.py`, `services/process_my_clients.py`, `services/process_kanban_enrichment.py`, `services/process_clients_nm.py`, `services/my_clients_api_list.py` (verificado).
+- **Frontend modificado** (1 ficheiro): `pages/ClientsPage.js` (remoção tabs/fase + coluna Processos).
+- **Documentação** (1 ficheiro): `ARCHITECTURE.md`.
+- **Validação**: `py_compile` ✓ (8 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (1 frontend, 0 erros); smoke test do novo builder confirma **paginação em 2 páginas** com template longo.
+- **Dependências**: Nenhuma nova — `reportlab.platypus` já faz parte de `reportlab==4.2.5`; DejaVuSans disponível na Docker image Playwright.
+- **Backward compat**: o antigo `_build_rgpd_pdf` (Canvas) foi mantido intacto — continua a ser usado pelo fluxo de assinatura digital (`sign_rgpd`). O novo `_build_prefilled_rgpd_pdf` é usado apenas pelo endpoint de PDF pré-preenchido para assinatura manual.
+
 ## [2026-07-25] — Pacote DF: Área Pessoal — User Global vs Role/Perfil
 
 ### Corrigido

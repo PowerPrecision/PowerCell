@@ -37,15 +37,18 @@ TIPOS_DOCUMENTO_LABELS = {
 def get_tipo_documento_label(tipo_documento: str) -> str:
     """
     Converte o valor do enum tipo_documento para um formato legível.
-    
+
     Args:
         tipo_documento: Valor do enum (ex: "cartao_de_cidadao")
-    
+
     Returns:
         Label formatado (ex: "Cartão de Cidadão")
     """
+    # PACOTE DG — não retornar "N/A" para campo vazio; retornar "" para que o
+    # template RGPD mostre a linha em branco "_____" (definida em consent_data),
+    # em vez de "Titular do N/A n.o ..." no PDF pré-preenchido para assinatura manual.
     if not tipo_documento:
-        return "N/A"
+        return ""
     return TIPOS_DOCUMENTO_LABELS.get(tipo_documento, tipo_documento)
 
 
@@ -717,8 +720,41 @@ async def _get_rendered_rgpd_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
+    # PACOTE DG — Obter dados da empresa a partir de system_config
+    # (paridade com `_get_rendered_minuta_text`). Usado para substituir
+    # {{NOME_EMPRESA}}, {{MORADA_EMPRESA}} e {{CONTACTO_EMPRESA}} que
+    # estão presentes no RGPD_DEFAULT_TEMPLATE (secção 1. RESPONSÁVEL).
+    # Anteriormente estes placeholders NÃO eram substituídos no RGPD
+    # (só na minuta), ficando literais no texto.
+    empresa_nome = "Power Real Estate, Lda."
+    empresa_morada = ""
+    empresa_contacto = ""
+    try:
+        config = await db.system_config.find_one(
+            {"_id": "main"},
+            {"_id": 0, "settings.empresa_nome": 1, "settings.company_name": 1,
+             "settings.company_address": 1, "settings.company_phone": 1}
+        )
+        if config:
+            settings = config.get("settings", {})
+            if settings.get("empresa_nome"):
+                empresa_nome = settings["empresa_nome"]
+            if settings.get("company_name"):
+                empresa_nome = settings["company_name"]
+            if settings.get("company_address"):
+                empresa_morada = settings["company_address"]
+            if settings.get("company_phone"):
+                empresa_contacto = settings["company_phone"]
+    except Exception:
+        pass
+
     rendered = rendered.replace("{{NOME_CLIENTE}}", client_name)
     rendered = rendered.replace("{{NOME}}", client_name)
+    # PACOTE DG — NOME_EMPRESA / MORADA_EMPRESA / CONTACTO_EMPRESA agora
+    # substituídos (antes ficavam literais no template RGPD).
+    rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
+    rendered = rendered.replace("{{MORADA_EMPRESA}}", empresa_morada)
+    rendered = rendered.replace("{{CONTACTO_EMPRESA}}", empresa_contacto)
     rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
     rendered = rendered.replace("{{MORADA}}", consent_data.get("morada", personal_data.get("morada_fiscal", "")))
     rendered = rendered.replace("{{LOCALIDADE}}", localidade)
