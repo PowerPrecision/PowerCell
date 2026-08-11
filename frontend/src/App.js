@@ -10,7 +10,7 @@ import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { hasRole, hasAnyRole, hasPermission, STAFF_ROLES } from "./utils/roleUtils";
+import { hasRole, hasPermission, STAFF_ROLES } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
@@ -33,10 +33,8 @@ import ClientPortal from "./pages/ClientPortal";
 // PÁGINAS PESADAS COM CODE SPLITTING (lazy loading)
 // ====================================================================
 // Páginas lazy-loaded para reduzir o bundle inicial:
-// - StaffDashboard: 44KB (gráficos e estatísticas)
-// - KanbanPage: importa bibliotecas de drag-drop (@dnd-kit)
+// - KanbanPage: usa drag-drop HTML5 nativo (sem biblioteca externa)
 // - ProcessDetails: 164KB (o maior componente da aplicação!)
-const StaffDashboard = React.lazy(() => import("./pages/StaffDashboard"));
 const ConsultorDashboard = React.lazy(() => import("./pages/ConsultorDashboard"));
 const KanbanPage = React.lazy(() => import("./pages/KanbanPage"));
 const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
@@ -88,6 +86,8 @@ const DraftsPage = React.lazy(() => import("./pages/DraftsPage"));
 const TemplatesPage = React.lazy(() => import("./pages/TemplatesPage"));
 const FilesExplorerPage = React.lazy(() => import("./pages/FilesExplorerPage"));
 const BranchPerformancePage = React.lazy(() => import("./pages/BranchPerformancePage"));
+// PACOTE DD — removido (Calculadoras passou a Sheet global no DashboardLayout)
+// const CalculatorsPage = React.lazy(() => import("./pages/CalculatorsPage"));
 
 // ====================================================================
 // LOADING SKELETON PARA PÁGINAS LAZY
@@ -764,6 +764,19 @@ function App() {
             }
           />
 
+          {/* PACOTE DD — removido (Calculadoras passou a Sheet global no DashboardLayout)
+          <Route
+            path="/calculadoras"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <RouteBoundary name="Calculadoras">
+                  <CalculatorsPage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          */}
+
           {/* RGPD Admin - Redirecionar para página dedicada */}
           <Route
             path="/admin/rgpd"
@@ -898,7 +911,7 @@ function App() {
         <ImpersonateBanner />
         <GlobalUploadProgress />
       </BrowserRouter>
-      <Toaster position="bottom-right" richColors closeButton offset="20px" />
+      <Toaster position="bottom-right" richColors closeButton offset="20px" visibleToasts={8} />
       </TasksProvider>
       </UploadProgressProvider>
     </AuthProvider>
@@ -910,7 +923,7 @@ function App() {
 }
 
 // Error Boundary fallback - mostrado quando React crasha
-function ErrorFallback({ error, componentStack, resetError, eventId }) {
+function ErrorFallback({ resetError }) {
   return (
     <div className="min-h-screen flex items-center justify-center bg-gray-50 dark:bg-gray-950 p-4">
       <div className="max-w-md w-full text-center space-y-4">

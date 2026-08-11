@@ -38,7 +38,6 @@
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
-import { queryClient } from "../lib/queryClient";
 
 const AuthContext = createContext(null);
 
@@ -57,12 +56,12 @@ const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
 // Constantes para refresh tokens
 const TOKEN_REFRESH_THRESHOLD = 2 * 60 * 1000; // 2 minutos antes de expirar
-const TOKEN_CHECK_INTERVAL = 60 * 1000; // Verificar a cada 60 segundos
+// Verificar a cada 60 segundos
 
 export function AuthProvider({ children }) {
   const [user, setUser] = useState(null);
   const [token, setToken] = useState(localStorage.getItem("token"));
-  const [refreshToken, setRefreshToken] = useState(localStorage.getItem("refreshToken"));
+  const [, setRefreshToken] = useState(localStorage.getItem("refreshToken"));
   const [loading, setLoading] = useState(true);
   const [isImpersonating, setIsImpersonating] = useState(false);
   const [originalAdminName, setOriginalAdminName] = useState(null);

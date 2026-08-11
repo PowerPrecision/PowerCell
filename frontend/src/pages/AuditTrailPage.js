@@ -8,14 +8,13 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import {
   Card,
   CardContent,
   CardHeader,
   CardTitle,
-  CardDescription,
 } from "../components/ui/card";
 import { Badge } from "../components/ui/badge";
 import { Button } from "../components/ui/button";
@@ -49,9 +48,11 @@ import {
   ChevronRight,
   FileText,
 } from "lucide-react";
-import { getAuditTrail, getAuditStats, exportAuditTrail, cleanupAuditTrail } from "../services/api";
-import { toast } from "../hooks/use-toast";
+import { exportAuditTrail, cleanupAuditTrail } from "../services/api";
+import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
+import { useAuditTrailQuery, buildAuditTrailFilterParams } from "../hooks/queries/useAuditTrailQuery";
+import { useAuditStatsQuery } from "../hooks/queries/useAuditStatsQuery";
 
 // Mapeamento de cores para badges de origem
 const sourceConfig = {
@@ -72,13 +73,8 @@ function truncate(str, maxLen = 60) {
 
 const AuditTrailPage = ({ embedded = false }) => {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout title="Auditoria">{children}</DashboardLayout>;
-  const [events, setEvents] = useState([]);
-  const [stats, setStats] = useState(null);
-  const [loading, setLoading] = useState(true);
   const [exporting, setExporting] = useState(false);
   const [page, setPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(0);
-  const [total, setTotal] = useState(0);
 
   // Filtros
   const [filterProcessId, setFilterProcessId] = useState("");
@@ -87,76 +83,49 @@ const AuditTrailPage = ({ embedded = false }) => {
   const [filterDateTo, setFilterDateTo] = useState("");
   const [filterAction, setFilterAction] = useState("");
 
-  // Carregar dados de auditoria
-  const fetchAuditTrail = useCallback(async () => {
-    setLoading(true);
-    try {
-      const params = {
-        page,
-        page_size: 50,
-      };
-      if (filterProcessId.trim()) params.process_id = filterProcessId.trim();
-      if (filterSource && filterSource !== "all") params.source = filterSource;
-      if (filterDateFrom) params.date_from = new Date(filterDateFrom).toISOString();
-      if (filterDateTo) {
-        const d = new Date(filterDateTo);
-        d.setHours(23, 59, 59, 999);
-        params.date_to = d.toISOString();
-      }
-      if (filterAction.trim()) params.action_type = filterAction.trim();
+  // ── Dados de servidor via TanStack Query (hooks dedicados) ────
+  const {
+    events,
+    totalPages,
+    total,
+    isLoading: loading,
+    isError: trailError,
+    refetch: fetchAuditTrail,
+  } = useAuditTrailQuery({
+    page,
+    filterProcessId,
+    filterSource,
+    filterDateFrom,
+    filterDateTo,
+    filterAction,
+  });
 
-      const response = await getAuditTrail(params);
-      setEvents(response.data.items || []);
-      setTotalPages(response.data.total_pages || 0);
-      setTotal(response.data.total || 0);
-    } catch (error) {
-      console.error("Erro ao carregar audit trail:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro",
+  const { stats, refetch: fetchStats } = useAuditStatsQuery();
+
+  useEffect(() => {
+    if (trailError) {
+      toast.error("Erro", {
         description: "Não foi possível carregar os registos de auditoria.",
       });
-    } finally {
-      setLoading(false);
     }
-  }, [page, filterProcessId, filterSource, filterDateFrom, filterDateTo, filterAction]);
-
-  // Carregar estatísticas
-  const fetchStats = useCallback(async () => {
-    try {
-      const response = await getAuditStats();
-      setStats(response.data);
-    } catch (error) {
-      console.error("Erro ao carregar estatísticas:", error);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchAuditTrail();
-  }, [fetchAuditTrail]);
-
-  useEffect(() => {
-    fetchStats();
-  }, [fetchStats]);
+  }, [trailError]);
 
   // Reset para página 1 ao mudar filtros
   useEffect(() => {
     setPage(1);
   }, [filterProcessId, filterSource, filterDateFrom, filterDateTo, filterAction]);
 
-  // Exportar CSV
+  // Exportar CSV — reutiliza os mesmos filtros da listagem (sem paginação)
   const handleExport = async () => {
     setExporting(true);
     try {
-      const params = {};
-      if (filterProcessId.trim()) params.process_id = filterProcessId.trim();
-      if (filterSource && filterSource !== "all") params.source = filterSource;
-      if (filterDateFrom) params.date_from = new Date(filterDateFrom).toISOString();
-      if (filterDateTo) {
-        const d = new Date(filterDateTo);
-        d.setHours(23, 59, 59, 999);
-        params.date_to = d.toISOString();
-      }
+      const params = buildAuditTrailFilterParams({
+        filterProcessId,
+        filterSource,
+        filterDateFrom,
+        filterDateTo,
+        filterAction,
+      });
 
       const response = await exportAuditTrail(params);
       const url = window.URL.createObjectURL(new Blob([response.data]));
@@ -167,12 +136,10 @@ const AuditTrailPage = ({ embedded = false }) => {
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      toast({ title: "Exportação concluída", description: "Ficheiro CSV descarregado com sucesso." });
+      toast.success("Exportação concluída", { description: "Ficheiro CSV descarregado com sucesso." });
     } catch (error) {
       console.error("Erro ao exportar:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro",
+      toast.error("Erro", {
         description: "Não foi possível exportar os registos.",
       });
     } finally {
@@ -186,17 +153,14 @@ const AuditTrailPage = ({ embedded = false }) => {
     try {
       const response = await cleanupAuditTrail();
       const deleted = response.data.deleted_count;
-      toast({
-        title: "Limpeza concluída",
+      toast.success("Limpeza concluída", {
         description: `${deleted} registos antigos foram eliminados.`,
       });
       fetchAuditTrail();
       fetchStats();
     } catch (error) {
       console.error("Erro na limpeza:", error);
-      toast({
-        variant: "destructive",
-        title: "Erro",
+      toast.error("Erro", {
         description: "Não foi possível efectuar a limpeza.",
       });
     }
@@ -229,13 +193,20 @@ const AuditTrailPage = ({ embedded = false }) => {
             <Download className="h-4 w-4 mr-1" />
             {exporting ? "A exportar..." : "Exportar CSV"}
           </Button>
-          <Button variant="outline" size="sm" onClick={handleCleanup} className="text-red-600 hover:text-red-700">
-            <Trash2 className="h-4 w-4 mr-1" />
-            Limpar Antigos
-          </Button>
-          <Button variant="outline" size="sm" onClick={() => { fetchAuditTrail(); fetchStats(); }}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              fetchAuditTrail();
+              fetchStats();
+            }}
+          >
             <RefreshCw className="h-4 w-4 mr-1" />
             Actualizar
+          </Button>
+          <Button variant="destructive" size="sm" onClick={handleCleanup}>
+            <Trash2 className="h-4 w-4 mr-1" />
+            Limpar antigos
           </Button>
         </div>
       </div>

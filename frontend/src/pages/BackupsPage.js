@@ -2,7 +2,7 @@
  * BackupsPage - Gestão de Backups
  * Interface para administradores criarem e restaurarem backups
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -23,8 +23,6 @@ import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
 import {
   Database,
-  Download,
-  Upload,
   RefreshCw,
   CheckCircle,
   XCircle,
@@ -160,7 +158,7 @@ const BackupsPage = ({ embedded = false }) => {
       } else {
         throw new Error("Erro ao iniciar backup");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao iniciar backup");
       setBackupInProgress(false);
     }
@@ -187,7 +185,7 @@ const BackupsPage = ({ embedded = false }) => {
           toast.warning("Verificação concluída - Existem problemas");
         }
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao verificar backups");
     } finally {
       setVerifying(false);
@@ -222,7 +220,7 @@ const BackupsPage = ({ embedded = false }) => {
         const detail = data.detail || data.errors?.join("; ") || "Erro desconhecido";
         toast.error(`Erro no restauro: ${detail}`);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de ligação ao restaurar backup");
     } finally {
       setRestoring(false);

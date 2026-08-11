@@ -137,7 +137,7 @@ const KanbanPage = () => {
       const filename = `PowerCell_Processos_${new Date().toISOString().slice(0,10)}.xlsx`;
       XLSX.writeFile(wb, filename);
       toast.success(`${allProcesses.length} processos exportados com sucesso!`);
-    } catch (err) {
+    } catch {
       toast.error('Erro ao exportar Excel');
     } finally {
       setExporting(false);

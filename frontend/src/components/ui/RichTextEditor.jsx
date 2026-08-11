@@ -4,9 +4,10 @@
  * Wrapper do React Quill com estilos consistentes com Tailwind/Shadcn.
  * Suporta tabelas responsivas, formatação rica e é completamente reutilizável.
  */
-import React, { useMemo, useCallback } from 'react';
+import { useMemo, useCallback } from 'react';
 import ReactQuill from 'react-quill-new';
 import 'quill/dist/quill.snow.css';
+import { sanitizeEmailHtml } from '../../utils/sanitize';
 
 // Estilos customizados para o editor
 const editorStyles = `
@@ -257,15 +258,7 @@ const RichTextEditor = ({
  * @param {string} className - Classes adicionais
  */
 export const RichTextViewer = ({ html = '', className = '' }) => {
-  // Sanitizar HTML para segurança (básico - usar DOMPurify em produção)
-  const sanitizeHtml = (htmlString) => {
-    // Remover scripts e eventos inline perigosos
-    return htmlString
-      .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-      .replace(/on\w+="[^"]*"/gi, '')
-      .replace(/on\w+='[^']*'/gi, '');
-  };
-
+  // Sanitização robusta via DOMPurify (utils/sanitize) para prevenir XSS.
   const viewerStyles = `
     .rich-text-viewer {
       font-family: 'Segoe UI', Arial, sans-serif;
@@ -325,7 +318,7 @@ export const RichTextViewer = ({ html = '', className = '' }) => {
       <style>{viewerStyles}</style>
       <div 
         className={`rich-text-viewer ${className}`}
-        dangerouslySetInnerHTML={{ __html: sanitizeHtml(html) }}
+        dangerouslySetInnerHTML={{ __html: sanitizeEmailHtml(html) }}
       />
     </>
   );

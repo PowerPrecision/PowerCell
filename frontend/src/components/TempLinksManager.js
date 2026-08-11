@@ -241,7 +241,7 @@ const TempLinksManager = ({ processId, clientName, clientEmail }) => {
         toast.success("Link cancelado");
         loadLinks();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao cancelar link");
     }
   };

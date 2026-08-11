@@ -32,19 +32,15 @@ import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
-import { ScrollArea } from "../components/ui/scroll-area";
 import { useAuth } from "../contexts/AuthContext";
-import { 
-  FolderOpen, Loader2, CheckCircle, XCircle, FileText, 
+import { FileText, 
   Calendar as CalendarIcon, Eye, Sparkles, LayoutGrid, Search, ClipboardList, Building,
-  TrendingUp, DollarSign, Clock, Target, Activity, ArrowRight, ChevronRight,
+  TrendingUp, DollarSign, Target, Activity, ChevronRight,
   MessageSquare, Inbox, BarChart3
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO } from "date-fns";
-import { pt } from "date-fns/locale";
 import { 
-  getStats, getUsers, getWorkflowStatuses, getOneDriveStatus, 
+  getStats, getUsers, getWorkflowStatuses, 
   getProcesses, getCalendarDeadlines, createDeadline, deleteDeadline, getUpcomingExpiries,
   getActivities, getCommunicationsFeed
 } from "../services/api";
@@ -55,7 +51,6 @@ import KanbanBoard from "../components/KanbanBoard";
 import LeadsKanban from "../components/LeadsKanban";
 import CalendarTab from "../components/admin/CalendarTab";
 import DocumentsTab from "../components/admin/DocumentsTab";
-import UsersTab from "../components/admin/UsersTab";
 import ClientSearchTab from "../components/admin/ClientSearchTab";
 import CreateEventDialog from "../components/admin/CreateEventDialog";
 import AIAnalysisTab from "../components/admin/AIAnalysisTab";
@@ -64,23 +59,23 @@ import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
 import TeamPerformanceTab from "../components/admin/TeamPerformanceTab";
-import { hasAnyRole, filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
 
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({});
+  const [, setStats] = useState({});
   const [users, setUsers] = useState([]);
   const [processes, setProcesses] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
-  const [storageStatus, setStorageStatus] = useState(null);
+  const [, setStorageStatus] = useState(null);
   const [calendarDeadlines, setCalendarDeadlines] = useState([]);
   const [upcomingExpiries, setUpcomingExpiries] = useState([]);
   const [staleStats, setStaleStats] = useState(null);
   const [showStaleList, setShowStaleList] = useState(false);
-  const [recentActivities, setRecentActivities] = useState([]);
+  const [, setRecentActivities] = useState([]);
   const [commsFeed, setCommsFeed] = useState({ portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 });
 
   // ── Derived data com fallbacks defensivos (Bloco B: anti-crash) ──
@@ -621,7 +616,7 @@ const AdminDashboard = () => {
                   <div className="space-y-2">
                     <Label>Filtrar por Consultor</Label>
                     <Select value={consultorFilter} onValueChange={setConsultorFilter}>
-                      <SelectTrigger><SelectValue placeholder="Todos os consultores" /></SelectTrigger>
+                      <SelectTrigger aria-label="Filtrar por consultor"><SelectValue placeholder="Todos os consultores" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os consultores</SelectItem>
                         <SelectItem value="none">Nenhum (sem consultor)</SelectItem>
@@ -632,7 +627,7 @@ const AdminDashboard = () => {
                   <div className="space-y-2">
                     <Label>Filtrar por Intermediário</Label>
                     <Select value={mediadorFilter} onValueChange={setMediadorFilter}>
-                      <SelectTrigger><SelectValue placeholder="Todos os intermediários" /></SelectTrigger>
+                      <SelectTrigger aria-label="Filtrar por intermediário"><SelectValue placeholder="Todos os intermediários" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os intermediários</SelectItem>
                         <SelectItem value="none">Nenhum (sem intermediário)</SelectItem>
@@ -643,7 +638,7 @@ const AdminDashboard = () => {
                   <div className="space-y-2">
                     <Label>Filtrar por Indexação</Label>
                     <Select value={indexacaoFilter} onValueChange={setIndexacaoFilter}>
-                      <SelectTrigger><SelectValue placeholder="Todos os indexação" /></SelectTrigger>
+                      <SelectTrigger aria-label="Filtrar por indexação"><SelectValue placeholder="Todos os indexação" /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="all">Todos os Indexação</SelectItem>
                         <SelectItem value="none">Nenhum (sem indexação)</SelectItem>

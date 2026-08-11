@@ -23,7 +23,7 @@
  *   - Asterisk icon toggle for required (shows red star)
  *   - Drag handle for reordering
  */
-import React, { useState, useEffect, useCallback, useMemo, useRef } from "react";
+import { useState, useEffect, useCallback, useMemo } from "react";
 import { DragDropContext, Droppable, Draggable } from "@hello-pangea/dnd";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -45,9 +45,9 @@ import { Tooltip, TooltipContent, TooltipTrigger, TooltipProvider } from "../com
 import { toast } from "sonner";
 import {
   FileText, Loader2, Save, RotateCcw, Eye, EyeOff, AlertCircle,
-  Plus, Trash2, GripVertical, X, PenLine, LayoutTemplate, Copy, Zap, Bookmark,
+  Plus, Trash2, GripVertical, X, LayoutTemplate, Copy, Zap, Bookmark,
   GripHorizontal, Inbox, ArrowRightLeft, Star, Pencil, Check, GitBranch, Info,
-  Settings, Eye as EyeIcon, ChevronDown, ChevronRight
+  Settings, ChevronDown, ChevronRight
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;

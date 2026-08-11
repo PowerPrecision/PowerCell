@@ -7,7 +7,7 @@
  * - Executar migração completa
  * - Testar migração com cliente específico
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -16,7 +16,6 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
-import { Progress } from "../components/ui/progress";
 import { Alert, AlertDescription, AlertTitle } from "../components/ui/alert";
 import {
   Dialog,
@@ -36,7 +35,6 @@ import {
   AlertTriangle,
   Loader2,
   Play,
-  RefreshCw,
   Search,
   Key,
   Hash,
@@ -44,52 +42,32 @@ import {
   Server,
 } from "lucide-react";
 import {
-  StatCard,
   LoadingState,
   AccessRestricted,
   PageHeader,
 } from "../components/admin/AdminPageShared";
+import { StatCard } from "../components/shared/StatCard";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-// Componente de estatística de migração
-const MigrationStatCard = ({ title, value, percentage, icon: Icon, color, description }) => (
-  <Card>
-    <CardContent className="pt-6">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm font-medium text-muted-foreground">{title}</p>
-          <p className="text-2xl font-bold">{value}</p>
-          {percentage !== undefined && (
-            <p className="text-xs text-muted-foreground mt-1">{percentage}% do total</p>
-          )}
-          {description && (
-            <p className="text-xs text-muted-foreground mt-1">{description}</p>
-          )}
-        </div>
-        <div className={`p-3 rounded-full ${color}`}>
-          <Icon className="h-5 w-5" />
-        </div>
-      </div>
-    </CardContent>
-  </Card>
+// Thin adapter: migration cards use shared StatCard + percentage subtitle
+const MigrationStatCard = ({ title, value, percentage, icon, color, description }) => (
+  <StatCard
+    variant="inline"
+    title={title}
+    value={value}
+    icon={icon}
+    bgColor={color || "bg-secondary"}
+    subtitle={
+      percentage !== undefined
+        ? `${percentage}% do total${description ? ` · ${description}` : ""}`
+        : description
+    }
+  />
 );
 
 // Barra de progresso de migração
-const MigrationProgress = ({ migrated, total }) => {
-  const percentage = total > 0 ? Math.round((migrated / total) * 100) : 0;
-  
-  return (
-    <div className="space-y-2">
-      <div className="flex justify-between text-sm">
-        <span>Progresso da Migração</span>
-        <span>{migrated} de {total} clientes</span>
-      </div>
-      <Progress value={percentage} className="h-2" />
-      <p className="text-xs text-muted-foreground text-right">{percentage}%</p>
-    </div>
-  );
-};
 
 // Página principal
 const RGPDMigrationPage = () => {

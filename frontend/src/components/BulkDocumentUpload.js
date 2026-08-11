@@ -8,8 +8,8 @@
  * O progresso é gerido globalmente pelo UploadProgressContext, permitindo
  * que o utilizador navegue para outras páginas enquanto o upload continua.
  */
-import { useState, useRef, useCallback } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { useState, useRef } from "react";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import { Progress } from "./ui/progress";
@@ -28,7 +28,6 @@ import {
   FolderUp,
   CheckCircle,
   XCircle,
-  AlertTriangle,
   FileText,
   Users,
   RefreshCw,
@@ -76,7 +75,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
   const [fileStatuses, setFileStatuses] = useState({});
   const [summary, setSummary] = useState(null);
   const [clientsList, setClientsList] = useState([]);
-  const [loadingClients, setLoadingClients] = useState(false);
+  const [, setLoadingClients] = useState(false);
   const [currentFile, setCurrentFile] = useState(null);
 
   // Verificar se é admin (ou se tem forceClientId definido - qualquer user com acesso ao processo pode enviar)
@@ -241,7 +240,7 @@ const BulkDocumentUpload = ({ forceClientId = null, forceClientName = null, vari
         return data.exists;
       }
       return false;
-    } catch (error) {
+    } catch {
       return false;
     }
   };

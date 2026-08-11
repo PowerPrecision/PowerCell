@@ -192,6 +192,19 @@ export const queryKeys = {
     all: ['stats'],
     dashboard: () => [...queryKeys.stats.all, 'dashboard'],
   },
+
+  // Desempenho da Equipa (Admin/CEO)
+  teamPerformance: {
+    all: ['team-performance'],
+    range: (startDate, endDate) => [...queryKeys.teamPerformance.all, 'range', { startDate, endDate }],
+  },
+
+  // Auditoria (RGPD — trilha de alterações)
+  audit: {
+    all: ['audit'],
+    trail: (params) => [...queryKeys.audit.all, 'trail', params],
+    stats: () => [...queryKeys.audit.all, 'stats'],
+  },
   
   // Financeiro
   finance: {
@@ -201,6 +214,46 @@ export const queryKeys = {
     commissions: (params) => [...queryKeys.finance.all, 'commissions', params],
     performance: (params) => [...queryKeys.finance.all, 'performance', params],
   },
+
+  // Registos de Clientes (Admin — formulário público)
+  clientRegistrations: {
+    all: ['client-registrations'],
+    list: (params) => [...queryKeys.clientRegistrations.all, 'list', params],
+    stats: () => [...queryKeys.clientRegistrations.all, 'stats'],
+  },
+
+  // Background Jobs (Centro de Operações — importações/análises em massa)
+  backgroundJobs: {
+    all: ['background-jobs'],
+    list: (statusFilter) => [...queryKeys.backgroundJobs.all, 'list', { statusFilter }],
+    notifications: () => [...queryKeys.backgroundJobs.all, 'notifications'],
+    metrics: (days) => [...queryKeys.backgroundJobs.all, 'metrics', { days }],
+  },
 };
+
+/**
+ * Invalida o bundle ProcessDetails (processo + side panels + kanban + cliente).
+ * Usar após saves/assigns/comentários/prazos em ProcessDetails.
+ */
+export async function invalidateProcessDetailsQueries(
+  queryClient,
+  processId,
+  { clientId } = {},
+) {
+  const tasks = [
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.detail(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.history.byProcess(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.activities.byProcess(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.deadlines.byProcess(processId) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanban({}) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.lists() }),
+  ];
+  if (clientId) {
+    tasks.push(
+      queryClient.invalidateQueries({ queryKey: queryKeys.clients.detail(clientId) }),
+    );
+  }
+  await Promise.all(tasks);
+}
 
 export default queryClient;

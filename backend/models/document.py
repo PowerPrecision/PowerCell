@@ -104,6 +104,9 @@ class DocumentMetadata(BaseModel):
     is_categorized: bool = False
     categorization_failed: bool = False
     categorization_error: Optional[str] = None
+    # Análise IA (extração de dados / Analisar com IA) — distinto de is_categorized
+    ai_analyzed: bool = False
+    ai_analyzed_at: Optional[str] = None
 
 
 class DocumentMetadataCreate(BaseModel):
@@ -135,6 +138,8 @@ class DocumentMetadataResponse(BaseModel):
     created_at: str
     updated_at: Optional[str] = None
     is_categorized: bool = False
+    ai_analyzed: bool = False
+    ai_analyzed_at: Optional[str] = None
 
 
 class DocumentSearchRequest(BaseModel):

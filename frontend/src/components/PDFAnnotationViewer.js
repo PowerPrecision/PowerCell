@@ -47,7 +47,6 @@ import {
   Filter,
   Pin,
   Eye,
-  EyeOff,
   PanelRightOpen,
   PanelRightClose,
   Loader2,
@@ -140,7 +139,6 @@ const PDFAnnotationViewer = ({
   // ====================================================================
   const containerRef = useRef(null);
   const canvasContainerRef = useRef(null);
-  const pageViewRefs = useRef({});
   const renderTasksRef = useRef([]);
   const annotationModeRef = useRef(false);
 
@@ -733,7 +731,7 @@ const PDFAnnotationViewer = ({
             className="max-w-[250px]"
           >
             <div className="text-xs space-y-1">
-              {cluster.annotations.slice(0, 3).map((ann, idx) => (
+              {cluster.annotations.slice(0, 3).map((ann) => (
                 <div key={ann.id} className="flex items-start gap-1">
                   <div
                     className="w-2 h-2 rounded-full mt-1 shrink-0"

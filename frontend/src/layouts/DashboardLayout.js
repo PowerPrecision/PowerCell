@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
+import { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { useTheme } from "../contexts/ThemeContext";
 import { useNavigate, Link, useLocation } from "react-router-dom";
@@ -23,6 +23,15 @@ import {
   DialogTitle,
   DialogDescription,
 } from "../components/ui/dialog";
+// PACOTE DD — Sheet global para Calculadora
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "../components/ui/sheet";
+import MortgageSimulator from "../components/calculators/MortgageSimulator";
 import {
   LayoutDashboard,
   FileText,
@@ -34,22 +43,14 @@ import {
   X,
   User,
   Building2,
-  CreditCard,
   BarChart3,
   Cog,
   Home,
   LayoutGrid,
   Search,
-  Sparkles,
-  AlertCircle,
-  AlertTriangle,
   Database,
-  FileArchive,
-  Brain,
   ChevronDown,
   ChevronRight,
-  Bell,
-  Wrench,
   Sun,
   Moon,
   Keyboard,
@@ -57,13 +58,11 @@ import {
   Activity,
   TrendingUp,
   FileSignature,
-  Zap,
   Shield,
   ClipboardList,
-  DollarSign,
-  Lock,
   Mail,
   Eye,
+  Calculator,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -74,7 +73,7 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, STAFF_ROLES, ADMIN_PANEL_ROLES, MANAGEMENT_ROLES } from "../utils/roleUtils";
+import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS } from "../utils/roleUtils";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -94,13 +93,15 @@ const EMPTY_HANDLERS = {};
 
 const DashboardLayout = ({ children, title }) => {
   const { user, logout, effectiveRole, isImpersonating } = useAuth();
-  const { theme, toggleTheme, isDark } = useTheme();
+  const { toggleTheme, isDark } = useTheme();
   const navigate = useNavigate();
   const location = useLocation();
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const [chatOpen, setChatOpen] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
+  // PACOTE DD — estado do Sheet global da Calculadora
+  const [calcSheetOpen, setCalcSheetOpen] = useState(false);
   const chatUnreadRef = useRef(0);
   const chatUnreadIntervalRef = useRef(null);
   
@@ -173,9 +174,6 @@ const DashboardLayout = ({ children, title }) => {
     const dashboardExecutivoRoutes = ["/admin/desempenho"];
     // Rotas do grupo Gestão e Operações
     const gestaoRoutes = ["/estatisticas", "/performance-balcoes", "/rascunhos"];
-    // Verificar se /rascunhos está acessível por capability
-    const hasDraftAccess = hasPermission(user, "DRAFT_VIEW");
-    
     return {
       "meu-negocio": meuNegocioRoutes.some(r => path.startsWith(r)),
       "visao-global": visaoGlobalRoutes.some(r => path.startsWith(r)),
@@ -230,18 +228,6 @@ const DashboardLayout = ({ children, title }) => {
     const isAdmin = userRole === "admin";
     const isCeo = userRole === "ceo";
     const canSeeAdminPanel = isAdmin || isCeo; // Botão Painel de Administração
-    const canSeeGestao = ["admin", "ceo", "diretor"].includes(userRole);
-
-    // Permissões personalizadas (se definidas)
-    const userPermissions = user?.permissions || {};
-    const userPages = userPermissions?.pages || [];
-
-    // Se o utilizador tem permissões definidas, verificar acesso
-    const hasPageAccess = (page) => {
-      if (userPages.length === 0) return true; // Sem permissões = acesso total
-      return userPages.includes(page);
-    };
-
     // ====================================================================
     // DASHBOARD
     // — admin e CEO: aponta para /admin (Painel de Administração)
@@ -280,7 +266,7 @@ const DashboardLayout = ({ children, title }) => {
         },
         // PACOTE BU — Menus temporariamente ocultos:
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
-        // { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Visitas", icon: Calendar, href: "/visitas" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ],
     };
@@ -332,6 +318,12 @@ const DashboardLayout = ({ children, title }) => {
           icon: Database,
           href: "/ficheiros",
         },
+        // PACOTE DD — movido para Sheet global (ícone de Calculadora no header)
+        // {
+        //   label: "Calculadoras",
+        //   icon: Calculator,
+        //   href: "/calculadoras",
+        // },
       ],
     };
 
@@ -378,12 +370,13 @@ const DashboardLayout = ({ children, title }) => {
     // NÃO vê: Dashboard, Estatísticas, Gestão, Configuração
     // ====================================================================
     if (userRole === "indexacao") {
-      // Comunicações sem Minutas (restrito a outros roles)
+      // Comunicações sem Minutas nem Calculadoras (restrito a outros roles —
+      // indexação não lida com simulações financeiras de crédito)
       const indexacaoComunicacoes = {
         id: "comunicacoes",
         label: "Comunicações e Ficheiros",
         icon: Mail,
-        items: comunicacoesGroup.items.filter(i => i.href !== "/minutas"),
+        items: comunicacoesGroup.items.filter(i => i.href !== "/minutas" && i.href !== "/calculadoras"),
       };
       // PACOTE DB — Visão Global do indexacao SEM "Registos de Clientes"
       // (restrição mantida: indexacao não necessita de acesso a registos de clientes)
@@ -423,7 +416,7 @@ const DashboardLayout = ({ children, title }) => {
         { label: "Quadro Geral", icon: LayoutGrid, href: "/kanban" },
         { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
         // PACOTE BU — Menus temporariamente ocultos:
-        // { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Visitas", icon: Calendar, href: "/visitas" },
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ];
@@ -631,7 +624,7 @@ const DashboardLayout = ({ children, title }) => {
                       <group.icon className="h-5 w-5" />
                       {group.label}
                     </div>
-                    {!!openSections[group.id] ? (
+                    {openSections[group.id] ? (
                       <ChevronDown className="h-4 w-4" />
                     ) : (
                       <ChevronRight className="h-4 w-4" />
@@ -820,6 +813,25 @@ const DashboardLayout = ({ children, title }) => {
                       </span>
                     )}
                   </Button>
+                  {/* PACOTE DD — Calculadora global (Sheet) */}
+                  <Sheet open={calcSheetOpen} onOpenChange={setCalcSheetOpen}>
+                    <SheetTrigger asChild>
+                      <Button variant="ghost" size="icon" aria-label="Calculadora" title="Calculadora de Prestações">
+                        <Calculator className="h-4 w-4" />
+                      </Button>
+                    </SheetTrigger>
+                    <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+                      <SheetHeader>
+                        <SheetTitle className="flex items-center gap-2">
+                          <Calculator className="h-5 w-5" />
+                          Calculadora de Prestações
+                        </SheetTitle>
+                      </SheetHeader>
+                      <div className="mt-4">
+                        <MortgageSimulator />
+                      </div>
+                    </SheetContent>
+                  </Sheet>
                   {/* Centro de Operações - Tarefas Assíncronas */}
                   <TasksDropdown compact={headerCollapsed} />
                   <NotificationsDropdown compact={headerCollapsed} />

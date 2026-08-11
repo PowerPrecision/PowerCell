@@ -24,7 +24,7 @@
  *   31-35 anos  → máx 37 anos
  *   > 35 anos   → máx 35 anos
  */
-import React, { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect } from 'react';
 import {
   Calculator,
   Info,
@@ -43,6 +43,7 @@ import {
   AccordionItem,
   AccordionTrigger,
 } from '../ui/accordion';
+import { formatCurrency } from '../../utils/formatCurrency';
 
 // ====================================================================
 // CÁLCULO MATEMÁTICO — Sistema Francês de Amortização
@@ -351,13 +352,7 @@ export default function SimulatorCH({ clienteDataNascimento }) {
   }, [montante, prazoAnos, tipoTaxa, tan, taxaFixa, prazoTaxaFixaAnos, seguroVida, seguroMultiriscos, comissoesIniciais]);
 
   // ── Formatação ──
-  const fmtEUR = (v) =>
-    new Intl.NumberFormat('pt-PT', {
-      style: 'currency',
-      currency: 'EUR',
-      minimumFractionDigits: 2,
-      maximumFractionDigits: 2,
-    }).format(v || 0);
+  const fmtEUR = (v) => formatCurrency(v || 0);
 
   const pct = (val, min, max) =>
     `${Math.min(100, Math.max(0, ((val - min) / (max - min)) * 100))}%`;

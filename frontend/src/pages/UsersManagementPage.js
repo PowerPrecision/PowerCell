@@ -7,6 +7,7 @@
  */
 
 import { useState, useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -40,8 +41,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 const UsersManagementPage = ({ embedded = false }) => {
   const { user: currentUser, impersonate } = useAuth();
-  const [users, setUsers] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [formLoading, setFormLoading] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
   const [roleFilter, setRoleFilter] = useState("all");
@@ -66,21 +66,34 @@ const UsersManagementPage = ({ embedded = false }) => {
   const [selectedUserIds, setSelectedUserIds] = useState(new Set());
   const [bulkDeleting, setBulkDeleting] = useState(false);
 
-  useEffect(() => {
-    fetchUsers();
-  }, []);
-
-  const fetchUsers = async () => {
-    try {
-      setLoading(true);
+  // Server state via TanStack Query (substitui useState + useEffect + fetch manual).
+  // fetchUsers passa a ser o refetch da query, para os call-sites existentes
+  // (após criar/editar/eliminar) continuarem a funcionar sem alterações.
+  const {
+    data: users = [],
+    isLoading: loading,
+    isError: usersError,
+    refetch: fetchUsers,
+  } = useQuery({
+    queryKey: ["users"],
+    queryFn: async () => {
       const response = await getUsers();
-      setUsers(response.data);
-    } catch (error) {
+      return response.data;
+    },
+  });
+
+  useEffect(() => {
+    if (usersError) {
       toast.error("Erro ao carregar utilizadores");
-    } finally {
-      setLoading(false);
     }
-  };
+  }, [usersError]);
+
+  // Shim de compatibilidade: mantém a API `setUsers(prev => ...)` usada nas
+  // atualizações otimistas (undo toast), agora escrevendo na cache da query.
+  const setUsers = (updater) =>
+    queryClient.setQueryData(["users"], (prev = []) =>
+      typeof updater === "function" ? updater(prev) : updater
+    );
 
   const filteredUsers = useMemo(() => {
     return users.filter(user => {
@@ -127,7 +140,7 @@ const UsersManagementPage = ({ embedded = false }) => {
     }
     setFormLoading(true);
     try {
-      const response = await createUser(formData);
+      await createUser(formData);
       toast.success("Utilizador criado com sucesso");
       // Mostrar a password após criação
       if (formData.password) {
@@ -193,33 +206,43 @@ const UsersManagementPage = ({ embedded = false }) => {
   };
 
   const handleDeleteUser = async (userId, userName) => {
-    // O8 - Usar undo toast em vez de window.confirm para micro-ações
+    // O8 - Usar undo toast em vez de window.confirm para micro-ações.
+    //
+    // FIX: o commit da eliminação é agora controlado por um setTimeout próprio
+    // (não pelo onAutoClose do toast, que disparava mesmo após o "Desfazer" e
+    // eliminava o utilizador na mesma). O "Desfazer" limpa o timer, garantindo
+    // que a eliminação no backend NÃO acontece.
     const userToDelete = users.find(u => u.id === userId);
     if (!userToDelete) return;
 
+    const restoreUser = () =>
+      setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+
     // Remover otimisticamente da lista
     setUsers(prev => prev.filter(u => u.id !== userId));
+
+    const UNDO_WINDOW_MS = 8000;
+    const commitTimer = setTimeout(async () => {
+      // Commit: efetuar a eliminação real no backend (só se não houve undo)
+      try {
+        await deleteUser(userId);
+        queryClient.invalidateQueries({ queryKey: ["users"] });
+      } catch (error) {
+        restoreUser();
+        toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar utilizador"));
+      }
+    }, UNDO_WINDOW_MS);
 
     toast.success(`Utilizador "${userName}" eliminado`, {
       action: {
         label: 'Desfazer',
         onClick: () => {
-          // Restaurar na lista (undo)
-          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
+          clearTimeout(commitTimer); // cancela a eliminação pendente
+          restoreUser();
           toast.success("Ação desfeita");
         },
       },
-      duration: 5000,
-      onAutoClose: async () => {
-        // Commit: efetuar a eliminação real no backend
-        try {
-          await deleteUser(userId);
-        } catch (error) {
-          // Se falhar, restaurar o utilizador
-          setUsers(prev => [...prev, userToDelete].sort((a, b) => a.name.localeCompare(b.name)));
-          toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao eliminar utilizador"));
-        }
-      },
+      duration: UNDO_WINDOW_MS,
     });
   };
 
@@ -747,7 +770,7 @@ const UsersManagementPage = ({ embedded = false }) => {
                                 try {
                                   await impersonate(user.id);
                                   toast.success(`A ver como ${user.name}`);
-                                } catch (error) {
+                                } catch {
                                   toast.error("Erro ao iniciar visualização");
                                 }
                               }}

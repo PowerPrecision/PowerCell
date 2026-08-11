@@ -462,10 +462,28 @@ async def get_current_client(
         raise HTTPException(status_code=401, detail="Token inválido: sem processo associado.")
 
     # Para tokens access_code_session com "no_process", permitir sem processo
+    # Se o cliente já tiver processo (criado após docs), anexá-lo automaticamente.
     if token_type == "access_code_session" and process_id == "no_process":
-        # Cliente autenticado mas sem processo — retornar dados mínimos
         client_id = payload.get("client_id")
         client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+        resolved_process = None
+        process_ids = (client or {}).get("process_ids") or []
+        if process_ids:
+            resolved_process = await db.processes.find_one(
+                {
+                    "id": {"$in": process_ids},
+                    "is_deleted": {"$ne": True},
+                },
+                {"_id": 0},
+            )
+        if resolved_process:
+            return {
+                "process_id": resolved_process["id"],
+                "process": resolved_process,
+                "client_id": client_id,
+                "client": client,
+                "token_payload": payload,
+            }
         return {
             "process_id": None,
             "process": None,

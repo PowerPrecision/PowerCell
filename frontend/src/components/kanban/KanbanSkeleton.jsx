@@ -4,7 +4,7 @@
  * Estado de loading do Kanban Board.
  * Mostra skeletons enquanto os dados estão a ser carregados.
  */
-import React, { memo } from 'react';
+import { memo } from 'react';
 import { Skeleton } from '../ui/skeleton';
 
 const KanbanSkeleton = memo(() => {

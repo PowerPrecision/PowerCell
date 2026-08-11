@@ -23,7 +23,7 @@
  * @param {number} completedDays - Filtro de dias para concluídos (default 30, 0 = sem limite)
  * @param {Function} onCompletedDaysChange - Callback para alterar o filtro de dias
  */
-import React, { memo, useCallback } from 'react';
+import { memo, useCallback } from 'react';
 import { Badge } from '../ui/badge';
 import { Button } from '../ui/button';
 import { ScrollArea } from '../ui/scroll-area';
@@ -137,6 +137,7 @@ const KanbanColumn = memo(({
                 size="icon"
                 className="h-6 w-6 text-white/70 hover:text-white hover:bg-white/20"
                 onClick={(e) => { e.stopPropagation(); handleToggleCollapse(); }}
+                aria-label="Minimizar coluna"
               >
                 <ChevronLeft className="h-4 w-4" />
               </Button>
@@ -155,7 +156,7 @@ const KanbanColumn = memo(({
               value={String(completedDays)} 
               onValueChange={(v) => onCompletedDaysChange(Number(v))}
             >
-              <SelectTrigger className="h-7 text-xs bg-white/15 border-white/20 text-white hover:bg-white/25 focus:ring-white/30 w-full">
+              <SelectTrigger className="h-7 text-xs bg-white/15 border-white/20 text-white hover:bg-white/25 focus:ring-white/30 w-full" aria-label="Período de conclusão">
                 <SelectValue placeholder="Período" />
               </SelectTrigger>
               <SelectContent>

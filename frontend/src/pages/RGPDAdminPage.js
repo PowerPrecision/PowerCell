@@ -3,7 +3,8 @@
  * Permite ao admin visualizar e editar os dados dos formulários RGPD assinados
  * Inclui aba de edição do template legal RGPD
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
+import { sanitizeHtml } from "../utils/sanitize";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -38,7 +39,6 @@ import { safeNumber } from "../components/dashboard/DashboardShared";
 import { getRGPDTemplate, updateRGPDTemplate, getMinutaTemplate, updateMinutaTemplate } from "../services/api";
 import {
   FileText,
-  Loader2,
   CheckCircle,
   XCircle,
   Clock,
@@ -64,27 +64,21 @@ import {
   AdminSearchFilter,
   PageHeader,
 } from "../components/admin/AdminPageShared";
+import { StatusBadge as SharedStatusBadge } from "../components/shared/StatusBadge";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-// Status badge component - específico para RGPD
-const StatusBadge = ({ status }) => {
-  const config = {
-    pending: { label: "Pendente", color: "bg-yellow-100 text-yellow-800 border-yellow-300", icon: Clock },
-    signed: { label: "Assinado", color: "bg-green-100 text-green-800 border-green-300", icon: CheckCircle },
-    expired: { label: "Expirado", color: "bg-red-100 text-red-800 border-red-300", icon: XCircle },
-    cancelled: { label: "Cancelado", color: "bg-gray-100 text-gray-800 border-gray-300", icon: XCircle },
-  };
-
-  const { label, color, icon: Icon } = config[status] || config.pending;
-
-  return (
-    <Badge variant="outline" className={`${color} flex items-center gap-1`}>
-      <Icon className="h-3 w-3" />
-      {label}
-    </Badge>
-  );
+const RGPD_STATUS_MAP = {
+  pending: { label: "Pendente", className: "bg-accent/15 text-foreground border-accent/30", icon: Clock },
+  signed: { label: "Assinado", className: "bg-secondary text-secondary-foreground border-border", icon: CheckCircle },
+  expired: { label: "Expirado", className: "bg-destructive/10 text-destructive border-destructive/20", icon: XCircle },
+  cancelled: { label: "Cancelado", className: "bg-muted text-muted-foreground border-border", icon: XCircle },
 };
+
+const StatusBadge = ({ status }) => (
+  <SharedStatusBadge status={status} statusMap={RGPD_STATUS_MAP} />
+);
 
 // Opções de status para filtro
 const RGPD_STATUS_OPTIONS = [
@@ -114,7 +108,7 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
     try {
       await onSave(rgpd.id, formData);
       onClose();
-    } catch (error) {
+    } catch {
       // Erro já tratado no onSave
     } finally {
       setSaving(false);
@@ -508,7 +502,7 @@ const RGPDTemplateTab = () => {
         }
         toast.success("Template restaurado para o valor padrão");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao restaurar o template padrão");
     }
   };
@@ -630,7 +624,7 @@ const RGPDTemplateTab = () => {
                       .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate, Lda.</span>');
                     // Wrap numbered sections for better formatting
                     safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^<]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
-                    return safe;
+                    return sanitizeHtml(safe);
                   })()
                 }}
               />
@@ -687,7 +681,7 @@ const RGPDTemplateTab = () => {
 // ============ ABA: PEDIDOS RGPD ============
 
 const RGPDPedidosTab = () => {
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const [loading, setLoading] = useState(true);
   const [requests, setRequests] = useState([]);
   const [stats, setStats] = useState(null);
@@ -766,7 +760,7 @@ const RGPDPedidosTab = () => {
         const data = await response.json();
         setViewModal({ open: true, rgpd: data.rgpd, process: data.process });
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao carregar detalhes");
     }
   };
@@ -814,7 +808,7 @@ const RGPDPedidosTab = () => {
       } else {
         toast.error("Erro ao eliminar");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar RGPD");
     } finally {
       setActionLoading(false);
@@ -836,7 +830,7 @@ const RGPDPedidosTab = () => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao reenviar"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao reenviar email");
     } finally {
       setActionLoading(false);
@@ -1067,7 +1061,7 @@ const MinutaTemplateTab = () => {
         }
         toast.success("Minuta restaurada para o valor padrão");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao restaurar a minuta padrão");
     }
   };
@@ -1190,7 +1184,7 @@ const MinutaTemplateTab = () => {
                       .replace(/\{\{NOME_EMPRESA\}\}/g, '<span class="bg-amber-100 dark:bg-amber-900/60 px-1.5 py-0.5 rounded font-medium text-amber-800 dark:text-amber-200">Power Real Estate, Lda.</span>');
                     // Wrap numbered sections for better formatting
                     safe = safe.replace(/^(\d+\.\s[A-ZÀ-Ú][^<]*)/gm, '<span class="font-semibold text-foreground">$1</span>');
-                    return safe;
+                    return sanitizeHtml(safe);
                   })()
                 }}
               />

@@ -14,18 +14,18 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { 
-  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell, 
-  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer,
-  FunnelChart, Funnel, LabelList
+  BarChart, Bar, PieChart, Pie, Cell, 
+  XAxis, YAxis, CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from "recharts";
 import { 
-  TrendingUp, TrendingDown, Users, FileText, CheckCircle, 
-  Clock, AlertCircle, Euro, Calendar, Target, Building, Trophy, Loader2
+  TrendingUp, TrendingDown, FileText, CheckCircle, 
+  Clock, Euro, Target, Building, Trophy
 } from "lucide-react";
 import { getStats, getProcesses, getUsers } from "../services/api";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -34,7 +34,7 @@ const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'
 const StatisticsPage = () => {
   const { user, token } = useAuth();
   const [loading, setLoading] = useState(true);
-  const [stats, setStats] = useState({});
+  const [, setStats] = useState({});
   const [processes, setProcesses] = useState([]);
   const [users, setUsers] = useState([]);
   const [selectedUser, setSelectedUser] = useState(user?.id);
@@ -151,10 +151,10 @@ const StatisticsPage = () => {
     <DashboardLayout title="Estatísticas e Análise">
       {loading ? (
         <div className="flex items-center justify-center py-24">
-          <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+          <Spinner size="lg" className="text-muted-foreground" />
         </div>
       ) : (
-      <div className="space-y-4 md:space-y-6 p-4 md:p-6">
+      <div className="space-y-4 md:space-y-6">
         {/* Filtros */}
         <div className="flex flex-wrap gap-4">
           {canViewAllStats && (

@@ -8,7 +8,8 @@
  * - Painel de detalhe individual com rácios
  * - Tabela refinada para visualização em detalhe
  */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
@@ -26,9 +27,8 @@ import {
 import DashboardLayout from "../layouts/DashboardLayout";
 import {
   BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer,
-  Legend, Cell,
+  Legend,
 } from "recharts";
-import { toast } from "sonner";
 import { format, subDays, startOfWeek, startOfMonth, endOfWeek, endOfMonth } from "date-fns";
 import { pt } from "date-fns/locale";
 
@@ -119,52 +119,40 @@ const CHART_COLORS = {
 // Componente Principal
 // ════════════════════════════════════════════════════════════
 const TeamPerformanceDashboard = () => {
-  const token = localStorage.getItem("token");
-
   // Período
   const [period, setPeriod] = useState("this_week");
   const [startDate, setStartDate] = useState(() => getDateRange("this_week").start);
   const [endDate, setEndDate] = useState(() => getDateRange("this_week").end);
 
-  // Dados
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(false);
-
   // Filtro de utilizador
   const [selectedUser, setSelectedUser] = useState("all");
 
-  // ── Buscar dados do endpoint ──────────────────────────────
-  const fetchPerformance = async (start, end) => {
-    if (!token) return;
-    setLoading(true);
-    try {
+  // ── Server state via TanStack Query ──────────────────────────
+  const {
+    data = null,
+    isFetching: loading,
+    refetch: fetchPerformance,
+  } = useQuery({
+    queryKey: ["team-performance", startDate, endDate],
+    queryFn: async () => {
+      const authToken = localStorage.getItem("token");
+      if (!authToken) throw new Error("Sessão inválida");
       const params = new URLSearchParams();
-      if (start) params.set("start_date", start);
-      if (end) params.set("end_date", end);
+      if (startDate) params.set("start_date", startDate);
+      if (endDate) params.set("end_date", endDate);
 
       const res = await fetch(
         `${BACKEND_URL}/api/admin/team-performance?${params.toString()}`,
-        { headers: { Authorization: `Bearer ${token}` } }
+        { headers: { Authorization: `Bearer ${authToken}` } }
       );
 
       if (!res.ok) {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.detail || "Erro ao carregar dados de desempenho");
       }
-
-      const json = await res.json();
-      setData(json);
-    } catch (error) {
-      console.error("[TeamPerformanceDashboard]", error);
-      toast.error(error.message || "Erro ao carregar desempenho da equipa");
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchPerformance(startDate, endDate);
-  }, [startDate, endDate]);
+      return res.json();
+    },
+  });
 
   // ── Handler: mudar período ────────────────────────────────
   const handlePeriodChange = (key) => {
@@ -176,7 +164,7 @@ const TeamPerformanceDashboard = () => {
   };
 
   const handleRefresh = () => {
-    fetchPerformance(startDate, endDate);
+    fetchPerformance();
   };
 
   // ── Dados derivados ───────────────────────────────────────

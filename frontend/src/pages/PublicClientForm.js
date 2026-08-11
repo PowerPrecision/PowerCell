@@ -46,11 +46,12 @@ import {
 import DynamicFormField from "../components/DynamicFormField";
 import { Checkbox } from "../components/ui/checkbox";
 import { Progress } from "../components/ui/progress";
-import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, Clock, AlertCircle, Eye, FlaskConical, Play, ClipboardList } from "lucide-react";
+import { Building2, Loader2, ArrowLeft, ArrowRight, Check, User, Briefcase, Home, Users, CreditCard, HelpCircle, Info, Save, AlertCircle, Eye, FlaskConical, ClipboardList } from "lucide-react";
 import { toast } from "sonner";
 import axios from "axios";
 import * as Sentry from "@sentry/react";
 import { cn, safeDateStr } from "../lib/utils";
+import { validateNIF as validateNIFShared } from "../utils/validateNIF";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
@@ -96,7 +97,6 @@ function RequiredLabel({ htmlFor, children, required: isRequired = true }) {
 // Validated Input Component - com forwardRef para suportar refs
 const ValidatedInput = forwardRef(function ValidatedInput({ 
   error, 
-  required,
   className,
   ...props 
 }, ref) {
@@ -117,30 +117,9 @@ const ValidatedInput = forwardRef(function ValidatedInput({
 ValidatedInput.displayName = 'ValidatedInput';
 
 // Validated Select Wrapper
-function ValidatedSelect({ 
-  error, 
-  children,
-  triggerClassName,
-  ...props 
-}) {
-  return (
-  <div className="space-y-1">
-    <Select {...props}>
-      <SelectTrigger className={cn(
-        triggerClassName,
-        error && "border-red-500 focus:ring-red-500 bg-red-50"
-      )}>
-        {children}
-      </SelectTrigger>
-    </Select>
-    {error && <FieldError>{error}</FieldError>}
-  </div>
-  );
-}
 
 // Progress Bar Component com percentagem
 function FormProgressBar({ currentStep, totalSteps, completedFields, totalFields }) {
-  const stepProgress = ((currentStep - 1) / totalSteps) * 100;
   const fieldProgress = totalFields > 0 ? (completedFields / totalFields) * 100 : 0;
   
   return (
@@ -348,13 +327,6 @@ export default function PublicClientForm({ previewMode = false }) {
   const [allFieldsConfig, setAllFieldsConfig] = useState([]);
   const [configLoaded, setConfigLoaded] = useState(false); // true once backend config is fetched
 
-  // Função para registar refs de campos de forma declarativa
-  const registerFieldRef = useCallback((fieldName) => (element) => {
-    if (element) {
-      fieldRefs.current[fieldName] = element;
-    }
-  }, []);
-  
   // Função helper para encontrar campo por nome (scoped ao container)
   const findFieldElement = useCallback((fieldName) => {
     // Primeiro tenta o ref registado
@@ -371,7 +343,7 @@ export default function PublicClientForm({ previewMode = false }) {
   // Auto-save state
   const [lastSaved, setLastSaved] = useState(null);
   const [isSaving, setIsSaving] = useState(false);
-  const [hasDraft, setHasDraft] = useState(false);
+  const [, setHasDraft] = useState(false);
   
   // Carregar rascunho do localStorage
   const loadDraft = useCallback(() => {
@@ -689,18 +661,6 @@ export default function PublicClientForm({ previewMode = false }) {
     return count;
   }, [isStepVisible, maxStepNum]);
 
-  // Map logical step (1..totalSteps) → real step number (1..maxStepNum)
-  const logicalToRealStep = useCallback((logicalStep) => {
-    let logical = 0;
-    for (let s = 1; s <= maxStepNum; s++) {
-      if (isStepVisible(s)) {
-        logical++;
-        if (logical === logicalStep) return s;
-      }
-    }
-    return logicalStep;
-  }, [isStepVisible, maxStepNum]);
-
   // Map real step (1..maxStepNum) → logical step (1..totalSteps)
   const realToLogicalStep = useCallback((realStep) => {
     let logical = 0;
@@ -929,120 +889,8 @@ export default function PublicClientForm({ previewMode = false }) {
   }, [allFieldsConfig]);
 
   // Renderizar um campo personalizado dinâmico
-  const renderCustomField = (field) => {
-    const value = formData[field.field_key] || "";
-    const updateCustom = (v) => updateField(field.field_key, v);
-
-    return (
-      <div key={field.field_key} className="space-y-2" data-testid={`custom-field-${field.field_key}`}>
-        {isFieldRequired(field.field_key, field.is_required) ? (
-          <RequiredLabel htmlFor={field.field_key} required={isFieldRequired(field.field_key, field.is_required)}>{getFieldLabel(field.field_key, field.label)}</RequiredLabel>
-        ) : (
-          <Label htmlFor={field.field_key}>{getFieldLabel(field.field_key, field.label)}</Label>
-        )}
-
-        {field.field_type === "text" && (
-          <Input
-            id={field.field_key}
-            value={value}
-            onChange={(e) => updateCustom(e.target.value)}
-            placeholder={field.placeholder || ""}
-          />
-        )}
-
-        {field.field_type === "number" && (
-          <Input
-            id={field.field_key}
-            type="number"
-            value={value}
-            onChange={(e) => updateCustom(e.target.value)}
-            placeholder={field.placeholder || ""}
-          />
-        )}
-
-        {field.field_type === "date" && (
-          <Input
-            id={field.field_key}
-            type="date"
-            lang="pt"
-            value={value}
-            onChange={(e) => updateCustom(e.target.value)}
-            placeholder="DD/MM/AAAA"
-          />
-        )}
-
-        {field.field_type === "select" && field.options && (
-          <Select value={value} onValueChange={updateCustom}>
-            <SelectTrigger>
-              <SelectValue placeholder={field.placeholder || "Selecione"} />
-            </SelectTrigger>
-            <SelectContent>
-              {field.options.map((opt) => (
-                <SelectItem key={opt} value={opt}>{opt}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        )}
-
-        {field.field_type === "checkbox" && field.options && (
-          <div className="flex flex-wrap gap-2">
-            {field.options.map((opt) => {
-              const arr = Array.isArray(formData[field.field_key]) ? formData[field.field_key] : [];
-              const checked = arr.includes(opt);
-              return (
-                <button
-                  key={opt}
-                  type="button"
-                  onClick={() => {
-                    const updated = checked ? arr.filter(v => v !== opt) : [...arr, opt];
-                    updateCustom(updated);
-                  }}
-                  className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
-                    checked
-                      ? "ring-2 ring-offset-1 ring-primary scale-105 bg-primary text-primary-foreground border-primary"
-                      : "opacity-60 hover:opacity-80 bg-transparent text-foreground border-border"
-                  }`}
-                >
-                  {checked && <span className="mr-1">&#10003;</span>}
-                  {opt}
-                </button>
-              );
-            })}
-          </div>
-        )}
-
-        {field.field_type === "radio" && (
-          <div className="flex gap-3">
-            <Button
-              type="button"
-              variant={value === "sim" ? "default" : "outline"}
-              className="flex-1"
-              onClick={() => updateCustom("sim")}
-            >
-              Sim
-            </Button>
-            <Button
-              type="button"
-              variant={value === "nao" ? "default" : "outline"}
-              className="flex-1"
-              onClick={() => updateCustom("nao")}
-            >
-              Não
-            </Button>
-          </div>
-        )}
-
-        {field.hint && <FieldHint>{field.hint}</FieldHint>}
-      </div>
-    );
-  };
 
   // Obter campos personalizados para um passo específico
-  const getCustomFieldsForStep = (stepNum) => {
-    return customFields
-      .filter(f => f.step === stepNum)
-      .sort((a, b) => (a.order_index ?? a.order ?? 0) - (b.order_index ?? b.order ?? 0));
-  };
 
   // ─── Field update helpers ──────────────────────────────────────────────
   // ⚠️ MUST be declared BEFORE renderDynamicField useCallback that uses them.
@@ -1759,24 +1607,11 @@ export default function PublicClientForm({ previewMode = false }) {
     );
   }, [formData, fieldErrors, updateField, setFormData, toggleCaracteristica, toggleBanco, updateBancoValor, toggleContasAbertas, toggleBancoSimulacoes, checkDependsOn, allFieldsConfig]);
 
-  // Validação de NIF português
+  // Validação de NIF português (delega o checksum para o utilitário partilhado)
   const validateNIF = (nif) => {
     if (!nif) return { valid: false, message: "NIF é obrigatório" };
-    const cleanNif = nif.replace(/[^\d]/g, '');
-    if (cleanNif.length !== 9) return { valid: false, message: "NIF deve ter 9 dígitos" };
-    if (!/^\d{9}$/.test(cleanNif)) return { valid: false, message: "NIF deve conter apenas números" };
-    
-    // Validar checksum
-    const digits = cleanNif.split('').map(Number);
-    const weights = [9, 8, 7, 6, 5, 4, 3, 2];
-    const sum = digits.slice(0, 8).reduce((acc, d, i) => acc + d * weights[i], 0);
-    const remainder = sum % 11;
-    const checkDigit = remainder > 1 ? 11 - remainder : 0;
-    
-    if (checkDigit !== digits[8]) {
-      return { valid: false, message: "NIF inválido (dígito de controlo incorreto)" };
-    }
-    return { valid: true };
+    const { valid, error } = validateNIFShared(nif);
+    return { valid, message: error };
   };
 
   // Validação de email
@@ -2023,21 +1858,6 @@ export default function PublicClientForm({ previewMode = false }) {
     }
   };
 
-  const renderStepIndicator = () => (
-    <div className="flex items-center justify-center mb-8 flex-wrap gap-2">
-      {[1, 2, 3, 4, 5, 6].map((s) => (
-        <div key={s} className="flex items-center">
-          <div
-            className={`w-8 h-8 rounded-full flex items-center justify-center text-sm font-medium transition-colors
-              ${step >= s ? "bg-teal-600 text-white" : "bg-muted text-muted-foreground"}`}
-          >
-            {step > s ? <Check className="h-4 w-4" /> : s}
-          </div>
-          {s < 6 && <div className={`w-8 md:w-12 h-0.5 ${step > s ? "bg-teal-600" : "bg-muted"}`} />}
-        </div>
-      ))}
-    </div>
-  );
 
   // Step 1: Dados Pessoais - Titular (dynamic from allFieldsConfig)
   const renderStep1 = () => {
@@ -2264,7 +2084,6 @@ export default function PublicClientForm({ previewMode = false }) {
   const renderDynamicStep = (stepNum) => {
     const stepFields = getFieldsForStep(stepNum);
     // Get step label from stepConfig or default
-    const labels = (stepConfig && stepConfig[String(stepNum)]?.label) ? {} : {};
     const customLabel = stepLabels[String(stepNum)] || `Passo ${stepNum}`;
     // Also check if stepConfig has a label for backward compat
     const configLabel = typeof stepConfig[String(stepNum)] === 'object' && stepConfig[String(stepNum)]?.label ? stepConfig[String(stepNum)].label : null;
@@ -2542,7 +2361,6 @@ export default function PublicClientForm({ previewMode = false }) {
   };
 
   // Função helper para obter erro de um campo específico
-  const getFieldError = (fieldName) => fieldErrors[fieldName] || null;
 
   const canProceed = useCallback(() => {
     if (previewMode) return true;

@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from "react";
+import { useState, useMemo, useCallback } from "react";
+import { useQuery } from "@tanstack/react-query";
 import {
   Building2,
   TrendingUp,
@@ -8,7 +9,6 @@ import {
   ArrowUp,
   ArrowDown,
   RefreshCw,
-  Loader2,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -16,6 +16,9 @@ import { Badge } from "../components/ui/badge";
 import { FullPageSkeleton } from "../components/ui/skeletons";
 import { useTheme } from "../contexts/ThemeContext";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
+import { PageHeader } from "../components/shared/PageHeader";
+import { Spinner } from "../components/ui/Spinner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -25,13 +28,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 /** Formata um número como moeda europeia (ex: 250.000,00 €) */
 function formatCurrency(value) {
-  if (value == null || isNaN(value)) return "0,00 €";
-  return new Intl.NumberFormat("pt-PT", {
-    style: "currency",
-    currency: "EUR",
-    minimumFractionDigits: 2,
-    maximumFractionDigits: 2,
-  }).format(value);
+  return formatCurrencyShared(value, { fallback: "0,00 €" });
 }
 
 /** Formata percentagem com 1 casa decimal */
@@ -120,33 +117,28 @@ function ApprovalBar({ rate }) {
 
 export default function BranchPerformancePage() {
   const { isDark } = useTheme();
-  const [data, setData] = useState(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const [sortConfig, setSortConfig] = useState({ key: "total_volume", direction: "desc" });
 
-  // ── Fetch ──
-  const fetchData = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
+  // ── Server state via TanStack Query ──
+  // fetchData é o refetch da query (usado no botão "Atualizar" e no retry).
+  const {
+    data,
+    isFetching: loading,
+    error: queryError,
+    refetch: fetchData,
+  } = useQuery({
+    queryKey: ["stats-branches"],
+    queryFn: async () => {
       const token = localStorage.getItem("token");
       const res = await fetch(`${API_URL}/api/stats/branches`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (!res.ok) throw new Error(`Erro ${res.status}: ${res.statusText}`);
-      const json = await res.json();
-      setData(json);
-    } catch (err) {
-      setError(err.message);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
+      return res.json();
+    },
+  });
+  // Manter `error` como string (o JSX renderiza-o diretamente).
+  const error = queryError ? queryError.message : null;
 
   // ── Sort handler ──
   const handleSort = useCallback((key) => {
@@ -206,29 +198,25 @@ export default function BranchPerformancePage() {
 
   return (
     <DashboardLayout title="Performance de Balcões">
-    <div className="p-4 md:p-6 lg:p-8 space-y-6 max-w-7xl mx-auto overflow-visible">
+    <div className="space-y-6 max-w-7xl mx-auto overflow-visible">
       {/* ── Header ── */}
-      <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3 relative z-10 overflow-visible">
-        <div>
-          <h1 className="text-2xl font-bold flex items-center gap-2">
-            <Building2 className="h-6 w-6 text-primary" />
-            Performance de Balcoes
-          </h1>
-          <p className="text-sm text-muted-foreground mt-1">
-            Analise de eficiencia dos parceiros bancarios
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={fetchData}
-          disabled={loading}
-          className="w-fit"
-        >
-          {loading ? <Loader2 className="h-4 w-4 mr-2 animate-spin" /> : <RefreshCw className="h-4 w-4 mr-2" />}
-          Atualizar
-        </Button>
-      </div>
+      <PageHeader
+        icon={Building2}
+        title="Performance de Balcoes"
+        description="Analise de eficiencia dos parceiros bancarios"
+        actions={
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={fetchData}
+            disabled={loading}
+            className="w-fit"
+          >
+            {loading ? <Spinner size="sm" className="mr-2" /> : <RefreshCw className="h-4 w-4 mr-2" />}
+            Atualizar
+          </Button>
+        }
+      />
 
       {/* ── Top Cards ── */}
       <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">

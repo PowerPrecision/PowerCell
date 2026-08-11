@@ -7,7 +7,7 @@
  * @context {AuthContext} — Consome user, token para autenticação e permissões
  */
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { useNavigate } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
@@ -32,8 +32,7 @@ import {
   Loader2
 } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
-import { getTTLStatus, migrateTTLFields } from "../services/api";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -46,12 +45,6 @@ const serviceIcons = {
   notifications: Bell
 };
 
-const statusColors = {
-  ok: "bg-green-500",
-  warning: "bg-yellow-500", 
-  error: "bg-red-500",
-  not_configured: "bg-gray-400"
-};
 
 const statusLabels = {
   ok: "Operacional",
@@ -211,20 +204,12 @@ const DiagnosticsPage = ({ embedded = false }) => {
       const data = await response.json();
       setMigrationResult(data);
       
-      toast({
-        title: "Migração Concluída",
-        description: data.message,
-        variant: data.total_migrated > 0 ? "default" : "default",
-      });
+      toast.success("Migração Concluída", { description: data.message });
       
       // Refrescar estado TTL
       await fetchTTLStatus();
     } catch (err) {
-      toast({
-        title: "Erro na Migração",
-        description: err.message,
-        variant: "destructive",
-      });
+      toast.error("Erro na Migração", { description: err.message });
     } finally {
       setMigrating(false);
     }
@@ -235,7 +220,7 @@ const DiagnosticsPage = ({ embedded = false }) => {
     fetchTTLStatus();
   }, [token]);
 
-  const handleConfigure = (service) => {
+  const handleConfigure = () => {
     navigate("/configuracoes");
   };
 

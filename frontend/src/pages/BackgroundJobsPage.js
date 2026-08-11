@@ -4,10 +4,10 @@
  * Suporta: Cancelar, Pausar e Retomar jobs
  * Inclui: Dashboard de métricas, notificações de jobs stuck, logs detalhados
  */
-import React, { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Progress } from "../components/ui/progress";
@@ -27,22 +27,12 @@ import {
   FileText,
   Upload,
   Zap,
-  Ban,
   BarChart3,
   TrendingUp,
   Timer,
-  Eye,
   Terminal,
   ChevronRight,
 } from "lucide-react";
-
-import {
-  Dialog,
-  DialogContent,
-  DialogDescription,
-  DialogHeader,
-  DialogTitle,
-} from "../components/ui/dialog";
 
 import {
   Sheet,
@@ -53,8 +43,20 @@ import {
 } from "../components/ui/sheet";
 
 import { formatDateTime, safeDate } from "../lib/utils";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import {
+  useBackgroundJobsQuery,
+  useBackgroundJobNotificationsQuery,
+  useBackgroundJobMetricsQuery,
+} from "../hooks/queries/useBackgroundJobsQuery";
+import {
+  deleteBackgroundJob,
+  cancelBackgroundJob,
+  pauseBackgroundJob,
+  resumeBackgroundJob,
+  clearBackgroundJobNotifications,
+  cleanupStuckBackgroundJobs,
+  clearFinishedBackgroundJobs,
+} from "../services/api";
 
 // Mapeamento de tipos de job para ícones
 const JOB_TYPE_ICONS = {
@@ -137,13 +139,6 @@ const JobCard = ({ job, onDelete, onCancel, onPause, onResume, onViewDetails }) 
   const isCompleted = job.status === "success" || job.status === "completed";
 
   // Cor da barra de progresso baseada no estado
-  const progressColor = isRunning
-    ? "bg-blue-500"
-    : isPaused
-    ? "bg-amber-500"
-    : isCompleted
-    ? "bg-green-500"
-    : "bg-red-500";
 
   return (
     <Card className={`transition-all ${isRunning ? 'border-blue-300 shadow-md dark:border-blue-700' : isPaused ? 'border-amber-300 dark:border-amber-700' : isCompleted ? 'border-green-200 dark:border-green-800' : ''}`}>
@@ -534,192 +529,85 @@ const JobLogSheet = ({ job, open, onOpenChange }) => {
 // ════════════════════════════════════════════════════════════
 const BackgroundJobsPage = ({ embedded = false }) => {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
-  const [jobs, setJobs] = useState([]);
-  const [counts, setCounts] = useState({ running: 0, success: 0, failed: 0, paused: 0, total: 0 });
-  const [loading, setLoading] = useState(true);
   const [statusFilter, setStatusFilter] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(true);
-  const [stuckNotifications, setStuckNotifications] = useState([]);
-  const [metrics, setMetrics] = useState(null);
   const [showMetrics, setShowMetrics] = useState(false);
   const [selectedJob, setSelectedJob] = useState(null);
   const [showLogSheet, setShowLogSheet] = useState(false);
 
-  const fetchJobs = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const url = statusFilter 
-        ? `${API_URL}/api/ai/bulk/background-jobs?status=${statusFilter}`
-        : `${API_URL}/api/ai/bulk/background-jobs`;
-      
-      const response = await fetch(url, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setJobs(data.jobs || []);
-        setCounts(data.counts || { running: 0, success: 0, failed: 0, paused: 0, total: 0 });
-      }
-    } catch (error) {
-      console.error("Erro ao carregar jobs:", error);
-    } finally {
-      setLoading(false);
-    }
-  }, [statusFilter]);
+  // ── Dados de servidor via TanStack Query (hooks dedicados) ────
+  const {
+    jobs,
+    counts,
+    isLoading: loading,
+    refetch: fetchJobs,
+  } = useBackgroundJobsQuery({ statusFilter, autoRefresh });
 
-  const fetchNotifications = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/notifications?unread_only=true`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setStuckNotifications(data.notifications || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar notificações:", error);
-    }
-  }, []);
+  const {
+    notifications: stuckNotifications,
+    refetch: fetchNotifications,
+  } = useBackgroundJobNotificationsQuery({ unreadOnly: true, autoRefresh });
 
-  const fetchMetrics = useCallback(async () => {
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/metrics?days=7`, {
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setMetrics(data);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar métricas:", error);
-    }
-  }, []);
+  const { metrics } = useBackgroundJobMetricsQuery({ days: 7 });
 
   const handleClearNotifications = async () => {
     try {
-      const token = localStorage.getItem("token");
-      await fetch(`${API_URL}/api/ai/bulk/background-jobs/notifications/clear`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      setStuckNotifications([]);
+      await clearBackgroundJobNotifications();
+      fetchNotifications();
       toast.success("Notificações limpas");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao limpar notificações");
     }
   };
 
-  useEffect(() => {
-    fetchJobs();
-    fetchNotifications();
-    fetchMetrics();
-    
-    if (autoRefresh) {
-      const interval = setInterval(() => {
-        fetchJobs();
-        fetchNotifications();
-      }, 5000);
-      return () => clearInterval(interval);
-    }
-  }, [fetchJobs, fetchNotifications, fetchMetrics, autoRefresh]);
-
   const handleDelete = async (jobId) => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/${jobId}`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        toast.success("Job removido");
-        fetchJobs();
-      }
-    } catch (error) {
+      await deleteBackgroundJob(jobId);
+      toast.success("Job removido");
+      fetchJobs();
+    } catch {
       toast.error("Erro ao remover job");
     }
   };
 
   const handleCancel = async (jobId) => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/${jobId}/cancel`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        toast.success("Processo cancelado");
-        fetchJobs();
-      } else {
-        toast.error("Não foi possível cancelar o processo");
-      }
+      await cancelBackgroundJob(jobId);
+      toast.success("Processo cancelado");
+      fetchJobs();
     } catch (error) {
-      toast.error("Erro ao cancelar processo");
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Não foi possível cancelar o processo"));
     }
   };
 
   const handlePause = async (jobId) => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/${jobId}/pause`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        toast.success("Processo pausado");
-        fetchJobs();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Não foi possível pausar o processo"));
-      }
+      await pauseBackgroundJob(jobId);
+      toast.success("Processo pausado");
+      fetchJobs();
     } catch (error) {
-      toast.error("Erro ao pausar processo");
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Não foi possível pausar o processo"));
     }
   };
 
   const handleResume = async (jobId) => {
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/${jobId}/resume`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        toast.success("Processo retomado");
-        fetchJobs();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Não foi possível retomar o processo"));
-      }
+      await resumeBackgroundJob(jobId);
+      toast.success("Processo retomado");
+      fetchJobs();
     } catch (error) {
-      toast.error("Erro ao retomar processo");
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Não foi possível retomar o processo"));
     }
   };
 
   const handleClearAll = async () => {
     if (!window.confirm("Tem a certeza que deseja limpar todos os jobs terminados?")) return;
-    
+
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs`, {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        toast.success(`${data.deleted || 0} jobs removidos`);
-        fetchJobs();
-      }
-    } catch (error) {
+      const response = await clearFinishedBackgroundJobs();
+      toast.success(`${response.data?.deleted || 0} jobs removidos`);
+      fetchJobs();
+    } catch {
       toast.error("Erro ao limpar jobs");
     }
   };
@@ -727,57 +615,24 @@ const BackgroundJobsPage = ({ embedded = false }) => {
   const handleCleanupStuck = async () => {
     const hours = window.prompt("Limpar jobs sem actividade há quantas horas?", "2");
     if (!hours) return;
-    
+
     const hoursNum = parseInt(hours);
     if (isNaN(hoursNum) || hoursNum < 1) {
       toast.error("Por favor introduza um número válido de horas");
       return;
     }
-    
-    try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/cleanup-stuck?hours=${hoursNum}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        if (data.cleaned > 0) {
-          toast.success(`${data.cleaned} jobs bloqueados foram limpos`);
-        } else {
-          toast.info("Nenhum job bloqueado encontrado");
-        }
-        fetchJobs();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao limpar jobs bloqueados"));
-      }
-    } catch (error) {
-      toast.error("Erro ao limpar jobs bloqueados");
-    }
-  };
 
-  const handleClearAllJobs = async () => {
-    if (!window.confirm("⚠️ ATENÇÃO: Isto irá limpar TODOS os jobs, incluindo os que estão a correr!\n\nTem a certeza?")) return;
-    
     try {
-      const token = localStorage.getItem("token");
-      const response = await fetch(`${API_URL}/api/ai/bulk/background-jobs/clear-all`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        toast.success(`${(data.deleted_db || 0) + (data.deleted_memory || 0)} jobs removidos`);
-        fetchJobs();
+      const response = await cleanupStuckBackgroundJobs(hoursNum);
+      const cleaned = response.data?.cleaned || 0;
+      if (cleaned > 0) {
+        toast.success(`${cleaned} jobs bloqueados foram limpos`);
       } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao limpar todos os jobs"));
+        toast.info("Nenhum job bloqueado encontrado");
       }
+      fetchJobs();
     } catch (error) {
-      toast.error("Erro ao limpar todos os jobs");
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao limpar jobs bloqueados"));
     }
   };
 

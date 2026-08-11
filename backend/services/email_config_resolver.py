@@ -124,6 +124,11 @@ async def resolve_email_config(
         return _empty_response("none")
 
     user_role = user.get("role", "")
+    # Effective role drives FORCED_SHARED (indexacao/suporte): use the
+    # active profile from the request, not only the primary JWT role.
+    # Multi-profile users may have indexacao as additional_role while
+    # acting as consultor (or vice-versa).
+    effective_role = (active_role or user_role or "").strip().lower()
     # Se active_company_id foi fornecido, usá-lo em vez do campo `company`
     user_company = active_company_id or user.get("company", "")
     raw_email_config = user.get("email_config", {})
@@ -176,8 +181,8 @@ async def resolve_email_config(
     # ==================================================================
     # REGRAS PARA ROLES COM FORÇA PARTILHADA (indexacao, suporte, etc.)
     # ==================================================================
-    if user_role in FORCED_SHARED_ROLES:
-        shared_config = await _load_shared_role_config(user_role)
+    if effective_role in FORCED_SHARED_ROLES:
+        shared_config = await _load_shared_role_config(effective_role)
         if shared_config:
             return shared_config
         # Se não tem config partilhada, retornar vazio (não fallback)

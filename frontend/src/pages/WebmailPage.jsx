@@ -8,7 +8,7 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
-import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
+import useWebSocket from "../hooks/useWebSocket";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -38,7 +38,6 @@ import {
   Send,
   Star,
   FileText,
-  Archive,
   Plus,
   Search,
   RefreshCw,
@@ -53,7 +52,6 @@ import {
   X,
   Loader2,
   ArrowLeft,
-  AtSign,
   Image,
   FileSpreadsheet,
   File,
@@ -77,7 +75,7 @@ import { pt } from "date-fns/locale";
 import { useNavigate } from "react-router-dom";
 import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
-import { hasAnyRole, hasRole } from "../utils/roleUtils";
+import { hasAnyRole } from "../utils/roleUtils";
 import { safeFormat } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -134,7 +132,7 @@ const getAttachmentIcon = (filename) => {
 };
 
 const WebmailPage = () => {
-  const { token, user } = useAuth();
+  const { token, user, effectiveRole } = useAuth();
   const navigate = useNavigate();
 
   // ── Multi-Tenant: active company_id from auth context ──────────
@@ -204,7 +202,7 @@ const WebmailPage = () => {
   // Labels state
   const [labels, setLabels] = useState([]);
   const [selectedLabel, setSelectedLabel] = useState(null);
-  const [labelsLoading, setLabelsLoading] = useState(false);
+  const [, setLabelsLoading] = useState(false);
 
   // Multi-select state
   const [selectedEmails, setSelectedEmails] = useState(new Set());
@@ -234,10 +232,11 @@ const WebmailPage = () => {
   // ROLE-BASED TABS: Initialize activeBox
   // ============================================================
   useEffect(() => {
-    if (hasRole(user, 'consultor')) setActiveBox('personal');
-    else if (hasRole(user, 'indexacao')) setActiveBox('shared_indexacao');
-    else setActiveBox('personal'); // admin/ceo/diretor/administrativo default to personal
-  }, [user?.role]);
+    // Use effectiveRole (active profile), not hasRole — multi-profile users
+    // may have indexacao as an additional role without it being the active one.
+    if (effectiveRole === 'indexacao') setActiveBox('shared_indexacao');
+    else setActiveBox('personal'); // consultor/admin/ceo/diretor/administrativo/etc.
+  }, [effectiveRole]);
 
   // Derived UI state
   const showTabs = hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo']);
@@ -258,7 +257,7 @@ const WebmailPage = () => {
       ? user.active_company_signature
       : user?.email_signature) || "";
   const pageSubtitle = !showTabs
-    ? (hasRole(user, 'indexacao') ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
+    ? (effectiveRole === 'indexacao' ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
     : null;
 
   // ============================================================
@@ -376,7 +375,7 @@ const WebmailPage = () => {
       } catch {
         // Silently fail
       }
-    } else if (hasRole(user, 'indexacao')) {
+    } else if (effectiveRole === 'indexacao') {
       try {
         const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=shared_indexacao`, { headers: { Authorization: `Bearer ${token}` } });
         if (res.ok) {
@@ -447,8 +446,8 @@ const WebmailPage = () => {
       if (customFolderId) {
         params.append("custom_folder", customFolderId);
       }
-      // Always enforce box=shared_indexacao for indexacao role
-      const effectiveBox = hasRole(user, 'indexacao') ? 'shared_indexacao' : activeBox;
+      // Always enforce box=shared_indexacao for active indexacao profile
+      const effectiveBox = effectiveRole === 'indexacao' ? 'shared_indexacao' : activeBox;
       if (effectiveBox) {
         params.append("box", effectiveBox);
       }
@@ -545,18 +544,40 @@ const WebmailPage = () => {
   // ============================================================
   // SYNC EMAILS (IMAP → DB)
   // ============================================================
-  // Poll job status until completed/failed, then refresh emails
+  // Poll job status until completed/failed, then refresh emails.
+  // Cap retries: in dev (no IMAP/email) or when the API is down (502),
+  // infinite polling floods the console with CORS/network noise.
   const pollJobStatus = useCallback((jobId) => {
     if (!jobId || !token) return;
+    let attempts = 0;
+    const MAX_ATTEMPTS = 20; // ~1 min of polling
+    const MAX_NETWORK_ERRORS = 3;
+    let networkErrors = 0;
+
     const poll = async () => {
+      attempts += 1;
+      if (attempts > MAX_ATTEMPTS) {
+        setSyncing(false);
+        toast.info("Sincronização a demorar demasiado — tente novamente mais tarde.");
+        return;
+      }
       try {
         const res = await fetch(`${API_URL}/api/emails/jobs/${jobId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         if (!res.ok) {
-          setSyncing(false);
+          // 502/503 = backend unavailable; stop instead of hammering
+          if (res.status >= 500 || attempts >= MAX_ATTEMPTS) {
+            setSyncing(false);
+            if (res.status >= 500) {
+              toast.error("Serviço de email indisponível (verifique a configuração IMAP em dev).");
+            }
+            return;
+          }
+          setTimeout(poll, 3000);
           return;
         }
+        networkErrors = 0;
         const job = await res.json();
         if (job.status === 'completed') {
           const synced = job.result?.synced || 0;
@@ -573,7 +594,12 @@ const WebmailPage = () => {
           setTimeout(poll, 3000);
         }
       } catch {
-        // Network error — retry in 5 seconds
+        networkErrors += 1;
+        if (networkErrors >= MAX_NETWORK_ERRORS) {
+          setSyncing(false);
+          // Silent stop in console-noise scenarios (CORS/502 often appear as TypeError)
+          return;
+        }
         setTimeout(poll, 5000);
       }
     };
@@ -650,7 +676,7 @@ const WebmailPage = () => {
             setLastSyncTime(new Date());
             pollJobStatus(fallbackData.job_id);
             return;
-          } catch (fallbackError) {
+          } catch {
             if (!wasInitialLoad) toast.error(data.error || "Erro na sincronização");
             setSyncing(false);
             return;
@@ -870,7 +896,7 @@ const WebmailPage = () => {
         try {
           const errData = await response.json();
           detail = errData.detail || errData.message || errData.error || detail;
-        } catch (_) {
+        } catch {
           /* resposta sem corpo JSON — manter mensagem genérica */
         }
         throw new Error(detail);
@@ -2305,7 +2331,7 @@ const WebmailPage = () => {
                 <div className="flex items-center gap-2 text-xs text-muted-foreground">
                   <Mail className="h-3.5 w-3.5 shrink-0" />
                   <span>
-                    {hasRole(user, 'indexacao')
+                    {effectiveRole === 'indexacao'
                       ? 'Envio pela conta partilhada de Indexação.'
                       : 'Envio pela sua conta pessoal — configure em Perfil > Configuração de Webmail.'}
                   </span>

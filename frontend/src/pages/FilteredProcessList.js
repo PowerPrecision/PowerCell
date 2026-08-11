@@ -3,18 +3,17 @@
  * Página para mostrar processos filtrados por status/critério
  */
 import { useState, useEffect } from "react";
-import { useNavigate, useParams, useSearchParams } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { ScrollArea } from "../components/ui/scroll-area";
 import {
-  ArrowLeft, Search, Eye, Loader2, Users, CheckCircle,
-  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame,
-  MessageSquare, Trash2
+  ArrowLeft, Search, Eye, Users, CheckCircle,
+  XCircle, Clock, TrendingUp, AlertTriangle, FileX, FileText, Flame, Trash2
 } from "lucide-react";
 import { TableSkeleton } from "../components/ui/skeletons";
 import { toast } from "sonner";
@@ -22,6 +21,7 @@ import { pt } from "date-fns/locale";
 import { getProcesses, getWorkflowStatuses, getCalendarDeadlines } from "../services/api";
 import { safeDateStr, safeFormat } from "../lib/utils";
 import { safeString } from "../utils/safeString";
+import { formatCurrency as formatCurrencyShared } from "../utils/formatCurrency";
 // PACOTE CH — ClientDetailsModal reutilizável
 import ClientDetailsModal from "../components/ClientDetailsModal";
 
@@ -37,37 +37,6 @@ const INACTIVE_STATUS_RE = /concluido|concluidos|desistencia|desistencias|elimin
  * chegassem como undefined (backend não as injetou), a verificação
  * !hasUnreadMessages && !hasNewDocuments podia ter comportamento inesperado.
  */
-const NotificationDots = ({ hasUnreadMessages, hasNewDocuments }) => {
-  const unread = Boolean(hasUnreadMessages);
-  const newDocs = Boolean(hasNewDocuments);
-  if (!unread && !newDocs) return null;
-  return (
-    <span className="inline-flex items-center gap-1 ml-1.5 align-middle" data-testid="notification-dots">
-      {unread && (
-        <span
-          className="relative flex h-2.5 w-2.5"
-          title="Mensagens não lidas do cliente"
-          role="img"
-          aria-label="Mensagens não lidas"
-        >
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-blue-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-blue-500" />
-        </span>
-      )}
-      {newDocs && (
-        <span
-          className="relative flex h-2.5 w-2.5"
-          title="Novos documentos do cliente"
-          role="img"
-          aria-label="Novos documentos"
-        >
-          <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-emerald-400 opacity-75" />
-          <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-emerald-500" />
-        </span>
-      )}
-    </span>
-  );
-};
 
 const filterConfig = {
   active: {
@@ -310,11 +279,7 @@ const FilteredProcessList = () => {
 
   const formatCurrency = (value) => {
     if (!value) return "-";
-    return new Intl.NumberFormat('pt-PT', { 
-      style: 'currency', 
-      currency: 'EUR',
-      maximumFractionDigits: 0 
-    }).format(value);
+    return formatCurrencyShared(value, { minimumFractionDigits: 0, maximumFractionDigits: 0 });
   };
 
   /**

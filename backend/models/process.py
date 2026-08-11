@@ -280,6 +280,9 @@ class PublicClientRegistration(BaseModel):
     Contém dados pessoais mínimos (name, email, phone) para criar o Cliente,
     e dados de processo (process_type, has_property) para o futuro Processo.
     Os dados pessoais são encaminhados para a coleção `clients`, NÃO para `processes`.
+
+    O processo só é criado depois dos documentos obrigatórios (SystemConfig).
+    `titular2_data` fica no cliente até essa criação e é copiado para o processo.
     """
     name: str = Field(..., min_length=2, max_length=200, description="Nome completo do cliente")
     email: EmailStr = Field(..., max_length=100, description="Email do cliente")
@@ -287,3 +290,6 @@ class PublicClientRegistration(BaseModel):
     process_type: str = Field(..., max_length=50, description="Tipo de processo")
     has_property: Optional[bool] = None
     custom_fields: Optional[dict] = None
+    personal_data: Optional[dict] = None
+    real_estate_data: Optional[dict] = None
+    titular2_data: Optional[dict] = None

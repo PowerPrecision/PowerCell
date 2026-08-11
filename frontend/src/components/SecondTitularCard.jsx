@@ -14,6 +14,7 @@ import { useQueryClient } from "@tanstack/react-query";
 import { searchClients, updateProcess, createClient } from "../services/api";
 import { queryKeys } from "../lib/queryClient";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { useDebounce } from "../hooks/useDebounce";
 import { Card, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
 import { Badge } from "./ui/badge";
@@ -24,8 +25,129 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { formatDate } from "../lib/utils";
+import { safeString } from "../utils/safeString";
+import { safeNumber } from "./dashboard/DashboardShared";
 
-const SecondTitularCard = ({ process: processData, onUpdate }) => {
+// PACOTE DD — Secção consolidada de Co-Buyers / Co-Applicants
+// (movida do antigo cartão separado em PersonalInfoTab para dentro do SecondTitularCard).
+// Usa apenas tokens semânticos do Shadcn (sem cores cruas).
+function CoBuyersSection({ process: processData, financialData }) {
+  const hasCoBuyers = Array.isArray(processData?.co_buyers) && processData.co_buyers.length > 0;
+  const hasCoApplicants = Array.isArray(processData?.co_applicants) && processData.co_applicants.length > 0;
+
+  if (!hasCoBuyers && !hasCoApplicants) return null;
+
+  const totalPeople =
+    (processData?.co_buyers?.length || 0) + (processData?.co_applicants?.length || 0);
+
+  return (
+    <div className="mt-4 pt-3 border-t border-border">
+      <h5 className="font-semibold text-sm flex items-center gap-2 mb-3">
+        <Users className="h-4 w-4 text-primary" />
+        2º Titular / Fiador
+        <Badge variant="secondary" className="ml-1">
+          {totalPeople} pessoa(s)
+        </Badge>
+      </h5>
+      <div className="space-y-3">
+        {/* Co-Buyers (do CPCV) */}
+        {hasCoBuyers && processData.co_buyers.map((buyer, index) => (
+          <div key={`buyer-${index}`} className="p-3 bg-primary/5 rounded-lg border border-border">
+            <div className="flex items-center gap-2 mb-2">
+              <Badge variant="outline" className="text-xs">
+                Comprador {index + 1}
+              </Badge>
+              {buyer.estado_civil && (
+                <Badge variant="secondary" className="text-xs">
+                  {safeString(buyer.estado_civil)}
+                </Badge>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              {buyer.nome && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Nome:</span>
+                  <p className="font-medium">{safeString(buyer.nome)}</p>
+                </div>
+              )}
+              {buyer.nif && (
+                <div>
+                  <span className="text-muted-foreground text-xs">NIF:</span>
+                  <p className="font-medium">{safeString(buyer.nif)}</p>
+                </div>
+              )}
+              {buyer.email && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Email:</span>
+                  <p className="font-medium">{safeString(buyer.email)}</p>
+                </div>
+              )}
+              {buyer.telefone && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Telefone:</span>
+                  <p className="font-medium">{safeString(buyer.telefone)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {/* Co-Applicants (do IRS/Simulação) */}
+        {hasCoApplicants && processData.co_applicants.map((applicant, index) => (
+          <div key={`applicant-${index}`} className="p-3 bg-muted rounded-lg border border-border">
+            <div className="flex items-center gap-2 mb-2">
+              <Badge variant="outline" className="text-xs">
+                {index === 0 ? "Titular" : "Cônjuge/Proponente " + (index + 1)}
+              </Badge>
+              {applicant.rendimento_mensal && (
+                <Badge variant="secondary" className="text-xs">
+                  {safeNumber(applicant.rendimento_mensal).toLocaleString('pt-PT')}€/mês
+                </Badge>
+              )}
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
+              {applicant.nome && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Nome:</span>
+                  <p className="font-medium">{safeString(applicant.nome)}</p>
+                </div>
+              )}
+              {applicant.nif && (
+                <div>
+                  <span className="text-muted-foreground text-xs">NIF:</span>
+                  <p className="font-medium">{safeString(applicant.nif)}</p>
+                </div>
+              )}
+              {applicant.data_nascimento && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Data Nascimento:</span>
+                  <p className="font-medium">{safeString(applicant.data_nascimento)}</p>
+                </div>
+              )}
+              {applicant.entidade_patronal && (
+                <div>
+                  <span className="text-muted-foreground text-xs">Empresa:</span>
+                  <p className="font-medium">{safeString(applicant.entidade_patronal)}</p>
+                </div>
+              )}
+            </div>
+          </div>
+        ))}
+
+        {/* Rendimento Agregado */}
+        {financialData?.rendimento_agregado && (
+          <div className="mt-3 p-2 bg-primary/5 rounded border border-border">
+            <p className="text-sm font-medium text-foreground">
+              Rendimento Agregado: {safeNumber(financialData.rendimento_agregado).toLocaleString('pt-PT')}€/mês
+            </p>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+const SecondTitularCard = ({ process: processData, onUpdate, financialData }) => {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [isSearching, setIsSearching] = useState(false);
@@ -34,7 +156,7 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
   const [loading, setLoading] = useState(false);
   const [linking, setLinking] = useState(false);
   const containerRef = useRef(null);
-  const debounceRef = useRef(null);
+  const debouncedQuery = useDebounce(query, 300);
 
   // ── Criação inline de novo cliente ──
   const [showNewClientForm, setShowNewClientForm] = useState(false);
@@ -79,11 +201,13 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
     }
   }, [processData?.client_id]);
 
+  // Disparar pesquisa quando o valor com debounce mudar
+  useEffect(() => {
+    if (isSearching) search(debouncedQuery);
+  }, [debouncedQuery, isSearching, search]);
+
   const handleInputChange = (e) => {
-    const value = e.target.value;
-    setQuery(value);
-    if (debounceRef.current) clearTimeout(debounceRef.current);
-    debounceRef.current = setTimeout(() => search(value), 300);
+    setQuery(e.target.value);
   };
 
   // Ligar cliente como 2º titular
@@ -279,6 +403,9 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
               )}
             </div>
           </div>
+
+          {/* PACOTE DD — Secção consolidada de co-buyers / co-applicants */}
+          <CoBuyersSection process={processData} financialData={financialData} />
         </CardContent>
       </Card>
     );
@@ -476,6 +603,8 @@ const SecondTitularCard = ({ process: processData, onUpdate }) => {
             )}
           </div>
         )}
+        {/* PACOTE DD — Secção consolidada de co-buyers / co-applicants */}
+        <CoBuyersSection process={processData} financialData={financialData} />
       </CardContent>
     </Card>
   );

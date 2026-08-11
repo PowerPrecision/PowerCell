@@ -11,9 +11,10 @@
  *
  * @route /visitas
  */
-import { useState, useEffect, useCallback, useMemo } from "react";
+import { useState, useEffect, useCallback, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { formatCurrency } from "../utils/formatCurrency";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -37,7 +38,6 @@ import {
   DialogTitle,
 } from "../components/ui/dialog";
 import {
-  Calendar as CalendarIcon,
   Clock,
   MapPin,
   User,
@@ -49,9 +49,7 @@ import {
   Loader2,
   Search,
   Filter,
-  ChevronRight,
   Users,
-  ArrowRight,
   Inbox,
   ExternalLink,
   Home,
@@ -60,10 +58,9 @@ import {
   Sparkles,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isToday, isTomorrow, isPast } from "date-fns";
+import { format, isToday, isTomorrow, isPast } from "date-fns";
 import { pt } from "date-fns/locale";
-import { safeDateStr, safeParseISO } from "../lib/utils";
-import { hasAnyRole, STAFF_ROLES } from "../utils/roleUtils";
+import { safeParseISO } from "../lib/utils";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -125,7 +122,7 @@ const isVisitPast = (isoDate) => {
 const formatPrice = (price) => {
   if (!price) return null;
   if (typeof price === 'number') {
-    return new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(price);
+    return formatCurrency(price);
   }
   return String(price);
 };
@@ -133,7 +130,7 @@ const formatPrice = (price) => {
 // ════════════════════════════════════════════════════════════════
 // VISIT CARD — Cartão individual de visita (v2 com dados do scraper)
 // ════════════════════════════════════════════════════════════════
-function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
+function VisitCard({ visit, onStatusChange, onSchedule }) {
   const status = visit.status || "agendada";
   const config = STATUS_CONFIG[status] || STATUS_CONFIG.agendada;
   const past = isVisitPast(visit.scheduled_date) && status === "agendada";
@@ -145,7 +142,6 @@ function VisitCard({ visit, onStatusChange, onEdit, onSchedule }) {
   const propertyPhoto = visit.property_photo || scraped.photo_url;
   const propertyPrice = visit.scraped_price || scraped.price;
   const propertyTypology = visit.scraped_typology || scraped.typology;
-  const propertyLocation = visit.property_address?.municipality || scraped.location || "";
   const propertyAddress = [
     visit.property_address?.street,
     visit.property_address?.municipality || scraped.location,
@@ -410,7 +406,15 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
         if (res.ok) {
           const data = await res.json();
           if (data.success && data.data) {
-            setScrapePreview(data.data);
+            const d = data.data;
+            // API may return PT keys (titulo/preco/…) or EN (title/price/…)
+            setScrapePreview({
+              title: d.title || d.titulo,
+              price: d.price || d.preco,
+              location: d.location || d.localizacao,
+              typology: d.typology || d.tipologia,
+              photo_url: d.photo_url || d.foto_principal,
+            });
           } else {
             setScrapePreview(null);
           }
@@ -580,7 +584,7 @@ function CreateVisitDialog({ open, onOpenChange, onSuccess, properties, processe
                     <span className="truncate">{p.title || "Sem título"}</span>
                     {p.financials?.asking_price && (
                       <span className="ml-2 text-muted-foreground text-xs">
-                        {new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(p.financials.asking_price)}
+                        {formatCurrency(p.financials.asking_price)}
                       </span>
                     )}
                   </SelectItem>
@@ -830,7 +834,7 @@ function ScheduleFromPortalDialog({ open, onOpenChange, visit, onSuccess }) {
 // VISITS PAGE — Página Principal
 // ════════════════════════════════════════════════════════════════
 const VisitsPage = () => {
-  const { user, token } = useAuth();
+  const { token } = useAuth();
   const [visits, setVisits] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showCreateDialog, setShowCreateDialog] = useState(false);
@@ -899,6 +903,37 @@ const VisitsPage = () => {
     fetchVisits();
     fetchFormData();
   }, [fetchVisits, fetchFormData]);
+
+  // Poll kanban while any visit has a pending URL scrape (timeout ~60s)
+  const scrapePollStartedRef = useRef(null);
+  useEffect(() => {
+    const columns = [
+      ...(visits.solicitadas || []),
+      ...(visits.agendadas || []),
+      ...(visits.concluidas || []),
+      ...(visits.canceladas || []),
+    ];
+    const hasPending = columns.some((v) => v.scraper_status === "pending");
+    if (!hasPending || !token) {
+      scrapePollStartedRef.current = null;
+      return;
+    }
+
+    if (!scrapePollStartedRef.current) {
+      scrapePollStartedRef.current = Date.now();
+    }
+
+    const interval = setInterval(() => {
+      if (Date.now() - scrapePollStartedRef.current > 60_000) {
+        clearInterval(interval);
+        scrapePollStartedRef.current = null;
+        return;
+      }
+      fetchVisits();
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [visits, token, fetchVisits]);
 
   const handleSchedule = useCallback((visit) => {
     setSchedulingVisit(visit);

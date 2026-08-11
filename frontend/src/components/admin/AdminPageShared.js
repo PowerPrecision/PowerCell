@@ -2,9 +2,7 @@
  * Componentes partilhados para páginas de Administração
  * Elimina duplicação de código entre RGPDAdminPage e ClientRegistrationsAdminPage
  */
-import React from "react";
 import { Card, CardContent } from "../ui/card";
-import { Badge } from "../ui/badge";
 import { Input } from "../ui/input";
 import { safeString } from "../../utils/safeString";
 import {
@@ -26,31 +24,31 @@ import { Button } from "../ui/button";
 import { 
   AlertTriangle, 
   Trash2, 
-  Loader2, 
   ChevronLeft, 
   ChevronRight, 
   Search,
   XCircle,
-  RefreshCw,
   Eye,
   Edit
 } from "lucide-react";
+import { StatCard as SharedStatCard } from "../shared/StatCard";
+import { PageHeader as SharedPageHeader } from "../shared/PageHeader";
+import { EmptyState as SharedEmptyState } from "../ui/EmptyState";
+import { Spinner } from "../ui/Spinner";
 
 /**
- * StatCard - Card de estatísticas para dashboards admin
+ * StatCard — admin wrapper around the canonical shared StatCard (inline variant).
+ * @deprecated Prefer importing from `components/shared/StatCard`.
  */
-export const StatCard = ({ title, value, icon: Icon, color }) => (
-  <Card>
-    <CardContent className="p-4">
-      <div className="flex items-center justify-between">
-        <div>
-          <p className="text-sm text-muted-foreground">{title}</p>
-          <p className={`text-2xl font-bold ${color}`}>{typeof value === 'number' ? value : safeString(value)}</p>
-        </div>
-        <Icon className={`h-8 w-8 ${color} opacity-50`} />
-      </div>
-    </CardContent>
-  </Card>
+export const StatCard = ({ title, value, icon, color, ...rest }) => (
+  <SharedStatCard
+    variant="inline"
+    title={title}
+    value={value}
+    icon={icon}
+    color={color}
+    {...rest}
+  />
 );
 
 /**
@@ -84,7 +82,7 @@ export const ConfirmDeleteModal = ({
       <DialogFooter>
         <Button variant="outline" onClick={onClose} disabled={loading}>Cancelar</Button>
         <Button variant="destructive" onClick={onConfirm} disabled={loading}>
-          {loading ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
+          {loading ? <Spinner size="sm" className="mr-2" /> : <Trash2 className="h-4 w-4 mr-2" />}
           Eliminar
         </Button>
       </DialogFooter>
@@ -93,15 +91,10 @@ export const ConfirmDeleteModal = ({
 );
 
 /**
- * EmptyState - Estado vazio para listas
+ * EmptyState — re-export from canonical ui/EmptyState
+ * @deprecated Prefer importing from `components/ui/EmptyState`.
  */
-export const EmptyState = ({ icon: Icon, message, action }) => (
-  <div className="text-center py-12 text-muted-foreground">
-    {Icon && <Icon className="h-12 w-12 mx-auto mb-4 opacity-50" />}
-    <p>{message}</p>
-    {action}
-  </div>
-);
+export const EmptyState = SharedEmptyState;
 
 /**
  * LoadingState - Estado de loading para listas
@@ -186,25 +179,10 @@ export const AdminSearchFilter = ({
 );
 
 /**
- * PageHeader - Header padrão para páginas de administração
+ * PageHeader — re-export from canonical shared/PageHeader
+ * @deprecated Prefer importing from `components/shared/PageHeader`.
  */
-export const PageHeader = ({ icon: Icon, title, description, onRefresh }) => (
-  <div className="flex items-center justify-between">
-    <div>
-      <h1 className="text-2xl font-bold flex items-center gap-2">
-        {Icon && <Icon className="h-6 w-6" />}
-        {title}
-      </h1>
-      {description && <p className="text-muted-foreground">{description}</p>}
-    </div>
-    {onRefresh && (
-      <Button variant="outline" onClick={onRefresh}>
-        <RefreshCw className="h-4 w-4 mr-2" />
-        Atualizar
-      </Button>
-    )}
-  </div>
-);
+export const PageHeader = SharedPageHeader;
 
 /**
  * AdminTable - Tabela reutilizável para admin pages

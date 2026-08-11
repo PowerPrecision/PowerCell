@@ -27,7 +27,6 @@ const priorityColors = {
 const CalendarTab = ({ 
   calendarDeadlines, 
   consultors, 
-  intermediarios, 
   users,
   currentUser,
   onCreateEvent,
@@ -105,10 +104,6 @@ const CalendarTab = ({
     return calendarDeadlines.map(d => new Date(safeDateStr(d.due_date)));
   }, [calendarDeadlines]);
 
-  const getUserName = (userId) => {
-    const user = users.find(u => u.id === userId);
-    return user ? user.name : "-";
-  };
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">

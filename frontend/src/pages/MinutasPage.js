@@ -48,7 +48,6 @@ import {
   Edit,
   Trash2,
   Copy,
-  Download,
   Clock,
   User,
   Tag,
@@ -147,7 +146,7 @@ const MinutasPage = () => {
         const error = await response.json();
         toast.error(extractErrorMessage(error.detail, "Erro ao guardar minuta"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar minuta");
     }
   };
@@ -166,7 +165,7 @@ const MinutasPage = () => {
         toast.success("Minuta eliminada");
         fetchMinutas();
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar minuta");
     }
   };
@@ -175,7 +174,7 @@ const MinutasPage = () => {
     try {
       await navigator.clipboard.writeText(minuta.conteudo);
       toast.success("Conteudo copiado para a area de transferencia");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao copiar");
     }
   };

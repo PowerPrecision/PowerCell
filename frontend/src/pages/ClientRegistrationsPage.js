@@ -70,6 +70,7 @@ import { TableSkeleton } from "../components/ui/skeletons";
 import { safeString } from "../utils/safeString";
 import CreateProcessModal from "../components/CreateProcessModal";
 import { formatDate, formatDateTime } from "../lib/utils";
+import { formatCurrency } from "../utils/formatCurrency";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -199,7 +200,7 @@ const ClientRegistrationsPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [token, search, hasProcessFilter, sortField, sortOrder, assignedToMe, isIndexacao]);
 
   useEffect(() => {
     fetchClients();
@@ -787,7 +788,7 @@ const ClientRegistrationsPage = () => {
                       <p className="text-xs text-muted-foreground">Rendimento Mensal</p>
                       <p className="text-sm font-medium">
                         {detailsDialog.client.dados_financeiros?.rendimento_mensal
-                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(safeString(detailsDialog.client.dados_financeiros.rendimento_mensal))
+                          ? formatCurrency(safeString(detailsDialog.client.dados_financeiros.rendimento_mensal))
                           : <span className="text-muted-foreground italic">Não preenchido</span>}
                       </p>
                     </div>
@@ -798,7 +799,7 @@ const ClientRegistrationsPage = () => {
                       <p className="text-xs text-muted-foreground">Rendimento Anual</p>
                       <p className="text-sm font-medium">
                         {detailsDialog.client.dados_financeiros?.rendimento_anual
-                          ? new Intl.NumberFormat('pt-PT', { style: 'currency', currency: 'EUR' }).format(safeString(detailsDialog.client.dados_financeiros.rendimento_anual))
+                          ? formatCurrency(safeString(detailsDialog.client.dados_financeiros.rendimento_anual))
                           : <span className="text-muted-foreground italic">Não preenchido</span>}
                       </p>
                     </div>
@@ -952,15 +953,10 @@ const ClientRegistrationsPage = () => {
             {canAssign && (
               <Button
                 onClick={() => {
-                  setPreSelectedClient({
-                    id: detailsDialog.client.id,
-                    name: safeString(detailsDialog.client.nome),
-                    nif: safeString(detailsDialog.client.nif) || safeString(detailsDialog.client.dados_pessoais?.nif) || "",
-                    email: safeString(detailsDialog.client.contacto?.email) || "",
-                    phone: safeString(detailsDialog.client.contacto?.telefone) || "",
-                  });
+                  const client = detailsDialog.client;
                   setDetailsDialog({ open: false, client: null });
-                  setShowCreateProcess(true);
+                  // Abrir o CreateProcessModal já wired abaixo, pré-selecionando o cliente.
+                  setCreateProcessModal({ open: true, client });
                 }}
               >
                 <FileText className="h-4 w-4 mr-2" />

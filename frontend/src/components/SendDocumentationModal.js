@@ -34,7 +34,7 @@
  *   user={currentUser}
  * />
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import {
   Dialog,
   DialogContent,
@@ -49,7 +49,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
-import { Separator } from "./ui/separator";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
 import {
   AlertCircle,
@@ -175,7 +174,7 @@ const SendDocumentationModal = ({
   const [selectedDocs, setSelectedDocs] = useState([]);
   const [recipients, setRecipients] = useState([]);
   const [selectedRecipients, setSelectedRecipients] = useState([]);
-  const [emailTemplate, setEmailTemplate] = useState("");
+  const [, setEmailTemplate] = useState("");
   const [ccEmails, setCcEmails] = useState("");
   const [bccEmails, setBccEmails] = useState("");
   const [config, setConfig] = useState(null);
@@ -249,7 +248,7 @@ const SendDocumentationModal = ({
       
       // Carregar status do RGPD do processo
       try {
-        const rgpdRes = await fetch(`${API_URL}/api/rgpd/status/${processId}`, {
+        await fetch(`${API_URL}/api/rgpd/status/${processId}`, {
           headers: { Authorization: `Bearer ${token}` },
         });
         // RGPD status loaded silently - used to decide pre-selection
@@ -508,7 +507,7 @@ const SendDocumentationModal = ({
   };
 
   // Verificar permissões — Admin/CEO podem contornar destinatários bloqueados
-  const canEditTemplate = true; // Todos os utilizadores podem editar o corpo do email
+// Todos os utilizadores podem editar o corpo do email
   const isAdminOrCEO = user?.role?.match(/admin|ceo/i);
 
   if (!config?.enabled) {

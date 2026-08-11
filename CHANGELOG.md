@@ -3,6 +3,76 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DD: Limpeza de UI, Desencriptação de Dados e Preparação de IA
+
+### Corrigido
+- **Dados encriptados vazavam para o frontend** em 4 endpoints que não chamavam `decrypt_*` antes de devolver clientes/processos: pesquisa global (`search_api_global.py`), clientes do processo (`process_clients_nm.py`), processos do cliente (`client_process_ops.py`) e restauro de processo (`restore_api_process.py`). Agora todos aplicam `decrypt_client_data` / `decrypt_sensitive_data`.
+- **Security gap**: `run_apply_ai_suggestions` guardava NIF/CC extraídos pela IA em plain text (sem encriptar). Adicionado `_encrypt_mongo_update_paths()` que encripta dot-paths Mongo sensíveis antes de `$set`.
+- **IBAN não estava encriptado em repouso**: adicionado `iban` e `conta_bancaria` a `financial_data` em `encrypt_sensitive_data`/`decrypt_sensitive_data` (`process_service.py`) e `SENSITIVE_FIELDS` (`encryption.py`).
+- **Pipeline de IA não alimentava o dashboard de documentos a expirar para CCs por OCR**: `build_auto_cat_metadata` agora faz fallback de `expiry_date` a partir de `cc_validity`/`validade`/`data_validade` extraídos pelo OCR (via helper `_extract_validade_from_ocr`).
+
+### Alterado
+- **Calculadoras movidas para Sheet global**: removida a rota `/calculadoras` e o link na sidebar. Adicionado ícone de `Calculator` no `TopNav` do `DashboardLayout` que abre um `Sheet` (lado direito) com o `MortgageSimulator`. Acessível a partir de qualquer ecrã.
+- **Scroll nas Tarefas**: `TasksPanel` envolvido em `ScrollArea` com `h-fit max-h-[400px]` para criar scroll interno e impedir que a página estique.
+- **"N/A" oculto no PageHeader**: `AutoDSTIBadge` em modo `compact` retorna `null` quando o DSTI não é calculável (em vez de mostrar "N/A" entre os botões de ação).
+- **Etiquetas movidas para o PageHeader**: removido o cartão gigante de Etiquetas do separador Resumo. As etiquetas são agora `<Badge variant="secondary">` compactos na `description` do `PageHeader`, a seguir ao tipo de processo / número.
+- **Cartões de 2º Titular consolidados**: eliminada a duplicação entre `SecondTitularCard` (gere `titular2_data`) e o cartão "2º Titular / Fiador" (mostrava `co_buyers`/`co_applicants`). A secção `CoBuyersSection` foi movida para dentro do `SecondTitularCard`, preservando a lógica de gravação.
+- **Toasts de background com closeButton**: adicionado `closeButton: true` aos 3 toasts sticky do `TasksContext` (`loading`, `success`, `error`).
+
+### Documentação
+- **`FRONTEND_GUIDELINES.md`**: nova secção 8 "Padrões consolidados (Pacote DD)" com regras: calculadoras em Sheets globais; listas com `max-height` + `ScrollArea`; metadados curtos no header sem fallbacks "N/A"; sem cartões de UI duplicados; toasts de background com `closeButton`.
+- **`ARCHITECTURE.md`**: nova secção "Pipeline de IA — Extração de Dados e Validade de Documentos (Pacote DD)" com diagrama do fluxo de categorização + OCR, explicação do fallback de `expiry_date`, persistência/encriptação de dados IA, e campos encriptados atualizados (IBAN).
+
+### Técnico
+- **Backend modificado** (8 ficheiros): `services/search_api_global.py`, `services/process_clients_nm.py`, `services/client_process_ops.py`, `services/restore_api_process.py`, `services/document_ai_analyze.py`, `services/process_service.py`, `services/encryption.py`, `services/document_auto_categorize.py`.
+- **Frontend modificado** (7 ficheiros): `App.js`, `layouts/DashboardLayout.js`, `pages/ProcessDetails.js`, `components/AutoDSTIBadge.js`, `components/processDetails/tabs/PersonalInfoTab.jsx`, `components/SecondTitularCard.jsx`, `contexts/TasksContext.js`.
+- **Documentação** (2 ficheiros): `FRONTEND_GUIDELINES.md`, `ARCHITECTURE.md`.
+- **Validação**: `py_compile` ✓ (8 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (7 frontend, 0 erros).
+- **Dependências**: Nenhuma nova — `Sheet`, `ScrollArea`, `Badge`, `Calculator` já existem em Shadcn/lucide-react.
+
+## [2026-07-25] — Auditoria UX/UI (Fases 1–6), redesign ProcessDetails/ConsultorDashboard, Calculadora de Prestações
+
+### Adicionado
+- **ESLint safety net contra cores Tailwind cruas (Fase 6, #596)**: nova regra `no-restricted-syntax` (nível `warn`, gate do CI apenas em `error`) em `frontend/eslint.config.js` que deteta utilities de cor crua do Tailwind (`bg-gray-*`, `text-blue-*`, `bg-red-*`, etc.) em `className`/`class` e em `cn()`/`clsx()`/`classnames()`/`cva()`, forçando o uso de tokens semânticos do Shadcn (`bg-primary`, `text-muted-foreground`, `bg-destructive`, …) que respeitam o Dark Mode. Código legado não foi alterado (~2700 avisos intencionais).
+- **`FRONTEND_GUIDELINES.md`**: novo documento que consolida as normas de UX/UI do frontend — Progressive Disclosure, layout 2/3+1/3, eliminação de cartões redundantes para metadados simples, formulários secundários em `Dialog`/`Sheet`, `EmptyState`/`PageHeader` canónicos, regra ESLint de cores, e utilitários centralizados (`formatCurrency`, `validateNIF`, `mortgageCalculations`).
+- **Calculadora de Prestações no CRM (`/calculadoras`, #601)**: nova secção `CalculatorsPage.js` com `components/calculators/MortgageSimulator.jsx` — simula a prestação mensal (sistema francês de amortização) a partir de Capital, Prazo e Taxa de Juro/Spread, com toggle `Switch` "Incluir Seguros" que revela progressivamente Seguro de Vida e Multirriscos. Motor de cálculo extraído para `utils/mortgageCalculations.js` (`calcularPrestacaoMensal`, `calcularTAEG`, `simularCreditoHabitacao`) a partir do simulador do Portal do Cliente (`components/portal/SimulatorCH.jsx`), reutilizável fora do Portal. Inclui acesso rápido a DSTI e Risco de Crédito (dialogs já existentes).
+- **Componentes partilhados canónicos (Fases 4–5, #594)**: `StatCard`, `StatusBadge`, `Spinner`, `EmptyState`, `PageHeader` promovidos para `components/shared/`; migração de Dashboards/RGPD/Finance para os usar; `PageHeader` estendido com slot opcional `titleBadge`.
+
+### Alterado
+- **Redesign `ProcessDetails` com Progressive Disclosure (#597, #599)**: título manual substituído pelo `PageHeader` partilhado (com `StatusBadge` junto ao título); conteúdo reestruturado num grid `grid-cols-1 lg:grid-cols-3` — 2/3 esquerda: Tabs "Resumo"/"Documentos"/"Histórico"; 1/3 direita: novos `ClientContextCard` (titular/NIF/contactos) e `AssignmentContextCard` (consultor/mediador + prazos críticos + botão "Gerir"), seguidos de Tarefas e Imóveis Compatíveis. `ProcessStickyHeader` removido (substituído pelo cabeçalho + cartões de contexto).
+- **Separador Histórico consolidado**: formulário "Registar Atividade" movido para dentro de um `Dialog` (antes inline); timeline de atividades compactada num `ScrollArea` de altura fixa (`h-[500px]`); "Filme da Lead" mantido no mesmo separador.
+- **Cartão "Prioridade" eliminado do Resumo**: deixou de ocupar um `Card` isolado; passou a `DropdownMenu` + `Badge` compacto dentro do `AssignmentContextCard` (coluna direita).
+- **Redesign `ConsultorDashboard` (#594)**: 3 zonas (foco, funil, tabs), progressive disclosure; remove double padding herdado do layout antigo.
+
+### Corrigido
+- Race condition em `handleSaveOrganization` (`ProcessDetails`): aceitar overrides explícitos evita enviar valores antigos de prioridade/etiquetas ao backend quando o save é disparado no mesmo handler que o `setState`.
+
+### Técnico
+- Documentação sincronizada: `AGENTS.md` (bullets de gotchas + tabela "Frontend UX Audit + Calculadoras"), `README.md`, `FRONTEND_GUIDELINES.md` (novo), `CHANGELOG.md`.
+- PRs: #590 (Fase 0/auditoria), #592 (Fases 1–3), #594 (Fases 4–5 + ConsultorDashboard), #596 (Fase 6 ESLint), #597/#598 (ProcessDetails redesign), #599/#600 (Activity Dialog), #601/#602 (Prioridade + Calculadora + docs).
+
+---
+
+## [2026-07-22] — ProcessDetails mutations, portal fulfill, toasts sticky, titular IA
+
+### Adicionado
+- **`useProcessMutations` ligado ao ProcessDetails**: update processo/cliente, assign multi-assignee, atividades e prazos via TanStack Query (em vez de `api.put` soltos).
+- **`sanitizeProcessUpdatePayload` / `sanitizeClientUpdatePayload`**: bloqueiam `documents`, `onedrive_links` e arrays vazios que esmagariam dados no Mongo; `labels:[]` só no save de organização.
+- **`document_portal_fulfill`**: upload da equipa no CRM marca pedidos portal REQUESTED→RECEIVED (além do upload do cliente).
+- **Dialog titular 1/2** quando a IA devolve `needs_titular_choice`; apply com `target_titular`.
+- **`ProcessAssignDialog`**: UI de atribuições extraída do monolito ProcessDetails.
+
+### Alterado
+- **Toasts de background**: sticky (`duration: Infinity`); **não** auto-dismiss ao mudar de página / ao sair de `/tasks/active`.
+- **Onboarding público**: registo cria cliente + checklist SystemConfig; processo só após documentação obrigatória; dual-assign pós-criação.
+- **Analisar/Renomear IA**: RBAC gestão; badge `ai_analyzed`; skip re-análise.
+- Documentação: `AGENTS.md`, `README.md`, `ARCHITECTURE.md` alinhados com estes fluxos.
+
+### Corrigido
+- Args invertidos em várias rotas admin thinned (stale-processes, team-performance, logs) que causavam 500.
+
+---
+
 ## [2026-07-16] — Pacote DC: Fix Portal Access Email Template and Expose Code in CRM UI
 
 ### Corrigido

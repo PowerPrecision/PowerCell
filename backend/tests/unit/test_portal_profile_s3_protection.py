@@ -1,7 +1,7 @@
 """
 Testes unitários — Hotfix: Portal do Cliente NUNCA deve apagar/sobrescrever
 mapeamentos S3 (s3_folder, etc.) ou relações com processos ao atualizar
-o perfil (PUT /portal/me).
+o perfil (PUT /portal/me → services/portal_profile.py).
 
 Cobre:
 - `build_portal_profile_mongo_update`: gera o dict de atualização
@@ -10,7 +10,7 @@ Cobre:
 - `_assert_no_protected_fields`: rede de segurança que bloqueia
   qualquer tentativa de escrever campos internos protegidos.
 """
-from routes.portal import (
+from services.portal_profile import (
     build_portal_profile_mongo_update,
     _assert_no_protected_fields,
     ClientProfileUpdate,

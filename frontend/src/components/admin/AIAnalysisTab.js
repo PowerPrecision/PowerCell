@@ -8,7 +8,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Sparkles, Upload, Loader2, FileText, CheckCircle, Copy } from "lucide-react";
+import { Sparkles, Loader2, FileText, CheckCircle, Copy } from "lucide-react";
 import { toast } from "sonner";
 import { analyzeDocument } from "../../services/api";
 

@@ -1,16 +1,11 @@
 /**
- * ConsultorDashboard — Painel principal da equipa (Staff)
- * 
- * Vista centralizada com widgets de métricas, mural da equipa, tarefas e
- * acesso rápido ao webmail. Destinado a consultores, mediadores, diretores,
- * administrativos e CEO.
+ * ConsultorDashboard — Painel principal (Progressive Disclosure)
  *
- * @context {AuthContext} — user, token
- * @widget TeamMural — Mural de novidades da equipa
- * @widget TasksPanel — Gestão de tarefas com prioridades e prazos
- * @widget Email KPI Card — Emails não lidos (personal box)
+ * Zona 1 (Foco): Tarefas Pendentes — prazos, tarefas e rascunhos
+ * Zona 2 (Negócio): Funil visual de macro-fases (recharts)
+ * Zona 3 (Exploração): Tabs — Clientes | Mural/Feed | Novidades
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect, useMemo } from "react";
 import { useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -19,12 +14,14 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import {
-  Users, Eye, Plus, AlertTriangle, Building2, Mail,
-  TrendingUp, CheckCircle, XCircle, FileX, ClipboardList, Rss, Calendar,
-  MessageSquare, Inbox, ArrowRight, Megaphone
+  Users, Eye, Plus, AlertTriangle, Mail,
+  TrendingUp, ClipboardList, Rss, Calendar,
+  MessageSquare, Inbox, ArrowRight, Megaphone, FileEdit
 } from "lucide-react";
 import {
-  StatCard,
+  BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Cell,
+} from "recharts";
+import {
   StatusBadge,
   SearchFilters,
   ProcessTable,
@@ -38,6 +35,9 @@ import {
   DOCUMENT_TYPES_CONSULTOR,
   formatDate
 } from "../components/dashboard/DashboardShared";
+import { PageHeader } from "../components/shared/PageHeader";
+import { EmptyState } from "../components/ui/EmptyState";
+import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamMural from "../components/TeamMural";
 import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystemChangelogs } from "../services/api";
@@ -45,33 +45,56 @@ import { safeString } from "../utils/safeString";
 import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
 
-/**
- * Conversor simples de Markdown para HTML (sem dependências externas).
- * Suporta: headers (##), bold, italic, bullets, emojis, line breaks.
- * O output é posteriormente sanitizado por DOMPurify antes de ser renderizado.
- */
+/** Macro-fases do funil (agrupam estados finos do workflow) */
+const FUNNEL_MACRO = [
+  {
+    key: "novo",
+    label: "Novo",
+    statuses: ["clientes_espera", "fase_documental", "fase_documental_ii", "documentacao"],
+    color: "hsl(var(--chart-4))",
+  },
+  {
+    key: "analise",
+    label: "Em Análise",
+    statuses: [
+      "enviado_bruno", "enviado_luis", "enviado_bcp_rui", "entradas_precision",
+      "fase_bancaria", "fase_visitas", "analise", "pre_aprovacao",
+    ],
+    color: "hsl(var(--chart-1))",
+  },
+  {
+    key: "aprovado",
+    label: "Aprovado",
+    statuses: [
+      "ch_aprovado", "fase_escritura", "escritura_agendada",
+      "credito_aprovado", "pedido_avaliacao", "avaliacao", "cpcv", "minuta", "escritura",
+      "aprovado",
+    ],
+    color: "hsl(var(--chart-2))",
+  },
+  {
+    key: "concluido",
+    label: "Concluído",
+    statuses: ["concluidos", "concluido", "escritura"],
+    color: "hsl(var(--chart-3))",
+  },
+];
+
+const DRAFT_STATUSES = new Set(["clientes_espera", "fase_documental"]);
+
 function markdownToHtml(md) {
-  if (!md || typeof md !== 'string') return '';
+  if (!md || typeof md !== "string") return "";
   let html = md
-    // Headers ## → <h2>
     .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
     .replace(/^## (.+)$/gm, '<h2 class="text-base font-bold mt-4 mb-2">$1</h2>')
     .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
-    // Bold **text** → <strong>
-    .replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>')
-    // Italic *text* → <em> (avoid matching **)
-    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, '<em>$1</em>')
-    // Bullet list items: - or * at line start → <li>
-    .replace(/^[\-\*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
-    // Line breaks: double newline → paragraph break
+    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
+    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
+    .replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
     .replace(/\n\n/g, '</p><p class="mb-2">')
-    // Single newline → <br>
-    .replace(/\n/g, '<br/>');
-  // Wrap in paragraph
+    .replace(/\n/g, "<br/>");
   html = `<p class="mb-2">${html}</p>`;
-  // Clean up empty paragraphs
-  html = html.replace(/<p class="mb-2"><\/p>/g, '');
-  return html;
+  return html.replace(/<p class="mb-2"><\/p>/g, "");
 }
 
 const roleLabels = {
@@ -87,23 +110,20 @@ const roleLabels = {
 const ConsultorDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
+  const [exploreTab, setExploreTab] = useState("clients");
 
-  // Webmail stats (personal box)
   const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
-  // Calendar deadlines
   const [deadlines, setDeadlines] = useState([]);
-  // Communications feed (portal messages + emails)
-  const [commsFeed, setCommsFeed] = useState({ portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 });
-  // System changelog (Novidades do CRM)
+  const [commsFeed, setCommsFeed] = useState({
+    portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0,
+  });
   const [changelog, setChangelog] = useState(null);
 
-  // Dashboard data hook
   const {
     processes,
     filteredProcesses,
     workflowStatuses,
     upcomingExpiries,
-    stats,
     loading,
     searchTerm,
     setSearchTerm,
@@ -112,7 +132,6 @@ const ConsultorDashboard = () => {
     fetchData
   } = useDashboardData();
 
-  // Document management hook
   const {
     isAddExpiryOpen,
     setIsAddExpiryOpen,
@@ -129,30 +148,62 @@ const ConsultorDashboard = () => {
     analyzeDocumentWithAI
   } = useDocumentManagement(fetchData);
 
-  // Fetch webmail stats, deadlines and communications feed on mount
   useEffect(() => {
     getWebmailStats("personal")
-      .then(res => setWebmailStats(res.data || { unread_count: 0, sent_today_count: 0, drafts_count: 0 }))
+      .then((res) => setWebmailStats(res.data || { unread_count: 0, sent_today_count: 0, drafts_count: 0 }))
       .catch(() => {});
-
     getCalendarDeadlines()
-      .then(res => setDeadlines(res.data || []))
+      .then((res) => setDeadlines(res.data || []))
       .catch(() => {});
-
     getCommunicationsFeed()
-      .then(res => setCommsFeed(res.data || { portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0 }))
+      .then((res) => setCommsFeed(res.data || {
+        portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0,
+      }))
       .catch(() => {});
-
-    // Fetch system changelog (Novidades do CRM)
     getSystemChangelogs(1)
-      .then(res => {
+      .then((res) => {
         const data = res.data;
-        if (Array.isArray(data) && data.length > 0) {
-          setChangelog(data[0]);
-        }
+        if (Array.isArray(data) && data.length > 0) setChangelog(data[0]);
       })
       .catch(() => {});
   }, []);
+
+  const draftProcesses = useMemo(
+    () => (processes || []).filter((p) => DRAFT_STATUSES.has(p.status)).slice(0, 5),
+    [processes]
+  );
+
+  const upcomingDeadlines = useMemo(() => {
+    return [...(deadlines || [])]
+      .sort((a, b) => new Date(safeDateStr(a.due_date)) - new Date(safeDateStr(b.due_date)))
+      .slice(0, 5);
+  }, [deadlines]);
+
+  const funnelData = useMemo(() => {
+    const list = processes || [];
+    return FUNNEL_MACRO.map((phase) => {
+      const statusSet = new Set(phase.statuses);
+      const count = list.filter((p) => statusSet.has(p.status)).length;
+      return {
+        key: phase.key,
+        name: phase.label,
+        value: count,
+        color: phase.color,
+        statuses: phase.statuses,
+      };
+    });
+  }, [processes]);
+
+  const handleFunnelClick = (entry) => {
+    if (!entry?.statuses?.length) return;
+    // Prefer first matching workflow status that exists in data / config
+    const match = entry.statuses.find((s) =>
+      (workflowStatuses || []).some((w) => w.name === s)
+      || (processes || []).some((p) => p.status === s)
+    ) || entry.statuses[0];
+    setStatusFilter(match);
+    setExploreTab("clients");
+  };
 
   if (loading) {
     return (
@@ -162,11 +213,9 @@ const ConsultorDashboard = () => {
     );
   }
 
-  // Greeting
   const firstName = user?.name?.split(" ")[0] || "";
   const roleLabel = roleLabels[user?.role] || user?.role || "";
 
-  // Table columns configuration
   const tableColumns = [
     { key: "client", label: "Cliente" },
     { key: "email", label: "Email" },
@@ -176,13 +225,14 @@ const ConsultorDashboard = () => {
     { key: "actions", label: "Ações", className: "text-right" }
   ];
 
-  // Row renderer
   const renderRow = (process) => (
     <tr key={process.id} className="border-b transition-colors hover:bg-muted/50 data-[state=selected]:bg-muted">
       <td className="p-2 sm:p-3 lg:p-4 align-middle font-medium">{safeString(process.client_name)}</td>
       <td className="p-2 sm:p-3 lg:p-4 align-middle">{safeString(process.client_email)}</td>
       <td className="p-2 sm:p-3 lg:p-4 align-middle">
-        <Badge variant="outline">{TYPE_LABELS[process.process_type] || (typeof process.process_type === 'string' ? process.process_type : '')}</Badge>
+        <Badge variant="outline">
+          {TYPE_LABELS[process.process_type] || (typeof process.process_type === "string" ? process.process_type : "")}
+        </Badge>
       </td>
       <td className="p-2 sm:p-3 lg:p-4 align-middle">
         <StatusBadge status={process.status} workflowStatuses={workflowStatuses} />
@@ -205,303 +255,239 @@ const ConsultorDashboard = () => {
     <DashboardLayout>
       <div className="space-y-6" data-testid="consultor-dashboard">
 
-        {/* ── Header ── */}
-        <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-2">
-          <div>
-            <h1 className="text-2xl font-bold">
-              Olá, {firstName} 👋
-            </h1>
-            <p className="text-muted-foreground">
-              {roleLabel && <Badge variant="secondary" className="mr-2 text-xs">{roleLabel}</Badge>}
-              Gestão dos seus clientes e processos
-            </p>
-          </div>
-          <Button onClick={() => navigate('/kanban')} variant="outline" className="gap-2 self-start">
-            <TrendingUp className="h-4 w-4" />
-            Quadro Geral
-          </Button>
-        </div>
-
-        {/* ── KPI / Metrics Row ── */}
-        <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-7 gap-3">
-          <Card
-            className="bg-blue-50 dark:bg-blue-950/30 border-blue-200 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => navigate('/processos')}
-          >
-            <CardContent className="pt-6">
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-1">
-                  <TrendingUp className="h-5 w-5 text-blue-600" />
-                  <p className="text-2xl sm:text-3xl font-bold text-blue-600">{stats.active_processes || 0}</p>
-                </div>
-                <p className="text-xs sm:text-sm text-blue-600/80">Ativos</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card
-            className="bg-emerald-50 dark:bg-emerald-950/30 border-emerald-200 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => navigate('/processos-filtrados?filter=concluded')}
-          >
-            <CardContent className="pt-6">
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-1">
-                  <CheckCircle className="h-5 w-5 text-emerald-600" />
-                  <p className="text-2xl sm:text-3xl font-bold text-emerald-600">{stats.concluded_processes || 0}</p>
-                </div>
-                <p className="text-xs sm:text-sm text-emerald-600/80">Concluídos</p>
-              </div>
-            </CardContent>
-          </Card>
-          <Card
-            className="bg-red-50 dark:bg-red-950/30 border-red-200 cursor-pointer hover:shadow-md transition-shadow"
-            onClick={() => navigate('/processos-filtrados?filter=dropped')}
-          >
-            <CardContent className="pt-6">
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-1">
-                  <XCircle className="h-5 w-5 text-red-600" />
-                  <p className="text-2xl sm:text-3xl font-bold text-red-600">{stats.dropped_processes || 0}</p>
-                </div>
-                <p className="text-xs sm:text-sm text-red-600/80">Desistências</p>
-              </div>
-            </CardContent>
-          </Card>
-          <StatCard
-            icon={Users}
-            iconColor="text-blue-600"
-            bgColor="bg-blue-100 dark:bg-teal-600/30"
-            value={processes.length}
-            label="Meus Clientes"
-            onClick={() => navigate('/meus-clientes')}
-          />
-          <StatCard
-            icon={AlertTriangle}
-            iconColor="text-yellow-600"
-            bgColor="bg-yellow-100 dark:bg-yellow-900/30"
-            value={stats.pending_deadlines || 0}
-            label="Prazos Pendentes"
-            onClick={() => navigate('/pendentes')}
-          />
-          <StatCard
-            icon={AlertTriangle}
-            iconColor="text-orange-600"
-            bgColor="bg-orange-100 dark:bg-orange-900/30"
-            value={upcomingExpiries.length}
-            label="Docs a Expirar"
-            onClick={() => navigate('/validades')}
-          />
-          {/* ── Email KPI Card ── */}
-          <Card
-            className={`cursor-pointer hover:shadow-md transition-shadow ${webmailStats.unread_count > 0 ? "bg-amber-50 dark:bg-amber-950/30 border-amber-200" : "bg-emerald-50/50 dark:bg-emerald-950/20 border-emerald-200/50"}`}
-            onClick={() => navigate('/webmail')}
-          >
-            <CardContent className="pt-6">
-              <div className="text-center">
-                <div className="flex items-center justify-center gap-1 mb-0.5">
+        <PageHeader
+          title={`Olá, ${firstName}`}
+          description={
+            <span className="flex flex-wrap items-center gap-2">
+              {roleLabel && <Badge variant="secondary" className="text-xs">{roleLabel}</Badge>}
+              <span>Foque-se no que importa — explore o resto quando precisar</span>
+            </span>
+          }
+          actions={
+            <div className="flex flex-wrap gap-2">
+              {webmailStats.unread_count > 0 && (
+                <Button variant="outline" size="sm" className="gap-2" onClick={() => navigate("/webmail")}>
                   <Mail className="h-4 w-4" />
+                  {webmailStats.unread_count} não lido{webmailStats.unread_count !== 1 ? "s" : ""}
+                </Button>
+              )}
+              <Button onClick={() => navigate("/kanban")} variant="outline" className="gap-2">
+                <TrendingUp className="h-4 w-4" />
+                Quadro Geral
+              </Button>
+            </div>
+          }
+        />
+
+        {/* ── Zona 1: Foco — Tarefas Pendentes ── */}
+        <Card className="border-border" data-testid="pending-tasks-zone">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base flex items-center gap-2">
+              <ClipboardList className="h-5 w-5 text-primary" />
+              Tarefas Pendentes
+            </CardTitle>
+            <CardDescription>
+              Prazos, tarefas e processos em rascunho — o essencial do dia
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="grid grid-cols-1 lg:grid-cols-3 gap-4 lg:gap-6">
+              {/* Prazos */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium flex items-center gap-2 text-foreground">
+                    <Calendar className="h-4 w-4 text-muted-foreground" />
+                    Prazos
+                  </h3>
+                  <Badge variant="secondary" className="text-xs">{upcomingDeadlines.length}</Badge>
                 </div>
-                <p className={`text-2xl sm:text-3xl font-bold ${webmailStats.unread_count > 0 ? "text-amber-600 dark:text-amber-400" : "text-emerald-600 dark:text-emerald-400"}`}>
-                  {webmailStats.unread_count}
-                </p>
-                <p className="text-xs sm:text-sm text-muted-foreground">
-                  {webmailStats.unread_count === 1 ? "Email Não Lido" : "Emails Não Lidos"}
-                </p>
-                {(webmailStats.sent_today_count > 0 || webmailStats.drafts_count > 0) && (
-                  <p className="text-[10px] text-muted-foreground mt-0.5">
-                    {webmailStats.sent_today_count > 0 && `${webmailStats.sent_today_count} enviado${webmailStats.sent_today_count !== 1 ? "s" : ""} hoje`}
-                    {webmailStats.sent_today_count > 0 && webmailStats.drafts_count > 0 && " · "}
-                    {webmailStats.drafts_count > 0 && `${webmailStats.drafts_count} rascunho${webmailStats.drafts_count !== 1 ? "s" : ""}`}
-                  </p>
-                )}
-                <p className="text-[10px] font-medium text-primary mt-1 hover:underline">
-                  Abrir Webmail →
-                </p>
-              </div>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ── Communications Feed: Portal Messages + Unread Emails ── */}
-        {(commsFeed.portal_unread_count > 0 || commsFeed.email_unread_count > 0) && (
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-            {/* Portal Messages Panel */}
-            <Card className={`border-border ${commsFeed.portal_unread_count > 0 ? "border-amber-200 dark:border-amber-800" : ""}`}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <MessageSquare className="h-5 w-5 shrink-0 text-amber-500" />
-                  Mensagens do Portal Não Lidas
-                  {commsFeed.portal_unread_count > 0 && (
-                    <Badge className="bg-amber-500 text-white ml-2">{commsFeed.portal_unread_count}</Badge>
-                  )}
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Mensagens de clientes aguardando resposta
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {commsFeed.portal_messages.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-6 text-sm">Sem mensagens por ler</p>
+                {upcomingDeadlines.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4">Sem prazos próximos</p>
                 ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {commsFeed.portal_messages.map((msg) => (
-                      <div
-                        key={msg.id}
-                        className="flex items-start gap-3 p-3 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/50 cursor-pointer hover:bg-amber-100/50 dark:hover:bg-amber-950/30 transition-colors"
-                        onClick={() => navigate(`/process/${msg.process_id}`)}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <div className="flex items-center gap-2 mb-1">
-                            <span className="font-medium text-sm truncate">{msg.sender_name || "Cliente"}</span>
-                            {msg.process_number && (
-                              <Badge variant="outline" className="text-[10px] px-1 py-0">#{msg.process_number}</Badge>
-                            )}
+                  <ul className="space-y-2">
+                    {upcomingDeadlines.map((deadline) => {
+                      const dueDate = new Date(safeDateStr(deadline.due_date));
+                      const daysLeft = Math.ceil((dueDate - new Date()) / (1000 * 60 * 60 * 24));
+                      return (
+                        <li
+                          key={deadline.id}
+                          className="flex items-start justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5"
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">
+                              {deadline.title || deadline.description || "Prazo"}
+                            </p>
+                            <p className="text-xs text-muted-foreground">{formatDate(deadline.due_date)}</p>
                           </div>
-                          <p className="text-xs text-muted-foreground truncate">{msg.content}</p>
-                          {msg.client_name && (
-                            <p className="text-[10px] text-muted-foreground mt-1">Processo: {msg.client_name}</p>
-                          )}
-                        </div>
-                        <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                      </div>
-                    ))}
-                  </div>
+                          <span className={`text-xs shrink-0 ${daysLeft < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                            {daysLeft < 0 ? `${Math.abs(daysLeft)}d atrasado` : daysLeft === 0 ? "Hoje" : `em ${daysLeft}d`}
+                          </span>
+                        </li>
+                      );
+                    })}
+                  </ul>
                 )}
-              </CardContent>
-            </Card>
+              </div>
 
-            {/* Unread Emails Panel */}
-            <Card className={`border-border ${commsFeed.email_unread_count > 0 ? "border-blue-200 dark:border-blue-800" : ""}`}>
-              <CardHeader className="pb-3">
-                <CardTitle className="text-base flex items-center gap-2">
-                  <Inbox className="h-5 w-5 shrink-0 text-blue-500" />
-                  E-mails Recentes Não Lidos
-                  {commsFeed.email_unread_count > 0 && (
-                    <Badge className="bg-blue-500 text-white ml-2">{commsFeed.email_unread_count}</Badge>
-                  )}
-                </CardTitle>
-                <CardDescription className="text-xs">
-                  Emails recebidos por ler
-                </CardDescription>
-              </CardHeader>
-              <CardContent className="pt-0">
-                {commsFeed.unread_emails.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-6 text-sm">Sem emails por ler</p>
+              {/* Tarefas */}
+              <div className="space-y-3 min-h-0">
+                <h3 className="text-sm font-medium flex items-center gap-2 text-foreground">
+                  <ClipboardList className="h-4 w-4 text-muted-foreground" />
+                  As minhas tarefas
+                </h3>
+                <TasksPanel
+                  showCreateButton={true}
+                  compact={true}
+                  maxHeight="280px"
+                  showOnlyMyTasks={true}
+                />
+              </div>
+
+              {/* Rascunhos */}
+              <div className="space-y-3">
+                <div className="flex items-center justify-between">
+                  <h3 className="text-sm font-medium flex items-center gap-2 text-foreground">
+                    <FileEdit className="h-4 w-4 text-muted-foreground" />
+                    Em rascunho
+                  </h3>
+                  <Badge variant="secondary" className="text-xs">{draftProcesses.length}</Badge>
+                </div>
+                {draftProcesses.length === 0 ? (
+                  <p className="text-sm text-muted-foreground py-4">Nenhum processo em fase inicial</p>
                 ) : (
-                  <div className="space-y-2 max-h-64 overflow-y-auto">
-                    {commsFeed.unread_emails.map((email) => (
-                      <div
-                        key={email.id}
-                        className="flex items-start gap-3 p-3 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-950/30 transition-colors"
-                        onClick={() => email.process_id ? navigate(`/process/${email.process_id}`) : navigate('/webmail')}
-                      >
-                        <div className="min-w-0 flex-1">
-                          <p className="font-medium text-sm truncate">{email.subject}</p>
-                          <p className="text-xs text-muted-foreground truncate">De: {email.from_address}</p>
-                          {email.client_name && (
-                            <p className="text-[10px] text-muted-foreground mt-1">Processo: {email.client_name}</p>
-                          )}
-                        </div>
-                        <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
-                      </div>
+                  <ul className="space-y-2">
+                    {draftProcesses.map((p) => (
+                      <li key={p.id}>
+                        <button
+                          type="button"
+                          className="w-full flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-left hover:bg-muted/50 transition-colors"
+                          onClick={() => navigate(`/process/${p.id}`)}
+                        >
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium truncate">{safeString(p.client_name)}</p>
+                            <p className="text-xs text-muted-foreground truncate">{safeString(p.client_email)}</p>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
+                        </button>
+                      </li>
                     ))}
-                  </div>
+                  </ul>
                 )}
-              </CardContent>
-            </Card>
-          </div>
-        )}
+              </div>
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* ── Novidades do CRM (Changelog gerado por IA) ── */}
-        {changelog && changelog.content_markdown && (
-          <Card className="border-primary/20 bg-gradient-to-r from-primary/5 via-primary/10 to-primary/5 shadow-sm">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Megaphone className="h-5 w-5 shrink-0 text-primary" />
-                Novidades do CRM
-                {changelog.version && (
-                  <Badge variant="outline" className="text-[10px] px-1.5 py-0">
-                    {safeString(changelog.version)}
-                  </Badge>
-                )}
-              </CardTitle>
-              <CardDescription className="text-xs">
-                {changelog.published_at && formatDate(changelog.published_at)}
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <div
-                className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed changelog-content"
-                dangerouslySetInnerHTML={{
-                  __html: sanitizeHtml(markdownToHtml(changelog.content_markdown))
-                }}
+        {/* ── Zona 2: Negócio — Funil ── */}
+        <Card className="border-border" data-testid="pipeline-funnel-zone">
+          <CardHeader className="pb-2">
+            <CardTitle className="text-base flex items-center gap-2">
+              <TrendingUp className="h-5 w-5 text-primary" />
+              Funil do Pipeline
+            </CardTitle>
+            <CardDescription>
+              Macro-fases dos seus processos — clique para filtrar a tabela de clientes
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            {funnelData.every((d) => d.value === 0) ? (
+              <EmptyState
+                icon={TrendingUp}
+                message="Ainda não há processos para montar o funil"
+                className="py-10"
               />
-            </CardContent>
-          </Card>
-        )}
+            ) : (
+              <SafeChartContainer className="h-[240px] min-w-0">
+                <ResponsiveContainer width="100%" height="100%">
+                  <BarChart
+                    data={funnelData}
+                    layout="vertical"
+                    margin={{ left: 8, right: 24, top: 8, bottom: 8 }}
+                  >
+                    <CartesianGrid strokeDasharray="3 3" horizontal={false} className="stroke-border" />
+                    <XAxis type="number" allowDecimals={false} tick={{ fontSize: 12 }} />
+                    <YAxis dataKey="name" type="category" width={96} tick={{ fontSize: 12 }} />
+                    <Tooltip
+                      formatter={(value) => [`${value} processos`, "Quantidade"]}
+                      contentStyle={{
+                        borderRadius: "8px",
+                        fontSize: "13px",
+                        border: "1px solid hsl(var(--border))",
+                        background: "hsl(var(--card))",
+                        color: "hsl(var(--card-foreground))",
+                      }}
+                    />
+                    <Bar
+                      dataKey="value"
+                      radius={[0, 6, 6, 0]}
+                      name="Processos"
+                      cursor="pointer"
+                      onClick={(data) => handleFunnelClick(data)}
+                    >
+                      {funnelData.map((entry) => (
+                        <Cell key={entry.key} fill={entry.color} />
+                      ))}
+                    </Bar>
+                  </BarChart>
+                </ResponsiveContainer>
+              </SafeChartContainer>
+            )}
+            <div className="mt-3 flex flex-wrap gap-2">
+              {funnelData.map((phase) => (
+                <Button
+                  key={phase.key}
+                  variant={statusFilter && phase.statuses.includes(statusFilter) ? "default" : "outline"}
+                  size="sm"
+                  className="gap-2"
+                  onClick={() => handleFunnelClick(phase)}
+                >
+                  <span
+                    className="h-2 w-2 rounded-full"
+                    style={{ backgroundColor: phase.color }}
+                    aria-hidden
+                  />
+                  {phase.name}
+                  <Badge variant="secondary" className="text-[10px] px-1.5">{phase.value}</Badge>
+                </Button>
+              ))}
+              {statusFilter !== "all" && (
+                <Button variant="ghost" size="sm" onClick={() => setStatusFilter("all")}>
+                  Limpar filtro
+                </Button>
+              )}
+            </div>
+          </CardContent>
+        </Card>
 
-        {/* ── Two-column Widget Grid: Tasks + Mural ── */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-
-          {/* ── Left Column: Tasks Panel ── */}
-          <Card className="border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <ClipboardList className="h-5 w-5 shrink-0" />
-                Minhas Tarefas
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Prazos, prioridades e tarefas em background
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <TasksPanel
-                showCreateButton={true}
-                compact={false}
-                maxHeight="520px"
-                showOnlyMyTasks={true}
-              />
-            </CardContent>
-          </Card>
-
-          {/* ── Right Column: Team Mural ── */}
-          <Card className="border-border">
-            <CardHeader className="pb-3">
-              <CardTitle className="text-base flex items-center gap-2">
-                <Rss className="h-5 w-5 shrink-0" />
-                Mural da Equipa
-              </CardTitle>
-              <CardDescription className="text-xs">
-                Novidades, avisos e comunicação interna
-              </CardDescription>
-            </CardHeader>
-            <CardContent className="pt-0">
-              <TeamMural />
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* ── Main Tabs: Clients / Documents / AI / Calendar ── */}
-        <Tabs defaultValue="clients">
-          <TabsList className="flex-wrap">
+        {/* ── Zona 3: Exploração — Tabs ── */}
+        <Tabs value={exploreTab} onValueChange={setExploreTab} data-testid="explore-tabs-zone">
+          <TabsList className="flex-wrap h-auto">
             <TabsTrigger value="clients" className="gap-2">
               <Users className="h-4 w-4" />
-              Meus Clientes
+              Clientes
             </TabsTrigger>
-            <TabsTrigger value="calendar" className="gap-2">
-              <Calendar className="h-4 w-4" />
-              Próximos Prazos
+            <TabsTrigger value="feed" className="gap-2">
+              <Rss className="h-4 w-4" />
+              Mural & Feed
+              {(commsFeed.portal_unread_count + commsFeed.email_unread_count) > 0 && (
+                <Badge className="ml-1 h-5 min-w-5 px-1.5 text-[10px]">
+                  {commsFeed.portal_unread_count + commsFeed.email_unread_count}
+                </Badge>
+              )}
+            </TabsTrigger>
+            <TabsTrigger value="changelog" className="gap-2">
+              <Megaphone className="h-4 w-4" />
+              Novidades
             </TabsTrigger>
             <TabsTrigger value="documents" className="gap-2">
               <AlertTriangle className="h-4 w-4" />
-              Documentos a Expirar
+              Docs a expirar
             </TabsTrigger>
             <TabsTrigger value="ai" className="gap-2">
-              <AlertTriangle className="h-4 w-4" />
               Análise IA
             </TabsTrigger>
           </TabsList>
 
-          {/* ── Clients Tab ── */}
           <TabsContent value="clients" className="mt-6">
             <Card className="border-border">
               <CardHeader>
@@ -529,68 +515,143 @@ const ConsultorDashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* ── Calendar / Deadlines Tab ── */}
-          <TabsContent value="calendar" className="mt-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="flex items-center gap-2">
-                  <Calendar className="h-5 w-5" />
-                  Próximos Prazos
+          <TabsContent value="feed" className="mt-6 space-y-6">
+            <Card className="border-border">
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base flex items-center gap-2">
+                  <Rss className="h-5 w-5" />
+                  Mural da Equipa
                 </CardTitle>
-                <CardDescription>Prazos e eventos agendados</CardDescription>
+                <CardDescription className="text-xs">
+                  Novidades, avisos e comunicação interna
+                </CardDescription>
               </CardHeader>
-              <CardContent>
-                {deadlines.length === 0 ? (
-                  <p className="text-muted-foreground text-center py-8">Nenhum prazo agendado</p>
-                ) : (
-                  <div className="space-y-3 max-h-[520px] overflow-y-auto">
-                    {[...deadlines]
-                      .sort((a, b) => new Date(safeDateStr(a.due_date)) - new Date(safeDateStr(b.due_date)))
-                      .slice(0, 15)
-                      .map((deadline) => {
-                        const dueDate = new Date(safeDateStr(deadline.due_date));
-                        const now = new Date();
-                        const daysLeft = Math.ceil((dueDate - now) / (1000 * 60 * 60 * 24));
-                        const urgencyClass = daysLeft < 0 ? "border-red-300 bg-red-50 dark:bg-red-950/20" :
-                          daysLeft <= 3 ? "border-orange-300 bg-orange-50 dark:bg-orange-950/20" :
-                          daysLeft <= 7 ? "border-yellow-300 bg-yellow-50 dark:bg-yellow-950/20" :
-                          "border-border bg-muted/30";
-                        return (
-                          <div key={deadline.id} className={`flex items-center justify-between p-3 rounded-lg border ${urgencyClass}`}>
-                            <div className="min-w-0 flex-1">
-                              <p className="font-medium text-sm truncate">{deadline.title || deadline.description || "Prazo"}</p>
-                              {deadline.process_id && (
-                                <p className="text-xs text-muted-foreground truncate">
-                                  Processo: {deadline.process_id}
-                                </p>
-                              )}
-                            </div>
-                            <div className="text-right ml-3 shrink-0">
-                              <p className="text-sm font-medium">
-                                {formatDate(deadline.due_date)}
-                              </p>
-                              <p className={`text-xs ${daysLeft < 0 ? "text-red-600" : daysLeft <= 3 ? "text-orange-600" : "text-muted-foreground"}`}>
-                                {daysLeft < 0 ? `${Math.abs(daysLeft)}d atrasado` : daysLeft === 0 ? "Hoje" : `em ${daysLeft}d`}
-                              </p>
-                            </div>
-                          </div>
-                        );
-                      })}
-                  </div>
-                )}
+              <CardContent className="pt-0">
+                <TeamMural />
               </CardContent>
             </Card>
+
+            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+              <Card className="border-border">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <MessageSquare className="h-5 w-5 text-accent-foreground" />
+                    Mensagens do Portal
+                    {commsFeed.portal_unread_count > 0 && (
+                      <Badge variant="secondary">{commsFeed.portal_unread_count}</Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {commsFeed.portal_messages.length === 0 ? (
+                    <EmptyState message="Sem mensagens por ler" className="py-8" />
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {commsFeed.portal_messages.map((msg) => (
+                        <button
+                          type="button"
+                          key={msg.id}
+                          className="w-full flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+                          onClick={() => navigate(`/process/${msg.process_id}`)}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2 mb-1">
+                              <span className="font-medium text-sm truncate">{msg.sender_name || "Cliente"}</span>
+                              {msg.process_number && (
+                                <Badge variant="outline" className="text-[10px] px-1 py-0">#{msg.process_number}</Badge>
+                              )}
+                            </div>
+                            <p className="text-xs text-muted-foreground truncate">{msg.content}</p>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+
+              <Card className="border-border">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Inbox className="h-5 w-5 text-primary" />
+                    E-mails não lidos
+                    {commsFeed.email_unread_count > 0 && (
+                      <Badge variant="secondary">{commsFeed.email_unread_count}</Badge>
+                    )}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  {commsFeed.unread_emails.length === 0 ? (
+                    <EmptyState message="Sem emails por ler" className="py-8" />
+                  ) : (
+                    <div className="space-y-2 max-h-64 overflow-y-auto">
+                      {commsFeed.unread_emails.map((email) => (
+                        <button
+                          type="button"
+                          key={email.id}
+                          className="w-full flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
+                          onClick={() => (email.process_id ? navigate(`/process/${email.process_id}`) : navigate("/webmail"))}
+                        >
+                          <div className="min-w-0 flex-1">
+                            <p className="font-medium text-sm truncate">{email.subject}</p>
+                            <p className="text-xs text-muted-foreground truncate">De: {email.from_address}</p>
+                          </div>
+                          <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0 mt-0.5" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </CardContent>
+              </Card>
+            </div>
           </TabsContent>
 
-          {/* ── Documents Expiry Tab ── */}
+          <TabsContent value="changelog" className="mt-6">
+            {changelog?.content_markdown ? (
+              <Card className="border-border bg-secondary/40">
+                <CardHeader className="pb-3">
+                  <CardTitle className="text-base flex items-center gap-2">
+                    <Megaphone className="h-5 w-5 text-primary" />
+                    Novidades do CRM
+                    {changelog.version && (
+                      <Badge variant="outline" className="text-[10px] px-1.5 py-0">
+                        {safeString(changelog.version)}
+                      </Badge>
+                    )}
+                  </CardTitle>
+                  <CardDescription className="text-xs">
+                    {changelog.published_at && formatDate(changelog.published_at)}
+                  </CardDescription>
+                </CardHeader>
+                <CardContent className="pt-0">
+                  <div
+                    className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed changelog-content"
+                    dangerouslySetInnerHTML={{
+                      __html: sanitizeHtml(markdownToHtml(changelog.content_markdown))
+                    }}
+                  />
+                </CardContent>
+              </Card>
+            ) : (
+              <Card className="border-border">
+                <CardContent>
+                  <EmptyState icon={Megaphone} message="Ainda não há novidades publicadas" />
+                </CardContent>
+              </Card>
+            )}
+          </TabsContent>
+
           <TabsContent value="documents" className="mt-6">
             <Card className="border-border">
               <CardHeader>
                 <CardTitle className="text-lg flex items-center gap-2">
-                  <AlertTriangle className="h-5 w-5 text-orange-500" />
+                  <AlertTriangle className="h-5 w-5 text-accent-foreground" />
                   Documentos a Expirar (Próximos 60 dias)
                 </CardTitle>
-                <CardDescription>Documentos dos seus clientes que estão próximos da data de validade</CardDescription>
+                <CardDescription>
+                  Documentos dos seus clientes próximos da data de validade
+                </CardDescription>
               </CardHeader>
               <CardContent>
                 <ExpiringDocumentsList
@@ -601,13 +662,12 @@ const ConsultorDashboard = () => {
             </Card>
           </TabsContent>
 
-          {/* ── AI Analysis Tab ── */}
           <TabsContent value="ai" className="mt-6">
             <AIAnalysisTab
               processes={processes}
               selectedClient={selectedClient}
               onSelectClient={(value) => {
-                const process = processes.find(p => p.id === value);
+                const process = processes.find((p) => p.id === value);
                 if (process) loadClientFiles(process);
               }}
               oneDriveFiles={oneDriveFiles}
@@ -618,7 +678,6 @@ const ConsultorDashboard = () => {
           </TabsContent>
         </Tabs>
 
-        {/* ── Add Document Expiry Dialog ── */}
         <AddExpiryDialog
           isOpen={isAddExpiryOpen}
           onClose={setIsAddExpiryOpen}

@@ -1,7 +1,7 @@
 /**
  * ClientPropertyMatch - Sugestões de imóveis compatíveis com o cliente
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Badge } from "./ui/badge";
@@ -14,7 +14,6 @@ import {
   DialogTitle,
   DialogDescription,
 } from "./ui/dialog";
-import { toast } from "sonner";
 import {
   Sparkles,
   Home,
@@ -27,6 +26,7 @@ import {
   TrendingUp,
   Eye,
 } from "lucide-react";
+import { formatCurrency } from "../utils/formatCurrency";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -58,14 +58,8 @@ const MatchCard = ({ match, onViewLead }) => {
   const { lead, score, match_reasons } = match;
   const [imageError, setImageError] = useState(false);
 
-  const formatPrice = (price) => {
-    if (!price) return "N/D";
-    return new Intl.NumberFormat("pt-PT", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
+  const formatPrice = (price) =>
+    formatCurrency(price, { fallback: "N/D", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   return (
     <Card className="hover:shadow-md transition-shadow">
@@ -298,9 +292,7 @@ const ClientPropertyMatch = ({ processId, clientName }) => {
                 <div>
                   <span className="text-muted-foreground">Preço:</span>
                   <p className="font-semibold text-green-600">
-                    {selectedLead.price 
-                      ? new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(selectedLead.price)
-                      : "N/D"}
+                    {formatCurrency(selectedLead.price, { fallback: "N/D" })}
                   </p>
                 </div>
                 <div>

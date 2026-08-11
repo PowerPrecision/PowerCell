@@ -13,7 +13,8 @@
  * @context {AuthContext} — Consumes token, user for verifying permissions and API calls
  * @route /admin/email-accounts — Página acessível apenas a admin/ceo
  */
-import React, { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useRef } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "../components/ui/card";
@@ -21,14 +22,8 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Label } from "../components/ui/label";
 import { Badge } from "../components/ui/badge";
-import { Switch } from "../components/ui/switch";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "../components/ui/select";
+
+
 import { hasAnyRole } from "../utils/roleUtils";
 import RichTextEditor from "../components/ui/RichTextEditor";
 import { toast } from "sonner";
@@ -38,8 +33,6 @@ import {
   Mail,
   Globe,
   Users,
-  Building,
-  Building2,
   ShieldCheck,
   Save,
   Loader2,
@@ -50,12 +43,18 @@ import {
   RotateCcw,
   MailCheck,
   Info,
-  Plus,
-  FileEdit,
-  Trash2,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
+
+async function fetchSystemConfig(token) {
+  const res = await fetch(`${API_URL}/api/system-config`, {
+    headers: { Authorization: `Bearer ${token}` },
+  });
+  if (!res.ok) throw new Error("Erro ao carregar configuração do sistema");
+  const response = await res.json();
+  return response.config || response;
+}
 
 // ====================================================================
 // Card 1: Email do Sistema (Transacional) — system_smtp
@@ -70,39 +69,28 @@ const SystemSmtpCard = () => {
     smtp_from_name: "",
     email_signature: "",
   });
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [testing, setTesting] = useState(null);
   // Resultado do teste isolado por secção (evita bleed para outros sub-menus)
   const [testResult, setTestResult] = useState(null);
+  const hydratedRef = useRef(false);
+
+  const { data: systemConfig, isLoading: loading } = useQuery({
+    queryKey: ["system-config"],
+    enabled: Boolean(token),
+    queryFn: () => fetchSystemConfig(token),
+  });
 
   useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/system-config`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const response = await res.json();
-          const data = response.config || response;
-          if (data.system_smtp) {
-            setSystemSmtp((prev) => ({
-              ...prev,
-              resend_api_key: data.system_smtp.resend_api_key || "",
-              smtp_from_email: data.system_smtp.smtp_from_email || "",
-              smtp_from_name: data.system_smtp.smtp_from_name || "",
-              email_signature: data.system_smtp.email_signature || "",
-            }));
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching system_smtp config:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchConfig();
-  }, [token]);
+    if (!systemConfig?.system_smtp || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setSystemSmtp({
+      resend_api_key: systemConfig.system_smtp.resend_api_key || "",
+      smtp_from_email: systemConfig.system_smtp.smtp_from_email || "",
+      smtp_from_name: systemConfig.system_smtp.smtp_from_name || "",
+      email_signature: systemConfig.system_smtp.email_signature || "",
+    });
+  }, [systemConfig]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -122,7 +110,7 @@ const SystemSmtpCard = () => {
         const data = await res.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar configuração");
     } finally {
       setSaving(false);
@@ -299,36 +287,25 @@ const IndexationImapCard = () => {
     email_user: "",
     app_password: "",
   });
-  const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const hydratedRef = useRef(false);
+
+  const { data: systemConfig, isLoading: loading } = useQuery({
+    queryKey: ["system-config"],
+    enabled: Boolean(token),
+    queryFn: () => fetchSystemConfig(token),
+  });
 
   useEffect(() => {
-    const fetchConfig = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/system-config`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const response = await res.json();
-          const data = response.config || response;
-          if (data.system_webmail) {
-            setSystemWebmail((prev) => ({
-              ...prev,
-              imap_host: data.system_webmail.imap_host || "",
-              imap_port: String(data.system_webmail.imap_port || 993),
-              email_user: data.system_webmail.email_user || "",
-              app_password: data.system_webmail.app_password ? "••••••••" : "",
-            }));
-          }
-        }
-      } catch (error) {
-        console.error("Error fetching system_webmail config:", error);
-      } finally {
-        setLoading(false);
-      }
-    };
-    fetchConfig();
-  }, [token]);
+    if (!systemConfig?.system_webmail || hydratedRef.current) return;
+    hydratedRef.current = true;
+    setSystemWebmail({
+      imap_host: systemConfig.system_webmail.imap_host || "",
+      imap_port: String(systemConfig.system_webmail.imap_port || 993),
+      email_user: systemConfig.system_webmail.email_user || "",
+      app_password: systemConfig.system_webmail.app_password ? "••••••••" : "",
+    });
+  }, [systemConfig]);
 
   const handleSave = async () => {
     setSaving(true);
@@ -348,7 +325,7 @@ const IndexationImapCard = () => {
         const data = await res.json();
         toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração IMAP"));
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao guardar configuração IMAP");
     } finally {
       setSaving(false);
@@ -436,31 +413,26 @@ const SHARED_EMAIL_ROLES = [
 
 const SharedEmailCard = () => {
   const { token } = useAuth();
-  const [configs, setConfigs] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   const [authenticating, setAuthenticating] = useState(null);
   const [syncing, setSyncing] = useState(null);
 
-  const fetchConfigs = async () => {
-    setLoading(true);
-    try {
+  const {
+    data: configs = [],
+    isLoading: loading,
+    refetch: fetchConfigs,
+  } = useQuery({
+    queryKey: ["shared-email"],
+    enabled: Boolean(token),
+    queryFn: async () => {
       const res = await fetch(`${API_URL}/api/admin/shared-email`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      if (res.ok) {
-        const data = await res.json();
-        setConfigs(data.configs || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar configs de email partilhado:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  useEffect(() => {
-    fetchConfigs();
-  }, []);
+      if (!res.ok) throw new Error("Erro ao carregar configs de email partilhado");
+      const data = await res.json();
+      return data.configs || [];
+    },
+  });
 
   // Escutar postMessage do popup OAuth
   useEffect(() => {
@@ -468,7 +440,7 @@ const SharedEmailCard = () => {
       if (event.data?.type === "shared_google_oauth_success") {
         toast.success(`Google OAuth conectado para ${event.data.email}`);
         setAuthenticating(null);
-        fetchConfigs();
+        queryClient.invalidateQueries({ queryKey: ["shared-email"] });
       }
       if (event.data?.type === "shared_google_oauth_error") {
         toast.error(`Autenticação cancelada: ${event.data.error}`);
@@ -477,7 +449,7 @@ const SharedEmailCard = () => {
     };
     window.addEventListener("message", handleMessage);
     return () => window.removeEventListener("message", handleMessage);
-  }, []);
+  }, [queryClient]);
 
   const handleGoogleAuth = async (role, emailAddress) => {
     setAuthenticating(role);
@@ -509,7 +481,7 @@ const SharedEmailCard = () => {
         toast.error("Popup bloqueado. Permita popups para este site.");
         setAuthenticating(null);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao iniciar autenticação Google");
       setAuthenticating(null);
     }
@@ -543,7 +515,7 @@ const SharedEmailCard = () => {
           toast.error(errorMsg, { duration: 6000 });
         }
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de ligação ao sincronizar");
     } finally {
       setSyncing(null);
@@ -563,7 +535,7 @@ const SharedEmailCard = () => {
       } else {
         toast.error("Erro ao desconectar");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao desconectar");
     }
   };
@@ -722,390 +694,13 @@ const SharedEmailCard = () => {
 // Copied from CompanyEmailConfigSection
 // ====================================================================
 
-const CompanyEmailCard = () => {
-  const { token } = useAuth();
-  const [configs, setConfigs] = useState([]);
-  const [companies, setCompanies] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [editingCompany, setEditingCompany] = useState(null);
-  const [showCreateDialog, setShowCreateDialog] = useState(false);
-  const [selectedCompany, setSelectedCompany] = useState("");
-  const [formData, setFormData] = useState({
-    company_name: "",
-    imap_server: "",
-    imap_port: 993,
-    smtp_server: "",
-    smtp_port: 465,
-    require_ssl: true,
-  });
-  const [deletingCompany, setDeletingCompany] = useState(null);
-
-  const fetchConfigs = async () => {
-    setLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/admin/company-email-configs`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setConfigs(data.configs || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar configs:", error);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const fetchCompanies = async () => {
-    try {
-      const res = await fetch(`${API_URL}/api/admin/company-email-configs/available-companies`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCompanies(data.companies || []);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar empresas:", error);
-    }
-  };
-
-  useEffect(() => {
-    fetchConfigs();
-    fetchCompanies();
-  }, []);
-
-  const handleEdit = (config) => {
-    setEditingCompany(config.company_name);
-    setFormData({
-      company_name: config.company_name,
-      imap_server: config.imap_server || "",
-      imap_port: config.imap_port || 993,
-      smtp_server: config.smtp_server || "",
-      smtp_port: config.smtp_port || 465,
-      require_ssl: config.require_ssl !== false,
-    });
-  };
-
-  const handleCreate = () => {
-    if (!selectedCompany) {
-      toast.error("Selecione uma empresa");
-      return;
-    }
-    setFormData({
-      company_name: selectedCompany,
-      imap_server: "",
-      imap_port: 993,
-      smtp_server: "",
-      smtp_port: 465,
-      require_ssl: true,
-    });
-    setShowCreateDialog(true);
-  };
-
-  const handleSave = async () => {
-    if (!formData.imap_server || !formData.smtp_server) {
-      toast.error("Preencha os servidores IMAP e SMTP");
-      return;
-    }
-    setSaving(true);
-    try {
-      const isUpdate = !!editingCompany;
-      const method = isUpdate ? "PUT" : "POST";
-      const url = isUpdate
-        ? `${API_URL}/api/admin/company-email-configs/${encodeURIComponent(editingCompany)}`
-        : `${API_URL}/api/admin/company-email-configs`;
-
-      const res = await fetch(url, {
-        method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify(formData),
-      });
-
-      if (res.ok) {
-        toast.success(isUpdate ? "Configuração atualizada" : "Configuração criada");
-        setEditingCompany(null);
-        setShowCreateDialog(false);
-        setSelectedCompany("");
-        fetchConfigs();
-        fetchCompanies();
-      } else {
-        const data = await res.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao guardar"));
-      }
-    } catch (error) {
-      toast.error("Erro de conexão");
-    } finally {
-      setSaving(false);
-    }
-  };
-
-  const handleDelete = async (companyName) => {
-    if (!window.confirm(`Remover a configuração de email para "${companyName}"?`)) return;
-    setDeletingCompany(companyName);
-    try {
-      const res = await fetch(
-        `${API_URL}/api/admin/company-email-configs/${encodeURIComponent(companyName)}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (res.ok) {
-        toast.success("Configuração removida");
-        fetchConfigs();
-        fetchCompanies();
-      } else {
-        toast.error("Erro ao remover");
-      }
-    } catch (error) {
-      toast.error("Erro de conexão");
-    } finally {
-      setDeletingCompany(null);
-    }
-  };
-
-  const companiesWithoutConfig = companies.filter((c) => !c.has_email_config);
-
-  return (
-    <Card>
-      <CardHeader className="pb-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="p-2 rounded-lg bg-indigo-100 dark:bg-indigo-900/30">
-              <Building className="h-5 w-5 text-indigo-700 dark:text-indigo-400" />
-            </div>
-            <div>
-              <CardTitle className="text-base">Configuração de Email por Empresa</CardTitle>
-              <CardDescription className="text-xs mt-0.5">
-                Configuração padrão de IMAP/SMTP por empresa (usada como fallback para emails pessoais dos colaboradores)
-              </CardDescription>
-            </div>
-          </div>
-          {configs.length > 0 && (
-            <Badge variant="secondary" className="text-xs bg-emerald-100 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400">
-              {configs.length} {configs.length === 1 ? "empresa" : "empresas"}
-            </Badge>
-          )}
-        </div>
-      </CardHeader>
-      <CardContent className="space-y-4">
-        {/* Info box about inheritance */}
-        <div className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
-          <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
-          <div className="text-blue-800 dark:text-blue-300 text-sm">
-            <p className="font-medium">Caminho da Herança</p>
-            <ol className="list-decimal list-inside mt-1 space-y-0.5 text-blue-700 dark:text-blue-400">
-              <li><strong>User Config</strong> — Configuração individual do utilizador</li>
-              <li><strong>Company Config</strong> — Servidores padrão da empresa (esta secção)</li>
-              <li><strong>System Config</strong> — Configuração global do sistema (fallback)</li>
-            </ol>
-            <p className="mt-2 text-blue-700 dark:text-blue-400 text-xs">
-              A password e o email do utilizador são sempre individuais. Apenas os servidores (IMAP/SMTP) são herdados.
-            </p>
-          </div>
-        </div>
-
-        {/* Create new */}
-        {companiesWithoutConfig.length > 0 && !showCreateDialog && (
-          <div className="flex items-center gap-3">
-            <Select value={selectedCompany} onValueChange={setSelectedCompany}>
-              <SelectTrigger className="w-64">
-                <SelectValue placeholder="Selecione uma empresa..." />
-              </SelectTrigger>
-              <SelectContent>
-                {companiesWithoutConfig.map((c) => (
-                  <SelectItem key={c.company_name} value={c.company_name}>
-                    {c.company_name} ({c.total_users} utilizadores)
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <Button onClick={handleCreate} disabled={!selectedCompany} className="gap-2">
-              <Plus className="h-4 w-4" />
-              Adicionar Configuração
-            </Button>
-          </div>
-        )}
-
-        {/* Create/Edit Form */}
-        {(showCreateDialog || editingCompany) && (
-          <div className="border rounded-lg p-4 space-y-4 bg-muted/30">
-            <div className="flex items-center justify-between">
-              <h4 className="font-medium">
-                {editingCompany ? `Editar: ${editingCompany}` : "Nova Configuração"}
-              </h4>
-              <div className="flex gap-2">
-                <Button variant="outline" size="sm" onClick={() => { setEditingCompany(null); setShowCreateDialog(false); }}>
-                  Cancelar
-                </Button>
-                <Button size="sm" onClick={handleSave} disabled={saving} className="gap-2">
-                  {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
-                  Guardar
-                </Button>
-              </div>
-            </div>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label>Empresa</Label>
-                <Input value={formData.company_name} disabled />
-              </div>
-              <div className="space-y-2" />
-              <div className="space-y-2">
-                <Label htmlFor="ce_imap_server">Servidor IMAP</Label>
-                <Input
-                  id="ce_imap_server"
-                  value={formData.imap_server}
-                  onChange={(e) => setFormData({ ...formData, imap_server: e.target.value })}
-                  placeholder="imap.empresa.pt"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ce_imap_port">Porta IMAP</Label>
-                <Input
-                  id="ce_imap_port"
-                  type="number"
-                  value={formData.imap_port}
-                  onChange={(e) => setFormData({ ...formData, imap_port: parseInt(e.target.value) || 993 })}
-                  placeholder="993"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ce_smtp_server">Servidor SMTP</Label>
-                <Input
-                  id="ce_smtp_server"
-                  value={formData.smtp_server}
-                  onChange={(e) => setFormData({ ...formData, smtp_server: e.target.value })}
-                  placeholder="smtp.empresa.pt"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ce_smtp_port">Porta SMTP</Label>
-                <Input
-                  id="ce_smtp_port"
-                  type="number"
-                  value={formData.smtp_port}
-                  onChange={(e) => setFormData({ ...formData, smtp_port: parseInt(e.target.value) || 465 })}
-                  placeholder="465"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ce_require_ssl">Requer SSL/TLS</Label>
-                <div className="flex items-center gap-3 h-9">
-                  <Switch
-                    id="ce_require_ssl"
-                    checked={formData.require_ssl}
-                    onCheckedChange={(v) => setFormData({ ...formData, require_ssl: v })}
-                  />
-                  <span className="text-sm text-muted-foreground">
-                    {formData.require_ssl ? "Ativado" : "Desativado"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* Existing configs list */}
-        {loading ? (
-          <div className="flex items-center justify-center py-8">
-            <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-          </div>
-        ) : configs.length === 0 ? (
-          <p className="text-center text-muted-foreground py-6">
-            Nenhuma empresa com configuração de email definida.
-          </p>
-        ) : (
-          <div className="space-y-3">
-            {configs.map((cfg) => (
-              <div key={cfg.id} className="border rounded-lg p-4 hover:bg-muted/30 transition-colors">
-                <div className="flex items-start justify-between">
-                  <div className="space-y-1">
-                    <div className="flex items-center gap-2">
-                      <Building2 className="h-4 w-4 text-muted-foreground" />
-                      <span className="font-medium">{cfg.company_name}</span>
-                      <Badge variant="secondary" className="text-xs">
-                        {cfg.total_users} {cfg.total_users === 1 ? "utilizador" : "utilizadores"}
-                      </Badge>
-                    </div>
-                    <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-sm text-muted-foreground">
-                      <div>
-                        <span className="text-xs uppercase tracking-wider">IMAP</span>
-                        <p>{cfg.imap_server}:{cfg.imap_port}</p>
-                      </div>
-                      <div>
-                        <span className="text-xs uppercase tracking-wider">SMTP</span>
-                        <p>{cfg.smtp_server}:{cfg.smtp_port}</p>
-                      </div>
-                      <div>
-                        <span className="text-xs uppercase tracking-wider">SSL/TLS</span>
-                        <p className="flex items-center gap-1">
-                          <ShieldCheck className={`h-3 w-3 ${cfg.require_ssl !== false ? "text-green-500" : "text-muted-foreground"}`} />
-                          {cfg.require_ssl !== false ? "Ativado" : "Desativado"}
-                        </p>
-                      </div>
-                      <div>
-                        <span className="text-xs uppercase tracking-wider">Utilizadores</span>
-                        <p>{cfg.total_users}</p>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => handleEdit(cfg)} title="Editar">
-                      <FileEdit className="h-4 w-4" />
-                    </Button>
-                    <Button
-                      variant="ghost"
-                      size="icon"
-                      onClick={() => handleDelete(cfg.company_name)}
-                      disabled={deletingCompany === cfg.company_name}
-                      className="text-destructive hover:text-destructive"
-                      title="Eliminar"
-                    >
-                      {deletingCompany === cfg.company_name ? (
-                        <Loader2 className="h-4 w-4 animate-spin" />
-                      ) : (
-                        <Trash2 className="h-4 w-4" />
-                      )}
-                    </Button>
-                  </div>
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* Companies without config summary */}
-        {companiesWithoutConfig.length > 0 && (
-          <div className="mt-4 pt-4 border-t">
-            <p className="text-xs text-muted-foreground mb-2">
-              Empresas sem configuração (utilizadores usarão System Config como fallback):
-            </p>
-            <div className="flex flex-wrap gap-2">
-              {companiesWithoutConfig.map((c) => (
-                <Badge key={c.company_name} variant="outline" className="text-xs">
-                  {c.company_name} ({c.total_users})
-                </Badge>
-              ))}
-            </div>
-          </div>
-        )}
-      </CardContent>
-    </Card>
-  );
-};
 
 // ====================================================================
 // Main Page Component
 // ====================================================================
 
 const EmailAccountsPage = ({ embedded = false }) => {
-  const { token, user } = useAuth();
+  const { user } = useAuth();
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
 
   if (!hasAnyRole(user, ["admin", "ceo"])) {

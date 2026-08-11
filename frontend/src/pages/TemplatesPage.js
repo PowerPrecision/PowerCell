@@ -4,7 +4,6 @@
  * Envolve o TemplatesPanel dentro do DashboardLayout para funcionar
  * como rota standalone acessível via sidebar.
  */
-import React from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
 import TemplatesPanel from "../components/TemplatesPanel";
 

@@ -2,11 +2,12 @@
  * LeadsKanban - Gestão de Leads de Imóveis
  * Quadro Kanban para gerir leads/visitas de imóveis
  */
-import React, { useState, useEffect, useCallback } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { useState, useEffect, useCallback } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { parseBackendError } from "../utils/errorFormatter";
+import { formatCurrency } from "../utils/formatCurrency";
 import {
   Dialog,
   DialogContent,
@@ -32,20 +33,14 @@ import {
 import { toast } from "sonner";
 import {
   Plus,
-  Link as LinkIcon,
   Loader2,
   MapPin,
-  Euro,
-  Home,
-  Phone,
   User,
   ExternalLink,
   Trash2,
   Edit,
-  GripVertical,
   Search,
   Building,
-  Maximize2,
   Users,
   Sparkles,
   ClipboardPaste,
@@ -66,7 +61,7 @@ const LEAD_STATUSES = [
 ];
 
 // Componente de cartão de lead
-const LeadCard = ({ lead, onEdit, onStatusChange, onDelete, onRefreshPrice, onShowSuggestions, clients }) => {
+const LeadCard = ({ lead, onEdit, onDelete, onRefreshPrice, onShowSuggestions }) => {
   const [isDragging, setIsDragging] = useState(false);
   const [isRefreshing, setIsRefreshing] = useState(false);
 
@@ -80,14 +75,8 @@ const LeadCard = ({ lead, onEdit, onStatusChange, onDelete, onRefreshPrice, onSh
     setIsDragging(false);
   };
 
-  const formatPrice = (price) => {
-    if (!price) return "N/D";
-    return new Intl.NumberFormat("pt-PT", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
+  const formatPrice = (price) =>
+    formatCurrency(price, { fallback: "N/D", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   const handleRefreshPrice = async () => {
     setIsRefreshing(true);
@@ -191,17 +180,11 @@ const LeadCard = ({ lead, onEdit, onStatusChange, onDelete, onRefreshPrice, onSh
 };
 
 // Componente de lista para Mobile
-const LeadListItem = ({ lead, status, onEdit, onDelete, onRefreshPrice, onShowSuggestions, onStatusChange }) => {
+const LeadListItem = ({ lead, onEdit, onDelete, onRefreshPrice, onShowSuggestions, onStatusChange }) => {
   const [isRefreshing, setIsRefreshing] = useState(false);
   
-  const formatPrice = (price) => {
-    if (!price) return "N/D";
-    return new Intl.NumberFormat("pt-PT", {
-      style: "currency",
-      currency: "EUR",
-      maximumFractionDigits: 0,
-    }).format(price);
-  };
+  const formatPrice = (price) =>
+    formatCurrency(price, { fallback: "N/D", minimumFractionDigits: 0, maximumFractionDigits: 0 });
 
   const handleRefreshPrice = async (e) => {
     e.stopPropagation();
@@ -391,8 +374,7 @@ const KanbanColumn = ({ status, leads, onDrop, onEdit, onStatusChange, onDelete,
 
 // Componente principal
 const LeadsKanban = () => {
-  const navigate = useNavigate();
-  const { token, user } = useAuth();
+  const { token } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
   const [leads, setLeads] = useState({});
   const [clients, setClients] = useState([]);

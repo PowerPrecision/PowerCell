@@ -6,7 +6,7 @@
  * Inclui bookmarklets para facilitar a cópia de dados directamente do browser.
  * Suporta navegação para links de agências para extrair mais dados.
  */
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import {
   Dialog,
@@ -41,7 +41,6 @@ import {
   FileText,
   Hash,
   Bed,
-  Bath,
   AlertTriangle,
   Edit2,
   BookmarkPlus,
@@ -50,7 +49,6 @@ import {
   ExternalLink,
   Link2,
   RefreshCw,
-  Globe,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;

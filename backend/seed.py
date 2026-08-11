@@ -20,6 +20,7 @@ Em produção, defina estas variáveis antes de executar o script!
 
 import asyncio
 import os
+import sys
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
@@ -50,15 +51,26 @@ class UserRole:
 
 
 def get_seed_passwords():
-    """Obter passwords do ambiente ou usar defaults (apenas para desenvolvimento)."""
-    admin_password = os.environ.get('SEED_ADMIN_PASSWORD', 'admin2026')
-    default_password = os.environ.get('SEED_DEFAULT_PASSWORD', 'power2026')
-    
-    # Avisar se estiver a usar passwords default
-    if admin_password == 'admin2026' or default_password == 'power2026':
-        print("\n⚠️  AVISO: A usar passwords padrão de desenvolvimento!")
-        print("   Para produção, defina SEED_ADMIN_PASSWORD e SEED_DEFAULT_PASSWORD\n")
-    
+    """Obter passwords do ambiente. Falha se não estiverem definidas.
+
+    Não existem defaults: as passwords DEVEM vir de SEED_ADMIN_PASSWORD e
+    SEED_DEFAULT_PASSWORD. Isto evita a criação de contas (nomeadamente a de
+    administrador) com credenciais previsíveis/hardcoded.
+    """
+    admin_password = os.environ.get('SEED_ADMIN_PASSWORD')
+    default_password = os.environ.get('SEED_DEFAULT_PASSWORD')
+
+    missing = [name for name, val in (
+        ('SEED_ADMIN_PASSWORD', admin_password),
+        ('SEED_DEFAULT_PASSWORD', default_password),
+    ) if not val]
+    if missing:
+        print(f"\n❌ ERRO: variáveis de ambiente em falta: {', '.join(missing)}")
+        print("   Defina-as antes de correr o seed, por exemplo:")
+        print("   SEED_ADMIN_PASSWORD=... SEED_DEFAULT_PASSWORD=... python seed.py")
+        print("   Gere passwords fortes com: openssl rand -base64 24\n")
+        sys.exit(1)
+
     return admin_password, default_password
 
 
@@ -84,7 +96,7 @@ async def seed_users():
     default_users = [
         {
             "email": "admin@sistema.pt",
-            "password": "admin",
+            "password": admin_password,
             "name": "Administrador Sistema",
             "role": UserRole.ADMIN,
             "phone": None,

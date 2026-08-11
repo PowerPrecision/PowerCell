@@ -9,10 +9,11 @@
  * ====================================================================
  */
 
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useMemo } from "react";
+import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Label } from "../components/ui/label";
@@ -49,7 +50,6 @@ import {
   AlertTriangle,
   CheckCircle,
   XCircle,
-  Filter,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -74,12 +74,10 @@ const PREFERENCE_LABELS = {
 
 export default function NotificationSettingsPage({ embedded = false }) {
   const wrapLayout = (children) => embedded ? children : <DashboardLayout>{children}</DashboardLayout>;
-  const { token, user } = useAuth();
-  
-  const [loading, setLoading] = useState(true);
+  const { token } = useAuth();
+  const queryClient = useQueryClient();
+
   const [saving, setSaving] = useState(false);
-  const [users, setUsers] = useState([]);
-  const [filteredUsers, setFilteredUsers] = useState([]);
   const [searchTerm, setSearchTerm] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
   const [preferences, setPreferences] = useState({});
@@ -87,46 +85,41 @@ export default function NotificationSettingsPage({ embedded = false }) {
   const [selectedForBulk, setSelectedForBulk] = useState([]);
   const [showBulkDialog, setShowBulkDialog] = useState(false);
 
-  // Carregar lista de utilizadores com preferências
-  const loadUsers = useCallback(async () => {
-    setLoading(true);
-    try {
+  const {
+    data: users = [],
+    isLoading: loading,
+    isError: usersError,
+  } = useQuery({
+    queryKey: ["notification-preferences"],
+    enabled: Boolean(token),
+    queryFn: async () => {
       const response = await fetch(`${API_URL}/api/admin/notification-preferences`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      
-      if (response.ok) {
-        const data = await response.json();
-        setUsers(data);
-        setFilteredUsers(data);
-      } else {
-        toast.error("Erro ao carregar utilizadores");
-      }
-    } catch (error) {
-      console.error("Erro:", error);
-      toast.error("Erro de conexão");
-    } finally {
-      setLoading(false);
-    }
-  }, [token]);
+      if (!response.ok) throw new Error("Erro ao carregar utilizadores");
+      return response.json();
+    },
+  });
 
   useEffect(() => {
-    loadUsers();
-  }, [loadUsers]);
-
-  // Filtrar utilizadores
-  useEffect(() => {
-    if (!searchTerm) {
-      setFilteredUsers(users);
-    } else {
-      const term = searchTerm.toLowerCase();
-      setFilteredUsers(users.filter(u => 
-        u.email?.toLowerCase().includes(term) ||
-        u.name?.toLowerCase().includes(term) ||
-        u.role?.toLowerCase().includes(term)
-      ));
+    if (usersError) {
+      toast.error("Erro ao carregar utilizadores");
     }
+  }, [usersError]);
+
+  const filteredUsers = useMemo(() => {
+    if (!searchTerm) return users;
+    const term = searchTerm.toLowerCase();
+    return users.filter((u) =>
+      u.email?.toLowerCase().includes(term) ||
+      u.name?.toLowerCase().includes(term) ||
+      u.role?.toLowerCase().includes(term)
+    );
   }, [searchTerm, users]);
+
+  const invalidateUsers = () => {
+    queryClient.invalidateQueries({ queryKey: ["notification-preferences"] });
+  };
 
   // Carregar preferências de um utilizador
   const loadUserPreferences = async (userId) => {
@@ -141,7 +134,7 @@ export default function NotificationSettingsPage({ embedded = false }) {
         setSelectedUser(data);
         setShowDialog(true);
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro ao carregar preferências");
     }
   };
@@ -164,11 +157,11 @@ export default function NotificationSettingsPage({ embedded = false }) {
       if (response.ok) {
         toast.success("Preferências guardadas");
         setShowDialog(false);
-        loadUsers();
+        invalidateUsers();
       } else {
         toast.error("Erro ao guardar preferências");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setSaving(false);
@@ -198,11 +191,11 @@ export default function NotificationSettingsPage({ embedded = false }) {
         toast.success(`${data.updated_count} utilizadores actualizados`);
         setSelectedForBulk([]);
         setShowBulkDialog(false);
-        loadUsers();
+        invalidateUsers();
       } else {
         toast.error("Erro ao actualizar utilizadores");
       }
-    } catch (error) {
+    } catch {
       toast.error("Erro de conexão");
     } finally {
       setSaving(false);

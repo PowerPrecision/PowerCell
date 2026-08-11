@@ -7,18 +7,17 @@ import { useNavigate } from "react-router-dom";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { 
   ArrowLeft, ClipboardList, Calendar, AlertTriangle, Clock, 
-  CheckCircle2, Circle, User, Loader2, Filter
+  CheckCircle2, Circle, User, Filter
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, differenceInDays } from "date-fns";
+import { format, differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { useAuth } from "../contexts/AuthContext";
 import { getMyTasks, completeTask, getMyDeadlines } from "../services/api";
-import { safeDateStr, safeParseISO } from "../lib/utils";
+import { safeParseISO } from "../lib/utils";
 
 const PendingItemsList = () => {
   const navigate = useNavigate();
@@ -64,7 +63,7 @@ const PendingItemsList = () => {
       await completeTask(taskId);
       toast.success("Tarefa concluída");
       fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao concluir tarefa");
     }
   };

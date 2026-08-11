@@ -9,7 +9,7 @@
  */
 
 import { useState, useEffect } from "react";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
+import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
@@ -22,7 +22,6 @@ import {
   ChevronDown, 
   ChevronUp,
   CheckCircle,
-  XCircle,
   Loader2
 } from "lucide-react";
 import { getProcessAlerts } from "../services/api";

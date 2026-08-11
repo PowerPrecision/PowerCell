@@ -32,7 +32,6 @@ import {
 import {
   TrendingUp,
   AlertTriangle,
-  CheckCircle,
   Info,
   Percent,
   Building2,

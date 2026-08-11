@@ -6,7 +6,7 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 
 ## Tecnologias
 
-- **Backend**: FastAPI (Python 3.11) + Motor (async MongoDB)
+- **Backend**: FastAPI (Python 3.12) + Motor (async MongoDB)
 - **Frontend**: React 19 + Vite + Tailwind CSS 4 + Shadcn UI (New York style) + @hello-pangea/dnd
 - **Base de dados**: MongoDB Atlas (via Motor async driver)
 - **Armazenamento**: AWS S3 (pre-signed URLs)
@@ -17,7 +17,7 @@ Sistema CRM completo para gestão de processos de crédito imobiliário, cliente
 - **Email**: SMTP transacional (SystemConfig) + IMAP sync (per-user + shared Google OAuth)
 - **Monitorização**: Sentry (frontend + backend)
 - **Acessibilidade**: axe-core (testes automáticos em dev)
-- **CI/CD**: GitHub Actions (Node.js 24 + Python 3.11)
+- **CI/CD**: GitHub Actions (Node.js 24 + Python 3.12)
 - **Deploy**: Render (backend) + Vercel (frontend)
 
 ## Estrutura do Projeto
@@ -33,7 +33,7 @@ PowerCell/
 │   │   ├── auth.py            # Login, refresh token, registo
 │   │   ├── automation.py      # Motor de automação (regras)
 │   │   ├── clients.py         # CRUD clientes, cursor pagination
-│   │   ├── documents.py       # Upload/download docs, rate limiting, S3 proxy
+│   │   ├── documents.py       # Thin stubs: upload/download/portal/S3 (lógica em services/document_*.py)
 │   │   ├── emails.py          # Gmail sync, send-to-banks, rascunhos IA
 │   │   ├── finance.py         # Dashboard financeiro, comissões
 │   │   ├── form_config.py     # Config formulário + templates
@@ -41,13 +41,15 @@ PowerCell/
 │   │   ├── rgpd.py            # Consentimento RGPD, anonimização
 │   │   ├── stats.py           # Estatísticas (com Redis cache)
 │   │   └── ...
-│   ├── services/              # ~60 ficheiros de lógica de negócio
+│   ├── services/              # Lógica de negócio (preferir editar aqui vs. routes/)
 │   │   ├── auth.py            # JWT, password hashing (passlib)
 │   │   ├── encryption.py      # Encriptação AES (Fernet) + Blind Indexing
 │   │   ├── redis_cache.py     # Cache Redis com fallback
 │   │   ├── workflow_engine.py # Motor de regras de automação
 │   │   ├── s3_storage.py      # Pre-signed URLs, organização automática
 │   │   ├── storage_service.py  # Factory Pattern: Local/S3/OneDrive adapters
+│   │   ├── document_*.py      # Documents: resolve, portal, upload, move, OCR, auto-cat…
+│   │   ├── process_*.py       # Processes: list, kanban, update, assignment, DSTI…
 │   │   ├── ai_document_analyzer.py  # Análise de documentos com confiança
 │   │   └── ...
 │   ├── models/                # Esquemas Pydantic + modelos de dados
@@ -61,16 +63,24 @@ PowerCell/
 │   │   ├── components/
 │   │   │   ├── ui/            # Componentes Shadcn UI
 │   │   │   ├── KanbanBoard.js # Quadro Kanban com drag-drop (@dnd-kit)
-│   │   │   ├── S3FileManager.js # Explorador de ficheiros + IA
+│   │   │   ├── S3FileManager.js # Explorador de ficheiros + IA (Analisar/Renomear)
 │   │   │   ├── NotificationsDropdown.js  # Polling com backoff
 │   │   │   ├── ImpersonateBanner.js      # Barra de impersonate
 │   │   │   ├── GlobalUploadProgress.js   # Progresso global de uploads
 │   │   │   ├── TasksDropdown.js          # Centro de operações
-│   │   │   └── UnifiedAuditTrail.js      # "Filme da Lead"
+│   │   │   ├── UnifiedAuditTrail.js      # "Filme da Lead"
+│   │   │   └── processDetails/           # Tabs/dialogs extraídos de ProcessDetails
+│   │   │       ├── ProcessAssignDialog.jsx
+│   │   │       ├── ProcessPersonalTab.jsx
+│   │   │       └── …
 │   │   ├── pages/             # ~50 páginas (lazy loaded)
 │   │   │   ├── PublicClientForm.js       # Formulário público dinâmico
 │   │   │   ├── AdminDashboard.js         # Dashboard admin
-│   │   │   ├── ProcessDetails.js         # Detalhes do processo
+│   │   │   ├── ProcessDetails.js         # Hub do processo (híbrido TanStack)
+│   │   │   ├── processDetails/           # Hydration, cleaners, payload seguro
+│   │   │   │   ├── processDetailsHydration.js
+│   │   │   │   ├── processFormCleaners.js
+│   │   │   │   └── processUpdatePayload.js  # Bloqueia arrays vazios / documents wipe
 │   │   │   ├── StaffDashboard.js         # Dashboard staff (consultor)
 │   │   │   ├── MyClientsPage.js          # Os Meus Processos (filtros)
 │   │   │   ├── FinanceDashboard.js       # Dashboard financeiro
@@ -84,11 +94,11 @@ PowerCell/
 │   │   │   └── ...
 │   │   ├── hooks/             # Custom hooks
 │   │   │   ├── useWebSocket.js  # WebSocket singleton + backoff
-│   │   │   ├── queries/         # TanStack Query hooks
-│   │   │   └── mutations/       # TanStack Mutation hooks
+│   │   │   ├── queries/         # TanStack Query (ex.: useProcessFullData)
+│   │   │   └── mutations/       # TanStack Mutations (ex.: useProcessMutations)
 │   │   ├── contexts/          # React Context providers
-│   │   │   ├── AuthContext.js   # Autenticação JWT + impersonate
-│   │   │   ├── TasksContext.js  # Polling + circuit breaker
+│   │   │   ├── AuthContext.js   # JWT + multi-perfil (effectiveRole / X-Active-Role)
+│   │   │   ├── TasksContext.js  # BG jobs: sticky toasts + circuit breaker
 │   │   │   ├── UploadProgressContext.js
 │   │   │   └── ThemeContext.js  # Light/Dark mode
 │   │   ├── services/
@@ -101,7 +111,7 @@ PowerCell/
 │   ├── vercel.json            # SPA rewrite + security headers
 │   └── public/
 ├── .github/workflows/
-│   └── ci.yml                 # CI/CD pipeline (Node 24 + Python 3.11)
+│   └── ci.yml                 # CI/CD pipeline (Node 24 + Python 3.12)
 ├── memory/
 │   └── PRD.md                 # Product Requirements Document
 ├── ARCHITECTURE.md            # Diagramas e padrões de design
@@ -124,6 +134,8 @@ PowerCell/
 - **Análise de documentos**: Extração automática de dados do CC, IRS, recibos vencimento
 - **Confiança por campo**: Score 0.0-1.0 por campo extraído, alertas visuais para < 0.8
 - **Auto-fill**: Sugestões automáticas de preenchimento com conflitos detetados
+- **Titular 1 vs 2**: match automático contra os dois titulares do processo; se ambíguo, dialog no CRM (“Este documento é de quem?”)
+- **Analisar / Renomear IA** (S3FileManager): restrito a gestão (`admin` / `CEO` / `diretor`); docs já analisados ficam com badge e são saltados
 - **Organização automática**: Categorização e movimentação de ficheiros no S3
 - **Rascunhos de emails IA**: Geração automática de emails quando faltam documentos
 - **DSTI automático**: Cálculo da taxa de esforço a partir de dados financeiros extraídos
@@ -139,14 +151,32 @@ PowerCell/
 - Campos obrigatórios com indicador visual (* vermelho + "obrigatório")
 - Rascunho automático (localStorage)
 
-### Registo de Clientes
-- Tabela mostra por defeito apenas clientes **sem processo atribuído** (leads) e clientes com processo em **status vazio/Lead** (ainda a preencher o Portal)
-- **PACOTE DB — Fluxo de Leads**: novos registos do formulário público entram com `status = None` (Lead) e `workflow_step = None` — **não entram no Kanban ativo**. Quando o cliente submete os **Documentos Obrigatórios** via Portal, o processo transita automaticamente para a **1ª fase real do Kanban** (1º status do `workflow_statuses` que não seja `pre_registo`, `fila_espera` nem terminal).
-- A página "Registos de Clientes" está no grupo **"Visão Global"** da barra lateral (PACOTE DB — movida de "O Meu Negócio"). O perfil Indexação mantém-se sem acesso a esta página.
-- Quando o processo é criado manualmente no CRM, usa a **1ª fase real do `workflow_statuses`** (sem forçar `fila_espera`/`fase_documental`); se não houver fases configuradas, o status fica vazio.
-- Quando o processo entra no Kanban ativo, o cliente desaparece da vista principal de Registos
-- Filtro disponível para ver "Todos", "Com Processo" ou "Sem Processo"
-- Link S3 automático ao criar processo: `s3://powerprecision-docs-storage/Documentação Clientes/Nome_Do_Cliente/`
+### Tarefas em background (UX)
+- Toasts sticky no canto inferior direito (`TasksContext` + Sonner): loading → success/error no mesmo `id`
+- **Não desaparecem** ao mudar de página; fecho apenas pelo X do utilizador
+- Polling de `GET /api/tasks/active` com circuit breaker
+
+### Ficha do processo (`ProcessDetails`)
+- **Leitura**: `useProcessFullData` / `useProcessQuery` (TanStack Query) + hydration helpers
+- **Escrita**: `useProcessMutations` (update processo/cliente, assign, atividades, prazos)
+- **Payload seguro**: `sanitizeProcessUpdatePayload` — nunca envia `documents` / `onedrive_links` / arrays vazios que esmagariam dados no Mongo
+- Tabs e dialogs parcialmente extraídos (`components/processDetails/*`)
+- **Separador Resumo limpo**: só dados críticos do processo (Cliente, Financeiros, Imóvel, Crédito, Prazos) — sem atividades/histórico (Progressive Disclosure, ver `FRONTEND_GUIDELINES.md`)
+- **Prioridade compacta**: deixou de ter um `Card` isolado no Resumo — vive como `DropdownMenu` + `Badge` dentro do `AssignmentContextCard` (coluna direita)
+- **Separador Histórico**: timeline de fases + "Atividades Recentes" (`ScrollArea` com altura fixa) + formulário "Registar Atividade" atrás de um `Dialog` + "Filme da Lead" (auditoria unificada)
+
+### Calculadoras (`/calculadoras`)
+- **Calculadora de Prestações (Crédito Habitação)**: `components/calculators/MortgageSimulator.jsx` — simula a prestação mensal (sistema francês de amortização) a partir de Capital, Prazo e Taxa de Juro/Spread, com toggle "Incluir Seguros" (`Switch`) que revela progressivamente Seguro de Vida e Multirriscos
+- Motor de cálculo isolado em `utils/mortgageCalculations.js` (reutilizado do simulador do Portal do Cliente, `components/portal/SimulatorCH.jsx`)
+- Layout 2 colunas (Inputs / Resultado em destaque), tokens Shadcn (`bg-primary`, `text-muted-foreground`, etc.), valores monetários via `formatCurrency`
+- Acesso rápido a DSTI e Risco de Crédito (dialogs já existentes) na mesma página
+
+### Registo de Clientes / Onboarding
+- **Registo público** cria **cliente** (+ checklist `mandatory_documents` do SystemConfig) — **não** cria processo de imediato
+- Processo é criado automaticamente quando a documentação obrigatória está completa; copia `titular2_data` e faz dual-assign (consultor + intermediário)
+- Tabela de registos mostra leads / clientes a aguardar docs; filtro "Todos" / "Com Processo" / "Sem Processo"
+- Quando o processo é criado manualmente no CRM, usa a **1ª fase real do `workflow_statuses`**
+- Link S3 automático ao criar processo: `s3://…/Documentação Clientes/Nome_Do_Cliente/`
 
 ### Os Meus Processos (`/meus-clientes`)
 - Vista personalizada por utilizador (apenas processos atribuídos)
@@ -217,12 +247,13 @@ PowerCell/
 ### Portal do Cliente
 - **Magic Link**: Acesso sem password via link curto (~50 chars, short_id)
 - **Visualização do processo**: Stepper de fases com cores dinâmicas, estado atual, consultor e mediador
-- **Upload de documentos**: Upload categorizado (13 categorias) com multi-ficheiro
-- **Pedido de documentos**: Admin solicita documentos específicos → cliente vê lista e responde
-- **Documentos carregados**: Cliente vê histórico de uploads com status (pendente, uploaded)
-- **Mapeamento S3 automático**: Categorias do portal mapeiam para pastas S3 do admin
-- **Gestão disponível para todos os roles**: Endpoints portal-requests acessíveis a 8 roles
-- **Estado do RGPD**: Quando o consentimento RGPD está assinado, o portal mostra um card verde "RGPD Assinado" com a data. Se pendente, mostra um card amarelo "RGPD Pendente"
+- **Upload de documentos**: Upload categorizado com multi-ficheiro → marca pedido como **RECEIVED** / “Enviado”
+- **Pedido de documentos**: Staff solicita documentos → cliente vê lista e responde
+- **Upload pela equipa no CRM**: também marca o pedido correspondente como recebido no portal (`document_portal_fulfill`)
+- **Documentos carregados**: Cliente vê histórico (pendente vs recebidos)
+- **Checklist obrigatória**: definida só em SystemConfig (`mandatory_documents`) — sem listas hardcoded
+- **Mapeamento S3**: uploads portal → pasta Index / categorias S3
+- **Estado do RGPD**: card verde “RGPD Assinado” ou amarelo “RGPD Pendente”
 
 ### Perfis de Utilizador e Permissões
 
@@ -420,6 +451,7 @@ flowchart TD
 | `/leads` | LeadsPage | Leads |
 | `/meus-clientes` | MyClientsPage | Os Meus Processos |
 | `/financeiro` | FinanceDashboard | Dashboard financeiro |
+| `/calculadoras` | CalculatorsPage | Calculadoras (Prestação de Crédito Habitação, DSTI, Risco) |
 | `/automation` | AutomationPage | Motor de automação No-Code |
 | `/gestao-formulario` | FormManagementPage | Gestão do formulário |
 | `/workflow-estados` | WorkflowStatusesPage | Gestão de estados do workflow |
@@ -495,7 +527,7 @@ flowchart TD
 
 ### Pré-requisitos
 
-- **Python 3.11+** com pip
+- **Python 3.12+** com pip
 - **Node.js 18+** (recomendado 24) com npm/yarn
 - **MongoDB Atlas** (ou instância local) — connection string SRV
 - **Conta AWS** (para S3) — opcional mas recomendado
@@ -660,7 +692,22 @@ O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Ren
 
 ## Histórico de Correções Recentes (dev)
 
-### OOM Fix — Render DEV (Lazy Loading + ENV Guards)
+### 2026-07 — Finalização UX (Prioridade, Resumo/Histórico), Calculadora de Prestações
+- **Toast com botão X**: `<Toaster closeButton />` confirmado em `App.js` — todos os toasts (incluindo os "sticky" de tarefas em background) têm sempre uma forma manual de fechar.
+- **Cartão "Prioridade" eliminado**: deixou de ocupar um `Card` isolado no separador Resumo do `ProcessDetails`; passou a um `DropdownMenu` + `Badge` compacto dentro do `AssignmentContextCard` (coluna direita) — ver `components/processDetails/AssignmentContextCard.jsx`.
+- **Resumo limpo / Histórico consolidado**: confirmado que "Atividades Recentes" e o formulário "Registar Atividade" vivem exclusivamente no separador Histórico (`HistoryTab.jsx`), com o formulário atrás de um `Dialog` e a lista dentro de um `ScrollArea` de altura fixa (`h-[500px]`) — sem duplicação no Resumo.
+- **Calculadora de Prestações no CRM**: nova secção `/calculadoras` (`CalculatorsPage.js`) com `MortgageSimulator.jsx` (Capital, Prazo, Taxa de Juro/Spread, toggle "Incluir Seguros" com Progressive Disclosure para Seguro de Vida/Multirriscos). Motor de cálculo extraído para `utils/mortgageCalculations.js` a partir do simulador do Portal do Cliente (`components/portal/SimulatorCH.jsx`). Inclui acesso rápido a DSTI e Risco de Crédito.
+- **Documentação**: novo `FRONTEND_GUIDELINES.md` consolida as normas de UX/UI (Progressive Disclosure, layout 2/3+1/3, tokens Shadcn, `sonner`, ESLint `no-restricted-syntax`, utilitários centralizados); `ARCHITECTURE.md` documenta a regra de escrita `$set` no MongoDB e a proteção dos mapeamentos S3.
+
+### 2026-07 — ProcessDetails TanStack, portal fulfill, toasts sticky, titular IA
+- **ProcessDetails writes** via `useProcessMutations`; load já era `useProcessFullData`. Payload sanitizado (`processUpdatePayload.js`) para não esmagar `documents` / arrays vazios.
+- **Toasts BG sticky**: não fazem dismiss ao mudar de página (`TasksContext`).
+- **Portal**: upload do cliente **e** da equipa no CRM marcam pedidos REQUESTED → RECEIVED (`document_portal_fulfill`).
+- **IA titular 1/2**: dialog no CRM quando o match é ambíguo; apply com `target_titular`.
+- **Onboarding**: registo público não cria processo até checklist SystemConfig completa.
+- Detalhe operacional para agentes: ver `AGENTS.md` (secção Cursor Cloud).
+
+### Oom Fix — Render DEV (Lazy Loading + ENV Guards)
 - **Lazy Loading do Playwright**: Removidos todos os imports top-level de `playwright` em `gov_scraper.py`. As importações estão apenas dentro das funções que as utilizam, evitando que o Chromium seja carregado na memória ao arrancar.
 - **ENVIRONMENT guards**: Adicionadas verificações `if os.environ.get('ENVIRONMENT') != 'production'` no início de todas as funções pesadas (scraper, email sync, worker). Em DEV, retornam mock JSON em vez de executar as operações reais.
 - **Mock routes no Portal**: Os endpoints `/fetch-financas`, `/fetch-seguranca-social` e `/scraper-status` retornam respostas simuladas em DEV, impedindo o Frontend de pendurar.

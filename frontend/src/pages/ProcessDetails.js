@@ -33,19 +33,17 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useParams, useNavigate } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
-import { safeLabel, safeNumber } from "../components/dashboard/DashboardShared";
+import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
 import DashboardLayout from "../layouts/DashboardLayout";
-import useWebSocket, { WSEventType } from "../hooks/useWebSocket";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
+import useWebSocket from "../hooks/useWebSocket";
+import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
-import { Label } from "../components/ui/label";
+// PACOTE DD — Label deixou de ser usado após remover o cartão de Etiquetas (badges compactos no PageHeader)
+// import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
-import { Switch } from "../components/ui/switch";
-import { Calendar } from "../components/ui/calendar";
-import { ScrollArea } from "../components/ui/scroll-area";
 import {
   Select,
   SelectContent,
@@ -60,11 +58,11 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Separator } from "../components/ui/separator";
-import { Popover, PopoverContent, PopoverTrigger } from "../components/ui/popover";
+// PACOTE DD — ScrollArea para limitar altura do painel de Tarefas
+import { ScrollArea } from "../components/ui/scroll-area";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -80,55 +78,36 @@ import {
   AccordionTrigger,
 } from "../components/ui/accordion";
 import {
-  getProcess,
-  updateProcess,
-  getClient,
-  updateClient,
-  getDeadlines,
-  createDeadline,
-  updateDeadline,
-  deleteDeadline,
-  getActivities,
-  createActivity,
-  deleteActivity,
-  getHistory,
-  getWorkflowStatuses,
-  getClientS3Files,
-  getS3DownloadUrl,
   deleteProcess,
   generateMagicLink,
   sendMagicLinkEmail,
-  impersonateClient,
   impersonateClientPortal,
 } from "../services/api";
+import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
+import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
 import ProcessSummaryCard from "../components/ProcessSummaryCard";
-import EmailHistoryPanel from "../components/EmailHistoryPanel";
-import UnifiedDocumentsPanel from "../components/UnifiedDocumentsPanel";
-import ProcessTimeline from "../components/ProcessTimeline";
-import UnifiedAuditTrail from "../components/UnifiedAuditTrail";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
+import ProcessAssignDialog from "../components/processDetails/ProcessAssignDialog";
+import ClientContextCard from "../components/processDetails/ClientContextCard";
+import AssignmentContextCard from "../components/processDetails/AssignmentContextCard";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
-import ProcessStickyHeader from "../components/ProcessStickyHeader";
 import DSTICalculator from "../components/DSTICalculator";
 import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
-import { AIBadge, getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
+import { getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import TempLinkButton from "../components/TempLinkButton";
 import SendDocumentationModal from "../components/SendDocumentationModal";
-import PortalDocumentRequests from "../components/PortalDocumentRequests";
-import SecondTitularCard from "../components/SecondTitularCard";
 import {
   ArrowLeft,
   User,
   Briefcase,
   Building2,
   CreditCard,
-  Calendar as CalendarIcon,
-  Clock,
-  Plus,
+  CalendarClock,
+  ClipboardList,
   Check,
   Trash2,
   Loader2,
@@ -137,159 +116,92 @@ import {
   History,
   Send,
   FolderOpen,
-  File,
-  Download,
-  ChevronRight,
   ChevronDown,
-  ChevronUp,
   ExternalLink,
   Link as LinkIcon,
   Users,
   Sparkles,
   Mail,
-  Phone,
-  MapPin,
   FileSignature,
   AlertTriangle,
   CheckCircle,
-  Pencil,
   Database,
   Calculator,
   TrendingUp,
-  Link2,
   Lock,
   Eye,
-  EyeOff,
   X,
-  Search,
-  RefreshCw,
-  BrainCircuit,
   Home,
   Shield,
 } from "lucide-react";
 import { toast } from "sonner";
-import { format, parseISO, isAfter, isValid } from "date-fns";
-import { pt } from "date-fns/locale";
-import { hasRole, hasAnyRole, filterByAnyRole, filterByRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
+import { format, isValid } from "date-fns";
+import { hasRole, hasAnyRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { safeDateStr, safeParseISO, safeFormat, safeDate } from "../lib/utils";
+import { safeParseISO } from "../lib/utils";
 
-// eslint-disable-next-line no-undef
+import { typeLabels } from "./processDetails/processDetailsConstants";
+import {
+  cleanPersonalDataForSubmit,
+  cleanTitular2DataForSubmit,
+  cleanRealEstateDataForSubmit,
+  cleanCreditDataForSubmit,
+  cleanFinancialDataForSubmit,
+} from "./processDetails/processFormCleaners";
+import { validateNIF } from "../utils/validateNIF";
+import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
+import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateProcessDetailsQueries } from "../lib/queryClient";
+import { useProcessFullData } from "../hooks/queries/useProcessQuery";
+import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
+// Sub-componentes das abas — cada um é responsável apenas pelo seu domínio
+// (SRP); ProcessDetails.js fica como orquestrador do layout + estado.
+import PersonalInfoTab from "../components/processDetails/tabs/PersonalInfoTab";
+import FinancialTab from "../components/processDetails/tabs/FinancialTab";
+import RealEstateTab from "../components/processDetails/tabs/RealEstateTab";
+import CreditTab from "../components/processDetails/tabs/CreditTab";
+import DocumentsTab from "../components/processDetails/tabs/DocumentsTab";
+import EmailsTab from "../components/processDetails/tabs/EmailsTab";
+import VisitasTab from "../components/processDetails/tabs/VisitasTab";
+import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
+import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
+import HistoryTab from "../components/processDetails/tabs/HistoryTab";
+import { PageHeader } from "../components/shared/PageHeader";
+import { StatusBadge } from "../components/shared/StatusBadge";
+
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
-const statusColors = {
-  yellow: "bg-yellow-100 text-yellow-800 border-yellow-200",
-  blue: "bg-blue-100 text-blue-800 border-blue-200",
-  orange: "bg-orange-100 text-orange-800 border-orange-200",
-  green: "bg-emerald-100 text-emerald-800 border-emerald-200",
-  red: "bg-red-100 text-red-800 border-red-200",
-  purple: "bg-purple-100 text-purple-800 border-purple-200",
-};
+// Constantes/helpers: processDetailsConstants, processFormCleaners, validateNIF
 
-const BANK_LIST = [
-  "ABANCA", "BBVA", "BEST", "BIG", "BPI", "CGD", "Crédito Agrícola",
-  "CTT", "Millennium bcp", "Novo Banco", "Popular", "Santander Totta", "Outro"
-];
-
-// Cores dos bancos portugueses para badges
-const BANK_COLORS = {
-  "ABANCA": "bg-red-500 text-white",
-  "BBVA": "bg-blue-600 text-white",
-  "BEST": "bg-green-600 text-white",
-  "BIG": "bg-orange-500 text-white",
-  "BPI": "bg-yellow-400 text-yellow-900",
-  "CGD": "bg-red-600 text-white",
-  "Crédito Agrícola": "bg-green-500 text-white",
-  "Credito Agricola": "bg-green-500 text-white",
-  "CTT": "bg-red-400 text-white",
-  "Millennium bcp": "bg-red-500 text-white",
-  "Millennium": "bg-red-500 text-white",
-  "bcp": "bg-red-500 text-white",
-  "Novo Banco": "bg-gray-700 text-white",
-  "NovoBanco": "bg-gray-700 text-white",
-  "Popular": "bg-blue-500 text-white",
-  "Santander Totta": "bg-red-600 text-white",
-  "Santander": "bg-red-600 text-white",
-  "Bankinter": "bg-blue-800 text-white",
-  "ActivoBank": "bg-teal-500 text-white",
-  "Eurobic": "bg-red-500 text-white",
-  "BIC": "bg-red-500 text-white",
-  "Caixa Geral": "bg-red-600 text-white",
-};
-
-// Função para obter cor do banco
-const getBankColor = (bankName) => {
-  if (!bankName) return "bg-gray-200 text-gray-800";
-  
-  // Garantir que bankName é uma string (pode vir como objecto {value, label})
-  const name = typeof bankName === 'string' ? bankName : (bankName?.label || bankName?.value || String(bankName));
-  
-  // Tentar match exato primeiro
-  if (BANK_COLORS[name]) {
-    return BANK_COLORS[name];
-  }
-  
-  // Tentar match parcial (case-insensitive)
-  const bankLower = name.toLowerCase();
-  for (const [bank, color] of Object.entries(BANK_COLORS)) {
-    if (bankLower.includes(bank.toLowerCase()) || bank.toLowerCase().includes(bankLower)) {
-      return color;
-    }
-  }
-  
-  // Cor padrão para bancos não mapeados
-  return "bg-gray-200 text-gray-800";
-};
-
-const typeLabels = {
-  credito: "Crédito",
-  imobiliaria: "Imobiliária",
-  ambos: "Crédito + Imobiliária",
-};
-
-// Função para validar NIF português
-const validateNIF = (nif) => {
-  if (!nif) return { valid: true, error: null };
-  
-  // Remover espaços e caracteres especiais
-  const nifClean = nif.replace(/[^\d]/g, '');
-  
-  if (nifClean.length !== 9) {
-    return { valid: false, error: `NIF deve ter 9 dígitos (tem ${nifClean.length})` };
-  }
-  
-  if (!/^\d+$/.test(nifClean)) {
-    return { valid: false, error: "NIF deve conter apenas dígitos" };
-  }
-  
-  // NIFs que começam com 5 são de empresas
-  if (nifClean.startsWith('5')) {
-    return { valid: false, error: "NIF de empresa (começa por 5) não é permitido para clientes particulares" };
-  }
-  
-  return { valid: true, error: null };
-};
-
-// ── Dynamic Form Fields Tab Component ───────────────────────────
-// Fetches form config from /api/admin/form-config/fields and displays
-// all fields that have a corresponding value in the process data.
-// Custom fields created in Form Manager appear here automatically.
 const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const { user, token } = useAuth();
+  const queryClient = useQueryClient();
+
+  // Live TanStack queries (process + client + side panels)
+  const processBundle = useProcessFullData(id);
+
+  // Mutations TanStack (silent — toasts ficam na página; payload sanitizado no hook)
+  const processMutations = useProcessMutations(id, {
+    silent: true,
+    clientId: processBundle.process?.client_id,
+  });
   
   // ── WebSocket: juntar-se à room do processo para mensagens em tempo real ──
-  const { joinProcessRoom, leaveProcessRoom, on, off } = useWebSocket({
+  // portalRefreshRef aponta para o refresh do hook useProcessPortalMessages
+  // (definido mais abaixo) — evita TDZ e mantém o callback WS estável.
+  const portalRefreshRef = useRef(() => {});
+  const { joinProcessRoom, leaveProcessRoom } = useWebSocket({
     onPortalMessage: (data) => {
       // Quando chega uma nova mensagem do portal, refrescar a lista SEMPRE
       // (independentemente do tab ativo, para que o unread count e as mensagens
       // estejam atualizados quando o utilizador mudar de tab)
       if (data?.process_id === id) {
-        fetchPortalMessages();
-        fetchPortalUnreadCount();
+        portalRefreshRef.current();
       }
     },
   });
@@ -300,6 +212,8 @@ const ProcessDetails = () => {
   // Guardar os dados originais do processo (da BD) para componentes
   // que precisam dos valores guardados (ex: email para notificações)
   const savedProcessRef = useRef(null);
+  const lastHydratedAtRef = useRef(0);
+  const wasEditingRef = useRef(false);
   // Refs para os triggers das calculadoras (desacopladas do Dropdown — Pacote AF)
   const dstiRef = useRef(null);
   const riskRef = useRef(null);
@@ -307,12 +221,16 @@ const ProcessDetails = () => {
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
-  const [oneDriveFiles, setOneDriveFiles] = useState([]);
-  const [currentFolder, setCurrentFolder] = useState("");
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [activeTab, setActiveTab] = useState("personal");
-  const [sideTab, setSideTab] = useState("deadlines");
+  // Separadores de topo (Progressive Disclosure): Resumo / Documentos / Histórico
+  const [mainTab, setMainTab] = useState("resumo");
+
+  // Mensagens do Portal — estado/polling vivem no hook (badge do tab precisa de unread)
+  const portal = useProcessPortalMessages(id, { isActive: activeTab === "mensagens" });
+  portalRefreshRef.current = portal.refresh;
+
 
   const [accessDenied, setAccessDenied] = useState(false);
   const [notFound, setNotFound] = useState(false);
@@ -385,27 +303,9 @@ const ProcessDetails = () => {
   // Estado para o modal de envio de documentação
   const [showSendDocsModal, setShowSendDocsModal] = useState(false);
 
-  // Estado para etiquetas (Fase 3)
-  const [newLabel, setNewLabel] = useState("");
-  const LABEL_PRESETS = ["Urgente", "Refinanciamento", "Primeira Habitação", "Investimento", "Documentação Pendente", "Aguarda Banco", "Aguarda Cliente", "Jovem"];
-
-  // Estado para Visitas/Imóveis tab
-  const [visitasProperties, setVisitasProperties] = useState([]);
-  const [visitasLoading, setVisitasLoading] = useState(false);
-  const [showAssociatePropertyDialog, setShowAssociatePropertyDialog] = useState(false);
-  const [propertySearch, setPropertySearch] = useState("");
-  const [propertySearchResults, setPropertySearchResults] = useState([]);
-  const [propertySearchLoading, setPropertySearchLoading] = useState(false);
-  const [associatingProperty, setAssociatingProperty] = useState(false);
-
-
-  // Estado para Mensagens do Portal (cliente ↔ staff)
-  const [portalMessages, setPortalMessages] = useState([]);
-  const [portalMessagesLoading, setPortalMessagesLoading] = useState(false);
-  const [portalNewMessage, setPortalNewMessage] = useState("");
-  const [portalSendingMessage, setPortalSendingMessage] = useState(false);
-  const [portalUnreadCount, setPortalUnreadCount] = useState(0);
-  const portalMessagesEndRef = useRef(null);
+  // PACOTE DD — newLabel removido (edição inline de etiquetas movida para um Dialog
+  // accionado pelo botão "+" ao lado dos badges no PageHeader; estado agora local ao Dialog)
+  // const [newLabel, setNewLabel] = useState("");
 
   // Buscar utilizadores
   const fetchUsers = async () => {
@@ -443,7 +343,7 @@ const ProcessDetails = () => {
         const data = await response.json();
         setRgpdStatus(data);
       }
-    } catch (error) {
+    } catch {
       // RGPD status check failed silently — not critical
     } finally {
       setRgpdLoading(false);
@@ -576,30 +476,18 @@ const ProcessDetails = () => {
   const handleSaveAssignment = async () => {
     setSavingAssignment(true);
     try {
-      const params = new URLSearchParams();
-      // Enviar múltiplos consultores separados por vírgula
-      params.append("consultor_ids", selectedConsultores.filter(Boolean).join(","));
-      // Enviar múltiplos intermediários separados por vírgula
-      params.append("mediador_ids", selectedMediadores.filter(Boolean).join(","));
-      params.append("indexacao_id", selectedIndexacao || "");
-      params.append("parceiro_id", selectedParceiro || "");  // Adicionar parceiro
-      
-      const response = await fetch(`${API_URL}/api/processes/${id}/assign?${params.toString()}`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
+      await processMutations.assignProcess.mutateAsync({
+        consultorIds: selectedConsultores.filter(Boolean),
+        mediadorIds: selectedMediadores.filter(Boolean),
+        indexacaoId: selectedIndexacao || "",
+        parceiroId: selectedParceiro || "",
       });
-      
-      if (response.ok) {
-        toast.success("Atribuições actualizadas com sucesso");
-        setShowAssignDialog(false);
-        fetchData();
-      } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao actualizar atribuições"));
-      }
+      toast.success("Atribuições actualizadas com sucesso");
+      setShowAssignDialog(false);
+      await fetchData();
     } catch (error) {
       console.error("Erro ao guardar atribuições:", error);
-      toast.error("Erro ao guardar atribuições");
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao guardar atribuições"));
     } finally {
       setSavingAssignment(false);
     }
@@ -610,129 +498,233 @@ const ProcessDetails = () => {
   const [aiFieldConfidence, setAiFieldConfidence] = useState({});
   const [aiConflicts, setAiConflicts] = useState([]);
   const [showAIReviewDialog, setShowAIReviewDialog] = useState(false);
+  const [titularChoiceDialog, setTitularChoiceDialog] = useState({
+    open: false,
+    items: [],
+    pendingPayload: null,
+  });
+
+  const applySharedExtractedFields = (extractedData) => {
+    if (!extractedData) return;
+    const newRealEstateData = { ...realEstateData };
+    if (extractedData.valor_imovel) newRealEstateData.valor_imovel = extractedData.valor_imovel;
+    if (extractedData.localizacao) newRealEstateData.localizacao = extractedData.localizacao;
+    if (extractedData.tipologia) newRealEstateData.tipologia = extractedData.tipologia;
+    if (extractedData.area || extractedData.area_bruta) newRealEstateData.area_bruta = extractedData.area || extractedData.area_bruta;
+    if (extractedData.area_util) newRealEstateData.area_util = extractedData.area_util;
+    if (extractedData.artigo_matricial) newRealEstateData.artigo_matricial = extractedData.artigo_matricial;
+    if (extractedData.conservatoria) newRealEstateData.conservatoria = extractedData.conservatoria;
+    if (extractedData.numero_predial) newRealEstateData.numero_predial = extractedData.numero_predial;
+    if (extractedData.certificado_energetico) newRealEstateData.certificado_energetico = extractedData.certificado_energetico;
+    if (extractedData.fracao) newRealEstateData.fracao = extractedData.fracao;
+    if (extractedData.codigo_postal) newRealEstateData.codigo_postal = extractedData.codigo_postal;
+    if (extractedData.localidade) newRealEstateData.localidade = extractedData.localidade;
+    if (extractedData.freguesia) newRealEstateData.freguesia = extractedData.freguesia;
+    if (extractedData.concelho) newRealEstateData.concelho = extractedData.concelho;
+    if (extractedData.valor_patrimonial) newRealEstateData.valor_patrimonial = extractedData.valor_patrimonial;
+    if (extractedData.data_cpcv) newRealEstateData.data_cpcv = extractedData.data_cpcv;
+    if (extractedData.descricao_imovel) newRealEstateData.descricao_imovel = extractedData.descricao_imovel;
+    if (extractedData.estacionamento) newRealEstateData.estacionamento = extractedData.estacionamento;
+    if (extractedData.arrecadacao) newRealEstateData.arrecadacao = extractedData.arrecadacao;
+    setRealEstateData(newRealEstateData);
+
+    const newCreditData = { ...creditData };
+    if (extractedData.valuation_value || extractedData.valor_avaliacao) newCreditData.valuation_value = extractedData.valuation_value || extractedData.valor_avaliacao;
+    if (extractedData.valuation_date || extractedData.data_avaliacao) newCreditData.valuation_date = extractedData.valuation_date || extractedData.data_avaliacao;
+    if (extractedData.valuation_bank || extractedData.banco_avaliacao) newCreditData.valuation_bank = extractedData.valuation_bank || extractedData.banco_avaliacao;
+    if (extractedData.valuation_notes || extractedData.notas_avaliacao) newCreditData.valuation_notes = extractedData.valuation_notes || extractedData.notas_avaliacao;
+    setCreditData(newCreditData);
+  };
+
+  const applyPersonalAndFinancialToTitular = (extractedData, targetTitular) => {
+    if (!extractedData || targetTitular === "ignore") return;
+
+    const personalPatch = {};
+    if (extractedData.nif) personalPatch.nif = extractedData.nif;
+    if (extractedData.documento_id || extractedData.cc_number) personalPatch.documento_id = extractedData.documento_id || extractedData.cc_number;
+    if (extractedData.data_nascimento || extractedData.birth_date) personalPatch.data_nascimento = extractedData.data_nascimento || extractedData.birth_date;
+    if (extractedData.cc_validity || extractedData.data_validade_cc) personalPatch.data_validade_cc = extractedData.cc_validity || extractedData.data_validade_cc;
+    if (extractedData.naturalidade) personalPatch.naturalidade = extractedData.naturalidade;
+    if (extractedData.nacionalidade || extractedData.nationality) personalPatch.nacionalidade = extractedData.nacionalidade || extractedData.nationality;
+    if (extractedData.estado_civil) personalPatch.estado_civil = extractedData.estado_civil;
+    if (extractedData.sexo || extractedData.gender) personalPatch.sexo = extractedData.sexo || extractedData.gender;
+    if (extractedData.profissao || extractedData.profession) personalPatch.profissao = extractedData.profissao || extractedData.profession;
+    const addr = extractedData.morada_fiscal || extractedData.fiscal_address || extractedData.morada || extractedData.address || "";
+    if (addr) personalPatch.morada_fiscal = addr;
+    if (extractedData.codigo_postal || extractedData.postal_code) personalPatch.codigo_postal = extractedData.codigo_postal || extractedData.postal_code;
+    if (extractedData.email) personalPatch.email = extractedData.email;
+    if (extractedData.phone || extractedData.telefone) personalPatch.phone = extractedData.phone || extractedData.telefone;
+    if (extractedData.nome || extractedData.name || extractedData.client_name) {
+      personalPatch.name = extractedData.nome || extractedData.name || extractedData.client_name;
+      personalPatch.nome = personalPatch.name;
+    }
+
+    const financialPatch = {};
+    const liq = extractedData.monthly_income || extractedData.rendimento_mensal || extractedData.salario_liquido;
+    if (liq) financialPatch.monthly_income = liq;
+    const brut = extractedData.rendimento_bruto || extractedData.salario_bruto;
+    if (brut) financialPatch.rendimento_bruto = brut;
+    if (extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal) {
+      financialPatch.employer_name = extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal;
+    }
+    if (extractedData.employment_type || extractedData.tipo_contrato) {
+      financialPatch.tipo_contrato = extractedData.employment_type || extractedData.tipo_contrato;
+    }
+    if (extractedData.categoria_profissional) financialPatch.categoria_profissional = extractedData.categoria_profissional;
+    if (extractedData.subsidiario_alimentacao) financialPatch.subsidiario_alimentacao = extractedData.subsidiario_alimentacao;
+    if (extractedData.data_referencia || extractedData.reference_date) {
+      financialPatch.data_referencia = extractedData.data_referencia || extractedData.reference_date;
+    }
+    if (extractedData.employer_nif || extractedData.nif_entidade) {
+      financialPatch.employer_nif = extractedData.employer_nif || extractedData.nif_entidade;
+    }
+
+    if (targetTitular === "titular2") {
+      setTitular2Data((prev) => ({ ...prev, ...personalPatch, ...financialPatch }));
+    } else {
+      setPersonalData((prev) => ({ ...prev, ...personalPatch }));
+      setFinancialData((prev) => ({ ...prev, ...financialPatch }));
+    }
+  };
+
+  const persistAISuggestions = async (extractedData, documentsProcessed, targetTitular) => {
+    try {
+      const token = localStorage.getItem("token");
+      const applyRes = await fetch(`${API_URL}/api/documents/ai-apply-suggestions/${id}`, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          ...extractedData,
+          target_titular: targetTitular || "titular1",
+        }),
+      });
+      if (applyRes.ok) {
+        const who = targetTitular === "titular2" ? "2º titular" : "titular 1";
+        toast.success(`Campos pré-preenchidos (${who}) e guardados com dados de ${documentsProcessed} documento(s)`);
+      } else {
+        toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
+      }
+    } catch (applyErr) {
+      console.warn("Erro ao aplicar sugestões IA:", applyErr);
+      toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
+    }
+  };
+
+  const commitAIExtractedData = async (payload, targetTitular) => {
+    const { extractedData, fieldConfidence, conflicts, documentsProcessed } = payload;
+    if (!extractedData) return;
+
+    applySharedExtractedFields(extractedData);
+    applyPersonalAndFinancialToTitular(extractedData, targetTitular);
+
+    if (conflicts && conflicts.length > 0 && targetTitular !== "ignore") {
+      setShowAIReviewDialog(true);
+      toast.info(`${conflicts.length} conflito(s) detectado(s). Reveja os valores.`);
+    } else if (targetTitular !== "ignore") {
+      await persistAISuggestions(extractedData, documentsProcessed, targetTitular);
+    }
+
+    if (fieldConfidence) {
+      const lowConfidenceFields = Object.entries(fieldConfidence)
+        .filter(([_, conf]) => conf < 0.8)
+        .map(([field, conf]) => `${field} (${Math.round(conf * 100)}%)`);
+      if (lowConfidenceFields.length > 0) {
+        toast.warning(
+          `${lowConfidenceFields.length} campo(s) com baixa confiança da IA: ${lowConfidenceFields.join(", ")}. Por favor, verifique manualmente.`,
+          { duration: 8000 }
+        );
+      }
+    }
+
+    setActiveTab("personal");
+  };
 
   // Handler para dados extraídos pela IA dos documentos
-  const handleAIDataExtractedFromDocs = async ({ extractedData, fieldConfidence, conflicts, documentsProcessed, suggestions }) => {
-    // Guardar dados, confiança e conflitos
+  const handleAIDataExtractedFromDocs = async ({
+    extractedData,
+    fieldConfidence,
+    conflicts,
+    documentsProcessed,
+    suggestions,
+    titularMatches,
+    needsTitularChoice,
+  }) => {
     setAiExtractedData(extractedData);
     setAiFieldConfidence(fieldConfidence || {});
     setAiConflicts(conflicts || []);
-    
-    // Pré-preencher campos nos formulários
-    // UNIFICAÇÃO: A IA pode usar nomes variados — mapeamos sempre para o campo canónico do modelo DB
-    if (extractedData) {
-      // Dados pessoais
-      const newPersonalData = { ...personalData };
-      if (extractedData.nif) newPersonalData.nif = extractedData.nif;
-      if (extractedData.documento_id || extractedData.cc_number) newPersonalData.documento_id = extractedData.documento_id || extractedData.cc_number;
-      if (extractedData.data_nascimento || extractedData.birth_date) newPersonalData.data_nascimento = extractedData.data_nascimento || extractedData.birth_date;
-      if (extractedData.cc_validity || extractedData.data_validade_cc) newPersonalData.data_validade_cc = extractedData.cc_validity || extractedData.data_validade_cc;
-      if (extractedData.naturalidade) newPersonalData.naturalidade = extractedData.naturalidade;
-      if (extractedData.nacionalidade || extractedData.nationality) newPersonalData.nacionalidade = extractedData.nacionalidade || extractedData.nationality;
-      if (extractedData.estado_civil) newPersonalData.estado_civil = extractedData.estado_civil;
-      if (extractedData.sexo || extractedData.gender) newPersonalData.sexo = extractedData.sexo || extractedData.gender;
-      if (extractedData.profissao || extractedData.profession) newPersonalData.profissao = extractedData.profissao || extractedData.profession;
-      // UNIFICADO: morada → morada_fiscal (campo canónico do modelo)
-      const addr = extractedData.morada_fiscal || extractedData.fiscal_address || extractedData.morada || extractedData.address || "";
-      if (addr) newPersonalData.morada_fiscal = addr;
-      if (extractedData.codigo_postal || extractedData.postal_code) newPersonalData.codigo_postal = extractedData.codigo_postal || extractedData.postal_code;
-      // UNIFICADO: email/phone da IA → sincronizar com campos de topo do processo
-      if (extractedData.email) newPersonalData.email = extractedData.email;
-      if (extractedData.phone || extractedData.telefone) newPersonalData.phone = extractedData.phone || extractedData.telefone;
-      setPersonalData(newPersonalData);
-      
-      // Dados financeiros
-      const newFinancialData = { ...financialData };
-      // UNIFICADO: rendimento_mensal/salario_liquido → monthly_income (campo canónico do modelo)
-      const liq = extractedData.monthly_income || extractedData.rendimento_mensal || extractedData.salario_liquido;
-      if (liq) newFinancialData.monthly_income = liq;
-      // UNIFICADO: rendimento_bruto/salario_bruto → rendimento_bruto (campo canónico)
-      const brut = extractedData.rendimento_bruto || extractedData.salario_bruto;
-      if (brut) newFinancialData.rendimento_bruto = brut;
-      // UNIFICADO: empresa → employer_name (campo canónico)
-      if (extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal) newFinancialData.employer_name = extractedData.employer_name || extractedData.empresa || extractedData.entidade_patronal;
-      // UNIFICADO: tipo_contrato → employment_type (campo canónico)
-      if (extractedData.employment_type || extractedData.tipo_contrato) newFinancialData.tipo_contrato = extractedData.employment_type || extractedData.tipo_contrato;
-      if (extractedData.categoria_profissional) newFinancialData.categoria_profissional = extractedData.categoria_profissional;
-      if (extractedData.subsidiario_alimentacao) newFinancialData.subsidiario_alimentacao = extractedData.subsidiario_alimentacao;
-      if (extractedData.data_referencia || extractedData.reference_date) newFinancialData.data_referencia = extractedData.data_referencia || extractedData.reference_date;
-      if (extractedData.employer_nif || extractedData.nif_entidade) newFinancialData.employer_nif = extractedData.employer_nif || extractedData.nif_entidade;
-      setFinancialData(newFinancialData);
-      
-      // Dados do imóvel — IA pode extrair dados de CPCV
-      const newRealEstateData = { ...realEstateData };
-      if (extractedData.valor_imovel) newRealEstateData.valor_imovel = extractedData.valor_imovel;
-      if (extractedData.localizacao) newRealEstateData.localizacao = extractedData.localizacao;
-      if (extractedData.tipologia) newRealEstateData.tipologia = extractedData.tipologia;
-      if (extractedData.area || extractedData.area_bruta) newRealEstateData.area_bruta = extractedData.area || extractedData.area_bruta;
-      if (extractedData.area_util) newRealEstateData.area_util = extractedData.area_util;
-      if (extractedData.artigo_matricial) newRealEstateData.artigo_matricial = extractedData.artigo_matricial;
-      if (extractedData.conservatoria) newRealEstateData.conservatoria = extractedData.conservatoria;
-      if (extractedData.numero_predial) newRealEstateData.numero_predial = extractedData.numero_predial;
-      if (extractedData.certificado_energetico) newRealEstateData.certificado_energetico = extractedData.certificado_energetico;
-      if (extractedData.fracao) newRealEstateData.fracao = extractedData.fracao;
-      if (extractedData.codigo_postal) newRealEstateData.codigo_postal = extractedData.codigo_postal;
-      if (extractedData.localidade) newRealEstateData.localidade = extractedData.localidade;
-      if (extractedData.freguesia) newRealEstateData.freguesia = extractedData.freguesia;
-      if (extractedData.concelho) newRealEstateData.concelho = extractedData.concelho;
-      if (extractedData.valor_patrimonial) newRealEstateData.valor_patrimonial = extractedData.valor_patrimonial;
-      if (extractedData.data_cpcv) newRealEstateData.data_cpcv = extractedData.data_cpcv;
-      if (extractedData.descricao_imovel) newRealEstateData.descricao_imovel = extractedData.descricao_imovel;
-      if (extractedData.estacionamento) newRealEstateData.estacionamento = extractedData.estacionamento;
-      if (extractedData.arrecadacao) newRealEstateData.arrecadacao = extractedData.arrecadacao;
-      setRealEstateData(newRealEstateData);
-      
-      // Dados de crédito e avaliação bancária (Fase 3)
-      const newCreditData = { ...creditData };
-      if (extractedData.valuation_value || extractedData.valor_avaliacao) newCreditData.valuation_value = extractedData.valuation_value || extractedData.valor_avaliacao;
-      if (extractedData.valuation_date || extractedData.data_avaliacao) newCreditData.valuation_date = extractedData.valuation_date || extractedData.data_avaliacao;
-      if (extractedData.valuation_bank || extractedData.banco_avaliacao) newCreditData.valuation_bank = extractedData.valuation_bank || extractedData.banco_avaliacao;
-      if (extractedData.valuation_notes || extractedData.notas_avaliacao) newCreditData.valuation_notes = extractedData.valuation_notes || extractedData.notas_avaliacao;
-      setCreditData(newCreditData);
-      
-      // Se há conflitos, mostrar dialog de revisão
-      if (conflicts && conflicts.length > 0) {
-        setShowAIReviewDialog(true);
-        toast.info(`${conflicts.length} conflito(s) detectado(s). Reveja os valores.`);
-      } else {
-        // Sem conflitos — aplicar directamente no backend
-        try {
-          const token = localStorage.getItem('token');
-          const applyRes = await fetch(`${API_URL}/api/documents/ai-apply-suggestions/${id}`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify(extractedData)
-          });
-          if (applyRes.ok) {
-            toast.success(`Campos pré-preenchidos e guardados com dados de ${documentsProcessed} documento(s)`);
-          } else {
-            toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
-          }
-        } catch (applyErr) {
-          console.warn("Erro ao aplicar sugestões IA:", applyErr);
-          toast.success(`Campos pré-preenchidos com dados de ${documentsProcessed} documento(s). Guarde manualmente.`);
-        }
-      }
-      
-      // Alertar sobre campos com baixa confiança (< 0.8)
-      if (fieldConfidence) {
-        const lowConfidenceFields = Object.entries(fieldConfidence)
-          .filter(([_, conf]) => conf < 0.8)
-          .map(([field, conf]) => `${field} (${Math.round(conf * 100)}%)`);
-        if (lowConfidenceFields.length > 0) {
-          toast.warning(
-            `${lowConfidenceFields.length} campo(s) com baixa confiança da IA: ${lowConfidenceFields.join(", ")}. Por favor, verifique manualmente.`,
-            { duration: 8000 }
-          );
-        }
-      }
-      
-      // Mudar para tab pessoais para mostrar os dados
-      setActiveTab("personal");
+
+    const matches = titularMatches || [];
+    const aggregate = matches.find((m) => m.scope === "process_aggregate");
+    const docsNeedingChoice = matches.filter(
+      (m) => m.scope === "document" && m.needs_user_choice && m.has_second_titular
+    );
+
+    if (needsTitularChoice && (docsNeedingChoice.length > 0 || aggregate?.needs_user_choice)) {
+      const items =
+        docsNeedingChoice.length > 0
+          ? docsNeedingChoice.map((m) => ({
+              key: m.file_name || `doc-${m.match}`,
+              file_name: m.file_name || "Documento",
+              titular1_name: m.titular1_name || "Titular 1",
+              titular2_name: m.titular2_name || "Titular 2",
+              choice:
+                m.match === "titular2" ? "titular2" : m.match === "titular1" ? "titular1" : null,
+            }))
+          : [
+              {
+                key: "aggregate",
+                file_name: "Dados extraídos (agregado)",
+                titular1_name: aggregate?.titular1_name || "Titular 1",
+                titular2_name: aggregate?.titular2_name || "Titular 2",
+                choice: null,
+              },
+            ];
+      applySharedExtractedFields(extractedData);
+      setTitularChoiceDialog({
+        open: true,
+        items,
+        pendingPayload: {
+          extractedData,
+          fieldConfidence,
+          conflicts,
+          documentsProcessed,
+          suggestions,
+        },
+      });
+      toast.info("Há documentos ambíguos — indique se são do titular 1 ou 2.");
+      return;
     }
+
+    const target = aggregate?.match === "titular2" ? "titular2" : "titular1";
+    await commitAIExtractedData(
+      { extractedData, fieldConfidence, conflicts, documentsProcessed, suggestions },
+      target
+    );
+  };
+
+  const confirmTitularChoices = async () => {
+    const { items, pendingPayload } = titularChoiceDialog;
+    if (!pendingPayload) {
+      setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+      return;
+    }
+    const choices = items.map((i) => i.choice).filter((c) => c && c !== "ignore");
+    const t2 = choices.filter((c) => c === "titular2").length;
+    const t1 = choices.filter((c) => c === "titular1").length;
+    let target = "titular1";
+    if (choices.length === 0) target = "ignore";
+    else if (t2 > t1) target = "titular2";
+    else target = "titular1";
+
+    setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+    if (target === "ignore") {
+      toast.info("Dados de identidade ignorados. Campos do imóvel (se houver) já foram aplicados.");
+      return;
+    }
+    await commitAIExtractedData(pendingPayload, target);
   };
 
   // AI Executive Summary — generate or refresh
@@ -825,254 +817,125 @@ const ProcessDetails = () => {
   };
 
   useEffect(() => {
-    fetchData();
     fetchRgpdStatus();
   }, [id]);
 
-  // Auto-save quando o status muda
+  // Side panels: live sync from TanStack queries (only when reference changes)
   useEffect(() => {
-    // Ignorar se:
-    // - Ainda está a carregar
-    // - Não há processo carregado
-    // - Status ainda não foi definido
-    // - Status é igual ao status original do processo
+    setDeadlines((prev) => (prev === processBundle.deadlines ? prev : (processBundle.deadlines || [])));
+  }, [processBundle.deadlines]);
+
+  useEffect(() => {
+    setActivities((prev) => (prev === processBundle.activities ? prev : (processBundle.activities || [])));
+  }, [processBundle.activities]);
+
+  useEffect(() => {
+    setHistory((prev) => (prev === processBundle.history ? prev : (processBundle.history || [])));
+  }, [processBundle.history]);
+
+  useEffect(() => {
+    setWorkflowStatuses((prev) => (
+      prev === processBundle.workflowStatuses ? prev : (processBundle.workflowStatuses || [])
+    ));
+  }, [processBundle.workflowStatuses]);
+
+  // Loading / error from live process query
+  useEffect(() => {
+    if (processBundle.isLoading) {
+      setLoading(true);
+      return;
+    }
+    if (processBundle.isError) {
+      const statusCode = processBundle.error?.response?.status;
+      if (statusCode === 404) {
+        setNotFound(true);
+      } else if (statusCode === 403) {
+        setAccessDenied(true);
+        toast.error("Não tem permissão para aceder a este processo");
+      } else if (statusCode) {
+        toast.error("Erro ao carregar dados do processo");
+        navigate(-1);
+      }
+      setLoading(false);
+    }
+  }, [processBundle.isLoading, processBundle.isError, processBundle.error, navigate]);
+
+  // Hydrate editable form state from query data (skip while a card is being edited)
+  useEffect(() => {
+    if (editingCardId) {
+      wasEditingRef.current = true;
+      return;
+    }
+    if (wasEditingRef.current) {
+      wasEditingRef.current = false;
+      lastHydratedAtRef.current = 0; // force re-apply server VM after cancel/exit edit
+    }
+
+    const processData = processBundle.process;
+    if (!processData) return;
+
+    const updatedAt = processBundle.processQuery?.dataUpdatedAt
+      || processBundle.clientQuery?.dataUpdatedAt
+      || 0;
+    // Guard against re-entry: only hydrate when TanStack reports a new data timestamp
+    if (!updatedAt || updatedAt === lastHydratedAtRef.current) return;
+
+    lastHydratedAtRef.current = updatedAt;
+    const vm = deriveProcessDetailsViewModel(processData, processBundle.client);
+    setProcess(vm.process);
+    savedProcessRef.current = vm.process;
+    setClientId(vm.clientId);
+    setClientData(vm.clientData);
+    setPersonalData(vm.personalData);
+    setTitular2Data(vm.titular2Data);
+    setFinancialData(vm.financialData);
+    setRealEstateData(vm.realEstateData);
+    setCreditData(vm.creditData);
+    setStatus(vm.status);
+    setAiSummary(vm.aiSummary);
+    setAiAnalysisDate(vm.aiAnalysisDate);
+    setAiSuggestions(vm.aiSuggestions);
+    setIsDataConfirmed(vm.isDataConfirmed);
+    setLoading(false);
+    setNotFound(false);
+    setAccessDenied(false);
+  }, [
+    processBundle.process,
+    processBundle.client,
+    processBundle.processQuery?.dataUpdatedAt,
+    processBundle.clientQuery?.dataUpdatedAt,
+    editingCardId,
+  ]);
+
+  // Auto-save quando o status muda (deps mínimas — evitar loop com `process`/`loading`)
+  useEffect(() => {
     if (loading || !process || !status || status === process.status) {
       return;
     }
 
-    // Verificar se o utilizador pode mudar o status
     const canChangeStatus = ["consultor", "intermediario", "admin", "ceo", "diretor", "administrativo"].includes(user?.role?.toLowerCase());
     if (!canChangeStatus) {
       return;
     }
 
-    // Debounce para evitar múltiplas gravações
+    const previousStatus = process.status;
     const timeoutId = setTimeout(() => {
-      // Guardar apenas o status
       const saveStatusOnly = async () => {
         try {
-          await updateProcess(id, { status });
+          await processMutations.updateProcess.mutateAsync({ status });
           toast.success("Estado atualizado");
-          fetchData();
         } catch (error) {
           console.error("Erro ao atualizar estado:", error);
           toast.error("Erro ao atualizar estado");
-          // Reverter para o status anterior
-          setStatus(process.status);
+          setStatus(previousStatus);
         }
       };
       saveStatusOnly();
     }, 500);
 
     return () => clearTimeout(timeoutId);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- intentional: only react to status changes
   }, [status]);
-
-  // ── VisitasTab: Hooks para gerir imóveis associados ao processo ──
-  // IMPORTANT: These hooks MUST be before any early returns (Rules of Hooks)
-  const fetchVisitasProperties = useCallback(async () => {
-    if (!id) return;
-    setVisitasLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/properties/by-process/${id}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setVisitasProperties(Array.isArray(data) ? data : []);
-      } else {
-        // Non-OK response handled silently; error already surfaced via UI state
-      }
-    } catch (error) {
-      console.error("Erro ao carregar imóveis:", error);
-    } finally {
-      setVisitasLoading(false);
-    }
-  }, [id, token]);
-
-  const searchProperties = useCallback(async (query) => {
-    if (!query || query.length < 2) {
-      setPropertySearchResults([]);
-      return;
-    }
-    setPropertySearchLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/properties?search=${encodeURIComponent(query)}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Filtrar imóveis que já estão associados a este processo
-        const associatedIds = visitasProperties.map((p) => p.id);
-        setPropertySearchResults(data.filter((p) => !associatedIds.includes(p.id)));
-      }
-    } catch (error) {
-      console.error("Erro ao pesquisar imóveis:", error);
-    } finally {
-      setPropertySearchLoading(false);
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
-
-  const handleAssociateProperty = useCallback(async (propertyId) => {
-    setAssociatingProperty(true);
-    try {
-      const response = await fetch(
-        `${API_URL}/api/properties/${propertyId}/interested-client?client_id=${id}`,
-        {
-          method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      if (response.ok) {
-        toast.success("Imóvel associado ao processo com sucesso");
-        setShowAssociatePropertyDialog(false);
-        setPropertySearch("");
-        setPropertySearchResults([]);
-        fetchVisitasProperties();
-      } else {
-        const data = await response.json();
-        toast.error(extractErrorMessage(data.detail, "Erro ao associar imóvel"));
-      }
-    } catch (error) {
-      console.error("Erro ao associar imóvel:", error);
-      toast.error("Erro ao associar imóvel ao processo");
-    } finally {
-      setAssociatingProperty(false);
-    }
-  }, [id, token, fetchVisitasProperties]);
-
-  // Buscar imóveis quando o tab Visitas fica activo
-  useEffect(() => {
-    if (activeTab === "visitas") {
-      fetchVisitasProperties();
-    }
-  }, [activeTab, fetchVisitasProperties]);
-
-  // Debounce para pesquisa de imóveis
-  useEffect(() => {
-    const timeout = setTimeout(() => {
-      if (propertySearch.length >= 2) {
-        searchProperties(propertySearch);
-      } else {
-        setPropertySearchResults([]);
-      }
-    }, 400);
-    return () => clearTimeout(timeout);
-  }, [propertySearch, searchProperties]);
-
-  // ── Portal Messages: Hooks para mensagens cliente ↔ staff ──
-  const fetchPortalMessages = useCallback(async () => {
-    if (!id) return;
-    setPortalMessagesLoading(true);
-    try {
-      const response = await fetch(`${API_URL}/api/processes/${id}/portal-messages`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        // Backend returns { messages: [...], total: N, process_id: "..." }
-        // Support both array and wrapped object formats
-        const msgs = Array.isArray(data) ? data : (data.messages || []);
-        setPortalMessages(msgs);
-      } else {
-        console.error(`[PortalMessages] API returned ${response.status}`);
-      }
-    } catch (error) {
-      console.error("Erro ao carregar mensagens do portal:", error);
-    } finally {
-      setPortalMessagesLoading(false);
-    }
-  }, [id, token]);
-
-  const fetchPortalUnreadCount = useCallback(async () => {
-    if (!id || !token) return;
-    try {
-      const response = await fetch(`${API_URL}/api/processes/${id}/portal-messages/unread`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (response.ok) {
-        const data = await response.json();
-        setPortalUnreadCount(data.unread_count || 0);
-      } else if (response.status === 404) {
-        // 404 = processo não encontrado OU endpoint indisponível.
-        // Desativar polling para evitar loop de 404s (especialmente em
-        // processos eliminados onde o utilizador ainda está na página).
-        setPortalUnreadCount(0);
-        return 'ENDPOINT_NOT_AVAILABLE';
-      } else if (response.status === 401 || response.status === 403) {
-        // Token inválido/expirado — desativar polling silenciosamente
-        setPortalUnreadCount(0);
-        return 'ENDPOINT_NOT_AVAILABLE';
-      }
-    } catch (error) {
-      // Silent — erro de rede, tentará novamente no próximo intervalo
-    }
-  }, [id, token]);
-
-  const sendPortalMessage = useCallback(async () => {
-    if (!portalNewMessage.trim() || !id) return;
-    setPortalSendingMessage(true);
-    try {
-      const response = await fetch(`${API_URL}/api/processes/${id}/portal-messages`, {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ content: portalNewMessage.trim() }),
-      });
-      if (response.ok) {
-        setPortalNewMessage("");
-        fetchPortalMessages();
-        toast.success("Mensagem enviada");
-      } else {
-        toast.error("Erro ao enviar mensagem");
-      }
-    } catch (error) {
-      toast.error("Erro ao enviar mensagem");
-    } finally {
-      setPortalSendingMessage(false);
-    }
-  }, [id, token, portalNewMessage, fetchPortalMessages]);
-
-  // Buscar mensagens e unread count quando o tab fica activo
-  useEffect(() => {
-    if (activeTab === "mensagens") {
-      fetchPortalMessages();
-      fetchPortalUnreadCount();
-    }
-  }, [activeTab, fetchPortalMessages, fetchPortalUnreadCount]);
-
-  // Polling para unread count (a cada 30s)
-  // Desativa automaticamente se o endpoint não existir (404) ou se o
-  // processo estiver eliminado/bloqueado. Só corre quando há token e id válidos.
-  const portalUnreadAvailableRef = useRef(true);
-  useEffect(() => {
-    // Só iniciar polling se temos id, token, e o endpoint ainda está disponível
-    if (!id || !token || !portalUnreadAvailableRef.current) return;
-
-    const interval = setInterval(async () => {
-      if (!portalUnreadAvailableRef.current) {
-        clearInterval(interval);
-        return;
-      }
-      const result = await fetchPortalUnreadCount();
-      if (result === 'ENDPOINT_NOT_AVAILABLE') {
-        portalUnreadAvailableRef.current = false;
-        clearInterval(interval);
-      }
-    }, 30000);
-
-    // Fetch inicial imediato
-    fetchPortalUnreadCount().then(result => {
-      if (result === 'ENDPOINT_NOT_AVAILABLE') {
-        portalUnreadAvailableRef.current = false;
-        clearInterval(interval);
-      }
-    });
-
-    return () => clearInterval(interval);
-  }, [fetchPortalUnreadCount, id, token]);
 
   // ── WebSocket Room: juntar-se à room do processo para mensagens em tempo real ──
   useEffect(() => {
@@ -1086,422 +949,24 @@ const ProcessDetails = () => {
     };
   }, [id, joinProcessRoom, leaveProcessRoom]);
 
-  const fetchData = async () => {
-    try {
-      // Use Promise.allSettled so that a failure in one request (e.g. history/activities)
-      // doesn't prevent the page from loading. The main getProcess call determines
-      // whether the process exists; the others are supplementary.
-      const [processRes, deadlinesRes, activitiesRes, historyRes, statusesRes] = await Promise.all([
-        getProcess(id).catch(err => { throw err; }), // Re-throw: this is the critical call
-        getDeadlines(id).catch(() => ({ data: [] })),
-        getActivities(id).catch(() => ({ data: [] })),
-        getHistory(id).catch(() => ({ data: [] })),
-        getWorkflowStatuses().catch(() => ({ data: [] })),
-      ]);
-      const processData = processRes.data;
-      setProcess(processData);
-      savedProcessRef.current = processData;
-      setDeadlines(Array.isArray(deadlinesRes.data) ? deadlinesRes.data : []);
-      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
-      setHistory(Array.isArray(historyRes.data) ? historyRes.data : []);
-      setWorkflowStatuses(Array.isArray(statusesRes.data) ? statusesRes.data : []);
-      setStatus(processData.status);
+  const fetchData = useCallback(async () => {
+    const cid = clientId || processBundle.process?.client_id;
+    await invalidateProcessDetailsQueries(queryClient, id, { clientId: cid });
+    await processBundle.refetchAll();
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- refetchAll is stable enough per id
+  }, [queryClient, id, clientId, processBundle.process?.client_id, processBundle.refetchAll]);
 
-      // ── FASE 3: Carregar dados do Cliente via client_id ──
-      // O processo tem uma FK (client_id) para a coleção clients.
-      // Os dados pessoais (nome, email, telefone, NIF, estado civil) pertencem ao Cliente.
-      if (processData.client_id) {
-        setClientId(processData.client_id);
-        try {
-          const clientRes = await getClient(processData.client_id);
-          const cData = clientRes.data;
-          setClientData(cData);
-          
-          // Preencher personalData a partir dos dados do Cliente (fonte de verdade)
-          const clientPersonal = { ...(cData.dados_pessoais || {}) };
-          // Limpar blind indexes
-          delete clientPersonal.nif_hash;
-          delete clientPersonal.email_hash;
-          delete clientPersonal.telefone_hash;
-          // Adicionar nome e contacto do cliente
-          clientPersonal.nome_completo = cData.nome || processData.client_name || '';
-          const resolvedEmail = cData.contacto?.email || processData.client_email || '';
-          const resolvedPhone = cData.contacto?.telefone || processData.client_phone || '';
-          clientPersonal.email = resolvedEmail;
-          clientPersonal.telefone = resolvedPhone;
-          // Manover NIF do cliente se existir
-          if (cData.dados_pessoais?.nif) {
-            clientPersonal.nif = cData.dados_pessoais.nif;
-          }
-          setPersonalData(clientPersonal);
-
-          // ── Sincronizar contactos do Cliente para o estado do Processo ──
-          // O cartão "Contactos" no separador "Dados do Processo" está ligado a
-          // process.client_email / process.client_phone. Se o processo ainda não
-          // tem esses campos populados mas o cliente já os tem (cenário comum em
-          // processos antigos ou recém-criados), copiamos do cliente para o
-          // estado local — garantindo que o utilizador vê os dados existentes.
-          if (resolvedEmail || resolvedPhone) {
-            setProcess(prev => ({
-              ...(prev || processData),
-              client_email: prev?.client_email || resolvedEmail || '',
-              client_phone: prev?.client_phone || resolvedPhone || '',
-            }));
-          }
-        } catch (clientErr) {
-          console.warn('Não foi possível carregar dados do cliente via client_id:', clientErr);
-          // Fallback: usar dados antigos do processo (personal_data no documento do processo)
-          const fallbackPersonal = { ...(processData.personal_data || {}) };
-          delete fallbackPersonal.nif_hash;
-          delete fallbackPersonal.email_hash;
-          delete fallbackPersonal.telefone_hash;
-          setPersonalData(fallbackPersonal);
-        }
-      } else {
-        // Sem client_id (processo antigo) — usar dados embutidos no processo
-        const cleanPersonalData = { ...(processData.personal_data || {}) };
-        delete cleanPersonalData.nif_hash;
-        delete cleanPersonalData.email_hash;
-        delete cleanPersonalData.telefone_hash;
-        setPersonalData(cleanPersonalData);
-      }
-      
-      const cleanTitular2Data = { ...(processData.titular2_data || {}) };
-      delete cleanTitular2Data.nif_hash;
-      setTitular2Data(cleanTitular2Data);  // Carregar dados do 2º titular
-      setFinancialData(processData.financial_data || {});
-      setRealEstateData(processData.real_estate_data || {});
-      setCreditData(processData.credit_data || {});
-      
-      // AI Executive Summary — load existing summary
-      setAiSummary(processData.ai_executive_summary || null);
-      setAiAnalysisDate(processData.ai_analysis_date || null);
-      
-      // UNIFICAÇÃO backward-compat: se personal_data tem morada/address mas não morada_fiscal, migrar
-      const pd = processData.personal_data || {};
-      if ((pd.morada || pd.address) && !pd.morada_fiscal) {
-        setPersonalData(prev => ({ ...prev, morada_fiscal: prev.morada || prev.address || "" }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem rendimento_mensal mas não monthly_income, migrar
-      const fd = processData.financial_data || {};
-      if ((fd.rendimento_mensal || fd.salario_liquido) && !fd.monthly_income) {
-        setFinancialData(prev => ({ ...prev, monthly_income: prev.rendimento_mensal || prev.salario_liquido }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem empresa mas não employer_name, migrar
-      if ((fd.empresa || fd.entidade_patronal) && !fd.employer_name) {
-        setFinancialData(prev => ({ ...prev, employer_name: prev.empresa || prev.entidade_patronal }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem tipo_contrato mas não employment_type, migrar
-      if (fd.tipo_contrato && !fd.employment_type) {
-        setFinancialData(prev => ({ ...prev, employment_type: prev.tipo_contrato }));
-      }
-      // UNIFICAÇÃO backward-compat: se financial_data tem antiguidade_emprego mas não employment_duration, migrar
-      if (fd.antiguidade_emprego && !fd.employment_duration) {
-        setFinancialData(prev => ({ ...prev, employment_duration: prev.antiguidade_emprego }));
-      }
-      // UNIFICAÇÃO backward-compat: normalizar valores de display labels para internal keys
-      // sexo: "Masculino"/"Feminino" → "M"/"F"
-      if (pd.sexo === "Masculino") {
-        setPersonalData(prev => ({ ...prev, sexo: "M" }));
-      } else if (pd.sexo === "Feminino") {
-        setPersonalData(prev => ({ ...prev, sexo: "F" }));
-      }
-      // estado_civil: display labels → internal keys (e.g. "Solteiro(a)" → "solteiro")
-      const estadoCivilMap = {
-        "Solteiro(a)": "solteiro", "Solteiro": "solteiro",
-        "Casado(a)": "casado", "Casado": "casado",
-        "Casado(a) - Comunhão de Bens": "casado_geral",
-        "Casado(a) - Comunhão de Aquiridos": "casado_adquiridos",
-        "Casado(a) - Comunhão de Adquiridos": "casado_adquiridos",
-        "Casado(a) - Separação de Bens": "casado_separacao",
-        "Divorciado(a)": "divorciado", "Divorciado": "divorciado",
-        "Viúvo(a)": "viuvo", "Viúvo": "viuvo",
-        "União de Facto": "uniao_facto",
-      };
-      if (pd.estado_civil && estadoCivilMap[pd.estado_civil]) {
-        const mappedEC = estadoCivilMap[pd.estado_civil];
-        setPersonalData(prev => ({ ...prev, estado_civil: mappedEC }));
-      }
-      // tipo_imovel: Title Case → lowercase (e.g. "Apartamento" → "apartamento")
-      const tipoImovelMap = {
-        "Apartamento": "apartamento", "Moradia": "moradia",
-        "Terreno": "terreno", "Outro": "outro",
-      };
-      const rd = processData.real_estate_data || {};
-      if (rd.tipo_imovel && tipoImovelMap[rd.tipo_imovel]) {
-        const mappedTI = tipoImovelMap[rd.tipo_imovel];
-        setRealEstateData(prev => ({ ...prev, tipo_imovel: mappedTI }));
-      }
-      // employment_type: Title Case → lowercase (e.g. "Efetivo" → "efetivo")
-      const employmentTypeMap = {
-        "Efetivo": "efetivo", "Termo Certo": "termo_certo",
-        "Termo Incerto": "termo_incerto", "Independente": "independente",
-        "Empresário": "empresario", "Empresário em Nome Individual": "empresario",
-        "Reformado": "reformado", "Desempregado": "desempregado",
-      };
-      if (fd.employment_type && employmentTypeMap[fd.employment_type]) {
-        const mappedET = employmentTypeMap[fd.employment_type];
-        setFinancialData(prev => ({ ...prev, employment_type: mappedET }));
-      }
-      // Titular2 backward-compat: normalizar estado_civil (Title Case → lowercase)
-      const t2 = processData.titular2_data || {};
-      if (t2.estado_civil && estadoCivilMap[t2.estado_civil]) {
-        const mappedT2EC = estadoCivilMap[t2.estado_civil];
-        setTitular2Data(prev => ({ ...prev, estado_civil: mappedT2EC }));
-      }
-      // Note: nif_hash is already cleaned synchronously above when setting initial state
-      // UNIFICAÇÃO: se personal_data tem email/phone, sincronizar com campos de topo
-      if (pd.email && !processData.client_email) {
-        setProcess(prev => ({ ...prev, client_email: pd.email }));
-      }
-      if ((pd.phone || pd.telefone) && !processData.client_phone) {
-        setProcess(prev => ({ ...prev, client_phone: pd.phone || pd.telefone }));
-      }
-      
-      // TAREFA 2: Carregar estado de conflitos e confirmação de dados
-      setAiSuggestions(processData.ai_suggestions || []);
-      setIsDataConfirmed(processData.is_data_confirmed || false);
-
-      // S3 files are loaded by S3FileManager component automatically
-      // No need to load them here
-    } catch (error) {
-      console.error("Error fetching data:", error);
-      if (error.response?.status === 404) {
-        setNotFound(true);
-      } else if (error.response?.status === 403) {
-        setAccessDenied(true);
-        toast.error("Não tem permissão para aceder a este processo");
-      } else {
-        toast.error("Erro ao carregar dados do processo");
-        navigate(-1);
-      }
-    } finally {
-      setLoading(false);
-    }
-  };
+  // Reset hydration when navigating to another process
+  useEffect(() => {
+    lastHydratedAtRef.current = 0;
+    setLoading(true);
+    setProcess(null);
+    setNotFound(false);
+    setAccessDenied(false);
+  }, [id]);
 
   // Legacy OneDrive functions - kept for compatibility but use S3FileManager instead
-  const loadOneDriveFolder = async (subfolder = "") => {
-    // Deprecated - S3FileManager handles this now
-  };
 
-  const handleDownloadFile = async (filePath) => {
-    try {
-      const res = await getS3DownloadUrl(id, filePath);
-      window.open(res.data.url, "_blank");
-    } catch (e) {
-      toast.error("Erro ao obter link de download");
-    }
-  };
-
-  // Helper para converter data em formato português para ISO
-  const convertPortugueseDateToISO = (dateStr) => {
-    if (!dateStr) return dateStr;
-    
-    // Se já está em formato ISO (yyyy-MM-dd), retornar como está
-    if (/^\d{4}-\d{2}-\d{2}$/.test(dateStr)) {
-      return dateStr;
-    }
-    
-    // Meses em português
-    const monthsMap = {
-      'janeiro': '01', 'fevereiro': '02', 'março': '03', 'abril': '04',
-      'maio': '05', 'junho': '06', 'julho': '07', 'agosto': '08',
-      'setembro': '09', 'outubro': '10', 'novembro': '11', 'dezembro': '12'
-    };
-    
-    // Tentar parsear formato "DD de MMMM de YYYY"
-    const match = dateStr.toLowerCase().match(/(\d{1,2})\s+de\s+(\w+)\s+de\s+(\d{4})/);
-    if (match) {
-      const day = match[1].padStart(2, '0');
-      const month = monthsMap[match[2]];
-      const year = match[3];
-      if (month) {
-        return `${year}-${month}-${day}`;
-      }
-    }
-    
-    // Tentar parsear formato "DD/MM/YYYY"
-    const shortMatch = dateStr.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
-    if (shortMatch) {
-      const day = shortMatch[1].padStart(2, '0');
-      const month = shortMatch[2].padStart(2, '0');
-      const year = shortMatch[3];
-      return `${year}-${month}-${day}`;
-    }
-    
-    // Se não conseguir parsear, retornar null para evitar erros
-    return null;
-  };
-
-  // Helper para formatar data para input type="date" (sempre retorna yyyy-MM-dd ou vazio)
-  const formatDateForInput = (dateStr) => {
-    if (!dateStr) return "";
-    const iso = convertPortugueseDateToISO(dateStr);
-    return iso || "";
-  };
-
-  // Helper para limpar dados pessoais antes de enviar
-  const cleanPersonalDataForSubmit = (data) => {
-    const cleaned = { ...data };
-    
-    // Converter datas para formato ISO
-    if (cleaned.data_nascimento) {
-      cleaned.data_nascimento = convertPortugueseDateToISO(cleaned.data_nascimento);
-    }
-    if (cleaned.data_validade_cc) {
-      cleaned.data_validade_cc = convertPortugueseDateToISO(cleaned.data_validade_cc);
-    }
-    
-    // Remover campos internos que não devem ser guardados no processo
-    delete cleaned.nif_hash;
-    delete cleaned.email_hash;
-    delete cleaned.telefone_hash;
-    delete cleaned.marital_status; // phantom field, usar estado_civil
-    
-    // Garantir que campos numéricos que o backend espera como string não sejam enviados como número
-    // Isto previne erros 422 quando dados antigos na BD têm tipos inesperados
-    const stringFields = ['nif', 'niss', 'documento_id', 'altura', 'codigo_postal', 'phone'];
-    for (const field of stringFields) {
-      if (cleaned[field] !== undefined && cleaned[field] !== null && cleaned[field] !== '') {
-        cleaned[field] = String(cleaned[field]);
-      }
-    }
-    
-    // Garantir que campos booleanos não são strings
-    if (cleaned.menor_35_anos !== undefined && cleaned.menor_35_anos !== null) {
-      cleaned.menor_35_anos = Boolean(cleaned.menor_35_anos);
-    }
-    
-    // Limpar NIF: remover espaços e caracteres não numéricos
-    if (cleaned.nif) {
-      cleaned.nif = cleaned.nif.replace(/[^\d]/g, '');
-      // Se após limpeza não tem 9 dígitos, não enviar (evita 422)
-      if (cleaned.nif.length !== 9) {
-        delete cleaned.nif;
-      }
-    }
-    
-    // Remover campos undefined ou vazios que podem causar problemas
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined || cleaned[key] === '') {
-        delete cleaned[key];
-      }
-    });
-    
-    return cleaned;
-  };
-
-  // Helper para limpar dados do 2º titular antes de enviar
-  const cleanTitular2DataForSubmit = (data) => {
-    const cleaned = { ...data };
-    // Converter data de nascimento para formato ISO
-    if (cleaned.birth_date) {
-      cleaned.birth_date = convertPortugueseDateToISO(cleaned.birth_date);
-    }
-    // Remover campos internos que não devem ser guardados no processo
-    delete cleaned.nif_hash;
-    
-    // Garantir que NIF é string limpa
-    if (cleaned.nif) {
-      cleaned.nif = String(cleaned.nif).replace(/[^\d]/g, '');
-      if (cleaned.nif.length !== 9) {
-        delete cleaned.nif;
-      }
-    }
-    
-    // Remover campos undefined ou vazios
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined || cleaned[key] === '') {
-        delete cleaned[key];
-      }
-    });
-    return cleaned;
-  };
-
-  // Helper para limpar dados do imóvel antes de enviar
-  const cleanRealEstateDataForSubmit = (data) => {
-    const cleaned = { ...data };
-    // Converter strings vazias → null (para permitir limpar campos no backend)
-    // Campos undefined são removidos (não foram alterados).
-    // Campos com "" significam que o utilizador limpou o campo → enviar null.
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined) {
-        delete cleaned[key];
-      } else if (cleaned[key] === '') {
-        cleaned[key] = null;
-      }
-    });
-    return cleaned;
-  };
-
-  // Helper para limpar dados de crédito antes de enviar
-  const cleanCreditDataForSubmit = (data) => {
-    const cleaned = { ...data };
-    // Converter datas para ISO
-    if (cleaned.valuation_date) {
-      cleaned.valuation_date = convertPortugueseDateToISO(cleaned.valuation_date);
-    }
-    if (cleaned.bank_approval_date) {
-      cleaned.bank_approval_date = convertPortugueseDateToISO(cleaned.bank_approval_date);
-    }
-    // Remover campos undefined; strings vazias → null (para permitir limpar campos)
-    Object.keys(cleaned).forEach(key => {
-      if (cleaned[key] === undefined) {
-        delete cleaned[key];
-      } else if (cleaned[key] === '') {
-        cleaned[key] = null;
-      }
-    });
-    return cleaned;
-  };
-
-  // Helper para limpar dados financeiros para envio
-  const cleanFinancialDataForSubmit = (data) => {
-    // Campos válidos do modelo FinancialData no backend
-    const validFields = [
-      'acesso_portal_financas', 'chave_movel_digital', 'renda_habitacao_atual',
-      'precisa_vender_casa', 'efetivo', 'fiador', 'bancos_creditos',
-      'capital_proprio', 'valor_financiado', 'valor_pretendido', 'valor_entrada',
-      'data_sinal', 'reforco_sinal', 'comissao_mediacao',
-      // Credenciais de portais oficiais
-      'portal_financas_utilizador', 'portal_financas_senha',
-      'seg_social_utilizador', 'seg_social_senha',
-      // Situação profissional e rendimentos
-      'monthly_income', 'employment_type', 'employment_duration', 'employer_name',
-      'employer_nif', 'trabalha_estrangeiro', 'bancos_simulacoes', 'tempo_restante_credito',
-      // Campos extraídos pela IA
-      'rendimento_mensal', 'rendimento_bruto', 'salario_liquido', 'salario_bruto',
-      'empresa', 'tipo_contrato', 'categoria_profissional', 'subsidiario_alimentacao',
-      'data_referencia',
-      // Créditos existentes e co-titular
-      'nr_dependentes', 'number_of_dependents', 'rendimento_co_titular',
-      'creditos_existentes', 'prestacao_creditos_mensal',
-      // Rendimento agregado
-      'rendimento_agregado',
-      // Rendimento anual (campo do modelo ClientFinancialData)
-      'rendimento_anual',
-      // Antiguidade no emprego (alias português)
-      'antiguidade_emprego',
-      // Outros rendimentos e despesas
-      'outros_rendimentos', 'despesas_mensais',
-      // Contas abertas (bancos)
-      'tem_creditos_activos',
-    ];
-    
-    const cleaned = {};
-    for (const key of validFields) {
-      if (data[key] !== undefined) {
-        if (data[key] === null || data[key] === '') {
-          // Utilizador limpou o campo → enviar null para o backend limpar
-          cleaned[key] = null;
-        } else {
-          cleaned[key] = data[key];
-        }
-      }
-    }
-    return cleaned;
-  };
 
   // Função para executar o save após confirmação
   // FASE 3: Gravação separada — dados pessoais vão para /clients/{id}, dados de negócio para /processes/{id}
@@ -1643,27 +1108,31 @@ const ProcessDetails = () => {
         }
       }
 
-      // 4. DISPARAR OS DOIS REQUESTS EM SIMULTÂNEO (PROMISE.ALL)
-      const promises = [];
+      // 4. DISPARAR OS DOIS REQUESTS EM SIMULTÂNEO (mutations TanStack)
+      // Sanitize explícito aqui + de novo no hook (defense in depth contra
+      // documents/onedrive_links/arrays vazios a esmagarem o backend).
+      const safeProcessPayload = sanitizeProcessUpdatePayload(processUpdateData);
+      if (emailVal) safeProcessPayload.client_email = emailVal;
+      if (phoneVal) safeProcessPayload.client_phone = phoneVal;
 
-      // Update do Processo — incluir client_email/client_phone no body
-      // (o backend lê do raw_body para sincronizar com o cliente)
-      // Só incluímos se tiverem valor: evita sobrescrever campos válidos
-      // do processo com strings vazias.
-      if (emailVal) processUpdateData.client_email = emailVal;
-      if (phoneVal) processUpdateData.client_phone = phoneVal;
-      promises.push(updateProcess(id, processUpdateData));
-      
-      // Update do Cliente (apenas se houver client_id e não for role de indexação)
+      const promises = [
+        processMutations.updateProcess.mutateAsync(safeProcessPayload),
+      ];
+
       if (process.client_id && !hasRole(user, "indexacao")) {
-        promises.push(updateClient(process.client_id, clientUpdateData));
+        promises.push(
+          processMutations.updateClient.mutateAsync({
+            clientId: process.client_id,
+            data: clientUpdateData,
+          })
+        );
       }
-      
+
       await Promise.all(promises);
 
       toast.success("Processo e Cliente atualizados com sucesso!");
       setEditingCardId(null); // Exit editing mode after save
-      fetchData();
+      await fetchData();
     } catch (error) {
       console.error("Error saving:", error);
       toast.error(error.message || "Erro ao guardar alterações");
@@ -1673,8 +1142,13 @@ const ProcessDetails = () => {
   };
 
   // Guardar apenas os dados da Organização do Processo (notas, prioridade, etiquetas)
-  const [savingOrg, setSavingOrg] = useState(false);
-  const handleSaveOrganization = async () => {
+  const [, setSavingOrg] = useState(false);
+  // `overrides` permite passar o valor recém-alterado explicitamente em vez de
+  // depender de `process` (a closure desta função fica "presa" ao valor de
+  // `process` do render em que foi definida — chamar handleSaveOrganization()
+  // logo após um setProcess() no mesmo handler enviaria o valor ANTIGO, já
+  // que o setState ainda não tinha sido aplicado nesse render).
+  const handleSaveOrganization = async (overrides = {}) => {
     if (isProcessLocked) {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
       return;
@@ -1686,10 +1160,15 @@ const ProcessDetails = () => {
         notes: process?.notes || "",
         prioridade: process?.prioridade || "media",
         labels: Array.isArray(process?.labels) ? process.labels : [],
+        ...overrides,
       };
-      await updateProcess(id, orgData);
+      // labels:[] é intencional (limpar etiquetas) — allowEmptyArrays
+      await processMutations.updateProcess.mutateAsync({
+        payload: orgData,
+        allowEmptyArrays: ["labels"],
+      });
       toast.success("Organização do processo guardada com sucesso!");
-      fetchData();
+      await fetchData();
     } catch (error) {
       console.error("Error saving organization:", error);
       const detail = error.response?.data?.detail;
@@ -1727,12 +1206,10 @@ const ProcessDetails = () => {
 
     setSendingComment(true);
     try {
-      await createActivity({ process_id: id, comment: newComment });
+      await processMutations.addActivity.mutateAsync({ comment: newComment });
       setNewComment("");
-      const activitiesRes = await getActivities(id);
-      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
       toast.success("Comentário adicionado");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao adicionar comentário");
     } finally {
       setSendingComment(false);
@@ -1741,11 +1218,9 @@ const ProcessDetails = () => {
 
   const handleDeleteComment = async (activityId) => {
     try {
-      await deleteActivity(activityId);
-      const activitiesRes = await getActivities(id);
-      setActivities(Array.isArray(activitiesRes.data) ? activitiesRes.data : []);
+      await processMutations.deleteActivity.mutateAsync(activityId);
       toast.success("Comentário eliminado");
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar comentário");
     }
   };
@@ -1757,8 +1232,7 @@ const ProcessDetails = () => {
     }
 
     try {
-      await createDeadline({
-        process_id: id,
+      await processMutations.deadlines.create.mutateAsync({
         title: deadlineForm.title,
         description: deadlineForm.description,
         due_date: selectedDate && isValid(selectedDate) ? format(selectedDate, "yyyy-MM-dd") : null,
@@ -1768,17 +1242,18 @@ const ProcessDetails = () => {
       setIsDeadlineDialogOpen(false);
       setDeadlineForm({ title: "", description: "", due_date: "", priority: "medium" });
       setSelectedDate(null);
-      fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao criar prazo");
     }
   };
 
   const handleToggleDeadline = async (deadline) => {
     try {
-      await updateDeadline(deadline.id, { completed: !deadline.completed });
-      fetchData();
-    } catch (error) {
+      await processMutations.deadlines.update.mutateAsync({
+        deadlineId: deadline.id,
+        data: { completed: !deadline.completed },
+      });
+    } catch {
       toast.error("Erro ao atualizar prazo");
     }
   };
@@ -1787,10 +1262,9 @@ const ProcessDetails = () => {
     if (!confirm("Tem certeza que deseja eliminar este prazo?")) return;
 
     try {
-      await deleteDeadline(deadlineId);
+      await processMutations.deadlines.remove.mutateAsync(deadlineId);
       toast.success("Prazo eliminado!");
-      fetchData();
-    } catch (error) {
+    } catch {
       toast.error("Erro ao eliminar prazo");
     }
   };
@@ -1818,7 +1292,6 @@ const ProcessDetails = () => {
   const userRole = user?.role?.toLowerCase() || "";
   const roleLabels = ROLE_LABELS; // Rótulos legíveis para exibição no banner retroativo
   const userPermissions = user?.permissions || {};
-  const userPages = userPermissions?.pages || [];
   const userActions = userPermissions?.actions || [];
   
   // Permissões baseadas em actions (se disponíveis) ou fallback para role
@@ -1842,16 +1315,6 @@ const ProcessDetails = () => {
   const canManageTasks = userActions.length > 0 
     ? userActions.includes("manage_tasks") 
     : ["admin", "ceo", "consultor", "intermediario", "diretor", "administrativo"].includes(userRole);
-  const canUploadDocs = userActions.length > 0 
-    ? userActions.includes("upload_docs") 
-    : true; // Por defeito todos podem upload
-  const canUseChat = userActions.length > 0 
-    ? userActions.includes("use_chat") 
-    : true; // Por defeito todos podem usar chat
-  const canAssignUsers = userActions.length > 0 
-    ? userActions.includes("assign_process_users") 
-    : ["admin", "ceo", "diretor"].includes(userRole);
-  
   // Modo de visualização (read-only) quando não tem edit_process
   // OU quando o processo está em status terminal (eliminados, desistências, concluídos)
   // EXCEPÇÃO: admin e CEO NUNCA sofrem lock — podem editar processos concluídos retroativamente
@@ -1953,58 +1416,25 @@ const ProcessDetails = () => {
     return isCardEmpty(cardId); // Auto-collapse if empty (default)
   };
 
-  // Reusable card header with edit toggle (pencil → Cancelar/Guardar)
-  // + Collapse toggle for empty cards
-  const CardHeaderWithEdit = ({ title, cardKey, icon: Icon, canEdit, collapsible }) => {
-    const collapsed = collapsible && shouldCardBeCollapsed(cardKey);
-    const empty = collapsible && isCardEmpty(cardKey);
-    return (
-    <div className="flex items-center justify-between">
-      <div className="flex items-center gap-2 cursor-pointer select-none" onClick={() => collapsible && toggleCardCollapse(cardKey)}>
-        {Icon && <Icon className="h-4 w-4 text-muted-foreground" />}
-        <h4 className="font-semibold text-sm">{title}</h4>
-        {collapsible && (
-          collapsed ? <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" /> :
-                      <ChevronUp className="h-3.5 w-3.5 text-muted-foreground" />
-        )}
-        {empty && !collapsed && (
-          <span className="text-xs text-muted-foreground italic ml-1">— Sem dados preenchidos</span>
-        )}
-      </div>
-      {canEdit && !isProcessLocked && editingCardId !== cardKey && (
-        <Button
-          variant="ghost"
-          size="icon"
-          className="h-7 w-7"
-          onClick={() => setEditingCardId(cardKey)}
-          title="Editar"
-        >
-          <Pencil className="h-3.5 w-3.5" />
-        </Button>
-      )}
-      {canEdit && !isProcessLocked && editingCardId === cardKey && (
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="sm"
-            className="h-7 text-xs"
-            onClick={() => setEditingCardId(null)}
-          >
-            Cancelar
-          </Button>
-          <Button
-            size="sm"
-            className="h-7 text-xs"
-            onClick={handleSave}
-            disabled={saving}
-          >
-            {saving ? <Loader2 className="h-3 w-3 animate-spin" /> : "Guardar"}
-          </Button>
-        </div>
-      )}
-    </div>
+  // Thin wrapper: liga o CardHeaderWithEdit extraído ao estado local do processo
+  const CardHeaderWithEdit = ({ title, cardKey, icon, canEdit, collapsible }) => (
+    <CardHeaderWithEditBase
+      title={title}
+      cardKey={cardKey}
+      icon={icon}
+      canEdit={canEdit}
+      collapsible={collapsible}
+      collapsed={collapsible && shouldCardBeCollapsed(cardKey)}
+      empty={collapsible && isCardEmpty(cardKey)}
+      isEditing={editingCardId === cardKey}
+      isProcessLocked={isProcessLocked}
+      saving={saving}
+      onToggleCollapse={toggleCardCollapse}
+      onStartEdit={setEditingCardId}
+      onCancelEdit={() => setEditingCardId(null)}
+      onSave={handleSave}
+    />
   );
-  };
 
   if (loading) {
     return (
@@ -2084,290 +1514,8 @@ const ProcessDetails = () => {
   const deadlineDates = deadlines.map((d) => safeParseISO(d.due_date)).filter(Boolean);
   const currentStatusInfo = getStatusInfo(process.status);
 
-  const propertyStatusColors = {
-    disponivel: "bg-emerald-100 text-emerald-800 border-emerald-200",
-    reservado: "bg-amber-100 text-amber-800 border-amber-200",
-    vendido: "bg-red-100 text-red-800 border-red-200",
-    suspenso: "bg-gray-100 text-gray-800 border-gray-200",
-    em_analise: "bg-blue-100 text-blue-800 border-blue-200",
-  };
-
-  const propertyStatusLabels = {
-    disponivel: "Disponível",
-    reservado: "Reservado",
-    vendido: "Vendido",
-    suspenso: "Suspenso",
-    em_analise: "Em Análise",
-  };
-
-  const propertyTypeLabels = {
-    apartamento: "Apartamento",
-    moradia: "Moradia",
-    terreno: "Terreno",
-    loja: "Loja",
-    escritorio: "Escritório",
-    armazem: "Armazém",
-    garagem: "Garagem",
-    outro: "Outro",
-  };
-
-  const formatPrice = (value) => {
-    if (!value && value !== 0) return "—";
-    return new Intl.NumberFormat("pt-PT", { style: "currency", currency: "EUR" }).format(value);
-  };
-
-  const VisitasTab = () => (
-    <div className="space-y-4">
-      {/* Header */}
-      <div className="bg-emerald-50 dark:bg-emerald-900/20 border border-emerald-200 dark:border-emerald-800 rounded-lg p-4">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="p-2 bg-emerald-100 dark:bg-emerald-900/40 rounded-lg">
-              <Home className="h-6 w-6 text-emerald-600 dark:text-emerald-400" />
-            </div>
-            <div>
-              <h3 className="font-semibold text-emerald-800 dark:text-emerald-200">Visitas / Imóveis</h3>
-              <p className="text-sm text-emerald-600 dark:text-emerald-400">
-                Imóveis associados a este processo
-              </p>
-            </div>
-          </div>
-          <Button
-            size="sm"
-            className="gap-1.5 bg-emerald-600 hover:bg-emerald-700"
-            onClick={() => {
-              setPropertySearch("");
-              setPropertySearchResults([]);
-              setShowAssociatePropertyDialog(true);
-            }}
-          >
-            <Plus className="h-4 w-4" />
-            Associar Imóvel
-          </Button>
-        </div>
-      </div>
-
-      {/* Loading state */}
-      {visitasLoading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="h-8 w-8 animate-spin text-emerald-500" />
-          <span className="ml-3 text-muted-foreground">A carregar imóveis...</span>
-        </div>
-      )}
-
-      {/* Empty state */}
-      {!visitasLoading && visitasProperties.length === 0 && (
-        <Card className="border-dashed">
-          <CardContent className="py-12 flex flex-col items-center text-center">
-            <div className="p-3 bg-muted rounded-full mb-4">
-              <Building2 className="h-8 w-8 text-muted-foreground" />
-            </div>
-            <h4 className="font-semibold text-lg mb-1">Nenhum imóvel associado</h4>
-            <p className="text-sm text-muted-foreground max-w-md">
-              Nenhum imóvel associado a este processo. Clique em "Associar Imóvel" para ligar um imóvel existente a este processo.
-            </p>
-          </CardContent>
-        </Card>
-      )}
-
-      {/* Properties list */}
-      {!visitasLoading && visitasProperties.length > 0 && (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {visitasProperties.map((prop) => (
-            <Card key={prop.id} className="overflow-hidden hover:shadow-md transition-shadow">
-              <CardContent className="p-4">
-                <div className="flex items-start justify-between mb-3">
-                  <div className="flex-1 min-w-0">
-                    <div className="flex items-center gap-2 mb-1">
-                      <span className="text-xs text-muted-foreground font-mono">
-                        {safeString(prop.internal_reference)}
-                      </span>
-                      <Badge
-                        className={`text-[10px] px-1.5 py-0 ${propertyStatusColors[prop.status] || "bg-gray-100 text-gray-800"}`}
-                        variant="outline"
-                      >
-                        {propertyStatusLabels[prop.status] || prop.status}
-                      </Badge>
-                    </div>
-                    <h5 className="font-semibold text-sm truncate">
-                      {safeString(prop.title)}
-                    </h5>
-                  </div>
-                  <Badge variant="outline" className="text-xs ml-2 shrink-0">
-                    {propertyTypeLabels[prop.property_type] || prop.property_type}
-                  </Badge>
-                </div>
-
-                {/* Price */}
-                <div className="text-lg font-bold text-emerald-700 dark:text-emerald-400 mb-2">
-                  {formatPrice(prop.asking_price)}
-                </div>
-
-                {/* Location */}
-                <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
-                  <MapPin className="h-3.5 w-3.5 shrink-0" />
-                  <span className="truncate">
-                    {[prop.municipality, prop.district].filter(Boolean).join(", ")}
-                  </span>
-                </div>
-
-                {/* Features */}
-                {(prop.bedrooms != null || prop.useful_area != null) && (
-                  <div className="flex items-center gap-3 text-xs text-muted-foreground mb-2">
-                    {prop.bedrooms != null && (
-                      <span>T{prop.bedrooms}</span>
-                    )}
-                    {prop.useful_area != null && (
-                      <span>{prop.useful_area} m²</span>
-                    )}
-                  </div>
-                )}
-
-                {/* Client name */}
-                {prop.client_name && (
-                  <div className="flex items-center gap-1.5 text-xs text-muted-foreground mb-2">
-                    <User className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{prop.client_name}</span>
-                  </div>
-                )}
-
-                {/* Source URL */}
-                {prop.source_url && (
-                  <div className="flex items-center gap-1.5 text-xs mt-2 pt-2 border-t">
-                    <ExternalLink className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
-                    <a
-                      href={prop.source_url}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className="text-blue-600 hover:text-blue-800 hover:underline truncate"
-                    >
-                      Ver origem
-                    </a>
-                  </div>
-                )}
-              </CardContent>
-            </Card>
-          ))}
-        </div>
-      )}
-
-      {/* Dialog para associar imóvel */}
-      <Dialog open={showAssociatePropertyDialog} onOpenChange={setShowAssociatePropertyDialog}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Link2 className="h-5 w-5 text-emerald-600" />
-              Associar Imóvel
-            </DialogTitle>
-            <DialogDescription>
-              Pesquise e selecione um imóvel existente para associar a este processo.
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4">
-            <div className="relative">
-              <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-              <Input
-                placeholder="Pesquisar imóveis por título, referência ou localidade..."
-                value={propertySearch}
-                onChange={(e) => setPropertySearch(e.target.value)}
-                className="pl-9"
-              />
-            </div>
-
-            {propertySearchLoading && (
-              <div className="flex items-center justify-center py-6">
-                <Loader2 className="h-5 w-5 animate-spin text-muted-foreground" />
-                <span className="ml-2 text-sm text-muted-foreground">A pesquisar...</span>
-              </div>
-            )}
-
-            {!propertySearchLoading && propertySearch.length >= 2 && propertySearchResults.length === 0 && (
-              <div className="text-center py-6 text-sm text-muted-foreground">
-                Nenhum imóvel encontrado para "{propertySearch}"
-              </div>
-            )}
-
-            {!propertySearchLoading && propertySearchResults.length > 0 && (
-              <ScrollArea className="max-h-72">
-                <div className="space-y-2 pr-3">
-                  {propertySearchResults.map((prop) => (
-                    <div
-                      key={prop.id}
-                      className="flex items-center justify-between p-3 rounded-lg border hover:bg-muted/50 cursor-pointer transition-colors"
-                    >
-                      <div className="flex-1 min-w-0 mr-3">
-                        <div className="flex items-center gap-2 mb-0.5">
-                          <span className="text-xs text-muted-foreground font-mono">
-                            {safeString(prop.internal_reference)}
-                          </span>
-                          <Badge
-                            className={`text-[9px] px-1 py-0 ${propertyStatusColors[prop.status] || "bg-gray-100 text-gray-800"}`}
-                            variant="outline"
-                          >
-                            {propertyStatusLabels[prop.status] || prop.status}
-                          </Badge>
-                        </div>
-                        <p className="text-sm font-medium truncate">{prop.title}</p>
-                        <p className="text-xs text-muted-foreground">
-                          {[prop.municipality, prop.district].filter(Boolean).join(", ")}
-                          {" · "}
-                          {formatPrice(prop.asking_price)}
-                        </p>
-                      </div>
-                      <Button
-                        size="sm"
-                        variant="outline"
-                        className="shrink-0 gap-1 text-emerald-700 border-emerald-300 hover:bg-emerald-50"
-                        onClick={() => handleAssociateProperty(prop.id)}
-                        disabled={associatingProperty}
-                      >
-                        {associatingProperty ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Link2 className="h-3.5 w-3.5" />
-                        )}
-                        Associar
-                      </Button>
-                    </div>
-                  ))}
-                </div>
-              </ScrollArea>
-            )}
-
-            {propertySearch.length < 2 && (
-              <p className="text-xs text-center text-muted-foreground py-4">
-                Escreva pelo menos 2 caracteres para pesquisar
-              </p>
-            )}
-          </div>
-          <DialogFooter>
-            <Button
-              variant="outline"
-              onClick={() => {
-                setShowAssociatePropertyDialog(false);
-                setPropertySearch("");
-                setPropertySearchResults([]);
-              }}
-            >
-              Cancelar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
-    </div>
-  );
-
-
   return (
     <DashboardLayout title="Detalhes do Processo">
-      {/* Header Fixo - Sempre visível durante scroll */}
-      <ProcessStickyHeader
-        process={process}
-        personalData={personalData}
-        financialData={financialData}
-        statusInfo={currentStatusInfo}
-      />
-
       <div className="space-y-6">
         {/* Aviso de processo bloqueado ou em modo retroativo */}
         {isProcessLocked && (
@@ -2390,49 +1538,38 @@ const ProcessDetails = () => {
           </div>
         )}
 
-        {/* Header */}
-        <div className="flex flex-col gap-4">
-          {/* Linha 1: Nome e Badge do Status */}
-          <div className="flex items-center gap-4">
-            <Button variant="ghost" size="icon" onClick={() => navigate(-1)}>
-              <ArrowLeft className="h-5 w-5" />
-            </Button>
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-3 flex-wrap">
-                <h2 className="text-xl font-semibold truncate">
-                  Processo #{safeString(process?.process_number || '')} — {safeString(clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome) || 'Cliente'}
-                </h2>
-                <Badge className={`${statusColors[currentStatusInfo.color]} border shrink-0`}>
-                  {safeLabel(currentStatusInfo.label)}
-                </Badge>
-              </div>
-              <p className="text-sm text-muted-foreground">
-                {typeLabels[safeString(process.process_type)] || safeString(process.process_type)}
-                {process?.process_number && (
-                  <span className="ml-2 text-xs bg-gray-100 dark:bg-gray-800 px-2 py-0.5 rounded font-mono">
-                    Nº {safeString(process.process_number)}
-                  </span>
-                )}
-              </p>
-            </div>
-          </div>
-          
-          {/* Linha 2: Botões de Ação */}
-          <div className="flex flex-wrap items-center gap-1.5 sm:gap-2 pl-0 sm:pl-12">
-            {/* Botão para Gerir Atribuições - disponível para todos os staff */}
-            {userRole !== "cliente" && (
-              <Button
-                variant="outline"
-                size="sm"
-                className="text-purple-600 border-purple-200 hover:bg-purple-50 h-8 px-2 sm:px-3"
-                onClick={openAssignDialog}
-                data-testid="assign-users-btn"
-              >
-                <Users className="h-3.5 w-3.5 sm:mr-1" />
-                <span className="hidden sm:inline">Atribuições</span>
-              </Button>
-            )}
-            
+        {/* Header (Progressive Disclosure): PageHeader partilhado + StatusBadge
+            junto ao título; ações principais alinhadas à direita. A gestão de
+            atribuições passou para o Cartão de Atribuição (coluna direita) —
+            fica junto da informação que edita, em vez de solta no cabeçalho. */}
+        <div className="flex items-start gap-2">
+          <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Voltar" className="mt-0.5 shrink-0">
+            <ArrowLeft className="h-5 w-5" />
+          </Button>
+          <div className="flex-1 min-w-0">
+            <PageHeader
+              title={`Processo #${safeString(process?.process_number || '')} — ${safeString(clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome) || 'Cliente'}`}
+              titleBadge={
+                <StatusBadge status={process.status} workflowStatuses={safeStatusOptions} showOrder={false} />
+              }
+              description={
+                <span className="flex items-center gap-2 flex-wrap">
+                  <span>{typeLabels[safeString(process.process_type)] || safeString(process.process_type)}</span>
+                  {process?.process_number && (
+                    <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
+                      Nº {safeString(process.process_number)}
+                    </span>
+                  )}
+                  {/* PACOTE DD — Etiquetas movidas para o PageHeader (badges compactos) */}
+                  {Array.isArray(process?.labels) && process.labels.map((label, idx) => (
+                    <Badge key={`lbl-${idx}`} variant="secondary" className="text-xs">
+                      {safeString(label)}
+                    </Badge>
+                  ))}
+                </span>
+              }
+              actions={
+                <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* Dialog RGPD */}
             <Dialog open={rgpdDialogOpen} onOpenChange={setRgpdDialogOpen}>
               <DialogContent>
@@ -2766,229 +1903,89 @@ const ProcessDetails = () => {
                 <span className="hidden sm:inline">Eliminar</span>
               </Button>
             )}
+                </div>
+              }
+            />
           </div>
         </div>
 
-        {/* Alertas do Processo */}
+        {/* Alertas do Processo — sempre visível, independente do separador ativo */}
         <ProcessAlerts processId={id} className="mb-2" />
 
-        {/* Resumo do Processo */}
-        <ProcessSummaryCard
-          process={process}
-          statusInfo={currentStatusInfo}
-          consultorNames={safeStringArray(process.consultor_names)}
-          mediadorNames={safeStringArray(process.mediador_names)}
-          consultorName={process.consultor_name || process.assigned_consultor_name}
-          mediadorName={process.mediador_name || process.assigned_mediador_name}
-        />
-
-        {/* ═══════ PACOTE BC: Layout reestruturado ═══════
-            Ordem visual exata:
-            1. Timeline (full width)
-            2. Cartão meta-dados: Etiquetas + Prioridade (full width)
-            3. Grid 2 colunas: Input (esquerda) + Atividades Recentes (direita) */}
-
-        {/* ── 1. Timeline (full width) ── */}
-        <ProcessTimeline
-          processId={id}
-          currentStatus={process.status}
-          history={history}
-          workflowStatuses={workflowStatuses}
-        />
-
-        {/* ── 2. Cartão meta-dados: Etiquetas + Prioridade (full width) ── */}
-        <Card>
-          <CardContent className="pt-4 pb-4">
-            <div className="flex flex-wrap items-center gap-4">
-              {/* Prioridade */}
-              <div className="flex items-center gap-2">
-                <Label className="text-xs text-muted-foreground">Prioridade</Label>
-                <Select
-                  value={process?.prioridade || "media"}
-                  onValueChange={(value) => {
-                    setProcess(prev => ({ ...prev, prioridade: value }));
-                    if (canEditPersonal && !isProcessLocked) handleSaveOrganization();
-                  }}
-                  disabled={!canEditPersonal || isProcessLocked}
-                >
-                  <SelectTrigger className="h-8 w-28 text-xs">
-                    <SelectValue />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="baixa"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-green-500" />Baixa</span></SelectItem>
-                    <SelectItem value="media"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-amber-500" />Média</span></SelectItem>
-                    <SelectItem value="alta"><span className="flex items-center gap-2"><span className="h-2 w-2 rounded-full bg-red-500" />Alta</span></SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              {/* Etiquetas */}
-              <div className="flex items-center gap-1.5 flex-wrap">
-                <Label className="text-xs text-muted-foreground">Etiquetas</Label>
-                {(Array.isArray(process?.labels) ? process.labels : []).map((label, idx) => (
-                  <Badge key={idx} variant="secondary" className="text-xs gap-1 pr-1">
-                    {safeString(label)}
-                    {canEditPersonal && (
-                      <button
-                        onClick={() => setProcess(prev => ({ ...prev, labels: (prev.labels || []).filter((_, i) => i !== idx) }))}
-                        className="ml-0.5 hover:text-destructive"
-                      >
-                        <X className="h-3 w-3" />
-                      </button>
-                    )}
-                  </Badge>
-                ))}
-                {canEditPersonal && (
-                  <Input
-                    value={newLabel}
-                    onChange={(e) => setNewLabel(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" && newLabel.trim()) {
-                        e.preventDefault();
-                        setProcess(prev => ({ ...prev, labels: [...(prev.labels || []), newLabel.trim()] }));
-                        setNewLabel("");
-                        if (!isProcessLocked) handleSaveOrganization();
-                      }
-                    }}
-                    className="h-7 w-28 text-xs"
-                    placeholder="Nova etiqueta"
-                  />
-                )}
-              </div>
-            </div>
-          </CardContent>
-        </Card>
-
-        {/* ── 3. Grid 2 colunas: Input (esquerda) + Atividades (direita) ── */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          {/* Lado Esquerdo: Registar Atividade / Nota */}
-          {!isProcessLocked && (
-            <Card className="border-violet-200 dark:border-violet-900">
-              <CardHeader className="pb-2 py-3">
-                <CardTitle className="text-sm flex items-center gap-2">
-                  <MessageSquare className="h-4 w-4 text-violet-600" />
-                  Registar Atividade / Nota
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="pt-0 pb-3">
-                <div className="flex gap-2">
-                  <Textarea
-                    placeholder="Escreva uma nota ou registo de atividade para este processo..."
-                    value={newComment}
-                    onChange={(e) => setNewComment(e.target.value)}
-                    className="flex-1 min-h-[60px] text-sm resize-none"
-                    data-testid="quick-note-input"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && (e.metaKey || e.ctrlKey)) {
-                        e.preventDefault();
-                        handleSendComment();
-                      }
-                    }}
-                  />
-                  <Button
-                    onClick={handleSendComment}
-                    disabled={sendingComment || !newComment.trim()}
-                    size="sm"
-                    data-testid="quick-note-submit"
-                    className="bg-violet-600 hover:bg-violet-700"
-                  >
-                    {sendingComment ? <Loader2 className="h-4 w-4 animate-spin" /> : <Send className="h-4 w-4" />}
-                  </Button>
-                </div>
-                <p className="text-[10px] text-muted-foreground mt-1.5">Cmd/Ctrl+Enter para enviar rápido</p>
-              </CardContent>
-            </Card>
-          )}
-
-          {/* Lado Direito: Atividades Recentes / Histórico */}
-          <Card>
-            <CardHeader className="pb-2 py-3">
-              <CardTitle className="text-sm flex items-center gap-2">
-                <Clock className="h-4 w-4 text-muted-foreground" />
-                Atividades Recentes
-              </CardTitle>
-            </CardHeader>
-            <CardContent className="pt-0 pb-3">
-              <ScrollArea className="h-[300px]">
-                <div className="space-y-2 pr-2">
-                  {activities.length === 0 ? (
-                    <p className="text-center text-muted-foreground py-4 text-xs">Sem registos. Adicione a primeira nota à esquerda.</p>
-                  ) : (
-                    /* PACOTE BH: Ordenação descendente por data (mais recentes primeiro).
-                       Antes usava-se apenas .reverse() que inverte a ordem do array tal como
-                       vem do backend — frágil e incorreto se a ordem de origem mudar.
-                       Agora ordena-se por created_at (fallback timestamp) de forma descendente,
-                       com tratamento defensivo de datas inválidas (items sem data vão para o fim). */
-                    [...activities].sort((a, b) => {
-                      const dateA = safeDate(a.created_at || a.timestamp);
-                      const dateB = safeDate(b.created_at || b.timestamp);
-                      if (!dateA && !dateB) return 0;
-                      if (!dateA) return 1;  // items sem data ficam no fim
-                      if (!dateB) return -1;
-                      return dateB - dateA;  // descendente — mais recentes primeiro
-                    }).map((activity) => (
-                      <div key={activity.id} className="p-2 bg-muted/50 rounded text-xs" data-testid={`activity-${activity.id}`}>
-                        <div className="flex items-start justify-between gap-1">
-                          <div className="flex-1 min-w-0">
-                            <span className="font-medium">{safeString(activity.user_name)}</span>
-                            <p className="text-xs mt-0.5 text-muted-foreground whitespace-pre-wrap">{safeString(activity.comment)}</p>
-                            <p className="text-[10px] text-muted-foreground">{safeFormat(activity.created_at, "dd/MM HH:mm", { locale: pt })}</p>
-                          </div>
-                          {(activity.user_id === user.id || hasRole(user, "admin")) && (
-                            <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteComment(activity.id)}>
-                              <Trash2 className="h-3 w-3 text-destructive" />
-                            </Button>
-                          )}
-                        </div>
-                      </div>
-                    ))
-                  )}
-                </div>
-              </ScrollArea>
-            </CardContent>
-          </Card>
-        </div>
-
-        {/* PACOTE BC: Cartão "Organização do Processo" removido. */}
-
-        {/* TAREFA 2: Resolver conflitos de dados IA */}
-        <DataConflictResolver
-          processId={id}
-          suggestions={aiSuggestions}
-          isDataConfirmed={isDataConfirmed}
-          onResolve={(suggestionId) => {
-            setAiSuggestions(prev => prev.filter(s => s.id !== suggestionId));
-            fetchData();
-          }}
-          onConfirmData={(confirmed) => {
-            setIsDataConfirmed(confirmed);
-            fetchData();
-          }}
-          token={token}
-        />
-
+        {/* ═══════ Layout Progressive Disclosure ═══════
+            Esquerda (2/3): Tabs Resumo / Documentos / Histórico — esconde a
+            complexidade em separadores por tarefa.
+            Direita (1/3): Contexto fixo — Cliente + Atribuição sempre visíveis,
+            independentemente do separador ativo à esquerda. */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
-          {/* Main Content */}
+          {/* ── Coluna Esquerda: Ação & Exploração (2/3) ── */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Banner de modo de visualização para roles sem edit_process (exceto indexacao que edita financeiros) */}
-            {isViewMode && !isProcessLocked && (
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
-                <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
-                <p className="text-sm text-amber-800 dark:text-amber-200">
-                  <strong>Modo de visualização.</strong> Não tem permissões para editar os dados base do processo. Pode gerir documentos, tarefas, chat e atribuição de utilizadores.
-                </p>
-              </div>
-            )}
+            <Tabs value={mainTab} onValueChange={setMainTab}>
+              <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="resumo" className="gap-1.5">
+                  <ClipboardList className="h-4 w-4" />
+                  Resumo
+                </TabsTrigger>
+                <TabsTrigger value="documentos" className="gap-1.5">
+                  <FolderOpen className="h-4 w-4" />
+                  Documentos
+                </TabsTrigger>
+                <TabsTrigger value="historico" className="gap-1.5">
+                  <History className="h-4 w-4" />
+                  Histórico
+                </TabsTrigger>
+              </TabsList>
 
-            {/* Layout normal do processo (todas as roles) */}
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="text-lg">Dados do Processo</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <Tabs value={activeTab} onValueChange={(v) => { setEditingCardId(null); setActiveTab(v); }}>
-                  <TabsList className="grid w-full grid-cols-3 sm:grid-cols-9 gap-1 h-auto p-1">
-                    {/* ── DADOS DO CLIENTE ── */}
-                    <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
+              {/* ── Separador: Resumo — formulários principais + dados críticos ── */}
+              <TabsContent value="resumo" className="space-y-6 mt-4">
+                {/* Banner de modo de visualização para roles sem edit_process (exceto indexacao que edita financeiros) */}
+                {isViewMode && !isProcessLocked && (
+                  <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-3 flex items-center gap-3">
+                    <AlertCircle className="h-5 w-5 text-amber-600 shrink-0" />
+                    <p className="text-sm text-amber-800 dark:text-amber-200">
+                      <strong>Modo de visualização.</strong> Não tem permissões para editar os dados base do processo. Pode gerir documentos, tarefas, chat e atribuição de utilizadores.
+                    </p>
+                  </div>
+                )}
+
+                {/* Resumo do Processo */}
+                <ProcessSummaryCard
+                  process={process}
+                  statusInfo={currentStatusInfo}
+                  consultorNames={safeStringArray(process.consultor_names)}
+                  mediadorNames={safeStringArray(process.mediador_names)}
+                  consultorName={process.consultor_name || process.assigned_consultor_name}
+                  mediadorName={process.mediador_name || process.assigned_mediador_name}
+                />
+
+                {/* PACOTE DD — cartão de Etiquetas removido (movido para PageHeader) */}
+
+                {/* Resolver conflitos de dados IA */}
+                <DataConflictResolver
+                  processId={id}
+                  suggestions={aiSuggestions}
+                  isDataConfirmed={isDataConfirmed}
+                  onResolve={(suggestionId) => {
+                    setAiSuggestions(prev => prev.filter(s => s.id !== suggestionId));
+                    fetchData();
+                  }}
+                  onConfirmData={(confirmed) => {
+                    setIsDataConfirmed(confirmed);
+                    fetchData();
+                  }}
+                  token={token}
+                />
+
+                {/* Formulários principais do processo, organizados por domínio */}
+                <Card className="border-border">
+                  <CardHeader>
+                    <CardTitle className="text-lg">Dados do Processo</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <Tabs value={activeTab} onValueChange={(v) => { setEditingCardId(null); setActiveTab(v); }}>
+                      <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
+                        {/* ── DADOS DO CLIENTE ── */}
+                        <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
                       <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Cliente</span>
                     </TabsTrigger>
@@ -3005,9 +2002,9 @@ const ProcessDetails = () => {
                       <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Crédito</span>
                     </TabsTrigger>
-                    <TabsTrigger value="documents" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-amber-50 dark:bg-amber-900/20 data-[state=active]:bg-amber-100 dark:data-[state=active]:bg-amber-900/40">
-                      <FolderOpen className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Docs</span>
+                    <TabsTrigger value="prazos" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
+                      <CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
+                      <span className="hidden sm:inline">Prazos</span>
                     </TabsTrigger>
                     <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
                       <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
@@ -3020,9 +2017,9 @@ const ProcessDetails = () => {
                     <TabsTrigger value="mensagens" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-violet-50 dark:bg-violet-900/20 data-[state=active]:bg-violet-100 dark:data-[state=active]:bg-violet-900/40 relative">
                       <MessageSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
                       <span className="hidden sm:inline">Mensagens</span>
-                      {portalUnreadCount > 0 && (
+                      {portal.unreadCount > 0 && (
                         <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                          {portalUnreadCount > 9 ? '9+' : portalUnreadCount}
+                          {portal.unreadCount > 9 ? '9+' : portal.unreadCount}
                         </span>
                       )}
                     </TabsTrigger>
@@ -3030,2249 +2027,117 @@ const ProcessDetails = () => {
 
                   {/* ── FASE 3: Tab Dados do Cliente ── */}
                   <TabsContent value="personal" className="mt-4">
-                    <div className="space-y-4">
-                      {/* Indicador visual: estes dados pertencem ao Cliente */}
-                      {clientId && (
-                        <div className="flex items-center gap-2 p-2.5 bg-teal-50 dark:bg-teal-950/20 border border-teal-200 dark:border-teal-800 rounded-lg">
-                          <User className="h-4 w-4 text-teal-600 shrink-0" />
-                          <p className="text-xs text-teal-700 dark:text-teal-300">
-                            Estes dados pertencem à <strong>ficha do Cliente</strong> e são guardados em <code className="font-mono text-[10px] bg-teal-100 dark:bg-teal-900/40 px-1 rounded">/clients/{clientId.slice(0,8)}…</code>
-                          </p>
-                        </div>
-                      )}
-                      {/* Contactos */}
-                      <Card className={`border-l-4 border-l-blue-500 ${editingCardId !== 'personal_contactos' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Contactos" cardKey="personal_contactos" icon={Phone} canEdit={canEditPersonal} />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Email</Label>
-                              <Input
-                                type="email"
-                                value={process?.client_email || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setProcess({ ...process, client_email: val });
-                                  setPersonalData(prev => ({ ...prev, email: val }));
-                                }}
-                                disabled={editingCardId !== 'personal_contactos' || !canEditPersonal}
-                                placeholder="email@exemplo.com"
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Telefone</Label>
-                              <Input
-                                value={process?.client_phone || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value;
-                                  setProcess({ ...process, client_phone: val });
-                                  setPersonalData(prev => ({ ...prev, telefone: val }));
-                                }}
-                                disabled={editingCardId !== 'personal_contactos' || !canEditPersonal}
-                                placeholder="+351 000 000 000"
-                                className="h-9"
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                      
-                      {/* Identificação */}
-                      <Card className={`border-l-4 border-l-amber-500 ${editingCardId !== 'personal_identificacao' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Identificação" cardKey="personal_identificacao" icon={CreditCard} canEdit={canEditPersonal} />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1 md:col-span-2">
-                              <Label className="text-xs text-muted-foreground">Nome Completo</Label>
-                              <Input
-                                value={personalData.nome_completo || process?.client_name || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, nome_completo: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className="h-9"
-                                placeholder="Nome completo do cliente (pode ser diferente do nome do processo)"
-                              />
-                              <p className="text-[10px] text-muted-foreground">
-                                O nome completo pode ser diferente do nome do processo
-                              </p>
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-1">
-                                  <Label className="text-xs text-muted-foreground">NIF</Label>
-                                  <AIBadge {...(getFieldMetaFor("dados_pessoais.nif") || {})} />
-                                </div>
-                                {getConfidenceIndicator("nif") && (
-                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("nif").badge}`}>
-                                    IA {getConfidenceIndicator("nif").label}
-                                  </Badge>
-                                )}
-                              </div>
-                              <Input
-                                value={personalData.nif || ""}
-                                onChange={(e) => {
-                                  const value = e.target.value;
-                                  setPersonalData({ ...personalData, nif: value });
-                                  // Validar NIF em tempo real
-                                  const validation = validateNIF(value);
-                                  setNifError(validation.error);
-                                }}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                data-testid="personal-nif"
-                                className={`h-9 ${nifError ? 'border-red-500 focus:ring-red-500' : ''} ${getConfidenceIndicator("nif")?.borderClass || ''}`}
-                                placeholder="9 dígitos"
-                              />
-                              {nifError && (
-                                <p className="text-xs text-red-500 mt-1">{nifError}</p>
-                              )}
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Nº Segurança Social (NISS)</Label>
-                              <Input
-                                value={personalData.niss || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, niss: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className="h-9"
-                                placeholder="11 dígitos"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <div className="flex items-center gap-1">
-                                  <Label className="text-xs text-muted-foreground">Nº Documento (CC)</Label>
-                                  <AIBadge {...(getFieldMetaFor("dados_pessoais.documento_id") || {})} />
-                                </div>
-                                {getConfidenceIndicator("documento_id") && (
-                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("documento_id").badge}`}>
-                                    IA {getConfidenceIndicator("documento_id").label}
-                                  </Badge>
-                                )}
-                              </div>
-                              <Input
-                                value={personalData.documento_id || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, documento_id: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className={`h-9 ${getConfidenceIndicator("documento_id")?.borderClass || ''}`}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <Label className="text-xs text-muted-foreground">Validade CC <span className="text-red-500">*</span></Label>
-                                {getConfidenceIndicator("cc_validity") && (
-                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("cc_validity").badge}`}>
-                                    IA {getConfidenceIndicator("cc_validity").label}
-                                  </Badge>
-                                )}
-                              </div>
-                              <Input
-                                type="date"
-                                value={formatDateForInput(personalData.data_validade_cc)}
-                                onChange={(e) => setPersonalData({ ...personalData, data_validade_cc: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className={`h-9 ${getConfidenceIndicator("cc_validity")?.borderClass || ''}`}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center justify-between">
-                                <Label className="text-xs text-muted-foreground">Data de Nascimento</Label>
-                                {getConfidenceIndicator("birth_date") && (
-                                  <Badge className={`text-[9px] px-1.5 py-0 ${getConfidenceIndicator("birth_date").badge}`}>
-                                    IA {getConfidenceIndicator("birth_date").label}
-                                  </Badge>
-                                )}
-                              </div>
-                              <Input
-                                type="date"
-                                value={formatDateForInput(personalData.data_nascimento || personalData.birth_date)}
-                                onChange={(e) => setPersonalData({ ...personalData, data_nascimento: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className={`h-9 ${getConfidenceIndicator("birth_date")?.borderClass || ''}`}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Tipo de Compra</Label>
-                              <Select
-                                value={personalData.compra_tipo || ""}
-                                onValueChange={(value) => setPersonalData({ ...personalData, compra_tipo: value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="primeira_habitacao">Primeira Habitação</SelectItem>
-                                  <SelectItem value="segunda_habitacao">Segunda Habitação</SelectItem>
-                                  <SelectItem value="investimento">Investimento</SelectItem>
-                                  <SelectItem value="refinanciamento">Refinanciamento</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Estado Civil</Label>
-                              <Select
-                                value={personalData.estado_civil || personalData.marital_status || ""}
-                                onValueChange={(value) => setPersonalData({ ...personalData, estado_civil: value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="solteiro">Solteiro(a)</SelectItem>
-                                  <SelectItem value="casado">Casado(a)</SelectItem>
-                                  <SelectItem value="casado_adquiridos">Casado(a) - Comunhão de Adquiridos</SelectItem>
-                                  <SelectItem value="casado_geral">Casado(a) - Comunhão Geral</SelectItem>
-                                  <SelectItem value="casado_separacao">Casado(a) - Separação de Bens</SelectItem>
-                                  <SelectItem value="divorciado">Divorciado(a)</SelectItem>
-                                  <SelectItem value="viuvo">Viúvo(a)</SelectItem>
-                                  <SelectItem value="uniao_facto">União de Facto</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Sexo</Label>
-                              <Select
-                                value={personalData.sexo || ""}
-                                onValueChange={(value) => setPersonalData({ ...personalData, sexo: value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="M">Masculino</SelectItem>
-                                  <SelectItem value="F">Feminino</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Naturalidade</Label>
-                              <Input
-                                value={personalData.naturalidade || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, naturalidade: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Nacionalidade</Label>
-                              <Input
-                                value={personalData.nacionalidade || personalData.nationality || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, nacionalidade: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Altura (m)</Label>
-                              <Input
-                                value={personalData.altura || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, altura: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Profissão</Label>
-                              <Input
-                                value={personalData.profissao || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, profissao: e.target.value })}
-                                disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                className="h-9"
-                                placeholder="Profissão do titular"
-                              />
-                            </div>
-                            <div className="space-y-1 flex items-end pb-2">
-                              <div className="flex items-center gap-2">
-                                <input
-                                  type="checkbox"
-                                  id="menor_35_anos"
-                                  checked={personalData.menor_35_anos || false}
-                                  onChange={(e) => setPersonalData({ ...personalData, menor_35_anos: e.target.checked })}
-                                  disabled={editingCardId !== 'personal_identificacao' || !canEditPersonal}
-                                  className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-                                />
-                                <Label htmlFor="menor_35_anos" className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
-                                  Menor de 35 anos
-                                </Label>
-                              </div>
-                              <p className="text-[10px] text-muted-foreground">
-                                Apoio ao estado (jovem até 35 anos)
-                              </p>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                      
-                      {/* Filiação */}
-                      <Card className={`border-l-4 border-l-orange-500 ${editingCardId !== 'personal_filiacao' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Filiação" cardKey="personal_filiacao" icon={Users} canEdit={canEditPersonal} />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Nome do Pai</Label>
-                              <Input
-                                value={personalData.nome_pai || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, nome_pai: e.target.value })}
-                                disabled={editingCardId !== 'personal_filiacao' || !canEditPersonal}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Nome da Mãe</Label>
-                              <Input
-                                value={personalData.nome_mae || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, nome_mae: e.target.value })}
-                                disabled={editingCardId !== 'personal_filiacao' || !canEditPersonal}
-                                className="h-9"
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                      
-                      {/* Morada */}
-                      <Card className={`border-l-4 border-l-teal-500 ${editingCardId !== 'personal_morada' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Morada" cardKey="personal_morada" icon={MapPin} canEdit={canEditPersonal} />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1 sm:col-span-2">
-                              <Label className="text-xs text-muted-foreground">Morada Fiscal</Label>
-                              <Input
-                                value={personalData.morada_fiscal || personalData.address || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, morada_fiscal: e.target.value })}
-                                disabled={editingCardId !== 'personal_morada' || !canEditPersonal}
-                                className="h-9"
-                                placeholder="Rua, número, andar"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Código Postal</Label>
-                              <Input
-                                value={personalData.codigo_postal || ""}
-                                onChange={(e) => setPersonalData({ ...personalData, codigo_postal: e.target.value })}
-                                disabled={editingCardId !== 'personal_morada' || !canEditPersonal}
-                                className="h-9"
-                                placeholder="0000-000"
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                      
-                      {/* 2º Titular — Componente com pesquisa e ficha */}
-                      <SecondTitularCard process={process} onUpdate={fetchData} />
-                      
-                      {/* 2º Titular / Fiador */}
-                      {(process?.co_buyers?.length > 0 || process?.co_applicants?.length > 0) && (
-                        <Card className="border-l-4 border-l-indigo-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <Users className="h-4 w-4 text-indigo-500" />
-                              2º Titular / Fiador
-                              <Badge variant="secondary" className="ml-2">
-                                {(process?.co_buyers?.length || 0) + (process?.co_applicants?.length || 0)} pessoa(s)
-                              </Badge>
-                            </h4>
-                            <div className="space-y-3">
-                              {/* Co-Buyers (do CPCV) */}
-                              {Array.isArray(process?.co_buyers) && process.co_buyers.map((buyer, index) => (
-                                <div key={`buyer-${index}`} className="p-3 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg border border-indigo-200 dark:border-indigo-800">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Badge variant="outline" className="text-xs">
-                                      Comprador {index + 1}
-                                    </Badge>
-                                    {buyer.estado_civil && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {safeString(buyer.estado_civil)}
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                    {buyer.nome && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Nome:</span>
-                                        <p className="font-medium">{safeString(buyer.nome)}</p>
-                                      </div>
-                                    )}
-                                    {buyer.nif && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">NIF:</span>
-                                        <p className="font-medium">{safeString(buyer.nif)}</p>
-                                      </div>
-                                    )}
-                                    {buyer.email && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Email:</span>
-                                        <p className="font-medium">{safeString(buyer.email)}</p>
-                                      </div>
-                                    )}
-                                    {buyer.telefone && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Telefone:</span>
-                                        <p className="font-medium">{safeString(buyer.telefone)}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                              
-                              {/* Co-Applicants (do IRS/Simulação) */}
-                              {Array.isArray(process?.co_applicants) && process.co_applicants.map((applicant, index) => (
-                                <div key={`applicant-${index}`} className="p-3 bg-purple-50 dark:bg-purple-900/20 rounded-lg border border-purple-200 dark:border-purple-800">
-                                  <div className="flex items-center gap-2 mb-2">
-                                    <Badge variant="outline" className="text-xs">
-                                      {index === 0 ? "Titular" : "Cônjuge/Proponente " + (index + 1)}
-                                    </Badge>
-                                    {applicant.rendimento_mensal && (
-                                      <Badge variant="secondary" className="text-xs">
-                                        {safeNumber(applicant.rendimento_mensal).toLocaleString('pt-PT')}€/mês
-                                      </Badge>
-                                    )}
-                                  </div>
-                                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-sm">
-                                    {applicant.nome && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Nome:</span>
-                                        <p className="font-medium">{safeString(applicant.nome)}</p>
-                                      </div>
-                                    )}
-                                    {applicant.nif && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">NIF:</span>
-                                        <p className="font-medium">{safeString(applicant.nif)}</p>
-                                      </div>
-                                    )}
-                                    {applicant.data_nascimento && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Data Nascimento:</span>
-                                        <p className="font-medium">{safeString(applicant.data_nascimento)}</p>
-                                      </div>
-                                    )}
-                                    {applicant.entidade_patronal && (
-                                      <div>
-                                        <span className="text-muted-foreground text-xs">Empresa:</span>
-                                        <p className="font-medium">{safeString(applicant.entidade_patronal)}</p>
-                                      </div>
-                                    )}
-                                  </div>
-                                </div>
-                              ))}
-                              
-                              {/* Rendimento Agregado */}
-                              {financialData?.rendimento_agregado && (
-                                <div className="mt-3 p-2 bg-green-50 dark:bg-green-900/20 rounded border border-green-200 dark:border-green-800">
-                                  <p className="text-sm font-medium text-green-700 dark:text-green-400">
-                                    Rendimento Agregado: {safeNumber(financialData.rendimento_agregado).toLocaleString('pt-PT')}€/mês
-                                  </p>
-                                </div>
-                              )}
-                            </div>
-                          </CardContent>
-                        </Card>
-                      )}
-                    </div>
+                    <PersonalInfoTab
+                      personalData={personalData}
+                      setPersonalData={setPersonalData}
+                      process={process}
+                      setProcess={setProcess}
+                      clientId={clientId}
+                      nifError={nifError}
+                      setNifError={setNifError}
+                      editingCardId={editingCardId}
+                      canEditPersonal={canEditPersonal}
+                      CardHeaderWithEdit={CardHeaderWithEdit}
+                      getConfidenceIndicator={getConfidenceIndicator}
+                      getFieldMetaFor={getFieldMetaFor}
+                      fetchData={fetchData}
+                      financialData={financialData}
+                    />
                   </TabsContent>
 
                   {/* Financial Data Tab */}
                   <TabsContent value="financial" className="mt-4">
-                    <div className="space-y-4">
-                      {/* DSTI Automático */}
-                      <AutoDSTIBadge processId={id} token={token} compact={false} showDetails={true} />
-                      {/* Rendimentos */}
-                      <Card className={`border-l-4 border-l-green-500 ${editingCardId !== 'financial_rendimentos' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Rendimentos" cardKey="financial_rendimentos" icon={Briefcase} canEdit={canEditFinancial} collapsible />
-                          {!shouldCardBeCollapsed('financial_rendimentos') && (
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1">
-                                <Label className="text-xs text-muted-foreground">Rendimento Mensal (€)</Label>
-                                <AIBadge {...(getFieldMetaFor("financial_data.monthly_income") || {})} />
-                              </div>
-                              <Input
-                                type="number"
-                                value={financialData.monthly_income || financialData.salario_liquido || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, monthly_income: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1">
-                                <Label className="text-xs text-muted-foreground">Rendimento Bruto (€)</Label>
-                                <AIBadge {...(getFieldMetaFor("financial_data.rendimento_bruto") || {})} />
-                              </div>
-                              <Input
-                                type="number"
-                                value={financialData.rendimento_bruto || financialData.salario_bruto || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, rendimento_bruto: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Rendimento Anual (€)</Label>
-                              <Input
-                                type="number"
-                                value={financialData.rendimento_anual || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, rendimento_anual: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Capital Próprio (€)</Label>
-                              <Input
-                                type="number"
-                                value={financialData.capital_proprio || financialData.other_income || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, capital_proprio: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <div className="flex items-center gap-1">
-                                <Label className="text-xs text-muted-foreground">Valor a Financiar</Label>
-                                <AIBadge {...(getFieldMetaFor("financial_data.valor_financiado") || {})} />
-                              </div>
-                              <Input
-                                value={financialData.valor_financiado || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, valor_financiado: e.target.value })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="Ex: 200.000€ ou 80%"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Renda Habitação Atual (€)</Label>
-                              <Input
-                                type="number"
-                                value={financialData.renda_habitacao_atual || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, renda_habitacao_atual: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Rendimento Co-Titular (€)</Label>
-                              <Input
-                                type="number"
-                                value={financialData.rendimento_co_titular || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, rendimento_co_titular: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="Rendimento do 2º titular"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Nº de Dependentes</Label>
-                              <Input
-                                type="number"
-                                min="0"
-                                value={financialData.nr_dependentes || financialData.number_of_dependents || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, nr_dependentes: parseInt(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_rendimentos' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="0"
-                              />
-                            </div>
-                          </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                      
-                      {/* Situação Financeira */}
-                      <Card className={`border-l-4 border-l-blue-500 ${editingCardId !== 'financial_situacao' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Situação Financeira" cardKey="financial_situacao" icon={CreditCard} canEdit={canEditFinancial} />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Contrato Efetivo?</Label>
-                              <Select
-                                value={financialData.efetivo || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, efetivo: value })}
-                                disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="sim">Sim</SelectItem>
-                                  <SelectItem value="nao">Não</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Precisa Vender Casa?</Label>
-                              <Select
-                                value={financialData.precisa_vender_casa || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, precisa_vender_casa: value })}
-                                disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="sim">Sim</SelectItem>
-                                  <SelectItem value="nao">Não</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Tem Fiador?</Label>
-                              <Select
-                                value={financialData.fiador || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, fiador: value })}
-                                disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="sim">Sim</SelectItem>
-                                  <SelectItem value="nao">Não</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Créditos Existentes (€)</Label>
-                              <Input
-                                type="number"
-                                value={financialData.creditos_existentes || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, creditos_existentes: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="Valor total em dívida"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Prestação Créditos Mensal (€)</Label>
-                              <Input
-                                type="number"
-                                value={financialData.prestacao_creditos_mensal || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, prestacao_creditos_mensal: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="Total prestações mensais"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Acesso Portais Oficiais?</Label>
-                              <Select
-                                value={financialData.acesso_portal_financas || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, acesso_portal_financas: value })}
-                                disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="portal_financas">Portal das Finanças</SelectItem>
-                                  <SelectItem value="seguranca_social">Segurança Social Direta</SelectItem>
-                                  <SelectItem value="ambos">Ambos</SelectItem>
-                                  <SelectItem value="nenhuma">Nenhuma</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Chave Móvel Digital?</Label>
-                              <Select
-                                value={financialData.chave_movel_digital || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, chave_movel_digital: value })}
-                                disabled={editingCardId !== 'financial_situacao' || !canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="sim">Sim</SelectItem>
-                                  <SelectItem value="nao">Não</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-
-                      {/* Credenciais de Portais Oficiais */}
-                      <Card className={`border-l-4 border-l-orange-500 ${editingCardId !== 'financial_credenciais' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial_credenciais" icon={Database} canEdit={canEditFinancial} collapsible />
-                          {!shouldCardBeCollapsed('financial_credenciais') && (
-                          <>
-                          <p className="text-xs text-muted-foreground mb-3">
-                            Preencha as credenciais de acesso aos portais oficiais para facilitar a gestão do processo.
-                          </p>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            {/* Portal das Finanças */}
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Portal Finanças - Utilizador</Label>
-                              <Input
-                                value={financialData.portal_financas_utilizador || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, portal_financas_utilizador: e.target.value })}
-                                disabled={editingCardId !== 'financial_credenciais' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="NIF ou email"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Portal Finanças - Senha</Label>
-                              <div className="relative">
-                                <Input
-                                  type={showPortalSenha ? "text" : "password"}
-                                  value={financialData.portal_financas_senha || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, portal_financas_senha: e.target.value })}
-                                  disabled={editingCardId !== 'financial_credenciais' || !canEditFinancial}
-                                  className="h-9 pr-9"
-                                  placeholder="Senha de acesso"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => setShowPortalSenha(!showPortalSenha)}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
-                                  tabIndex={-1}
-                                >
-                                  {showPortalSenha ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
-                              </div>
-                            </div>
-                            {/* Segurança Social Direta */}
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Seg. Social - Utilizador</Label>
-                              <Input
-                                value={financialData.seg_social_utilizador || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, seg_social_utilizador: e.target.value })}
-                                disabled={editingCardId !== 'financial_credenciais' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="NISS ou email"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Seg. Social - Senha</Label>
-                              <div className="relative">
-                                <Input
-                                  type={showSegSocialSenha ? "text" : "password"}
-                                  value={financialData.seg_social_senha || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, seg_social_senha: e.target.value })}
-                                  disabled={editingCardId !== 'financial_credenciais' || !canEditFinancial}
-                                  className="h-9 pr-9"
-                                  placeholder="Senha de acesso"
-                                />
-                                <button
-                                  type="button"
-                                  onClick={() => setShowSegSocialSenha(!showSegSocialSenha)}
-                                  className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground min-h-[44px] min-w-[44px] flex items-center justify-center"
-                                  tabIndex={-1}
-                                >
-                                  {showSegSocialSenha ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
-                                </button>
-                              </div>
-                            </div>
-                          </div>
-                          </>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      {/* Credenciais de Portais Oficiais - 2º Proponente */}
-                      {(process?.titular2_data || Object.keys(titular2Data).length > 0) && (
-                        <Card className={`border-l-4 border-l-orange-300 ${editingCardId !== 'financial_credenciais_2' ? 'read-only-card' : ''}`}>
-                          <CardContent className="pt-4">
-                            <div className="flex items-center gap-2">
-                              <CardHeaderWithEdit title="Credenciais de Portais Oficiais" cardKey="financial_credenciais_2" icon={Database} canEdit={canEditFinancial} collapsible />
-                              <Badge variant="outline" className="text-xs bg-orange-50 text-orange-600 border-orange-200">2º Proponente</Badge>
-                            </div>
-                            {!shouldCardBeCollapsed('financial_credenciais_2') && (
-                            <>
-                            <p className="text-xs text-muted-foreground mb-3">
-                              Credenciais de acesso aos portais oficiais do segundo proponente/titular.
-                            </p>
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              {/* Portal das Finanças */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Finanças - Utilizador</Label>
-                                <Input
-                                  value={titular2Data.portal_financas_utilizador || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, portal_financas_utilizador: e.target.value })}
-                                  disabled={editingCardId !== 'financial_credenciais_2' || !canEditFinancial}
-                                  className="h-9"
-                                  placeholder="NIF ou email"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Finanças - Senha</Label>
-                                <Input
-                                  type="password"
-                                  value={titular2Data.portal_financas_senha || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, portal_financas_senha: e.target.value })}
-                                  disabled={editingCardId !== 'financial_credenciais_2' || !canEditFinancial}
-                                  className="h-9"
-                                  placeholder="Senha de acesso"
-                                />
-                              </div>
-                              {/* Segurança Social Direta */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Seg. Social - Utilizador</Label>
-                                <Input
-                                  value={titular2Data.seg_social_utilizador || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, seg_social_utilizador: e.target.value })}
-                                  disabled={editingCardId !== 'financial_credenciais_2' || !canEditFinancial}
-                                  className="h-9"
-                                  placeholder="NISS ou email"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Seg. Social - Senha</Label>
-                                <Input
-                                  type="password"
-                                  value={titular2Data.seg_social_senha || ""}
-                                  onChange={(e) => setTitular2Data({ ...titular2Data, seg_social_senha: e.target.value })}
-                                  disabled={editingCardId !== 'financial_credenciais_2' || !canEditFinancial}
-                                  className="h-9"
-                                  placeholder="Senha de acesso"
-                                />
-                              </div>
-                            </div>
-                            </>
-                            )}
-                          </CardContent>
-                        </Card>
-                      )}
-
-                      {/* Créditos/Bancos */}
-                      <Card className="border-l-4 border-l-red-500">
-                        <CardContent className="pt-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-semibold text-sm flex items-center gap-2">
-                              <AlertCircle className="h-4 w-4 text-red-500" />
-                              Créditos Ativos
-                            </h4>
-                            {canEditFinancial && editingCreditField !== 'creditos' && (
-                              <button
-                                type="button"
-                                onClick={() => setEditingCreditField('creditos')}
-                                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-                              >
-                                <Pencil className="h-3 w-3" />
-                                Editar
-                              </button>
-                            )}
-                            {canEditFinancial && editingCreditField === 'creditos' && (
-                              <button
-                                type="button"
-                                onClick={() => setEditingCreditField(null)}
-                                className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 transition-colors"
-                              >
-                                <CheckCircle className="h-3 w-3" />
-                                Concluído
-                              </button>
-                            )}
-                          </div>
-                          {editingCreditField === 'creditos' && canEditFinancial ? (
-                            <div className="space-y-2">
-                              {(financialData.bancos_creditos || []).map((item, idx) => {
-                                const banco = typeof item === 'object' ? item.banco : item;
-                                const valor = typeof item === 'object' ? item.valor : null;
-                                return (
-                                  <div key={idx} className="flex items-center gap-2">
-                                    <select
-                                      value={banco || ''}
-                                      onChange={(e) => {
-                                        const updated = [...(financialData.bancos_creditos || [])];
-                                        updated[idx] = { ...updated[idx], banco: e.target.value };
-                                        setFinancialData({ ...financialData, bancos_creditos: updated });
-                                      }}
-                                      className="text-xs border rounded px-2 py-1 bg-background"
-                                    >
-                                      <option value="">Banco...</option>
-                                      {BANK_LIST.map((b) => (
-                                        <option key={b} value={b}>{b}</option>
-                                      ))}
-                                    </select>
-                                    <input
-                                      type="number"
-                                      placeholder="Valor"
-                                      value={valor || ''}
-                                      onChange={(e) => {
-                                        const updated = [...(financialData.bancos_creditos || [])];
-                                        updated[idx] = { ...updated[idx], valor: parseFloat(e.target.value) || 0 };
-                                        setFinancialData({ ...financialData, bancos_creditos: updated });
-                                      }}
-                                      className="text-xs border rounded px-2 py-1 w-28 bg-background"
-                                    />
-                                    <button
-                                      type="button"
-                                      onClick={() => {
-                                        const updated = (financialData.bancos_creditos || []).filter((_, i) => i !== idx);
-                                        setFinancialData({ ...financialData, bancos_creditos: updated });
-                                      }}
-                                      className="p-1 hover:bg-red-100 rounded text-red-500 transition-colors"
-                                    >
-                                      <Trash2 className="h-3.5 w-3.5" />
-                                    </button>
-                                  </div>
-                                );
-                              })}
-                              <button
-                                type="button"
-                                onClick={() => {
-                                  const updated = [...(financialData.bancos_creditos || []), { banco: '', valor: 0 }];
-                                  setFinancialData({ ...financialData, bancos_creditos: updated });
-                                }}
-                                className="flex items-center gap-1 text-xs text-red-500 hover:text-red-700 font-medium mt-1"
-                              >
-                                <Plus className="h-3.5 w-3.5" />
-                                Adicionar crédito
-                              </button>
-                            </div>
-                          ) : (
-                            <div>
-                              {(() => {
-                                const total = (financialData.bancos_creditos || []).reduce((sum, item) => {
-                                  if (typeof item === 'object' && item.valor) return sum + item.valor;
-                                  return sum;
-                                }, 0);
-                                if (total > 0) {
-                                  return (
-                                    <p className="text-xs text-muted-foreground mb-2">
-                                      Total: <span className="font-semibold text-foreground">{total.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}</span>
-                                    </p>
-                                  );
-                                }
-                                return null;
-                              })()}
-                              <div className="space-y-2">
-                                {Array.isArray(financialData.bancos_creditos) && financialData.bancos_creditos.length > 0 ? (
-                                  financialData.bancos_creditos.map((item, idx) => {
-                                    const banco = typeof item === 'object' ? safeString(item.banco) : safeString(item);
-                                    const valor = typeof item === 'object' ? item.valor : null;
-                                    return (
-                                      <div key={idx} className="flex items-center gap-2">
-                                        <Badge className={getBankColor(banco)}>{safeString(banco)}</Badge>
-                                        {valor != null && valor > 0 && (
-                                          <span className="text-xs font-medium text-muted-foreground">
-                                            {valor.toLocaleString('pt-PT', { style: 'currency', currency: 'EUR' })}
-                                          </span>
-                                        )}
-                                      </div>
-                                    );
-                                  })
-                                ) : (
-                                  <span className="text-xs text-muted-foreground">Nenhum crédito registado</span>
-                                )}
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      {/* Contas de Crédito Abertas */}
-                      <Card className="border-l-4 border-l-amber-500">
-                        <CardContent className="pt-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-semibold text-sm flex items-center gap-2">
-                              <CreditCard className="h-4 w-4 text-amber-500" />
-                              Contas de Crédito Abertas
-                            </h4>
-                            {canEditFinancial && editingCreditField !== 'contas' && (
-                              <button
-                                type="button"
-                                onClick={() => setEditingCreditField('contas')}
-                                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-                              >
-                                <Pencil className="h-3 w-3" />
-                                Editar
-                              </button>
-                            )}
-                            {canEditFinancial && editingCreditField === 'contas' && (
-                              <button
-                                type="button"
-                                onClick={() => setEditingCreditField(null)}
-                                className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 transition-colors"
-                              >
-                                <CheckCircle className="h-3 w-3" />
-                                Concluído
-                              </button>
-                            )}
-                          </div>
-                          {editingCreditField === 'contas' && canEditFinancial ? (
-                            <div className="flex flex-wrap gap-2">
-                              <button
-                                type="button"
-                                onClick={() => setFinancialData({ ...financialData, tem_creditos_activos: [] })}
-                                className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${
-                                  (financialData.tem_creditos_activos || []).length === 0
-                                    ? 'ring-2 ring-offset-1 ring-amber-400 scale-105 bg-slate-700 text-white border-slate-700'
-                                    : 'opacity-50 hover:opacity-80 bg-transparent text-slate-600 border-slate-400'
-                                }`}
-                              >
-                                {(financialData.tem_creditos_activos || []).length === 0 && <span className="mr-1">✓</span>}
-                                Nenhuma
-                              </button>
-                              {BANK_LIST.map((banco) => {
-                                const selected = (financialData.tem_creditos_activos || []).includes(banco);
-                                return (
-                                  <button
-                                    key={`contas-${banco}`}
-                                    type="button"
-                                    onClick={() => {
-                                      const current = financialData.tem_creditos_activos || [];
-                                      setFinancialData({
-                                        ...financialData,
-                                        tem_creditos_activos: current.includes(banco)
-                                          ? current.filter(b => b !== banco)
-                                          : [...current, banco]
-                                      });
-                                    }}
-                                    className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-amber-400 scale-105' : 'opacity-50 hover:opacity-80'} ${getBankColor(banco)}`}
-                                  >
-                                    {selected && <span className="mr-1">✓</span>}
-                                    {banco}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {Array.isArray(financialData?.tem_creditos_activos) && financialData.tem_creditos_activos.length > 0 ? (
-                                financialData.tem_creditos_activos.map((banco, idx) => (
-                                  <Badge key={idx} className={getBankColor(banco)}>{safeString(banco)}</Badge>
-                                ))
-                              ) : (
-                                <span className="text-xs text-muted-foreground">Nenhuma conta registada</span>
-                              )}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                      
-                      {/* Simulações de Crédito */}
-                      <Card className="border-l-4 border-l-blue-500">
-                        <CardContent className="pt-4">
-                          <div className="flex items-center justify-between mb-3">
-                            <h4 className="font-semibold text-sm flex items-center gap-2">
-                              <CreditCard className="h-4 w-4 text-blue-500" />
-                              Simulações de Crédito Efetuadas
-                            </h4>
-                            {canEditFinancial && editingCreditField !== 'simulacoes' && (
-                              <button
-                                type="button"
-                                onClick={() => setEditingCreditField('simulacoes')}
-                                className="text-xs text-muted-foreground hover:text-foreground flex items-center gap-1 transition-colors"
-                              >
-                                <Pencil className="h-3 w-3" />
-                                Editar
-                              </button>
-                            )}
-                            {canEditFinancial && editingCreditField === 'simulacoes' && (
-                              <button
-                                type="button"
-                                onClick={() => setEditingCreditField(null)}
-                                className="text-xs text-green-600 hover:text-green-700 flex items-center gap-1 transition-colors"
-                              >
-                                <CheckCircle className="h-3 w-3" />
-                                Concluído
-                              </button>
-                            )}
-                          </div>
-                          {editingCreditField === 'simulacoes' && canEditFinancial ? (
-                            <div className="flex flex-wrap gap-2">
-                              {BANK_LIST.map((banco) => {
-                                const selected = (financialData.bancos_simulacoes || []).includes(banco);
-                                return (
-                                  <button
-                                    key={`sim-${banco}`}
-                                    type="button"
-                                    onClick={() => {
-                                      const current = financialData.bancos_simulacoes || [];
-                                      setFinancialData({
-                                        ...financialData,
-                                        bancos_simulacoes: current.includes(banco)
-                                          ? current.filter(b => b !== banco)
-                                          : [...current, banco]
-                                      });
-                                    }}
-                                    className={`px-3 py-1.5 rounded-full text-sm font-medium border-2 transition-all ${selected ? 'ring-2 ring-offset-1 ring-blue-400 scale-105' : 'opacity-50 hover:opacity-80'} ${getBankColor(banco)}`}
-                                  >
-                                    {selected && <span className="mr-1">✓</span>}
-                                    {banco}
-                                  </button>
-                                );
-                              })}
-                            </div>
-                          ) : (
-                            <div className="flex flex-wrap gap-2">
-                              {Array.isArray(financialData.bancos_simulacoes) && financialData.bancos_simulacoes.length > 0 ? (
-                                financialData.bancos_simulacoes.map((banco, idx) => (
-                                  <Badge key={idx} variant="outline" className="border-blue-300 text-blue-700">{safeString(banco)}</Badge>
-                                ))
-                              ) : (
-                                <span className="text-xs text-muted-foreground">Nenhuma simulação registada</span>
-                              )}
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                      
-                      {/* Tempo Restante do Crédito (Refinanciamento) */}
-                      {financialData?.tempo_restante_credito && (
-                        <Card className="border-l-4 border-l-amber-500">
-                          <CardContent className="pt-4">
-                            <h4 className="font-semibold text-sm mb-3 flex items-center gap-2">
-                              <Clock className="h-4 w-4 text-amber-500" />
-                              Tempo Restante do Crédito Atual
-                            </h4>
-                            <p className="text-sm">
-                              {financialData.tempo_restante_credito === "menos_1_ano" ? "Menos de 1 ano" :
-                               financialData.tempo_restante_credito === "1_5_anos" ? "1 a 5 anos" :
-                               financialData.tempo_restante_credito === "5_10_anos" ? "5 a 10 anos" :
-                               financialData.tempo_restante_credito === "10_15_anos" ? "10 a 15 anos" :
-                               financialData.tempo_restante_credito === "15_20_anos" ? "15 a 20 anos" :
-                               financialData.tempo_restante_credito === "mais_20_anos" ? "Mais de 20 anos" : 
-                               financialData.tempo_restante_credito}
-                            </p>
-                          </CardContent>
-                        </Card>
-                      )}
-                      
-                      {/* Emprego */}
-                      <Card className={`border-l-4 border-l-purple-500 ${editingCardId !== 'financial_profissional' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Situação Profissional" cardKey="financial_profissional" icon={User} canEdit={canEditFinancial} />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Tipo de Emprego</Label>
-                              <Select
-                                value={financialData.employment_type || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, employment_type: value })}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="efetivo">Contrato Efetivo</SelectItem>
-                                  <SelectItem value="termo_certo">Termo Certo</SelectItem>
-                                  <SelectItem value="termo_incerto">Termo Incerto</SelectItem>
-                                  <SelectItem value="independente">Trabalhador Independente</SelectItem>
-                                  <SelectItem value="empresario">Empresário</SelectItem>
-                                  <SelectItem value="reformado">Reformado</SelectItem>
-                                  <SelectItem value="desempregado">Desempregado</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Trabalha no Estrangeiro?</Label>
-                              <Select
-                                value={financialData.trabalha_estrangeiro || ""}
-                                onValueChange={(value) => setFinancialData({ ...financialData, trabalha_estrangeiro: value })}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                              >
-                                <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                <SelectContent>
-                                  <SelectItem value="sim">Sim</SelectItem>
-                                  <SelectItem value="nao">Não</SelectItem>
-                                </SelectContent>
-                              </Select>
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Tempo de Emprego</Label>
-                              <Input
-                                value={financialData.employment_duration || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, employment_duration: e.target.value })}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Entidade Empregadora</Label>
-                              <Input
-                                value={financialData.employer_name || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, employer_name: e.target.value })}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">NIF da Entidade Empregadora</Label>
-                              <Input
-                                value={financialData.employer_nif || ""}
-                                onChange={(e) => {
-                                  const val = e.target.value.replace(/\D/g, '').slice(0, 9);
-                                  setFinancialData({ ...financialData, employer_nif: val });
-                                }}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="NIF da empresa"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Categoria Profissional</Label>
-                              <Input
-                                value={financialData.categoria_profissional || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, categoria_profissional: e.target.value })}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="Ex: Técnico superior, Operário..."
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Subsídio Alimentação (€)</Label>
-                              <Input
-                                type="number"
-                                value={financialData.subsidiario_alimentacao || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, subsidiario_alimentacao: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                                className="h-9"
-                                placeholder="0.00"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Data de Referência (Recibo)</Label>
-                              <Input
-                                type="month"
-                                value={financialData.data_referencia || ""}
-                                onChange={(e) => setFinancialData({ ...financialData, data_referencia: e.target.value })}
-                                disabled={editingCardId !== 'financial_profissional' || !canEditFinancial}
-                                className="h-9"
-                              />
-                            </div>
-                          </div>
-                        </CardContent>
-                      </Card>
-                    </div>
+                    <FinancialTab
+                      titular2Data={titular2Data}
+                      setTitular2Data={setTitular2Data}
+                      financialData={financialData}
+                      setFinancialData={setFinancialData}
+                      process={process}
+                      editingCardId={editingCardId}
+                      editingCreditField={editingCreditField}
+                      setEditingCreditField={setEditingCreditField}
+                      showPortalSenha={showPortalSenha}
+                      setShowPortalSenha={setShowPortalSenha}
+                      showSegSocialSenha={showSegSocialSenha}
+                      setShowSegSocialSenha={setShowSegSocialSenha}
+                      canEditFinancial={canEditFinancial}
+                      CardHeaderWithEdit={CardHeaderWithEdit}
+                      getFieldMetaFor={getFieldMetaFor}
+                      token={token}
+                      id={id}
+                      shouldCardBeCollapsed={shouldCardBeCollapsed}
+                    />
                   </TabsContent>
 
                   {/* Real Estate Tab */}
                   <TabsContent value="realestate" className="space-y-4 mt-4">
-                    {!canEditRealEstate && !realEstateData?.tipo_imovel && !realEstateData?.property_type && !realEstateData?.num_quartos ? (
-                      <div className="text-center py-8 text-muted-foreground">
-                        <Building2 className="h-12 w-12 mx-auto mb-4 opacity-50" />
-                        <p>Dados imobiliários serão preenchidos pelo consultor</p>
-                      </div>
-                    ) : (
-                      <div className="space-y-4">
-
-                        {/* ====== Grupo D: Estado da Procura ====== */}
-                        <Card className={`border-l-4 border-l-indigo-500 ${editingCardId !== 'realestate_procura' ? 'read-only-card' : ''}`}>
-                          <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Estado da Procura" cardKey="realestate_procura" icon={Search} canEdit={canEditRealEstate} collapsible />
-                            {!shouldCardBeCollapsed('realestate_procura') && (
-                            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                              <div className="space-y-1 flex items-center gap-3 pb-1">
-                                <input
-                                  type="checkbox"
-                                  id="ja_tem_imovel"
-                                  checked={realEstateData.ja_tem_imovel || realEstateData.has_property || false}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, ja_tem_imovel: e.target.checked, has_property: e.target.checked })}
-                                  disabled={editingCardId !== 'realestate_procura' || !canEditRealEstate}
-                                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                />
-                                <Label htmlFor="ja_tem_imovel" className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
-                                  Já tem imóvel identificado
-                                </Label>
-                              </div>
-                              <div className="space-y-1 flex items-center gap-3 pb-1">
-                                <input
-                                  type="checkbox"
-                                  id="ja_tem_casa_escolhida"
-                                  checked={realEstateData.ja_tem_casa_escolhida || false}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, ja_tem_casa_escolhida: e.target.checked })}
-                                  disabled={editingCardId !== 'realestate_procura' || !canEditRealEstate}
-                                  className="h-4 w-4 rounded border-gray-300 text-indigo-600 focus:ring-indigo-500"
-                                />
-                                <Label htmlFor="ja_tem_casa_escolhida" className="text-xs text-muted-foreground cursor-pointer whitespace-nowrap">
-                                  Já tem casa escolhida
-                                </Label>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Nome do Proprietário (vendedor)</Label>
-                                <Input
-                                  value={realEstateData.proprietario_nome || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, proprietario_nome: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_procura' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Nome do proprietário do imóvel"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Contacto do Proprietário</Label>
-                                <Input
-                                  value={realEstateData.proprietario_contacto || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, proprietario_contacto: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_procura' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="+351 000 000 000"
-                                />
-                              </div>
-                            </div>
-                            )}
-                          </CardContent>
-                        </Card>
-
-                        {/* ====== Grupo A: Características do Imóvel ====== */}
-                        <Card className={`border-l-4 border-l-green-500 ${editingCardId !== 'realestate_caracteristicas' ? 'read-only-card' : ''}`}>
-                          <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Características do Imóvel" cardKey="realestate_caracteristicas" icon={Building2} canEdit={canEditRealEstate} />
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Tipo de Imóvel</Label>
-                                <Select
-                                  value={realEstateData.tipo_imovel || ""}
-                                  onValueChange={(value) => setRealEstateData({ ...realEstateData, tipo_imovel: value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                >
-                                  <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="apartamento">Apartamento</SelectItem>
-                                    <SelectItem value="moradia">Moradia</SelectItem>
-                                    <SelectItem value="terreno">Terreno</SelectItem>
-                                    <SelectItem value="outro">Outro</SelectItem>
-                                    <SelectItem value="comercial">Espaço Comercial</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Tipologia (Quartos)</Label>
-                                <Select
-                                  value={realEstateData.num_quartos || ""}
-                                  onValueChange={(value) => setRealEstateData({ ...realEstateData, num_quartos: value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                >
-                                  <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="T0">T0</SelectItem>
-                                    <SelectItem value="T1">T1</SelectItem>
-                                    <SelectItem value="T2">T2</SelectItem>
-                                    <SelectItem value="T3">T3</SelectItem>
-                                    <SelectItem value="T4">T4+</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Tipologia</Label>
-                                <Input
-                                  value={realEstateData.tipologia || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, tipologia: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: T2, T3, T4"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1">
-                                  <Label className="text-xs text-muted-foreground">Valor do Imóvel (€)</Label>
-                                  <AIBadge {...(getFieldMetaFor("real_estate_data.valor_imovel") || {})} />
-                                </div>
-                                <Input
-                                  type="number"
-                                  value={realEstateData.valor_imovel || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_imovel: parseFloat(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <div className="flex items-center gap-1">
-                                  <Label className="text-xs text-muted-foreground">Valor Patrimonial (€)</Label>
-                                  <AIBadge {...(getFieldMetaFor("real_estate_data.valor_patrimonial") || {})} />
-                                </div>
-                                <Input
-                                  type="number"
-                                  value={realEstateData.valor_patrimonial || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_patrimonial: parseFloat(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Certificado Energético</Label>
-                                <Input
-                                  value={realEstateData.certificado_energetico || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, certificado_energetico: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: A, B-, C"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Área Bruta (m²)</Label>
-                                <Input
-                                  type="number"
-                                  value={realEstateData.area_bruta || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, area_bruta: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Área Útil (m²)</Label>
-                                <Input
-                                  type="number"
-                                  value={realEstateData.area_util || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, area_util: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Fração</Label>
-                                <Input
-                                  value={realEstateData.fracao || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, fracao: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: A, B, C"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Artigo Matricial</Label>
-                                <Input
-                                  value={realEstateData.artigo_matricial || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, artigo_matricial: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: 1234"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Conservatória</Label>
-                                <Input
-                                  value={realEstateData.conservatoria || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, conservatoria: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Nome da conservatória"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Número Predial</Label>
-                                <Input
-                                  value={realEstateData.numero_predial || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, numero_predial: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: 000"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Estacionamento</Label>
-                                <Input
-                                  value={realEstateData.estacionamento || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, estacionamento: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: Garagem dupla, Lugar 12"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Arrecadação</Label>
-                                <Input
-                                  value={realEstateData.arrecadacao || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, arrecadacao: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: Arrecadação A, Caixa 5"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Outras Características</Label>
-                                <Input
-                                  value={realEstateData.outras_caracteristicas || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, outras_caracteristicas: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: Varanda, Piscina, Solar"
-                                />
-                              </div>
-                              <div className="space-y-1 sm:col-span-2 md:col-span-3">
-                                <Label className="text-xs text-muted-foreground">Descrição do Imóvel</Label>
-                                <Textarea
-                                  value={realEstateData.descricao_imovel || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, descricao_imovel: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_caracteristicas' || !canEditRealEstate}
-                                  rows={2}
-                                  placeholder="Descrição detalhada do imóvel"
-                                />
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* ====== Grupo B: Localização ====== */}
-                        <Card className={`border-l-4 border-l-blue-500 ${editingCardId !== 'realestate_localizacao' ? 'read-only-card' : ''}`}>
-                          <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Localização" cardKey="realestate_localizacao" icon={MapPin} canEdit={canEditRealEstate} />
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Localização Pretendida</Label>
-                                <Input
-                                  value={realEstateData.localizacao || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, localizacao: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                  className="h-9"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Área Pretendida (m²)</Label>
-                                <Input
-                                  type="number"
-                                  value={realEstateData.area_pretendida || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, area_pretendida: parseFloat(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                  className="h-9"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Valor Máximo (€)</Label>
-                                <Input
-                                  type="number"
-                                  value={realEstateData.valor_maximo_imovel || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, valor_maximo_imovel: parseFloat(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                  className="h-9"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Finalidade</Label>
-                                <Select
-                                  value={realEstateData.finalidade || ""}
-                                  onValueChange={(value) => setRealEstateData({ ...realEstateData, finalidade: value })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                >
-                                  <SelectTrigger className="h-9"><SelectValue placeholder="Selecione" /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="compra_imovel">Compra de Imóvel</SelectItem>
-                                    <SelectItem value="habitacao_propria">Habitação Própria</SelectItem>
-                                    <SelectItem value="investimento">Investimento</SelectItem>
-                                    <SelectItem value="arrendamento">Arrendamento</SelectItem>
-                                    <SelectItem value="refinanciamento">Refinanciamento</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Código Postal</Label>
-                                <Input
-                                  value={realEstateData.codigo_postal || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, codigo_postal: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0000-000"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Localidade</Label>
-                                <Input
-                                  value={realEstateData.localidade || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, localidade: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Cidade"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Freguesia</Label>
-                                <Input
-                                  value={realEstateData.freguesia || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, freguesia: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Freguesia"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Concelho</Label>
-                                <Input
-                                  value={realEstateData.concelho || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, concelho: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Concelho"
-                                />
-                              </div>
-                            </div>
-                            {/* Características como badges */}
-                            {(() => {
-                              const chars = Array.isArray(realEstateData?.caracteristicas)
-                                ? realEstateData.caracteristicas
-                                : typeof realEstateData?.caracteristicas === 'string' && realEstateData.caracteristicas.trim()
-                                  ? realEstateData.caracteristicas.split(',').map(s => s.trim()).filter(Boolean)
-                                  : [];
-                              return chars.length > 0 ? (
-                                <div className="mt-3 space-y-1">
-                                  <Label className="text-xs text-muted-foreground">Características Pretendidas</Label>
-                                  <div className="flex flex-wrap gap-2">
-                                    {chars.map((c, idx) => (
-                                      <Badge key={idx} variant="secondary">{c}</Badge>
-                                    ))}
-                                  </div>
-                                </div>
-                              ) : null;
-                            })()}
-                            <div className="mt-3 space-y-1">
-                              <Label className="text-xs text-muted-foreground">Outras Informações</Label>
-                              <Textarea
-                                value={realEstateData.outras_informacoes || ""}
-                                onChange={(e) => setRealEstateData({ ...realEstateData, outras_informacoes: e.target.value })}
-                                disabled={editingCardId !== 'realestate_localizacao' || !canEditRealEstate}
-                                rows={2}
-                              />
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* ====== Grupo C: Dados do CPCV e Prazos ====== */}
-                        <Card className={`border-l-4 border-l-amber-500 ${editingCardId !== 'realestate_cpcv' ? 'read-only-card' : ''}`}>
-                          <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Dados do CPCV e Prazos" cardKey="realestate_cpcv" icon={FileSignature} canEdit={canEditRealEstate} />
-                            <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                              {/* Valores Financeiros do CPCV (Fase 3) */}
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Sinal / Entrada (€)</Label>
-                                <Input
-                                  type="number"
-                                  value={financialData.valor_entrada || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, valor_entrada: parseFloat(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Data do Sinal</Label>
-                                <Input
-                                  type="date"
-                                  value={financialData.data_sinal || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, data_sinal: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Reforço do Sinal (€)</Label>
-                                <Input
-                                  type="number"
-                                  value={financialData.reforco_sinal || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, reforco_sinal: parseFloat(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Comissão Mediação (€)</Label>
-                                <Input
-                                  type="number"
-                                  value={financialData.comissao_mediacao || ""}
-                                  onChange={(e) => setFinancialData({ ...financialData, comissao_mediacao: parseFloat(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="0.00"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Data do CPCV</Label>
-                                <Input
-                                  type="date"
-                                  value={realEstateData.data_cpcv || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, data_cpcv: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Data Escritura Prevista</Label>
-                                <Input
-                                  type="date"
-                                  value={realEstateData.data_escritura_prevista || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, data_escritura_prevista: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Prazo Escritura (dias)</Label>
-                                <Input
-                                  type="number"
-                                  min="0"
-                                  value={realEstateData.prazo_escritura_dias || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, prazo_escritura_dias: parseInt(e.target.value) || null })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: 90"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Data Entrega de Chaves</Label>
-                                <Input
-                                  type="date"
-                                  value={realEstateData.data_entrega_chaves || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, data_entrega_chaves: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                />
-                              </div>
-                              <div className="space-y-1 sm:col-span-2">
-                                <Label className="text-xs text-muted-foreground">Condição Suspensiva</Label>
-                                <Input
-                                  value={realEstateData.condicao_suspensiva || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, condicao_suspensiva: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Ex: Aprovação de financiamento bancário"
-                                />
-                              </div>
-                              <div className="space-y-1 sm:col-span-2 md:col-span-3">
-                                <Label className="text-xs text-muted-foreground">Observações do CPCV</Label>
-                                <Textarea
-                                  value={realEstateData.observacoes_cpcv || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, observacoes_cpcv: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_cpcv' || !canEditRealEstate}
-                                  rows={2}
-                                  placeholder="Observações adicionais sobre o CPCV"
-                                />
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                        {/* Dados do Proprietário (existente) */}
-                        <Card className={`border-l-4 border-l-orange-500 ${editingCardId !== 'realestate_vendedor' ? 'read-only-card' : ''}`}>
-                          <CardContent className="pt-4">
-                            <CardHeaderWithEdit title="Dados do Proprietário / Vendedor" cardKey="realestate_vendedor" icon={Users} canEdit={canEditRealEstate} />
-                            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Nome</Label>
-                                <Input
-                                  value={realEstateData.owner_name || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, owner_name: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_vendedor' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="Nome completo"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Email</Label>
-                                <Input
-                                  type="email"
-                                  value={realEstateData.owner_email || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, owner_email: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_vendedor' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="email@exemplo.com"
-                                />
-                              </div>
-                              <div className="space-y-1">
-                                <Label className="text-xs text-muted-foreground">Telefone</Label>
-                                <Input
-                                  value={realEstateData.owner_phone || ""}
-                                  onChange={(e) => setRealEstateData({ ...realEstateData, owner_phone: e.target.value })}
-                                  disabled={editingCardId !== 'realestate_vendedor' || !canEditRealEstate}
-                                  className="h-9"
-                                  placeholder="+351 000 000 000"
-                                />
-                              </div>
-                            </div>
-                          </CardContent>
-                        </Card>
-
-                      </div>
-                    )}
+                    <RealEstateTab
+                      financialData={financialData}
+                      setFinancialData={setFinancialData}
+                      realEstateData={realEstateData}
+                      setRealEstateData={setRealEstateData}
+                      editingCardId={editingCardId}
+                      canEditRealEstate={canEditRealEstate}
+                      CardHeaderWithEdit={CardHeaderWithEdit}
+                      getFieldMetaFor={getFieldMetaFor}
+                      shouldCardBeCollapsed={shouldCardBeCollapsed}
+                    />
                   </TabsContent>
 
                   {/* Credit Tab */}
                   <TabsContent value="credit" className="space-y-4 mt-4">
-                      <>
-                      {/* Dados do Crédito */}
-                      <Card className={`border-l-4 border-l-teal-500 ${editingCardId !== 'credit_dados' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Dados do Crédito" cardKey="credit_dados" icon={CreditCard} canEdit={canEditCredit} collapsible />
-                          {!shouldCardBeCollapsed('credit_dados') && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-1">
-                            <Label>Valor do Empréstimo (€)</Label>
-                            <AIBadge {...(getFieldMetaFor("credit_data.requested_amount") || {})} />
-                          </div>
-                          <Input
-                            type="number"
-                            value={creditData.requested_amount || ""}
-                            onChange={(e) => setCreditData({ ...creditData, requested_amount: parseFloat(e.target.value) || null })}
-                            disabled={editingCardId !== 'credit_dados' || !canEditCredit}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Prazo (anos)</Label>
-                          <Input
-                            type="number"
-                            value={creditData.loan_term_years || ""}
-                            onChange={(e) => setCreditData({ ...creditData, loan_term_years: parseInt(e.target.value) || null })}
-                            disabled={editingCardId !== 'credit_dados' || !canEditCredit}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-1">
-                            <Label>Taxa de Juro (%)</Label>
-                            <AIBadge {...(getFieldMetaFor("credit_data.interest_rate") || {})} />
-                          </div>
-                          <Input
-                            type="number"
-                            step="0.01"
-                            value={creditData.interest_rate || ""}
-                            onChange={(e) => setCreditData({ ...creditData, interest_rate: parseFloat(e.target.value) || null })}
-                            disabled={editingCardId !== 'credit_dados' || !canEditCredit}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <div className="flex items-center gap-1">
-                            <Label>Prestação Mensal (€)</Label>
-                            <AIBadge {...(getFieldMetaFor("credit_data.monthly_payment") || {})} />
-                          </div>
-                          <Input
-                            type="number"
-                            value={creditData.monthly_payment || ""}
-                            onChange={(e) => setCreditData({ ...creditData, monthly_payment: parseFloat(e.target.value) || null })}
-                            disabled={editingCardId !== 'credit_dados' || !canEditCredit}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Banco</Label>
-                          <Input
-                            value={creditData.bank_name || ""}
-                            onChange={(e) => setCreditData({ ...creditData, bank_name: e.target.value })}
-                            disabled={editingCardId !== 'credit_dados' || !canEditCredit}
-                          />
-                        </div>
-                        <div className="space-y-2">
-                          <Label>Data de Aprovação</Label>
-                          <Input
-                            type="date"
-                            value={formatDateForInput(creditData.bank_approval_date)}
-                            onChange={(e) => setCreditData({ ...creditData, bank_approval_date: e.target.value })}
-                            disabled={editingCardId !== 'credit_dados' || !canEditCredit}
-                          />
-                        </div>
-                        <div className="space-y-2 md:col-span-2">
-                          <Label>Notas da Aprovação</Label>
-                          <Textarea
-                            value={creditData.bank_approval_notes || ""}
-                            onChange={(e) => setCreditData({ ...creditData, bank_approval_notes: e.target.value })}
-                            disabled={editingCardId !== 'credit_dados' || !canEditCredit}
-                          />
-                        </div>
-                      </div>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      {/* ====== Avaliação Bancária (Fase 3) ====== */}
-                      <Card className={`border-l-4 border-l-emerald-500 ${editingCardId !== 'credit_avaliacao' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Avaliação Bancária" cardKey="credit_avaliacao" icon={Building2} canEdit={canEditCredit} />
-                          <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Valor da Avaliação (€)</Label>
-                              <Input
-                                type="number"
-                                value={creditData.valuation_value || ""}
-                                onChange={(e) => setCreditData({ ...creditData, valuation_value: parseFloat(e.target.value) || null })}
-                                disabled={editingCardId !== 'credit_avaliacao' || !canEditCredit}
-                                className="h-9"
-                                placeholder="0.00"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Data da Avaliação</Label>
-                              <Input
-                                type="date"
-                                value={creditData.valuation_date || ""}
-                                onChange={(e) => setCreditData({ ...creditData, valuation_date: e.target.value })}
-                                disabled={editingCardId !== 'credit_avaliacao' || !canEditCredit}
-                                className="h-9"
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Banco Avaliador</Label>
-                              <Input
-                                value={creditData.valuation_bank || ""}
-                                onChange={(e) => setCreditData({ ...creditData, valuation_bank: e.target.value })}
-                                disabled={editingCardId !== 'credit_avaliacao' || !canEditCredit}
-                                className="h-9"
-                                placeholder="Ex: CGD, Millennium BCP"
-                              />
-                            </div>
-                            <div className="space-y-1 sm:col-span-2 md:col-span-3">
-                              <Label className="text-xs text-muted-foreground">Notas da Avaliação</Label>
-                              <Textarea
-                                value={creditData.valuation_notes || ""}
-                                onChange={(e) => setCreditData({ ...creditData, valuation_notes: e.target.value })}
-                                disabled={editingCardId !== 'credit_avaliacao' || !canEditCredit}
-                                rows={2}
-                                placeholder="Observações sobre a avaliação bancária"
-                              />
-                            </div>
-                          </div>
-                          {/* Alerta: Avaliação abaixo do valor de compra */}
-                          {creditData.valuation_value && realEstateData.valor_imovel && creditData.valuation_value < realEstateData.valor_imovel && (
-                            <div className="mt-3 p-3 bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg flex items-center gap-2">
-                              <AlertTriangle className="h-4 w-4 text-red-500 shrink-0" />
-                              <p className="text-xs text-red-700 dark:text-red-300">
-                                Valor da avaliação ({safeNumber(creditData.valuation_value).toLocaleString('pt-PT')}€) é inferior ao valor do imóvel ({safeNumber(realEstateData.valor_imovel).toLocaleString('pt-PT')}€). Diferença de {safeNumber(Math.abs(realEstateData.valor_imovel - creditData.valuation_value)).toLocaleString('pt-PT')}€.
-                              </p>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      {/* ====== Compliance & Perfil de Risco (Pacote AC) ====== */}
-                      {/* Cartão minimizado por defeito (collapsedCards inicial = { credit_compliance: true }).
-                          Campos: admission_year (Ano de admissão), is_ppe (PPE), is_fpe (FPE),
-                          credit_incidents (texto livre). Persistidos em credit_data via cleanCreditDataForSubmit. */}
-                      <Card className={`border-l-4 border-l-rose-500 ${editingCardId !== 'credit_compliance' ? 'read-only-card' : ''}`}>
-                        <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Compliance & Perfil de Risco" cardKey="credit_compliance" icon={Shield} canEdit={canEditCredit} collapsible />
-                          {!shouldCardBeCollapsed('credit_compliance') && (
-                          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                            {/* Ano de Admissão */}
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Ano de Admissão (no emprego atual)</Label>
-                              <Input
-                                type="number"
-                                min="1950"
-                                max="2099"
-                                value={creditData.admission_year || ""}
-                                onChange={(e) => setCreditData({ ...creditData, admission_year: parseInt(e.target.value) || null })}
-                                disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
-                                className="h-9"
-                                placeholder="Ex: 2020"
-                              />
-                            </div>
-
-                            {/* PPE — Pessoa Politicamente Exposta */}
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Pessoa Politicamente Exposta (PPE)</Label>
-                              <div className="flex items-center gap-2 h-9">
-                                <Switch
-                                  checked={creditData.is_ppe === true}
-                                  onCheckedChange={(checked) => setCreditData({ ...creditData, is_ppe: checked })}
-                                  disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
-                                />
-                                <span className="text-xs text-muted-foreground">
-                                  {creditData.is_ppe === true ? "Sim — sujeito a compliance reforçado" : "Não"}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* FPE — Pessoa Fiscalmente Exposta */}
-                            <div className="space-y-1">
-                              <Label className="text-xs text-muted-foreground">Pessoa Fiscalmente Exposta (FPE)</Label>
-                              <div className="flex items-center gap-2 h-9">
-                                <Switch
-                                  checked={creditData.is_fpe === true}
-                                  onCheckedChange={(checked) => setCreditData({ ...creditData, is_fpe: checked })}
-                                  disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
-                                />
-                                <span className="text-xs text-muted-foreground">
-                                  {creditData.is_fpe === true ? "Sim — incumprimento fiscal registado" : "Não"}
-                                </span>
-                              </div>
-                            </div>
-
-                            {/* Incidentes de Crédito (texto livre) */}
-                            <div className="space-y-1 md:col-span-2">
-                              <Label className="text-xs text-muted-foreground">Incidentes de Crédito</Label>
-                              <Textarea
-                                value={creditData.credit_incidents || ""}
-                                onChange={(e) => setCreditData({ ...creditData, credit_incidents: e.target.value })}
-                                disabled={editingCardId !== 'credit_compliance' || !canEditCredit}
-                                rows={3}
-                                placeholder="Registos de incidentes de crédito (ex.: contas encerradas, incumprimentos, execuções fiscais). Deixar vazio se não houver."
-                              />
-                            </div>
-
-                            {/* Aviso se PPE ou FPE ativos */}
-                            {(creditData.is_ppe === true || creditData.is_fpe === true) && (
-                              <div className="md:col-span-2 p-3 bg-rose-50 dark:bg-rose-900/20 border border-rose-200 dark:border-rose-800 rounded-lg flex items-start gap-2">
-                                <AlertTriangle className="h-4 w-4 text-rose-500 shrink-0 mt-0.5" />
-                                <p className="text-xs text-rose-700 dark:text-rose-300">
-                                  {creditData.is_ppe === true && creditData.is_fpe === true
-                                    ? "Cliente identificado como PPE e FPE. Sujeito a compliance regulamentar reforçado (Banco de Portugal). Verifique procedimentos KYC/AML aplicáveis."
-                                    : creditData.is_ppe === true
-                                    ? "Cliente identificado como Pessoa Politicamente Exposta (PPE). Sujeito a procedimentos KYC/AML reforçados."
-                                    : "Cliente identificado como Pessoa Fiscalmente Exposta (FPE). Verificar impacto na análise de risco de crédito."}
-                                </p>
-                              </div>
-                            )}
-                          </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                      </>
+                    <CreditTab
+                      realEstateData={realEstateData}
+                      creditData={creditData}
+                      setCreditData={setCreditData}
+                      editingCardId={editingCardId}
+                      canEditCredit={canEditCredit}
+                      CardHeaderWithEdit={CardHeaderWithEdit}
+                      getFieldMetaFor={getFieldMetaFor}
+                      shouldCardBeCollapsed={shouldCardBeCollapsed}
+                      collapsedCards={collapsedCards}
+                    />
                   </TabsContent>
 
-                  {/* Documents Tab - Destaque para fácil acesso */}
-                  <TabsContent value="documents" className="mt-4">
-                    <div className="space-y-4">
-                      {/* Header com info — só visível para admin e CEO */}
-                      {hasAnyRole(user, ["admin", "ceo"]) && (
-                      <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-amber-100 dark:bg-amber-900/40 rounded-lg">
-                            <FolderOpen className="h-6 w-6 text-amber-600 dark:text-amber-400" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-amber-800 dark:text-amber-200">Gestão de Documentos</h3>
-                            <p className="text-sm text-amber-600 dark:text-amber-400">
-                              Faça upload de ficheiros ou adicione links externos (Google Drive, OneDrive, etc.)
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      )}
-
-                      {/* PACOTE DB — AI Executive Summary temporariamente oculto (display: none).
-                          O Card é mantido para reativação futura — não apagar.
-                          Originalmente: só visível para admin e CEO. */}
-                      {hasAnyRole(user, ["admin", "ceo"]) && false && (
-                      <Card className="border-indigo-200 dark:border-indigo-800 bg-gradient-to-r from-indigo-50/50 to-purple-50/50 dark:from-indigo-900/10 dark:to-purple-900/10" style={{ display: 'none' }}>
-                        <CardContent className="pt-4">
-                          <div className="flex items-center justify-between">
-                            <div className="flex items-center gap-3">
-                              <div className="p-2 bg-indigo-100 dark:bg-indigo-900/40 rounded-lg">
-                                <BrainCircuit className="h-5 w-5 text-indigo-600 dark:text-indigo-400" />
-                              </div>
-                              <div>
-                                <h3 className="font-semibold text-sm text-indigo-800 dark:text-indigo-200">Resumo Executivo IA</h3>
-                                <p className="text-xs text-indigo-600 dark:text-indigo-400">
-                                  Auditoria cruzada entre dados declarados e documentos
-                                </p>
-                              </div>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              {aiAnalysisDate && (
-                                <span className="text-xs text-muted-foreground hidden sm:inline">
-                                  {safeFormat(aiAnalysisDate, "dd/MM/yyyy HH:mm", { locale: pt })}
-                                </span>
-                              )}
-                              {aiSummary && !aiAnalysisLoading ? (
-                                <Button
-                                  size="sm"
-                                  variant="outline"
-                                  onClick={() => handleAiAnalysis(true)}
-                                  className="border-indigo-300 text-indigo-700 hover:bg-indigo-100 dark:border-indigo-700 dark:text-indigo-300"
-                                >
-                                  <RefreshCw className="h-3.5 w-3.5 mr-1.5" />
-                                  Atualizar
-                                </Button>
-                              ) : (
-                                <Button
-                                  size="sm"
-                                  onClick={() => handleAiAnalysis(true)}
-                                  disabled={aiAnalysisLoading}
-                                  className="bg-indigo-600 hover:bg-indigo-700 text-white"
-                                >
-                                  {aiAnalysisLoading ? (
-                                    <>
-                                      <Loader2 className="h-3.5 w-3.5 mr-1.5 animate-spin" />
-                                      A cruzar dados e a ler documentos...
-                                    </>
-                                  ) : (
-                                    <>
-                                      <Sparkles className="h-3.5 w-3.5 mr-1.5" />
-                                      {aiSummary ? "Atualizar Análise IA" : "Analisar IA (Auditoria)"}
-                                    </>
-                                  )}
-                                </Button>
-                              )}
-                            </div>
-                          </div>
-
-                          {/* Loading state */}
-                          {aiAnalysisLoading && (
-                            <div className="mt-4 flex items-center gap-3 p-4 bg-indigo-50 dark:bg-indigo-900/20 rounded-lg">
-                              <div className="flex gap-1">
-                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '0ms' }} />
-                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '150ms' }} />
-                                <div className="w-2 h-2 bg-indigo-500 rounded-full animate-bounce" style={{ animationDelay: '300ms' }} />
-                              </div>
-                              <p className="text-sm text-indigo-700 dark:text-indigo-300">
-                                A IA está a cruzar os dados do formulário com os documentos extraídos...
-                              </p>
-                            </div>
-                          )}
-
-                          {/* Summary result */}
-                          {aiSummary && !aiAnalysisLoading && (
-                            <div className="mt-4 p-4 bg-white dark:bg-gray-900 border rounded-lg max-h-[600px] overflow-y-auto">
-                              <div className="prose prose-sm dark:prose-invert max-w-none">
-                                {renderAiSummary(aiSummary)}
-                              </div>
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-                      )}
-
-                      {/* Painel de Documentos Unificado */}
-                      <Card className="border-amber-200 dark:border-amber-800">
-                        <CardContent className="pt-6">
-                          <UnifiedDocumentsPanel 
-                            key={documentsRefreshKey}
-                            processId={id}
-                            clientName={process?.client_name}
-                            onAIDataExtracted={handleAIDataExtractedFromDocs}
-                          />
-                        </CardContent>
-                      </Card>
-
-                      {/* Pedidos de Documentos do Portal */}
-                      <PortalDocumentRequests
-                        processId={id}
-                        onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}
-                      />
-                    </div>
+                  {/* Prazos Tab — calendário e lista de prazos críticos do processo */}
+                  <TabsContent value="prazos" className="mt-4">
+                    <DeadlinesTab
+                      canManageDeadlines={canManageDeadlines}
+                      isDeadlineDialogOpen={isDeadlineDialogOpen}
+                      setIsDeadlineDialogOpen={setIsDeadlineDialogOpen}
+                      deadlineForm={deadlineForm}
+                      setDeadlineForm={setDeadlineForm}
+                      selectedDate={selectedDate}
+                      setSelectedDate={setSelectedDate}
+                      handleCreateDeadline={handleCreateDeadline}
+                      deadlineDates={deadlineDates}
+                      deadlines={deadlines}
+                      handleToggleDeadline={handleToggleDeadline}
+                      handleDeleteDeadline={handleDeleteDeadline}
+                    />
                   </TabsContent>
 
                   {/* Emails Tab - Histórico de Emails do Processo */}
                   <TabsContent value="emails" className="mt-4">
-                    <div className="space-y-4">
-                      {/* Header com info */}
-                      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
-                        <div className="flex items-center gap-3">
-                          <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg">
-                            <Send className="h-6 w-6 text-blue-600 dark:text-blue-400" />
-                          </div>
-                          <div>
-                            <h3 className="font-semibold text-blue-800 dark:text-blue-200">Histórico de Emails</h3>
-                            <p className="text-sm text-blue-600 dark:text-blue-400">
-                              Emails associados a este processo
-                            </p>
-                          </div>
-                        </div>
-                      </div>
-                      
-                      {/* Painel de Emails */}
-                      <Card className="border-blue-200 dark:border-blue-800">
-                        <CardContent className="pt-6">
-                          <EmailHistoryPanel 
-                            processId={id}
-                            clientEmail={savedProcessRef.current?.client_email || process?.client_email}
-                            clientName={savedProcessRef.current?.client_name || process?.client_name}
-                            compact={false}
-                            maxHeight="500px"
-                            token={token}
-                          />
-                        </CardContent>
-                      </Card>
-                    </div>
+                    <EmailsTab id={id} savedProcessRef={savedProcessRef} process={process} token={token} />
                   </TabsContent>
 
                   {/* Visitas / Imóveis Tab */}
                   <TabsContent value="visitas" className="mt-4">
-                    <VisitasTab />
+                    <VisitasTab processId={id} />
                   </TabsContent>
 
                   {/* Mensagens do Portal Tab */}
                   <TabsContent value="mensagens" className="mt-4">
-                    <div className="space-y-4">
-                      {/* Header */}
-                      <div className="bg-violet-50 dark:bg-violet-900/20 border border-violet-200 dark:border-violet-800 rounded-lg p-4">
-                        <div className="flex items-center justify-between">
-                          <div className="flex items-center gap-3">
-                            <div className="p-2 bg-violet-100 dark:bg-violet-900/40 rounded-lg">
-                              <MessageSquare className="h-6 w-6 text-violet-600 dark:text-violet-400" />
-                            </div>
-                            <div>
-                              <h3 className="font-semibold text-violet-800 dark:text-violet-200">Mensagens com o Cliente</h3>
-                              <p className="text-sm text-violet-600 dark:text-violet-400">
-                                Comunicação direta com o cliente via Portal
-                              </p>
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="gap-1.5"
-                            onClick={() => fetchPortalMessages()}
-                          >
-                            <RefreshCw className="h-3.5 w-3.5" />
-                            Actualizar
-                          </Button>
-                        </div>
-                      </div>
-
-                      {/* Messages Area */}
-                      <Card>
-                        <CardContent className="p-4">
-                          {portalMessagesLoading && portalMessages.length === 0 ? (
-                            <div className="flex items-center justify-center py-12">
-                              <Loader2 className="h-8 w-8 animate-spin text-violet-500" />
-                              <span className="ml-3 text-muted-foreground">A carregar mensagens...</span>
-                            </div>
-                          ) : portalMessages.length === 0 ? (
-                            <div className="text-center py-12">
-                              <MessageSquare className="h-12 w-12 mx-auto mb-3 text-muted-foreground/30" />
-                              <p className="text-muted-foreground">Sem mensagens ainda</p>
-                              <p className="text-xs text-muted-foreground/70 mt-1">Envie a primeira mensagem ao cliente</p>
-                            </div>
-                          ) : (
-                            <div className="max-h-96 overflow-y-auto space-y-3 pr-1">
-                              {portalMessages.map((msg) => (
-                                <div
-                                  key={msg.id}
-                                  className={`flex ${msg.sender_type === 'staff' ? 'justify-end' : 'justify-start'}`}
-                                >
-                                  <div className={`max-w-[80%] rounded-xl px-4 py-2.5 ${
-                                    msg.sender_type === 'staff'
-                                      ? 'bg-violet-100 dark:bg-violet-900/30 rounded-br-sm'
-                                      : 'bg-gray-100 dark:bg-gray-800 rounded-bl-sm'
-                                  }`}>
-                                    {msg.sender_type === 'client' && (
-                                      <p className="text-xs font-medium text-violet-600 dark:text-violet-400 mb-1">
-                                        {safeString(msg.sender_name)}
-                                      </p>
-                                    )}
-                                    {msg.sender_type === 'staff' && (
-                                      <p className="text-xs font-medium text-right text-gray-500 dark:text-gray-400 mb-1">
-                                        {safeString(msg.sender_name)} (Equipamento)
-                                      </p>
-                                    )}
-                                    <p className="text-sm whitespace-pre-wrap break-words">{safeString(msg.content)}</p>
-                                    <p className="text-[10px] text-muted-foreground mt-1 text-right">
-                                      {msg.created_at ? safeFormat(msg.created_at, "dd/MM/yyyy HH:mm", { locale: pt }) : ''}
-                                    </p>
-                                  </div>
-                                </div>
-                              ))}
-                              <div ref={portalMessagesEndRef} />
-                            </div>
-                          )}
-                        </CardContent>
-                      </Card>
-
-                      {/* Send Message */}
-                      <Card>
-                        <CardContent className="p-4">
-                          <div className="flex gap-2">
-                            <Textarea
-                              placeholder="Escreva uma mensagem para o cliente..."
-                              value={portalNewMessage}
-                              onChange={(e) => setPortalNewMessage(e.target.value)}
-                              className="flex-1 min-h-[44px] max-h-32 resize-none"
-                              rows={2}
-                              onKeyDown={(e) => {
-                                if (e.key === 'Enter' && !e.shiftKey) {
-                                  e.preventDefault();
-                                  sendPortalMessage();
-                                }
-                              }}
-                            />
-                            <Button
-                              className="bg-violet-600 hover:bg-violet-700 self-end gap-1.5"
-                              onClick={sendPortalMessage}
-                              disabled={!portalNewMessage.trim() || portalSendingMessage}
-                            >
-                              {portalSendingMessage ? (
-                                <Loader2 className="h-4 w-4 animate-spin" />
-                              ) : (
-                                <Send className="h-4 w-4" />
-                              )}
-                              Enviar
-                            </Button>
-                          </div>
-                          <p className="text-xs text-muted-foreground mt-2">
-                            A mensagem ficará visível no portal do cliente. Prima Enter para enviar.
-                          </p>
-                        </CardContent>
-                      </Card>
-                    </div>
+                    <PortalMessagesTab
+                      messages={portal.messages}
+                      loading={portal.loading}
+                      newMessage={portal.newMessage}
+                      setNewMessage={portal.setNewMessage}
+                      sending={portal.sending}
+                      onRefresh={portal.fetchMessages}
+                      onSend={portal.sendMessage}
+                    />
                   </TabsContent>
                 </Tabs>
 
@@ -5399,12 +2264,64 @@ const ProcessDetails = () => {
                 )}
               </CardContent>
             </Card>
+              </TabsContent>
+
+              {/* ── Separador: Documentos — gestor de ficheiros S3 do cliente ── */}
+              <TabsContent value="documentos" className="mt-4">
+                <DocumentsTab
+                  hasAnyRole={hasAnyRole}
+                  user={user}
+                  aiSummary={aiSummary}
+                  aiAnalysisLoading={aiAnalysisLoading}
+                  aiAnalysisDate={aiAnalysisDate}
+                  handleAiAnalysis={handleAiAnalysis}
+                  renderAiSummary={renderAiSummary}
+                  documentsRefreshKey={documentsRefreshKey}
+                  id={id}
+                  process={process}
+                  handleAIDataExtractedFromDocs={handleAIDataExtractedFromDocs}
+                  setDocumentsRefreshKey={setDocumentsRefreshKey}
+                />
+              </TabsContent>
+
+              {/* ── Separador: Histórico — changelog, notas e cronologia de atividades ── */}
+              <TabsContent value="historico" className="mt-4">
+                <HistoryTab
+                  processId={id}
+                  process={process}
+                  history={history}
+                  workflowStatuses={workflowStatuses}
+                  activities={activities}
+                  newComment={newComment}
+                  setNewComment={setNewComment}
+                  sendingComment={sendingComment}
+                  handleSendComment={handleSendComment}
+                  handleDeleteComment={handleDeleteComment}
+                  user={user}
+                  isProcessLocked={isProcessLocked}
+                />
+              </TabsContent>
+            </Tabs>
           </div>
 
-          {/* Sidebar - Organizada com Accordions */}
-          <div className="space-y-3">
-            {/* PACOTE AQ: Cartão "Atividade" movido para o topo do layout
-                (agora integrado no cartão "Atividade & Notas" com a Timeline). */}
+          {/* ── Coluna Direita: Contexto Fixo (1/3) — Cliente + Atribuição sempre visíveis ── */}
+          <div className="space-y-4">
+            <ClientContextCard process={process} personalData={personalData} clientData={clientData} />
+
+            <AssignmentContextCard
+              process={process}
+              consultorNames={safeStringArray(process.consultor_names)}
+              mediadorNames={safeStringArray(process.mediador_names)}
+              deadlines={deadlines}
+              onManageAssignment={openAssignDialog}
+              canManageAssignment={userRole !== "cliente"}
+              priority={process?.prioridade || "media"}
+              onPriorityChange={(value) => {
+                setProcess(prev => ({ ...prev, prioridade: value }));
+                if (canEditPersonal && !isProcessLocked) handleSaveOrganization({ prioridade: value });
+              }}
+              canEditPriority={canEditPersonal && !isProcessLocked}
+            />
 
             {/* Tarefas - visível se tem manage_tasks */}
             {canManageTasks && (
@@ -5416,11 +2333,14 @@ const ProcessDetails = () => {
                 </CardTitle>
               </CardHeader>
               <CardContent>
-                <TasksPanel
-                  processId={id}
-                  processName={process?.client_name}
-                  compact={false}
-                />
+                {/* PACOTE DD — ScrollArea com altura máxima para evitar expansão infinita da página */}
+                <ScrollArea className="h-fit max-h-[400px]">
+                  <TasksPanel
+                    processId={id}
+                    processName={process?.client_name}
+                    compact={false}
+                  />
+                </ScrollArea>
               </CardContent>
             </Card>
             )}
@@ -5447,354 +2367,29 @@ const ProcessDetails = () => {
 
             </Accordion>
             )}
-
-            {/* Side Tabs - Prazos e Histórico - visível se NÃO for modo de visualização */}
-            {!isViewMode && (
-            <Card className="border-border">
-              <CardContent className="p-0">
-                <Tabs value={sideTab} onValueChange={setSideTab}>
-                  <TabsList className="w-full grid grid-cols-2 rounded-none rounded-t-md h-9">
-                    <TabsTrigger value="deadlines" className="gap-1 text-xs">
-                      <Clock className="h-3 w-3" />
-                      Prazos
-                    </TabsTrigger>
-                    <TabsTrigger value="history" className="gap-1 text-xs">
-                      <History className="h-3 w-3" />
-                      Histórico
-                    </TabsTrigger>
-                  </TabsList>
-
-                  {/* Deadlines Tab */}
-                  <TabsContent value="deadlines" className="p-4 pt-2">
-                    <div className="flex items-center justify-between mb-4">
-                      <h3 className="font-medium">Prazos</h3>
-                      {canManageDeadlines && (
-                        <Dialog open={isDeadlineDialogOpen} onOpenChange={setIsDeadlineDialogOpen}>
-                          <DialogTrigger asChild>
-                            <Button size="sm" variant="outline" data-testid="add-deadline-btn">
-                              <Plus className="h-4 w-4" />
-                            </Button>
-                          </DialogTrigger>
-                          <DialogContent aria-describedby="deadline-dialog-description" className="sm:max-w-md w-[calc(100vw-2rem)]">
-                            <DialogHeader>
-                              <DialogTitle>Novo Prazo</DialogTitle>
-                              <DialogDescription id="deadline-dialog-description">
-                                Crie um novo prazo para este processo.
-                              </DialogDescription>
-                            </DialogHeader>
-                            <div className="space-y-4">
-                              <div className="space-y-2">
-                                <Label>Título</Label>
-                                <Input
-                                  value={deadlineForm.title}
-                                  onChange={(e) => setDeadlineForm({ ...deadlineForm, title: e.target.value })}
-                                  placeholder="Ex: Entregar documentos"
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Descrição</Label>
-                                <Textarea
-                                  value={deadlineForm.description}
-                                  onChange={(e) => setDeadlineForm({ ...deadlineForm, description: e.target.value })}
-                                />
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Data Limite</Label>
-                                <Popover>
-                                  <PopoverTrigger asChild>
-                                    <Button variant="outline" className="w-full justify-start text-left font-normal">
-                                      <CalendarIcon className="mr-2 h-4 w-4" />
-                                      {selectedDate && isValid(selectedDate) ? format(selectedDate, "PPP", { locale: pt }) : "Selecione"}
-                                    </Button>
-                                  </PopoverTrigger>
-                                  <PopoverContent className="w-auto p-0">
-                                    <Calendar mode="single" selected={selectedDate} onSelect={setSelectedDate} locale={pt} />
-                                  </PopoverContent>
-                                </Popover>
-                              </div>
-                              <div className="space-y-2">
-                                <Label>Prioridade</Label>
-                                <Select
-                                  value={deadlineForm.priority}
-                                  onValueChange={(value) => setDeadlineForm({ ...deadlineForm, priority: value })}
-                                >
-                                  <SelectTrigger><SelectValue /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="low">Baixa</SelectItem>
-                                    <SelectItem value="medium">Média</SelectItem>
-                                    <SelectItem value="high">Alta</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                            <DialogFooter>
-                              <Button onClick={handleCreateDeadline}>Criar Prazo</Button>
-                            </DialogFooter>
-                          </DialogContent>
-                        </Dialog>
-                      )}
-                    </div>
-
-                    <Calendar
-                      mode="single"
-                      selected={selectedDate}
-                      locale={pt}
-                      modifiers={{ deadline: deadlineDates }}
-                      modifiersStyles={{
-                        deadline: { backgroundColor: "hsl(var(--primary))", color: "white", borderRadius: "4px" },
-                      }}
-                      className="rounded-md border mb-4"
-                    />
-
-                    <ScrollArea className="h-[200px]">
-                      {deadlines.length === 0 ? (
-                        <p className="text-center text-muted-foreground text-sm py-4">Sem prazos</p>
-                      ) : (
-                        <div className="space-y-2">
-                          {deadlines.map((deadline) => (
-                            <div
-                              key={deadline.id}
-                              className={`flex items-center justify-between p-2 rounded-md ${deadline.completed ? "bg-muted/30" : "bg-muted/50"}`}
-                            >
-                              <div className="flex items-center gap-2">
-                                <button
-                                  onClick={() => handleToggleDeadline(deadline)}
-                                  className={`h-4 w-4 rounded border flex items-center justify-center ${
-                                    deadline.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300"
-                                  }`}
-                                  disabled={!canManageDeadlines}
-                                >
-                                  {deadline.completed && <Check className="h-3 w-3" />}
-                                </button>
-                                <div>
-                                  <p className={`text-sm ${deadline.completed ? "line-through text-muted-foreground" : ""}`}>
-                                    {safeString(deadline.title)}
-                                  </p>
-                                  <p className="text-xs text-muted-foreground font-mono">
-                                    {safeFormat(deadline.due_date, "dd/MM/yyyy")}
-                                  </p>
-                                </div>
-                              </div>
-                              {canManageDeadlines && (
-                                <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDeleteDeadline(deadline.id)}>
-                                  <Trash2 className="h-3 w-3 text-destructive" />
-                                </Button>
-                              )}
-                            </div>
-                          ))}
-                        </div>
-                      )}
-                    </ScrollArea>
-                  </TabsContent>
-
-                  {/* History Tab */}
-                  <TabsContent value="history" className="p-4 pt-2">
-                    <h3 className="font-medium mb-3">Filme da Lead</h3>
-                    <UnifiedAuditTrail 
-                      history={history} 
-                      activities={activities}
-                      maxHeight="400px"
-                    />
-                  </TabsContent>
-                </Tabs>
-              </CardContent>
-            </Card>
-            )}
           </div>
         </div>
       </div>
       
       {/* Dialog para atribuir utilizadores */}
-      <Dialog open={showAssignDialog} onOpenChange={setShowAssignDialog}>
-        <DialogContent className="sm:max-w-[500px]">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-purple-600" />
-              Gerir Atribuições
-            </DialogTitle>
-            <DialogDescription>
-              Seleccione os utilizadores a atribuir a este processo.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="p-3 bg-gray-50 rounded-lg">
-              <p className="font-medium">{safeString(clientData?.nome || process?.client_name || personalData?.nome_completo) || 'Cliente'}</p>
-              <p className="text-sm text-muted-foreground">
-                #{safeString(process?.process_number, '—')}
-              </p>
-            </div>
-            
-            {loadingUsers ? (
-              <div className="flex items-center justify-center py-8">
-                <Loader2 className="h-6 w-6 animate-spin text-purple-600" />
-                <span className="ml-2 text-sm text-muted-foreground">A carregar utilizadores...</span>
-              </div>
-            ) : (
-            <div className="space-y-4">
-              {/* Consultores - Seleção Múltipla */}
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Consultores</Label>
-                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"])
-                    .map(u => (
-                      <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
-                        <input
-                          type="checkbox"
-                          checked={selectedConsultores.includes(u.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedConsultores([...selectedConsultores, u.id]);
-                            } else {
-                              setSelectedConsultores(selectedConsultores.filter(id => id !== u.id));
-                            }
-                          }}
-                          className="rounded border-gray-300"
-                        />
-                        <span className="text-sm">{u.name}</span>
-                        <Badge variant="outline" className="text-xs ml-auto">{u.role}</Badge>
-                      </label>
-                    ))
-                  }
-                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"]).length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-2">Nenhum consultor disponível</p>
-                  )}
-                </div>
-                {selectedConsultores.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedConsultores.map(cid => {
-                      const user = appUsers.find(u => u.id === cid);
-                      return user ? (
-                        <Badge key={cid} variant="secondary" className="flex items-center gap-1">
-                          {user.name}
-                          <button
-                            onClick={() => setSelectedConsultores(selectedConsultores.filter(id => id !== cid))}
-                            className="ml-1 hover:text-destructive"
-                          >
-                            ×
-                          </button>
-                        </Badge>
-                      ) : null;
-                    })}
-                  </div>
-                )}
-              </div>
-              
-              {/* Intermediários - Seleção Múltipla */}
-              <div>
-                <Label className="text-sm font-medium mb-2 block">Intermediários / Mediadores</Label>
-                <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, ["intermediario", "intermediario", "intermediario_credito", "diretor"])
-                    .map(u => (
-                      <label key={u.id} className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded">
-                        <input
-                          type="checkbox"
-                          checked={selectedMediadores.includes(u.id)}
-                          onChange={(e) => {
-                            if (e.target.checked) {
-                              setSelectedMediadores([...selectedMediadores, u.id]);
-                            } else {
-                              setSelectedMediadores(selectedMediadores.filter(id => id !== u.id));
-                            }
-                          }}
-                          className="rounded border-gray-300"
-                        />
-                        <span className="text-sm">{u.name}</span>
-                        <Badge variant="outline" className="text-xs ml-auto">{u.role}</Badge>
-                      </label>
-                    ))
-                  }
-                  {filterByAnyRole(appUsers, ["intermediario", "intermediario", "intermediario_credito", "diretor"]).length === 0 && (
-                    <p className="text-sm text-muted-foreground text-center py-2">Nenhum intermediário disponível</p>
-                  )}
-                </div>
-                {selectedMediadores.length > 0 && (
-                  <div className="flex flex-wrap gap-1 mt-2">
-                    {selectedMediadores.map(mid => {
-                      const user = appUsers.find(u => u.id === mid);
-                      return user ? (
-                        <Badge key={mid} variant="secondary" className="flex items-center gap-1">
-                          {user.name}
-                          <button
-                            onClick={() => setSelectedMediadores(selectedMediadores.filter(id => id !== mid))}
-                            className="ml-1 hover:text-destructive"
-                          >
-                            ×
-                          </button>
-                        </Badge>
-                      ) : null;
-                    })}
-                  </div>
-                )}
-              </div>
-              
-              {/* Indexação - Seleção Única */}
-              <div>
-                <Label className="text-sm font-medium">Indexação (Documentos)</Label>
-                <Select value={selectedIndexacao || "none"} onValueChange={(v) => setSelectedIndexacao(v === "none" ? "" : v)}>
-                  <SelectTrigger className="mt-1" data-testid="indexacao-select">
-                    <SelectValue placeholder="Seleccionar indexação..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {filterByAnyRole(appUsers, ["indexacao", "administrativo", "admin", "ceo"])
-                      .map(u => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.name} ({u.role})
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-              
-              {/* Parceiro - Seleção Única (Utilizador Fantasma) */}
-              <div>
-                <Label className="text-sm font-medium flex items-center gap-2">
-                  Parceiro
-                  <span className="text-xs text-muted-foreground font-normal">(Utilizador fantasma - sem acesso)</span>
-                </Label>
-                <Select value={selectedParceiro || "none"} onValueChange={(v) => setSelectedParceiro(v === "none" ? "" : v)}>
-                  <SelectTrigger className="mt-1" data-testid="parceiro-select">
-                    <SelectValue placeholder="Seleccionar parceiro..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Nenhum</SelectItem>
-                    {filterByRole(appUsers, "parceiro")
-                      .map(u => (
-                        <SelectItem key={u.id} value={u.id}>
-                          {u.name}
-                        </SelectItem>
-                      ))
-                    }
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            )}
-          </div>
-          
-          <DialogFooter className="gap-2">
-            <Button variant="outline" onClick={() => setShowAssignDialog(false)}>
-              Cancelar
-            </Button>
-            <Button 
-              onClick={handleSaveAssignment}
-              disabled={savingAssignment}
-              className="bg-purple-600 hover:bg-purple-700"
-            >
-              {savingAssignment ? (
-                <>
-                  <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                  A guardar...
-                </>
-              ) : (
-                "Guardar"
-              )}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ProcessAssignDialog
+        open={showAssignDialog}
+        onOpenChange={setShowAssignDialog}
+        clientName={clientData?.nome || process?.client_name || personalData?.nome_completo}
+        processNumber={process?.process_number}
+        loadingUsers={loadingUsers}
+        appUsers={appUsers}
+        selectedConsultores={selectedConsultores}
+        setSelectedConsultores={setSelectedConsultores}
+        selectedMediadores={selectedMediadores}
+        setSelectedMediadores={setSelectedMediadores}
+        selectedIndexacao={selectedIndexacao}
+        setSelectedIndexacao={setSelectedIndexacao}
+        selectedParceiro={selectedParceiro}
+        setSelectedParceiro={setSelectedParceiro}
+        savingAssignment={savingAssignment}
+        onSave={handleSaveAssignment}
+      />
 
       {/* Dialog de Revisão de Conflitos IA */}
       <Dialog open={showAIReviewDialog} onOpenChange={setShowAIReviewDialog}>
@@ -5889,6 +2484,96 @@ const ProcessDetails = () => {
             >
               <Check className="h-4 w-4 mr-2" />
               Confirmar Todos
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* Dialog: documento ambíguo → Titular 1 / Titular 2 / Ignorar */}
+      <Dialog
+        open={titularChoiceDialog.open}
+        onOpenChange={(open) => {
+          if (!open) setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+        }}
+      >
+        <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle className="flex items-center gap-2">
+              <Users className="h-5 w-5 text-purple-600" />
+              Este documento é de quem?
+            </DialogTitle>
+            <DialogDescription>
+              A IA não conseguiu associar com confiança. Escolha o titular para aplicar os dados de identidade
+              (o 2º titular já está definido no processo).
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {titularChoiceDialog.items.map((item, idx) => (
+              <div key={item.key || idx} className="border rounded-lg p-3 space-y-2">
+                <div className="text-sm font-medium truncate">{item.file_name}</div>
+                <div className="flex flex-wrap gap-2">
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.choice === "titular1" ? "default" : "outline"}
+                    onClick={() =>
+                      setTitularChoiceDialog((prev) => ({
+                        ...prev,
+                        items: prev.items.map((it, i) =>
+                          i === idx ? { ...it, choice: "titular1" } : it
+                        ),
+                      }))
+                    }
+                  >
+                    Titular 1{item.titular1_name ? `: ${item.titular1_name}` : ""}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.choice === "titular2" ? "default" : "outline"}
+                    onClick={() =>
+                      setTitularChoiceDialog((prev) => ({
+                        ...prev,
+                        items: prev.items.map((it, i) =>
+                          i === idx ? { ...it, choice: "titular2" } : it
+                        ),
+                      }))
+                    }
+                  >
+                    Titular 2{item.titular2_name ? `: ${item.titular2_name}` : ""}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant={item.choice === "ignore" ? "secondary" : "ghost"}
+                    onClick={() =>
+                      setTitularChoiceDialog((prev) => ({
+                        ...prev,
+                        items: prev.items.map((it, i) =>
+                          i === idx ? { ...it, choice: "ignore" } : it
+                        ),
+                      }))
+                    }
+                  >
+                    Ignorar
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </div>
+          <DialogFooter className="gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setTitularChoiceDialog({ open: false, items: [], pendingPayload: null })}
+            >
+              Cancelar
+            </Button>
+            <Button
+              onClick={confirmTitularChoices}
+              disabled={titularChoiceDialog.items.some((it) => !it.choice)}
+            >
+              <Check className="h-4 w-4 mr-2" />
+              Aplicar
             </Button>
           </DialogFooter>
         </DialogContent>

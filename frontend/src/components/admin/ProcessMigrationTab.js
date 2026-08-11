@@ -45,9 +45,9 @@ import {
   runProcessMigration,
   rollbackProcessMigration,
 } from "../../services/api";
-import { toast } from "../../hooks/use-toast";
+import { toast } from "sonner";
 
-const ProcessMigrationTab = ({ embedded = false }) => {
+const ProcessMigrationTab = () => {
   const [status, setStatus] = useState(null);
   const [loading, setLoading] = useState(false);
   const [actionLoading, setActionLoading] = useState(null); // 'dry-run' | 'run' | 'rollback'
@@ -61,9 +61,7 @@ const ProcessMigrationTab = ({ embedded = false }) => {
       const { data } = await getProcessMigrationStatus();
       setStatus(data);
     } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao carregar estado",
+      toast.error("Erro ao carregar estado", {
         description: extractErrorMessage(err.response?.data?.detail, "Não foi possível obter o estado da migração."),
       });
     } finally {
@@ -90,15 +88,12 @@ const ProcessMigrationTab = ({ embedded = false }) => {
     setConfirmText("");
     try {
       await dryRunProcessMigration();
-      toast({
-        title: "Simulação iniciada",
+      toast.success("Simulação iniciada", {
         description: "A simulação (dry-run) está a correr em background. Verifique o estado dentro de alguns segundos.",
       });
       setTimeout(loadStatus, 2000);
     } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao iniciar simulação",
+      toast.error("Erro ao iniciar simulação", {
         description: extractErrorMessage(err.response?.data?.detail, "Não foi possível iniciar a simulação."),
       });
     } finally {
@@ -112,15 +107,12 @@ const ProcessMigrationTab = ({ embedded = false }) => {
     setConfirmText("");
     try {
       await runProcessMigration();
-      toast({
-        title: "Migração iniciada",
+      toast.success("Migração iniciada", {
         description: "A migração Fase 1 está a correr em background. Um backup foi criado automaticamente.",
       });
       setTimeout(loadStatus, 2000);
     } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao iniciar migração",
+      toast.error("Erro ao iniciar migração", {
         description: extractErrorMessage(err.response?.data?.detail, "Não foi possível iniciar a migração."),
       });
     } finally {
@@ -134,15 +126,12 @@ const ProcessMigrationTab = ({ embedded = false }) => {
     setConfirmText("");
     try {
       const { data } = await rollbackProcessMigration();
-      toast({
-        title: "Rollback executado",
+      toast.success("Rollback executado", {
         description: data.message || "As colecções foram restauradas para o estado anterior.",
       });
       loadStatus();
     } catch (err) {
-      toast({
-        variant: "destructive",
-        title: "Erro ao reverter",
+      toast.error("Erro ao reverter", {
         description: extractErrorMessage(err.response?.data?.detail, "Não foi possível reverter a migração."),
       });
     } finally {

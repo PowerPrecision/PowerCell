@@ -39,7 +39,7 @@
  * });
  */
 import axios from "axios";
-import { toast } from "../hooks/use-toast";
+import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 
 // ====================================================================
@@ -176,6 +176,63 @@ const MAX_RETRY_DELAY = 30000;    // 30 seconds
 // Track which URLs are currently retrying to avoid toast spam
 const retryingUrls = new Set();
 
+// ====================================================================
+// SILENT TOKEN REFRESH (single-flight)
+// ====================================================================
+// Quando um access token expira, um pedido devolve 401. Em vez de forçar
+// logout imediato, tentamos renovar o token com o refresh_token e repetir
+// o pedido original UMA vez. Várias respostas 401 concorrentes partilham a
+// mesma promessa de refresh (single-flight) para não gastar/rodar o
+// refresh_token múltiplas vezes.
+//
+// Usa axios "cru" (não a instância `api`) para o pedido de refresh, de forma
+// a não reentrar neste próprio interceptor.
+// ====================================================================
+let refreshPromise = null;
+
+async function performTokenRefresh() {
+  const currentRefreshToken = localStorage.getItem("refreshToken");
+  if (!currentRefreshToken) return null;
+
+  const currentToken = localStorage.getItem("token");
+  const headers = { "Content-Type": "application/json" };
+  if (currentToken) {
+    headers["Authorization"] = `Bearer ${currentToken}`;
+  }
+
+  try {
+    const resp = await axios.post(
+      `${API_URL}/auth/refresh`,
+      { refresh_token: currentRefreshToken },
+      { headers }
+    );
+    const data = resp?.data;
+    if (data?.access_token) {
+      localStorage.setItem("token", data.access_token);
+      if (data.refresh_token) {
+        localStorage.setItem("refreshToken", data.refresh_token);
+      }
+      return data.access_token;
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Retorna a promessa de refresh partilhada (single-flight).
+ * Se já houver um refresh em curso, devolve a mesma promessa.
+ */
+function getRefreshedToken() {
+  if (!refreshPromise) {
+    refreshPromise = performTokenRefresh().finally(() => {
+      refreshPromise = null;
+    });
+  }
+  return refreshPromise;
+}
+
 api.interceptors.response.use(
   // Sucesso - apenas retorna a response
   (response) => response,
@@ -188,9 +245,7 @@ api.interceptors.response.use(
     // ERRO DE REDE (sem response do servidor)
     // ================================================================
     if (!response) {
-      toast({
-        variant: "destructive",
-        title: "Erro de Conexão",
+      toast.error("Erro de Conexão", {
         description: "Não foi possível conectar ao servidor. Verifique a sua conexão.",
       });
       return Promise.reject(error);
@@ -205,7 +260,6 @@ api.interceptors.response.use(
     if (status === 401) {
       // Não mostrar toast para tentativas de login falhadas
       const isLoginAttempt = config.url?.includes("/auth/login");
-      const isStopImpersonate = config.url?.includes("/stop-impersonate");
       
       // Se estiver em modo impersonate e existe originalToken, tentar restaurar
       const originalToken = localStorage.getItem("originalToken");
@@ -217,8 +271,7 @@ api.interceptors.response.use(
         localStorage.removeItem("originalToken");
         
         // Mostrar toast a informar
-        toast({
-          title: "Sessão de Visualização Terminada",
+        toast.info("Sessão de Visualização Terminada", {
           description: "Voltou à sua conta de administrador.",
         });
         
@@ -229,7 +282,29 @@ api.interceptors.response.use(
         
         return Promise.reject(error);
       }
-      
+
+      // ============================================================
+      // REFRESH SILENCIOSO: tentar renovar o token e repetir o pedido
+      // original UMA vez antes de terminar a sessão. Evita logout
+      // desnecessário quando só o access token expirou mas o
+      // refresh_token ainda é válido.
+      // ============================================================
+      const isRefreshCall = config.url?.includes("/auth/refresh");
+      const isOnPortalForRefresh = window.location.pathname.startsWith("/portal");
+      const hasRefreshToken = !!localStorage.getItem("refreshToken");
+
+      if (!isLoginAttempt && !isRefreshCall && !isOnPortalForRefresh && hasRefreshToken && !config._retry) {
+        config._retry = true;
+        const newToken = await getRefreshedToken();
+        if (newToken) {
+          config.headers = config.headers || {};
+          config.headers.Authorization = `Bearer ${newToken}`;
+          // Repetir o pedido original com o novo token.
+          return api(config);
+        }
+        // Refresh falhou → cair no fluxo de logout abaixo.
+      }
+
       if (!isLoginAttempt) {
         // ============================================================
         // PORTAL: Não redirecionar utilizadores do portal para /login
@@ -240,9 +315,7 @@ api.interceptors.response.use(
         const isOnPortal = window.location.pathname.startsWith('/portal');
 
         if (!isOnPortal) {
-          toast({
-            variant: "destructive",
-            title: "Sessão Expirada",
+          toast.error("Sessão Expirada", {
             description: "A sua sessão expirou. Por favor, faça login novamente.",
           });
         }
@@ -267,9 +340,7 @@ api.interceptors.response.use(
     // 403 - PROIBIDO (Sem permissão)
     // ================================================================
     if (status === 403) {
-      toast({
-        variant: "destructive",
-        title: "Acesso Negado",
+      toast.error("Acesso Negado", {
         description: "Não tem permissão para realizar esta ação.",
       });
       return Promise.reject(error);
@@ -312,9 +383,7 @@ api.interceptors.response.use(
       // Only show toast if this URL wasn't already showing one (avoid spam)
       if (!retryingUrls.has(urlKey)) {
         const retryAfter = response.headers["retry-after"] || "alguns segundos";
-        toast({
-          variant: "destructive",
-          title: "Demasiados Pedidos",
+        toast.error("Demasiados Pedidos", {
           description: `O sistema está ocupado. Tente novamente em ${retryAfter}.`,
         });
       }
@@ -345,9 +414,7 @@ api.interceptors.response.use(
         validationMessage = data.detail;
       }
       
-      toast({
-        variant: "destructive",
-        title: "Erro de Validação",
+      toast.error("Erro de Validação", {
         description: validationMessage,
       });
       return Promise.reject(error);
@@ -365,11 +432,7 @@ api.interceptors.response.use(
         ? "Ocorreu um erro interno. Contacte o suporte se o problema persistir."
         : serverDetail;
 
-      toast({
-        variant: "destructive",
-        title: "Erro de Servidor",
-        description,
-      });
+      toast.error("Erro de Servidor", { description });
 
       // Log do erro para debugging
       console.error("[API] Server error:", {
@@ -386,11 +449,7 @@ api.interceptors.response.use(
     // OUTROS ERROS (400, etc.)
     // ================================================================
     if (status >= 400) {
-      toast({
-        variant: "destructive",
-        title: "Erro",
-        description: errorMessage,
-      });
+      toast.error("Erro", { description: errorMessage });
     }
     
     return Promise.reject(error);
@@ -443,10 +502,33 @@ export const createProcess = (data) => api.post("/processes", data);
 export const searchClients = (q, limit = 10) => api.get("/clients/search", { params: { q, limit } });
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
-export const assignProcess = (id, consultorId, mediadorId, indexacaoId) => 
-  api.post(`/processes/${id}/assign`, null, {
-    params: { consultor_id: consultorId, mediador_id: mediadorId, indexacao_id: indexacaoId }
-  });
+export const assignProcess = (id, {
+  consultorIds,
+  mediadorIds,
+  indexacaoId,
+  parceiroId,
+  consultorId,
+  mediadorId,
+} = {}) => {
+  const params = {};
+  if (Array.isArray(consultorIds)) {
+    params.consultor_ids = consultorIds.filter(Boolean).join(",");
+  } else if (consultorId) {
+    params.consultor_id = consultorId;
+  }
+  if (Array.isArray(mediadorIds)) {
+    params.mediador_ids = mediadorIds.filter(Boolean).join(",");
+  } else if (mediadorId) {
+    params.mediador_id = mediadorId;
+  }
+  if (indexacaoId !== undefined && indexacaoId !== null) {
+    params.indexacao_id = indexacaoId;
+  }
+  if (parceiroId !== undefined && parceiroId !== null) {
+    params.parceiro_id = parceiroId;
+  }
+  return api.post(`/processes/${id}/assign`, null, { params });
+};
 export const getKanbanBoard = () => api.get("/processes/kanban");
 export const moveProcessKanban = (processId, newStatus) => 
   api.put(`/processes/kanban/${processId}/move`, null, {
@@ -495,6 +577,9 @@ export const testUserEmailConfig = (userId) => api.post(`/admin/users/${userId}/
 // Stats
 export const getStats = () => api.get("/stats");
 export const getCommunicationsFeed = () => api.get("/stats/communications");
+
+// Team Performance (Admin/CEO) — desempenho da equipa por período
+export const getTeamPerformance = (params = {}) => api.get("/admin/team-performance", { params });
 
 // Activities/Comments
 export const getActivities = (processId, limit = 50) => {
@@ -986,6 +1071,46 @@ export const upsertCompanyEmailConfig = (data) =>
   api.post("/admin/company-email-configs", data);
 export const deleteCompanyEmailConfig = (companyName) =>
   api.delete(`/admin/company-email-configs/${encodeURIComponent(companyName)}`);
+
+// ===== CLIENT REGISTRATIONS (Admin — registos do formulário público) =====
+export const getClientRegistrations = (params = {}) =>
+  api.get("/admin/client-registrations", { params });
+export const getClientRegistration = (processId) =>
+  api.get(`/admin/client-registrations/${processId}`);
+export const updateClientRegistration = (processId, data) =>
+  api.put(`/admin/client-registrations/${processId}`, data);
+export const deleteClientRegistration = (processId) =>
+  api.delete(`/admin/client-registrations/${processId}`);
+export const getClientRegistrationsStats = () =>
+  api.get("/admin/client-registrations/stats/summary");
+
+// ===== BACKGROUND JOBS (Centro de Operações — importações/análises em massa) =====
+export const getBackgroundJobs = (status) =>
+  api.get("/ai/bulk/background-jobs", { params: status ? { status } : {} });
+export const getBackgroundJob = (jobId) =>
+  api.get(`/ai/bulk/background-jobs/${jobId}`);
+export const getBackgroundJobMetrics = (days = 7) =>
+  api.get("/ai/bulk/background-jobs/metrics", { params: { days } });
+export const getBackgroundJobNotifications = (unreadOnly = true) =>
+  api.get("/ai/bulk/background-jobs/notifications", { params: { unread_only: unreadOnly } });
+export const markBackgroundJobNotificationRead = (notificationId) =>
+  api.put(`/ai/bulk/background-jobs/notifications/${notificationId}/read`);
+export const clearBackgroundJobNotifications = () =>
+  api.delete("/ai/bulk/background-jobs/notifications/clear");
+export const deleteBackgroundJob = (jobId) =>
+  api.delete(`/ai/bulk/background-jobs/${jobId}`);
+export const cancelBackgroundJob = (jobId) =>
+  api.post(`/ai/bulk/background-jobs/${jobId}/cancel`);
+export const pauseBackgroundJob = (jobId) =>
+  api.post(`/ai/bulk/background-jobs/${jobId}/pause`);
+export const resumeBackgroundJob = (jobId) =>
+  api.post(`/ai/bulk/background-jobs/${jobId}/resume`);
+export const cleanupStuckBackgroundJobs = (hours = 2) =>
+  api.post("/ai/bulk/background-jobs/cleanup-stuck", null, { params: { hours } });
+export const clearFinishedBackgroundJobs = () =>
+  api.delete("/ai/bulk/background-jobs");
+export const clearAllBackgroundJobs = () =>
+  api.post("/ai/bulk/background-jobs/clear-all");
 
 // Export da instância axios configurada (para uso directo se necessário)
 export default api;
