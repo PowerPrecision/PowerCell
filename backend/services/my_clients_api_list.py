@@ -61,6 +61,9 @@ async def run_get_my_clients(request: Request, user: dict):
         leads_query = {
             "$and": [
                 {"created_by": user_id},
+                # PACOTE DG — filtro is_deleted já presente (verificado).
+                # Clientes eliminados (soft-delete) não devem aparecer na
+                # lista de leads órfãos do consultor/intermediário.
                 {"is_deleted": {"$ne": True}},
                 {"$or": [
                     {"process_ids": {"$exists": False}},

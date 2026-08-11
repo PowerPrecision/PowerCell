@@ -194,8 +194,15 @@ async def fill_missing_process_client_contacts(processes: list[dict]) -> None:
     if not client_ids_to_fetch:
         return
 
+    # PACOTE DG — excluir clientes eliminados (soft-delete) do enriquecimento
+    # de contactos do kanban (defesa em profundidade — o processo já deve
+    # estar filtrado, mas garantimos que não arrastamos dados de clientes
+    # eliminados).
     client_docs = await db.clients.find(
-        {"id": {"$in": list(client_ids_to_fetch)}},
+        {"$and": [
+            {"id": {"$in": list(client_ids_to_fetch)}},
+            {"is_deleted": {"$ne": True}},
+        ]},
         {"_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais": 1, "nif": 1},
     ).to_list(len(client_ids_to_fetch))
 
