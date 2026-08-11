@@ -487,7 +487,7 @@ Tipo de Processo: {process_type}
 Aceda à plataforma para ver todos os detalhes e dar seguimento.
 
 Cumprimentos,
-Sistema PowerCell
+Sistema Precision Crédito
 """
     
     content = f"""
@@ -508,7 +508,7 @@ Sistema PowerCell
 </p>
 
 <p>Cumprimentos,<br>
-<strong>Sistema PowerCell</strong></p>
+<strong>Sistema Precision Crédito</strong></p>
 """
     
     html_body = get_base_template(content, "Novo Cliente")

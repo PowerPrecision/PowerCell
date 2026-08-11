@@ -219,9 +219,10 @@ async def run_create_user(data: UserCreate, user: dict):
         role_name = role_names.get(data.role, data.role)
         
         # Criar corpo do email
+        # PACOTE DI — marca client-facing actualizada para Precision Crédito.
         email_body = f"""Olá {clean_name},
 
-Bem-vindo(a) ao PowerCell!
+Bem-vindo(a) ao Precision Crédito!
 
 A sua conta foi criada com sucesso. Seguem os dados de acesso:
 
@@ -237,14 +238,14 @@ Recomendamos que altere a sua password após o primeiro acesso.
 Se tiver alguma dúvida, não hesite em contactar.
 
 Cumprimentos,
-Equipa PowerCell
+Equipa Precision Crédito
 """
         
         email_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0d253f 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                <h1 style="color: white; margin: 0;">Bem-vindo ao PowerCell</h1>
+                <h1 style="color: white; margin: 0;">Bem-vindo ao Precision Crédito</h1>
             </div>
             <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
                 <p style="font-size: 16px; color: #334155;">Olá <strong>{data.name}</strong>,</p>
@@ -269,18 +270,18 @@ Equipa PowerCell
                 <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
                     Se tiver alguma dúvida, não hesite em contactar.<br><br>
                     Cumprimentos,<br>
-                    <strong>Equipa PowerCell</strong>
+                    <strong>Equipa Precision Crédito</strong>
                 </p>
             </div>
         </body>
         </html>
         """
         
-        # Enviar email (usar conta power ou precision)
+        # PACOTE DI — subject client-facing actualizado para Precision Crédito.
         email_result = await send_email(
             account_name="power",  # Usar conta Power Real Estate
             to_emails=[clean_email],
-            subject="Bem-vindo ao PowerCell - Dados de Acesso",
+            subject="Bem-vindo ao Precision Crédito - Dados de Acesso",
             body=email_body,
             body_html=email_html
         )

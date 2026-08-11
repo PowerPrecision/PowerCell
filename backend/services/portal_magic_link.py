@@ -124,13 +124,14 @@ def build_magic_link_email_bodies(
     """Constrói (text_body, html_body) do email de magic link ao cliente."""
     portal_credentials_html = f"""
             <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.powercell.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
+                <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.precisioncredito.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
                 <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{portal_access_code or '—'}</strong></h3>
                 <p style="margin: 5px 0; color: #1e293b; font-size: 13px;"><strong>Email:</strong> {client_email}</p>
             </div>
     """
+    # PACOTE DI — URL client-facing actualizada para precisioncredito.pt.
     portal_credentials_text = (
-        f"\nSe o link não funcionar, aceda a www.powercell.pt/portal e "
+        f"\nSe o link não funcionar, aceda a www.precisioncredito.pt/portal e "
         f"insira o seguinte Código de Acesso: {portal_access_code or '—'}\n"
         f"Email: {client_email}\n"
     )

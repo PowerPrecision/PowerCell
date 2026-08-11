@@ -205,7 +205,8 @@ async def run_get_rgpd_form_data(token: str):
         rendered = rendered.replace("{{CONTACTO_EMPRESA}}", str(empresa_contacto or ""))
         return rendered
 
-    empresa_nome = "Power Real Estate, Lda."
+    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
+    empresa_nome = "Precision Crédito"
     empresa_morada = ""
     empresa_contacto = ""
     try:

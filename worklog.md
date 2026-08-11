@@ -3381,3 +3381,38 @@ Stage Summary:
   - frontend/src/pages/ClientPortal.jsx (Próximos Eventos section com fetchEvents)
   - ARCHITECTURE.md (secção Agenda dualidade)
 - Resultado: (1) 7 cartões vazios recolhem por omissão (Progressive Disclosure). (2) Modelo Deadline evoluiu para Agenda dual (deadline|event) com visible_to_client e reminder_time. (3) Cron de deadlines FIXED (era silenciosamente no-op) + type-based alerts. (4) DeadlinesTab → "Agenda" com formulário completo e ícones. (5) Portal do Cliente tem secção "Próximos Eventos". (6) MortgageSimulator acessível via Simulações dropdown. (7) Docs atualizadas.
+
+
+---
+Task ID: Pacote DI (Session Clash Fix + PDF HTML/Minuta + Rebranding)
+Agent: Main Agent (Z.ai Code Assistant) + 4 subagentes (2 Explore + 2 Implementação)
+Task: 4 alterações — fix choque de sessões em links públicos, PDF RGPD com HTML parsing + Minuta + sem IP, rebranding PowerCell→Precision Crédito.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 3894b6c5 = Pacote DH).
+- 2 subagentes Explore: DI-1-Explore (session clash — root cause: AuthContext fetchUser + api.js 401 handler só isentavam /portal, não /rgpd) + DI-2-Explore (PDF builder — _escape_xml mata HTML; Minuta em rgpd_minutas.py/_get_rendered_minuta_text; IP em _build_rgpd_pdf; 135 ocorrências "PowerCell" categorizadas 56 client-facing vs 79 internal).
+- 2 subagentes Implementação: DI-Backend (14 ficheiros — _html_to_flowables com lxml+bleach + Minuta PageBreak + IP removido + ~30 rebranding) + DI-Frontend (3 ficheiros — publicRoutes.js + AuthContext + api.js isPublicRoute). Smoke test backend confirma PDF 2 páginas com HTML parsed e Minuta.
+- Validação final: py_compile ✓ (14 backend), flake8 0 erros, bun build ✓ (3 frontend).
+- Documentação: CHANGELOG atualizado.
+- Verificação de tokens: 0 ocorrências de padrão de token no diff.
+
+Stage Summary:
+- 17 ficheiros modificados (14 backend + 3 frontend):
+  - backend/services/rgpd_pdf.py (_html_to_flowables com lxml+bleach + Minuta PageBreak + assinatura)
+  - backend/services/rgpd_service.py (IP removido + 6 rebranding PowerCell→Precision Crédito)
+  - backend/services/rgpd_public.py (empresa_nome fallback)
+  - backend/services/email.py (Sistema PowerCell→Precision Crédito)
+  - backend/services/admin_users.py (4 rebranding boas-vindas)
+  - backend/services/notification_service.py (Equipa rebranding)
+  - backend/services/portal_documents_notify.py (2 rebranding)
+  - backend/services/temp_link_service.py (6 rebranding subjects/signatures)
+  - backend/services/portal_magic_link.py (URL powercell.pt→precisioncredito.pt)
+  - backend/services/public_registration.py (URL portal)
+  - backend/services/template_generator.py (2 rodapés PDF)
+  - backend/services/finance_pool.py (company_name fallback)
+  - backend/services/finance_commissions.py (company_name fallback)
+  - backend/seed_database.py (app_name + company_name seeder)
+  - frontend/src/utils/publicRoutes.js (NOVO — isPublicRoute helper)
+  - frontend/src/contexts/AuthContext.js (isPublicRoute + guard 401 defensivo)
+  - frontend/src/services/api.js (isPublicRoute em 3 sítios do 401 handler)
+- Resultado: (1) Links públicos /rgpd/:token funcionam com sessão staff ativa (sem redirect /login). (2) PDF RGPD tem HTML formatting correto (parágrafos, bold, listas) + Minuta de Exclusividade (PageBreak) + sem Endereço IP. (3) ~30 strings client-facing rebranded PowerCell→Precision Crédito.

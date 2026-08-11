@@ -253,7 +253,8 @@ async def run_export_pool_distribution_csv(
     month_label = month_names[month] if 1 <= month <= 12 else str(month)
 
     # Obter nome da empresa para o cabeçalho
-    company_name = "PowerCell"
+    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
+    company_name = "Precision Crédito"
     try:
         sys_cfg = await db.system_config.find_one(
             {"company_id": company_id},

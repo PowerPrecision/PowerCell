@@ -3,6 +3,23 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DI: Session Clash Fix + PDF HTML/Minuta + Rebranding
+
+### Corrigido
+- **Bug crítico: choque de sessões em links públicos de RGPD**: quando um consultor com sessão ativa clicava num link público `/rgpd/:token` recebido por email, a página redirecionava para `/login`. Causa raiz: `AuthContext.js` e `api.js` só isentavam `/portal` do `fetchUser()` mount-time e do redirect 401 — `/rgpd`, `/upload`, `/download` não eram isentados. Criado helper `utils/publicRoutes.js` com `isPublicRoute()` que cobre todas as rotas públicas. `AuthContext` e `api.js` agora usam `isPublicRoute()` em vez de `startsWith('/portal')`.
+- **PDF do RGPD desformatado**: o `_build_prefilled_rgpd_pdf` escapava TODO o HTML (`<p>`, `<br>`, `<strong>` apareciam como `&lt;p&gt;` literal). Novo helper `_html_to_flowables` usa `lxml.html` + `bleach` para fazer parse do HTML do `SmartRichEditor` e converter para Flowables do platypus (`<p>` → `Paragraph`, `<strong>` → `<b>`, `<ul>` → `ListFlowable`, etc.). Fallback para plain text (template default) mantido.
+- **Minuta de Exclusividade em falta no PDF**: o documento legal é composto por RGPD + Minuta, mas o PDF só gerava a primeira parte. Agora `run_generate_prefilled_rgpd_pdf` busca também o texto da Minuta via `_get_rendered_minuta_text` e o builder insere um `PageBreak()` + título "MINUTA DE EXCLUSIVIDADE" + corpo + secção de assinatura (linhas em branco para caneta).
+- **"Endereço IP" no PDF**: removido o bloco que desenhava `Endereco IP: {client_ip}` no PDF legacy (`_build_rgpd_pdf` em `rgpd_service.py`). O email de auditoria ao staff mantém o IP (não é client-facing).
+
+### Alterado
+- **Rebranding "PowerCell" → "Precision Crédito"**: substituição em ~30 pontos client-facing (emails, PDFs, notificações, seeds) em 13 ficheiros backend. Inclui: assuntos de email, assinaturas ("Equipa PowerCell" → "Equipa Precision Crédito"), URLs (`www.powercell.pt/portal` → `www.precisioncredito.pt/portal`), rodapés de PDF, `empresa_nome` fallback, `company_name` no seeder. Referências internas (JSDoc, GitHub repo, dev DBs, test passwords, logo assets, Sentry) mantidas como "PowerCell".
+
+### Técnico
+- **Backend modificado** (14 ficheiros): `services/rgpd_pdf.py` (HTML→Flowables + Minuta), `services/rgpd_service.py` (IP removido + rebranding), `services/rgpd_public.py`, `services/email.py`, `services/admin_users.py`, `services/notification_service.py`, `services/portal_documents_notify.py`, `services/temp_link_service.py`, `services/portal_magic_link.py`, `services/public_registration.py`, `services/template_generator.py`, `services/finance_pool.py`, `services/finance_commissions.py`, `seed_database.py`.
+- **Frontend modificado** (3 ficheiros): `utils/publicRoutes.js` (NOVO), `contexts/AuthContext.js` (isPublicRoute + guard 401), `services/api.js` (isPublicRoute em 3 sítios do 401 handler).
+- **Validação**: `py_compile` ✓ (14 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (3 frontend, 0 erros); smoke test confirma PDF com 2 páginas (RGPD + Minuta), HTML parsed (sem `&lt;p&gt;` literal), sem "Endereço IP".
+- **Dependências**: Nenhuma nova — `lxml` e `bleach` já instalados.
+
 ## [2026-07-25] — Pacote DH: Progressive Disclosure + Agenda (Prazo/Evento) + Portal Events
 
 ### Adicionado

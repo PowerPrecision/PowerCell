@@ -643,9 +643,11 @@ Pela Mediadora: ___________________________
 O Cliente: ___________________________
 
 ---
-Documento gerado automaticamente pelo sistema PowerCell CRM
+
+Documento gerado automaticamente pelo sistema Precision Crédito CRM
 Processo: {process.get('id', '[ID]')}
 """
+    # PACOTE DI — rodapé client-facing actualizado para Precision Crédito CRM.
     return template.strip()
 
 
@@ -740,10 +742,12 @@ Cliente: _________________________________ Data: ___/___/______
 Consultor: _______________________________ Data: ___/___/______
 
 ═══════════════════════════════════════════════════════════════════
-Documento gerado pelo sistema PowerCell CRM
+
+Documento gerado pelo sistema Precision Crédito CRM
 Processo: {process.get('id', '[ID]')} | Ref: #{process.get('process_number', '')}
 ═══════════════════════════════════════════════════════════════════
 """
+    # PACOTE DI — rodapé client-facing actualizado para Precision Crédito CRM.
     return template.strip()
 
 

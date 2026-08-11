@@ -38,6 +38,8 @@
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
+// PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
+import { isPublicRoute } from "../utils/publicRoutes";
 
 const AuthContext = createContext(null);
 
@@ -149,13 +151,13 @@ export function AuthProvider({ children }) {
   }, [getTokenExpiry, refreshTokens]);
 
   useEffect(() => {
-    // No portal do cliente, o AuthContext de staff não deve tentar
-    // autenticar — o portal tem o seu próprio sistema (portal_token).
-    // Isto evita que um token de staff expirado dispare o interceptor
-    // 401 que redirecionaria para /login.
-    const isOnPortal = window.location.pathname.startsWith('/portal');
+    // PACOTE DI — todas as rotas públicas (não só /portal) dispensam fetchUser.
+    // Isto evita que um token de staff expirado dispare o interceptor 401
+    // que redirecionaria para /login, quebrando links RGPD/upload/download
+    // públicos abertos por consultores com sessão staff ativa.
+    const isOnPublicRoute = isPublicRoute();
 
-    if (token && !isOnPortal) {
+    if (token && !isOnPublicRoute) {
       setAuthToken(token);
       fetchUser();
       scheduleTokenRefresh(token);
@@ -252,6 +254,14 @@ export function AuthProvider({ children }) {
       }
     } catch (error) {
       console.error("Error fetching user:", error);
+      // PACOTE DI — em rotas públicas, 401 do fetchUser não redireciona.
+      // O utilizador pode ter aberto um link RGPD/upload/download com um
+      // token de staff expirado em localStorage; essas rotas usam tokens
+      // próprios (URL) e não devem disparar logout nem redirect.
+      if (error.response?.status === 401 && isPublicRoute()) {
+        setLoading(false);
+        return;
+      }
       // Não chamar logout aqui - o interceptor já trata 401
       if (error.response?.status !== 401) {
         logout();

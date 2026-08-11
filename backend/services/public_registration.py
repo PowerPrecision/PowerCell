@@ -339,12 +339,13 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         if _portal_access_code_dc:
             _access_code_html_dc = f"""
                 <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
-                    <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.powercell.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
+                    <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.precisioncredito.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
                     <h3 style="text-align: center; margin: 10px 0;"><strong style="font-family: 'Courier New', monospace; font-size: 22px; color: #0f766e; letter-spacing: 3px;">{_portal_access_code_dc}</strong></h3>
                 </div>
             """
+            # PACOTE DI — URL client-facing actualizada para precisioncredito.pt.
             _access_code_text_dc = (
-                f"\nSe o link não funcionar, aceda a www.powercell.pt/portal e "
+                f"\nSe o link não funcionar, aceda a www.precisioncredito.pt/portal e "
                 f"insira o seguinte Código de Acesso: {_portal_access_code_dc}\n"
             )
 

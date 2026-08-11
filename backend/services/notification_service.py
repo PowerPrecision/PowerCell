@@ -274,7 +274,7 @@ O estado do seu processo foi atualizado de "{old_status}" para "{new_status_labe
 Se tiver dúvidas, não hesite em contactar-nos.
 
 Cumprimentos,
-Equipa PowerCell
+Equipa Precision Crédito
 """
     
     return await send_notification_with_preference_check(
