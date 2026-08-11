@@ -315,18 +315,24 @@ async def get_ai_training_stats(
 @router.get("/notification-preferences/{user_id}")
 async def get_notification_preferences(
     user_id: str,
+    company_id: Optional[str] = None,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_get_notification_preferences(user_id, user)
+    # PACOTE DF — `company_id` query param opcional permite ler preferências
+    # por-UCR (user_company_roles.notification_preferences).
+    return await run_get_notification_preferences(user_id, user, company_id=company_id)
 
 
 @router.put("/notification-preferences/{user_id}")
 async def update_notification_preferences(
     user_id: str,
     preferences: dict,
+    company_id: Optional[str] = None,
     user: dict = Depends(require_roles([UserRole.ADMIN]))
 ):
-    return await run_update_notification_preferences(user_id, preferences, user)
+    # PACOTE DF — `company_id` query param opcional permite gravar preferências
+    # por-UCR (user_company_roles.notification_preferences) com fallback global.
+    return await run_update_notification_preferences(user_id, preferences, user, company_id=company_id)
 
 
 @router.get("/notification-preferences")

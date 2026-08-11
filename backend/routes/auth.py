@@ -60,14 +60,22 @@ async def get_me(request: Request, user: dict = Depends(get_current_user)):
 @router.put("/preferences")
 async def update_preferences(
     data: dict,
+    request: Request,
     user: dict = Depends(get_current_user)
 ):
-    return await run_update_preferences(data, user)
+    # PACOTE DF — passamos `request` para permitir leitura do header X-Company-Id
+    # e gravar preferências por-UCR (user_company_roles.notification_preferences).
+    return await run_update_preferences(data, request, user)
 
 
 @router.get("/preferences")
-async def get_preferences(user: dict = Depends(get_current_user)):
-    return await run_get_preferences(user)
+async def get_preferences(
+    request: Request,
+    user: dict = Depends(get_current_user)
+):
+    # PACOTE DF — passamos `request` para resolver a empresa ativa e ler
+    # preferências da UCR com fallback ao store global.
+    return await run_get_preferences(request, user)
 
 
 @router.put("/profile")

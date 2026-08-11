@@ -28,7 +28,7 @@ BACKWARD COMPATIBILITY:
 """
 
 from pydantic import BaseModel, field_validator
-from typing import Optional, List
+from typing import Optional, List, Dict
 from datetime import datetime, timezone
 from enum import Enum
 
@@ -55,6 +55,10 @@ class UserCompanyRoleCreate(BaseModel):
     signature: Optional[str] = None  # Assinatura de email HTML/Texto para esta empresa
     professional_phone: Optional[str] = None  # Telefone profissional específico desta empresa
     job_title: Optional[str] = None  # Cargo específico nesta empresa
+    display_name: Optional[str] = None  # PACOTE DF — Nome de exibição específico desta empresa
+    # PACOTE DF — Preferências de notificação (14 booleans) por-UCR.
+    # Quando None, o consumidor cai para o store global (db.notification_preferences).
+    notification_preferences: Optional[Dict[str, bool]] = None
 
     @field_validator("role")
     @classmethod
@@ -80,6 +84,9 @@ class UserCompanyRoleUpdate(BaseModel):
     signature: Optional[str] = None  # Assinatura de email HTML/Texto para esta empresa
     professional_phone: Optional[str] = None  # Telefone profissional específico desta empresa
     job_title: Optional[str] = None  # Cargo específico nesta empresa
+    display_name: Optional[str] = None  # PACOTE DF — Nome de exibição específico desta empresa
+    # PACOTE DF — Preferências de notificação por-UCR (fallback ao store global se None).
+    notification_preferences: Optional[Dict[str, bool]] = None
 
     @field_validator("role")
     @classmethod
@@ -103,6 +110,9 @@ class UserCompanyRoleResponse(BaseModel):
     signature: Optional[str] = None  # Assinatura de email HTML/Texto para esta empresa
     professional_phone: Optional[str] = None  # Telefone profissional específico desta empresa
     job_title: Optional[str] = None  # Cargo específico nesta empresa
+    display_name: Optional[str] = None  # PACOTE DF — Nome de exibição específico desta empresa
+    # PACOTE DF — Preferências de notificação por-UCR (14 booleans) ou None (fallback global).
+    notification_preferences: Optional[Dict[str, bool]] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
 

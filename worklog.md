@@ -3289,3 +3289,34 @@ Stage Summary:
   - FRONTEND_GUIDELINES.md (secção 9)
   - ARCHITECTURE.md (2 secções: Upload Múltiplo + RGPD PDF)
 - Resultado: (1) Staff pode descarregar PDF do RGPD pré-preenchido com dados do cliente via DropdownMenu no ProcessDetails. (2) Cliente pode carregar múltiplos ficheiros por categoria no Portal, de forma faseada, com lista visual de ficheiros anexados (ScrollArea + Badges). Backend faz APPEND ($push attached_files) — nunca replace. (3) Docs atualizadas com regras: Portal sempre append; documentos legais sempre pré-preenchidos do backend.
+
+
+---
+Task ID: Pacote DF (Área Pessoal — User Global vs Role/Perfil)
+Agent: Main Agent (Z.ai Code Assistant) + 4 subagentes (2 Explore + 2 Implementação)
+Task: Resolver perfis fantasma na ProfilePage + reestruturar UI em Tabs (Conta Global vs uma aba por perfil) + alinhar backend para settings isoladas por user_company_role.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 9154f9dc = Pacote DE).
+- 2 subagentes Explore em paralelo: DF-1-Explore (frontend: ProfilePage 1081 linhas, AuthContext, ContextSwitcher, roleUtils, api.js) + DF-2-Explore (backend: auth_profile_handlers, user_company_roles model, users_api_email_config, notification_service, admin_users). Confirmou: signature/phone/job_title/webmail/Google OAuth já são per-UCR; notifications eram globais (único gap).
+- 2 subagentes Implementação em paralelo: DF-Backend (7 ficheiros — notification_preferences per-UCR com fallback global) + DF-Frontend (4 ficheiros — ProfilePage reestruturada com Tabs + novo ProfileRoleTab.jsx + AuthContext null fallback + ContextSwitcher "Padrão").
+- Validação final: py_compile ✓ (7 backend), flake8 0 erros, bun build ✓ (4 frontend).
+- Documentação: ARCHITECTURE.md secção "Separação User Global vs Role Local" + FRONTEND_GUIDELINES.md secção 10 + CHANGELOG.
+- Verificação de tokens: grep por padrão de token no diff = 0 ocorrências reais.
+
+Stage Summary:
+- 13 ficheiros modificados (7 backend + 4 frontend + 2 docs):
+  - backend/models/user_company_role.py (notification_preferences + display_name no modelo)
+  - backend/services/auth_profile_handlers.py (preferences per-UCR via X-Company-Id)
+  - backend/services/notification_service.py (company_id kwarg + fallback global)
+  - backend/services/email_v2.py (company_id kwarg + fallback global)
+  - backend/services/admin_users.py (admin preferences per-UCR)
+  - backend/routes/auth.py (request param em /auth/preferences)
+  - backend/routes/admin.py (company_id query param em /admin/notification-preferences)
+  - frontend/src/pages/ProfilePage.js (reestruturação Tabs: Conta Global + uma aba por UCR)
+  - frontend/src/components/ProfileRoleTab.jsx (NOVO — 3 cartões de perfil scoped por X-Company-Id)
+  - frontend/src/contexts/AuthContext.js (null fallback em vez de "default")
+  - frontend/src/components/layout/ContextSwitcher.jsx ("Padrão" em vez de "Principal")
+  - ARCHITECTURE.md (secção Separação User vs Role)
+  - FRONTEND_GUIDELINES.md (secção 10)
+- Resultado: (1) Perfis fantasma eliminados — tabs geradas 100% de user.companies. (2) "Conta principal" removida — sem "default" sintético. (3) Área Pessoal dividida: Conta Global (login, password, sessões) + uma aba por UCR (dados profissionais, assinatura, webmail). (4) Backend: notification_preferences per-UCR com fallback global; display_name no modelo UCR. (5) Docs atualizadas com separação estrita User vs Role.

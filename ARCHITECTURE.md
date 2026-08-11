@@ -1250,3 +1250,91 @@ flowchart LR
 - **Dados**: `consent_data` é construído a partir de `process.personal_data` (desencriptado via `decrypt_sensitive_data`), com fallback para strings vazias quando campos não existem.
 - **Auth**: `require_staff()` — o PDF expõe PII do cliente.
 - **Filename**: `RGPD_{safe_client_name}.pdf` (normalizado, sem acentos/caracteres especiais).
+
+---
+
+## Separação Estrita: User (Global) vs Role/Perfil (Local) — Pacote DF
+
+A Área Pessoal (`ProfilePage`) segue uma separação estrita entre o que pertence à **pessoa** (global) e o que pertence a cada **perfil/role** (local por `user_company_role`). Isto evita perfis fantasma, mistura de contextos e a falsa noção de "conta principal".
+
+```mermaid
+flowchart LR
+    subgraph Global["User (Global — pessoa)"]
+        Auth["Informação de Login<br/>(email, password)"]
+        Sessions["Sessões Ativas<br/>(JWT tokens)"]
+    end
+    subgraph UCR1["UCR: Consultor @ Power RE"]
+        Sig1["Assinatura de Email"]
+        Phone1["Telefone Profissional"]
+        Job1["Cargo"]
+        Mail1["Config Webmail<br/>(IMAP/SMTP)"]
+        Google1["Google OAuth"]
+        Notif1["Preferências de<br/>Notificação"]
+    end
+    subgraph UCR2["UCR: Intermediário @ Precision"]
+        Sig2["Assinatura de Email"]
+        Phone2["Telefone Profissional"]
+        Job2["Cargo"]
+        Mail2["Config Webmail"]
+        Google2["Google OAuth"]
+        Notif2["Preferências de<br/>Notificação"]
+    end
+    User["Utilador"] --> Global
+    User -->|"user.companies[]"| UCR1
+    User -->|"user.companies[]"| UCR2
+```
+
+### User (Global) — pertence à pessoa
+
+| Campo | Coleção | Notas |
+|---|---|---|
+| `email` | `users` | Identidade de login |
+| `password_hash` | `users` | Autenticação |
+| `role` | `users` | Role primária (JWT) — apenas para fallback |
+| `created_at` | `users` | "Membro desde" |
+| `additional_roles` | `users` | Array de roles (legacy) — não usado para renderizar perfis |
+| Sessões | `refresh_tokens` | JWT refresh tokens ativos |
+
+A aba "Conta Global" da Área Pessoal contém APENAS estes cartões: Informação de Login + Sessões Ativas.
+
+### Role/Perfil (Local) — pertence ao `user_company_role`
+
+Cada UCR (`user_company_roles` collection, chave única `{user_id, company_id}`) tem os seus próprios:
+
+| Campo | Coleção | Scoping |
+|---|---|---|
+| `signature` | `user_company_roles` | Assinatura de email para esta empresa |
+| `professional_phone` | `user_company_roles` | Telefone profissional para esta empresa |
+| `job_title` | `user_company_roles` | Cargo para esta empresa |
+| `display_name` | `user_company_roles` | Nome de exibição para esta empresa |
+| `notification_preferences` | `user_company_roles` | Preferências de notificação (14 bools) — **PACOTE DF** |
+| Webmail IMAP/SMTP | `user_email_configs` | Keyed by `{user_id, company_id}` |
+| Google OAuth tokens | `user_email_configs` + `users.email_config["company:<id>"]` | Dual-write per-UCR |
+
+A Área Pessoal gera **uma aba dinâmica por UCR real** (iterando `user.companies`), cada uma com os cartões: Dados Profissionais + Assinatura + Webmail. **Sem hardcode de roles** — só perfis que o utilizador realmente tem aparecem.
+
+### `X-Company-Id` header — o mecanismo de scoping
+
+O backend recebe o contexto de UCR ativo via header `X-Company-Id` (e `X-Active-Role`), injetado automaticamente pelo interceptor do `api.js` no frontend. Todos os endpoints de perfil/settings leem este header via `get_active_company_id_async(request, user)` para scope das queries ao UCR ativo.
+
+```python
+# services/auth.py
+async def get_active_company_id_async(request, user):
+    company_id = request.headers.get("X-Company-Id")
+    # valida que o user tem um UCR para esta company_id
+    # retorna company_id ou fallback
+```
+
+### Preferências de Notificação — per-UCR com fallback (PACOTE DF)
+
+As preferências de notificação (14 campos booleanos: `email_*`, `inapp_*`) são agora persistidas no UCR (`user_company_roles.notification_preferences`) com fallback gracioso ao store global (`db.notification_preferences`):
+
+- **Write** (`PUT /auth/preferences`): escreve no UCR ativo (via `X-Company-Id`); dual-write no global para backward compat.
+- **Read** (`GET /auth/preferences`): lê do UCR ativo primeiro; se vazio/None, fall back ao global.
+- **Consumers** (`notification_service.py`, `email_v2.py`): aceitam `company_id=None` opcional; quando fornecido, procuram o UCR primeiro com fallback global.
+
+Isto permite que um consultor tenha notificações de email ativas para a Power Real Estate mas desativadas para a Precision, por exemplo.
+
+### O que NÃO é per-UCR (tech debt)
+
+- **OneDrive**: system-level apenas (env var `ONEDRIVE_SHARED_LINK`), sem store per-user. Defer para futuro.

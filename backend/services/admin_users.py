@@ -587,60 +587,129 @@ async def run_stop_impersonate(user: dict):
     }
 
 
-async def run_get_notification_preferences(user_id: str, user: dict):
+async def run_get_notification_preferences(
+    user_id: str,
+    user: dict,
+    company_id: Optional[str] = None
+):
     """
     Obtém as preferências de notificação de um utilizador.
     Admin pode ver/editar de qualquer utilizador.
+
+    PACOTE DF — Per-UCR: Se `company_id` for fornecido (query param),
+    procura primeiro o campo `notification_preferences` na UCR
+    (user_company_roles, keyed por user_id + company_id). Se existir,
+    devolve essas preferências. Caso contrário, cai para o store global
+    (db.notification_preferences) para backward compat.
     """
     target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not target_user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
-    
-    # Obter preferências da DB ou usar defaults
+
+    # ── PACOTE DF — Tentar ler da UCR ativa primeiro ──
+    if company_id and company_id != "default":
+        try:
+            ucr_doc = await db.user_company_roles.find_one(
+                {"user_id": user_id, "company_id": company_id},
+                {"_id": 0, "notification_preferences": 1}
+            )
+            if ucr_doc and ucr_doc.get("notification_preferences"):
+                return {
+                    "user_id": user_id,
+                    "user_email": target_user.get("email"),
+                    "user_name": target_user.get("name"),
+                    "company_id": company_id,
+                    "scope": "ucr",
+                    "preferences": ucr_doc["notification_preferences"]
+                }
+        except Exception as e:
+            logger.warning(
+                f"[admin/get_notif_prefs] Erro ao ler UCR para user_id={user_id}, "
+                f"company_id={company_id!r}: {e}. A usar store global."
+            )
+
+    # Obter preferências globais da DB ou usar defaults
     prefs = await db.notification_preferences.find_one({"user_id": user_id}, {"_id": 0})
-    
+
     if not prefs:
         prefs = {**DEFAULT_NOTIFICATION_PREFS, "user_id": user_id}
-    
+
     return {
         "user_id": user_id,
         "user_email": target_user.get("email"),
         "user_name": target_user.get("name"),
+        "scope": "global",
         "preferences": prefs
     }
 
 
-async def run_update_notification_preferences(user_id: str, preferences: dict, user: dict):
+async def run_update_notification_preferences(
+    user_id: str,
+    preferences: dict,
+    user: dict,
+    company_id: Optional[str] = None
+):
     """
     Actualiza as preferências de notificação de um utilizador.
     Admin pode editar de qualquer utilizador.
+
+    PACOTE DF — Per-UCR: Se `company_id` for fornecido (query param),
+    grava as preferências em `user_company_roles.notification_preferences`
+    (keyed por user_id + company_id) e também no store global para
+    backward compat. Caso contrário, mantém o comportamento legacy
+    (gravação apenas no store global).
     """
     target_user = await db.users.find_one({"id": user_id})
     if not target_user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
-    
+
     # Filtrar apenas campos válidos
     valid_keys = set(DEFAULT_NOTIFICATION_PREFS.keys())
     filtered_prefs = {k: v for k, v in preferences.items() if k in valid_keys}
-    
+
     filtered_prefs["user_id"] = user_id
     filtered_prefs["updated_at"] = datetime.now(timezone.utc).isoformat()
     filtered_prefs["updated_by"] = user.get("email", "admin")
-    
+
+    # ── PACOTE DF — Gravar na UCR se houver company_id ──
+    if company_id and company_id != "default":
+        try:
+            ucr_update = {
+                "notification_preferences": {k: v for k, v in filtered_prefs.items()
+                                             if k in valid_keys},
+                "updated_at": filtered_prefs["updated_at"]
+            }
+            await db.user_company_roles.update_one(
+                {"user_id": user_id, "company_id": company_id},
+                {"$set": ucr_update},
+                upsert=True
+            )
+            logger.info(
+                f"[admin/update_notif_prefs] UCR gravação: user_id={user_id}, "
+                f"company_id={company_id!r}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[admin/update_notif_prefs] Erro ao gravar na UCR "
+                f"(user_id={user_id}, company_id={company_id!r}): {e}. "
+                f"A gravar apenas no store global."
+            )
+
+    # Gravar no store global (sempre, para backward compat com consumidores legacy)
     await db.notification_preferences.update_one(
         {"user_id": user_id},
         {"$set": filtered_prefs},
         upsert=True
     )
-    
+
     # Invalidar cache de preferências de notificação
     try:
         from services.realtime_notifications import _invalidate_pref_cache
         _invalidate_pref_cache(user_id)
     except ImportError:
         pass
-    
-    return {"success": True, "preferences": filtered_prefs}
+
+    return {"success": True, "preferences": filtered_prefs, "scope": "ucr" if (company_id and company_id != "default") else "global"}
 
 
 async def run_get_all_notification_preferences(user: dict):

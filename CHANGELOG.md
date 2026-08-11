@@ -3,6 +3,35 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DF: Área Pessoal — User Global vs Role/Perfil
+
+### Corrigido
+- **Perfis fantasma na Área Pessoal**: a `ProfilePage` renderiza agora tabs/secções de perfil **100% dinamicamente** a partir de `user.companies` (UCRs reais), sem qualquer hardcode de roles. Removida a função local `getRoleLabel` (substituída por `ROLE_LABELS` de `roleUtils.js`). Removidas comparações `effectiveRole === "suporte"` (role inexistente). Perfis que o utilizador não tem deixam de aparecer.
+- **"Conta principal" fantasma**: removido o fallback sintético `company_id === "default"` que criava uma "conta principal" inexistente. O `AuthContext` agora usa `null` em vez de `"default"` quando não há UCRs. O `ContextSwitcher` mostra "Padrão" apenas quando `is_default: true` (não "Principal").
+
+### Alterado
+- **Reestruturação da Área Pessoal com Shadcn Tabs**: a `ProfilePage` (antes uma pilha plana de 5 Cards) passou a usar `<Tabs>` do Shadcn com:
+  - **Aba "Conta Global"** (sempre presente): contém APENAS cartões transversais à pessoa — Informação de Login (email, password, role badge, "Membro desde") + Sessões Ativas.
+  - **Uma aba por UCR real** (gerada dinamicamente de `user.companies`): cada aba contém os cartões de perfil — Dados Profissionais + Assinatura de Email + Configuração de Webmail. O label de cada aba é `{ROLE_LABELS[role]} @ {company_name}` com o ícone da role.
+- **Novo componente `ProfileRoleTab.jsx`**: encapsula os 3 cartões de perfil (Dados Profissionais, Assinatura, Webmail) e faz scoping via header `X-Company-Id` override por request (`api.put(url, data, { headers: { "X-Company-Id": companyId } })`). Cada aba carrega e guarda os seus dados de forma isolada — sem misturar contextos entre perfis.
+- **`ProfilePage.js` reduzida de 1081 → 658 linhas** (lógica de per-UCR movida para `ProfileRoleTab.jsx`).
+
+### Adicionado
+- **Preferências de notificação per-UCR**: o campo `notification_preferences` (14 bools) foi adicionado ao modelo `UserCompanyRole` (`models/user_company_role.py`). `PUT /auth/preferences` e `GET /auth/preferences` agora usam `X-Company-Id` para scope ao UCR ativo, com dual-write no global para backward compat. Os consumers (`notification_service.py`, `email_v2.py`) aceitam `company_id=None` opcional: quando fornecido, procuram o UCR primeiro com fallback ao store global. Endpoints admin (`/admin/notification-preferences/{user_id}`) aceitam `?company_id=` query param.
+- **`display_name` no modelo UCR**: adicionado aos pydantic `UserCompanyRoleCreate/Update/Response` (era escrito via dict mas não estava no modelo).
+
+### Documentação
+- **`ARCHITECTURE.md`**: nova secção "Separação Estrita: User (Global) vs Role/Perfil (Local)" com diagrama Mermaid, tabela de campos por coleção, mecanismo `X-Company-Id`, e notas sobre preferências de notificação per-UCR com fallback.
+- **`FRONTEND_GUIDELINES.md`**: nova secção 10 "Área Pessoal — separação User (Global) vs Role/Perfil" com regras: renderização 100% dinâmica de `user.companies`; estrutura "Conta Global" + uma aba por UCR; sem "conta principal"; settings sempre pré-preenchidas do backend com scoping por `X-Company-Id`.
+
+### Técnico
+- **Backend modificado** (7 ficheiros): `models/user_company_role.py` (notification_preferences + display_name), `services/auth_profile_handlers.py` (preferences per-UCR), `services/notification_service.py` (company_id kwarg), `services/email_v2.py` (company_id kwarg), `services/admin_users.py` (admin preferences per-UCR), `routes/auth.py` (request param), `routes/admin.py` (company_id query param).
+- **Frontend modificado** (4 ficheiros): `pages/ProfilePage.js` (reestruturação Tabs), `components/ProfileRoleTab.jsx` (NOVO), `contexts/AuthContext.js` (null fallback), `components/layout/ContextSwitcher.jsx` ("Padrão" label).
+- **Documentação** (2 ficheiros): `ARCHITECTURE.md`, `FRONTEND_GUIDELINES.md`.
+- **Validação**: `py_compile` ✓ (7 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (4 frontend, 0 erros).
+- **Dependências**: Nenhuma nova — `Tabs`, `ROLE_LABELS`, `ROLE_ICONS` já existem em Shadcn/roleUtils.
+- **Tech debt (defer)**: OneDrive permanece system-level (env var) — fazer per-UCR seria um novo feature. `realtime_notifications.py:_get_user_prefs` não foi modificado (in-app WebSocket prefs continuam globais — follow-up opcional).
+
 ## [2026-07-25] — Pacote DE: Download RGPD PDF + Upload Múltiplo Portal
 
 ### Adicionado

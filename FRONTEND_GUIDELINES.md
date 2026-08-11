@@ -164,4 +164,44 @@ Documentos legais gerados pelo sistema (RGPD, Minuta, CPCV) **devem** vir pré-p
 - **RGPD PDF**: `GET /api/rgpd/pdf/{process_id}` gera um PDF com o template ativo do RGPD, substituindo os placeholders (`{{NOME}}`, `{{CONTRIBUINTE}}`, `{{MORADA}}`, etc.) pelos dados desencriptados do cliente. Usa `reportlab` (já instalado) e reutiliza `_get_rendered_rgpd_text` + `_generate_rgpd_pdf_bytes` de `services/rgpd_service.py`.
 - **Frontend**: o botão de RGPD no `PageHeader` do `ProcessDetails` é um `DropdownMenu` com 2 opções: "Solicitar Consentimento" (envia email com link) e "Descarregar PDF (Assinatura Manual)" (download do PDF pré-preenchido). O download usa o padrão blob (`responseType: "blob"` + `createObjectURL` + `link.click()`).
 
+---
+
+## 10. Área Pessoal — separação User (Global) vs Role/Perfil (Pacote DF)
+
+A Área Pessoal (`ProfilePage`) segue uma separação estrita entre o que pertence à **pessoa** (global) e o que pertence a cada **perfil/role** (local por `user_company_role`). Isto evita perfis fantasma e a falsa noção de "conta principal".
+
+### Renderização de perfis 100% dinâmica
+
+As abas/secções de perfil são geradas **exclusivamente** a partir de `user.companies` (a lista de UCRs reais vindas do backend). **Nunca** hardcodear roles (`VALID_ROLES`, `additional_roles` sem validação) — isso produz perfis fantasma (ex: "Mediador" aparece mesmo sem o role).
+
+```jsx
+// PACOTE DF — Tabs dinâmicas baseadas em UCRs reais
+const ucrTabs = useMemo(() => {
+  return (user?.companies || [])
+    .filter(c => c.role && c.company_id && c.company_id !== "default")
+    .map(c => ({
+      value: `${c.role}__${c.company_id}`,
+      label: `${ROLE_LABELS[c.role] || c.role} @ ${c.company_name}`,
+      Icon: ROLE_ICONS[c.role],
+      companyId: c.company_id,
+    }));
+}, [user?.companies]);
+```
+
+Usar `ROLE_LABELS` e `ROLE_ICONS` de `utils/roleUtils.js` (não reimplementar localmente). Filtrar `company_id === "default"` — é um fallback sintético que não corresponde a nenhum UCR real.
+
+### Estrutura: "Conta Global" + uma aba por perfil
+
+- **Aba "Conta Global"** (sempre presente): contém APENAS cartões transversais à pessoa — Informação de Login (email, password) e Sessões Ativas. Sem `active_company_name` badge (já visível no `ContextSwitcher`).
+- **Uma aba por UCR** (gerada dinamicamente): contém os cartões de perfil — Dados Profissionais, Assinatura de Email, Configuração de Webmail. Cada aba faz scoping via `X-Company-Id` header override (`api.put(url, data, { headers: { "X-Company-Id": companyId } })`).
+
+### Sem "conta principal"
+
+O conceito de "conta principal" foi removido. Não existe "Principal (Padrão)" como company_id sintético. O que existe é `is_default: true` num UCR (a empresa padrão do utilizador), mostrado como badge "Padrão" no `ContextSwitcher` — não como uma categoria separada de "conta".
+
+### Settings sempre pré-preenchidas do backend
+
+As settings de cada perfil (assinatura, webmail, preferências) são lidas do backend já scoped pelo UCR ativo (via `X-Company-Id`). O frontend não pré-preenche nem mistura contextos — cada aba carrega e guarda os seus dados de forma isolada. Ver `components/ProfileRoleTab.jsx`.
+
+
 

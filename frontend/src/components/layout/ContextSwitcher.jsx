@@ -67,26 +67,36 @@ const ContextSwitcher = () => {
     const companyRoles = new Set(companies.map(c => c.role));
     for (const role of additionalRoles) {
       if (!companyRoles.has(role)) {
-        profileItems.push({ 
-          role, 
-          company_id: effectiveCompanyId, 
-          company_name: activeCompanyName || null 
+        profileItems.push({
+          role,
+          company_id: effectiveCompanyId,
+          company_name: activeCompanyName || null,
+          // PACOTE DF — additional_roles não vêm de UCR real, não são is_default
+          is_default: false,
         });
       }
     }
 
     // Incluir o role primário se não estiver coberto por companies nem additional_roles
     if (!companyRoles.has(user.role) && !additionalRoles.includes(user.role)) {
-      profileItems.unshift({ 
-        role: user.role, 
-        company_id: effectiveCompanyId, 
-        company_name: activeCompanyName || null 
+      profileItems.unshift({
+        role: user.role,
+        company_id: effectiveCompanyId,
+        company_name: activeCompanyName || null,
+        // PACOTE DF — role primário sem UCR real; não marca como is_default
+        is_default: false,
       });
     }
   } else {
     // Fallback: additional_roles (strings) — sem company_id disponível
     const allRoles = [user.role, ...additionalRoles.filter(r => r !== user.role)];
-    profileItems = allRoles.map(role => ({ role, company_id: null, company_name: null }));
+    profileItems = allRoles.map(role => ({
+      role,
+      company_id: null,
+      company_name: null,
+      // PACOTE DF — fallback sem UCR real
+      is_default: false,
+    }));
   }
 
   // Filtrar entradas sem role válido (defensivo)
@@ -206,8 +216,12 @@ const ContextSwitcher = () => {
                       ATIVO
                     </span>
                   )}
-                  {selectedRole === user.role && !isActive && (
-                    <span className="text-[10px] text-muted-foreground">Principal</span>
+                  {/* PACOTE DF — remove "Principal" label sintético.
+                      Não há "conta principal" — há UCR is_default (definido
+                      no backend). Só mostrar "Padrão" se este UCR está
+                      marcado como is_default e não é o activo. */}
+                  {!isActive && profile.is_default && (
+                    <span className="text-[10px] text-muted-foreground">Padrão</span>
                   )}
                 </DropdownMenuItem>
               );
