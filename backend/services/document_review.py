@@ -1,35 +1,35 @@
 """
 ====================================================================
-PACOTE DJ — SERVIÇO DE REVISÃO HUMAN-IN-THE-LOOP DE DOCUMENTOS
+PACOTE DJ — SISTEMA HÍBRIDO DE CONFIANÇA PARA IA DE DOCUMENTOS
 ====================================================================
-Fluxo HITL (Human-in-the-Loop) para análise IA de documentos:
+Arquitectura Híbrida (Zero-Touch + Human-in-the-Loop):
 
 1. `run_analyze_document_for_review(doc_id, user)`
    - IA gera sugestões (categoria, subcategoria, validade, nome, filename)
-   - Persiste em `suggested_*` (NÃO aplica a `ai_*`)
-   - Marca `ai_review_status='pending'`
+   - Converte confidence (0.0-1.0) → confidence_score (0-100 inteiro)
+   - **Se confidence_score >= AI_CONFIDENCE_THRESHOLD (85)**:
+     · Auto-aplica: escreve em BOTH `suggested_*` E `ai_*`
+     · Marca `ai_review_status='auto_approved'` (Zero-Touch)
+   - **Se confidence_score < 85**:
+     · Guarda apenas em `suggested_*` (não toca em `ai_*`)
+     · Marca `ai_review_status='pending_review'` (HITL)
 
 2. `run_apply_review(doc_id, body, user)`
-   - Consultor aprova sugestões (opcionalmente com edições)
+   - Consultor aprova sugestões de docs `pending_review`
    - Copia `suggested_*` → `ai_*`
-   - Marca `ai_review_status='approved'` (ou `'edited'` se houve edições)
+   - Marca `ai_review_status='approved'` (ou `'edited'`)
 
 3. `run_reject_review(doc_id, body, user)`
    - Consultor rejeita as sugestões
    - Marca `ai_review_status='rejected'`
-   - Mantém `suggested_*` para auditoria
 
 4. `run_get_pending_reviews(process_id, user)`
-   - Lista documentos de um processo com `ai_review_status='pending'`
+   - Lista documentos com `ai_review_status='pending_review'`
 
-Princípio chave:
-- A IA escreve SEMPRE em `suggested_*` (não toca em `ai_*`).
-- Os campos `ai_*` (aplicados) só são actualizados quando o consultor
-  aprova via `run_apply_review`.
-- O fluxo de auto-categorização em background (`document_auto_categorize.py`)
-  NÃO é afectado — continua a escrever directamente em `ai_*` para uploads
-  novos. Este serviço é uma via paralela, accionada on-demand pelo
-  endpoint `POST /documents/{doc_id}/ai-analyze-review`.
+Princípio chave (Sistema Híbrido):
+- Alta confiança (≥85%): auto-aprovação (Zero-Touch) — IA aplica directo.
+- Baixa confiança (<85%): Human-in-the-Loop — IA sugere, consultor decide.
+- O fluxo de auto-categorização em background NÃO é afectado.
 ====================================================================
 """
 from __future__ import annotations
@@ -60,6 +60,14 @@ from services.document_categorization import (
 from services.s3_storage import s3_service
 
 logger = logging.getLogger(__name__)
+
+# --------------------------------------------------------------------
+# PACOTE DJ — Sistema Híbrido: limiar de confiança para auto-aprovação
+# --------------------------------------------------------------------
+# Se a IA devolver confidence_score >= 85, os metadados são auto-aplicados
+# (Zero-Touch). Abaixo de 85, as sugestões ficam pendentes de revisão
+# manual (Human-in-the-Loop).
+AI_CONFIDENCE_THRESHOLD = 85
 
 
 # --------------------------------------------------------------------
@@ -237,10 +245,19 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
                 f"[DJ-REVIEW] Erro no OCR (não bloqueia revisão): {ocr_err}"
             )
 
-    # 6. Persistir em suggested_* (NÃO em ai_*)
+    # 6. PACOTE DJ — Sistema Híbrido: threshold de confiança
+    # ----------------------------------------------------------------
+    # Converter confidence (0.0-1.0 float da IA) → confidence_score
+    # (0-100 inteiro, conforme requisitado pelo utilizador).
+    # ----------------------------------------------------------------
+    raw_confidence = cat_result.get("confidence") or 0.0
+    confidence_score = int(round(float(raw_confidence) * 100))
+    is_auto_approved = confidence_score >= AI_CONFIDENCE_THRESHOLD
+
     now = datetime.now(timezone.utc).isoformat()
     expiry_suggested = expiry_from_cat or validade_from_ocr
 
+    # Sempre guardar em suggested_* (para auditoria em ambos os casos)
     update_payload: Dict[str, Any] = {
         "suggested_category": ai_category,
         "suggested_subcategory": cat_result.get("subcategory"),
@@ -248,15 +265,54 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
         "suggested_expiry_date": expiry_suggested,
         "suggested_filename": cat_result.get("suggested_filename"),
         "suggested_nome": nome_extraido,
-        "ai_review_status": "pending",
-        "ai_reviewed_at": None,
-        "ai_reviewed_by": None,
         "updated_at": now,
     }
-    # Se OCR devolveu extracted_data, guardá-lo também para auditoria
-    # (não substituímos extracted_data existente se OCR falhou)
     if extracted_data:
         update_payload["extracted_data"] = extracted_data
+
+    if is_auto_approved:
+        # ----------------------------------------------------------------
+        # PACOTE DJ — AUTO-APROVADO (Zero-Touch): confidence >= 85
+        # ----------------------------------------------------------------
+        # A IA tem alta confiança → aplicar directamente em ai_* também.
+        # O consultor não precisa de intervir (mas pode editar depois).
+        # ----------------------------------------------------------------
+        update_payload["ai_category"] = ai_category
+        update_payload["ai_subcategory"] = cat_result.get("subcategory")
+        update_payload["ai_confidence"] = cat_result.get("confidence")
+        update_payload["expiry_date"] = expiry_suggested
+        update_payload["is_categorized"] = True
+        update_payload["categorized_at"] = now
+        update_payload["ai_review_status"] = "auto_approved"
+        update_payload["ai_reviewed_at"] = now
+        update_payload["ai_reviewed_by"] = "system_auto"
+        update_payload["ai_applied_fields"] = ["categoria", "validade"]
+        if nome_extraido:
+            update_payload["ai_applied_fields"].append("nome")
+        if cat_result.get("suggested_filename"):
+            update_payload["ai_applied_fields"].append("filename")
+        review_status = "auto_approved"
+        logger.info(
+            f"[DJ-REVIEW] AUTO-APROVADO doc {doc_id_resolved} ({filename}): "
+            f"confidence={confidence_score}% >= {AI_CONFIDENCE_THRESHOLD} → "
+            f"ai_* aplicado directamente (Zero-Touch)"
+        )
+    else:
+        # ----------------------------------------------------------------
+        # PACOTE DJ — PENDING_REVIEW (Human-in-the-Loop): confidence < 85
+        # ----------------------------------------------------------------
+        # A IA tem baixa confiança → NÃO aplicar. Guardar apenas sugestões.
+        # O consultor deve aprovar/rejeitar via run_apply_review/run_reject_review.
+        # ----------------------------------------------------------------
+        update_payload["ai_review_status"] = "pending_review"
+        update_payload["ai_reviewed_at"] = None
+        update_payload["ai_reviewed_by"] = None
+        review_status = "pending_review"
+        logger.info(
+            f"[DJ-REVIEW] PENDING_REVIEW doc {doc_id_resolved} ({filename}): "
+            f"confidence={confidence_score}% < {AI_CONFIDENCE_THRESHOLD} → "
+            f"sugestões guardadas, aguarda revisão manual"
+        )
 
     try:
         await db.document_metadata.update_one(
@@ -271,20 +327,18 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
             "doc_id": doc_id_resolved,
         }
 
-    logger.info(
-        f"[DJ-REVIEW] Sugestões geradas para doc {doc_id_resolved} "
-        f"({filename}): cat={ai_category}, validade={expiry_suggested}, "
-        f"nome={'sim' if nome_extraido else 'não'}"
-    )
-
-    # 7. Retornar sugestões + valores actuais
+    # 7. Retornar sugestões + valores actuais + confidence_score + estado
     return {
         "success": True,
         "doc_id": doc_id_resolved,
+        "confidence_score": confidence_score,
+        "ai_review_status": review_status,
+        "auto_approved": is_auto_approved,
         "suggestions": {
             "category": ai_category,
             "subcategory": cat_result.get("subcategory"),
             "confidence": cat_result.get("confidence"),
+            "confidence_score": confidence_score,
             "expiry_date": expiry_suggested,
             "nome": nome_extraido,
             "filename": cat_result.get("suggested_filename"),
@@ -300,7 +354,6 @@ async def run_analyze_document_for_review(doc_id: str, user: dict) -> dict:
             "nome": (doc.get("extracted_data") or {}).get("nome_completo")
             or (doc.get("extracted_data") or {}).get("nome"),
         },
-        "ai_review_status": "pending",
     }
 
 
@@ -487,8 +540,9 @@ async def run_get_pending_reviews(process_id: str, user: dict) -> dict:
     Retorna `{pending: [...], total: N}` com documentos sanitizados
     (inclui `suggested_*`, `current_*`, `filename`, `ai_confidence`).
     """
+    # PACOTE DJ — query usa 'pending_review' (Sistema Híbrido)
     cursor = db.document_metadata.find(
-        {"process_id": process_id, "ai_review_status": "pending"},
+        {"process_id": process_id, "ai_review_status": "pending_review"},
         {"_id": 0},
     )
     pending_docs_raw = await cursor.to_list(2000)

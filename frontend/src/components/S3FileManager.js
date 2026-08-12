@@ -2082,7 +2082,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                   ) : (
                     <Brain className="h-3.5 w-3.5 text-purple-600 sm:mr-1" />
                   )}
-                  <span className="hidden sm:inline">Analisar</span> IA
+                  {/* PACOTE DJ — Sistema Híbrido. Botão global de análise em lote. */}
+                  <span className="hidden sm:inline">🧠 Analisar Documentos</span>
+                  <span className="sm:hidden">🧠 Analisar</span>
                 </Button>
               )}
               {canUseAIDocumentTools && (
@@ -2384,10 +2386,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             >
                               {file.name}
                             </span>
-                            {/* PACOTE DJ — Badges de estado de revisão HITL IA.
-                                Mostra o estado actual da revisão das sugestões IA
-                                (pending/approved/rejected/edited) e um spinner
-                                "A analisar..." enquanto o endpoint corre. */}
+                            {/* PACOTE DJ — Sistema Híbrido. Badges de estado de revisão IA.
+                                Estados: auto_approved (≥85% confiança, IA auto-aplicou),
+                                pending_review (<85%, à espera de revisão humana),
+                                approved/rejected/edited (decisão humana já registada). */}
                             {analyzingDocIds.has(file.doc_id || file.id) && (
                               <Badge
                                 variant="outline"
@@ -2398,18 +2400,28 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 A analisar...
                               </Badge>
                             )}
-                            {file.ai_review_status === "pending" && (
+                            {file.ai_review_status === "auto_approved" && (
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] py-0 h-4 px-1 bg-primary/10 text-primary border-primary/20 shrink-0"
+                                title="Confiança ≥85% — sugestões IA aplicadas automaticamente"
+                              >
+                                <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                                ✨ Auto-Aprovado
+                              </Badge>
+                            )}
+                            {file.ai_review_status === "pending_review" && (
                               <Badge
                                 variant="outline"
                                 className="text-[9px] py-0 h-4 px-1 bg-accent/15 text-accent-foreground border-accent/30 shrink-0 cursor-pointer"
-                                title="Clique para rever as sugestões da IA"
+                                title="Confiança <85% — clique para rever as sugestões da IA"
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleOpenReviewModal(file);
                                 }}
                               >
-                                <Sparkles className="h-2.5 w-2.5 mr-0.5" />
-                                Sugestões IA
+                                <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+                                ⚠️ Revisão Necessária
                               </Badge>
                             )}
                             {file.ai_review_status === "approved" && (
@@ -2939,7 +2951,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               <Badge variant="outline" className="text-[10px] py-0 h-4">
                                 {file.category}
                               </Badge>
-                              {/* PACOTE DJ — Badges de estado de revisão HITL IA (grelha - Todos). */}
+                              {/* PACOTE DJ — Sistema Híbrido. Badges de estado de revisão IA (grelha - Todos). */}
                               {analyzingDocIds.has(file.doc_id || file.id) && (
                                 <Badge
                                   variant="outline"
@@ -2950,18 +2962,28 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                   A analisar...
                                 </Badge>
                               )}
-                              {file.ai_review_status === "pending" && (
+                              {file.ai_review_status === "auto_approved" && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[9px] py-0 h-4 px-1 bg-primary/10 text-primary border-primary/20"
+                                  title="Confiança ≥85% — sugestões IA aplicadas automaticamente"
+                                >
+                                  <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                                  ✨ Auto-Aprovado
+                                </Badge>
+                              )}
+                              {file.ai_review_status === "pending_review" && (
                                 <Badge
                                   variant="outline"
                                   className="text-[9px] py-0 h-4 px-1 bg-accent/15 text-accent-foreground border-accent/30 cursor-pointer"
-                                  title="Clique para rever as sugestões da IA"
+                                  title="Confiança <85% — clique para rever as sugestões da IA"
                                   onClick={(e) => {
                                     e.stopPropagation();
                                     handleOpenReviewModal(file);
                                   }}
                                 >
-                                  <Sparkles className="h-2.5 w-2.5 mr-0.5" />
-                                  Sugestões IA
+                                  <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+                                  ⚠️ Revisão Necessária
                                 </Badge>
                               )}
                               {file.ai_review_status === "approved" && (
@@ -3115,7 +3137,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               </button>
                               {/* Meta info */}
                               <div className="flex flex-wrap items-center gap-1">
-                                {/* PACOTE DJ — Badges de estado de revisão HITL IA (grelha - por categoria). */}
+                                {/* PACOTE DJ — Sistema Híbrido. Badges de estado de revisão IA (grelha - por categoria). */}
                                 {analyzingDocIds.has(file.doc_id || file.id) && (
                                   <Badge
                                     variant="outline"
@@ -3126,18 +3148,28 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                     A analisar...
                                   </Badge>
                                 )}
-                                {file.ai_review_status === "pending" && (
+                                {file.ai_review_status === "auto_approved" && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[9px] py-0 h-4 px-1 bg-primary/10 text-primary border-primary/20"
+                                    title="Confiança ≥85% — sugestões IA aplicadas automaticamente"
+                                  >
+                                    <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                                    ✨ Auto-Aprovado
+                                  </Badge>
+                                )}
+                                {file.ai_review_status === "pending_review" && (
                                   <Badge
                                     variant="outline"
                                     className="text-[9px] py-0 h-4 px-1 bg-accent/15 text-accent-foreground border-accent/30 cursor-pointer"
-                                    title="Clique para rever as sugestões da IA"
+                                    title="Confiança <85% — clique para rever as sugestões da IA"
                                     onClick={(e) => {
                                       e.stopPropagation();
                                       handleOpenReviewModal(file);
                                     }}
                                   >
-                                    <Sparkles className="h-2.5 w-2.5 mr-0.5" />
-                                    Sugestões IA
+                                    <AlertTriangle className="h-2.5 w-2.5 mr-0.5" />
+                                    ⚠️ Revisão Necessária
                                   </Badge>
                                 )}
                                 {file.ai_review_status === "approved" && (

@@ -3,6 +3,31 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DJ (Híbrido): Sistema de Confiança — Zero-Touch + HITL
+
+### Alterado
+- **Sistema Híbrido de Confiança**: o `run_analyze_document_for_review` agora aplica um threshold de confiança em vez de guardar sempre em `suggested_*`:
+  - `AI_CONFIDENCE_THRESHOLD = 85` (constante em `document_review.py`).
+  - `confidence_score = int(round(confidence * 100))` — converte 0.0-1.0 → 0-100 inteiro.
+  - **Se `confidence_score >= 85`**: auto-aplica (Zero-Touch) — escreve em BOTH `suggested_*` E `ai_*`, marca `ai_review_status = "auto_approved"`.
+  - **Se `confidence_score < 85`**: guarda apenas em `suggested_*` (HITL), marca `ai_review_status = "pending_review"`.
+- **Status values atualizados**: `"pending"` → `"pending_review"` (mais semântico); novo `"auto_approved"` para docs auto-aplicados.
+- **Badges no S3FileManager** atualizados em 3 sites (list, grid Todos, grid per-category):
+  - `auto_approved` → "✨ Auto-Aprovado" (verde, `bg-primary/10`, informativo).
+  - `pending_review` → "⚠️ Revisão Necessária" (âmbar, `bg-accent/15`, clickable — abre modal).
+  - Estados `approved`/`rejected`/`edited` e spinner `analyzing` mantidos.
+- **Botão global** renomeado de "Analisar IA" para "🧠 Analisar Documentos".
+- **`run_get_pending_reviews`** query atualizada de `"pending"` para `"pending_review"`.
+- **Resposta da API** agora inclui `confidence_score` (0-100), `auto_approved` (bool), e `ai_review_status`.
+
+### Documentação
+- **`ARCHITECTURE.md`**: secção "IA Híbrida" completamente reescrita com diagrama Mermaid do fluxo de threshold (confidence_score → auto_approved vs pending_review), tabela de estados visuais, e código do threshold.
+
+### Técnico
+- **Backend modificado** (1 ficheiro): `services/document_review.py` (AI_CONFIDENCE_THRESHOLD + lógica auto-approve + status values + confidence_score na resposta).
+- **Frontend modificado** (1 ficheiro): `components/S3FileManager.js` (3 sites de badges atualizados + botão global renomeado).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (0 erros); `eslint --quiet` ✓ (0 erros).
+
 ## [2026-07-25] — Pacote DJ: IA Human-in-the-Loop — Revisão de Documentos
 
 ### Adicionado

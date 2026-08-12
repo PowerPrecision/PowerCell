@@ -3442,3 +3442,35 @@ Stage Summary:
   - frontend/src/components/S3FileManager.js (state + 2 handlers + per-file BrainCircuit button + 15 badge blocks em 3 sites + modal mount)
   - ARCHITECTURE.md (secção HITL)
 - Resultado: (1) Consultor clica BrainCircuit num documento → IA analisa e guarda sugestões em suggested_* (não aplica). (2) Badge "Sugestões IA" aparece no ficheiro. (3) Click no badge abre DocumentReviewModal com Atual vs Sugerido (Nome, Categoria, Validade, Filename) + confiança. (4) Consultor seleciona campos e clica "Aplicar Selecionadas" (suggested_* → ai_*) ou "Rejeitar Tudo". (5) Auto-categorização em background mantida (paralela, sem HITL).
+
+
+---
+Task ID: Pacote DJ Híbrido (Sistema de Confiança — Zero-Touch + HITL)
+Agent: Main Agent (Z.ai Code Assistant) + 1 subagente Frontend
+Task: Evoluir o Pacote DJ para Arquitetura Híbrida — threshold de confiança (85%) com auto-aprovação para alta confiança e HITL para baixa confiança.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 9ba18688 = Pacote DJ anterior).
+- Lido document_review.py atual (508 linhas) — confirmou que guardava SEMPRE em suggested_* com status "pending".
+- Backend: document_review.py modificado:
+  - AI_CONFIDENCE_THRESHOLD = 85 constante.
+  - confidence_score = int(round(confidence * 100)) — conversão 0.0-1.0 → 0-100.
+  - Se >= 85: auto-aplica em BOTH suggested_* E ai_* + status "auto_approved" (Zero-Touch).
+  - Se < 85: apenas suggested_* + status "pending_review" (HITL).
+  - run_get_pending_reviews query: "pending" → "pending_review".
+  - Resposta API inclui confidence_score, auto_approved, ai_review_status.
+  - py_compile + flake8 0 erros.
+- Frontend (subagente): S3FileManager.js:
+  - 3 sites de badges atualizados: auto_approved (verde "✨ Auto-Aprovado"), pending_review (âmbar "⚠️ Revisão Necessária" clickable).
+  - Botão global renomeado para "🧠 Analisar Documentos".
+  - eslint --quiet 0 erros.
+- Documentação: ARCHITECTURE.md secção "IA Híbrida" reescrita com diagrama threshold + tabela estados visuais. CHANGELOG atualizado.
+- Verificação de tokens: 0 ocorrências no diff.
+
+Stage Summary:
+- 4 ficheiros modificados (1 backend + 1 frontend + 2 docs):
+  - backend/services/document_review.py (AI_CONFIDENCE_THRESHOLD=85 + auto-approve logic + status pending_review + confidence_score)
+  - frontend/src/components/S3FileManager.js (3 sites badges: auto_approved/pending_review + botão global renomeado)
+  - ARCHITECTURE.md (secção IA Híbrida reescrita)
+  - CHANGELOG.md
+- Resultado: (1) IA com confidence >= 85% → auto-aplica metadados (Zero-Touch), badge verde "✨ Auto-Aprovado". (2) IA com confidence < 85% → sugestões pendentes, badge âmbar "⚠️ Revisão Necessária" (clickable abre modal HITL). (3) Botão global "🧠 Analisar Documentos". (4) Docs atualizadas com fluxo híbrido.
