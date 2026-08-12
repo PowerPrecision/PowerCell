@@ -101,9 +101,12 @@ export default function CreditTab({
                       </Card>
 
                       {/* ====== Avaliação Bancária (Fase 3) ====== */}
+                      {/* PACOTE DH — tornou-se colapsável (progressive disclosure) */}
                       <Card className={`border-l-4 border-l-emerald-500 ${editingCardId !== 'credit_avaliacao' ? 'read-only-card' : ''}`}>
                         <CardContent className="pt-4">
-                          <CardHeaderWithEdit title="Avaliação Bancária" cardKey="credit_avaliacao" icon={Building2} canEdit={canEditCredit} />
+                          <CardHeaderWithEdit title="Avaliação Bancária" cardKey="credit_avaliacao" icon={Building2} canEdit={canEditCredit} collapsible />
+                          {!shouldCardBeCollapsed('credit_avaliacao') && (
+                          <>
                           <div className="grid grid-cols-1 sm:grid-cols-2 md:grid-cols-3 gap-4">
                             <div className="space-y-1">
                               <Label className="text-xs text-muted-foreground">Valor da Avaliação (€)</Label>
@@ -155,6 +158,8 @@ export default function CreditTab({
                                 Valor da avaliação ({safeNumber(creditData.valuation_value).toLocaleString('pt-PT')}€) é inferior ao valor do imóvel ({safeNumber(realEstateData.valor_imovel).toLocaleString('pt-PT')}€). Diferença de {safeNumber(Math.abs(realEstateData.valor_imovel - creditData.valuation_value)).toLocaleString('pt-PT')}€.
                               </p>
                             </div>
+                          )}
+                          </>
                           )}
                         </CardContent>
                       </Card>

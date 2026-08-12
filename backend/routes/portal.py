@@ -219,3 +219,10 @@ async def request_portal_visit(
 @router.get("/visits")
 async def get_portal_visits(client_data: dict = Depends(get_current_client)):
     return await run_get_portal_visits(client_data)
+
+
+@router.get("/events")
+async def get_portal_events(client_data: dict = Depends(get_current_client)):
+    """PACOTE DH — Eventos/prazos visíveis ao cliente no Portal."""
+    from services.portal_events import run_get_portal_events
+    return await run_get_portal_events(client_data)

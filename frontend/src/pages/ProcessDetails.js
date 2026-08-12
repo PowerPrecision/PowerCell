@@ -155,6 +155,10 @@ import {
 } from "./processDetails/processFormCleaners";
 import { validateNIF } from "../utils/validateNIF";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
+// PACOTE DH — Sheet para a Calculadora de Crédito Habitação (Simulações dropdown)
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../components/ui/sheet";
+// PACOTE DH — MortgageSimulator reutilizado do Pacote DD (Calculadoras globais)
+import MortgageSimulator from "../components/calculators/MortgageSimulator";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateProcessDetailsQueries } from "../lib/queryClient";
@@ -220,6 +224,8 @@ const ProcessDetails = () => {
   // Refs para os triggers das calculadoras (desacopladas do Dropdown — Pacote AF)
   const dstiRef = useRef(null);
   const riskRef = useRef(null);
+  // PACOTE DH — Sheet da Calculadora de Crédito Habitação (Simulações dropdown)
+  const [mortgageSheetOpen, setMortgageSheetOpen] = useState(false);
   const [deadlines, setDeadlines] = useState([]);
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
@@ -276,6 +282,10 @@ const ProcessDetails = () => {
     description: "",
     due_date: "",
     priority: "medium",
+    // PACOTE DH — Agenda evolution: type / reminder_time / visible_to_client
+    type: "deadline",
+    reminder_time: null,
+    visible_to_client: false,
   });
   const [selectedDate, setSelectedDate] = useState(null);
   
@@ -1277,10 +1287,23 @@ const ProcessDetails = () => {
         description: deadlineForm.description,
         due_date: selectedDate && isValid(selectedDate) ? format(selectedDate, "yyyy-MM-dd") : null,
         priority: deadlineForm.priority,
+        // PACOTE DH — Agenda evolution: novos campos persistidos no backend
+        type: deadlineForm.type || "deadline",
+        reminder_time: deadlineForm.reminder_time ?? null,
+        visible_to_client: !!deadlineForm.visible_to_client,
       });
       toast.success("Prazo criado com sucesso!");
       setIsDeadlineDialogOpen(false);
-      setDeadlineForm({ title: "", description: "", due_date: "", priority: "medium" });
+      // PACOTE DH — reset inclui os novos campos do formulário Agenda
+      setDeadlineForm({
+        title: "",
+        description: "",
+        due_date: "",
+        priority: "medium",
+        type: "deadline",
+        reminder_time: null,
+        visible_to_client: false,
+      });
       setSelectedDate(null);
     } catch {
       toast.error("Erro ao criar prazo");
@@ -1437,6 +1460,39 @@ const ProcessDetails = () => {
         // Credenciais de Portais Oficiais (2º proponente) — mesma lógica.
         return !titular2Data?.portal_financas_utilizador && !titular2Data?.portal_financas_senha &&
                !titular2Data?.seg_social_utilizador && !titular2Data?.seg_social_senha;
+      // PACOTE DH — novos casos: cartões que antes eram sempre expandidos
+      // (mesmo vazios). Agora colapsam automaticamente quando não têm dados.
+      case 'financial_situacao':
+        return !financialData?.efetivo && !financialData?.precisa_vender_casa &&
+               !financialData?.fiador && !financialData?.creditos_existentes &&
+               !financialData?.prestacao_creditos_mensal &&
+               !financialData?.acesso_portal_financas && !financialData?.chave_movel_digital;
+      case 'financial_profissional':
+        return !financialData?.employment_type && !financialData?.trabalha_estrangeiro &&
+               !financialData?.employment_duration && !financialData?.employer_name &&
+               !financialData?.employer_nif && !financialData?.categoria_profissional &&
+               !financialData?.subsidiario_alimentacao && !financialData?.data_referencia;
+      case 'realestate_caracteristicas':
+        return !realEstateData?.tipo_imovel && !realEstateData?.num_quartos &&
+               !realEstateData?.tipologia && !realEstateData?.valor_imovel &&
+               !realEstateData?.valor_patrimonial && !realEstateData?.certificado_energetico &&
+               !realEstateData?.area_bruta && !realEstateData?.area_util &&
+               !realEstateData?.fracao && !realEstateData?.artigo_matricial;
+      case 'realestate_localizacao':
+        return !realEstateData?.localizacao && !realEstateData?.area_pretendida &&
+               !realEstateData?.valor_maximo_imovel && !realEstateData?.finalidade &&
+               !realEstateData?.codigo_postal && !realEstateData?.localidade &&
+               !realEstateData?.freguesia && !realEstateData?.concelho &&
+               !(Array.isArray(realEstateData?.caracteristicas) && realEstateData.caracteristicas.length > 0);
+      case 'realestate_cpcv':
+        return !financialData?.valor_entrada && !realEstateData?.data_sinal &&
+               !realEstateData?.data_escritura && !realEstateData?.data_balcao;
+      case 'realestate_vendedor':
+        return !realEstateData?.vendedor_nome && !realEstateData?.vendedor_nif &&
+               !realEstateData?.vendedor_contacto && !realEstateData?.vendedor_email;
+      case 'credit_avaliacao':
+        return !creditData?.valuation_value && !creditData?.valuation_date &&
+               !creditData?.valuation_bank && !creditData?.valuation_notes;
       default:
         return false;
     }
@@ -1893,6 +1949,14 @@ const ProcessDetails = () => {
                       <TrendingUp className="h-4 w-4" />
                       Calculadora de Risco
                     </DropdownMenuItem>
+                    {/* PACOTE DH — Calculadora de Crédito Habitação (MortgageSimulator) */}
+                    <DropdownMenuItem
+                      className="cursor-pointer gap-2 text-emerald-600"
+                      onSelect={() => setMortgageSheetOpen(true)}
+                    >
+                      <Home className="h-4 w-4" />
+                      Simulação de Crédito Habitação
+                    </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
 
@@ -1922,6 +1986,24 @@ const ProcessDetails = () => {
                     }}
                   />
                 </div>
+
+                {/* PACOTE DH — Sheet da Calculadora de Crédito Habitação.
+                    Aberto a partir do item "Simulação de Crédito Habitação"
+                    no Dropdown de Simulações. Reutiliza o MortgageSimulator
+                    do Pacote DD (Calculadoras globais). */}
+                <Sheet open={mortgageSheetOpen} onOpenChange={setMortgageSheetOpen}>
+                  <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
+                    <SheetHeader>
+                      <SheetTitle className="flex items-center gap-2">
+                        <Home className="h-5 w-5" />
+                        Simulação de Crédito Habitação
+                      </SheetTitle>
+                    </SheetHeader>
+                    <div className="mt-4">
+                      <MortgageSimulator />
+                    </div>
+                  </SheetContent>
+                </Sheet>
               </>
             )}
             
@@ -2060,7 +2142,8 @@ const ProcessDetails = () => {
                     </TabsTrigger>
                     <TabsTrigger value="prazos" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
                       <CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Prazos</span>
+                      {/* PACOTE DH — Tab label evoluído de "Prazos" para "Agenda" */}
+                      <span className="hidden sm:inline">Agenda</span>
                     </TabsTrigger>
                     <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
                       <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />

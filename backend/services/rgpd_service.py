@@ -415,15 +415,15 @@ async def send_rgpd_email(
         True se enviado com sucesso
     """
     import os
-    # Usar variável de ambiente ou URL de produção
+    # PACOTE DI — URL de produção actualizada para Precision Crédito.
     if base_url is None:
-        base_url = os.environ.get("FRONTEND_URL", "https://www.powercell.pt")
+        base_url = os.environ.get("FRONTEND_URL", "https://www.precisioncredito.pt")
     
     # Construir link temporário
     rgpd_link = f"{base_url}/rgpd/{token}"
     
-    # Template do email
-    subject = "Solicitação de Assinatura RGPD - PowerCell"
+    # PACOTE DI — marca client-facing actualizada para Precision Crédito.
+    subject = "Solicitação de Assinatura RGPD - Precision Crédito"
     
     # Custom message from staff
     custom_section = ""
@@ -439,7 +439,7 @@ Atenção: deverá assinar num máximo de 24h.
 PREENCHER RGPD: {rgpd_link}
 
 Atenciosamente,
-Equipa PowerCell
+Equipa Precision Crédito
 """
     
     # Custom message section for HTML
@@ -480,7 +480,7 @@ Equipa PowerCell
     <hr style="border: none; border-top: 1px solid #ddd; margin: 30px 0;">
     
     <p>Atenciosamente,<br>
-    <strong>Equipa PowerCell</strong></p>
+    <strong>Equipa Precision Crédito</strong></p>
 </body>
 </html>
 """
@@ -726,7 +726,8 @@ async def _get_rendered_rgpd_text(
     # estão presentes no RGPD_DEFAULT_TEMPLATE (secção 1. RESPONSÁVEL).
     # Anteriormente estes placeholders NÃO eram substituídos no RGPD
     # (só na minuta), ficando literais no texto.
-    empresa_nome = "Power Real Estate, Lda."
+    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
+    empresa_nome = "Precision Crédito"
     empresa_morada = ""
     empresa_contacto = ""
     try:
@@ -791,8 +792,8 @@ async def _get_rendered_minuta_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # Obter dados da empresa
-    empresa_nome = "Power Real Estate, Lda."
+    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
+    empresa_nome = "Precision Crédito"
     empresa_morada = ""
     empresa_contacto = ""
     try:
@@ -1028,24 +1029,16 @@ def _build_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
     c.line(margin_left, y, page_width - margin_right, y)
     y -= line_height + 4
     
-    # Date, location and IP
+    # Date and location (PACOTE DI — Endereço IP removido do PDF;
+    # mantém-se no email staff `send_rgpd_signed_email` para auditoria).
     data_assinatura = consent_data.get("data_assinatura", "")
     loc = consent_data.get("localidade", "")
-    client_ip = consent_data.get("client_ip", "")
     if loc and data_assinatura:
         # Format: "Lisboa, 24/04/2026"
         date_only = data_assinatura.split(" ")[0] if " " in data_assinatura else data_assinatura
         c.setFont(font_name, font_size)
         try:
             c.drawString(margin_left, y, f"{loc}, {date_only}")
-        except Exception:
-            pass
-        y -= line_height
-    # [Pacote X] Incluir IP do cliente no PDF para auditoria
-    if client_ip and client_ip != "unknown":
-        c.setFont("Helvetica", font_size - 1)
-        try:
-            c.drawString(margin_left, y, f"Endereco IP: {client_ip}")
         except Exception:
             pass
         y -= line_height

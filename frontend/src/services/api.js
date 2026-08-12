@@ -41,6 +41,8 @@
 import axios from "axios";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+// PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
+import { isPublicRoute } from "../utils/publicRoutes";
 
 // ====================================================================
 // CONFIGURAÇÃO
@@ -290,10 +292,15 @@ api.interceptors.response.use(
       // refresh_token ainda é válido.
       // ============================================================
       const isRefreshCall = config.url?.includes("/auth/refresh");
-      const isOnPortalForRefresh = window.location.pathname.startsWith("/portal");
+      // PACOTE DI — todas as rotas públicas dispensam refresh + redirect.
+      // Não tentamos refresh silencioso em /portal, /rgpd, /upload, /download
+      // porque essas rotas usam tokens próprios (URL/magic link) e não o
+      // token de staff global — o refresh seria inútil e o redirect quebraria
+      // a experiência pública.
+      const isOnPublicRouteForRefresh = isPublicRoute();
       const hasRefreshToken = !!localStorage.getItem("refreshToken");
 
-      if (!isLoginAttempt && !isRefreshCall && !isOnPortalForRefresh && hasRefreshToken && !config._retry) {
+      if (!isLoginAttempt && !isRefreshCall && !isOnPublicRouteForRefresh && hasRefreshToken && !config._retry) {
         config._retry = true;
         const newToken = await getRefreshedToken();
         if (newToken) {
@@ -307,14 +314,16 @@ api.interceptors.response.use(
 
       if (!isLoginAttempt) {
         // ============================================================
-        // PORTAL: Não redirecionar utilizadores do portal para /login
-        // O portal tem o seu próprio sistema de autenticação (portal_token).
-        // Se um token de staff expirou enquanto o utilizador está no
-        // portal, limpar apenas o token de staff sem redirecionar.
+        // PACOTE DI — ROTAS PÚBLICAS: Não redirecionar utilizadores em
+        // /portal, /rgpd, /upload, /download para /login.
+        // Estas rotas têm sistemas de auth próprios (portal_token, URL token,
+        // magic link). Se um token de staff expirou enquanto o utilizador
+        // está numa rota pública, limpar apenas o token de staff sem
+        // redirecionar — a rota pública continua a funcionar com o seu token.
         // ============================================================
-        const isOnPortal = window.location.pathname.startsWith('/portal');
+        const isOnPublicRoute = isPublicRoute();
 
-        if (!isOnPortal) {
+        if (!isOnPublicRoute) {
           toast.error("Sessão Expirada", {
             description: "A sua sessão expirou. Por favor, faça login novamente.",
           });
@@ -325,8 +334,8 @@ api.interceptors.response.use(
         localStorage.removeItem("user");
         localStorage.removeItem("originalToken");
 
-        // Redirecionar apenas se NÃO estiver no portal
-        if (!isOnPortal) {
+        // Redirecionar apenas se NÃO estiver numa rota pública
+        if (!isOnPublicRoute) {
           setTimeout(() => {
             window.location.href = "/login";
           }, 1500);

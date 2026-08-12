@@ -1,6 +1,12 @@
 /**
  * DeadlinesTab — extraído de ProcessDetails.js (side-tab "Prazos").
  * Calendário + lista de prazos do processo, com diálogo de criação.
+ *
+ * PACOTE DH — evolução para "Agenda": cada item passa a ter:
+ *   - type: "deadline" (Prazo Limite) | "event" (Marcação)
+ *   - reminder_time: antecedência do lembrete ("1h", "1d", "3d", "7d" ou null)
+ *   - visible_to_client: se o cliente vê este item no Portal do Cliente
+ * O tab label passou de "Prazos" para "Agenda" no ProcessDetails.js.
  */
 import { Button } from "../../ui/button";
 import { Input } from "../../ui/input";
@@ -8,6 +14,10 @@ import { Label } from "../../ui/label";
 import { Textarea } from "../../ui/textarea";
 import { Calendar } from "../../ui/calendar";
 import { ScrollArea } from "../../ui/scroll-area";
+import { Switch } from "../../ui/switch";
+import { Badge } from "../../ui/badge";
+// PACOTE DH — EmptyState canónico substitui o <p>Sem prazos</p> ad-hoc
+import { EmptyState } from "../../ui/EmptyState";
 import {
   Select,
   SelectContent,
@@ -25,7 +35,9 @@ import {
   DialogTrigger,
 } from "../../ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "../../ui/popover";
-import { Plus, Calendar as CalendarIcon, Check, Trash2 } from "lucide-react";
+// PACOTE DH — ícones Bell (lembrete) e Eye (visível no portal);
+// CalendarClock para o EmptyState canónico.
+import { Plus, Calendar as CalendarIcon, Check, Trash2, Bell, Eye, CalendarClock } from "lucide-react";
 import { format, isValid } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeString } from "../../../utils/safeString";
@@ -48,7 +60,8 @@ export default function DeadlinesTab({
   return (
     <>
       <div className="flex items-center justify-between mb-4">
-        <h3 className="font-medium">Prazos</h3>
+        {/* PACOTE DH — título evolui de "Prazos" para "Agenda" */}
+        <h3 className="font-medium">Agenda</h3>
         {canManageDeadlines && (
           <Dialog open={isDeadlineDialogOpen} onOpenChange={setIsDeadlineDialogOpen}>
             <DialogTrigger asChild>
@@ -58,9 +71,9 @@ export default function DeadlinesTab({
             </DialogTrigger>
             <DialogContent aria-describedby="deadline-dialog-description" className="sm:max-w-md w-[calc(100vw-2rem)]">
               <DialogHeader>
-                <DialogTitle>Novo Prazo</DialogTitle>
+                <DialogTitle>Novo Prazo / Evento</DialogTitle>
                 <DialogDescription id="deadline-dialog-description">
-                  Crie um novo prazo para este processo.
+                  Crie um novo prazo ou marcação para este processo.
                 </DialogDescription>
               </DialogHeader>
               <div className="space-y-4">
@@ -107,9 +120,62 @@ export default function DeadlinesTab({
                     </SelectContent>
                   </Select>
                 </div>
+
+                {/* PACOTE DH — Tipo: Prazo (deadline) ou Marcação (event) */}
+                <div className="space-y-2">
+                  <Label>Tipo</Label>
+                  <Select
+                    value={deadlineForm.type || "deadline"}
+                    onValueChange={(value) => setDeadlineForm({ ...deadlineForm, type: value })}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="deadline">Prazo Limite</SelectItem>
+                      <SelectItem value="event">Marcação</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* PACOTE DH — Lembrete: antecedência do alerta */}
+                <div className="space-y-2">
+                  <Label>Lembrete</Label>
+                  <Select
+                    value={deadlineForm.reminder_time || "none"}
+                    onValueChange={(value) => setDeadlineForm({
+                      ...deadlineForm,
+                      reminder_time: value === "none" ? null : value,
+                    })}
+                  >
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Sem lembrete</SelectItem>
+                      <SelectItem value="1h">1 hora antes</SelectItem>
+                      <SelectItem value="1d">1 dia antes</SelectItem>
+                      <SelectItem value="3d">3 dias antes</SelectItem>
+                      <SelectItem value="7d">7 dias antes</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {/* PACOTE DH — Visível no Portal do Cliente */}
+                <div className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30">
+                  <Switch
+                    id="visible-to-client"
+                    checked={!!deadlineForm.visible_to_client}
+                    onCheckedChange={(checked) => setDeadlineForm({ ...deadlineForm, visible_to_client: checked })}
+                  />
+                  <div className="space-y-0.5">
+                    <Label htmlFor="visible-to-client" className="text-sm cursor-pointer">
+                      Visível no Portal do Cliente
+                    </Label>
+                    <p className="text-xs text-muted-foreground">
+                      O cliente verá este evento na sua agenda do Portal.
+                    </p>
+                  </div>
+                </div>
               </div>
               <DialogFooter>
-                <Button onClick={handleCreateDeadline}>Criar Prazo</Button>
+                <Button onClick={handleCreateDeadline}>Criar</Button>
               </DialogFooter>
             </DialogContent>
           </Dialog>
@@ -129,7 +195,12 @@ export default function DeadlinesTab({
 
       <ScrollArea className="h-[200px]">
         {deadlines.length === 0 ? (
-          <p className="text-center text-muted-foreground text-sm py-4">Sem prazos</p>
+          /* PACOTE DH — EmptyState canónico substitui o <p>Sem prazos</p> */
+          <EmptyState
+            icon={CalendarClock}
+            title="Sem eventos"
+            message="Ainda não há prazos ou marcações para este processo."
+          />
         ) : (
           <div className="space-y-2">
             {deadlines.map((deadline) => (
@@ -137,27 +208,51 @@ export default function DeadlinesTab({
                 key={deadline.id}
                 className={`flex items-center justify-between p-2 rounded-md ${deadline.completed ? "bg-muted/30" : "bg-muted/50"}`}
               >
-                <div className="flex items-center gap-2">
+                <div className="flex items-center gap-2 min-w-0 flex-1">
                   <button
                     onClick={() => handleToggleDeadline(deadline)}
-                    className={`h-4 w-4 rounded border flex items-center justify-center ${
+                    className={`h-4 w-4 rounded border flex items-center justify-center shrink-0 ${
                       deadline.completed ? "bg-emerald-500 border-emerald-500 text-white" : "border-slate-300"
                     }`}
                     disabled={!canManageDeadlines}
                   >
                     {deadline.completed && <Check className="h-3 w-3" />}
                   </button>
-                  <div>
-                    <p className={`text-sm ${deadline.completed ? "line-through text-muted-foreground" : ""}`}>
+                  {/* PACOTE DH — Badge a distinguir tipo: Evento vs Prazo */}
+                  <Badge
+                    variant={deadline.type === 'event' ? 'secondary' : 'outline'}
+                    className="shrink-0 text-[10px] px-1.5 py-0"
+                  >
+                    {deadline.type === 'event' ? 'Evento' : 'Prazo'}
+                  </Badge>
+                  <div className="min-w-0 flex-1">
+                    <p className={`text-sm truncate ${deadline.completed ? "line-through text-muted-foreground" : ""}`}>
                       {safeString(deadline.title)}
                     </p>
                     <p className="text-xs text-muted-foreground font-mono">
                       {safeFormat(deadline.due_date, "dd/MM/yyyy")}
                     </p>
                   </div>
+                  {/* PACOTE DH — ícones indicadores (lembrete / visível no portal) */}
+                  <div className="flex items-center gap-1 shrink-0">
+                    {deadline.reminder_time && (
+                      <Bell
+                        className="h-3.5 w-3.5 text-muted-foreground"
+                        aria-label={`Lembrete: ${deadline.reminder_time}`}
+                        title={`Lembrete: ${deadline.reminder_time}`}
+                      />
+                    )}
+                    {deadline.visible_to_client && (
+                      <Eye
+                        className="h-3.5 w-3.5 text-muted-foreground"
+                        aria-label="Visível no Portal do Cliente"
+                        title="Visível no Portal do Cliente"
+                      />
+                    )}
+                  </div>
                 </div>
                 {canManageDeadlines && (
-                  <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => handleDeleteDeadline(deadline.id)}>
+                  <Button variant="ghost" size="icon" className="h-8 w-8 shrink-0" onClick={() => handleDeleteDeadline(deadline.id)}>
                     <Trash2 className="h-3 w-3 text-destructive" />
                   </Button>
                 )}

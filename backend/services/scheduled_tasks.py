@@ -161,47 +161,205 @@ class ScheduledTasksService:
     
     async def check_upcoming_deadlines(self) -> int:
         """
-        Verificar prazos/eventos nas próximas 24 horas.
-        Criar notificações para os participantes.
+        PACOTE DH — Verificar prazos/eventos próximos e enviar lembretes.
+
+        Correcções vs versão anterior (silenciosamente broken):
+        - Query usa `due_date` (campo correcto do schema) em vez de `date`.
+        - Itera `assigned_user_ids` (campo correcto) em vez de `participants`.
+        - Branch por `type`:
+            * "deadline" → DEADLINE_APPROACHING (1h/3h/1d/3d/7d antes, conforme reminder_time)
+              + DEADLINE_MISSED (atrasado).
+            * "event" → EVENT_REMINDER respeitando `reminder_time`.
+        - Respeita `reminder_time` para ambos os tipos (defaults: deadline=["1d","3d"],
+          event=["1h","1d"]).
+        - Não reenvia para o mesmo deadline+reminder window (array `sent_reminders` no doc).
         """
-        logger.info("A verificar prazos próximos...")
-        
+        logger.info("A verificar prazos/eventos próximos...")
+
         today = datetime.now(timezone.utc)
-        tomorrow = today + timedelta(days=1)
-        
-        # Buscar deadlines próximos
+
+        # PACOTE DH — Buscar deadlines não concluídos com due_date. Janela ampla
+        # para cobrir reminder_time="7d" + deadlines recentemente atrasados.
+        # `due_date` é string ISO, comparável lexicograficamente.
+        window_start_iso = (today - timedelta(days=2)).isoformat()
+        window_end_iso = (today + timedelta(days=8)).isoformat()
+
+        # PACOTE DH — query corrigida: campo é `due_date` (não `date`).
         deadlines = await self.db.deadlines.find({
-            "date": {
-                "$gte": today.isoformat(),
-                "$lte": tomorrow.isoformat()
-            }
+            "due_date": {"$exists": True, "$ne": None, "$gte": window_start_iso, "$lte": window_end_iso},
+            "completed": {"$ne": True},
         }, {"_id": 0}).to_list(500)
-        
+
+        # PACOTE DH — parsing de reminder_time para timedelta.
+        REMINDER_DELTAS = {
+            "1h": timedelta(hours=1),
+            "3h": timedelta(hours=3),
+            "1d": timedelta(days=1),
+            "3d": timedelta(days=3),
+            "7d": timedelta(days=7),
+        }
+
         notifications_created = 0
-        
+
+        # Import lazy para evitar dependência circular.
+        try:
+            from services.notification_service import send_notification_with_preference_check
+        except Exception:  # pragma: no cover — fallback defensivo
+            send_notification_with_preference_check = None
+
         for deadline in deadlines:
-            participants = deadline.get("participants", [])
-            
-            for user_id in participants:
-                # Verificar se já existe notificação similar
-                existing = await self.db.notifications.find_one({
-                    "user_id": user_id,
-                    "type": "deadline_reminder",
-                    "message": {"$regex": deadline.get("title", "")},
-                    "created_at": {"$gte": (today - timedelta(hours=12)).isoformat()}
-                })
-                
-                if not existing:
-                    await self.create_notification(
-                        user_id=user_id,
-                        message=f"Lembrete: {deadline.get('title', 'Evento')} - amanhã",
-                        notification_type="deadline_reminder",
-                        process_id=deadline.get("process_id"),
-                        link="/admin?tab=calendar"
+            due_date_str = deadline.get("due_date")
+            if not due_date_str:
+                continue
+
+            try:
+                due_date = datetime.fromisoformat(
+                    str(due_date_str).replace("Z", "+00:00")
+                )
+            except (ValueError, TypeError):
+                continue
+
+            # Garantir tz-aware para comparação cronológica.
+            if due_date.tzinfo is None:
+                due_date = due_date.replace(tzinfo=timezone.utc)
+
+            # PACOTE DH — tipo do item da agenda (default "deadline" para retrocompat).
+            deadline_type = deadline.get("type") or "deadline"
+
+            # PACOTE DH — reminder_time: explícito > default por tipo.
+            reminder_time_cfg = deadline.get("reminder_time")
+            if reminder_time_cfg and isinstance(reminder_time_cfg, list):
+                reminder_times = list(reminder_time_cfg)
+            elif deadline_type == "event":
+                reminder_times = ["1h", "1d"]
+            else:
+                reminder_times = ["1d", "3d"]
+
+            # PACOTE DH — campo correcto: assigned_user_ids (não participants).
+            assigned_user_ids = deadline.get("assigned_user_ids", []) or []
+            if not assigned_user_ids:
+                continue
+
+            sent_reminders = list(deadline.get("sent_reminders", []) or [])
+            new_sent: List[str] = []
+            title = deadline.get("title", "Evento")
+            process_id = deadline.get("process_id")
+            deadline_id = deadline.get("id")
+
+            # PACOTE DH — Pré-lembretes (1h/3h/1d/3d/7d antes da due_date).
+            for rt in reminder_times:
+                delta = REMINDER_DELTAS.get(rt)
+                if delta is None:
+                    continue
+                reminder_key = f"pre:{rt}"
+                if reminder_key in sent_reminders or reminder_key in new_sent:
+                    continue
+
+                reminder_moment = due_date - delta
+                # Dispara quando now >= (due_date - delta) e ainda não passou a due_date.
+                if today >= reminder_moment and today < due_date:
+                    if rt.endswith("h"):
+                        qty = int(rt[:-1])
+                        unidade = "hora(s)"
+                    else:
+                        qty = int(rt[:-1])
+                        unidade = "dia(s)"
+                    message = (
+                        f"⏰ Lembrete ({rt}): {title} — em {qty} {unidade}"
                     )
-                    notifications_created += 1
-        
-        logger.info(f"Prazos próximos: {notifications_created} notificações criadas")
+                    notif_type = (
+                        "event_reminder" if deadline_type == "event"
+                        else "deadline_approaching"
+                    )
+                    is_urgent = rt in ("1h", "3h")
+
+                    for user_id in assigned_user_ids:
+                        await self.create_notification(
+                            user_id=user_id,
+                            message=message,
+                            notification_type=notif_type,
+                            process_id=process_id,
+                            link="/admin?tab=calendar",
+                        )
+                        notifications_created += 1
+
+                        # Email via verificação de preferências.
+                        if send_notification_with_preference_check is not None:
+                            try:
+                                user_doc = await self.db.users.find_one(
+                                    {"id": user_id}, {"_id": 0, "email": 1}
+                                )
+                                if user_doc and user_doc.get("email"):
+                                    await send_notification_with_preference_check(
+                                        user_doc["email"],
+                                        f"Lembrete: {title}",
+                                        message,
+                                        notification_type=notif_type,
+                                        is_urgent=is_urgent,
+                                    )
+                            except Exception as email_err:
+                                logger.warning(
+                                    f"[deadlines] email reminder falhou "
+                                    f"para user_id={user_id}: {email_err}"
+                                )
+
+                    new_sent.append(reminder_key)
+
+            # PACOTE DH — DEADLINE_MISSED para deadlines atrasados (eventos não disparam missed).
+            if deadline_type == "deadline" and today >= due_date:
+                missed_key = "post:missed"
+                if missed_key not in sent_reminders and missed_key not in new_sent:
+                    days_late = (today - due_date).days
+                    message = (
+                        f"🚨 PRAZO ATRASADO ({days_late} dia(s)): {title}"
+                    )
+                    for user_id in assigned_user_ids:
+                        await self.create_notification(
+                            user_id=user_id,
+                            message=message,
+                            notification_type="deadline_missed",
+                            process_id=process_id,
+                            link="/admin?tab=calendar",
+                        )
+                        notifications_created += 1
+
+                        if send_notification_with_preference_check is not None:
+                            try:
+                                user_doc = await self.db.users.find_one(
+                                    {"id": user_id}, {"_id": 0, "email": 1}
+                                )
+                                if user_doc and user_doc.get("email"):
+                                    await send_notification_with_preference_check(
+                                        user_doc["email"],
+                                        f"URGENTE: Prazo Atrasado - {title}",
+                                        message,
+                                        notification_type="deadline_missed",
+                                        is_urgent=True,
+                                    )
+                            except Exception as email_err:
+                                logger.warning(
+                                    f"[deadlines] email missed falhou "
+                                    f"para user_id={user_id}: {email_err}"
+                                )
+
+                    new_sent.append(missed_key)
+
+            # PACOTE DH — Persistir sent_reminders atomicamente (evita reenvio).
+            if new_sent:
+                try:
+                    await self.db.deadlines.update_one(
+                        {"id": deadline_id},
+                        {"$addToSet": {"sent_reminders": {"$each": new_sent}}},
+                    )
+                except Exception as persist_err:
+                    logger.warning(
+                        f"[deadlines] Falha ao persistir sent_reminders "
+                        f"para deadline_id={deadline_id}: {persist_err}"
+                    )
+
+        logger.info(
+            f"Prazos/eventos próximos: {notifications_created} notificações criadas"
+        )
         return notifications_created
     
     async def check_tasks_due_soon(self) -> int:

@@ -28,6 +28,11 @@ import os
 import re
 from datetime import datetime, timezone
 
+# PACOTE DI — HTML parsing (lxml) + sanitização (bleach) para conversão
+# do conteúdo HTML do SmartRichEditor (ReactQuill) em Flowables do reportlab.
+from lxml import html as lxml_html
+import bleach
+
 from fastapi import HTTPException
 
 from database import db
@@ -36,10 +41,24 @@ from services.process_service import decrypt_sensitive_data
 # Python não enforce privacy; importação cross-module é aceitável aqui.
 # `_get_rendered_rgpd_text` renderiza o template RGPD ativo com os
 # placeholders substituídos pelos dados do cliente (ou linhas em branco).
-from services.rgpd_service import _get_rendered_rgpd_text
+# PACOTE DI — `_get_rendered_minuta_text` (mesmo padrão) para a Minuta.
+from services.rgpd_service import (
+    _get_rendered_rgpd_text,
+    _get_rendered_minuta_text,
+)
 from services.rgpd_helpers import _add_process_activity
 
 logger = logging.getLogger(__name__)
+
+
+# PACOTE DI — Tags permitidas no conteúdo HTML vindo do SmartRichEditor.
+# Permite apenas tags seguras e suportadas pelo conversor de Flowables.
+_PACOTE_DI_ALLOWED_TAGS = [
+    "p", "br", "strong", "b", "em", "i", "u",
+    "ul", "ol", "li",
+    "h1", "h2", "h3", "h4", "h5", "h6",
+    "div", "span",
+]
 
 
 # ---------------------------------------------------------------------------
@@ -131,7 +150,248 @@ CONSENT_OPTIONS_DG = [
 ]
 
 
-def _build_prefilled_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
+# ---------------------------------------------------------------------------
+# PACOTE DI — _html_to_flowables
+#
+# Converte HTML (produzido pelo SmartRichEditor/ReactQuill na admin) em
+# Flowables do reportlab. Antes deste helper, o `_build_prefilled_rgpd_pdf`
+# fazia `_escape_xml(line)` que ESCAPAVA todas as tags (`<p>` virava
+# `&lt;p&gt;`) — o user via o markup literal no PDF e a formatação era
+# perdida. Agora:
+#   - `<p>` → Paragraph (um por tag)
+#   - `<h1>`-`<h6>` → Paragraph com header style (font maior, bold)
+#   - `<ul>`/`<ol>` → ListFlowable com ListItem por `<li>`
+#   - `<strong>`/`<b>` → `<b>` (reportlab nativo)
+#   - `<em>`/`<i>` → `<i>`
+#   - `<u>` → `<u>`
+#   - `<br>` standalone → Spacer
+#   - `<div>`/`<span>` → recurse into children
+#   - texto nu (sem wrapper) → Paragraph com body style
+# Sanitiza com `bleach.clean` (defesa em profundidade — remove `<script>`,
+# `on*` attributes, etc). Faz fallback a plain-text split (`\n`) quando o
+# texto NÃO contém tags HTML — backward-compat com `RGPD_DEFAULT_TEMPLATE`
+# que é plain-text.
+# ---------------------------------------------------------------------------
+def _pacote_di_serialize_inline(el) -> str:
+    """Serializa o conteúdo inline de um elemento lxml para uma string
+    HTML compatível com reportlab Paragraph (<b>, <i>, <u>, <br/>)."""
+    if el is None:
+        return ""
+    parts = []
+    if el.text:
+        parts.append(_escape_xml(el.text))
+    for child in el.iterchildren():
+        # Ignorar comentários / PI (tag não-str)
+        if not isinstance(getattr(child, "tag", None), str):
+            if getattr(child, "tail", None):
+                parts.append(_escape_xml(child.tail))
+            continue
+        tag = child.tag.lower()
+        inner = _pacote_di_serialize_inline(child)
+        if tag in ("strong", "b"):
+            parts.append(f"<b>{inner}</b>")
+        elif tag in ("em", "i"):
+            parts.append(f"<i>{inner}</i>")
+        elif tag == "u":
+            parts.append(f"<u>{inner}</u>")
+        elif tag == "br":
+            parts.append("<br/>")
+        elif tag in ("p", "div"):
+            # Block dentro de inline — insere quebra
+            parts.append(inner)
+            parts.append("<br/>")
+        else:
+            # span, li, etc — conteúdo inline sem wrapper
+            parts.append(inner)
+        if getattr(child, "tail", None):
+            parts.append(_escape_xml(child.tail))
+    return "".join(parts)
+
+
+def _pacote_di_process_node(
+    el,
+    body_style,
+    section_style,
+    header_styles,
+):
+    """Processa um elemento lxml e devolve uma lista de Flowables.
+
+    Args:
+        el: elemento lxml (lxml.html.HtmlElement).
+        body_style: ParagraphStyle para texto normal.
+        section_style: ParagraphStyle para secções.
+        header_styles: dict {h1: style, h2: style, ...} para headers.
+    """
+    from reportlab.platypus import Paragraph, Spacer, ListFlowable, ListItem
+    from reportlab.lib.units import cm
+
+    flowables = []
+    if el is None:
+        return flowables
+
+    # Ignorar comentários / PI (tag não-str)
+    if not isinstance(getattr(el, "tag", None), str):
+        return flowables
+
+    tag = el.tag.lower()
+
+    if tag in ("h1", "h2", "h3", "h4", "h5", "h6"):
+        text = _pacote_di_serialize_inline(el)
+        if text.strip():
+            style = header_styles.get(tag, section_style)
+            flowables.append(Paragraph(text, style))
+    elif tag == "p":
+        text = _pacote_di_serialize_inline(el)
+        if text.strip():
+            flowables.append(Paragraph(text, body_style))
+        else:
+            flowables.append(Spacer(1, 0.15 * cm))
+    elif tag == "br":
+        flowables.append(Spacer(1, 0.25 * cm))
+    elif tag in ("ul", "ol"):
+        items = []
+        for li in el.iterchildren("li"):
+            li_text = _pacote_di_serialize_inline(li)
+            if li_text.strip():
+                items.append(
+                    ListItem(Paragraph(li_text, body_style))
+                )
+        if items:
+            bullet_type = "1" if tag == "ol" else "bullet"
+            flowables.append(
+                ListFlowable(
+                    items,
+                    bulletType=bullet_type,
+                    leftIndent=18,
+                    bulletFontName=body_style.fontName,
+                    bulletFontSize=body_style.fontSize,
+                )
+            )
+    elif tag in ("div", "span"):
+        # Block container — recurse into children
+        if el.text and el.text.strip():
+            flowables.append(
+                Paragraph(_escape_xml(el.text.strip()), body_style)
+            )
+        for child in el.iterchildren():
+            flowables.extend(
+                _pacote_di_process_node(
+                    child, body_style, section_style, header_styles
+                )
+            )
+    else:
+        # Tag desconhecida — tentar como Paragraph com conteúdo inline
+        text = _pacote_di_serialize_inline(el)
+        if text.strip():
+            flowables.append(Paragraph(text, body_style))
+    return flowables
+
+
+def _pacote_di_plain_text_to_flowables(text, body_style, section_style):
+    """Fallback plain-text: split por \\n (backward-compat com o
+    comportamento anterior — `RGPD_DEFAULT_TEMPLATE` é plain-text)."""
+    from reportlab.platypus import Paragraph, Spacer
+    from reportlab.lib.units import cm
+
+    flowables = []
+    for line in text.split("\n"):
+        line_stripped = line.strip()
+        if not line_stripped:
+            flowables.append(Spacer(1, 0.25 * cm))
+            continue
+        is_header = (
+            line_stripped[0].isdigit() and "." in line_stripped[:4]
+        ) or (line_stripped.isupper() and len(line_stripped) < 80)
+        style = section_style if is_header else body_style
+        flowables.append(Paragraph(_escape_xml(line_stripped), style))
+    return flowables
+
+
+def _html_to_flowables(html_text, styles, font_name):
+    """PACOTE DI — Converte HTML (SmartRichEditor) em Flowables reportlab.
+
+    Args:
+        html_text: String HTML ou plain-text.
+        styles: dict com chaves ``body``, ``section`` e ``headers``
+            (dict ``{h1: style, ...}``).
+        font_name: Nome da fonte registada (ex.: ``DejaVuSans``) para
+            criar header styles em falta.
+
+    Returns:
+        Lista de Flowables do reportlab.
+    """
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.units import cm
+
+    if not html_text:
+        return []
+
+    text_str = html_text if isinstance(html_text, str) else str(html_text)
+    body_style = styles.get("body")
+    section_style = styles.get("section") or body_style
+    raw_headers = styles.get("headers") or {}
+
+    # Garantir header styles h1-h6 (criar se em falta)
+    header_sizes = {"h1": 14, "h2": 13, "h3": 12, "h4": 11, "h5": 10, "h6": 10}
+    header_styles = {}
+    for level, size in header_sizes.items():
+        header_styles[level] = raw_headers.get(level) or ParagraphStyle(
+            f"PacoteDI_{level}",
+            parent=body_style,
+            fontName=font_name,
+            fontSize=size,
+            leading=size + 4,
+            spaceBefore=8,
+            spaceAfter=4,
+        )
+
+    # Detetar se contém tags HTML — se não, fallback plain-text
+    if "<" not in text_str or ">" not in text_str:
+        return _pacote_di_plain_text_to_flowables(
+            text_str, body_style, section_style
+        )
+
+    # PACOTE DI — Sanitizar com bleach (defesa em profundidade)
+    try:
+        cleaned = bleach.clean(
+            text_str,
+            tags=_PACOTE_DI_ALLOWED_TAGS,
+            attributes={},
+            strip=True,
+        )
+    except Exception as clean_err:
+        logger.warning(
+            "[PACOTE DI] bleach.clean falhou (%s) — a usar texto bruto",
+            clean_err,
+        )
+        cleaned = text_str
+
+    # PACOTE DI — Parse com lxml.html. Wrap num <div> para garantir
+    # root único (lxml.html.fromstring falha com fragments múltiplos).
+    try:
+        wrapped = f"<div>{cleaned}</div>"
+        tree = lxml_html.fromstring(wrapped)
+    except Exception as parse_err:
+        logger.warning(
+            "[PACOTE DI] lxml parse falhou (%s) — fallback plain-text",
+            parse_err,
+        )
+        return _pacote_di_plain_text_to_flowables(
+            text_str, body_style, section_style
+        )
+
+    flowables = []
+    # tree é o <div> wrapper — iterar os filhos directos
+    for el in tree.iterchildren():
+        flowables.extend(
+            _pacote_di_process_node(
+                el, body_style, section_style, header_styles
+            )
+        )
+    return flowables
+
+
+def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: dict) -> bytes:
     """
     PACOTE DG — Novo builder de PDF RGPD pré-preenchido para assinatura manual.
 
@@ -144,6 +404,8 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
 
     Args:
         rgpd_text: Template RGPD já renderizado (placeholders substituídos).
+        minuta_text: Template Minuta de Exclusividade já renderizado
+            (PACOTE DI — adicionado para incluir a Minuta após o RGPD).
         consent_data: Dict com nome, contribuinte, etc. (não usado directamente
             aqui porque o `rgpd_text` já tem os placeholders substituídos —
             mantém-se no signature para paridade com `_build_rgpd_pdf`).
@@ -258,19 +520,19 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
 
     # 2. Renderizar o template dinâmico (respeita edição do admin)
     # O `rgpd_text` já tem placeholders substituídos por `_get_rendered_rgpd_text`.
-    # Linhas vazias → Spacer; outras → Paragraph.
+    # PACOTE DI — agora o conteúdo é HTML (vindo do SmartRichEditor/ReactQuill).
+    # O helper `_html_to_flowables` faz parse com `lxml.html` + sanitiza com
+    # `bleach.clean` e converte `<p>`/`<ul>`/`<strong>`/etc. em Flowables.
+    # Se o texto NÃO contiver tags HTML (ex.: `RGPD_DEFAULT_TEMPLATE` que é
+    # plain-text), faz fallback ao split por `\n` (backward-compat).
     if rgpd_text:
-        for line in rgpd_text.split("\n"):
-            line_stripped = line.strip()
-            if not line_stripped:
-                story.append(Spacer(1, 0.25 * cm))
-                continue
-            # Detectar headers de secção (linhas começando com número ou ALL CAPS)
-            is_header = (
-                line_stripped[0].isdigit() and "." in line_stripped[:4]
-            ) or (line_stripped.isupper() and len(line_stripped) < 80)
-            style = section_style if is_header else body_style
-            story.append(Paragraph(_escape_xml(line_stripped), style))
+        rgpd_styles = {
+            "body": body_style,
+            "section": section_style,
+            "headers": {},  # _html_to_flowables cria header styles via font_name
+        }
+        rgpd_flowables = _html_to_flowables(rgpd_text, rgpd_styles, font_name)
+        story.extend(rgpd_flowables)
 
     story.append(Spacer(1, 0.6 * cm))
     story.append(
@@ -327,6 +589,62 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, consent_data: dict) -> bytes:
             ),
         )
     )
+
+    # ------------------------------------------------------------------
+    # PACOTE DI — Minuta de Exclusividade (nova página, mesmo PDF)
+    # ------------------------------------------------------------------
+    # Após a assinatura do RGPD, insere-se uma quebra de página e a
+    # Minuta de Exclusividade. O `minuta_text` é HTML (vindo do
+    # SmartRichEditor/ReactQuill) — usa-se o mesmo helper `_html_to_flowables`.
+    # ------------------------------------------------------------------
+    if minuta_text:
+        from reportlab.platypus import PageBreak
+        # PACOTE DI — Minuta de Exclusividade (nova página)
+        story.append(PageBreak())
+        story.append(Paragraph("MINUTA DE EXCLUSIVIDADE", title_style))
+        story.append(
+            HRFlowable(width="100%", thickness=0.5, color=HexColor("#333333"))
+        )
+        story.append(Spacer(1, 0.4 * cm))
+        # Renderizar o texto da Minuta (mesma abordagem HTML→Flowables)
+        minuta_styles = {
+            "body": body_style,
+            "section": section_style,
+            "headers": {},
+        }
+        minuta_flowables = _html_to_flowables(
+            minuta_text, minuta_styles, font_name
+        )
+        story.extend(minuta_flowables)
+        # Secção de assinatura da Minuta
+        story.append(Spacer(1, 0.5 * cm))
+        story.append(
+            Paragraph(
+                f"Local: {_blank_line(35)} &nbsp;&nbsp;&nbsp; "
+                f"Data: ___/___/______",
+                sig_style,
+            )
+        )
+        story.append(Spacer(1, 1 * cm))
+        story.append(
+            Paragraph("Assinatura do Titular dos Dados:", sig_style)
+        )
+        story.append(Spacer(1, 0.8 * cm))
+        story.append(
+            HRFlowable(width="60%", thickness=0.5, color=black, hAlign="LEFT")
+        )
+        story.append(
+            Paragraph(
+                "(Assinar à caneta)",
+                ParagraphStyle(
+                    "MinutaSigCaption",
+                    parent=body_style,
+                    fontSize=8,
+                    textColor=HexColor("#666666"),
+                    spaceBefore=2,
+                ),
+            )
+        )
 
     doc.build(story)
     return buffer.getvalue()
@@ -425,7 +743,23 @@ async def run_generate_prefilled_rgpd_pdf(
         rgpd_text = await _get_rendered_rgpd_text(
             process_id, {}, consent_data
         )
-        pdf_bytes = _build_prefilled_rgpd_pdf(rgpd_text, consent_data)
+        # PACOTE DI — buscar Minuta de Exclusividade (mesmo padrão do
+        # `_get_rendered_rgpd_text`). Se falhar, fallback a string vazia
+        # (o PDF é gerado só com o RGPD — não bloqueia o download).
+        minuta_text = ""
+        try:
+            minuta_text = await _get_rendered_minuta_text(
+                process_id, {}, consent_data
+            )
+        except Exception as minuta_err:
+            logger.warning(
+                "[PACOTE DI] Erro ao buscar Minuta para processo %s: %s",
+                process_id,
+                minuta_err,
+            )
+        pdf_bytes = _build_prefilled_rgpd_pdf(
+            rgpd_text, minuta_text, consent_data
+        )
     except Exception as exc:
         logger.error(
             "[RGPD-PDF] Erro ao gerar PDF pré-preenchido para processo %s: %s",

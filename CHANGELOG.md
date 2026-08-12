@@ -3,6 +3,56 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DI: Session Clash Fix + PDF HTML/Minuta + Rebranding
+
+### Corrigido
+- **Bug crítico: choque de sessões em links públicos de RGPD**: quando um consultor com sessão ativa clicava num link público `/rgpd/:token` recebido por email, a página redirecionava para `/login`. Causa raiz: `AuthContext.js` e `api.js` só isentavam `/portal` do `fetchUser()` mount-time e do redirect 401 — `/rgpd`, `/upload`, `/download` não eram isentados. Criado helper `utils/publicRoutes.js` com `isPublicRoute()` que cobre todas as rotas públicas. `AuthContext` e `api.js` agora usam `isPublicRoute()` em vez de `startsWith('/portal')`.
+- **PDF do RGPD desformatado**: o `_build_prefilled_rgpd_pdf` escapava TODO o HTML (`<p>`, `<br>`, `<strong>` apareciam como `&lt;p&gt;` literal). Novo helper `_html_to_flowables` usa `lxml.html` + `bleach` para fazer parse do HTML do `SmartRichEditor` e converter para Flowables do platypus (`<p>` → `Paragraph`, `<strong>` → `<b>`, `<ul>` → `ListFlowable`, etc.). Fallback para plain text (template default) mantido.
+- **Minuta de Exclusividade em falta no PDF**: o documento legal é composto por RGPD + Minuta, mas o PDF só gerava a primeira parte. Agora `run_generate_prefilled_rgpd_pdf` busca também o texto da Minuta via `_get_rendered_minuta_text` e o builder insere um `PageBreak()` + título "MINUTA DE EXCLUSIVIDADE" + corpo + secção de assinatura (linhas em branco para caneta).
+- **"Endereço IP" no PDF**: removido o bloco que desenhava `Endereco IP: {client_ip}` no PDF legacy (`_build_rgpd_pdf` em `rgpd_service.py`). O email de auditoria ao staff mantém o IP (não é client-facing).
+
+### Alterado
+- **Rebranding "PowerCell" → "Precision Crédito"**: substituição em ~30 pontos client-facing (emails, PDFs, notificações, seeds) em 13 ficheiros backend. Inclui: assuntos de email, assinaturas ("Equipa PowerCell" → "Equipa Precision Crédito"), URLs (`www.powercell.pt/portal` → `www.precisioncredito.pt/portal`), rodapés de PDF, `empresa_nome` fallback, `company_name` no seeder. Referências internas (JSDoc, GitHub repo, dev DBs, test passwords, logo assets, Sentry) mantidas como "PowerCell".
+
+### Técnico
+- **Backend modificado** (14 ficheiros): `services/rgpd_pdf.py` (HTML→Flowables + Minuta), `services/rgpd_service.py` (IP removido + rebranding), `services/rgpd_public.py`, `services/email.py`, `services/admin_users.py`, `services/notification_service.py`, `services/portal_documents_notify.py`, `services/temp_link_service.py`, `services/portal_magic_link.py`, `services/public_registration.py`, `services/template_generator.py`, `services/finance_pool.py`, `services/finance_commissions.py`, `seed_database.py`.
+- **Frontend modificado** (3 ficheiros): `utils/publicRoutes.js` (NOVO), `contexts/AuthContext.js` (isPublicRoute + guard 401), `services/api.js` (isPublicRoute em 3 sítios do 401 handler).
+- **Validação**: `py_compile` ✓ (14 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (3 frontend, 0 erros); smoke test confirma PDF com 2 páginas (RGPD + Minuta), HTML parsed (sem `&lt;p&gt;` literal), sem "Endereço IP".
+- **Dependências**: Nenhuma nova — `lxml` e `bleach` já instalados.
+
+## [2026-07-25] — Pacote DH: Progressive Disclosure + Agenda (Prazo/Evento) + Portal Events
+
+### Adicionado
+- **Modelo de Agenda dual (Prazo/Evento)**: o modelo `Deadline` (`models/deadline.py`) ganhou 3 campos: `type` (`"deadline"` | `"event"`), `visible_to_client` (bool, default False), `reminder_time` (`List[str]` com valores `"1h"`, `"3h"`, `"1d"`, `"3d"`, `"7d"`). Validadores Pydantic para dedup e rejeição de valores inválidos.
+- **Novo tipo de notificação `EVENT_REMINDER`** em `NotificationType` (`models/enums.py`).
+- **Endpoint `GET /api/portal/events`**: retorna eventos visíveis ao cliente (`visible_to_client=True`, não concluídos, `due_date >= hoje`), ordenados por data. Novo serviço `services/portal_events.py`.
+- **Secção "Próximos Eventos" no Portal do Cliente** (`ClientPortal.jsx`): card na TOP SECTION que lista eventos visíveis com Badge (Prazo/Evento) e data. Oculta quando vazia; `EmptyState` quando não há eventos.
+- **Calculadora de Prestações no menu Simulações** (`ProcessDetails.js`): novo item "Simulação de Crédito Habitação" no dropdown de Simulações que abre um `Sheet` lateral com o `MortgageSimulator`.
+
+### Corrigido
+- **Cron de deadlines SILENTIOSAMENTE BROKEN**: `check_upcoming_deadlines` (`scheduled_tasks.py`) queries `{"date": ...}` (campo inexistente — deveria ser `due_date`) e itera `deadline.get("participants", [])` (campo inexistente — deveria ser `assigned_user_ids`). O cron encontrava 0 deadlines e notificava 0 utilizadores. Reescrito com: query correta `due_date`, iteração `assigned_user_ids`, branching por `type` (deadline → `DEADLINE_APPROACHING`/`DEADLINE_MISSED`; event → `EVENT_REMINDER`), respeito por `reminder_time`, idempotência via `sent_reminders` array.
+- **`notify_deadline_reminder`** (`realtime_notifications.py`): lia `participants` (inexistente) — corrigido para `assigned_user_ids`.
+- **`assigned_user_ids` não persistido em update**: `DeadlineUpdate` declarava o campo mas `run_update_deadline` nunca o processava. Agora processado.
+- **Mapeamentos de notificação**: `NOTIFICATION_TYPE_MAP` (`notification_service.py`) e `NOTIFICATION_TYPE_TO_PREF_KEY` (`realtime_notifications.py`) não mapeavam `deadline_approaching`, `deadline_missed`, `event_reminder` — agora mapeados.
+
+### Alterado
+- **Progressive Disclosure em 7 cartões vazios**: cartões que não tinham dados ficavam abertos a ocupar ecrã. Agora recolhem por omissão quando vazios (mostrando apenas o cabeçalho + "Sem dados preenchidos"):
+  - FinancialTab: "Situação Financeira" + "Situação Profissional"
+  - RealEstateTab: "Características do Imóvel" + "Localização" + "Dados do CPCV" + "Dados do Vendedor"
+  - CreditTab: "Avaliação Bancária"
+  - Usa o pattern inline existente (`collapsible` prop + `isCardEmpty` + `shouldCardBeCollapsed`) — 7 novos cases em `isCardEmpty`.
+- **DeadlinesTab → "Agenda"**: renomeada de "Prazos" para "Agenda". Formulário de criação estendido com: Select de tipo (Prazo Limite vs Marcação), Select de lembrete (1h/1d/3d/7d antes), Switch "Visível no Portal do Cliente" com description de ajuda. Listagem mostra Badge (Prazo/Evento), ícone Sino (se tem alerta), ícone Olho (se partilhado com cliente). `EmptyState` canónico substitui o `<p>Sem prazos</p>` ad-hoc.
+
+### Documentação
+- **`ARCHITECTURE.md`**: nova secção "Agenda — Dualidade Prazo/Evento" com modelo de dados, tabela de comportamento por tipo, diagrama Mermaid do fluxo (staff → cron → notificações + portal → cliente).
+
+### Técnico
+- **Backend modificado** (8 ficheiros): `models/deadline.py` (3 campos + validadores), `models/enums.py` (EVENT_REMINDER), `services/deadlines_api_crud.py` (persistência + bugfix assigned_user_ids), `services/scheduled_tasks.py` (cron reescrito), `services/notification_service.py` (mapeamentos), `services/realtime_notifications.py` (mapeamentos + bugfix participants), `services/portal_events.py` (NOVO), `routes/portal.py` (novo endpoint).
+- **Frontend modificado** (6 ficheiros): `pages/ProcessDetails.js` (7 isCardEmpty cases + deadlineForm + Agenda label + MortgageSimulator Sheet), `tabs/FinancialTab.jsx` (2 cartões collapsible), `tabs/RealEstateTab.jsx` (4 cartões collapsible + Badge import fix), `tabs/CreditTab.jsx` (1 cartão collapsible), `tabs/DeadlinesTab.jsx` (Agenda evolution), `pages/ClientPortal.jsx` (Próximos Eventos).
+- **Documentação** (1 ficheiro): `ARCHITECTURE.md`.
+- **Validação**: `py_compile` ✓ (8 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (6 frontend, 0 erros).
+- **Dependências**: Nenhuma nova — `Collapsible`, `Switch`, `Sheet`, `EmptyState`, `Badge`, `Bell`, `Eye`, `CalendarClock` já existem em Shadcn/lucide-react.
+
 ## [2026-07-25] — Pacote DG: RGPD PDF Multi-página + Clientes Sem Lifecycle
 
 ### Corrigido

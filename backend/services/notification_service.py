@@ -48,6 +48,10 @@ NOTIFICATION_TYPE_MAP = {
     "urgent": "email_urgent_only",
     "daily_summary": "email_daily_summary",
     "weekly_report": "email_weekly_report",
+    # PACOTE DH — Agenda: novos tipos de notificação (deadline/event reminders).
+    "deadline_approaching": "email_deadline_reminder",
+    "deadline_missed": "email_urgent_only",
+    "event_reminder": "email_deadline_reminder",
 }
 
 
@@ -270,7 +274,7 @@ O estado do seu processo foi atualizado de "{old_status}" para "{new_status_labe
 Se tiver dúvidas, não hesite em contactar-nos.
 
 Cumprimentos,
-Equipa PowerCell
+Equipa Precision Crédito
 """
     
     return await send_notification_with_preference_check(

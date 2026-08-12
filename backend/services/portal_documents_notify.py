@@ -109,7 +109,8 @@ async def check_and_notify_documents_complete(
         "Recebemos com sucesso toda a documentação submetida via Portal do Cliente.\n"
         "O seu processo entrou agora em fase de Análise de Crédito e entraremos em "
         "contacto brevemente para os próximos passos.\n\n"
-        "Obrigado pela confiança,\nEquipa PowerCell"
+        # PACOTE DI — marca client-facing actualizada para Precision Crédito.
+        "Obrigado pela confiança,\nEquipa Precision Crédito"
     )
     html_body = _build_documents_complete_html(client_name)
 
@@ -249,7 +250,7 @@ def _build_documents_complete_html(client_name: str) -> str:
           Entraremos em contacto brevemente para os próximos passos.
         </div>
         <p style="margin:0 0 8px;">Obrigado pela confiança,</p>
-        <p style="margin:0;"><strong>Equipa PowerCell</strong></p>
+        <p style="margin:0;"><strong>Equipa Precision Crédito</strong></p>
       </div>
       <p style="font-size:12px;color:#9ca3af;text-align:center;margin-top:16px;">
         Este é um email automático — por favor não responda.

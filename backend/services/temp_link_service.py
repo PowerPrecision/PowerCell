@@ -406,7 +406,8 @@ class TempLinkService:
             description = link_doc.get("description", "")
 
             if link_type == TempLinkType.UPLOAD.value:
-                subject = "📎 PowerCell - Carregue a sua Documentação"
+                # PACOTE DI — marca client-facing actualizada para Precision Crédito.
+                subject = "📎 Precision Crédito - Carregue a sua Documentação"
                 body_text = f"""Olá {client_name},
 
 Foi solicitado que carregue documentação para o seu processo.
@@ -419,7 +420,7 @@ Para carregar os documentos, aceda ao seguinte link:
 Este link expira em 72 horas. Se não conseguir aceder dentro deste prazo, contacte o seu consultor.
 
 Cumprimentos,
-Equipa PowerCell
+Equipa Precision Crédito
 """
                 body_html = f"""
                 <html>
@@ -447,7 +448,7 @@ Equipa PowerCell
                         
                         <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
                             Cumprimentos,<br>
-                            <strong>Equipa PowerCell</strong>
+                            <strong>Equipa Precision Crédito</strong>
                         </p>
                     </div>
                 </body>
@@ -455,7 +456,8 @@ Equipa PowerCell
                 """
             else:
                 # Download link
-                subject = "📥 PowerCell - Documentação Disponível"
+                # PACOTE DI — marca client-facing actualizada para Precision Crédito.
+                subject = "📥 Precision Crédito - Documentação Disponível"
                 body_text = f"""Olá {client_name},
 
 Tem documentação disponível para download.
@@ -468,7 +470,7 @@ Para aceder aos documentos, clique no seguinte link:
 Este link expira em 72 horas.
 
 Cumprimentos,
-Equipa PowerCell
+Equipa Precision Crédito
 """
                 body_html = f"""
                 <html>
@@ -490,7 +492,7 @@ Equipa PowerCell
                         
                         <p style="font-size: 14px; color: #64748b; margin-top: 30px;">
                             Cumprimentos,<br>
-                            <strong>Equipa PowerCell</strong>
+                            <strong>Equipa Precision Crédito</strong>
                         </p>
                     </div>
                 </body>

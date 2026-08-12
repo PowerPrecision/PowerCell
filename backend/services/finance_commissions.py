@@ -255,7 +255,8 @@ async def run_export_commissions_csv(
     model_label = "Pool Global" if distribution_model == "global_pool" else "Tradicional (Split Individual)"
 
     # Obter nome da empresa
-    company_name = "PowerCell"
+    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
+    company_name = "Precision Crédito"
     try:
         sys_cfg = await db.system_config.find_one(
             {"company_id": company_id},

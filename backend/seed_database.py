@@ -85,8 +85,9 @@ async def seed_database():
         
         system_config = {
             "id": "system-config",
-            "app_name": "PowerCell",
-            "company_name": "PowerCell",
+            # PACOTE DI — branding client-facing actualizado para Precision Crédito.
+            "app_name": "Precision Crédito",
+            "company_name": "Precision Crédito",
             "default_language": "pt",
             "timezone": "Europe/Lisbon",
             "email_notifications": True,
