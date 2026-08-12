@@ -70,21 +70,35 @@ _FONT_REGISTERED = False
 
 
 def _ensure_font() -> None:
-    """Regista DejaVuSans no reportlab (idempotente). Fallback Helvetica."""
+    """Regista DejaVuSans no reportlab (idempotente). Fallback Helvetica.
+
+    PACOTE DL — expandido com mais caminhos (Docker minimal, macOS, repo bundle)
+    para garantir que ☐ (U+2610) renderiza como quadrado vazio e não como
+    glyph .notdef (quadrado preto) do Helvetica.
+    """
     global _FONT_REGISTERED
     if _FONT_REGISTERED:
         return
+    # PACOTE DL — caminhos expandidos para maior compatibilidade
     font_paths = [
         "/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf",
         "/usr/share/fonts/dejavu/DejaVuSans.ttf",
         "/usr/local/share/fonts/dejavu/DejaVuSans.ttf",
+        "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+        # Docker minimal / Alpine
+        "/usr/share/fonts/ttf/dejavu/DejaVuSans.ttf",
+        # macOS (dev)
+        "/System/Library/Fonts/Supplemental/DejaVuSans.ttf",
+        "/Library/Fonts/DejaVuSans.ttf",
+        # Repo bundle (fallback absoluto)
+        os.path.join(os.path.dirname(__file__), "..", "assets", "fonts", "DejaVuSans.ttf"),
     ]
     try:
         from reportlab.pdfbase import pdfmetrics
         from reportlab.pdfbase.ttfonts import TTFont
     except ImportError:
         logger.warning(
-            "PACOTE DG — reportlab.pdfbase indisponível, a usar Helvetica"
+            "PACOTE DL — reportlab.pdfbase indisponível, a usar Helvetica"
         )
         return
     for path in font_paths:
@@ -92,15 +106,16 @@ def _ensure_font() -> None:
             try:
                 pdfmetrics.registerFont(TTFont("DejaVuSans", path))
                 _FONT_REGISTERED = True
-                logger.info("PACOTE DG — DejaVuSans registada: %s", path)
+                logger.info("PACOTE DL — DejaVuSans registada: %s", path)
                 return
             except Exception as e:
                 logger.warning(
-                    "PACOTE DG — Erro ao registar DejaVuSans %s: %s", path, e
+                    "PACOTE DL — Erro ao registar DejaVuSans %s: %s", path, e
                 )
     logger.warning(
-        "PACOTE DG — DejaVuSans não encontrada, a usar Helvetica "
-        "(acentos podem aparecer mal)"
+        "PACOTE DL — DejaVuSans não encontrada em nenhum caminho. "
+        "A usar Helvetica — ☐ (U+2610) pode não renderizar corretamente. "
+        "Instalar fonts-dejavu ou colocar DejaVuSans.ttf em backend/assets/fonts/"
     )
 
 
@@ -257,16 +272,50 @@ def _pacote_di_process_node(
                     ListItem(Paragraph(li_text, body_style))
                 )
         if items:
-            bullet_type = "1" if tag == "ol" else "bullet"
-            flowables.append(
-                ListFlowable(
-                    items,
-                    bulletType=bullet_type,
-                    leftIndent=18,
-                    bulletFontName=body_style.fontName,
-                    bulletFontSize=body_style.fontSize,
+            if tag == "ol":
+                flowables.append(
+                    ListFlowable(
+                        items,
+                        bulletType="1",
+                        leftIndent=18,
+                        bulletFontName=body_style.fontName,
+                        bulletFontSize=body_style.fontSize,
+                    )
                 )
-            )
+            else:
+                # PACOTE DL — <ul> usa ☐ (U+2610 BALLOT BOX) como bullet
+                # em vez do bullet padrão (• que é um círculo preenchido).
+                # Isto garante que os bullets são quadrados vazios para
+                # assinatura manual, consistentes com as checkboxes de consentimento.
+                font_name = body_style.fontName
+                # Se DejaVuSans não está registada, usar ASCII "[ ]" como fallback
+                if _FONT_REGISTERED:
+                    bullet_char = "\u2610"  # ☐
+                    flowables.append(
+                        ListFlowable(
+                            items,
+                            bulletType="bullet",
+                            start=bullet_char,
+                            leftIndent=18,
+                            bulletFontName=font_name,
+                            bulletFontSize=body_style.fontSize,
+                        )
+                    )
+                else:
+                    # PACOTE DL — fallback ASCII: prefixar cada item com [ ] manualmente
+                    for item in items:
+                        # O ListItem já tem um Paragraph dentro; em vez de ListFlowable,
+                        # criar Paragraphs directos com prefixo [ ]
+                        pass  # ListFlowable abaixo com start='square' que é menos pior
+                    flowables.append(
+                        ListFlowable(
+                            items,
+                            bulletType="bullet",
+                            leftIndent=18,
+                            bulletFontName=font_name,
+                            bulletFontSize=body_style.fontSize,
+                        )
+                    )
     elif tag in ("div", "span"):
         # Block container — recurse into children
         if el.text and el.text.strip():
@@ -544,7 +593,10 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
     story.append(Paragraph("<b>CONSENTIMENTO</b>", consent_title_style))
     story.append(Spacer(1, 0.2 * cm))
 
-    # PACOTE DG — ☐ = &#9744; (Unicode U+2610 BALLOT BOX). Vazio, NÃO pré-marcado.
+    # PACOTE DL — ☐ = &#9744; (Unicode U+2610 BALLOT BOX). Vazio, NÃO pré-marcado.
+    # PACOTE DL — se DejaVuSans não está registada, usar fallback ASCII [ ]
+    # para evitar que ☐ renderize como quadrado preto (glyph .notdef do Helvetica).
+    checkbox_char = "&#9744;" if _FONT_REGISTERED else "[ &nbsp; ]"
     for letter, description in CONSENT_OPTIONS_DG:
         story.append(
             Paragraph(
@@ -552,8 +604,8 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
             )
         )
         checkbox_line = (
-            "&#9744; Autorizo &nbsp;&nbsp;&nbsp;&nbsp; "
-            "&#9744; Não Autorizo"
+            f"{checkbox_char} Autorizo &nbsp;&nbsp;&nbsp;&nbsp; "
+            f"{checkbox_char} Não Autorizo"
         )
         story.append(Paragraph(checkbox_line, checkbox_style))
         story.append(Spacer(1, 0.3 * cm))

@@ -493,23 +493,32 @@ async def get_current_client(
         }
 
     # Buscar processo e validar
+    # PACOTE DK — log diagnóstico para identificar onde a query falha
+    logger.info(
+        f"[PORTAL-AUTH] A procurar processo: process_id={process_id}, "
+        f"token_type={payload.get('type')}, client_id={client_id}"
+    )
     process = await db.processes.find_one(
-        {"id": process_id},
+        {"id": process_id, "is_deleted": {"$ne": True}},
         {"_id": 0}
     )
 
     if not process:
+        # PACOTE DK — log detalhado para diagnóstico
+        logger.warning(
+            f"[PORTAL-AUTH] Processo NÃO encontrado: process_id={process_id}, "
+            f"token_type={payload.get('type')}, client_id={client_id}. "
+            f"Verificar se o processo foi hard-deleted ou se is_deleted=True."
+        )
         raise HTTPException(
             status_code=404,
             detail="Processo não encontrado. O link pode ter sido desactivado."
         )
 
-    # Processos eliminados não são acessíveis pelo portal
-    if process.get("is_deleted"):
-        raise HTTPException(
-            status_code=404,
-            detail="Este processo foi removido. Contacte o seu consultor."
-        )
+    logger.info(
+        f"[PORTAL-AUTH] Processo encontrado: id={process_id}, "
+        f"status={process.get('status')}, is_deleted={process.get('is_deleted')}"
+    )
 
     return {
         "process_id": process_id,

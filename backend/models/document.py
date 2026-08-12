@@ -108,6 +108,21 @@ class DocumentMetadata(BaseModel):
     ai_analyzed: bool = False
     ai_analyzed_at: Optional[str] = None
 
+    # PACOTE DJ — Human-in-the-Loop review (IA sugere, consultor aprova)
+    # ai_review_status: 'pending' (IA gerou sugestões) | 'approved' (consultor aprovou tal qual)
+    #                  | 'edited' (consultor aprovou com edições) | 'rejected' (consultor rejeitou)
+    ai_review_status: Optional[str] = None  # 'pending' | 'approved' | 'rejected' | 'edited'
+    ai_reviewed_at: Optional[str] = None  # ISO datetime da decisão do consultor
+    ai_reviewed_by: Optional[str] = None  # ID do utilizador que decidiu
+    ai_applied_fields: Optional[List[str]] = None  # campos aplicados (ex: ['categoria','validade','nome','filename'])
+    # Sugestões da IA (paralelo a ai_* aplicado — só passam para ai_* quando aprovadas)
+    suggested_category: Optional[str] = None
+    suggested_subcategory: Optional[str] = None
+    suggested_confidence: Optional[float] = None
+    suggested_expiry_date: Optional[str] = None
+    suggested_filename: Optional[str] = None
+    suggested_nome: Optional[str] = None  # nome extraído pela IA
+
 
 class DocumentMetadataCreate(BaseModel):
     """Dados para criar metadados de documento."""
@@ -140,6 +155,18 @@ class DocumentMetadataResponse(BaseModel):
     is_categorized: bool = False
     ai_analyzed: bool = False
     ai_analyzed_at: Optional[str] = None
+    # PACOTE DJ — Human-in-the-Loop review
+    ai_review_status: Optional[str] = None
+    ai_reviewed_at: Optional[str] = None
+    ai_reviewed_by: Optional[str] = None
+    ai_applied_fields: Optional[List[str]] = None
+    suggested_category: Optional[str] = None
+    suggested_subcategory: Optional[str] = None
+    suggested_confidence: Optional[float] = None
+    suggested_expiry_date: Optional[str] = None
+    suggested_filename: Optional[str] = None
+    suggested_nome: Optional[str] = None
+    expiry_date: Optional[str] = None
 
 
 class DocumentSearchRequest(BaseModel):

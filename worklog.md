@@ -3416,3 +3416,101 @@ Stage Summary:
   - frontend/src/contexts/AuthContext.js (isPublicRoute + guard 401 defensivo)
   - frontend/src/services/api.js (isPublicRoute em 3 sítios do 401 handler)
 - Resultado: (1) Links públicos /rgpd/:token funcionam com sessão staff ativa (sem redirect /login). (2) PDF RGPD tem HTML formatting correto (parágrafos, bold, listas) + Minuta de Exclusividade (PageBreak) + sem Endereço IP. (3) ~30 strings client-facing rebranded PowerCell→Precision Crédito.
+
+
+---
+Task ID: Pacote DJ (IA Human-in-the-Loop — Revisão de Documentos)
+Agent: Main Agent (Z.ai Code Assistant) + 4 subagentes (2 Explore + 2 Implementação)
+Task: Criar fluxo HITL para IA de documentos — trigger per-document, sugestões em suggested_*, modal de revisão (Atual vs Sugerido), Aceitar/Rejeitar.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 60111d8c = Pacote DI).
+- 2 subagentes Explore: DJ-1-Explore (backend AI — 22 endpoints mapeados, document_metadata schema, run_apply_ai_suggestions, data_conflict pattern) + DJ-2-Explore (frontend — S3FileManager 3900 linhas, 3 sites de badges, DataConflictResolver pattern para clone).
+- 2 subagentes Implementação: DJ-Backend (4 ficheiros — 10 campos model + document_review.py NOVO com 4 funções + 4 endpoints + projeção expandida) + DJ-Frontend (3 ficheiros — 4 helpers api.js + DocumentReviewModal.jsx NOVO + S3FileManager state/handlers/badges/modal). Validação completa: eslint --quiet 0 erros + vite build 0 erros.
+- Validação final: py_compile ✓ (4 backend), flake8 0 erros, bun build ✓ (3 frontend).
+- Documentação: ARCHITECTURE.md secção "IA Human-in-the-Loop" (diagrama + tabela suggested_* vs ai_*) + CHANGELOG.
+- Verificação de tokens: 0 ocorrências de padrão de token no diff.
+
+Stage Summary:
+- 8 ficheiros modificados (4 backend + 3 frontend + 1 doc):
+  - backend/models/document.py (10 campos: ai_review_status + ai_reviewed_* + ai_applied_fields + suggested_*)
+  - backend/services/document_review.py (NOVO — run_analyze_document_for_review + run_apply_review + run_reject_review + run_get_pending_reviews)
+  - backend/routes/documents.py (4 endpoints + projeção expandida 5→19 campos)
+  - backend/services/document_categorization.py (comentário)
+  - frontend/src/services/api.js (4 helpers: analyzeDocumentForReview, applyAIReview, rejectAIReview, getPendingReviews)
+  - frontend/src/components/DocumentReviewModal.jsx (NOVO — modal HITL com grid 3-col Atual→Sugerido + toggle + Aceitar/Rejeitar)
+  - frontend/src/components/S3FileManager.js (state + 2 handlers + per-file BrainCircuit button + 15 badge blocks em 3 sites + modal mount)
+  - ARCHITECTURE.md (secção HITL)
+- Resultado: (1) Consultor clica BrainCircuit num documento → IA analisa e guarda sugestões em suggested_* (não aplica). (2) Badge "Sugestões IA" aparece no ficheiro. (3) Click no badge abre DocumentReviewModal com Atual vs Sugerido (Nome, Categoria, Validade, Filename) + confiança. (4) Consultor seleciona campos e clica "Aplicar Selecionadas" (suggested_* → ai_*) ou "Rejeitar Tudo". (5) Auto-categorização em background mantida (paralela, sem HITL).
+
+
+---
+Task ID: Pacote DJ Híbrido (Sistema de Confiança — Zero-Touch + HITL)
+Agent: Main Agent (Z.ai Code Assistant) + 1 subagente Frontend
+Task: Evoluir o Pacote DJ para Arquitetura Híbrida — threshold de confiança (85%) com auto-aprovação para alta confiança e HITL para baixa confiança.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 9ba18688 = Pacote DJ anterior).
+- Lido document_review.py atual (508 linhas) — confirmou que guardava SEMPRE em suggested_* com status "pending".
+- Backend: document_review.py modificado:
+  - AI_CONFIDENCE_THRESHOLD = 85 constante.
+  - confidence_score = int(round(confidence * 100)) — conversão 0.0-1.0 → 0-100.
+  - Se >= 85: auto-aplica em BOTH suggested_* E ai_* + status "auto_approved" (Zero-Touch).
+  - Se < 85: apenas suggested_* + status "pending_review" (HITL).
+  - run_get_pending_reviews query: "pending" → "pending_review".
+  - Resposta API inclui confidence_score, auto_approved, ai_review_status.
+  - py_compile + flake8 0 erros.
+- Frontend (subagente): S3FileManager.js:
+  - 3 sites de badges atualizados: auto_approved (verde "✨ Auto-Aprovado"), pending_review (âmbar "⚠️ Revisão Necessária" clickable).
+  - Botão global renomeado para "🧠 Analisar Documentos".
+  - eslint --quiet 0 erros.
+- Documentação: ARCHITECTURE.md secção "IA Híbrida" reescrita com diagrama threshold + tabela estados visuais. CHANGELOG atualizado.
+- Verificação de tokens: 0 ocorrências no diff.
+
+Stage Summary:
+- 4 ficheiros modificados (1 backend + 1 frontend + 2 docs):
+  - backend/services/document_review.py (AI_CONFIDENCE_THRESHOLD=85 + auto-approve logic + status pending_review + confidence_score)
+  - frontend/src/components/S3FileManager.js (3 sites badges: auto_approved/pending_review + botão global renomeado)
+  - ARCHITECTURE.md (secção IA Híbrida reescrita)
+  - CHANGELOG.md
+- Resultado: (1) IA com confidence >= 85% → auto-aplica metadados (Zero-Touch), badge verde "✨ Auto-Aprovado". (2) IA com confidence < 85% → sugestões pendentes, badge âmbar "⚠️ Revisão Necessária" (clickable abre modal HITL). (3) Botão global "🧠 Analisar Documentos". (4) Docs atualizadas com fluxo híbrido.
+
+
+---
+Task ID: Pacote DK+DL (Hotfix: Portal 'Processo não encontrado' + Checkboxes PDF RGPD)
+Agent: Main Agent (Z.ai Code Assistant) + 1 subagente Explore
+Task: 2 hotfixes críticos — (DK) regressão no acesso ao Portal do Cliente + (DL) checkboxes do PDF RGPD como quadrados pretos.
+
+Work Log:
+- Re-clonado /home/z/powercell (base a3c9dbef = Pacote DJ Híbrido).
+- Subagente DK-DL-Explore: análise completa da cadeia de auth do portal (4 entry flows) e do rgpd_pdf ListFlowable. Descobertas chave:
+  · DK: o is_deleted filter NÃO foi introduzido pelo Pacote DG nos ficheiros do portal (já existia antes). A causa mais provável é um processo hard-deleted com referência stale em client.process_ids, OU o fallback em portal_auth.py:268 que usava process_ids[0] sem verificar se o processo existe.
+  · DL: o ☐ (U+2610) não existe no font Helvetica. Quando DejaVuSans não está registada, o glyph .notdef do Helvetica é renderizado como quadrado preto por muitos viewers PDF.
+
+- DK Fix (portal_security.py):
+  · get_current_client: query agora inclui is_deleted:{$ne:True} directamente (antes a query não tinha filtro e o check era post-fetch).
+  · Adicionados logs diagnósticos: log.info antes da query (process_id, token_type, client_id); log.warning quando não encontrado; log.info quando encontrado (status, is_deleted).
+  · Removido o check post-fetch is_deleted separado (agora integrado na query).
+
+- DK Fix (portal_auth.py):
+  · run_portal_login: fallback de process_ids[0] agora verifica se o processo existe na BD antes de o usar no JWT.
+  · Se o processo foi hard-deleted (não existe) → usa "no_process" em vez de um ID stale que causaria 404.
+  · Se o processo está soft-deleted → log warning + usa "no_process".
+  · Se o processo existe e não está deleted → usa o ID (comportamento normal).
+  · Logs detalhados em cada branch do fallback.
+
+- DL Fix (rgpd_pdf.py):
+  · _ensure_font: caminhos expandidos de 3 para 8 (Docker minimal, macOS, repo bundle backend/assets/fonts/).
+  · ListFlowable para <ul>: usa start='\u2610' (☐) como bullet quando DejaVuSans está registada; fallback para bullet padrão quando não está.
+  · Checkboxes de consentimento: usa &#9744; (☐) quando DejaVuSans registada; fallback para ASCII "[ ]" quando não está (evita quadrado preto).
+  · Lógica: checkbox_char = "&#9744;" if _FONT_REGISTERED else "[ &nbsp; ]"
+
+- Validação: py_compile ✓ (3 ficheiros), flake8 0 erros.
+- Verificação de tokens: 0 ocorrências no diff.
+
+Stage Summary:
+- 3 ficheiros modificados:
+  - backend/services/portal_security.py (query is_deleted + logs diagnósticos)
+  - backend/services/portal_auth.py (fallback stale process_ids[0] → "no_process" + logs)
+  - backend/services/rgpd_pdf.py (_ensure_font expandido + ☐ bullet + fallback ASCII [ ] para checkboxes)
+- Resultado: (DK) Portal do Cliente já não falha com "Processo não encontrado" quando o processo foi hard-deleted — usa "no_process" no JWT. Logs diagnósticos permitem identificar exactamente onde a query falha. (DL) Checkboxes do PDF RGPD renderizam como quadrados vazios ☐ quando DejaVuSans está disponível, ou [ ] como fallback ASCII quando não está — nunca mais quadrados pretos.

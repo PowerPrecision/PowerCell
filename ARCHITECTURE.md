@@ -1474,3 +1474,83 @@ flowchart LR
     DB -->|"visible_to_client=true"| Portal["GET /portal/events"]
     Portal --> ClientUI["ClientPortal — Próximos Eventos"]
 ```
+
+---
+
+## IA Híbrida — Sistema de Confiança para Documentos (Pacote DJ)
+
+A IA analisa documentos e aplica um **Sistema Híbrido baseado em Confiança**: confiança alta (≥85%) resulta em auto-aprovação (Zero-Touch); confiança baixa (<85%) entra em Human-in-the-Loop (revisão manual).
+
+```mermaid
+flowchart TD
+    Trigger["Consultor clica BrainCircuit<br/>num documento"] -->|"POST /documents/{doc_id}/ai-analyze-review"| Backend["document_review.py<br/>run_analyze_document_for_review"]
+    Backend -->|"categorize_document_with_ai<br/>+ OCR"| LLM["GPT-4o-mini"]
+    LLM -->|"JSON: categoria, validade,<br/>nome, confidence"| Backend
+    Backend -->|"confidence_score = int(confidence * 100)"| Check{"confidence_score >= 85?"}
+    Check -->|"Sim — Alta confiança"| Auto["AUTO_APPROVED (Zero-Touch)<br/>escreve em suggested_* E ai_*<br/>ai_review_status=auto_approved"]
+    Check -->|"Não — Baixa confiança"| Pending["PENDING_REVIEW (HITL)<br/>escreve apenas em suggested_*<br/>ai_review_status=pending_review"]
+    Auto --> DB[(document_metadata)]
+    Pending --> DB
+    DB -->|"GET /client/{id}/files"| Frontend["S3FileManager badges"]
+    Frontend -->|"auto_approved: ✨ Auto-Aprovado (verde)"| AutoBadge["Badge verde informativo"]
+    Frontend -->|"pending_review: ⚠️ Revisão Necessária (âmbar)"| ReviewBadge["Badge âmbar clickable"]
+    ReviewBadge -->|"click"| Modal["DocumentReviewModal<br/>Atual vs Sugerido<br/>+ Aprovar/Rejeitar"]
+    Modal -->|"POST /apply-ai-review"| Apply["copia suggested_* → ai_*<br/>status=approved/edited"]
+    Modal -->|"POST /reject-ai-review"| Reject["status=rejected"]
+```
+
+### Lógica de Threshold (Limiar de Confiança)
+
+```python
+# services/document_review.py
+AI_CONFIDENCE_THRESHOLD = 85
+
+# Na análise:
+confidence_score = int(round(raw_confidence * 100))  # 0.0-1.0 → 0-100
+
+if confidence_score >= AI_CONFIDENCE_THRESHOLD:
+    # AUTO_APPROVED: IA aplica directamente em ai_* (Zero-Touch)
+    ai_review_status = "auto_approved"
+else:
+    # PENDING_REVIEW: IA sugere em suggested_* (HITL)
+    ai_review_status = "pending_review"
+```
+
+### Modelo de dados — `suggested_*` vs `ai_*`
+
+A coleção `document_metadata` tem dois conjuntos de campos:
+
+| Campo `suggested_*` (IA sugere) | Campo `ai_*` (aplicado) | Quando é escrito |
+|---|---|---|
+| `suggested_category` | `ai_category` | `suggested_*` sempre; `ai_*` se auto_approved ou consultor aprova |
+| `suggested_subcategory` | `ai_subcategory` | mesmo padrão |
+| `suggested_confidence` | `ai_confidence` | mesmo padrão |
+| `suggested_expiry_date` | `expiry_date` | mesmo padrão |
+| `suggested_filename` | `filename` | mesmo padrão |
+| `suggested_nome` | `extracted_data.nome` | mesmo padrão |
+
+O campo `ai_review_status` controla o estado: `auto_approved` | `pending_review` → `approved` | `rejected` | `edited`.
+
+### Endpoints do fluxo HITL
+
+| Endpoint | Método | Descrição |
+|---|---|---|
+| `/documents/{doc_id}/ai-analyze-review` | POST | Triggera IA, aplica threshold (auto_approved ou pending_review) |
+| `/documents/{doc_id}/apply-ai-review` | POST | Aplica sugestões selecionadas (`suggested_*` → `ai_*`) |
+| `/documents/{doc_id}/reject-ai-review` | POST | Rejeita sugestões |
+| `/documents/process/{process_id}/pending-review` | GET | Lista documentos pendentes de revisão (`pending_review`) |
+
+### Estados visuais no frontend (S3FileManager)
+
+| `ai_review_status` | Badge | Cor | Clickable? |
+|---|---|---|---|
+| `auto_approved` | ✨ Auto-Aprovado | verde (`bg-primary/10`) | Não (informativo) |
+| `pending_review` | ⚠️ Revisão Necessária | âmbar (`bg-accent/15`) | Sim (abre modal) |
+| `approved` | Aprovado | verde (`variant=secondary`) | Não |
+| `rejected` | Rejeitado | muted (`variant=outline`) | Não |
+| `edited` | Editado | azul | Não |
+| (analisando) | A analisar... | roxo com spinner | Não |
+
+### Fluxo paralelo — auto-categorização em background
+
+A auto-categorização em background (`document_auto_categorize.py`) continua a escrever **diretamente** em `ai_*` (sem HITL) para uploads novos. O fluxo HITL é **paralelo** — accionado on-demand pelo consultor quando quer rever/refinar os metadados de um documento específico.

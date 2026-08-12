@@ -3,6 +3,55 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-07-25] — Pacote DJ (Híbrido): Sistema de Confiança — Zero-Touch + HITL
+
+### Alterado
+- **Sistema Híbrido de Confiança**: o `run_analyze_document_for_review` agora aplica um threshold de confiança em vez de guardar sempre em `suggested_*`:
+  - `AI_CONFIDENCE_THRESHOLD = 85` (constante em `document_review.py`).
+  - `confidence_score = int(round(confidence * 100))` — converte 0.0-1.0 → 0-100 inteiro.
+  - **Se `confidence_score >= 85`**: auto-aplica (Zero-Touch) — escreve em BOTH `suggested_*` E `ai_*`, marca `ai_review_status = "auto_approved"`.
+  - **Se `confidence_score < 85`**: guarda apenas em `suggested_*` (HITL), marca `ai_review_status = "pending_review"`.
+- **Status values atualizados**: `"pending"` → `"pending_review"` (mais semântico); novo `"auto_approved"` para docs auto-aplicados.
+- **Badges no S3FileManager** atualizados em 3 sites (list, grid Todos, grid per-category):
+  - `auto_approved` → "✨ Auto-Aprovado" (verde, `bg-primary/10`, informativo).
+  - `pending_review` → "⚠️ Revisão Necessária" (âmbar, `bg-accent/15`, clickable — abre modal).
+  - Estados `approved`/`rejected`/`edited` e spinner `analyzing` mantidos.
+- **Botão global** renomeado de "Analisar IA" para "🧠 Analisar Documentos".
+- **`run_get_pending_reviews`** query atualizada de `"pending"` para `"pending_review"`.
+- **Resposta da API** agora inclui `confidence_score` (0-100), `auto_approved` (bool), e `ai_review_status`.
+
+### Documentação
+- **`ARCHITECTURE.md`**: secção "IA Híbrida" completamente reescrita com diagrama Mermaid do fluxo de threshold (confidence_score → auto_approved vs pending_review), tabela de estados visuais, e código do threshold.
+
+### Técnico
+- **Backend modificado** (1 ficheiro): `services/document_review.py` (AI_CONFIDENCE_THRESHOLD + lógica auto-approve + status values + confidence_score na resposta).
+- **Frontend modificado** (1 ficheiro): `components/S3FileManager.js` (3 sites de badges atualizados + botão global renomeado).
+- **Validação**: `py_compile` ✓; `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (0 erros); `eslint --quiet` ✓ (0 erros).
+
+## [2026-07-25] — Pacote DJ: IA Human-in-the-Loop — Revisão de Documentos
+
+### Adicionado
+- **Fluxo Human-in-the-Loop para IA de documentos**: a IA agora **sugere** metadados (categoria, validade, nome) em vez de os aplicar diretamente. O consultor revê as sugestões num modal e decide quais aceitar ou rejeitar.
+- **Novo modelo de dados `suggested_*`**: `document_metadata` ganhou 10 campos: `ai_review_status` (pending|approved|rejected|edited), `ai_reviewed_at`, `ai_reviewed_by`, `ai_applied_fields`, `suggested_category`, `suggested_subcategory`, `suggested_confidence`, `suggested_expiry_date`, `suggested_filename`, `suggested_nome`. A IA escreve em `suggested_*`; `ai_*` só é atualizado quando o consultor aprova.
+- **4 novos endpoints**: `POST /documents/{doc_id}/ai-analyze-review` (trigger), `POST /documents/{doc_id}/apply-ai-review` (aplicar), `POST /documents/{doc_id}/reject-ai-review` (rejeitar), `GET /documents/process/{process_id}/pending-review` (listar pendentes). Novo serviço `services/document_review.py`.
+- **Botão per-document "Analisar com IA"** (BrainCircuit icon) na lista de ficheiros do S3FileManager — list view + grid view. Gated by `canUseAIDocumentTools`.
+- **Badges de estado de revisão** por ficheiro: "A analisar..." (spinner), "Sugestões IA" (clickable, abre modal), "Aprovado", "Rejeitado", "Editado". Em 3 sítios (list, grid Todos, grid per-category).
+- **Novo componente `DocumentReviewModal.jsx`**: modal de revisão com grid 3-colunas (Atual → Sugerido) por campo (Nome, Categoria, Validade, Filename), Badge de confiança, toggle selecionar/ignorar por campo, botões "Aplicar Selecionadas" + "Rejeitar Tudo".
+
+### Alterado
+- **Projeção do file listing expandida**: `GET /documents/client/{process_id}/files` agora inclui `ai_review_status`, `suggested_*`, `ai_confidence`, `expiry_date`, `ai_subcategory` (antes só 4 campos).
+- **4 novos helpers em api.js**: `analyzeDocumentForReview`, `applyAIReview`, `rejectAIReview`, `getPendingReviews`.
+
+### Documentação
+- **`ARCHITECTURE.md`**: nova secção "IA Human-in-the-Loop" com diagrama Mermaid do fluxo (trigger → IA → suggested_* → frontend badge → modal → apply/reject → ai_*), tabela `suggested_*` vs `ai_*`, e nota sobre o fluxo paralelo de auto-categorização.
+
+### Técnico
+- **Backend modificado** (4 ficheiros): `models/document.py` (10 campos), `services/document_review.py` (NOVO, 4 funções), `routes/documents.py` (4 endpoints + projeção), `services/document_categorization.py` (comentário).
+- **Frontend modificado** (3 ficheiros): `services/api.js` (4 helpers), `components/DocumentReviewModal.jsx` (NOVO), `components/S3FileManager.js` (state + handlers + badges + modal mount).
+- **Validação**: `py_compile` ✓ (4 backend); `flake8 --select=E9,F63,F7,F82` → 0 erros; `bun build --no-bundle` ✓ (3 frontend, 0 erros); `eslint --quiet` ✓ (0 erros); `vite build` ✓ (0 erros).
+- **Dependências**: Nenhuma nova — `BrainCircuit`, `Dialog`, `ScrollArea`, `Badge`, `ArrowRight` já existem em Shadcn/lucide-react.
+- **Princípio chave**: a IA escreve SEMPRE em `suggested_*`; `ai_*` só é atualizado quando o consultor aprova. A auto-categorização em background (uploads novos) continua a escrever diretamente em `ai_*` — o HITL é um fluxo paralelo accionado on-demand.
+
 ## [2026-07-25] — Pacote DI: Session Clash Fix + PDF HTML/Minuta + Rebranding
 
 ### Corrigido
