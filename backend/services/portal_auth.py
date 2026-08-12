@@ -256,7 +256,7 @@ async def run_portal_login(data: PortalLoginRequest):
     process_id = None
     process_ids = client.get("process_ids", [])
     if process_ids:
-        # Buscar o primeiro processo activo
+        # Buscar o primeiro processo activo (não eliminado)
         process = await db.processes.find_one(
             {"id": {"$in": process_ids}, "is_deleted": {"$ne": True}},
             {"_id": 0, "id": 1}
@@ -264,8 +264,27 @@ async def run_portal_login(data: PortalLoginRequest):
         if process:
             process_id = process.get("id")
         else:
-            # Fallback: usar o primeiro ID da lista
-            process_id = process_ids[0]
+            # PACOTE DK — Fallback: verificar se o primeiro ID da lista ainda existe
+            # (mesmo que esteja soft-deleted). Se não existir (hard-deleted), usar
+            # "no_process" em vez de um ID stale que causaria 404 no portal.
+            stale_check = await db.processes.find_one(
+                {"id": process_ids[0]}, {"_id": 0, "id": 1, "is_deleted": 1}
+            )
+            if stale_check:
+                if stale_check.get("is_deleted"):
+                    logger.warning(
+                        f"[PORTAL LOGIN] Processo {process_ids[0]} está soft-deleted "
+                        f"para cliente {client_id}. Usando 'no_process' no JWT."
+                    )
+                    process_id = None  # → gerará token "no_process"
+                else:
+                    process_id = process_ids[0]
+            else:
+                logger.warning(
+                    f"[PORTAL LOGIN] Processo {process_ids[0]} NÃO existe na BD "
+                    f"(hard-deleted?) para cliente {client_id}. Usando 'no_process'."
+                )
+                process_id = None  # → gerará token "no_process"
 
     # ── 6. Gerar JWT de sessão ──
     if process_id:
