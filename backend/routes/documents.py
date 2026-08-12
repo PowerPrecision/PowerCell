@@ -26,7 +26,7 @@ from pydantic import BaseModel, model_validator
 from database import db
 from models.auth import UserRole
 from models.document import DocumentExpiryCreate, DocumentExpiryResponse
-from services.auth import get_current_user, require_roles
+from services.auth import get_current_user, require_roles, require_staff
 from middleware.rate_limit import limiter
 
 # Importar verificação de permissões de processo
@@ -210,6 +210,10 @@ async def list_client_files(
 
     # Enriquecer com flags de análise/categorização IA (para badge na UI)
     try:
+        # PACOTE DJ — expandir projeção para incluir campos de revisão HITL
+        # (ai_review_status + suggested_* + ai_confidence/expiry_date/ai_subcategory).
+        # Sem isto, o frontend S3FileManager não consegue mostrar badges de
+        # "pending/approved/rejected" nem montar o modal de revisão.
         meta_docs = await db.document_metadata.find(
             {"process_id": effective_id},
             {
@@ -219,6 +223,21 @@ async def list_client_files(
                 "ai_analyzed_at": 1,
                 "is_categorized": 1,
                 "ai_category": 1,
+                # PACOTE DJ — campos de revisão HITL
+                "ai_review_status": 1,
+                "ai_reviewed_at": 1,
+                "ai_reviewed_by": 1,
+                "ai_applied_fields": 1,
+                "suggested_category": 1,
+                "suggested_subcategory": 1,
+                "suggested_confidence": 1,
+                "suggested_expiry_date": 1,
+                "suggested_filename": 1,
+                "suggested_nome": 1,
+                "ai_confidence": 1,
+                "ai_subcategory": 1,
+                "expiry_date": 1,
+                "extracted_data": 1,
             },
         ).to_list(2000)
         meta_by_path = {
@@ -236,6 +255,22 @@ async def list_client_files(
                     f["is_categorized"] = bool(meta.get("is_categorized"))
                     if meta.get("ai_category") and not f.get("ai_category"):
                         f["ai_category"] = meta.get("ai_category")
+                    # PACOTE DJ — propagar campos de revisão + extras para a UI
+                    f["ai_review_status"] = meta.get("ai_review_status")
+                    f["ai_reviewed_at"] = meta.get("ai_reviewed_at")
+                    f["ai_reviewed_by"] = meta.get("ai_reviewed_by")
+                    f["ai_applied_fields"] = meta.get("ai_applied_fields")
+                    f["suggested_category"] = meta.get("suggested_category")
+                    f["suggested_subcategory"] = meta.get("suggested_subcategory")
+                    f["suggested_confidence"] = meta.get("suggested_confidence")
+                    f["suggested_expiry_date"] = meta.get("suggested_expiry_date")
+                    f["suggested_filename"] = meta.get("suggested_filename")
+                    f["suggested_nome"] = meta.get("suggested_nome")
+                    f["ai_confidence"] = meta.get("ai_confidence")
+                    f["ai_subcategory"] = meta.get("ai_subcategory")
+                    f["expiry_date"] = meta.get("expiry_date")
+                    # extracted_data pode conter nome_completo/nif — útil para a UI
+                    f["extracted_data"] = meta.get("extracted_data")
     except Exception as enrich_err:
         logger.warning(f"[FILES] Falha ao enriquecer metadados IA: {enrich_err}")
 
@@ -884,6 +919,99 @@ async def rename_all_documents_smart(
     - details: Lista de operações
     """
     return await run_rename_all_documents_smart(process_id)
+
+
+
+# ====================================================================
+# PACOTE DJ — REVISÃO HUMAN-IN-THE-LOOP DE DOCUMENTOS (IA sugere, consultor aprova)
+# ====================================================================
+# Fluxo HITL:
+#   1. POST /documents/{doc_id}/ai-analyze-review     → IA gera sugestões (pending)
+#   2. POST /documents/{doc_id}/apply-ai-review       → Consultor aprova (copia suggested_* → ai_*)
+#   3. POST /documents/{doc_id}/reject-ai-review      → Consultor rejeita
+#   4. GET  /documents/process/{process_id}/pending-review → Lista pendentes
+#
+# Princípio: a IA escreve SEMPRE em `suggested_*` (não em `ai_*`).
+# Os campos `ai_*` só são actualizados quando o consultor aprova via apply-ai-review.
+# O fluxo de auto-categorização em background (`document_auto_categorize.py`) NÃO é
+# afectado — continua a escrever directamente em `ai_*` para uploads novos.
+# ====================================================================
+
+@router.post("/{doc_id}/ai-analyze-review", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def analyze_document_for_review(
+    doc_id: str,
+    user: dict = Depends(require_staff()),
+):
+    """
+    PACOTE DJ — Analisa documento com IA e guarda SUGESTÕES para revisão.
+
+    A IA gera sugestões de categoria, subcategoria, validade, nome e filename,
+    e persiste-as em `suggested_*` (sem aplicar). Marca `ai_review_status='pending'`.
+
+    O consultor deve depois aprovar (`/apply-ai-review`) ou rejeitar
+    (`/reject-ai-review`) as sugestões.
+    """
+    from services.document_review import run_analyze_document_for_review
+    return await run_analyze_document_for_review(doc_id, user)
+
+
+@router.post("/{doc_id}/apply-ai-review", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def apply_ai_review(
+    doc_id: str,
+    body: dict,
+    user: dict = Depends(require_staff()),
+):
+    """
+    PACOTE DJ — Aplica sugestões da IA (Human-in-the-Loop).
+
+    Body:
+        {
+            "fields": ["categoria","validade","nome","filename"],  # campos a aplicar
+            "edited_values": {  # opcional — overrides do consultor
+                "categoria": "...", "validade": "...",
+                "nome": "...", "filename": "..."
+            }
+        }
+
+    Copia `suggested_*` → `ai_*`. Se `edited_values` estiver presente,
+    marca `ai_review_status='edited'`; caso contrário, `'approved'`.
+    """
+    from services.document_review import run_apply_review
+    return await run_apply_review(doc_id, body, user)
+
+
+@router.post("/{doc_id}/reject-ai-review", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+async def reject_ai_review(
+    doc_id: str,
+    body: dict = None,
+    user: dict = Depends(require_staff()),
+):
+    """
+    PACOTE DJ — Rejeita sugestões da IA.
+
+    Body (opcional):
+        { "reason": "motivo da rejeição" }
+
+    Marca `ai_review_status='rejected'`. Mantém `suggested_*` para auditoria.
+    """
+    from services.document_review import run_reject_review
+    return await run_reject_review(doc_id, body or {}, user)
+
+
+@router.get("/process/{process_id}/pending-review", responses={500: HTTP_500_RESPONSE})
+async def get_pending_reviews(
+    process_id: str,
+    user: dict = Depends(require_staff()),
+):
+    """
+    PACOTE DJ — Lista documentos pendentes de revisão IA para um processo.
+
+    Retorna `{pending: [...], total: N}` com `suggested_*` e `current_*` para
+    cada documento, permitindo ao frontend montar o modal de revisão
+    (Actual vs Sugerido) — padrão já usado pelo DataConflictResolver.
+    """
+    from services.document_review import run_get_pending_reviews
+    return await run_get_pending_reviews(process_id, user)
 
 
 

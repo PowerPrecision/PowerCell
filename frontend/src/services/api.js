@@ -645,6 +645,20 @@ export const analyzeDocument = (data) => api.post("/ai/analyze-document", data);
 export const analyzeOneDriveDocument = (data) => api.post("/ai/analyze-onedrive-document", data);
 export const getSupportedDocuments = () => api.get("/ai/supported-documents");
 
+// PACOTE DJ — Revisão Human-in-the-Loop de Documentos
+// A IA sugere metadados (categoria, validade, nome, filename) em campos `suggested_*`
+// paralelos; o consultor aprova/rejeita via 4 endpoints dedicados.
+// O fluxo antigo (`/documents/ai-analyze/{process_id}`) escrevia directamente em `ai_*`
+// e auto-aplicava; este novo fluxo pede revisão explícita antes de aplicar.
+export const analyzeDocumentForReview = (docId) =>
+  api.post(`/documents/${docId}/ai-analyze-review`);
+export const applyAIReview = (docId, data) =>
+  api.post(`/documents/${docId}/apply-ai-review`, data);
+export const rejectAIReview = (docId, data) =>
+  api.post(`/documents/${docId}/reject-ai-review`, data);
+export const getPendingReviews = (processId) =>
+  api.get(`/documents/process/${processId}/pending-review`);
+
 // Document Expiry Management
 export const getDocumentExpiries = (processId) => 
   api.get("/documents/expiry", { params: { process_id: processId } });

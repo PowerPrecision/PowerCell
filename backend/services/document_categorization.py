@@ -175,6 +175,13 @@ Responde APENAS em formato JSON válido:
         ).with_model("openai", "gpt-4o-mini")
         
         user_message = UserMessage(text=user_prompt)
+        # PACOTE DJ — Nota: LlmChat (emergentintegrations) não expõe
+        # `response_format={"type": "json_object"}` como o client OpenAI
+        # cru (ver ai_document_analyzer.py:419). O prompt já pede JSON
+        # estrito e `parse_categorization_response` faz strip de markdown
+        # + fallback seguro ("Outros"/0.3) — pelo que nos apoiamos nesse
+        # parser. Refactor para client OpenAI directo ficaria para outro
+        # pacote (não estritamente necessário para o fluxo HITL DJ).
         response = await chat.send_message(user_message)
         
         # Parse da resposta JSON

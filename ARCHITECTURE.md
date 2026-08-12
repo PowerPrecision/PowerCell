@@ -1474,3 +1474,49 @@ flowchart LR
     DB -->|"visible_to_client=true"| Portal["GET /portal/events"]
     Portal --> ClientUI["ClientPortal — Próximos Eventos"]
 ```
+
+---
+
+## IA Human-in-the-Loop — Revisão de Documentos (Pacote DJ)
+
+A IA analisa documentos e **sugere** metadados (categoria, validade, nome), mas **nunca aplica alterações diretamente**. O consultor revê as sugestões num modal e decide quais aceitar ou rejeitar.
+
+```mermaid
+flowchart LR
+    Trigger["Consultor clica BrainCircuit<br/>num documento"] -->|"POST /documents/{doc_id}/ai-analyze-review"| Backend["document_review.py<br/>run_analyze_document_for_review"]
+    Backend -->|"categorize_document_with_ai<br/>+ OCR (analyze_document_from_base64)"| LLM["GPT-4o-mini"]
+    LLM -->|"JSON: categoria, validade,<br/>nome, confianca"| Backend
+    Backend -->|"escreve suggested_*<br/>ai_review_status=pending"| DB[(document_metadata)]
+    DB -->|"GET /client/{id}/files<br/>(projection expandida)"| Frontend["S3FileManager<br/>badge: Sugestões IA"]
+    Frontend -->|"click no badge"| Modal["DocumentReviewModal<br/>Atual vs Sugerido<br/>+ Aceitar/Rejeitar"]
+    Modal -->|"POST /documents/{doc_id}/apply-ai-review"| Apply["copia suggested_* → ai_*<br/>status=approved/edited"]
+    Modal -->|"POST /documents/{doc_id}/reject-ai-review"| Reject["status=rejected<br/>mantém suggested_* para auditoria"]
+```
+
+### Modelo de dados — `suggested_*` vs `ai_*`
+
+A coleção `document_metadata` tem dois conjuntos de campos:
+
+| Campo `suggested_*` (IA sugere) | Campo `ai_*` (consultor aprova) | Quando é escrito |
+|---|---|---|
+| `suggested_category` | `ai_category` | `suggested_*` na análise; `ai_*` na aprovação |
+| `suggested_subcategory` | `ai_subcategory` | mesmo padrão |
+| `suggested_confidence` | `ai_confidence` | mesmo padrão |
+| `suggested_expiry_date` | `expiry_date` | mesmo padrão |
+| `suggested_filename` | `filename` | mesmo padrão |
+| `suggested_nome` | `extracted_data.nome` | mesmo padrão |
+
+O campo `ai_review_status` controla o estado: `pending` → `approved` | `rejected` | `edited`.
+
+### Endpoints do fluxo HITL
+
+| Endpoint | Método | Descrição |
+|---|---|---|
+| `/documents/{doc_id}/ai-analyze-review` | POST | Triggera IA, escreve `suggested_*`, marca `pending` |
+| `/documents/{doc_id}/apply-ai-review` | POST | Aplica sugestões selecionadas (`suggested_*` → `ai_*`) |
+| `/documents/{doc_id}/reject-ai-review` | POST | Rejeita sugestões |
+| `/documents/process/{process_id}/pending-review` | GET | Lista documentos pendentes de revisão |
+
+### Fluxo paralelo — auto-categorização em background
+
+A auto-categorização em background (`document_auto_categorize.py`) continua a escrever **diretamente** em `ai_*` (sem HITL) para uploads novos. O fluxo HITL é **paralelo** — accionado on-demand pelo consultor quando quer rever/refinar os metadados de um documento específico.

@@ -71,6 +71,8 @@ import {
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
+// PACOTE DJ — Modal de revisão Human-in-the-Loop de sugestões IA por documento
+import DocumentReviewModal from "./DocumentReviewModal";
 import { hasRole, hasAnyRole, MANAGEMENT_ROLES } from "../utils/roleUtils";
 import {
   FileText,
@@ -96,6 +98,8 @@ import {
   X,
   Sparkles,
   Brain,
+  BrainCircuit, // PACOTE DJ — trigger IA per-document (HITL)
+  CheckCircle2, // PACOTE DJ — badge "approved"
   CheckSquare,
   Square,
   Link,
@@ -115,6 +119,8 @@ import {
 import { Input } from "./ui/input";
 import { pt } from "date-fns/locale";
 import { safeDate, safeFormat } from "../lib/utils";
+// PACOTE DJ — helper api.js para o novo endpoint de revisão HITL
+import { analyzeDocumentForReview } from "../services/api";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -200,6 +206,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [aiDialog, setAiDialog] = useState({ open: false, results: null });
   const [selectedFilesForAI, setSelectedFilesForAI] = useState([]);
   const [applyingChanges, setApplyingChanges] = useState(false);
+
+  // PACOTE DJ — Revisão Human-in-the-Loop de sugestões IA por documento.
+  // `analyzingDocIds` guarda os docIds em análise (mostra badge "A analisar..."
+  // por ficheiro enquanto o endpoint /ai-analyze-review corre). `reviewModal`
+  // controla a abertura do DocumentReviewModal com o doc a rever.
+  const [analyzingDocIds, setAnalyzingDocIds] = useState(new Set());
+  const [reviewModal, setReviewModal] = useState({ open: false, doc: null });
+
   
   // Estado para mapeamento S3 individual
   const [s3MappingOpen, setS3MappingOpen] = useState(false);
@@ -1281,6 +1295,62 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
+  // PACOTE DJ — Analisar documento individual para revisão HITL.
+  // Diferente do `handleAIAnalysis` (que analisa vários ficheiros via endpoint
+  // antigo e auto-aplica), este handler chama o NOVO endpoint
+  // `POST /documents/{doc_id}/ai-analyze-review` que:
+  //   1. Persiste sugestões em `suggested_*` (NÃO toca em `ai_*`).
+  //   2. Marca `ai_review_status='pending'`.
+  //   3. Devolve `{ suggestions, current, ai_review_status }` para o modal.
+  // Depois de receber a resposta, abre o DocumentReviewModal para o consultor
+  // aprovar/rejeitar explicitamente cada campo.
+  const handleAnalyzeDocForReview = async (file) => {
+    if (!canUseAIDocumentTools) {
+      toast.error("Sem permissão para analisar documentos com IA");
+      return;
+    }
+    // O listing de ficheiros (`GET /client/{process_id}/files`) expõe o ID do
+    // document_metadata em `file.doc_id`. Fallback para `file.id` se o backend
+    // usar esse nome alternativo noutros contextos.
+    const docId = file?.doc_id || file?.id;
+    if (!docId) {
+      toast.error("Não foi possível identificar o documento (doc_id em falta).");
+      return;
+    }
+
+    setAnalyzingDocIds((prev) => new Set([...prev, docId]));
+    try {
+      const res = await analyzeDocumentForReview(docId);
+      toast.success("Análise IA concluída. Revise as sugestões.");
+      // Refresca a lista para mostrar o badge "Sugestões IA" (pending).
+      await fetchFiles();
+      // Abre o modal de revisão com os dados frescos (suggestions + current).
+      // Merge do `file` (com campos `suggested_*` actualizados pelo fetchFiles)
+      // com a resposta do endpoint para garantir que temos tudo disponível.
+      setReviewModal({
+        open: true,
+        doc: { ...file, ...(res?.data || {}) },
+      });
+    } catch (err) {
+      toast.error(err?.response?.data?.detail || "Erro ao analisar documento.");
+    } finally {
+      setAnalyzingDocIds((prev) => {
+        const next = new Set(prev);
+        next.delete(docId);
+        return next;
+      });
+    }
+  };
+
+  // PACOTE DJ — Abrir o modal de revisão para um ficheiro que já tem
+  // `ai_review_status='pending'` (sugestões gravadas, à espera de decisão).
+  // Não chama o endpoint de análise; apenas abre o modal com os dados que
+  // já vieram no listing (`suggested_*` + `ai_*`/`current`).
+  const handleOpenReviewModal = (file) => {
+    if (!file) return;
+    setReviewModal({ open: true, doc: file });
+  };
+
   // Aplicar sugestões da análise IA
   const handleApplyAISuggestions = async (suggestions) => {
     if (!suggestions || Object.keys(suggestions).length === 0) {
@@ -2314,6 +2384,63 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             >
                               {file.name}
                             </span>
+                            {/* PACOTE DJ — Badges de estado de revisão HITL IA.
+                                Mostra o estado actual da revisão das sugestões IA
+                                (pending/approved/rejected/edited) e um spinner
+                                "A analisar..." enquanto o endpoint corre. */}
+                            {analyzingDocIds.has(file.doc_id || file.id) && (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 h-4 px-1 bg-primary/10 text-primary border-primary/20 shrink-0"
+                                title="A análise IA está em curso..."
+                              >
+                                <Loader2 className="h-2.5 w-2.5 mr-0.5 animate-spin" />
+                                A analisar...
+                              </Badge>
+                            )}
+                            {file.ai_review_status === "pending" && (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 h-4 px-1 bg-accent/15 text-accent-foreground border-accent/30 shrink-0 cursor-pointer"
+                                title="Clique para rever as sugestões da IA"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleOpenReviewModal(file);
+                                }}
+                              >
+                                <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                                Sugestões IA
+                              </Badge>
+                            )}
+                            {file.ai_review_status === "approved" && (
+                              <Badge
+                                variant="secondary"
+                                className="text-[9px] py-0 h-4 px-1 shrink-0"
+                                title="Sugestões IA aprovadas"
+                              >
+                                <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
+                                Aprovado
+                              </Badge>
+                            )}
+                            {file.ai_review_status === "rejected" && (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 h-4 px-1 text-muted-foreground shrink-0"
+                                title="Sugestões IA rejeitadas"
+                              >
+                                Rejeitado
+                              </Badge>
+                            )}
+                            {file.ai_review_status === "edited" && (
+                              <Badge
+                                variant="outline"
+                                className="text-[9px] py-0 h-4 px-1 bg-primary/15 text-primary border-primary/30 shrink-0"
+                                title="Sugestões IA aplicadas com edições manuais"
+                              >
+                                <Pencil className="h-2.5 w-2.5 mr-0.5" />
+                                Editado
+                              </Badge>
+                            )}
                             {file.ai_analyzed && (
                               <Badge
                                 variant="outline"
@@ -2338,6 +2465,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
                           {/* Ações */}
                           <div className="flex items-center justify-end gap-0.5 min-w-[80px]">
+                            {/* PACOTE DJ — Botão "Analisar com IA" (HITL) por documento.
+                                Chama o endpoint /ai-analyze-review que persiste sugestões
+                                em suggested_* (não aplica) e abre o DocumentReviewModal.
+                                Gate: apenas gestão (canUseAIDocumentTools). */}
+                            {canUseAIDocumentTools && !isFolder && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 flex-shrink-0 text-primary hover:text-primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleAnalyzeDocForReview(file);
+                                }}
+                                disabled={analyzingDocIds.has(file.doc_id || file.id)}
+                                title="Analisar com IA"
+                                data-testid={`dj-analyze-btn-${idx}`}
+                              >
+                                {analyzingDocIds.has(file.doc_id || file.id) ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <BrainCircuit className="h-3 w-3" />
+                                )}
+                              </Button>
+                            )}
                             {isPreviewable(file.name) && (
                               <Button 
                                 variant="ghost" 
@@ -2720,6 +2871,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                             <div className="flex items-center justify-between mb-2">
                               <FileIcon filename={file.name} />
                               <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                {/* PACOTE DJ — Botão "Analisar com IA" (HITL) por documento (vista grelha - Todos). */}
+                                {canUseAIDocumentTools && !isFolder && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-primary hover:text-primary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleAnalyzeDocForReview(file);
+                                    }}
+                                    disabled={analyzingDocIds.has(file.doc_id || file.id)}
+                                    title="Analisar com IA"
+                                    data-testid={`dj-analyze-btn-all-${idx}`}
+                                  >
+                                    {analyzingDocIds.has(file.doc_id || file.id) ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <BrainCircuit className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                )}
                                 {isPdfFile(file.name) && (
                                   <Button
                                     variant="ghost"
@@ -2767,6 +2939,60 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               <Badge variant="outline" className="text-[10px] py-0 h-4">
                                 {file.category}
                               </Badge>
+                              {/* PACOTE DJ — Badges de estado de revisão HITL IA (grelha - Todos). */}
+                              {analyzingDocIds.has(file.doc_id || file.id) && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] py-0 h-4 px-1 bg-primary/10 text-primary border-primary/20"
+                                  title="A análise IA está em curso..."
+                                >
+                                  <Loader2 className="h-2.5 w-2.5 mr-0.5 animate-spin" />
+                                  A analisar...
+                                </Badge>
+                              )}
+                              {file.ai_review_status === "pending" && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] py-0 h-4 px-1 bg-accent/15 text-accent-foreground border-accent/30 cursor-pointer"
+                                  title="Clique para rever as sugestões da IA"
+                                  onClick={(e) => {
+                                    e.stopPropagation();
+                                    handleOpenReviewModal(file);
+                                  }}
+                                >
+                                  <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                                  Sugestões IA
+                                </Badge>
+                              )}
+                              {file.ai_review_status === "approved" && (
+                                <Badge
+                                  variant="secondary"
+                                  className="text-[9px] py-0 h-4 px-1"
+                                  title="Sugestões IA aprovadas"
+                                >
+                                  <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
+                                  Aprovado
+                                </Badge>
+                              )}
+                              {file.ai_review_status === "rejected" && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] py-0 h-4 px-1 text-muted-foreground"
+                                  title="Sugestões IA rejeitadas"
+                                >
+                                  Rejeitado
+                                </Badge>
+                              )}
+                              {file.ai_review_status === "edited" && (
+                                <Badge
+                                  variant="outline"
+                                  className="text-[9px] py-0 h-4 px-1 bg-primary/15 text-primary border-primary/30"
+                                  title="Sugestões IA aplicadas com edições manuais"
+                                >
+                                  <Pencil className="h-2.5 w-2.5 mr-0.5" />
+                                  Editado
+                                </Badge>
+                              )}
                               {file.ai_analyzed && (
                                 <Badge
                                   variant="outline"
@@ -2822,6 +3048,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               <div className="flex items-center justify-between mb-2">
                                 <FileIcon filename={file.name} />
                                 <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity">
+                                  {/* PACOTE DJ — Botão "Analisar com IA" (HITL) por documento (vista grelha - por categoria). */}
+                                  {canUseAIDocumentTools && !file?.path?.endsWith('/') && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-primary hover:text-primary"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleAnalyzeDocForReview(file);
+                                      }}
+                                      disabled={analyzingDocIds.has(file.doc_id || file.id)}
+                                      title="Analisar com IA"
+                                      data-testid={`dj-analyze-btn-cat-${idx}`}
+                                    >
+                                      {analyzingDocIds.has(file.doc_id || file.id) ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <BrainCircuit className="h-3.5 w-3.5" />
+                                      )}
+                                    </Button>
+                                  )}
                                   {isPdfFile(file.name) && (
                                     <Button
                                       variant="ghost"
@@ -2868,6 +3115,60 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                               </button>
                               {/* Meta info */}
                               <div className="flex flex-wrap items-center gap-1">
+                                {/* PACOTE DJ — Badges de estado de revisão HITL IA (grelha - por categoria). */}
+                                {analyzingDocIds.has(file.doc_id || file.id) && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] py-0 h-4 px-1 bg-primary/10 text-primary border-primary/20"
+                                    title="A análise IA está em curso..."
+                                  >
+                                    <Loader2 className="h-2.5 w-2.5 mr-0.5 animate-spin" />
+                                    A analisar...
+                                  </Badge>
+                                )}
+                                {file.ai_review_status === "pending" && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] py-0 h-4 px-1 bg-accent/15 text-accent-foreground border-accent/30 cursor-pointer"
+                                    title="Clique para rever as sugestões da IA"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleOpenReviewModal(file);
+                                    }}
+                                  >
+                                    <Sparkles className="h-2.5 w-2.5 mr-0.5" />
+                                    Sugestões IA
+                                  </Badge>
+                                )}
+                                {file.ai_review_status === "approved" && (
+                                  <Badge
+                                    variant="secondary"
+                                    className="text-[9px] py-0 h-4 px-1"
+                                    title="Sugestões IA aprovadas"
+                                  >
+                                    <CheckCircle2 className="h-2.5 w-2.5 mr-0.5" />
+                                    Aprovado
+                                  </Badge>
+                                )}
+                                {file.ai_review_status === "rejected" && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] py-0 h-4 px-1 text-muted-foreground"
+                                    title="Sugestões IA rejeitadas"
+                                  >
+                                    Rejeitado
+                                  </Badge>
+                                )}
+                                {file.ai_review_status === "edited" && (
+                                  <Badge
+                                    variant="outline"
+                                    className="text-[9px] py-0 h-4 px-1 bg-primary/15 text-primary border-primary/30"
+                                    title="Sugestões IA aplicadas com edições manuais"
+                                  >
+                                    <Pencil className="h-2.5 w-2.5 mr-0.5" />
+                                    Editado
+                                  </Badge>
+                                )}
                                 {file.ai_analyzed && (
                                   <Badge
                                     variant="outline"
@@ -3880,6 +4181,18 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           user={{ id: user?.id, name: user?.name || user?.email, role: user?.role }}
         />
       )}
+
+      {/* PACOTE DJ — Modal de Revisão de Sugestões IA (Human-in-the-Loop).
+          Aberto quando o consultor clica no botão "Analisar com IA" por
+          documento (BrainCircuit) ou no badge "Sugestões IA" (pending).
+          Permite aprovar/rejeitar cada campo sugerido pela IA antes de
+          aplicar — ver DocumentReviewModal.jsx. */}
+      <DocumentReviewModal
+        open={reviewModal.open}
+        onOpenChange={(open) => setReviewModal((prev) => ({ ...prev, open }))}
+        doc={reviewModal.doc}
+        onResolved={fetchFiles}
+      />
     </>
   );
 };

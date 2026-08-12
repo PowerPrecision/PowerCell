@@ -3416,3 +3416,29 @@ Stage Summary:
   - frontend/src/contexts/AuthContext.js (isPublicRoute + guard 401 defensivo)
   - frontend/src/services/api.js (isPublicRoute em 3 sítios do 401 handler)
 - Resultado: (1) Links públicos /rgpd/:token funcionam com sessão staff ativa (sem redirect /login). (2) PDF RGPD tem HTML formatting correto (parágrafos, bold, listas) + Minuta de Exclusividade (PageBreak) + sem Endereço IP. (3) ~30 strings client-facing rebranded PowerCell→Precision Crédito.
+
+
+---
+Task ID: Pacote DJ (IA Human-in-the-Loop — Revisão de Documentos)
+Agent: Main Agent (Z.ai Code Assistant) + 4 subagentes (2 Explore + 2 Implementação)
+Task: Criar fluxo HITL para IA de documentos — trigger per-document, sugestões em suggested_*, modal de revisão (Atual vs Sugerido), Aceitar/Rejeitar.
+
+Work Log:
+- Re-clonado /home/z/powercell (base 60111d8c = Pacote DI).
+- 2 subagentes Explore: DJ-1-Explore (backend AI — 22 endpoints mapeados, document_metadata schema, run_apply_ai_suggestions, data_conflict pattern) + DJ-2-Explore (frontend — S3FileManager 3900 linhas, 3 sites de badges, DataConflictResolver pattern para clone).
+- 2 subagentes Implementação: DJ-Backend (4 ficheiros — 10 campos model + document_review.py NOVO com 4 funções + 4 endpoints + projeção expandida) + DJ-Frontend (3 ficheiros — 4 helpers api.js + DocumentReviewModal.jsx NOVO + S3FileManager state/handlers/badges/modal). Validação completa: eslint --quiet 0 erros + vite build 0 erros.
+- Validação final: py_compile ✓ (4 backend), flake8 0 erros, bun build ✓ (3 frontend).
+- Documentação: ARCHITECTURE.md secção "IA Human-in-the-Loop" (diagrama + tabela suggested_* vs ai_*) + CHANGELOG.
+- Verificação de tokens: 0 ocorrências de padrão de token no diff.
+
+Stage Summary:
+- 8 ficheiros modificados (4 backend + 3 frontend + 1 doc):
+  - backend/models/document.py (10 campos: ai_review_status + ai_reviewed_* + ai_applied_fields + suggested_*)
+  - backend/services/document_review.py (NOVO — run_analyze_document_for_review + run_apply_review + run_reject_review + run_get_pending_reviews)
+  - backend/routes/documents.py (4 endpoints + projeção expandida 5→19 campos)
+  - backend/services/document_categorization.py (comentário)
+  - frontend/src/services/api.js (4 helpers: analyzeDocumentForReview, applyAIReview, rejectAIReview, getPendingReviews)
+  - frontend/src/components/DocumentReviewModal.jsx (NOVO — modal HITL com grid 3-col Atual→Sugerido + toggle + Aceitar/Rejeitar)
+  - frontend/src/components/S3FileManager.js (state + 2 handlers + per-file BrainCircuit button + 15 badge blocks em 3 sites + modal mount)
+  - ARCHITECTURE.md (secção HITL)
+- Resultado: (1) Consultor clica BrainCircuit num documento → IA analisa e guarda sugestões em suggested_* (não aplica). (2) Badge "Sugestões IA" aparece no ficheiro. (3) Click no badge abre DocumentReviewModal com Atual vs Sugerido (Nome, Categoria, Validade, Filename) + confiança. (4) Consultor seleciona campos e clica "Aplicar Selecionadas" (suggested_* → ai_*) ou "Rejeitar Tudo". (5) Auto-categorização em background mantida (paralela, sem HITL).
