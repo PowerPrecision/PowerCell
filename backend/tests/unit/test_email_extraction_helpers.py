@@ -106,6 +106,7 @@ def test_email_mailbox_ops_module_exports():
         "run_get_email_attachments",
         "run_download_attachment",
         "run_preview_attachment",
+        "run_download_webmail_attachment",
     ):
         assert callable(getattr(mod, name))
 
@@ -126,6 +127,8 @@ def test_email_remaining_modules_export_run_entrypoints():
         "run_webmail_stats",
         "run_webmail_sync",
         "run_get_configured_accounts",
+        "build_ucr_mailbox_filter",
+        "resolve_ucr_mailbox_filter",
     ):
         assert callable(getattr(wm, name))
     for name in (
@@ -148,3 +151,16 @@ def test_emails_router_is_thin_stubs_only():
     # No fat IMAP/webmail bodies left in the route file
     assert "ISOLAMENTO DE DADOS (Segurança)" not in text
     assert len(text.splitlines()) < 800
+
+
+def test_webmail_attachment_router_is_thin_stub():
+    from pathlib import Path
+    from routes.webmail import router
+
+    routes_path = Path(__file__).resolve().parents[2] / "routes" / "webmail.py"
+    text = routes_path.read_text()
+    assert "/attachments/{attachment_id}" in text
+    assert "return await run_download_webmail_attachment" in text
+    assert len(text.splitlines()) < 80
+    paths = [getattr(r, "path", "") for r in router.routes]
+    assert any("attachments" in p for p in paths)

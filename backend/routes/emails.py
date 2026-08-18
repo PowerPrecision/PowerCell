@@ -427,10 +427,11 @@ async def webmail_list(
 
 @router.get("/webmail-stats")
 async def webmail_stats(
+    request: Request,
     box: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    return await run_webmail_stats(current_user, box=box)
+    return await run_webmail_stats(current_user, box=box, request=request)
 
 
 @router.post("/webmail/sync")

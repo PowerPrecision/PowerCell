@@ -132,7 +132,7 @@ const getAttachmentIcon = (filename) => {
 };
 
 const WebmailPage = () => {
-  const { token, user, effectiveRole } = useAuth();
+  const { token, user, effectiveRole, activeCompanyId, effectiveCompanyId } = useAuth();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialFolder = FOLDERS.some((f) => f.id === searchParams.get("folder"))
@@ -140,13 +140,18 @@ const WebmailPage = () => {
     : "inbox";
   const draftIdFromUrl = searchParams.get("id") || searchParams.get("draftId");
 
-  // ── Multi-Tenant: active company_id from auth context ──────────
-  // The backend reads company_id from X-Company-Id header (the same
-  // header injected by the api.js interceptor on every request).
-  // We pass it explicitly to avoid cross-tenant data leaks.
-  // NOTE: must be X-Company-Id (NOT X-Active-Company) — the latter is
-  // not in CORS_ALLOW_HEADERS, causing preflight 400 -> net::ERR_FAILED.
-  const activeCompanyId = user?.active_company_id || user?.company_id || "";
+  // Pacote DN.2: empresa do Header (ContextSwitcher), não o user.company_id estático.
+  const companyId = activeCompanyId || effectiveCompanyId || "";
+
+  const webmailHeaders = useCallback((extra = {}) => {
+    const headers = {
+      Authorization: `Bearer ${token}`,
+      ...extra,
+    };
+    if (companyId) headers["X-Company-Id"] = companyId;
+    if (effectiveRole) headers["X-Active-Role"] = effectiveRole;
+    return headers;
+  }, [token, companyId, effectiveRole]);
 
   // ── Loading guard: prevent premature "not configured" toast ────
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
@@ -167,6 +172,7 @@ const WebmailPage = () => {
   const [unreadCount, setUnreadCount] = useState(0);
   const [selectedEmail, setSelectedEmail] = useState(null);
   const [emailDetail, setEmailDetail] = useState(null);
+  const [downloadingAttachmentId, setDownloadingAttachmentId] = useState(null);
   const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
@@ -311,7 +317,7 @@ const WebmailPage = () => {
     setLabelsLoading(true);
     try {
       const res = await fetch(`${API_URL}/api/emails/labels`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: webmailHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -335,7 +341,7 @@ const WebmailPage = () => {
     if (!token) return;
     try {
       const res = await fetch(`${API_URL}/api/emails/folders`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: webmailHeaders(),
       });
       if (res.ok) {
         const data = await res.json();
@@ -362,8 +368,8 @@ const WebmailPage = () => {
       // Fetch both personal and general unread counts
       try {
         const [personalRes, generalRes] = await Promise.all([
-          fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: { Authorization: `Bearer ${token}` } }),
-          fetch(`${API_URL}/api/emails/webmail-stats?box=general`, { headers: { Authorization: `Bearer ${token}` } }),
+          fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: webmailHeaders() }),
+          fetch(`${API_URL}/api/emails/webmail-stats?box=general`, { headers: webmailHeaders() }),
         ]);
         const pData = personalRes.ok ? await personalRes.json() : {};
         const gData = generalRes.ok ? await generalRes.json() : {};
@@ -383,7 +389,7 @@ const WebmailPage = () => {
       }
     } else if (effectiveRole === 'indexacao') {
       try {
-        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=shared_indexacao`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=shared_indexacao`, { headers: webmailHeaders() });
         if (res.ok) {
           const data = await res.json();
           setUnreadByBox({ personal: 0, general: 0, shared_indexacao: data.unread_count || 0 });
@@ -403,7 +409,7 @@ const WebmailPage = () => {
     } else {
       // For consultor/intermediario, fetch personal stats
       try {
-        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: { Authorization: `Bearer ${token}` } });
+        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: webmailHeaders() });
         if (res.ok) {
           const data = await res.json();
           setUnreadCount(data.unread_count || 0);
@@ -421,7 +427,7 @@ const WebmailPage = () => {
         // Silently fail
       }
     }
-  }, [token, user?.role]);
+  }, [token, user?.role, effectiveRole, companyId, webmailHeaders]);
 
   useEffect(() => {
     fetchUnreadCounts();
@@ -458,17 +464,14 @@ const WebmailPage = () => {
         params.append("box", effectiveBox);
       }
       // ── Multi-Tenant: incluir company_id nos params ────────────
-      if (activeCompanyId) {
-        params.append("company_id", activeCompanyId);
+      if (companyId) {
+        params.append("company_id", companyId);
       }
 
       const response = await fetch(
         `${API_URL}/api/emails/webmail?${params.toString()}`,
         {
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
-          },
+          headers: webmailHeaders(),
         }
       );
 
@@ -493,17 +496,23 @@ const WebmailPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, activeFolder, account, activeBox, user?.role]);
+  }, [token, activeFolder, account, activeBox, effectiveRole, companyId, webmailHeaders]);
 
   // Auto-sync emails on page mount (on-demand model — no background polling in dev)
   // Only triggers once when the user navigates to the Webmail page
   const hasAutoSynced = useRef(false);
+  const lastSyncedProfile = useRef("");
   useEffect(() => {
-    if (token && !hasAutoSynced.current && !syncing) {
-      hasAutoSynced.current = true;
-      handleSyncEmails();
-    }
-  }, [token]); // eslint-disable-line react-hooks/exhaustive-deps
+    if (!token || syncing) return;
+    const profileKey = `${companyId}|${effectiveRole || ""}`;
+    if (lastSyncedProfile.current === profileKey) return;
+    lastSyncedProfile.current = profileKey;
+    hasAutoSynced.current = true;
+    setCurrentPage(1);
+    setSelectedEmail(null);
+    setEmailDetail(null);
+    handleSyncEmails();
+  }, [token, companyId, effectiveRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
   // Carregar emails quando muda pasta, página ou label
   useEffect(() => {
@@ -569,7 +578,7 @@ const WebmailPage = () => {
       }
       try {
         const res = await fetch(`${API_URL}/api/emails/jobs/${jobId}`, {
-          headers: { Authorization: `Bearer ${token}` },
+          headers: webmailHeaders(),
         });
         if (!res.ok) {
           // 502/503 = backend unavailable; stop instead of hammering
@@ -610,7 +619,7 @@ const WebmailPage = () => {
       }
     };
     setTimeout(poll, 3000); // First check after 3s
-  }, [token, handleRefresh]);
+  }, [token, handleRefresh, webmailHeaders]);
 
   const handleSyncEmails = useCallback(async () => {
     if (!token || syncing) return;
@@ -629,17 +638,14 @@ const WebmailPage = () => {
         params.append("account", account);
       }
       // ── Multi-Tenant: incluir company_id nos params ────────────
-      if (activeCompanyId) {
-        params.append("company_id", activeCompanyId);
+      if (companyId) {
+        params.append("company_id", companyId);
       }
       const response = await fetch(
         `${syncEndpoint}?${params.toString()}`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
-          },
+          headers: webmailHeaders(),
         }
       );
       const data = await response.json().catch(() => ({}));
@@ -659,15 +665,12 @@ const WebmailPage = () => {
         if (isPersonalSync && showTabs) {
           try {
             const fallbackParams = new URLSearchParams({ days: "7" });
-            if (activeCompanyId) fallbackParams.append("company_id", activeCompanyId);
+            if (companyId) fallbackParams.append("company_id", companyId);
             const fallbackResponse = await fetch(
               `${API_URL}/api/emails/webmail/sync?${fallbackParams.toString()}`,
               {
                 method: "POST",
-                headers: {
-                  Authorization: `Bearer ${token}`,
-                  ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
-                },
+                headers: webmailHeaders(),
               }
             );
             const fallbackData = await fallbackResponse.json().catch(() => ({}));
@@ -702,7 +705,7 @@ const WebmailPage = () => {
       toast.error("Erro de ligação ao servidor");
       setSyncing(false);
     }
-  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus]);
+  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus, companyId, webmailHeaders]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -729,7 +732,7 @@ const WebmailPage = () => {
     setDetailLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/emails/${email.id}`, {
-        headers: { Authorization: `Bearer ${token}` },
+        headers: webmailHeaders(),
       });
       if (!response.ok) {
         const errData = await response.json().catch(() => ({}));
@@ -743,10 +746,7 @@ const WebmailPage = () => {
         try {
           await fetch(`${API_URL}/api/emails/${email.id}/mark`, {
             method: "POST",
-            headers: {
-              Authorization: `Bearer ${token}`,
-              "Content-Type": "application/json",
-            },
+            headers: webmailHeaders({ "Content-Type": "application/json" }),
             body: JSON.stringify({ type: "read" }),
           });
           // Atualizar lista local
@@ -764,7 +764,7 @@ const WebmailPage = () => {
     } finally {
       setDetailLoading(false);
     }
-  }, [token, multiSelectMode]);
+  }, [token, multiSelectMode, webmailHeaders]);
 
   // ============================================================
   // TOGGLE STAR
@@ -775,10 +775,7 @@ const WebmailPage = () => {
       const newStarred = !email.is_starred;
       await fetch(`${API_URL}/api/emails/${email.id}/mark`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: webmailHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({ type: "starred" }),
       });
 
@@ -904,13 +901,7 @@ const WebmailPage = () => {
         `${API_URL}/api/emails/send?account=${effectiveAccount}`,
         {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-            // Enviar a empresa ativa para o backend resolver a assinatura
-            // correta (cada user pode ter uma assinatura por empresa — UCR).
-            ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {}),
-          },
+          headers: webmailHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify(bodyPayload),
         }
       );
@@ -964,7 +955,7 @@ const WebmailPage = () => {
         const response = await fetch(
           `${API_URL}/api/processes?search=${encodeURIComponent(query.trim())}&size=10`,
           {
-            headers: { Authorization: `Bearer ${token}` },
+            headers: webmailHeaders(),
           }
         );
         if (!response.ok) throw new Error("Erro na pesquisa");
@@ -992,10 +983,7 @@ const WebmailPage = () => {
       try {
         const response = await fetch(`${API_URL}/api/emails/associate`, {
           method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
+          headers: webmailHeaders({ "Content-Type": "application/json" }),
           body: JSON.stringify({
             email_id: selectedEmail.id,
             process_id: processId,
@@ -1048,10 +1036,7 @@ const WebmailPage = () => {
     try {
       const response = await fetch(`${API_URL}/api/emails/labels/apply`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: webmailHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           email_ids: Array.from(selectedEmails),
           label_id: labelId,
@@ -1083,7 +1068,7 @@ const WebmailPage = () => {
           ids.map((id) =>
             fetch(`${API_URL}/api/emails/${id}/permanent`, {
               method: "DELETE",
-              headers: { Authorization: `Bearer ${token}` },
+              headers: webmailHeaders(),
             })
           )
         );
@@ -1106,7 +1091,7 @@ const WebmailPage = () => {
           ids.map((id) =>
             fetch(`${API_URL}/api/emails/${id}`, {
               method: "DELETE",
-              headers: { Authorization: `Bearer ${token}` },
+              headers: webmailHeaders(),
             })
           )
         );
@@ -1132,7 +1117,7 @@ const WebmailPage = () => {
       try {
         const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}/permanent`, {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: webmailHeaders(),
         });
         if (!response.ok) throw new Error("Erro ao eliminar permanentemente");
         toast.success("Email eliminado permanentemente");
@@ -1148,7 +1133,7 @@ const WebmailPage = () => {
       try {
         const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}`, {
           method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: webmailHeaders(),
         });
         if (!response.ok) throw new Error("Erro ao mover para o lixo");
         toast.success("Email movido para o Lixo");
@@ -1174,7 +1159,7 @@ const WebmailPage = () => {
       try {
         const res = await fetch(`${API_URL}/api/emails/attachments/upload`, {
           method: "POST",
-          headers: { Authorization: `Bearer ${token}` },
+          headers: webmailHeaders(),
           body: formData,
         });
         if (res.ok) {
@@ -1255,10 +1240,7 @@ const WebmailPage = () => {
       
       const res = await fetch(url, {
         method,
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: webmailHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           name: folderDialogData.name.trim(),
           color: folderDialogData.color,
@@ -1285,7 +1267,7 @@ const WebmailPage = () => {
     try {
       const res = await fetch(`${API_URL}/api/emails/folders/${folder.id}`, {
         method: "DELETE",
-        headers: { Authorization: `Bearer ${token}` },
+        headers: webmailHeaders(),
       });
       if (res.ok) {
         toast.success(`Pasta "${folder.name}" eliminada`);
@@ -1313,10 +1295,7 @@ const WebmailPage = () => {
     try {
       const res = await fetch(`${API_URL}/api/emails/emails/move-to-folder`, {
         method: "POST",
-        headers: {
-          Authorization: `Bearer ${token}`,
-          "Content-Type": "application/json",
-        },
+        headers: webmailHeaders({ "Content-Type": "application/json" }),
         body: JSON.stringify({
           email_ids: emailIds,
           folder_id: folderId || null,
@@ -1353,6 +1332,36 @@ const WebmailPage = () => {
       trash: folderCountsData.trash || 0,
     };
   }, [folderCountsData, unreadCount]);
+
+  const handleDownloadAttachment = useCallback(async (attachment, idx) => {
+    if (!emailDetail?.id || !token) return;
+    const attId = attachment.id || `${emailDetail.id}:${idx}`;
+    setDownloadingAttachmentId(attId);
+    try {
+      const params = new URLSearchParams({ email_id: emailDetail.id });
+      const res = await fetch(
+        `${API_URL}/api/webmail/attachments/${encodeURIComponent(attId)}?${params.toString()}`,
+        { headers: webmailHeaders() }
+      );
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.detail || "Anexo não encontrado");
+      }
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = attachment.filename || attachment.file_name || `anexo-${idx + 1}`;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    } catch (error) {
+      toast.error(error.message || "Erro ao descarregar anexo");
+    } finally {
+      setDownloadingAttachmentId(null);
+    }
+  }, [emailDetail?.id, token, webmailHeaders]);
 
   // Sanitized HTML body
   const sanitizedBodyHtml = useMemo(() => {
@@ -2160,31 +2169,37 @@ const WebmailPage = () => {
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-medium truncate">
-                                    {attachment.filename || `Anexo ${idx + 1}`}
+                                    {attachment.filename || attachment.file_name || `Anexo ${idx + 1}`}
                                   </p>
-                                  {attachment.size && (
+                                  {(attachment.size || attachment.file_size) && (
                                     <p className="text-xs text-muted-foreground mt-0.5">
-                                      {formatFileSize(attachment.size)}
+                                      {formatFileSize(attachment.size || attachment.file_size)}
                                     </p>
                                   )}
                                 </div>
-                                {attachment.url && (
-                                  <Tooltip>
-                                    <TooltipTrigger asChild>
-                                      <a
-                                        href={attachment.url}
-                                        download={attachment.filename || `Anexo ${idx + 1}`}
-                                        target="_blank"
-                                        rel="noopener noreferrer"
-                                        className="h-8 w-8 rounded-md border flex items-center justify-center text-muted-foreground hover:text-foreground hover:bg-accent transition-colors shrink-0"
-                                        onClick={(e) => e.stopPropagation()}
-                                      >
+                                <Tooltip>
+                                  <TooltipTrigger asChild>
+                                    <Button
+                                      type="button"
+                                      variant="outline"
+                                      size="icon"
+                                      className="h-8 w-8 shrink-0"
+                                      disabled={downloadingAttachmentId === (attachment.id || `${emailDetail.id}:${idx}`)}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleDownloadAttachment(attachment, idx);
+                                      }}
+                                      aria-label={`Descarregar ${attachment.filename || "anexo"}`}
+                                    >
+                                      {downloadingAttachmentId === (attachment.id || `${emailDetail.id}:${idx}`) ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
                                         <Download className="h-3.5 w-3.5" />
-                                      </a>
-                                    </TooltipTrigger>
-                                    <TooltipContent>Descarregar</TooltipContent>
-                                  </Tooltip>
-                                )}
+                                      )}
+                                    </Button>
+                                  </TooltipTrigger>
+                                  <TooltipContent>Descarregar</TooltipContent>
+                                </Tooltip>
                               </div>
                             );
                           })}
