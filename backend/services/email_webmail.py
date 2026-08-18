@@ -25,6 +25,75 @@ from utils.input_sanitization import sanitize_string
 
 logger = logging.getLogger(__name__)
 
+
+def build_ucr_mailbox_filter(
+    active_company_id: Optional[str],
+    mailbox_email: Optional[str],
+) -> Optional[dict]:
+    """Filtro Mongo estrito para a mailbox do UCR activo (Pacote DN.2).
+
+    Inclui emails com ``company_id`` da empresa activa **ou** cujo campo
+    ``account`` é o endereço IMAP dessa UCR (legado, sem company_id).
+
+    Não inclui emails globais / de outros perfis do mesmo utilizador.
+    """
+    clauses: List[dict] = []
+    company_id = (active_company_id or "").strip()
+    if company_id and company_id != "default":
+        clauses.append({"company_id": company_id})
+    mailbox = (mailbox_email or "").strip().lower()
+    if mailbox:
+        escaped = re.escape(mailbox)
+        clauses.append({"account": {"$regex": f"^{escaped}$", "$options": "i"}})
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$or": clauses}
+
+
+async def resolve_ucr_mailbox_filter(
+    request: Request,
+    current_user: dict,
+    box: Optional[str] = None,
+) -> Optional[dict]:
+    """Resolve o filtro UCR a partir do header X-Company-Id + config de email.
+
+    Caixas partilhadas (geral / indexação) não são scoped por UCR pessoal.
+    """
+    if box in ("general", "shared_indexacao"):
+        return None
+    from services.auth import get_active_company_id_async
+    from services.email_config_resolver import resolve_email_config_for_sync
+
+    active_company_id = None
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a ler empresa activa: %s", exc)
+
+    mailbox_email = None
+    try:
+        resolved = await resolve_email_config_for_sync(
+            current_user.get("id"),
+            active_role=get_effective_role(request, current_user),
+            active_company_id=active_company_id,
+        )
+        if resolved:
+            mailbox_email = (resolved.get("email_address") or "").strip() or None
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a resolver mailbox UCR: %s", exc)
+
+    return build_ucr_mailbox_filter(active_company_id, mailbox_email)
+
+
+def _and_query(query: dict, extra: Optional[dict]) -> dict:
+    """Combina um filtro extra sem esmagar um ``$or`` já presente."""
+    if not extra:
+        return query
+    return {"$and": [query, extra]}
+
+
 async def run_test_email_connections(current_user: dict, account: Optional[str] = None):
     """Testar ligação com as contas de email."""
     if current_user["role"] not in ["admin", "ceo"]:
@@ -118,20 +187,11 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     # Isso evita que múltiplos $or se sobreponham.
     and_conditions = []
     
-    # === MULTI-EMPRESA: filtrar emails por empresa ativa ===
-    # Mostrar: emails da empresa ativa + emails globais (sem company_id)
-    try:
-        from services.auth import get_active_company_id_async
-        active_company_id = await get_active_company_id_async(request, current_user)
-        if active_company_id:
-            and_conditions.append({"$or": [
-                {"company_id": active_company_id},
-                {"company_id": {"$exists": False}},
-                {"company_id": None},
-                {"company_id": ""},
-            ]})
-    except Exception:
-        pass  # Fallback: mostrar todos se não houver contexto
+    # === MULTI-EMPRESA (Pacote DN.2): filtrar pela mailbox do UCR activo ===
+    # Estrito: só emails da empresa/conta IMAP do perfil escolhido no Header.
+    ucr_filter = await resolve_ucr_mailbox_filter(request, current_user, box=box)
+    if ucr_filter:
+        and_conditions.append(ucr_filter)
     
     # === ISOLAMENTO POR UTILIZADOR ===
     # Quando box é fornecido, ele substitui a lógica de isolamento padrão.
@@ -434,7 +494,11 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     }
 
 
-async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
+async def run_webmail_stats(
+    current_user: dict,
+    box: Optional[str] = None,
+    request: Optional[Request] = None,
+):
     """
     Estatísticas de Webmail para o utilizador logado.
     
@@ -443,6 +507,7 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
     Admin/CEO/Diretor vêem a caixa geral.
     
     BOX PARAM: filtra as estatísticas por caixa (personal, general, shared_indexacao).
+    Pacote DN.2: caixa pessoal filtrada pelo UCR activo (X-Company-Id).
     """
     from models.auth import UserRole
     
@@ -450,6 +515,9 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
     user_role = current_user.get("role", "")
     user_id = current_user.get("id", "")
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    ucr_filter = None
+    if request is not None:
+        ucr_filter = await resolve_ucr_mailbox_filter(request, current_user, box=box)
     
     # === BOX permission checks ===
     if box == "general":
@@ -516,23 +584,23 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
         drafts_base["created_by"] = user_id
     
     # Unread count
-    unread_query = {**inbox_base, "is_read": False}
+    unread_query = _and_query({**inbox_base, "is_read": False}, ucr_filter)
     unread_count = await db.emails.count_documents(unread_query)
     
     # Sent today
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    sent_today_query = {
+    sent_today_query = _and_query({
         **sent_base,
         "sent_at": {"$gte": today_start}
-    }
+    }, ucr_filter)
     sent_today_count = await db.emails.count_documents(sent_today_query)
     
     # Drafts count
-    drafts_count = await db.emails.count_documents(drafts_base)
+    drafts_count = await db.emails.count_documents(_and_query(drafts_base, ucr_filter))
     
     # Full folder counts for sidebar badges
-    inbox_count = await db.emails.count_documents(inbox_base)
-    sent_count = await db.emails.count_documents(sent_base)
+    inbox_count = await db.emails.count_documents(_and_query(inbox_base, ucr_filter))
+    sent_count = await db.emails.count_documents(_and_query(sent_base, ucr_filter))
     
     # Starred count
     starred_base = {"is_starred": True, "is_archived": False}
@@ -552,7 +620,7 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
             {"synced_for_user": user_id},
             {"synced_for_user": user_email},
         ]
-    starred_count = await db.emails.count_documents(starred_base)
+    starred_count = await db.emails.count_documents(_and_query(starred_base, ucr_filter))
     
     # Trash count
     trash_base = {"is_archived": True}
@@ -572,7 +640,7 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
             {"synced_for_user": user_id},
             {"synced_for_user": user_email},
         ]
-    trash_count = await db.emails.count_documents(trash_base)
+    trash_count = await db.emails.count_documents(_and_query(trash_base, ucr_filter))
     
     return {
         "unread_count": unread_count,
@@ -754,7 +822,7 @@ async def run_webmail_sync_user(request: Request, current_user: dict):
         job_type=JobType.EMAIL_SYNC,
         user_id=user_id,
         user_email=current_user.get("email", ""),
-        metadata={"sync_type": "user_personal"}
+        metadata={"sync_type": "user_personal", "company_id": active_company_id}
     )
     
     async def run_user_sync():

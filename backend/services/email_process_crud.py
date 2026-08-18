@@ -875,6 +875,22 @@ async def run_get_email(email_id: str, request: Request, current_user: dict):
         if not (is_owner or is_shared_role or is_in_conversation):
             raise HTTPException(status_code=403, detail="Sem permissão para ver este email")
 
+    # Pacote DN.1: garantir id em cada anexo (legado IMAP não gravava UUID)
+    attachments = email.get("attachments") or []
+    assigned = False
+    for idx, att in enumerate(attachments):
+        if not isinstance(att, dict):
+            continue
+        if not att.get("filename"):
+            att["filename"] = att.get("file_name") or "anexo"
+            assigned = True
+        if not att.get("id"):
+            att["id"] = f"{email_id}:{idx}"
+            assigned = True
+    if assigned:
+        await db.emails.update_one({"id": email_id}, {"$set": {"attachments": attachments}})
+        email["attachments"] = attachments
+
     enriched = await enrich_email(email)
 
     try:

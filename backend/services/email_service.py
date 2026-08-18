@@ -932,9 +932,12 @@ async def send_email(
         if attachments:
             for att in attachments:
                 attachment_records.append({
+                    "id": att.get("id") or str(uuid.uuid4()),
                     "filename": att.get("filename", "documento"),
                     "content_type": att.get("content_type", "application/octet-stream"),
-                    "size": len(att.get("content_bytes", b""))
+                    "size": len(att.get("content_bytes", b"")),
+                    "s3_key": att.get("s3_key"),
+                    "temp_key": att.get("temp_key"),
                 })
         
         if process_id:
@@ -957,8 +960,10 @@ async def send_email(
                 "synced_for_user": created_by,
                 "notes": f"Enviado via {account.name}" + (f" com {len(attachment_records)} anexo(s)" if attachment_records else ""),
                 "synced": False,
-                "account": account.name
+                "account": account.email or account.name,
             }
+            if active_company_id and active_company_id != "default":
+                email_doc["company_id"] = active_company_id
             await db.emails.insert_one(email_doc)
         
         return {"success": True, "account": account.name}
@@ -1140,7 +1145,7 @@ def _fetch_all_from_folder_sync(
                     except Exception:
                         email_date = datetime.now()
                 
-                # Extrair anexos
+                # Extrair anexos (com id estável para download — Pacote DN.1)
                 attachments = []
                 for part in msg.walk():
                     content_disposition = str(part.get("Content-Disposition", ""))
@@ -1149,9 +1154,10 @@ def _fetch_all_from_folder_sync(
                         filename = decode_email_header(filename)
                         size = len(part.get_payload(decode=True) or b"")
                         attachments.append({
+                            "id": str(uuid.uuid4()),
                             "filename": filename,
                             "content_type": part.get_content_type(),
-                            "size": size
+                            "size": size,
                         })
                 
                 emails_found.append({
@@ -1644,6 +1650,9 @@ async def sync_user_emails(
         user_login_email = (config.get("email_address") or "").lower().strip()
         if not config.get("encrypted_password"):
             return {"success": False, "error": "Password não configurada"}
+        company_id = (config.get("resolved_company_id") or "").strip() or None
+        if company_id == "default":
+            company_id = None
     else:
         user = await db.users.find_one(
             {"id": user_id},
@@ -1658,6 +1667,7 @@ async def sync_user_emails(
         config = user["email_config"]
         if not config.get("is_configured"):
             return {"success": False, "error": "Configuração de email não ativa"}
+        company_id = None
     
     encrypted_password = config.get("encrypted_password", "")
     if not encrypted_password:
@@ -1777,11 +1787,14 @@ async def sync_user_emails(
                 if not msg_id:
                     continue
                 
-                # Verificar se já existe (por message_id + user_id para isolamento)
-                existing = await db.emails.find_one({
+                # Verificar se já existe (por message_id + user_id + empresa)
+                existing_query = {
                     "message_id": msg_id,
                     "synced_for_user": user_id,
-                })
+                }
+                if company_id:
+                    existing_query["company_id"] = company_id
+                existing = await db.emails.find_one(existing_query)
                 
                 if existing:
                     total_duplicates += 1
@@ -1862,6 +1875,8 @@ async def sync_user_emails(
                     "in_reply_to": in_reply_to or None,
                     "references": references or [],
                 }
+                if company_id:
+                    email_doc["company_id"] = company_id
                 
                 await db.emails.insert_one(email_doc)
                 total_synced += 1
@@ -2636,3 +2651,75 @@ async def _get_email_account_for_email(account_value: str, synced_for_user: str 
                 return acc
     
     return None
+
+
+def fetch_attachment_bytes_from_imap_sync(
+    account: "EmailAccount",
+    message_id: str,
+    filename: str,
+) -> Optional[bytes]:
+    """Lê o payload de um anexo IMAP pelo Message-ID + filename (Pacote DN.1)."""
+    if not account or not message_id or not filename:
+        return None
+
+    mail = None
+    try:
+        context = ssl.create_default_context()
+        mail = imaplib.IMAP4_SSL(
+            account.imap_server, account.imap_port, ssl_context=context, timeout=30
+        )
+        mail.login(account.email, account.password)
+
+        mid = message_id.strip()
+        variants = [mid]
+        if not mid.startswith("<"):
+            variants.append(f"<{mid}>")
+        elif mid.startswith("<") and mid.endswith(">"):
+            variants.append(mid[1:-1])
+
+        folders = [
+            "INBOX", "Sent", "INBOX.Sent", "Sent Items", "Enviados",
+            "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados",
+            "Drafts", "INBOX.Drafts", "[Gmail]/Drafts",
+        ]
+        target = filename.lower().strip()
+
+        for folder in folders:
+            result, _ = mail.select(folder)
+            if result != "OK":
+                continue
+            for variant in variants:
+                try:
+                    search_result = mail.search(None, "HEADER", "Message-ID", variant)
+                except Exception:
+                    continue
+                nums = _safe_search_result(search_result)
+                if not nums or not nums[0]:
+                    continue
+                num = nums[0].split()[-1]
+                fetch_result = mail.fetch(num, "(BODY.PEEK[])")
+                email_bytes = _extract_email_bytes_from_fetch(fetch_result)
+                if not email_bytes:
+                    continue
+                msg = email.message_from_bytes(email_bytes)
+                for part in msg.walk():
+                    disposition = str(part.get("Content-Disposition", ""))
+                    if "attachment" not in disposition:
+                        continue
+                    part_name = decode_email_header(part.get_filename() or "")
+                    if part_name.lower().strip() != target:
+                        continue
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        return payload
+        return None
+    except Exception as exc:
+        logger.warning("[Webmail Attachment] IMAP fetch falhou: %s", exc)
+        return None
+    finally:
+        if mail:
+            try:
+                mail.logout()
+            except Exception:
+                pass
+

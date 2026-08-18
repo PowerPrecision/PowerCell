@@ -991,6 +991,28 @@ flowchart TD
     TrySystemWebmail -->|Não configurado| Error["Erro: Email partilhado<br/>não configurado"]
 ```
 
+**Isolamento por perfil activo (Pacote DN.1+2):**
+
+O Webmail respeita o UCR escolhido no Header (`ContextSwitcher`):
+
+1. O frontend envia `X-Company-Id` e `X-Active-Role` em **todos** os `fetch` do Webmail (não só via interceptor Axios).
+2. Listagem (`GET /api/emails/webmail`) e stats filtram pela mailbox da UCR activa: `company_id` **ou** `account` = endereço IMAP dessa config. Emails globais / de outros perfis do mesmo user **não** entram.
+3. Sync pessoal (`POST /api/emails/webmail/sync-user`) resolve `user_email_configs` com a empresa activa e grava `company_id` em cada email sincronizado.
+4. Anexos: `GET /api/webmail/attachments/{id}` (auth JWT) devolve `StreamingResponse` com `Content-Disposition: attachment`. Fonte: S3 (`s3_key`) → conteúdo na BD → IMAP on-demand. 404 se o anexo não existir.
+
+```mermaid
+flowchart TD
+    Header["ContextSwitcher<br/>perfil + empresa"] --> WP["WebmailPage"]
+    WP -->|"X-Company-Id<br/>X-Active-Role"| List["GET /emails/webmail"]
+    WP -->|"mesmo contexto"| Sync["POST /emails/webmail/sync-user"]
+    WP -->|"JWT + company"| Att["GET /webmail/attachments/id"]
+    List --> Filter["Filtro UCR:<br/>company_id OU account=mailbox"]
+    Sync --> Resolver["resolve_email_config_for_sync<br/>(user + company)"]
+    Resolver --> IMAP["IMAP da conta do perfil"]
+    IMAP --> DB["emails.company_id = UCR"]
+    Att --> S3["S3 / BD / IMAP"]
+```
+
 **Storage Factory Pattern:**
 
 ```mermaid

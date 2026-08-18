@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-08-18] — Pacote DN.1+2: Webmail por perfil activo e download de anexos
+
+### Corrigido
+- **Webmail misturava emails de vários perfis**: a página usava `user.company_id` e `fetch` sem `X-Active-Role`/`X-Company-Id` do Header. Passa a usar `activeCompanyId` do AuthContext e envia o contexto UCR em todos os pedidos. Backend filtra listagem/stats/sync pela mailbox da UCR activa (não inclui emails sem empresa de outras contas).
+- **Anexos de emails recebidos não descarregavam**: o botão só aparecia se existisse `attachment.url` (IMAP não gravava URL). Novo `GET /api/webmail/attachments/{id}` devolve stream binário (`Content-Disposition: attachment`) a partir de S3, BD ou IMAP; 404 se o anexo não existir.
+
+### Adicionado
+- IDs de anexo na sync IMAP; `company_id` nos emails sincronizados para o perfil activo.
+- UI de anexos no painel de leitura: nome, tamanho e botão de download (tokens Shadcn).
+
+---
 ## [2026-08-18] — Pacote DM: Área Pessoal, Rascunhos e UX Base
 
 ### Corrigido

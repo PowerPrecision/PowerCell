@@ -1,4 +1,36 @@
 ---
+Task ID: pacote-dn-webmail-perfil-anexos
+Agent: Cloud Agent (cursor/pacote-dn-webmail-perfil-anexos-90f2)
+Task: Pacote DN.1+2 — Motor de Webmail (filtro UCR + download anexos)
+
+Date: 2026-08-18
+
+Work Log:
+- DN.2: WebmailPage deixa de usar user.company_id; lê activeCompanyId/effectiveRole do AuthContext e envia X-Company-Id + X-Active-Role em todos os fetch
+- DN.2: listagem/stats usam build_ucr_mailbox_filter (company_id da UCR ou account=mailbox); já não misturam emails globais/outros perfis
+- DN.2: sync_user_emails grava company_id (resolved_company_id) e faz dedup por message_id+user+empresa
+- DN.1: GET /api/webmail/attachments/{id} (routes/webmail.py) → StreamingResponse; S3 → BD → IMAP; 404 se não encontrado
+- DN.1: painel de leitura mostra badges de anexo (nome/tamanho) com botão download sempre visível
+- Docs: ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Trocar perfil no Header recarrega a mailbox certa
+- Anexos de emails recebidos descarregam via endpoint autenticado
+
+Files:
+- frontend/src/pages/WebmailPage.jsx
+- backend/services/email_webmail.py
+- backend/services/email_mailbox_ops.py
+- backend/services/email_service.py
+- backend/services/email_process_crud.py
+- backend/routes/webmail.py
+- backend/routes/emails.py
+- backend/server.py
+- backend/tests/unit/test_webmail_profile_attachments.py
+- backend/tests/unit/test_email_extraction_helpers.py
+- ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: pacote-dm-area-pessoal-rascunhos-ux
 Agent: Cloud Agent (cursor/pacote-dm-area-pessoal-rascunhos-ux-08c2)
 Task: Pacote DM — Área Pessoal, Rascunhos e UX Base
