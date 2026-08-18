@@ -33,6 +33,10 @@ def test_users_api_export_run_entrypoints():
     assert callable(users_api_email_config.run_get_my_email_config)
     assert callable(users_api_email_config.run_save_my_email_config)
     assert callable(users_api_email_config.run_test_my_email_config)
+    assert callable(users_api_email_config.run_list_my_email_accounts)
+    assert callable(users_api_email_config.run_add_my_email_account)
+    assert callable(users_api_email_config.run_delete_my_email_account)
+    assert callable(users_api_email_config.run_set_primary_email_account)
 
 
 def test_auth_core_not_overwritten():
@@ -53,12 +57,14 @@ def test_users_router_is_thin_stubs_only():
     routes_path = Path(__file__).resolve().parents[2] / "routes" / "users.py"
     text = routes_path.read_text()
     assert text.count("return await run_") >= 5
-    assert len(text.splitlines()) < 100
+    assert len(text.splitlines()) < 180
     assert "encryption_service.encrypt" not in text
     # Static /me paths declared before /{user_id}
     me_pos = text.index('/me/email-config"')
+    accounts_pos = text.index("/me/email-accounts")
     id_pos = text.index('/{user_id}"')
     assert me_pos < id_pos
+    assert accounts_pos < id_pos
 
 
 def test_forced_shared_roles_block_on_save_constant():
@@ -234,4 +240,25 @@ def test_non_default_company_id_helper():
     assert _non_default_company_id("  ", "comp-2") == "comp-2"
     assert _non_default_company_id(None, None) is None
     assert _non_default_company_id("tab-company", "header-company") == "tab-company"
+
+
+def test_publicize_email_account_strips_secrets():
+    from services.user_email_config_service import publicize_email_account
+
+    pub = publicize_email_account({
+        "id": "acc-1",
+        "company_id": "co-1",
+        "email_address": "a@b.pt",
+        "encrypted_password": "secret",
+        "google_refresh_token": "tok",
+        "is_primary": True,
+        "is_configured": True,
+        "auth_method": "none",
+    })
+    assert pub["id"] == "acc-1"
+    assert pub["has_password"] is True
+    assert pub["has_google_oauth"] is True
+    assert pub["auth_method"] == "google_oauth"
+    assert "encrypted_password" not in pub
+    assert "google_refresh_token" not in pub
 

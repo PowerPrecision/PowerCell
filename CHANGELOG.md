@@ -3,7 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
-## [2026-08-18] — Pacote DN.1+2: Webmail por perfil activo e download de anexos
+## [2026-08-18] — Pacote DN.3+4: Emails do processo e contas múltiplas
+
+### Corrigido
+- **Separador Emails do processo**: a listagem (`GET /api/emails/process/{id}`) passa a incluir CC e a procurar no motor todas as mensagens em que De, Para ou CC correspondem ao email do cliente (e 2º titular / emails monitorizados). Mensagens ainda não ligadas a um processo aparecem no histórico; clique abre o leitor. Documentos incompletos (sem `status`/`created_at`) são normalizados para não devolver 500.
+
+### Adicionado
+- **Várias contas de email por perfil**: `user_email_configs` deixa de ser 1:1 por empresa. Índice único `{user_id, company_id, email_address}`; campo `is_primary`. Endpoints `GET/POST /users/me/email-accounts` e `PUT/DELETE /users/me/email-accounts/{id}` (+ `set-primary`).
+- Área Pessoal: lista de contas no cartão Webmail e botão **+ Adicionar Conta de Email** (IMAP/SMTP ou OAuth) num Dialog Shadcn.
+- Webmail: Select no topo para alternar entre as contas do perfil activo (`mailbox=` na listagem/sync).
+
+---
 
 ### Corrigido
 - **Webmail misturava emails de vários perfis**: a página usava `user.company_id` e `fetch` sem `X-Active-Role`/`X-Company-Id` do Header. Passa a usar `activeCompanyId` do AuthContext e envia o contexto UCR em todos os pedidos. Backend filtra listagem/stats/sync pela mailbox da UCR activa (não inclui emails sem empresa de outras contas).

@@ -7,19 +7,19 @@ Suporta dois modos de autenticação:
 1. Clássico: IMAP/SMTP com password (qualquer provedor)
 2. Google OAuth 2.0: via Gmail API (refresh_token encriptado)
 
-MULTI-EMPRESA:
-  O campo company_id é uma CHAVE ESTRANGEIRA que associa a configuração
-  de email a uma empresa específica. A restrição de unicidade é a
-  combinação (user_id, company_id) — um utilizador só pode ter UMA
-  config de email por empresa.
+MULTI-EMPRESA + MULTI-CONTA (Pacote DN.4):
+  O campo company_id associa a configuração a uma empresa (UCR).
+  Um utilizador pode ter VÁRIAS configs por empresa (IMAP/SMTP ou OAuth).
+  A unicidade é (user_id, company_id, email_address).
+  `is_primary` marca a conta por omissão do perfil.
 
 COLEÇÃO MONGODB: user_email_configs
-INDEX: { user_id: 1, company_id: 1 } (unique composto)
+INDEX: { user_id: 1, company_id: 1, email_address: 1 } (unique composto)
 
 BACKWARD COMPATIBILITY:
-  A config também é guardada embebida no user.email_config (nested dict)
-  sob a chave "company:<company_id>" para retrocompatibilidade com código
-  que ainda lê daí. A coleção user_email_configs é a fonte canónica.
+  A conta primária também é guardada embebida no user.email_config (nested dict)
+  sob a chave "company:<company_id>". A coleção user_email_configs é a fonte canónica.
+
 
 CAMPOS DA COLEÇÃO:
   - id: UUID (PK)
@@ -50,7 +50,7 @@ class EmailConfigCreate(BaseModel):
 
     O campo company_id identifica a empresa a que esta config pertence.
     É OBRIGATÓRIO — se não for fornecido, usa "default" (retrocompat).
-    A unicidade é garantida pela combinação (user_id, company_id).
+    A unicidade é (user_id, company_id, email_address) — várias contas por perfil.
     """
     email_address: str
     password: Optional[str] = None  # Recebe em plain-text, será encriptada no endpoint
@@ -60,6 +60,9 @@ class EmailConfigCreate(BaseModel):
     smtp_port: int = 465
     google_refresh_token: Optional[str] = None  # Encriptado pelo OAuth callback
     company_id: Optional[str] = "default"  # FK: empresa a que esta config pertence
+    label: Optional[str] = None  # Nome amigável (ex: "Gmail pessoal")
+    is_primary: Optional[bool] = None
+    account_id: Optional[str] = None  # ID existente para actualizar uma conta
 
     @field_validator("company_id")
     @classmethod
@@ -69,6 +72,25 @@ class EmailConfigCreate(BaseModel):
             if not v:
                 return "default"
         return v or "default"
+
+
+class EmailAccountSummary(BaseModel):
+    """Conta de email do perfil (sem secrets) — Pacote DN.4."""
+    id: str
+    company_id: Optional[str] = "default"
+    email_address: Optional[str] = None
+    label: Optional[str] = None
+    imap_server: Optional[str] = None
+    imap_port: Optional[int] = None
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
+    is_configured: bool = False
+    is_primary: bool = False
+    has_password: bool = False
+    has_google_oauth: bool = False
+    auth_method: str = "none"
+    google_email: Optional[str] = None
+    oauth_connected_at: Optional[str] = None
 
 
 class EmailConfigResponse(BaseModel):
@@ -84,6 +106,10 @@ class EmailConfigResponse(BaseModel):
     auth_method: str = "none"  # "none" | "imap_smtp" | "google_oauth"
     company_id: Optional[str] = "default"  # FK: empresa desta config
     available_companies: Optional[List[str]] = None  # Lista de company_ids com config
+    id: Optional[str] = None
+    is_primary: bool = True
+    label: Optional[str] = None
+    accounts: Optional[List[EmailAccountSummary]] = None
 
 
 class EmailConfigTestResult(BaseModel):
@@ -100,7 +126,8 @@ class UserEmailConfigDoc(BaseModel):
     """Documento da coleção user_email_configs (canónico).
 
     Representa uma config de email pessoal de um utilizador para
-    uma empresa específica. A unicidade é (user_id, company_id).
+    uma empresa. A unicidade é (user_id, company_id, email_address).
+    Várias contas por perfil; `is_primary` indica a conta por omissão.
     """
     id: str
     user_id: str                          # FK → db.users.id
@@ -117,5 +144,7 @@ class UserEmailConfigDoc(BaseModel):
     auth_method: str = "none"             # "none" | "imap_smtp" | "google_oauth"
     oauth_connected_at: Optional[str] = None
     is_configured: bool = False
+    is_primary: bool = False
+    label: Optional[str] = None
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

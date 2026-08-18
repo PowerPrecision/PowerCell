@@ -1,4 +1,35 @@
 ---
+Task ID: pacote-dn3-dn4-emails
+Agent: Cloud Agent (cursor/pacote-dn3-dn4-emails-edb4)
+Task: Pacote DN.3+4 — Emails do Processo e Contas Múltiplas
+
+Date: 2026-08-18
+
+Work Log:
+- DN.3: GET /emails/process/{id} e stats fazem match em from/to/cc do cliente (processo + 2º titular + monitored + clients.contacto.email); listagem normaliza docs incompletos (status/created_at)
+- DN.3: EmailsTab com tokens semânticos; clique na linha continua a abrir EmailViewerModal
+- DN.4: user_email_configs 1:N por empresa (unique user+company+email_address, is_primary)
+- DN.4: CRUD /users/me/email-accounts; Área Pessoal lista + Adicionar Conta; Webmail Select mailbox
+- Docs: ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Histórico de emails do processo inclui CC e mensagens do cliente ainda não ligadas
+- Um perfil pode ter várias contas IMAP/SMTP/OAuth e o Webmail troca entre elas
+
+Files:
+- backend/services/email_process_crud.py
+- backend/models/email_config.py
+- backend/services/user_email_config_service.py
+- backend/services/users_api_email_config.py
+- backend/routes/users.py
+- backend/services/email_webmail.py
+- frontend/src/components/EmailAccountsCard.jsx
+- frontend/src/components/ProfileRoleTab.jsx
+- frontend/src/pages/WebmailPage.jsx
+- frontend/src/components/processDetails/tabs/EmailsTab.jsx
+- ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: pacote-dn-webmail-perfil-anexos
 Agent: Cloud Agent (cursor/pacote-dn-webmail-perfil-anexos-90f2)
 Task: Pacote DN.1+2 — Motor de Webmail (filtro UCR + download anexos)

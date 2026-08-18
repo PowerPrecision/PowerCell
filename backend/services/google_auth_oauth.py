@@ -333,6 +333,7 @@ async def run_google_callback(
                         auth_method=new_role_config.get("auth_method", "google_oauth"),
                         oauth_connected_at=new_role_config.get("oauth_connected_at"),
                         is_configured=True,
+                        create_new=True,
                     )
                 except Exception as e:
                     logger.warning(

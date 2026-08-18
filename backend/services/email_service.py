@@ -1794,6 +1794,9 @@ async def sync_user_emails(
                 }
                 if company_id:
                     existing_query["company_id"] = company_id
+                mailbox_addr = (config.get("email_address") or "").strip().lower()
+                if mailbox_addr:
+                    existing_query["account"] = mailbox_addr
                 existing = await db.emails.find_one(existing_query)
                 
                 if existing:

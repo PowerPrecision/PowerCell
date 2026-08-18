@@ -416,12 +416,14 @@ async def webmail_list(
     label: Optional[str] = None,
     custom_folder: Optional[str] = None,
     box: Optional[str] = None,
+    mailbox: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
     return await run_webmail_list(
         request, current_user,
         folder=folder, page=page, limit=limit, account=account,
         search=search, label=label, custom_folder=custom_folder, box=box,
+        mailbox=mailbox,
     )
 
 
@@ -429,9 +431,12 @@ async def webmail_list(
 async def webmail_stats(
     request: Request,
     box: Optional[str] = None,
+    mailbox: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    return await run_webmail_stats(current_user, box=box, request=request)
+    return await run_webmail_stats(
+        current_user, box=box, request=request, mailbox=mailbox,
+    )
 
 
 @router.post("/webmail/sync")
@@ -446,9 +451,13 @@ async def webmail_sync(
 @router.post("/webmail/sync-user")
 async def webmail_sync_user(
     request: Request,
+    account_id: Optional[str] = None,
+    mailbox: Optional[str] = None,
     current_user: dict = Depends(get_current_user)
 ):
-    return await run_webmail_sync_user(request, current_user)
+    return await run_webmail_sync_user(
+        request, current_user, account_id=account_id, mailbox=mailbox,
+    )
 
 
 @router.get("/jobs/{job_id}")

@@ -38,6 +38,155 @@ logger = logging.getLogger(__name__)
 # Shared in-memory sync status (single object — do not duplicate)
 _sync_status: dict = {}
 
+_EMAIL_IN_TEXT_RE = re.compile(
+    r"[A-Z0-9._%+\-]+@[A-Z0-9.\-]+\.[A-Z]{2,}", re.IGNORECASE
+)
+
+
+def normalize_participant_email(value) -> str:
+    """Extract a lowercase address from a string, dict, or 'Name <email>'."""
+    if not value:
+        return ""
+    if isinstance(value, dict):
+        nested_contacto = value.get("contacto") if isinstance(value.get("contacto"), dict) else {}
+        return normalize_participant_email(
+            value.get("email") or (nested_contacto or {}).get("email")
+        )
+    if not isinstance(value, str):
+        return ""
+    text = value.strip()
+    if not text:
+        return ""
+    match = _EMAIL_IN_TEXT_RE.search(text)
+    return (match.group(0) if match else text).lower().strip()
+
+
+def collect_emails_from_process_doc(process_doc: Optional[dict]) -> set:
+    """Client + monitored + 2º titular emails stored on the process."""
+    emails: set = set()
+    if not process_doc:
+        return emails
+    emails.add(normalize_participant_email(process_doc.get("client_email")))
+    for monitored in process_doc.get("monitored_emails") or []:
+        emails.add(normalize_participant_email(monitored))
+    titular2 = process_doc.get("titular2_data") or {}
+    emails.add(normalize_participant_email(titular2))
+    emails.discard("")
+    return emails
+
+
+def collect_emails_from_client_doc(client_doc: Optional[dict]) -> set:
+    """Emails on a clients collection document (titular 1/2)."""
+    emails: set = set()
+    if not client_doc:
+        return emails
+    emails.add(normalize_participant_email(client_doc.get("email")))
+    contacto = client_doc.get("contacto") or {}
+    if isinstance(contacto, dict):
+        emails.add(normalize_participant_email(contacto.get("email")))
+    titular2 = client_doc.get("titular2_data") or {}
+    emails.add(normalize_participant_email(titular2))
+    emails.discard("")
+    return emails
+
+
+def build_participant_address_match(client_emails) -> Optional[dict]:
+    """Mongo clause: from, to or cc matches any client address (Pacote DN.3)."""
+    clauses = []
+    for address in client_emails or []:
+        if not address:
+            continue
+        escaped = re.escape(address)
+        rx_exact = {"$regex": f"^{escaped}$", "$options": "i"}
+        rx_from = {
+            "$regex": f"(^|<)\\s*{escaped}\\s*(>|\\s|$)",
+            "$options": "i",
+        }
+        clauses.extend([
+            {"from_email": rx_from},
+            {"from_email": rx_exact},
+            {"to_emails": rx_exact},
+            {"to_emails": rx_from},
+            {"cc_emails": rx_exact},
+            {"cc_emails": rx_from},
+        ])
+    if not clauses:
+        return None
+    return {"$or": clauses}
+
+
+def build_process_emails_base_conditions(process_id: str, client_emails) -> list:
+    """Emails linked to the process OR unassigned messages involving the client."""
+    conditions = [{"process_id": process_id}]
+    participant_match = build_participant_address_match(client_emails)
+    if participant_match:
+        conditions.append({
+            "$and": [
+                {
+                    "$or": [
+                        {"process_id": None},
+                        {"process_id": {"$exists": False}},
+                        {"process_id": ""},
+                    ]
+                },
+                participant_match,
+            ]
+        })
+    return conditions
+
+
+def coerce_email_response_fields(doc: Optional[dict]) -> dict:
+    """Fill EmailResponse required fields so incomplete IMAP leftovers still list."""
+    enriched = dict(doc or {})
+    if not enriched.get("status"):
+        enriched["status"] = "synced" if enriched.get("synced") else "sent"
+    if not enriched.get("created_at"):
+        enriched["created_at"] = (
+            enriched.get("sent_at") or datetime.now(timezone.utc).isoformat()
+        )
+    if not enriched.get("direction"):
+        enriched["direction"] = "received"
+    if enriched.get("from_email") is None:
+        enriched["from_email"] = ""
+    if enriched.get("to_emails") is None:
+        enriched["to_emails"] = []
+    if enriched.get("subject") is None:
+        enriched["subject"] = ""
+    if enriched.get("body") is None:
+        enriched["body"] = ""
+    return enriched
+
+
+async def resolve_process_participant_emails(process_id: str) -> set:
+    """Load process + linked client records and collect participant addresses."""
+    process_doc = await db.processes.find_one(
+        {"id": process_id},
+        {
+            "_id": 0,
+            "client_email": 1,
+            "monitored_emails": 1,
+            "client_id": 1,
+            "second_client_id": 1,
+            "titular2_data": 1,
+        },
+    )
+    emails = collect_emails_from_process_doc(process_doc)
+    client_ids = []
+    if process_doc:
+        for key in ("client_id", "second_client_id"):
+            client_id = process_doc.get(key)
+            if client_id:
+                client_ids.append(client_id)
+    if client_ids:
+        clients = await db.clients.find(
+            {"id": {"$in": client_ids}},
+            {"_id": 0, "email": 1, "contacto.email": 1, "titular2_data.email": 1},
+        ).to_list(10)
+        for client_doc in clients:
+            emails.update(collect_emails_from_client_doc(client_doc))
+    emails.discard("")
+    return emails
+
 async def run_advanced_email_search(filters: EmailFilter, current_user: dict, page: int = 1, limit: int = 20):
     """
     Pesquisa avançada de emails com filtros.
@@ -173,6 +322,8 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
     1. Smart Threading (herança de process_id via In-Reply-To / References)
     2. Tag Mágica [Proc-{id}] no assunto
     3. Associação manual pelo utilizador (botão Ligar a Processo no Webmail)
+    4. Pacote DN.3: from / to / cc correspondem ao email do cliente (ou 2º titular /
+       emails monitorizados) e a mensagem ainda não está ligada a outro processo.
     
     Se force_refresh=True, limpa emails sincronizados em cache e
     dispara sincronização global (smart threading + tags aplicam-se automaticamente).
@@ -193,47 +344,9 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
         except Exception as e:
             logger.error(f"Erro na re-sync após limpeza de cache: {e}")
     
-    # ── Query principal: emails com process_id directo ──
-    base_conditions = [{"process_id": process_id}]
-
-    # ── Fallback: emails sem process_id mas que envolvem o cliente do processo ──
-    # Isto apanha emails enviados/recebidos (Sent/Drafts) que o Smart Threading
-    # não associou automaticamente porque não tinham In-Reply-To ou tag [Proc-xxx].
-    process_doc = await db.processes.find_one(
-        {"id": process_id},
-        {"_id": 0, "client_email": 1, "monitored_emails": 1}
-    )
-    client_email = (process_doc or {}).get("client_email", "").lower().strip()
-    monitored = (process_doc or {}).get("monitored_emails", [])
-
-    if client_email or monitored:
-        # Construir lista de endereços do cliente para matching
-        client_emails = set()
-        if client_email:
-            client_emails.add(client_email)
-        for me in monitored:
-            if me and isinstance(me, str):
-                client_emails.add(me.lower().strip())
-        client_emails.discard("")
-
-        if client_emails:
-            email_match_or = []
-            for ce in client_emails:
-                escaped = re.escape(ce)
-                email_match_or.extend([
-                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
-                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
-                ])
-
-            # Só incluir se NÃO tiver process_id já (evitar duplicados)
-            fallback_condition = {
-                "$and": [
-                    {"$or": [{"process_id": None}, {"process_id": {"$exists": False}}]},
-                    {"$or": email_match_or},
-                ]
-            }
-            base_conditions.append(fallback_condition)
-
+    # ── Query: process_id directo OU from/to/cc do cliente (Pacote DN.3) ──
+    client_emails = await resolve_process_participant_emails(process_id)
+    base_conditions = build_process_emails_base_conditions(process_id, client_emails)
     query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
 
     if direction:
@@ -264,46 +377,24 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
     
     enriched_emails = []
     for email in emails:
-        enriched = await enrich_email(email)
-        enriched_emails.append(EmailResponse(**enriched))
-    
+        enriched = coerce_email_response_fields(await enrich_email(email))
+        try:
+            enriched_emails.append(EmailResponse(**enriched))
+        except Exception as exc:
+            logger.warning(
+                "A saltar email malformado %s na listagem do processo: %s",
+                enriched.get("id"),
+                exc,
+            )
+
     return enriched_emails
 
 
 async def run_get_email_stats(process_id: str, current_user: dict):
     """Obter estatísticas de emails de um processo."""
-    # Construir query com fallback por email do cliente (mesma lógica de get_process_emails)
-    base_conditions = [{"process_id": process_id}]
-    process_doc = await db.processes.find_one(
-        {"id": process_id},
-        {"_id": 0, "client_email": 1, "monitored_emails": 1}
-    )
-    client_email_val = (process_doc or {}).get("client_email", "").lower().strip()
-    monitored = (process_doc or {}).get("monitored_emails", [])
-    if client_email_val or monitored:
-        client_emails = set()
-        if client_email_val:
-            client_emails.add(client_email_val)
-        for me in monitored:
-            if me and isinstance(me, str):
-                client_emails.add(me.lower().strip())
-        client_emails.discard("")
-        if client_emails:
-            email_match_or = []
-            for ce in client_emails:
-                escaped = re.escape(ce)
-                email_match_or.extend([
-                    {"from_email": {"$regex": f"^{escaped}$", "$options": "i"}},
-                    {"to_emails": {"$regex": f"^{escaped}$", "$options": "i"}},
-                ])
-            fallback_condition = {
-                "$and": [
-                    {"$or": [{"process_id": None}, {"process_id": {"$exists": False}}]},
-                    {"$or": email_match_or},
-                ]
-            }
-            base_conditions.append(fallback_condition)
-
+    # Mesma lógica de get_process_emails: process_id + from/to/cc do cliente
+    client_emails = await resolve_process_participant_emails(process_id)
+    base_conditions = build_process_emails_base_conditions(process_id, client_emails)
     stats_query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
     stats_query["is_archived"] = {"$ne": True}
 
