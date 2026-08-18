@@ -176,6 +176,8 @@ import VisitasTab from "../components/processDetails/tabs/VisitasTab";
 import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 import HistoryTab from "../components/processDetails/tabs/HistoryTab";
+import ProcessObservationsCard from "../components/processDetails/ProcessObservationsCard";
+import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
 import { StatusBadge } from "../components/shared/StatusBadge";
 
@@ -232,6 +234,7 @@ const ProcessDetails = () => {
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [savingObservations, setSavingObservations] = useState(false);
   const [activeTab, setActiveTab] = useState("personal");
   // Separadores de topo (Progressive Disclosure): Resumo / Documentos / Histórico
   const [mainTab, setMainTab] = useState("resumo");
@@ -1104,6 +1107,7 @@ const ProcessDetails = () => {
         processUpdateData.monitored_emails = process.monitored_emails;
       }
       if (process.notes !== undefined) processUpdateData.notes = process.notes;
+      if (process.observations !== undefined) processUpdateData.observations = process.observations;
       if (process.prioridade) processUpdateData.prioridade = process.prioridade;
       if (process.labels !== undefined) processUpdateData.labels = process.labels;
 
@@ -1208,6 +1212,7 @@ const ProcessDetails = () => {
     try {
       const orgData = {
         notes: process?.notes || "",
+        observations: process?.observations ?? process?.notes ?? "",
         prioridade: process?.prioridade || "media",
         labels: Array.isArray(process?.labels) ? process.labels : [],
         ...overrides,
@@ -1226,6 +1231,27 @@ const ProcessDetails = () => {
       toast.error(errorMessage);
     } finally {
       setSavingOrg(false);
+    }
+  };
+
+  const handleSaveObservations = async (text) => {
+    if (isProcessLocked) {
+      toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
+      return;
+    }
+    setSavingObservations(true);
+    try {
+      const value = text ?? "";
+      await processMutations.updateProcess.mutateAsync({
+        payload: { observations: value, notes: value },
+      });
+      setProcess((prev) => (prev ? { ...prev, observations: value, notes: value } : prev));
+      toast.success("Observações guardadas");
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : "Erro ao guardar observações");
+    } finally {
+      setSavingObservations(false);
     }
   };
 
@@ -2095,6 +2121,21 @@ const ProcessDetails = () => {
                   consultorName={process.consultor_name || process.assigned_consultor_name}
                   mediadorName={process.mediador_name || process.assigned_mediador_name}
                 />
+
+                {/* PACOTE DO.1 — Observações + Timeline compacta no Resumo */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                  <ProcessObservationsCard
+                    process={process}
+                    onSave={handleSaveObservations}
+                    disabled={isViewMode || isProcessLocked}
+                    saving={savingObservations}
+                  />
+                  <ProcessSummaryTimeline
+                    process={process}
+                    history={history}
+                    onOpenFullHistory={() => setMainTab("historico")}
+                  />
+                </div>
 
                 {/* PACOTE DD — cartão de Etiquetas removido (movido para PageHeader) */}
 

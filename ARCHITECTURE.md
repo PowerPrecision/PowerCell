@@ -1509,7 +1509,39 @@ flowchart LR
     Reminder --> Notif
     Notif --> Consultor["Consultor (email + in-app)"]
     DB -->|"visible_to_client=true"| Portal["GET /portal/events"]
-    Portal --> ClientUI["ClientPortal — Próximos Eventos"]
+    Portal --> ClientUI["ClientPortal — Próximos Eventos + Calendário (DO.2)"]
+```
+
+---
+
+## Resumo do Processo e Calendário Visual (Pacote DO.1 + DO.2)
+
+### DO.1 — Observações + Timeline no Resumo
+
+O modelo de Processo tem o campo `observations` (string). Na persistência (`apply_cpcv_and_metadata_fields`) o valor sincroniza com `notes` quando só um dos dois é enviado — `notes` continua a alimentar o Kanban / "Notas do Consultor".
+
+O histórico de estados **já existia** (`GET /api/history`, coleção `history` via `log_history`). O Pacote DO.1 acrescenta um endpoint compacto para o Resumo:
+
+- `GET /api/processes/{id}/timeline` → `{ events, total }` com criação, mudanças de fase e restantes eventos, ordenados do mais recente para o mais antigo.
+- UI: `ProcessObservationsCard` (Textarea Shadcn, guardar no botão e no `onBlur`) + `ProcessSummaryTimeline` (linha vertical + nós) no separador Resumo. O histórico completo permanece no tab Histórico.
+
+### DO.2 — Calendário visual (Dashboard + Portal)
+
+`AgendaCalendar` (Shadcn `Calendar` + vista semanal) consome os prazos/eventos da Agenda (Pacote DH, `GET /deadlines/calendar`).
+
+| Superfície | Fonte | Filtro |
+|---|---|---|
+| Dashboard do Consultor | `getCalendarDeadlines()` | Processos/prazos do utilizador (já scoped no backend) |
+| Portal do Cliente | `GET /portal/events?include_past=true` | Apenas `visible_to_client=true` e não concluídos |
+
+Dias com agendamentos mostram um ponto; o dia seleccionado lista os títulos. O calendário vive numa tab (Progressive Disclosure), não no fluxo principal.
+
+```mermaid
+flowchart LR
+    DH["Agenda DH<br/>deadlines"] --> CalAPI["GET /deadlines/calendar"]
+    DH -->|"visible_to_client"| PortalAPI["GET /portal/events"]
+    CalAPI --> Dash["ConsultorDashboard<br/>tab Calendário"]
+    PortalAPI --> PortalCal["ClientPortal<br/>tab Agenda"]
 ```
 
 ---

@@ -630,6 +630,8 @@ export const deleteActivity = (id) => api.delete(`/activities/${id}`);
 // History
 export const getHistory = (processId) => 
   api.get("/history", { params: { process_id: processId } });
+export const getProcessTimeline = (processId, limit = 40) =>
+  api.get(`/processes/${processId}/timeline`, { params: { limit } });
 
 // Workflow Statuses
 export const getWorkflowStatuses = () => api.get("/admin/workflow-statuses");

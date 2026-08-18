@@ -12,8 +12,8 @@ Aplicações concretas já em produção:
 
 | Onde | Como |
 |---|---|
-| `ProcessDetails` — separador Resumo | Só dados críticos do processo (dados do cliente, financeiros, imóvel, crédito) — **sem** atividades/histórico |
-| `ProcessDetails` — separador Histórico | Timeline + Atividades + "Filme da Lead" (auditoria unificada) — tudo o que é cronológico, fora do fluxo de edição |
+| `ProcessDetails` — separador Resumo | Dados críticos + Observações (`observations`) + Timeline compacta (últimos eventos); o filme completo continua no separador Histórico |
+| `ProcessDetails` — separador Histórico | Timeline de fases + Atividades + "Filme da Lead" (auditoria unificada) — histórico completo, fora do fluxo de edição |
 | `HistoryTab.jsx` — "Registar Atividade" | Formulário só aparece dentro de um `Dialog`, aberto por um botão de destaque ("➕ Registar Atividade"); nunca inline permanentemente |
 | `S3FileManager` — Opções Avançadas | Accordion, fechado por defeito |
 | Calculadoras (`MortgageSimulator.jsx`) | Campos de Seguro de Vida / Multirriscos só aparecem depois de o `Switch` "Incluir Seguros" ser ativado |

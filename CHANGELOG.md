@@ -3,6 +3,15 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-08-18] — Pacote DO.1+2: Observações, Timeline no Resumo e Calendário Visual
+
+### Adicionado
+- **Observações no Resumo** (`observations` no modelo de Processo, sincronizado com `notes`): Textarea Shadcn com guardar no botão e no `onBlur`.
+- **Timeline compacta** no Resumo (linha vertical + nós) a partir do histórico existente; `GET /processes/{id}/timeline` normaliza criação + mudanças de fase. Histórico completo continua no tab Histórico.
+- **Calendário visual** (mensal/semanal, pontos nos dias com eventos) no Dashboard do Consultor e no Portal do Cliente. Consome a Agenda DH; o Portal só mostra `visible_to_client=true` (`GET /portal/events?include_past=true`).
+
+---
+
 ## [2026-08-18] — Pacote DN.3+4: Emails do processo e contas múltiplas
 
 ### Corrigido

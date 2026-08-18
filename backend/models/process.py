@@ -216,7 +216,11 @@ class ProcessUpdate(BaseModel):
     vendedor: Optional[dict] = None  
     mediador: Optional[dict] = None  
     monitored_emails: Optional[List[str]] = None  
-    notes: Optional[str] = None  
+    notes: Optional[str] = None
+    observations: Optional[str] = Field(
+        None,
+        description="PACOTE DO.1 — Observações de fácil acesso no Resumo do Processo",
+    )
     prioridade: Optional[str] = None  
     labels: Optional[List[str]] = None
     is_indexed: Optional[bool] = None  # Marcação de conclusão da indexação documental  
@@ -259,6 +263,10 @@ class ProcessResponse(BaseModel):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
     notes: Optional[str] = None
+    observations: Optional[str] = Field(
+        None,
+        description="PACOTE DO.1 — Observações livres no Resumo do Processo",
+    )
     prioridade: Optional[str] = None  
     labels: Optional[List[str]] = None
     onedrive_links: Optional[List[dict]] = None

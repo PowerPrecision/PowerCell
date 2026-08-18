@@ -45,6 +45,7 @@ import { safeString } from "../utils/safeString";
 import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
 import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
+import AgendaCalendar from "../components/calendar/AgendaCalendar";
 
 /** Macro-fases do funil (agrupam estados finos do workflow) */
 const FUNNEL_MACRO = [
@@ -490,6 +491,10 @@ const ConsultorDashboard = () => {
               <Users className="h-4 w-4" />
               Clientes
             </TabsTrigger>
+            <TabsTrigger value="calendar" className="gap-2">
+              <Calendar className="h-4 w-4" />
+              Calendário
+            </TabsTrigger>
             <TabsTrigger value="feed" className="gap-2">
               <Rss className="h-4 w-4" />
               Mural & Feed
@@ -537,6 +542,17 @@ const ConsultorDashboard = () => {
                 />
               </CardContent>
             </Card>
+          </TabsContent>
+
+          <TabsContent value="calendar" className="mt-6">
+            <AgendaCalendar
+              events={deadlines}
+              title="Agenda"
+              description="Escrituras, CPCV e prazos dos seus processos"
+              onEventClick={(event) => {
+                if (event?.process_id) navigate(`/processo/${event.process_id}`);
+              }}
+            />
           </TabsContent>
 
           <TabsContent value="feed" className="mt-6 space-y-6">
