@@ -262,3 +262,148 @@ def test_publicize_email_account_strips_secrets():
     assert "encrypted_password" not in pub
     assert "google_refresh_token" not in pub
 
+
+def test_decrypt_email_secret_passthrough_and_failed_enc():
+    from services.email_config_resolver import decrypt_email_secret
+
+    assert decrypt_email_secret("plain-secret") == "plain-secret"
+    assert decrypt_email_secret("") == ""
+    assert decrypt_email_secret(None) == ""
+    leftover = decrypt_email_secret("ENC:not-a-valid-blob", context="unit-test")
+    assert leftover == "" or not leftover.startswith("ENC:")
+
+
+def test_publicize_caixa_geral_account_strips_password():
+    from services.email_config_resolver import (
+        CAIXA_GERAL_ACCOUNT_ID,
+        publicize_caixa_geral_account,
+    )
+
+    pub = publicize_caixa_geral_account(
+        {
+            "email_address": "geral@empresa.pt",
+            "imap_server": "imap.empresa.pt",
+            "smtp_server": "smtp.empresa.pt",
+            "password": "super-secret",
+            "has_password": True,
+        },
+        company_id="co-1",
+    )
+    assert pub["id"] == CAIXA_GERAL_ACCOUNT_ID
+    assert pub["is_caixa_geral"] is True
+    assert pub["read_only"] is True
+    assert pub["has_password"] is True
+    assert "password" not in pub
+    assert "encrypted_password" not in pub
+
+
+def test_list_email_accounts_injects_caixa_geral_for_diretor():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from services.users_api_email_config import run_list_my_email_accounts
+
+    async def _run():
+        request = MagicMock()
+        request.headers = {"X-Active-Role": "diretor", "X-Company-Id": "acme"}
+        user = {"id": "u-dir", "role": "consultor", "additional_roles": ["diretor"]}
+        caixa = {
+            "email_address": "geral@acme.pt",
+            "imap_server": "imap.acme.pt",
+            "smtp_server": "smtp.acme.pt",
+            "imap_port": 993,
+            "smtp_port": 465,
+            "password": "decrypted",
+            "has_password": True,
+            "label": "Caixa Geral",
+        }
+        with patch(
+            "services.auth.get_effective_role", return_value="diretor",
+        ), patch(
+            "services.auth.get_active_company_id_async",
+            new_callable=AsyncMock, return_value="acme",
+        ), patch(
+            "services.user_email_config_service.list_company_email_configs",
+            new_callable=AsyncMock, return_value=[],
+        ), patch(
+            "services.email_config_resolver.resolve_active_ucr_role",
+            new_callable=AsyncMock, return_value="diretor",
+        ), patch(
+            "services.email_config_resolver.load_caixa_geral_config",
+            new_callable=AsyncMock, return_value=caixa,
+        ):
+            result = await run_list_my_email_accounts(request, "acme", user)
+        assert result["caixa_geral_injected"] is True
+        assert len(result["accounts"]) == 1
+        assert result["accounts"][0]["is_caixa_geral"] is True
+        assert result["accounts"][0]["email_address"] == "geral@acme.pt"
+        assert "password" not in result["accounts"][0]
+
+    asyncio.run(_run())
+
+
+def test_list_email_accounts_skips_caixa_geral_for_consultor():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from services.users_api_email_config import run_list_my_email_accounts
+
+    async def _run():
+        request = MagicMock()
+        request.headers = {"X-Active-Role": "consultor", "X-Company-Id": "acme"}
+        user = {"id": "u-c", "role": "consultor"}
+        with patch(
+            "services.auth.get_effective_role", return_value="consultor",
+        ), patch(
+            "services.auth.get_active_company_id_async",
+            new_callable=AsyncMock, return_value="acme",
+        ), patch(
+            "services.user_email_config_service.list_company_email_configs",
+            new_callable=AsyncMock, return_value=[],
+        ), patch(
+            "services.email_config_resolver.resolve_active_ucr_role",
+            new_callable=AsyncMock, return_value="consultor",
+        ), patch(
+            "services.email_config_resolver.load_caixa_geral_config",
+            new_callable=AsyncMock,
+        ) as load_caixa:
+            result = await run_list_my_email_accounts(request, "acme", user)
+        load_caixa.assert_not_awaited()
+        assert result.get("caixa_geral_injected") is False
+        assert result["accounts"] == []
+
+    asyncio.run(_run())
+
+
+def test_cannot_mutate_caixa_geral_virtual_account():
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from fastapi import HTTPException
+    from models.email_config import EmailConfigCreate
+    from services.users_api_email_config import (
+        run_delete_my_email_account,
+        run_update_my_email_account,
+    )
+
+    async def _run():
+        request = MagicMock()
+        request.headers = {"X-Active-Role": "diretor"}
+        user = {"id": "u-dir", "role": "diretor"}
+        config = EmailConfigCreate(
+            email_address="geral@acme.pt",
+            imap_server="imap",
+            smtp_server="smtp",
+        )
+        with patch("services.auth.get_effective_role", return_value="diretor"):
+            with pytest.raises(HTTPException) as exc:
+                await run_delete_my_email_account(request, "caixa-geral", user)
+            assert exc.value.status_code == 403
+            with pytest.raises(HTTPException) as exc2:
+                await run_update_my_email_account(
+                    request, "caixa-geral", config, user,
+                )
+            assert exc2.value.status_code == 403
+
+    asyncio.run(_run())
+

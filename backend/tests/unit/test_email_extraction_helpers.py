@@ -129,6 +129,7 @@ def test_email_remaining_modules_export_run_entrypoints():
         "run_get_configured_accounts",
         "build_ucr_mailbox_filter",
         "resolve_ucr_mailbox_filter",
+        "rewrite_box_for_caixa_geral",
     ):
         assert callable(getattr(wm, name))
     for name in (
@@ -214,3 +215,35 @@ def test_coerce_email_response_fields_fills_required():
     assert coerced["direction"] == "received"
     assert coerced["to_emails"] == []
     assert coerced["body"] == ""
+
+
+def test_send_documentation_wrapper_hides_stack_trace():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import HTTPException
+    from services.email_documentation import run_send_documentation_email
+
+    async def _run():
+        with patch(
+            "services.email_documentation._send_documentation_email_impl",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("incorrect authentication data\nTraceback..."),
+        ):
+            try:
+                await run_send_documentation_email("p1", {}, {"id": "u1", "email": "a@b.pt"})
+                assert False, "expected HTTPException"
+            except HTTPException as exc:
+                assert exc.status_code == 500
+                assert "Traceback" not in str(exc.detail)
+                assert "incorrect authentication" not in str(exc.detail).lower()
+
+    asyncio.run(_run())
+
+
+def test_send_email_accepts_account_override_signature():
+    import inspect
+    from services.email_service import send_email
+
+    params = inspect.signature(send_email).parameters
+    assert "account_override" in params

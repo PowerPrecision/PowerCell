@@ -10,7 +10,6 @@ import json
 import logging
 import re
 import string
-import traceback
 import uuid
 from typing import Optional
 
@@ -373,9 +372,14 @@ async def run_send_documentation_email(
     except HTTPException:
         raise
     except Exception as e:
-        import traceback
-        logger.error(f"[send-documentation] Erro inesperado: {e}\n{traceback.format_exc()}")
-        raise HTTPException(status_code=500, detail=f"Erro ao enviar documentação: {str(e)}")
+        logger.error(
+            "[send-documentation] Erro inesperado user=%s process=%s: %s: %s",
+            current_user.get("id"), process_id, type(e).__name__, e,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível enviar a documentação. Tente novamente.",
+        )
 
 
 async def _send_documentation_email_impl(
@@ -726,27 +730,136 @@ async def _send_documentation_email_impl(
         except Exception:
             active_company_id = None
 
-    result = await send_email(
-        account_name="power",
-        to_emails=to_emails,
-        subject=subject,
-        body=plain_text_body,
-        body_html=email_body,
-        cc_emails=cc_emails if cc_emails else None,
-        bcc_emails=all_bcc,
-        reply_to=current_user.get("email"),
-        from_email=current_user.get("email"),
-        process_id=process_id,
-        created_by=current_user["id"],
-        attachments=email_attachments if email_attachments else None,
-        force_system=True,
-        system_purpose="DOCUMENTS",
-        skip_proc_tag=True,
-        active_company_id=active_company_id
+    from services.email_service import EmailAccount
+    from services.email_config_resolver import (
+        decrypt_email_secret,
+        load_caixa_geral_config,
+        resolve_active_ucr_role,
+        resolve_email_config_for_sync,
     )
-    
+
+    smtp_account = None
+    smtp_source = "none"
+    ucr_role = None
+    try:
+        ucr_role = await resolve_active_ucr_role(
+            request, current_user, active_company_id,
+        ) if request is not None else current_user.get("role", "")
+        resolved = await resolve_email_config_for_sync(
+            current_user["id"],
+            active_role=ucr_role,
+            active_company_id=active_company_id,
+        )
+        if resolved:
+            profile_password = decrypt_email_secret(
+                resolved.get("encrypted_password", ""),
+                (
+                    f"send-documentation profile user={current_user.get('id')} "
+                    f"email={resolved.get('email_address')} "
+                    f"source={resolved.get('config_source')}"
+                ),
+            )
+            smtp_host = resolved.get("smtp_server") or resolved.get("imap_server")
+            smtp_user = resolved.get("email_address")
+            if smtp_user and smtp_host and profile_password:
+                smtp_account = EmailAccount(
+                    name="personal",
+                    imap_server=resolved.get("imap_server") or smtp_host,
+                    imap_port=int(resolved.get("imap_port") or 993),
+                    smtp_server=smtp_host,
+                    smtp_port=int(resolved.get("smtp_port") or 465),
+                    email=smtp_user,
+                    password=profile_password,
+                )
+                smtp_source = f"profile:{resolved.get('config_source')}"
+                logger.info(
+                    "[send-documentation] SMTP do perfil activo user=%s email=%s host=%s",
+                    current_user.get("id"), smtp_user, smtp_host,
+                )
+    except Exception as exc:
+        logger.warning(
+            "[send-documentation] Falha a resolver SMTP do perfil user=%s: %s: %s",
+            current_user.get("id"), type(exc).__name__, exc,
+        )
+
+    if smtp_account is None:
+        try:
+            caixa = await load_caixa_geral_config(active_company_id)
+            if caixa and caixa.get("password") and caixa.get("smtp_server") and caixa.get("email_address"):
+                smtp_account = EmailAccount(
+                    name="caixa_geral",
+                    imap_server=caixa.get("imap_server") or caixa["smtp_server"],
+                    imap_port=int(caixa.get("imap_port") or 993),
+                    smtp_server=caixa["smtp_server"],
+                    smtp_port=int(caixa.get("smtp_port") or 465),
+                    email=caixa["email_address"],
+                    password=caixa["password"],
+                )
+                smtp_source = caixa.get("source") or "caixa_geral"
+                logger.info(
+                    "[send-documentation] SMTP da Caixa Geral user=%s email=%s host=%s",
+                    current_user.get("id"), caixa["email_address"], caixa["smtp_server"],
+                )
+        except Exception as exc:
+            logger.warning(
+                "[send-documentation] Falha a resolver Caixa Geral company=%s: %s: %s",
+                active_company_id, type(exc).__name__, exc,
+            )
+
+    if smtp_account is None:
+        logger.error(
+            "[send-documentation] Sem credenciais SMTP user=%s company=%s role=%s",
+            current_user.get("id"), active_company_id, ucr_role,
+        )
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Não foi possível autenticar o envio: configure o email do perfil "
+                "activo ou a Caixa Geral da empresa."
+            ),
+        )
+
+    try:
+        result = await send_email(
+            account_name=smtp_account.name,
+            to_emails=to_emails,
+            subject=subject,
+            body=plain_text_body,
+            body_html=email_body,
+            cc_emails=cc_emails if cc_emails else None,
+            bcc_emails=all_bcc,
+            reply_to=current_user.get("email"),
+            from_email=smtp_account.email or current_user.get("email"),
+            process_id=process_id,
+            created_by=current_user["id"],
+            attachments=email_attachments if email_attachments else None,
+            force_system=False,
+            skip_proc_tag=True,
+            active_company_id=active_company_id,
+            account_override=smtp_account,
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error(
+            "[send-documentation] Erro SMTP inesperado user=%s source=%s host=%s: %s: %s",
+            current_user.get("id"), smtp_source, smtp_account.smtp_server,
+            type(exc).__name__, exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível enviar a documentação. Verifique as credenciais de email.",
+        )
+
     if not result["success"]:
-        raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
+        logger.error(
+            "[send-documentation] send_email falhou user=%s source=%s: %s",
+            current_user.get("id"), smtp_source, result.get("error"),
+        )
+        raise HTTPException(
+            status_code=500,
+            detail=result.get("error") or "Não foi possível enviar a documentação.",
+        )
     
     # NOTA: O registo no histórico já é feito pelo send_email() internamente.
     # Adicionar label "documentação" ao registo criado pelo send_email

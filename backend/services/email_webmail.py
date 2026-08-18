@@ -76,6 +76,15 @@ async def resolve_ucr_mailbox_filter(
 
     selected_mailbox = (mailbox or "").strip().lower() or None
     if selected_mailbox:
+        try:
+            from services.email_config_resolver import load_caixa_geral_config
+            caixa = await load_caixa_geral_config(active_company_id)
+            caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
+            if caixa_email and caixa_email == selected_mailbox:
+                # Diretor a ver a Caixa Geral injetada na lista de contas
+                return None
+        except Exception as exc:
+            logger.warning("[Webmail] Falha a comparar mailbox com Caixa Geral: %s", exc)
         # Conta pessoal específica — não misturar as outras do mesmo UCR
         return build_ucr_mailbox_filter(None, selected_mailbox)
 
@@ -99,6 +108,28 @@ def _and_query(query: dict, extra: Optional[dict]) -> dict:
     if not extra:
         return query
     return {"$and": [query, extra]}
+
+
+async def rewrite_box_for_caixa_geral(
+    request: Request,
+    current_user: dict,
+    box: Optional[str],
+    mailbox: Optional[str],
+):
+    """Se a mailbox seleccionada é a Caixa Geral, tratar como box=general."""
+    if not mailbox:
+        return box, mailbox
+    try:
+        from services.auth import get_active_company_id_async
+        from services.email_config_resolver import load_caixa_geral_config
+        cid = await get_active_company_id_async(request, current_user)
+        caixa = await load_caixa_geral_config(cid)
+        caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
+        if caixa_email and caixa_email == mailbox.strip().lower():
+            return "general", None
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a reescrever box para Caixa Geral: %s", exc)
+    return box, mailbox
 
 
 async def run_test_email_connections(current_user: dict, account: Optional[str] = None):
@@ -152,18 +183,19 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     user_id = current_user.get("id", "")
     effective_role = get_effective_role(request, current_user)  # Used for data filtering
     can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
     
     logger.debug(f"User {current_user.get('email')} (id={user_id}, role={user_role}, effective_role={effective_role}) querying box={box} folder={folder} account={account}")
     
     # === BOX FILTER: permissões e isolamento por caixa ===
     if box == "general":
-        # Blocked for consultor and indexacao
-        if user_role in (UserRole.CONSULTOR, UserRole.INDEXACAO):
+        # Bloquear consultor/indexação no cargo *activo* (UCR), não só no JWT.
+        if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
             raise HTTPException(
                 status_code=403,
-                detail=f"Acesso à caixa 'geral' não permitido para o role '{user_role}'."
+                detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail List] box=general, user={user_email}, role={user_role}")
+        logger.info(f"[Webmail List] box=general, user={user_email}, role={user_role}, effective_role={effective_role}")
     elif box == "shared_indexacao":
         # Blocked for everyone except admin and indexacao
         if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
@@ -524,7 +556,10 @@ async def run_webmail_stats(
     user_email = (current_user.get("email") or "").lower().strip()
     user_role = current_user.get("role", "")
     user_id = current_user.get("id", "")
-    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    effective_role = get_effective_role(request, current_user) if request is not None else user_role
+    can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    if request is not None:
+        box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
     ucr_filter = None
     if request is not None:
         ucr_filter = await resolve_ucr_mailbox_filter(
@@ -533,12 +568,12 @@ async def run_webmail_stats(
     
     # === BOX permission checks ===
     if box == "general":
-        if user_role in (UserRole.CONSULTOR, UserRole.INDEXACAO):
+        if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
             raise HTTPException(
                 status_code=403,
-                detail=f"Acesso à caixa 'geral' não permitido para o role '{user_role}'."
+                detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail Stats] box=general, user={user_email}, role={user_role}")
+        logger.info(f"[Webmail Stats] box=general, user={user_email}, role={user_role}, effective_role={effective_role}")
     elif box == "shared_indexacao":
         if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
             raise HTTPException(
@@ -683,10 +718,13 @@ async def run_webmail_sync(current_user: dict, account: Optional[str] = None, da
     """
     from models.auth import UserRole
     from services.background_jobs import BackgroundJobService, JobType
-    
-    # Bloquear sync global para utilizadores não-admin
+
     user_role = current_user.get("role", "")
-    if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
+    all_roles = [user_role] + list(current_user.get("additional_roles") or [])
+    can_sync_global = any(
+        r in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR) for r in all_roles
+    )
+    if not can_sync_global:
         raise HTTPException(
             status_code=403,
             detail="Sincronização global apenas disponível para administradores. Use /webmail/sync-user para sincronizar o seu email pessoal."
@@ -769,7 +807,39 @@ async def run_webmail_sync_user(
     
     user_id = current_user["id"]
     user_role = get_effective_role(request, current_user)
-    
+
+    from services.auth import get_active_company_id_async
+    from services.email_config_resolver import (
+        CAIXA_GERAL_ACCOUNT_ID,
+        CAIXA_GERAL_INJECT_ROLES,
+        load_caixa_geral_config,
+        resolve_active_ucr_role,
+    )
+    active_company_id = None
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+    except Exception:
+        active_company_id = None
+    ucr_role = await resolve_active_ucr_role(request, current_user, active_company_id)
+    selected_mailbox = (mailbox or "").strip().lower()
+    wants_caixa_geral = account_id == CAIXA_GERAL_ACCOUNT_ID
+    if selected_mailbox and not wants_caixa_geral:
+        try:
+            caixa = await load_caixa_geral_config(active_company_id)
+            caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
+            wants_caixa_geral = bool(caixa_email and caixa_email == selected_mailbox)
+        except Exception:
+            wants_caixa_geral = False
+    if wants_caixa_geral and (
+        ucr_role in CAIXA_GERAL_INJECT_ROLES
+        or user_role in CAIXA_GERAL_INJECT_ROLES | {"admin", "ceo"}
+    ):
+        logger.info(
+            "[Webmail Sync] Diretor a sincronizar Caixa Geral user=%s company=%s",
+            user_id, active_company_id,
+        )
+        return await run_webmail_sync(current_user)
+
     # === INDEXACAO / SUPORTE: usar conta partilhada do departamento ===
     if user_role in ("indexacao", "suporte"):
         # Tenta shared_role_email_configs primeiro, depois fallback para system_webmail (Bloco C)

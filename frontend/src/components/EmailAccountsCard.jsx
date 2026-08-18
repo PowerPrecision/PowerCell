@@ -144,11 +144,14 @@ export default function EmailAccountsCard({
                 )}
               </div>
               <div className="flex items-center gap-1.5 shrink-0">
-                {account.is_primary && (
+                {account.is_caixa_geral && (
+                  <Badge variant="secondary">Caixa Geral</Badge>
+                )}
+                {account.is_primary && !account.is_caixa_geral && (
                   <Badge variant="secondary">Principal</Badge>
                 )}
                 <Badge variant="outline">{authLabel(account)}</Badge>
-                {!account.is_primary && (
+                {!account.is_caixa_geral && !account.is_primary && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -161,31 +164,35 @@ export default function EmailAccountsCard({
                     <Star className="h-3.5 w-3.5" />
                   </Button>
                 )}
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  title="Editar"
-                  onClick={() => openEdit(account)}
-                >
-                  <Pencil className="h-3.5 w-3.5" />
-                </Button>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8 text-destructive"
-                  title="Remover"
-                  disabled={busyId === account.id}
-                  onClick={() => handleDelete(account)}
-                >
-                  {busyId === account.id ? (
-                    <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                  ) : (
-                    <Trash2 className="h-3.5 w-3.5" />
-                  )}
-                </Button>
+                {!account.is_caixa_geral && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Editar"
+                    onClick={() => openEdit(account)}
+                  >
+                    <Pencil className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+                {!account.is_caixa_geral && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-destructive"
+                    title="Remover"
+                    disabled={busyId === account.id}
+                    onClick={() => handleDelete(account)}
+                  >
+                    {busyId === account.id ? (
+                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                    ) : (
+                      <Trash2 className="h-3.5 w-3.5" />
+                    )}
+                  </Button>
+                )}
               </div>
             </li>
           ))}

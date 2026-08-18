@@ -375,16 +375,31 @@ def _assert_not_forced_shared(effective_role: str):
         )
 
 
+def _assert_not_caixa_geral(account_id: str):
+    from services.email_config_resolver import CAIXA_GERAL_ACCOUNT_ID
+    if account_id == CAIXA_GERAL_ACCOUNT_ID:
+        raise HTTPException(
+            status_code=403,
+            detail="A Caixa Geral é gerida centralmente. Não é possível editar ou remover esta conta.",
+        )
+
+
 async def run_list_my_email_accounts(
     request: Request,
     company_id: Optional[str],
     current_user: dict,
 ):
-    """Listar contas de email do perfil activo (Pacote DN.4)."""
+    """Listar contas de email do perfil activo (Pacote DN.4 + DO.3)."""
     from services.auth import get_active_company_id_async, get_effective_role
     from services.user_email_config_service import (
         list_company_email_configs,
         publicize_email_account,
+    )
+    from services.email_config_resolver import (
+        CAIXA_GERAL_INJECT_ROLES,
+        load_caixa_geral_config,
+        publicize_caixa_geral_account,
+        resolve_active_ucr_role,
     )
 
     effective_role = get_effective_role(request, current_user)
@@ -394,9 +409,40 @@ async def run_list_my_email_accounts(
     header_company = await get_active_company_id_async(request, current_user)
     active_company_id = _non_default_company_id(company_id, header_company) or "default"
     docs = await list_company_email_configs(current_user["id"], active_company_id)
+    accounts = [publicize_email_account(doc) for doc in docs]
+
+    ucr_role = await resolve_active_ucr_role(
+        request, current_user, active_company_id,
+    )
+    caixa_injected = False
+    if ucr_role in CAIXA_GERAL_INJECT_ROLES or effective_role in CAIXA_GERAL_INJECT_ROLES:
+        caixa = await load_caixa_geral_config(active_company_id)
+        if caixa and caixa.get("email_address"):
+            existing = {
+                (a.get("email_address") or "").strip().lower() for a in accounts
+            }
+            caixa_email = caixa["email_address"].strip().lower()
+            if caixa_email not in existing:
+                accounts.insert(0, publicize_caixa_geral_account(caixa, active_company_id))
+                caixa_injected = True
+            else:
+                for account in accounts:
+                    if (account.get("email_address") or "").strip().lower() == caixa_email:
+                        account["is_caixa_geral"] = True
+                        account["is_shared"] = True
+                        account["managed_centralized"] = True
+                        account["label"] = account.get("label") or "Caixa Geral"
+                        caixa_injected = True
+                        break
+            logger.info(
+                "[email-accounts] Caixa Geral disponível para diretor user=%s company=%s email=%s",
+                current_user.get("id"), active_company_id, caixa.get("email_address"),
+            )
+
     return {
         "company_id": active_company_id,
-        "accounts": [publicize_email_account(doc) for doc in docs],
+        "accounts": accounts,
+        "caixa_geral_injected": caixa_injected,
     }
 
 
@@ -472,6 +518,7 @@ async def run_update_my_email_account(
 
     effective_role = get_effective_role(request, current_user)
     _assert_not_forced_shared(effective_role)
+    _assert_not_caixa_geral(account_id)
 
     existing = await get_user_email_config(
         current_user["id"], config.company_id or "default", account_id=account_id,
@@ -518,6 +565,7 @@ async def run_delete_my_email_account(
 
     effective_role = get_effective_role(request, current_user)
     _assert_not_forced_shared(effective_role)
+    _assert_not_caixa_geral(account_id)
 
     existing = await get_user_email_config(
         current_user["id"], "default", account_id=account_id,
@@ -550,6 +598,7 @@ async def run_set_primary_email_account(
 
     effective_role = get_effective_role(request, current_user)
     _assert_not_forced_shared(effective_role)
+    _assert_not_caixa_geral(account_id)
 
     existing = await get_user_email_config(
         current_user["id"], "default", account_id=account_id,

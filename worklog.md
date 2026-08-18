@@ -1,4 +1,33 @@
 ---
+Task ID: pacote-do3-do4-email-smtp
+Agent: Cloud Agent
+Task: Pacote DO.3+4 — Diretor na Caixa Geral e correção SMTP dos balcões
+
+Date: 2026-08-18
+
+Work Log:
+- DO.3: GET /users/me/email-accounts injeta a Caixa Geral (system_config.email / contas globais) quando o cargo activo do UCR é diretor; sem password pessoal; id virtual caixa-geral read-only
+- DO.3: Webmail tab/sync/stats usam effectiveRole + UCR; mailbox da Caixa Geral trata-se como box=general
+- DO.4: send-documentation autentica com password desencriptada do perfil activo, fallback Caixa Geral; deixa de usar system_purpose=DOCUMENTS
+- DO.4: decrypt_email_secret nunca envia blob ENC: ao SMTP; erros de autenticação logados (host/user) sem stack no cliente
+- Docs: ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Diretor vê a Caixa Geral na lista de contas do Webmail sem configurar password
+- Enviar para balcões usa as credenciais certas do perfil / caixa geral
+
+Files:
+- backend/services/email_config_resolver.py
+- backend/services/users_api_email_config.py
+- backend/services/email_webmail.py
+- backend/services/email_documentation.py
+- backend/services/email_service.py
+- backend/services/email.py
+- frontend/src/pages/WebmailPage.jsx
+- frontend/src/components/EmailAccountsCard.jsx
+- ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: pacote-do-resumo-calendario
 Agent: Cloud Agent (cursor/pacote-do-resumo-calendario-74b9)
 Task: Pacote DO.1+2 — Observações/Timeline no Resumo e Calendário Visual

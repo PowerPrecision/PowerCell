@@ -969,7 +969,7 @@ sequenceDiagram
 
 **Email Transacional do Sistema (Bloco A):**
 
-Quando `send_email(force_system=True)` é chamado (ex: envio de documentação para bancos):
+Quando `send_email(force_system=True)` é chamado (ex: alertas de sistema):
 
 ```mermaid
 flowchart TD
@@ -979,6 +979,8 @@ flowchart TD
     TrySystemSMTP -->|Configurado| UseSystemSMTP["Usar Bloco A<br/>(noreply@empresa.pt)"]
     TrySystemSMTP -->|Não configurado| Error["Erro: SMTP não configurado"]
 ```
+
+O envio de documentação para balcões **não** usa `force_system` + `DOCUMENTS`: resolve primeiro o SMTP do perfil UCR activo (password desencriptada) e cai na Caixa Geral.
 
 **Webmail Partilhado por Role (Bloco C):**
 
@@ -1000,8 +1002,11 @@ O Webmail respeita o UCR escolhido no Header (`ContextSwitcher`):
 3. Sync pessoal (`POST /api/emails/webmail/sync-user`) resolve `user_email_configs` com a empresa activa (e `account_id` / `mailbox` se o utilizador escolheu uma conta) e grava `company_id` em cada email sincronizado.
 4. Anexos: `GET /api/webmail/attachments/{id}` (auth JWT) devolve `StreamingResponse` com `Content-Disposition: attachment`. Fonte: S3 (`s3_key`) → conteúdo na BD → IMAP on-demand. 404 se o anexo não existir.
 5. **Pacote DN.4:** um perfil pode ter várias contas (`user_email_configs` único em `{user_id, company_id, email_address}`). A Área Pessoal lista-as e o Webmail troca com um Select (`mailbox=`). `is_primary` é a conta por omissão (dual-write no `user.email_config` embebido).
+6. **Pacote DO.3:** se o cargo activo do UCR for `diretor`, `GET /users/me/email-accounts` injeta a **Caixa Geral** da empresa (`system_config.email` / contas globais) na lista, com `is_caixa_geral=true`, sem exigir password pessoal. A conta virtual `id=caixa-geral` é só de leitura.
 
 **Emails do processo (Pacote DN.3):** `GET /api/emails/process/{id}` devolve mensagens com `process_id` **ou** sem processo ligado cujo `from_email` / `to_emails` / `cc_emails` corresponde ao email do cliente (processo, 2º titular, emails monitorizados, `clients.contacto.email`). Clicar na linha abre o `EmailViewerModal`.
+
+**Envio para balcões (Pacote DO.4):** `POST /api/emails/send-documentation/{id}` autentica SMTP com a password desencriptada do **perfil de email activo**; se não houver, usa a Caixa Geral. Já não usa o transporter `system_purpose=DOCUMENTS` por omissão. Falhas de autenticação são logadas (host/user, sem password) e o cliente recebe uma mensagem genérica — sem stack trace.
 
 ```mermaid
 flowchart TD

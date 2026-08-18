@@ -253,14 +253,15 @@ const WebmailPage = () => {
   }, [effectiveRole]);
 
   // Derived UI state
-  const showTabs = hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo']);
+  const caixaGeralRoles = ['admin', 'ceo', 'diretor', 'administrativo'];
+  const showTabs = caixaGeralRoles.includes(effectiveRole) || hasAnyRole(user, caixaGeralRoles);
   const showAccountSelector = showTabs && activeBox === 'personal';
   // Perfis que podem usar contas globais (power/precision) para enviar email.
   // Os restantes roles (consultor, intermediario, administrativo, indexacao)
   // enviam obrigatoriamente pela conta pessoal (email_config) — o backend
   // ignora a conta global e força "personal". Nestes casos o seletor de conta
   // do composer não deve aparecer (o utilizador só tem uma conta útil).
-  const canUseGlobalAccounts = hasAnyRole(user, ['admin', 'ceo', 'diretor']);
+  const canUseGlobalAccounts = ['admin', 'ceo', 'diretor'].includes(effectiveRole) || hasAnyRole(user, ['admin', 'ceo', 'diretor']);
   // Assinatura resolvida para pré-visualização no composer.
   // O /auth/me já devolve email_signature (mergeado: empresa ativa ou global)
   // e active_company_signature (None se não definida na UCR da empresa ativa).
@@ -663,7 +664,9 @@ const WebmailPage = () => {
     setSyncing(true);
     try {
       // Determine sync endpoint based on role and active box
-      const isGeneralSync = activeBox === 'general' && showTabs;
+      const selectedAccount = personalAccounts.find((item) => item.email_address === selectedMailbox);
+      const isCaixaGeralMailbox = Boolean(selectedAccount?.is_caixa_geral);
+      const isGeneralSync = (activeBox === 'general' && showTabs) || isCaixaGeralMailbox;
       const isPersonalSync = !isGeneralSync;
 
       const syncEndpoint = isGeneralSync
@@ -745,7 +748,7 @@ const WebmailPage = () => {
       toast.error("Erro de ligação ao servidor");
       setSyncing(false);
     }
-  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus, companyId, webmailHeaders, selectedMailbox]);
+  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus, companyId, webmailHeaders, selectedMailbox, personalAccounts]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -1456,7 +1459,9 @@ const WebmailPage = () => {
             <SelectContent>
               {personalAccounts.map((item) => (
                 <SelectItem key={item.id} value={item.email_address}>
-                  {item.label && item.label !== item.email_address
+                  {item.is_caixa_geral
+                    ? `Caixa Geral (${item.email_address})`
+                    : item.label && item.label !== item.email_address
                     ? `${item.label} (${item.email_address})`
                     : item.email_address}
                 </SelectItem>

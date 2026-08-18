@@ -110,16 +110,26 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                 imap_server = email_config.get("imap_server")
                 
                 if smtp_user and smtp_password and (smtp_server or imap_server):
-                    accounts.append(EmailAccount(
-                        name="power",
-                        imap_server=imap_server or smtp_server,
-                        imap_port=int(email_config.get("imap_port", 993)),
-                        smtp_server=smtp_server or imap_server,
-                        smtp_port=int(email_config.get("smtp_port", 465)),
-                        email=smtp_user,
-                        password=smtp_password
-                    ))
-                    logger.info(f"Conta Power carregada da DB: {smtp_user}")
+                    from services.email_config_resolver import decrypt_email_secret
+                    smtp_password = decrypt_email_secret(
+                        smtp_password,
+                        f"system_config.email power user={smtp_user}",
+                    )
+                    if not smtp_password:
+                        logger.warning(
+                            "Conta Power: password não desencriptável — a ignorar esta conta"
+                        )
+                    else:
+                        accounts.append(EmailAccount(
+                            name="power",
+                            imap_server=imap_server or smtp_server,
+                            imap_port=int(email_config.get("imap_port", 993)),
+                            smtp_server=smtp_server or imap_server,
+                            smtp_port=int(email_config.get("smtp_port", 465)),
+                            email=smtp_user,
+                            password=smtp_password
+                        ))
+                        logger.info(f"Conta Power carregada da DB: {smtp_user}")
                 else:
                     logger.warning(f"Conta Power incompleta: user={bool(smtp_user)}, pass={bool(smtp_password)}, server={bool(smtp_server or imap_server)}")
                 
@@ -130,16 +140,26 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                 imap_server_2 = email_config.get("imap_server_2")
                 
                 if smtp_user_2 and smtp_password_2 and (smtp_server_2 or imap_server_2):
-                    accounts.append(EmailAccount(
-                        name="precision",
-                        imap_server=imap_server_2 or smtp_server_2,
-                        imap_port=int(email_config.get("imap_port_2", 993)),
-                        smtp_server=smtp_server_2 or imap_server_2,
-                        smtp_port=int(email_config.get("smtp_port_2", 465)),
-                        email=smtp_user_2,
-                        password=smtp_password_2
-                    ))
-                    logger.info(f"Conta Precision carregada da DB: {smtp_user_2}")
+                    from services.email_config_resolver import decrypt_email_secret
+                    smtp_password_2 = decrypt_email_secret(
+                        smtp_password_2,
+                        f"system_config.email precision user={smtp_user_2}",
+                    )
+                    if not smtp_password_2:
+                        logger.warning(
+                            "Conta Precision: password não desencriptável — a ignorar esta conta"
+                        )
+                    else:
+                        accounts.append(EmailAccount(
+                            name="precision",
+                            imap_server=imap_server_2 or smtp_server_2,
+                            imap_port=int(email_config.get("imap_port_2", 993)),
+                            smtp_server=smtp_server_2 or imap_server_2,
+                            smtp_port=int(email_config.get("smtp_port_2", 465)),
+                            email=smtp_user_2,
+                            password=smtp_password_2
+                        ))
+                        logger.info(f"Conta Precision carregada da DB: {smtp_user_2}")
                 else:
                     logger.warning(f"Conta Precision incompleta: user={bool(smtp_user_2)}, pass={bool(smtp_password_2)}, server={bool(smtp_server_2 or imap_server_2)}")
                     
@@ -452,6 +472,7 @@ async def send_email(
     skip_proc_tag: bool = False,
     from_email: Optional[str] = None,
     active_company_id: Optional[str] = None,
+    account_override: Optional["EmailAccount"] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -497,6 +518,8 @@ async def send_email(
             - content_type (str): Tipo MIME (ex: "application/pdf").
         force_system: Se True, nunca faz fallback para credenciais pessoais
             do utilizador. Usa exclusivamente a conta global do sistema.
+        account_override: Conta SMTP já resolvida (Pacote DO.4). Quando
+            fornecida, ignora a resolução por account_name / system_purpose.
 
     Returns:
         dict: Resultado da operação:
@@ -508,8 +531,13 @@ async def send_email(
         smtplib.SMTPException: Se a autenticação ou o envio SMTP falharem.
     """
     # === system_purpose: tentar config específica por propósito (zero downtime) ===
-    account = None
-    if force_system and system_purpose:
+    account = account_override
+    if account is not None:
+        logger.info(
+            "[Send Email] Usando account_override name=%s user=%s host=%s",
+            account.name, account.email, account.smtp_server,
+        )
+    if account is None and force_system and system_purpose:
         try:
             from services.email import get_system_transporter
             transporter = await get_system_transporter(system_purpose)
@@ -534,8 +562,9 @@ async def send_email(
         account = next((a for a in accounts if a.name == account_name), None)
     
     # Se a conta pedida é "personal", ir diretamente para a config do utilizador
-    # sem nunca cair nas contas globais (isolamento de remetente)
-    if account_name == "personal" and created_by:
+    # sem nunca cair nas contas globais (isolamento de remetente).
+    # Pacote DO.4: se já veio account_override, não voltar a resolver.
+    if account_override is None and account_name == "personal" and created_by:
         from services.encryption import encryption_service
         user = await db.users.find_one(
             {"id": created_by},
@@ -918,9 +947,24 @@ async def send_email(
             )
         else:
             # --- SMTP directo (legado) ---
+            from services.email_config_resolver import decrypt_email_secret
+            smtp_password = decrypt_email_secret(
+                account.password,
+                f"send_email account={account.name} user={account.email} host={account.smtp_server}",
+            )
+            if not smtp_password:
+                logger.error(
+                    "[Send Email] Password SMTP vazia ou não desencriptável "
+                    "account=%s user=%s host=%s:%s",
+                    account.name, account.email, account.smtp_server, account.smtp_port,
+                )
+                return {
+                    "success": False,
+                    "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa.",
+                }
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context, timeout=30) as server:
-                server.login(account.email, account.password)
+                server.login(account.email, smtp_password)
                 
                 all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
                 server.sendmail(account.email, all_recipients, msg.as_string())
@@ -968,9 +1012,35 @@ async def send_email(
         
         return {"success": True, "account": account.name}
         
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(
+            "[Send Email] Autenticação SMTP recusada account=%s user=%s host=%s:%s: %s",
+            getattr(account, "name", "?"),
+            getattr(account, "email", "?"),
+            getattr(account, "smtp_server", "?"),
+            getattr(account, "smtp_port", "?"),
+            e,
+        )
+        return {
+            "success": False,
+            "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa ou da Caixa Geral.",
+        }
     except Exception as e:
-        logger.error(f"Erro ao enviar email via {account.name}: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(
+            "[Send Email] Erro ao enviar via %s user=%s host=%s: %s: %s",
+            getattr(account, "name", "?"),
+            getattr(account, "email", "?"),
+            getattr(account, "smtp_server", "?"),
+            type(e).__name__,
+            e,
+        )
+        err_lower = str(e).lower()
+        if "incorrect authentication" in err_lower or "authentication" in err_lower:
+            return {
+                "success": False,
+                "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa ou da Caixa Geral.",
+            }
+        return {"success": False, "error": "Não foi possível enviar o email. Tente novamente."}
 
 
 async def test_email_connection(account_name: str = None) -> Dict[str, Any]:

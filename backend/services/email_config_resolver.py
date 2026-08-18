@@ -340,6 +340,171 @@ async def resolve_email_config_for_sync(
     return resolved
 
 
+# Pacote DO.3 — Diretor herda a Caixa Geral da empresa (sem password pessoal).
+CAIXA_GERAL_ACCOUNT_ID = "caixa-geral"
+CAIXA_GERAL_INJECT_ROLES = {"diretor"}
+CAIXA_GERAL_ACCESS_ROLES = {"diretor", "admin", "ceo", "administrativo"}
+
+
+def decrypt_email_secret(value: Optional[str], context: str = "") -> str:
+    """Desencripta password SMTP/IMAP. Nunca devolve o blob ENC: ao SMTP.
+
+    Se a desencriptação falhar, devolve string vazia e regista o contexto
+    (host/user/purpose) sem a password em claro.
+    """
+    if not value:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    if not value.startswith(encryption_service.ENCRYPTION_PREFIX):
+        return value
+    try:
+        decrypted = encryption_service.decrypt(value)
+    except Exception as exc:
+        logger.error(
+            "[SMTP] Falha a desencriptar credencial (%s): %s",
+            context or "unknown", type(exc).__name__,
+        )
+        return ""
+    if isinstance(decrypted, str) and decrypted.startswith(encryption_service.ENCRYPTION_PREFIX):
+        logger.error(
+            "[SMTP] Credencial permanece encriptada após decrypt (%s). "
+            "ENCRYPTION_KEY provavelmente diferente da usada a gravar.",
+            context or "unknown",
+        )
+        return ""
+    return decrypted or ""
+
+
+async def resolve_active_ucr_role(
+    request: Any,
+    current_user: Dict[str, Any],
+    company_id: Optional[str] = None,
+) -> str:
+    """Role activo do UCR da empresa, com fallback para X-Active-Role / JWT."""
+    from services.auth import get_effective_role
+
+    effective = (get_effective_role(request, current_user) or "").strip().lower()
+    cid = (company_id or "").strip()
+    user_id = current_user.get("id")
+    if not user_id or not cid or cid == "default":
+        return effective
+    try:
+        ucr = await db.user_company_roles.find_one(
+            {"user_id": user_id, "company_id": cid},
+            {"_id": 0, "role": 1},
+        )
+        ucr_role = str((ucr or {}).get("role") or "").strip().lower()
+        if ucr_role:
+            return ucr_role
+    except Exception as exc:
+        logger.warning(
+            "[EmailConfig] Falha a ler UCR role user=%s company=%s: %s",
+            user_id, cid, exc,
+        )
+    return effective
+
+
+def publicize_caixa_geral_account(
+    config: Dict[str, Any],
+    company_id: Optional[str] = None,
+) -> Dict[str, Any]:
+    """Serializa a Caixa Geral sem secrets, para GET /users/me/email-accounts."""
+    email_address = (config.get("email_address") or "").strip()
+    return {
+        "id": CAIXA_GERAL_ACCOUNT_ID,
+        "company_id": company_id or config.get("company_id") or "default",
+        "email_address": email_address,
+        "label": config.get("label") or "Caixa Geral",
+        "imap_server": config.get("imap_server") or "",
+        "imap_port": int(config.get("imap_port") or 993),
+        "smtp_server": config.get("smtp_server") or "",
+        "smtp_port": int(config.get("smtp_port") or 465),
+        "is_configured": True,
+        "is_primary": False,
+        "has_password": bool(config.get("password") or config.get("has_password")),
+        "has_google_oauth": bool(config.get("google_refresh_token")),
+        "auth_method": "imap_smtp",
+        "is_caixa_geral": True,
+        "is_shared": True,
+        "managed_centralized": True,
+        "read_only": True,
+    }
+
+
+async def load_caixa_geral_config(
+    company_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """Credenciais da Caixa Geral (system_config.email da empresa, depois contas globais).
+
+    Inclui ``password`` já desencriptada para SMTP/IMAP interno.
+    """
+    from services.system_config import get_system_config
+
+    candidates = []
+    cid = (company_id or "").strip()
+    if cid and cid != "default":
+        candidates.append(cid)
+    candidates.append("default")
+
+    for cfg_id in candidates:
+        try:
+            sys_cfg = await get_system_config(cfg_id)
+            email_cfg = sys_cfg.email
+            user = (email_cfg.imap_user or email_cfg.smtp_user or "").strip()
+            raw_pw = email_cfg.imap_password or email_cfg.smtp_password or ""
+            password = decrypt_email_secret(
+                raw_pw, f"caixa_geral system_config company={cfg_id} user={user}",
+            )
+            smtp_server = email_cfg.smtp_server or email_cfg.imap_server
+            imap_server = email_cfg.imap_server or email_cfg.smtp_server
+            if user and password and smtp_server:
+                return {
+                    "email_address": user,
+                    "imap_server": imap_server,
+                    "imap_port": int(email_cfg.imap_port or 993),
+                    "smtp_server": smtp_server,
+                    "smtp_port": int(email_cfg.smtp_port or 465),
+                    "password": password,
+                    "has_password": True,
+                    "company_id": cfg_id,
+                    "source": f"system_config:{cfg_id}",
+                    "label": "Caixa Geral",
+                }
+        except Exception as exc:
+            logger.warning(
+                "[CaixaGeral] Falha a ler system_config company=%s: %s",
+                cfg_id, exc,
+            )
+
+    try:
+        from services.email_service import get_email_accounts_async
+        accounts = await get_email_accounts_async()
+        if accounts:
+            account = accounts[0]
+            password = decrypt_email_secret(
+                account.password,
+                f"caixa_geral global account={account.name} user={account.email}",
+            )
+            if account.email and password and account.smtp_server:
+                return {
+                    "email_address": account.email,
+                    "imap_server": account.imap_server,
+                    "imap_port": int(account.imap_port or 993),
+                    "smtp_server": account.smtp_server,
+                    "smtp_port": int(account.smtp_port or 465),
+                    "password": password,
+                    "has_password": True,
+                    "company_id": cid or "default",
+                    "source": f"global:{account.name}",
+                    "label": "Caixa Geral",
+                }
+    except Exception as exc:
+        logger.warning("[CaixaGeral] Falha no fallback de contas globais: %s", exc)
+
+    return None
+
+
 def _empty_response(source: str, reason: str = "", active_company_id: Optional[str] = None) -> Dict[str, Any]:
     """Retorna resposta vazia com config_source indicado."""
     resp = {

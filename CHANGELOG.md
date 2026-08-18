@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-08-18] — Pacote DO.3+4: Caixa Geral no Diretor e SMTP dos balcões
+
+### Adicionado
+- **DO.3:** `GET /users/me/email-accounts` injeta a Caixa Geral da empresa quando o cargo activo do UCR é `diretor`, sem exigir password pessoal. Conta virtual `id=caixa-geral` (só leitura) na Área Pessoal e no Select do Webmail.
+
+### Corrigido
+- **DO.3:** o acesso à tab Caixa Geral e ao sync global usa o cargo efectivo (`X-Active-Role` / UCR), não só o role primário do JWT.
+- **DO.4:** «Enviar para balcões» deixa de autenticar no transporter `DOCUMENTS` (credenciais erradas / ENC:). Usa a password desencriptada do perfil de email activo ou da Caixa Geral. Erros SMTP são logados sem stack trace no cliente.
+
+---
+
 ## [2026-08-18] — Pacote DO.1+2: Observações, Timeline no Resumo e Calendário Visual
 
 ### Adicionado
