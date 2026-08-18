@@ -194,7 +194,23 @@ def test_process_participant_email_helpers_include_cc():
     assert "cc_emails" in blob
     assert "to_emails" in blob
     assert "from_email" in blob
+    assert "(^|<)" in blob
 
     conditions = build_process_emails_base_conditions("proc-1", {"ana@cliente.pt"})
     assert {"process_id": "proc-1"} in conditions
     assert any("cc_emails" in str(c) for c in conditions)
+
+
+def test_coerce_email_response_fields_fills_required():
+    from services.email_process_crud import coerce_email_response_fields
+
+    coerced = coerce_email_response_fields({
+        "id": "e1",
+        "from_email": "ana@cliente.pt",
+        "subject": "Olá",
+    })
+    assert coerced["status"] in ("sent", "synced")
+    assert coerced["created_at"]
+    assert coerced["direction"] == "received"
+    assert coerced["to_emails"] == []
+    assert coerced["body"] == ""

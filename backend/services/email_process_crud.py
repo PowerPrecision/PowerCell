@@ -106,7 +106,9 @@ def build_participant_address_match(client_emails) -> Optional[dict]:
             {"from_email": rx_from},
             {"from_email": rx_exact},
             {"to_emails": rx_exact},
+            {"to_emails": rx_from},
             {"cc_emails": rx_exact},
+            {"cc_emails": rx_from},
         ])
     if not clauses:
         return None
@@ -131,6 +133,28 @@ def build_process_emails_base_conditions(process_id: str, client_emails) -> list
             ]
         })
     return conditions
+
+
+def coerce_email_response_fields(doc: Optional[dict]) -> dict:
+    """Fill EmailResponse required fields so incomplete IMAP leftovers still list."""
+    enriched = dict(doc or {})
+    if not enriched.get("status"):
+        enriched["status"] = "synced" if enriched.get("synced") else "sent"
+    if not enriched.get("created_at"):
+        enriched["created_at"] = (
+            enriched.get("sent_at") or datetime.now(timezone.utc).isoformat()
+        )
+    if not enriched.get("direction"):
+        enriched["direction"] = "received"
+    if enriched.get("from_email") is None:
+        enriched["from_email"] = ""
+    if enriched.get("to_emails") is None:
+        enriched["to_emails"] = []
+    if enriched.get("subject") is None:
+        enriched["subject"] = ""
+    if enriched.get("body") is None:
+        enriched["body"] = ""
+    return enriched
 
 
 async def resolve_process_participant_emails(process_id: str) -> set:
@@ -353,9 +377,16 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
     
     enriched_emails = []
     for email in emails:
-        enriched = await enrich_email(email)
-        enriched_emails.append(EmailResponse(**enriched))
-    
+        enriched = coerce_email_response_fields(await enrich_email(email))
+        try:
+            enriched_emails.append(EmailResponse(**enriched))
+        except Exception as exc:
+            logger.warning(
+                "A saltar email malformado %s na listagem do processo: %s",
+                enriched.get("id"),
+                exc,
+            )
+
     return enriched_emails
 
 
