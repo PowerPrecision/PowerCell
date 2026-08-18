@@ -31,7 +31,7 @@ const DEFAULT_CONFIG = {
 
 // Configuração para emails - mais permissiva para formatação
 // PACOTE DM: permitir data:image e cid: para imagens da assinatura
-const EMAIL_URI_REGEXP = /^(?:(?:(?:f|ht)tps?|mailto|tel|cid|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+const EMAIL_URI_REGEXP = /^(?:(?:(?:f|ht)tps?|mailto|tel|cid|data|blob):|[^a-z]|[a-z+.-]+(?:[^a-z+.-:]|$))/i;
 
 const EMAIL_CONFIG = {
   ...DEFAULT_CONFIG,
