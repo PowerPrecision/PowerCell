@@ -56,10 +56,12 @@ async def resolve_ucr_mailbox_filter(
     request: Request,
     current_user: dict,
     box: Optional[str] = None,
+    mailbox: Optional[str] = None,
 ) -> Optional[dict]:
     """Resolve o filtro UCR a partir do header X-Company-Id + config de email.
 
     Caixas partilhadas (geral / indexação) não são scoped por UCR pessoal.
+    Se ``mailbox`` for dado (Pacote DN.4), filtra só essa conta IMAP.
     """
     if box in ("general", "shared_indexacao"):
         return None
@@ -71,6 +73,11 @@ async def resolve_ucr_mailbox_filter(
         active_company_id = await get_active_company_id_async(request, current_user)
     except Exception as exc:
         logger.warning("[Webmail] Falha a ler empresa activa: %s", exc)
+
+    selected_mailbox = (mailbox or "").strip().lower() or None
+    if selected_mailbox:
+        # Conta pessoal específica — não misturar as outras do mesmo UCR
+        return build_ucr_mailbox_filter(None, selected_mailbox)
 
     mailbox_email = None
     try:
@@ -117,7 +124,7 @@ async def run_get_configured_accounts(current_user: dict):
     ]
 
 
-async def run_webmail_list(request: Request, current_user: dict, folder: str = "inbox", page: int = 1, limit: int = 30, account: Optional[str] = None, search: Optional[str] = None, label: Optional[str] = None, custom_folder: Optional[str] = None, box: Optional[str] = None):
+async def run_webmail_list(request: Request, current_user: dict, folder: str = "inbox", page: int = 1, limit: int = 30, account: Optional[str] = None, search: Optional[str] = None, label: Optional[str] = None, custom_folder: Optional[str] = None, box: Optional[str] = None, mailbox: Optional[str] = None):
     """
     Listar emails no formato Webmail por pasta.
     
@@ -187,9 +194,11 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     # Isso evita que múltiplos $or se sobreponham.
     and_conditions = []
     
-    # === MULTI-EMPRESA (Pacote DN.2): filtrar pela mailbox do UCR activo ===
+    # === MULTI-EMPRESA (Pacote DN.2 + DN.4): filtrar pela mailbox do UCR / conta ──
     # Estrito: só emails da empresa/conta IMAP do perfil escolhido no Header.
-    ucr_filter = await resolve_ucr_mailbox_filter(request, current_user, box=box)
+    ucr_filter = await resolve_ucr_mailbox_filter(
+        request, current_user, box=box, mailbox=mailbox,
+    )
     if ucr_filter:
         and_conditions.append(ucr_filter)
     
@@ -498,6 +507,7 @@ async def run_webmail_stats(
     current_user: dict,
     box: Optional[str] = None,
     request: Optional[Request] = None,
+    mailbox: Optional[str] = None,
 ):
     """
     Estatísticas de Webmail para o utilizador logado.
@@ -517,7 +527,9 @@ async def run_webmail_stats(
     can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     ucr_filter = None
     if request is not None:
-        ucr_filter = await resolve_ucr_mailbox_filter(request, current_user, box=box)
+        ucr_filter = await resolve_ucr_mailbox_filter(
+            request, current_user, box=box, mailbox=mailbox,
+        )
     
     # === BOX permission checks ===
     if box == "general":
@@ -741,7 +753,12 @@ async def run_webmail_sync(current_user: dict, account: Optional[str] = None, da
     }
 
 
-async def run_webmail_sync_user(request: Request, current_user: dict):
+async def run_webmail_sync_user(
+    request: Request,
+    current_user: dict,
+    account_id: Optional[str] = None,
+    mailbox: Optional[str] = None,
+):
     """
     Sincronizar emails usando as credenciais do utilizador logado.
     
@@ -808,7 +825,26 @@ async def run_webmail_sync_user(request: Request, current_user: dict):
     from services.email_config_resolver import resolve_email_config_for_sync
     from services.auth import get_active_company_id_async
     active_company_id = await get_active_company_id_async(request, current_user)
-    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role, active_company_id=active_company_id)
+    resolved = await resolve_email_config_for_sync(
+        user_id,
+        active_role=active_role,
+        active_company_id=active_company_id,
+        account_id=account_id,
+    )
+    if mailbox and resolved and (resolved.get("email_address") or "").lower() != mailbox.strip().lower():
+        from services.user_email_config_service import list_company_email_configs
+        docs = await list_company_email_configs(user_id, active_company_id or "default")
+        match = next(
+            (d for d in docs if (d.get("email_address") or "").lower() == mailbox.strip().lower()),
+            None,
+        )
+        if match:
+            resolved = await resolve_email_config_for_sync(
+                user_id,
+                active_role=active_role,
+                active_company_id=active_company_id,
+                account_id=match.get("id"),
+            )
     
     if not resolved:
         return {

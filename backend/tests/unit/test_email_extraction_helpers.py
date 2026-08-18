@@ -164,3 +164,37 @@ def test_webmail_attachment_router_is_thin_stub():
     assert len(text.splitlines()) < 80
     paths = [getattr(r, "path", "") for r in router.routes]
     assert any("attachments" in p for p in paths)
+
+
+def test_process_participant_email_helpers_include_cc():
+    from services.email_process_crud import (
+        normalize_participant_email,
+        collect_emails_from_process_doc,
+        collect_emails_from_client_doc,
+        build_participant_address_match,
+        build_process_emails_base_conditions,
+    )
+
+    assert normalize_participant_email("Ana Silva <ana@cliente.pt>") == "ana@cliente.pt"
+    assert normalize_participant_email({"email": "B@X.PT"}) == "b@x.pt"
+
+    process_doc = {
+        "client_email": "ana@cliente.pt",
+        "monitored_emails": ["extra@cliente.pt"],
+        "titular2_data": {"email": "joao@cliente.pt"},
+    }
+    emails = collect_emails_from_process_doc(process_doc)
+    assert emails == {"ana@cliente.pt", "extra@cliente.pt", "joao@cliente.pt"}
+
+    client_doc = {"contacto": {"email": "ana@cliente.pt"}, "titular2_data": {"email": "t2@x.pt"}}
+    assert "t2@x.pt" in collect_emails_from_client_doc(client_doc)
+
+    match = build_participant_address_match({"ana@cliente.pt"})
+    blob = str(match)
+    assert "cc_emails" in blob
+    assert "to_emails" in blob
+    assert "from_email" in blob
+
+    conditions = build_process_emails_base_conditions("proc-1", {"ana@cliente.pt"})
+    assert {"process_id": "proc-1"} in conditions
+    assert any("cc_emails" in str(c) for c in conditions)

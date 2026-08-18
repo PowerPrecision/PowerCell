@@ -249,7 +249,9 @@ async def scheduler_loop():
                                 # Resolver a config canónica para este par user+empresa
                                 # (passa a saber exatamente que credenciais usar)
                                 resolved = await resolve_email_config_for_sync(
-                                    user_id, active_company_id=company_id
+                                    user_id,
+                                    active_company_id=company_id,
+                                    account_id=cfg.get("id"),
                                 )
                                 if not resolved:
                                     logger.debug(

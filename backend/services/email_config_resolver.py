@@ -81,7 +81,8 @@ def _extract_role_email_config(
 
 async def resolve_email_config(
     user_id: str, active_role: Optional[str] = None,
-    active_company_id: Optional[str] = None
+    active_company_id: Optional[str] = None,
+    account_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Resolve a configuração de email de um utilizador seguindo a herança.
@@ -147,16 +148,29 @@ async def resolve_email_config(
     if active_company_id:
         # CAMINHO 0a: Coleção user_email_configs (fonte canónica)
         try:
-            collection_config = await db.user_email_configs.find_one(
-                {"user_id": user_id, "company_id": active_company_id},
-                {"_id": 0}
-            )
+            collection_query = {"user_id": user_id, "company_id": active_company_id}
+            if account_id:
+                collection_query["id"] = account_id
+                collection_config = await db.user_email_configs.find_one(
+                    collection_query, {"_id": 0}
+                )
+            else:
+                collection_config = await db.user_email_configs.find_one(
+                    {**collection_query, "is_primary": True, "is_configured": True},
+                    {"_id": 0},
+                )
+                if not collection_config:
+                    collection_config = await db.user_email_configs.find_one(
+                        {**collection_query, "is_configured": True},
+                        {"_id": 0},
+                    )
             if collection_config and collection_config.get("is_configured"):
                 user_email_config = collection_config
                 resolved_from_collection = True
                 logger.debug(
                     f"[EmailConfigResolver] Config resolvida da coleção "
                     f"user_email_configs para user={user_id} company={active_company_id}"
+                    f" account={account_id or collection_config.get('id')}"
                 )
         except Exception as e:
             logger.warning(
@@ -290,7 +304,8 @@ async def resolve_email_config(
 
 async def resolve_email_config_for_sync(
     user_id: str, active_role: Optional[str] = None,
-    active_company_id: Optional[str] = None
+    active_company_id: Optional[str] = None,
+    account_id: Optional[str] = None,
 ) -> Optional[Dict[str, Any]]:
     """
     Resolve config completa para sincronização/envio (inclui credenciais).
@@ -304,7 +319,8 @@ async def resolve_email_config_for_sync(
     """
     resolved = await resolve_email_config(
         user_id, active_role=active_role,
-        active_company_id=active_company_id
+        active_company_id=active_company_id,
+        account_id=account_id,
     )
     source = resolved.get("config_source", "none")
 

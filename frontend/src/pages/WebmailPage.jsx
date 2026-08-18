@@ -177,6 +177,8 @@ const WebmailPage = () => {
   const [detailLoading, setDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
   const [account, setAccount] = useState(defaultAccount);
+  const [personalAccounts, setPersonalAccounts] = useState([]);
+  const [selectedMailbox, setSelectedMailbox] = useState("");
 
   // Tab-based mailbox state
   const [activeBox, setActiveBox] = useState("personal"); // "personal", "general", or "shared_indexacao"
@@ -356,6 +358,38 @@ const WebmailPage = () => {
     fetchCustomFolders();
   }, [fetchCustomFolders]);
 
+  useEffect(() => {
+    if (!token || !companyId) {
+      setPersonalAccounts([]);
+      return;
+    }
+    let cancelled = false;
+    const loadAccounts = async () => {
+      try {
+        const res = await fetch(
+          `${API_URL}/api/users/me/email-accounts?company_id=${encodeURIComponent(companyId)}`,
+          { headers: webmailHeaders() },
+        );
+        if (!res.ok) return;
+        const data = await res.json();
+        const list = data.accounts || [];
+        if (cancelled) return;
+        setPersonalAccounts(list);
+        const primary = list.find((item) => item.is_primary) || list[0];
+        setSelectedMailbox((current) => {
+          if (current && list.some((item) => item.email_address === current)) {
+            return current;
+          }
+          return primary?.email_address || "";
+        });
+      } catch {
+        if (!cancelled) setPersonalAccounts([]);
+      }
+    };
+    loadAccounts();
+    return () => { cancelled = true; };
+  }, [token, companyId, webmailHeaders]);
+
   // ============================================================
   // FETCH UNREAD COUNTS (for tab badges)
   // ============================================================
@@ -467,6 +501,9 @@ const WebmailPage = () => {
       if (companyId) {
         params.append("company_id", companyId);
       }
+      if (selectedMailbox) {
+        params.append("mailbox", selectedMailbox);
+      }
 
       const response = await fetch(
         `${API_URL}/api/emails/webmail?${params.toString()}`,
@@ -496,7 +533,7 @@ const WebmailPage = () => {
     } finally {
       setLoading(false);
     }
-  }, [token, activeFolder, account, activeBox, effectiveRole, companyId, webmailHeaders]);
+  }, [token, activeFolder, account, activeBox, effectiveRole, companyId, webmailHeaders, selectedMailbox]);
 
   // Auto-sync emails on page mount (on-demand model — no background polling in dev)
   // Only triggers once when the user navigates to the Webmail page
@@ -637,6 +674,9 @@ const WebmailPage = () => {
       if (account && !isGeneralSync) {
         params.append("account", account);
       }
+      if (selectedMailbox && isPersonalSync) {
+        params.append("mailbox", selectedMailbox);
+      }
       // ── Multi-Tenant: incluir company_id nos params ────────────
       if (companyId) {
         params.append("company_id", companyId);
@@ -705,7 +745,7 @@ const WebmailPage = () => {
       toast.error("Erro de ligação ao servidor");
       setSyncing(false);
     }
-  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus, companyId, webmailHeaders]);
+  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus, companyId, webmailHeaders, selectedMailbox]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -1407,6 +1447,23 @@ const WebmailPage = () => {
               className="pl-9 h-8"
             />
           </div>
+
+          {personalAccounts.length > 0 && activeBox === "personal" && effectiveRole !== "indexacao" && (
+          <Select value={selectedMailbox || personalAccounts[0]?.email_address || ""} onValueChange={setSelectedMailbox}>
+            <SelectTrigger className="w-[220px] h-8 text-xs">
+              <SelectValue placeholder="Conta de email" />
+            </SelectTrigger>
+            <SelectContent>
+              {personalAccounts.map((item) => (
+                <SelectItem key={item.id} value={item.email_address}>
+                  {item.label && item.label !== item.email_address
+                    ? `${item.label} (${item.email_address})`
+                    : item.email_address}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          )}
 
           {/* Account selector */}
           {showAccountSelector && (

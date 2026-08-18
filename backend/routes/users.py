@@ -19,6 +19,11 @@ from services.users_api_email_config import (
     run_get_my_email_config,
     run_save_my_email_config,
     run_test_my_email_config,
+    run_list_my_email_accounts,
+    run_add_my_email_account,
+    run_update_my_email_account,
+    run_delete_my_email_account,
+    run_set_primary_email_account,
 )
 
 router = APIRouter(prefix="/users", tags=["Users"])
@@ -67,6 +72,60 @@ async def test_my_email_config(
 ):
     """Testar ligação de email do utilizador."""
     return await run_test_my_email_config(request, company_id, current_user)
+
+
+@router.get("/me/email-accounts")
+async def list_my_email_accounts(
+    request: Request,
+    company_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Listar contas de email do perfil activo (Pacote DN.4)."""
+    return await run_list_my_email_accounts(request, company_id, current_user)
+
+
+@router.post("/me/email-accounts")
+async def add_my_email_account(
+    request: Request,
+    config: EmailConfigCreate,
+    company_id: Optional[str] = Query(None),
+    current_user: dict = Depends(get_current_user),
+):
+    """Adicionar uma conta IMAP/SMTP extra ao perfil activo."""
+    return await run_add_my_email_account(
+        request, config, current_user, query_company_id=company_id,
+    )
+
+
+@router.put("/me/email-accounts/{account_id}")
+async def update_my_email_account(
+    request: Request,
+    account_id: str,
+    config: EmailConfigCreate,
+    current_user: dict = Depends(get_current_user),
+):
+    """Actualizar uma conta de email do perfil."""
+    return await run_update_my_email_account(request, account_id, config, current_user)
+
+
+@router.delete("/me/email-accounts/{account_id}")
+async def delete_my_email_account(
+    request: Request,
+    account_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Remover uma conta de email do perfil."""
+    return await run_delete_my_email_account(request, account_id, current_user)
+
+
+@router.post("/me/email-accounts/{account_id}/set-primary")
+async def set_primary_email_account(
+    request: Request,
+    account_id: str,
+    current_user: dict = Depends(get_current_user),
+):
+    """Definir a conta por omissão do perfil activo."""
+    return await run_set_primary_email_account(request, account_id, current_user)
 
 
 @router.get("/{user_id}", response_model=UserResponse)

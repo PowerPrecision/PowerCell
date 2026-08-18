@@ -592,6 +592,24 @@ export const getUserEmailConfig = (userId) => api.get(`/admin/users/${userId}/em
 export const setUserEmailConfig = (userId, data) => api.post(`/admin/users/${userId}/email-config`, data);
 export const testUserEmailConfig = (userId) => api.post(`/admin/users/${userId}/email-config/test`);
 
+// Contas de email do próprio utilizador (Pacote DN.4)
+export const listMyEmailAccounts = (companyId) =>
+  api.get("/users/me/email-accounts", {
+    params: companyId ? { company_id: companyId } : {},
+    headers: companyId && companyId !== "default" ? { "X-Company-Id": companyId } : {},
+  });
+export const addMyEmailAccount = (data, companyId) =>
+  api.post("/users/me/email-accounts", data, {
+    params: companyId ? { company_id: companyId } : {},
+    headers: companyId && companyId !== "default" ? { "X-Company-Id": companyId } : {},
+  });
+export const updateMyEmailAccount = (accountId, data) =>
+  api.put(`/users/me/email-accounts/${accountId}`, data);
+export const deleteMyEmailAccount = (accountId) =>
+  api.delete(`/users/me/email-accounts/${accountId}`);
+export const setPrimaryEmailAccount = (accountId) =>
+  api.post(`/users/me/email-accounts/${accountId}/set-primary`);
+
 // Stats
 export const getStats = () => api.get("/stats");
 export const getCommunicationsFeed = () => api.get("/stats/communications");

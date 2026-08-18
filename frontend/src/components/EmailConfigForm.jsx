@@ -50,7 +50,16 @@ const roleLabels = {
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
-const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onCancel, companyId = "default" }) => {
+const EmailConfigForm = ({
+  mode = "self",
+  userId,
+  targetUserName,
+  onSuccess,
+  onCancel,
+  companyId = "default",
+  createAdditional = false,
+  accountId = null,
+}) => {
   const isSelf = mode === "self";
   const { user, effectiveRole, effectiveCompanyId } = useAuth();
 
@@ -79,6 +88,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   };
 
   const saveConfigUrl = () => {
+    if (isSelf && createAdditional) return "/users/me/email-accounts";
+    if (isSelf && accountId) return `/users/me/email-accounts/${accountId}`;
     if (isSelf) return "/users/me/email-config";
     return `/admin/users/${userId}/email-config`;
   };
@@ -139,7 +150,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     setEmailConfig(prev => ({ ...prev, password: "" }));
 
     loadConfig();
-  }, [companyId, effectiveCompanyId, effectiveRole]); // ← effectiveRole adicionado: troca de perfil recarrega config
+  }, [companyId, effectiveCompanyId, effectiveRole, accountId, createAdditional]);
 
   // Listen for Google OAuth popup messages (two-step flow)
   useEffect(() => {
@@ -180,7 +191,36 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     try {
       const response = await api.get(getConfigUrl(), companyRequestConfig());
       const config = response.data;
-      if (config && (config.is_configured || config.imap_server)) {
+      if (createAdditional) {
+        setConfigSource(config?.config_source || "none");
+        setEmailConfig({
+          email_address: "",
+          imap_server: config?.imap_server || "",
+          imap_port: config?.imap_port || 993,
+          smtp_server: config?.smtp_server || "",
+          smtp_port: config?.smtp_port || 465,
+          password: "",
+        });
+        setHasPassword(false);
+        setWebmailConfigured(false);
+        setIsEditing(true);
+      } else if (accountId && Array.isArray(config?.accounts)) {
+        const acc = config.accounts.find((item) => item.id === accountId) || config;
+        setConfigSource(config.config_source || "user");
+        setEmailConfig({
+          email_address: acc.email_address || "",
+          imap_server: acc.imap_server || config.imap_server || "",
+          imap_port: acc.imap_port || config.imap_port || 993,
+          smtp_server: acc.smtp_server || config.smtp_server || "",
+          smtp_port: acc.smtp_port || config.smtp_port || 465,
+          password: "",
+        });
+        setHasPassword(acc.has_password || false);
+        setWebmailConfigured(Boolean(acc.is_configured || acc.email_address));
+        if (acc.auth_method?.includes("google_oauth") || acc.has_google_oauth) {
+          setGoogleOAuthConnected(true);
+        }
+      } else if (config && (config.is_configured || config.imap_server)) {
         setConfigSource(config.config_source || "user");
         setEmailConfig({
           email_address: config.email_address || "",
@@ -321,15 +361,21 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     setTestResult(null);
     try {
       // Always save form values before testing
-      await api.post(saveConfigUrl(), {
+      const payload = {
         email_address: emailConfig.email_address,
-        password: emailConfig.password || undefined,  // omit if empty → backend preserves existing
+        password: emailConfig.password || undefined,
         imap_server: emailConfig.imap_server,
         imap_port: emailConfig.imap_port,
         smtp_server: emailConfig.smtp_server,
         smtp_port: emailConfig.smtp_port,
-        company_id: resolvedCompanyId,  // PACOTE DM: UCR da tab, não a empresa activa global
-      }, companyRequestConfig());
+        company_id: resolvedCompanyId,
+        account_id: accountId || undefined,
+      };
+      if (accountId && isSelf && !createAdditional) {
+        await api.put(saveConfigUrl(), payload, companyRequestConfig());
+      } else {
+        await api.post(saveConfigUrl(), payload, companyRequestConfig());
+      }
 
       // Now test with the just-saved stored credentials
       const response = await api.post(testConfigUrl(), null, companyRequestConfig());
@@ -358,22 +404,30 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
       return;
     }
 
-    if (!webmailConfigured && !emailConfig.password) {
+    if (!webmailConfigured && !emailConfig.password && !googleOAuthConnected) {
       toast.error("Preencha a password do email para a configuração inicial");
       return;
     }
 
     setSaving(true);
     try {
-      await api.post(saveConfigUrl(), {
+      const payload = {
         email_address: emailConfig.email_address,
         password: emailConfig.password || undefined,
         imap_server: emailConfig.imap_server,
         imap_port: emailConfig.imap_port,
         smtp_server: emailConfig.smtp_server,
         smtp_port: emailConfig.smtp_port,
-        company_id: resolvedCompanyId,  // PACOTE DM: UCR da tab, não a empresa activa global
-      }, companyRequestConfig());
+        company_id: resolvedCompanyId,
+        account_id: accountId || undefined,
+      };
+      if (createAdditional) {
+        await api.post(saveConfigUrl(), payload, companyRequestConfig());
+      } else if (accountId && isSelf) {
+        await api.put(saveConfigUrl(), payload, companyRequestConfig());
+      } else {
+        await api.post(saveConfigUrl(), payload, companyRequestConfig());
+      }
       toast.success("Configuração de webmail guardada com sucesso");
       setEmailConfig((prev) => ({ ...prev, password: "" }));
       setTestResult(null);

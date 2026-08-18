@@ -36,6 +36,15 @@ def test_build_ucr_mailbox_filter_does_not_include_empty_company():
     assert "None" not in blob
 
 
+def test_mailbox_only_filter_excludes_company_or():
+    """Pacote DN.4: conta seleccionada filtra só por address, não OR company_id."""
+    from services.email_webmail import resolve_ucr_mailbox_filter
+    import inspect
+    src = inspect.getsource(resolve_ucr_mailbox_filter)
+    assert "selected_mailbox" in src
+    assert "build_ucr_mailbox_filter(None, selected_mailbox)" in src
+
+
 def test_and_query_wraps_existing_or():
     base = {"$or": [{"created_by": "u1"}]}
     extra = {"company_id": "co-1"}

@@ -40,7 +40,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { htmlToText } from "../utils/sanitize";
 // PACOTE DF — role helpers centralizados (substituem getRoleLabel local)
 import { ROLE_LABELS, ROLE_COLORS } from "../utils/roleUtils";
-import EmailConfigForm from "./EmailConfigForm";
+import EmailAccountsCard from "./EmailAccountsCard";
 import RichTextEditor, { RichTextViewer } from "./ui/RichTextEditor";
 import {
   Building2,
@@ -419,7 +419,7 @@ const ProfileRoleTab = ({ companyId, role, companyName, user, onUpdate }) => {
           </CardContent>
         </Card>
       ) : (
-        // PACOTE DF — Webmail normal: EmailConfigForm scoped ao companyId da tab
+        // PACOTE DF / DN.4 — Webmail: lista de contas + adicionar
         <Card>
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
@@ -427,7 +427,7 @@ const ProfileRoleTab = ({ companyId, role, companyName, user, onUpdate }) => {
               Configuração de Webmail
             </CardTitle>
             <CardDescription>
-              Configure o seu email para integração IMAP/SMTP
+              Contas IMAP/SMTP ou OAuth deste perfil. Pode adicionar várias e escolhê-las no Webmail.
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -468,11 +468,7 @@ const ProfileRoleTab = ({ companyId, role, companyName, user, onUpdate }) => {
                 </span>
               </div>
             )}
-            <EmailConfigForm
-              mode="self"
-              onSuccess={onUpdate}
-              companyId={companyId}
-            />
+            <EmailAccountsCard companyId={companyId} onUpdate={onUpdate} />
           </CardContent>
         </Card>
       )}

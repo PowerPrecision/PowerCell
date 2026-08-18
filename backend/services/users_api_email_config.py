@@ -44,7 +44,12 @@ async def run_get_my_email_config(
     """Obter configuração de email do utilizador logado (sem secrets)."""
     from services.email_config_resolver import resolve_email_config
     from services.auth import get_active_company_id_async, get_effective_role
-    from services.user_email_config_service import get_user_companies_with_config
+    from services.user_email_config_service import (
+        get_user_companies_with_config,
+        get_user_email_config,
+        list_company_email_configs,
+        publicize_email_account,
+    )
 
     user_id = current_user["id"]
     user_role = current_user.get("role", "")
@@ -110,11 +115,19 @@ async def run_get_my_email_config(
         resolved.get("resolved_company_id", active_company_id) or "default"
     )
 
+    account_docs = await list_company_email_configs(user_id, resolved_company_id)
+    accounts = [publicize_email_account(doc) for doc in account_docs]
+    primary_doc = await get_user_email_config(user_id, resolved_company_id)
+
     return {
         "config_source": source,
         "is_configured": (
             resolved.get("has_password") or resolved.get("has_google_oauth")
         ),
+        "id": (primary_doc or {}).get("id"),
+        "is_primary": bool((primary_doc or {}).get("is_primary", True)),
+        "label": (primary_doc or {}).get("label"),
+        "accounts": accounts,
         "email_address": resolved.get("email_address"),
         "imap_server": resolved.get("imap_server"),
         "imap_port": resolved.get("imap_port", 993),
@@ -232,6 +245,8 @@ async def run_save_my_email_config(
             auth_method=existing_role_config.get("auth_method", "none"),
             oauth_connected_at=existing_role_config.get("oauth_connected_at"),
             is_configured=True,
+            config_id=getattr(config, "account_id", None),
+            label=getattr(config, "label", None),
         )
 
         new_role_config = {
@@ -347,3 +362,204 @@ async def run_test_my_email_config(
         "google_refresh_token": resolved.get("google_refresh_token"),
     }
     return await test_connection_smart(test_config, user_id)
+
+
+def _assert_not_forced_shared(effective_role: str):
+    if effective_role in FORCED_SHARED_ROLES:
+        raise HTTPException(
+            status_code=403,
+            detail=(
+                "O seu acesso ao email é gerido centralmente pelo departamento. "
+                "Contacte o Administrador para alterações na configuração de email."
+            ),
+        )
+
+
+async def run_list_my_email_accounts(
+    request: Request,
+    company_id: Optional[str],
+    current_user: dict,
+):
+    """Listar contas de email do perfil activo (Pacote DN.4)."""
+    from services.auth import get_active_company_id_async, get_effective_role
+    from services.user_email_config_service import (
+        list_company_email_configs,
+        publicize_email_account,
+    )
+
+    effective_role = get_effective_role(request, current_user)
+    if effective_role in FORCED_SHARED_ROLES:
+        return {"accounts": [], "managed_centralized": True}
+
+    header_company = await get_active_company_id_async(request, current_user)
+    active_company_id = _non_default_company_id(company_id, header_company) or "default"
+    docs = await list_company_email_configs(current_user["id"], active_company_id)
+    return {
+        "company_id": active_company_id,
+        "accounts": [publicize_email_account(doc) for doc in docs],
+    }
+
+
+async def run_add_my_email_account(
+    request: Request,
+    config: EmailConfigCreate,
+    current_user: dict,
+    query_company_id: Optional[str] = None,
+):
+    """Adicionar uma conta extra (IMAP/SMTP) ao perfil activo."""
+    from services.encryption import encryption_service
+    from services.user_email_config_service import (
+        upsert_user_email_config,
+        publicize_email_account,
+    )
+    from services.auth import get_active_company_id_async, get_effective_role
+
+    effective_role = get_effective_role(request, current_user)
+    _assert_not_forced_shared(effective_role)
+
+    header_company = None
+    try:
+        header_company = await get_active_company_id_async(request, current_user)
+    except Exception:
+        header_company = None
+
+    company_id = _non_default_company_id(
+        getattr(config, "company_id", None),
+        query_company_id,
+        header_company,
+    ) or "default"
+
+    encrypted_password = ""
+    if config.password:
+        encrypted_password = encryption_service.encrypt(config.password)
+
+    doc = await upsert_user_email_config(
+        user_id=current_user["id"],
+        company_id=company_id,
+        email_address=config.email_address.strip().lower(),
+        imap_server=config.imap_server.strip(),
+        imap_port=config.imap_port,
+        smtp_server=config.smtp_server.strip(),
+        smtp_port=config.smtp_port,
+        encrypted_password=encrypted_password,
+        is_configured=True,
+        create_new=True,
+        label=getattr(config, "label", None),
+        is_primary=False,
+    )
+    return {
+        "success": True,
+        "message": "Conta de email adicionada",
+        "account": publicize_email_account(doc),
+        "company_id": company_id,
+    }
+
+
+async def run_update_my_email_account(
+    request: Request,
+    account_id: str,
+    config: EmailConfigCreate,
+    current_user: dict,
+):
+    """Actualizar uma conta existente do perfil."""
+    from services.encryption import encryption_service
+    from services.user_email_config_service import (
+        get_user_email_config,
+        upsert_user_email_config,
+        publicize_email_account,
+    )
+    from services.auth import get_effective_role
+
+    effective_role = get_effective_role(request, current_user)
+    _assert_not_forced_shared(effective_role)
+
+    existing = await get_user_email_config(
+        current_user["id"], config.company_id or "default", account_id=account_id,
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Conta de email não encontrada")
+
+    encrypted_password = existing.get("encrypted_password") or ""
+    if config.password:
+        encrypted_password = encryption_service.encrypt(config.password)
+
+    doc = await upsert_user_email_config(
+        user_id=current_user["id"],
+        company_id=existing.get("company_id") or config.company_id or "default",
+        email_address=config.email_address.strip().lower(),
+        imap_server=config.imap_server.strip(),
+        imap_port=config.imap_port,
+        smtp_server=config.smtp_server.strip(),
+        smtp_port=config.smtp_port,
+        encrypted_password=encrypted_password,
+        google_refresh_token=existing.get("google_refresh_token"),
+        google_access_token=existing.get("google_access_token"),
+        google_email=existing.get("google_email"),
+        auth_method=existing.get("auth_method", "none"),
+        oauth_connected_at=existing.get("oauth_connected_at"),
+        is_configured=True,
+        config_id=account_id,
+        label=getattr(config, "label", None) or existing.get("label"),
+    )
+    return {"success": True, "account": publicize_email_account(doc)}
+
+
+async def run_delete_my_email_account(
+    request: Request,
+    account_id: str,
+    current_user: dict,
+):
+    """Remover uma conta de email do perfil."""
+    from services.user_email_config_service import (
+        get_user_email_config,
+        delete_user_email_config,
+    )
+    from services.auth import get_effective_role
+
+    effective_role = get_effective_role(request, current_user)
+    _assert_not_forced_shared(effective_role)
+
+    existing = await get_user_email_config(
+        current_user["id"], "default", account_id=account_id,
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Conta de email não encontrada")
+
+    ok = await delete_user_email_config(
+        current_user["id"],
+        existing.get("company_id") or "default",
+        account_id=account_id,
+    )
+    if not ok:
+        raise HTTPException(status_code=404, detail="Conta de email não encontrada")
+    return {"success": True, "message": "Conta de email removida"}
+
+
+async def run_set_primary_email_account(
+    request: Request,
+    account_id: str,
+    current_user: dict,
+):
+    """Definir a conta por omissão do perfil activo."""
+    from services.user_email_config_service import (
+        get_user_email_config,
+        set_primary_email_config,
+        publicize_email_account,
+    )
+    from services.auth import get_effective_role
+
+    effective_role = get_effective_role(request, current_user)
+    _assert_not_forced_shared(effective_role)
+
+    existing = await get_user_email_config(
+        current_user["id"], "default", account_id=account_id,
+    )
+    if not existing:
+        raise HTTPException(status_code=404, detail="Conta de email não encontrada")
+
+    updated = await set_primary_email_config(
+        current_user["id"],
+        existing.get("company_id") or "default",
+        account_id,
+    )
+    return {"success": True, "account": publicize_email_account(updated)}
