@@ -33,7 +33,7 @@ import {
   DropdownMenuLabel,
 } from "../ui/dropdown-menu";
 import { ChevronDown, Shield, Building2 } from "lucide-react";
-import { ROLE_LABELS, ROLE_ICONS } from "../../utils/roleUtils";
+import { ROLE_LABELS, ROLE_ICONS, normalizeRole, isSelectableRole } from "../../utils/roleUtils";
 
 const ContextSwitcher = () => {
   const {
@@ -99,21 +99,36 @@ const ContextSwitcher = () => {
     }));
   }
 
-  // Filtrar entradas sem role válido (defensivo)
-  profileItems = profileItems.filter(p => p.role);
+  // Filtrar entradas sem role válido e roles removidos (ex: Mediador)
+  profileItems = profileItems
+    .filter((p) => isSelectableRole(p.role))
+    .map((p) => ({ ...p, role: normalizeRole(p.role) }));
+
+  // Dedup após normalizar (UCR legado 'mediador' + 'intermediario' na mesma empresa)
+  const seenProfiles = new Set();
+  profileItems = profileItems.filter((p) => {
+    const key = `${p.role}__${p.company_id || ""}`;
+    if (seenProfiles.has(key)) return false;
+    seenProfiles.add(key);
+    return true;
+  });
 
   // Visibilidade: mostrar selector de Role se tem múltiplos perfis
   const hasMultipleRoles = profileItems.length > 1;
   const hasMultipleCompanies = companies.length > 1;
+  // PACOTE DM: o contexto da empresa já vem do perfil no Header.
+  // A dropbox extra de empresa (típica no Diretor com vários UCRs) é redundante.
+  const showCompanySwitcher = hasMultipleCompanies && !hasMultipleRoles
+    && effectiveRole !== "diretor";
 
-  if (!hasMultipleRoles && !hasMultipleCompanies) return null;
+  if (!hasMultipleRoles && !showCompanySwitcher) return null;
 
   const currentLabel = ROLE_LABELS[effectiveRole] || effectiveRole;
 
   return (
     <div className="flex items-center gap-1.5">
       {/* ── Selector de Empresa ── */}
-      {hasMultipleCompanies && (
+      {showCompanySwitcher && (
         <DropdownMenu>
           <DropdownMenuTrigger asChild>
             <Button

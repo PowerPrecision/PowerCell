@@ -40,10 +40,11 @@ import { EmptyState } from "../components/ui/EmptyState";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamMural from "../components/TeamMural";
-import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystemChangelogs } from "../services/api";
+import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystemChangelogs, getAutoDrafts } from "../services/api";
 import { safeString } from "../utils/safeString";
 import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
+import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
 
 /** Macro-fases do funil (agrupam estados finos do workflow) */
 const FUNNEL_MACRO = [
@@ -80,7 +81,7 @@ const FUNNEL_MACRO = [
   },
 ];
 
-const DRAFT_STATUSES = new Set(["clientes_espera", "fase_documental"]);
+const DRAFT_STATUSES = PROCESS_DRAFT_STATUSES;
 
 function markdownToHtml(md) {
   if (!md || typeof md !== "string") return "";
@@ -113,6 +114,7 @@ const ConsultorDashboard = () => {
   const [exploreTab, setExploreTab] = useState("clients");
 
   const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
+  const [emailDrafts, setEmailDrafts] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [commsFeed, setCommsFeed] = useState({
     portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0,
@@ -160,6 +162,9 @@ const ConsultorDashboard = () => {
         portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0,
       }))
       .catch(() => {});
+    getAutoDrafts(5)
+      .then((res) => setEmailDrafts(res.data?.drafts || []))
+      .catch(() => {});
     getSystemChangelogs(1)
       .then((res) => {
         const data = res.data;
@@ -172,6 +177,22 @@ const ConsultorDashboard = () => {
     () => (processes || []).filter((p) => DRAFT_STATUSES.has(p.status)).slice(0, 5),
     [processes]
   );
+
+  const dashboardDrafts = useMemo(() => {
+    const emails = (emailDrafts || []).slice(0, 5).map((d) => ({
+      ...d,
+      kind: "email",
+      _label: d.subject || d.client_name || "Rascunho de email",
+      _sub: d.client_name || (Array.isArray(d.to_emails) ? d.to_emails[0] : "") || "Email",
+    }));
+    const procs = draftProcesses.map((p) => ({
+      ...p,
+      kind: p.status === "pre_registo" || p.is_lead ? "lead" : "process",
+      _label: p.client_name || "Processo em rascunho",
+      _sub: p.client_email || p.status || "",
+    }));
+    return [...emails, ...procs].slice(0, 8);
+  }, [emailDrafts, draftProcesses]);
 
   const upcomingDeadlines = useMemo(() => {
     return [...(deadlines || [])]
@@ -350,22 +371,25 @@ const ConsultorDashboard = () => {
                     <FileEdit className="h-4 w-4 text-muted-foreground" />
                     Em rascunho
                   </h3>
-                  <Badge variant="secondary" className="text-xs">{draftProcesses.length}</Badge>
+                  <Badge variant="secondary" className="text-xs">{dashboardDrafts.length}</Badge>
                 </div>
-                {draftProcesses.length === 0 ? (
+                {dashboardDrafts.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4">Nenhum processo em fase inicial</p>
                 ) : (
                   <ul className="space-y-2">
-                    {draftProcesses.map((p) => (
-                      <li key={p.id}>
+                    {dashboardDrafts.map((p) => (
+                      <li key={`${p.kind || "item"}-${p.id}`}>
                         <button
                           type="button"
                           className="w-full flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-left hover:bg-muted/50 transition-colors"
-                          onClick={() => navigate(`/process/${p.id}`)}
+                          onClick={() => {
+                            const { href } = getDraftNavigationTarget(p);
+                            navigate(href);
+                          }}
                         >
                           <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{safeString(p.client_name)}</p>
-                            <p className="text-xs text-muted-foreground truncate">{safeString(p.client_email)}</p>
+                            <p className="text-sm font-medium truncate">{safeString(p._label || p.client_name)}</p>
+                            <p className="text-xs text-muted-foreground truncate">{safeString(p._sub || p.client_email)}</p>
                           </div>
                           <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
                         </button>

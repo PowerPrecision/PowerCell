@@ -30,6 +30,9 @@ const DEFAULT_CONFIG = {
 };
 
 // Configuração para emails - mais permissiva para formatação
+// PACOTE DM: permitir data:image e cid: para imagens da assinatura
+const EMAIL_URI_REGEXP = /^(?:(?:(?:f|ht)tps?|mailto|tel|cid|data|blob):|[^a-z]|[a-z+.\-]+(?:[^a-z+.\-:]|$))/i;
+
 const EMAIL_CONFIG = {
   ...DEFAULT_CONFIG,
   ALLOWED_TAGS: [
@@ -41,6 +44,7 @@ const EMAIL_CONFIG = {
     'color', 'face', 'size', 'align', 'bgcolor', 'border',
     'cellpadding', 'cellspacing', 'valign'
   ],
+  ALLOWED_URI_REGEXP: EMAIL_URI_REGEXP,
 };
 
 /**
@@ -60,6 +64,30 @@ export function sanitizeHtml(html, options = {}) {
 }
 
 /**
+ * Se o HTML foi gravado com entidades (&lt;p&gt;), devolve o markup real.
+ * Evita mostrar tags como texto cru na Área Pessoal e no compositor.
+ */
+export function unescapeHtmlIfNeeded(html) {
+  if (!html || typeof html !== 'string') {
+    return '';
+  }
+
+  const trimmed = html.trim();
+  const looksEscaped = /^&lt;[a-z!/]/i.test(trimmed)
+    || (trimmed.includes('&lt;') && !trimmed.includes('<'));
+  if (!looksEscaped) {
+    return html;
+  }
+
+  return trimmed
+    .replace(/&lt;/g, '<')
+    .replace(/&gt;/g, '>')
+    .replace(/&quot;/g, '"')
+    .replace(/&#39;/g, "'")
+    .replace(/&amp;/g, '&');
+}
+
+/**
  * Sanitiza HTML de emails.
  * Mais permissivo para compatibilidade com emails formatados.
  * 
@@ -70,14 +98,16 @@ export function sanitizeEmailHtml(html) {
   if (!html || typeof html !== 'string') {
     return '';
   }
-  
+
+  const unescaped = unescapeHtmlIfNeeded(html);
+
   // Primeiro, remover scripts e handlers inline
-  let cleaned = html
+  let cleaned = unescaped
     .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
     .replace(/on\w+\s*=\s*["'][^"']*["']/gi, '')
     .replace(/javascript:/gi, '');
   
-  // Depois sanitizar com DOMPurify
+  // Depois sanitizar com DOMPurify (imagens data:/https/cid permitidas)
   return DOMPurify.sanitize(cleaned, EMAIL_CONFIG);
 }
 
@@ -140,5 +170,6 @@ export default {
   sanitizeHtml,
   sanitizeEmailHtml,
   sanitizeUrl,
-  htmlToText
+  htmlToText,
+  unescapeHtmlIfNeeded,
 };

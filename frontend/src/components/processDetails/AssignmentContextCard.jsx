@@ -143,7 +143,7 @@ export default function AssignmentContextCard({
           />
         </div>
         <TeamRow label="Consultor(es)" names={consultorNames} />
-        <TeamRow label="Mediador(es)" names={mediadorNames} />
+        <TeamRow label="Intermediário(s)" names={mediadorNames} />
         {indexacaoName && <TeamRow label="Indexação" names={[indexacaoName]} />}
         {parceiroName && <TeamRow label="Parceiro" names={[parceiroName]} />}
 

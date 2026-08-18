@@ -1,4 +1,42 @@
 ---
+Task ID: pacote-dm-area-pessoal-rascunhos-ux
+Agent: Cloud Agent (cursor/pacote-dm-area-pessoal-rascunhos-ux-08c2)
+Task: Pacote DM — Área Pessoal, Rascunhos e UX Base
+
+Date: 2026-08-18
+
+Work Log:
+- Email IMAP/SMTP: interceptor `api.js` deixa de sobrescrever `X-Company-Id`/`X-Active-Role`; `EmailConfigForm` grava com body+query+header do UCR da tab; backend `run_save_my_email_config` resolve company_id body → query → header, com try/except e logs
+- Assinatura: `sanitizeEmailHtml` permite data:/cid:/https nas imagens + unescape de HTML entity-encoded; pré-visualização `RichTextViewer` na Área Pessoal; compositor Webmail com classes de imagem
+- Perfil Mediador removido da UI (`normalizeRole` / `REMOVED_ROLES`); dropbox de empresa do Diretor oculta no `ContextSwitcher`
+- Impersonate: `applyUserContext` redefine role/empresa; sidebar esconde Administração se o impersonado não for admin/CEO
+- Dashboard rascunhos: `getDraftNavigationTarget` — email → webmail drafts+composer; pre_registo → registos-clientes; resto → `/processo/:id`
+- Docs: ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Multi-perfil consegue guardar config de email da tab certa
+- Assinatura HTML/imagens renderiza em vez de código cru
+- Sem perfil fantasma Mediador; menus admin não vazam no impersonate
+- Clique em rascunho no Dashboard abre o editor correcto
+
+Files:
+- frontend/src/services/api.js
+- frontend/src/components/EmailConfigForm.jsx
+- frontend/src/components/ProfileRoleTab.jsx
+- frontend/src/utils/sanitize.js
+- frontend/src/utils/roleUtils.js
+- frontend/src/utils/draftNavigation.js
+- frontend/src/components/layout/ContextSwitcher.jsx
+- frontend/src/contexts/AuthContext.js
+- frontend/src/layouts/DashboardLayout.js
+- frontend/src/pages/ConsultorDashboard.js
+- frontend/src/pages/WebmailPage.jsx
+- backend/services/users_api_email_config.py
+- backend/routes/users.py
+- backend/tests/unit/test_users_extraction_helpers.py
+- ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: processdetails-mutations-docs
 Agent: Cloud Agent (cursor/multi-profile-ai-visits-toasts-0b1c)
 Task: ProcessDetails TanStack mutations + portal fulfill + toasts sticky + titular IA + docs

@@ -5,6 +5,7 @@ Preserves multi-empresa resolution, dual-write, and FORCED_SHARED_ROLES blocks.
 """
 from __future__ import annotations
 
+import logging
 from datetime import datetime, timezone
 from typing import Optional
 
@@ -13,6 +14,19 @@ from fastapi import HTTPException, Request
 from database import db
 from models.email_config import EmailConfigCreate
 from services.users_api_helpers import FORCED_SHARED_ROLES
+
+logger = logging.getLogger(__name__)
+
+
+def _non_default_company_id(*candidates: Optional[str]) -> Optional[str]:
+    """Primeiro company_id útil (não vazio e diferente de 'default')."""
+    for value in candidates:
+        if not value:
+            continue
+        cleaned = str(value).strip()
+        if cleaned and cleaned != "default":
+            return cleaned
+    return None
 
 
 def _resolve_active_role(request: Request, user_role: str) -> Optional[str]:
@@ -121,8 +135,13 @@ async def run_save_my_email_config(
     request: Request,
     config: EmailConfigCreate,
     current_user: dict,
+    query_company_id: Optional[str] = None,
 ):
-    """Guardar configuração de email (dual-write + encryption)."""
+    """Guardar configuração de email (dual-write + encryption).
+
+    PACOTE DM: o company_id é resolvido por ordem isolada do UCR da tab:
+      1) body.company_id  2) query ?company_id=  3) header X-Company-Id
+    """
     from services.encryption import encryption_service
     from services.email_config_resolver import (
         _is_nested_email_config,
@@ -144,14 +163,20 @@ async def run_save_my_email_config(
             ),
         )
 
-    company_id = config.company_id or "default"
-    if company_id == "default":
-        try:
-            header_company = await get_active_company_id_async(request, current_user)
-            if header_company:
-                company_id = header_company
-        except Exception:
-            pass
+    header_company = None
+    try:
+        header_company = await get_active_company_id_async(request, current_user)
+    except Exception as exc:
+        logger.warning(
+            "[email-config] Falha a ler X-Company-Id para user=%s: %s",
+            user_id, exc,
+        )
+
+    company_id = _non_default_company_id(
+        getattr(config, "company_id", None),
+        query_company_id,
+        header_company,
+    ) or "default"
 
     active_role_header = request.headers.get("X-Active-Role", "")
     if active_role_header and active_role_header != user_role:
@@ -165,84 +190,100 @@ async def run_save_my_email_config(
     else:
         storage_key = storage_role
 
-    existing_user = await db.users.find_one(
-        {"id": user_id},
-        {"_id": 0, "email_config": 1},
-    )
-    raw_existing = (existing_user or {}).get("email_config", {})
+    try:
+        existing_user = await db.users.find_one(
+            {"id": user_id},
+            {"_id": 0, "email_config": 1},
+        )
+        raw_existing = (existing_user or {}).get("email_config", {})
 
-    if raw_existing and not _is_nested_email_config(raw_existing):
-        nested_existing = {"default": raw_existing}
-    elif raw_existing:
-        nested_existing = raw_existing
-    else:
-        nested_existing = {}
+        if raw_existing and not _is_nested_email_config(raw_existing):
+            nested_existing = {"default": raw_existing}
+        elif raw_existing:
+            nested_existing = raw_existing
+        else:
+            nested_existing = {}
 
-    existing_role_config = (
-        _extract_role_email_config(nested_existing, storage_key)
-        if storage_key != "default"
-        else nested_existing.get("default", {})
-    )
+        existing_role_config = (
+            _extract_role_email_config(nested_existing, storage_key)
+            if storage_key != "default"
+            else nested_existing.get("default", {})
+        )
 
-    if config.password:
-        encrypted_password = encryption_service.encrypt(config.password)
-    elif existing_role_config.get("encrypted_password"):
-        encrypted_password = existing_role_config["encrypted_password"]
-    else:
-        encrypted_password = ""
+        if config.password:
+            encrypted_password = encryption_service.encrypt(config.password)
+        elif existing_role_config.get("encrypted_password"):
+            encrypted_password = existing_role_config["encrypted_password"]
+        else:
+            encrypted_password = ""
 
-    await upsert_user_email_config(
-        user_id=user_id,
-        company_id=company_id,
-        email_address=config.email_address.strip().lower(),
-        imap_server=config.imap_server.strip(),
-        imap_port=config.imap_port,
-        smtp_server=config.smtp_server.strip(),
-        smtp_port=config.smtp_port,
-        encrypted_password=encrypted_password,
-        google_refresh_token=existing_role_config.get("google_refresh_token"),
-        google_access_token=existing_role_config.get("google_access_token"),
-        google_email=existing_role_config.get("google_email"),
-        auth_method=existing_role_config.get("auth_method", "none"),
-        oauth_connected_at=existing_role_config.get("oauth_connected_at"),
-        is_configured=True,
-    )
+        await upsert_user_email_config(
+            user_id=user_id,
+            company_id=company_id,
+            email_address=config.email_address.strip().lower(),
+            imap_server=config.imap_server.strip(),
+            imap_port=config.imap_port,
+            smtp_server=config.smtp_server.strip(),
+            smtp_port=config.smtp_port,
+            encrypted_password=encrypted_password,
+            google_refresh_token=existing_role_config.get("google_refresh_token"),
+            google_access_token=existing_role_config.get("google_access_token"),
+            google_email=existing_role_config.get("google_email"),
+            auth_method=existing_role_config.get("auth_method", "none"),
+            oauth_connected_at=existing_role_config.get("oauth_connected_at"),
+            is_configured=True,
+        )
 
-    new_role_config = {
-        "email_address": config.email_address.strip().lower(),
-        "imap_server": config.imap_server.strip(),
-        "imap_port": config.imap_port,
-        "smtp_server": config.smtp_server.strip(),
-        "smtp_port": config.smtp_port,
-        "encrypted_password": encrypted_password,
-        "company_id": company_id,
-        "is_configured": True,
-        "updated_at": datetime.now(timezone.utc).isoformat(),
-    }
+        new_role_config = {
+            "email_address": config.email_address.strip().lower(),
+            "imap_server": config.imap_server.strip(),
+            "imap_port": config.imap_port,
+            "smtp_server": config.smtp_server.strip(),
+            "smtp_port": config.smtp_port,
+            "encrypted_password": encrypted_password,
+            "company_id": company_id,
+            "is_configured": True,
+            "updated_at": datetime.now(timezone.utc).isoformat(),
+        }
 
-    for oauth_key in (
-        "google_refresh_token",
-        "google_access_token",
-        "google_email",
-        "auth_method",
-        "oauth_connected_at",
-    ):
-        if existing_role_config.get(oauth_key):
-            new_role_config[oauth_key] = existing_role_config[oauth_key]
+        for oauth_key in (
+            "google_refresh_token",
+            "google_access_token",
+            "google_email",
+            "auth_method",
+            "oauth_connected_at",
+        ):
+            if existing_role_config.get(oauth_key):
+                new_role_config[oauth_key] = existing_role_config[oauth_key]
 
-    nested_existing[storage_key] = new_role_config
+        nested_existing[storage_key] = new_role_config
 
-    await db.users.update_one(
-        {"id": user_id},
-        {"$set": {"email_config": nested_existing}},
-    )
+        await db.users.update_one(
+            {"id": user_id},
+            {"$set": {"email_config": nested_existing}},
+        )
 
-    return {
-        "success": True,
-        "message": "Configuração guardada com sucesso",
-        "is_configured": True,
-        "company_id": company_id,
-    }
+        logger.info(
+            "[email-config] Guardado para user=%s company_id=%s storage_key=%s",
+            user_id, company_id, storage_key,
+        )
+        return {
+            "success": True,
+            "message": "Configuração guardada com sucesso",
+            "is_configured": True,
+            "company_id": company_id,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception(
+            "[email-config] Erro a guardar config de email user=%s company_id=%s: %s",
+            user_id, company_id, exc,
+        )
+        raise HTTPException(
+            status_code=500,
+            detail="Não foi possível guardar a configuração de email. Tente novamente.",
+        )
 
 
 async def run_test_my_email_config(

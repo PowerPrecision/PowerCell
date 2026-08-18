@@ -57,7 +57,6 @@ const ACTION_LABELS = {
 const TASK_ROLES = [
   { value: "consultor", label: "Consultor" },
   { value: "intermediario", label: "Intermediário" },
-  { value: "mediador", label: "Mediador" },
   { value: "indexacao", label: "Indexação" },
 ];
 
