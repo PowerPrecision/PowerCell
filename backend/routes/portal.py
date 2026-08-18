@@ -10,7 +10,7 @@ SEGURANÇA:
 import logging
 from typing import Optional
 
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Query
 from fastapi.responses import JSONResponse
 
 from services.portal_security import get_current_client
@@ -222,7 +222,10 @@ async def get_portal_visits(client_data: dict = Depends(get_current_client)):
 
 
 @router.get("/events")
-async def get_portal_events(client_data: dict = Depends(get_current_client)):
+async def get_portal_events(
+    include_past: bool = Query(False, description="PACOTE DO.2 — incluir datas anteriores no calendário"),
+    client_data: dict = Depends(get_current_client),
+):
     """PACOTE DH — Eventos/prazos visíveis ao cliente no Portal."""
     from services.portal_events import run_get_portal_events
-    return await run_get_portal_events(client_data)
+    return await run_get_portal_events(client_data, include_past=include_past)

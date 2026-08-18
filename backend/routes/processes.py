@@ -62,6 +62,7 @@ from services.process_detail import (
     run_get_process_detail,
     run_get_process_alerts,
 )
+from services.process_timeline import run_get_process_timeline
 from services.process_clients_nm import (
     run_add_client_to_process,
     run_remove_client_from_process,
@@ -426,6 +427,21 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
         user,
         can_view_fn=can_view_process,
         get_alerts_fn=get_process_alerts,
+    )
+
+
+@router.get("/{process_id}/timeline")
+async def get_process_timeline(
+    process_id: str,
+    limit: int = Query(40, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+):
+    """PACOTE DO.1 — Timeline compacta (criação + mudanças de fase + eventos)."""
+    return await run_get_process_timeline(
+        process_id,
+        user,
+        can_view_fn=can_view_process,
+        limit=limit,
     )
 
 

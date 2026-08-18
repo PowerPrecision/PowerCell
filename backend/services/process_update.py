@@ -435,7 +435,7 @@ def sanitize_party_dict_names(d: dict) -> None:
 
 def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
     """
-    Aplica co_buyers / vendedor / mediador / notes / prioridade / labels.
+    Aplica co_buyers / vendedor / mediador / notes / observations / prioridade / labels.
 
     Raises:
         HTTPException(400): prioridade inválida.
@@ -456,6 +456,15 @@ def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
         update_data["monitored_emails"] = data.monitored_emails
     if data.notes is not None:
         update_data["notes"] = data.notes
+    # PACOTE DO.1 — observations no Resumo; sincroniza com notes quando só um é enviado
+    # (notes já alimenta Kanban / "Notas do Consultor").
+    observations = getattr(data, "observations", None)
+    if observations is not None:
+        update_data["observations"] = observations
+        if data.notes is None:
+            update_data["notes"] = observations
+    elif data.notes is not None:
+        update_data["observations"] = data.notes
     if data.prioridade is not None:
         if data.prioridade not in VALID_PRIORIDADES:
             raise HTTPException(

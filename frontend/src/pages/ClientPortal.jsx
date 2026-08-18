@@ -48,6 +48,7 @@ import {
   Home,
   MapPin,
   CalendarClock,
+  CalendarDays,
   User,
   Save,
   Lock,
@@ -65,6 +66,8 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
 // PACOTE DH — EmptyState canónico para a secção "Próximos Eventos" vazia
 import { EmptyState } from '@/components/ui/EmptyState';
+import AgendaCalendar from '../components/calendar/AgendaCalendar';
+import { agendaDateKey } from '../utils/agendaCalendar';
 import { formatDate, safeDate } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import ClientPortalLogin from './ClientPortalLogin';
@@ -2031,7 +2034,7 @@ export default function ClientPortal() {
   const [recommendationsLoading, setRecommendationsLoading] = useState(true);
 
   // ── Tab navigation ──
-  const [activeTab, setActiveTab] = useState('documentos'); // 'documentos' | 'visitas'
+  const [activeTab, setActiveTab] = useState('documentos'); // 'documentos' | 'perfil' | 'simulador' | 'agenda'
 
   // ── Visits state ──
   const [visits, setVisits] = useState([]);
@@ -2049,7 +2052,7 @@ export default function ClientPortal() {
     const token = getPortalToken();
     if (!token) return;
     try {
-      const res = await fetch(`${BACKEND_URL}/portal/events`, {
+      const res = await fetch(`${BACKEND_URL}/portal/events?include_past=true`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (res.ok) {
@@ -2068,6 +2071,15 @@ export default function ClientPortal() {
     if (!isVerified) return;
     fetchEvents();
   }, [isVerified, fetchEvents]);
+
+  // PACOTE DO.2 — lista compacta no topo só com datas >= hoje; o calendário usa `events`.
+  const upcomingEvents = useMemo(() => {
+    const today = agendaDateKey(new Date());
+    return (events || []).filter((ev) => {
+      const key = agendaDateKey(ev.due_date);
+      return key && key >= today;
+    });
+  }, [events]);
 
   const fetchMessages = useCallback(async () => {
     const token = getPortalToken();
@@ -2338,7 +2350,7 @@ export default function ClientPortal() {
             {/* PACOTE DH — Próximos Eventos (Agenda do processo visível no Portal).
                 Só se renderiza quando há eventos OU ainda estamos a carregar —
                 se estiver vazia, a secção fica oculta (evita ruído visual). */}
-            {(events.length > 0 || eventsLoading) && (
+            {(upcomingEvents.length > 0 || eventsLoading) && (
               <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
                 <h3 className="text-base font-bold text-gray-800 mb-3 flex items-center gap-2">
                   <CalendarClock className="w-5 h-5 text-emerald-500" />
@@ -2348,7 +2360,7 @@ export default function ClientPortal() {
                   <div className="flex items-center gap-2 text-sm text-gray-500">
                     <Loader2 className="w-4 h-4 animate-spin" /> A carregar eventos...
                   </div>
-                ) : events.length === 0 ? (
+                ) : upcomingEvents.length === 0 ? (
                   <EmptyState
                     icon={CalendarClock}
                     title="Sem eventos"
@@ -2356,7 +2368,7 @@ export default function ClientPortal() {
                   />
                 ) : (
                   <div className="space-y-2">
-                    {events.map((ev) => (
+                    {upcomingEvents.map((ev) => (
                       <div
                         key={ev.id}
                         className="flex items-center gap-3 p-3 rounded-xl border border-gray-100"
@@ -2433,6 +2445,18 @@ export default function ClientPortal() {
                 <Calculator className="w-4 h-4" />
                 <span className="hidden sm:inline">Simulador</span>
                 <span className="sm:hidden">Calc</span>
+              </button>
+              <button
+                onClick={() => setActiveTab('agenda')}
+                className={`flex-1 flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold transition-all ${
+                  activeTab === 'agenda'
+                    ? 'bg-primary text-primary-foreground shadow-md'
+                    : 'text-muted-foreground hover:bg-muted hover:text-foreground'
+                }`}
+              >
+                <CalendarDays className="w-4 h-4" />
+                <span className="hidden sm:inline">Agenda</span>
+                <span className="sm:hidden">Cal</span>
               </button>
               {/* PACOTE CB — Botão "As Minhas Visitas" temporariamente oculto.
                   O código da Tab 'visitas' em baixo está mantido (apenas comentado
@@ -2557,6 +2581,15 @@ export default function ClientPortal() {
             {/* ═══ Tab: Simulador de Crédito Habitação ═══ */}
             {activeTab === 'simulador' && (
               <SimulatorCH clienteDataNascimento={data?.dados_pessoais?.data_nascimento || data?.client_data?.data_nascimento} />
+            )}
+
+            {activeTab === 'agenda' && (
+              <AgendaCalendar
+                events={events}
+                title="A minha agenda"
+                description="Escrituras, CPCV e outros agendamentos visíveis para si"
+                compact
+              />
             )}
 
             {/* ═══ Tab: As Minhas Visitas ═══ */}

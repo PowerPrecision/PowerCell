@@ -1,4 +1,33 @@
 ---
+Task ID: pacote-do-resumo-calendario
+Agent: Cloud Agent (cursor/pacote-do-resumo-calendario-74b9)
+Task: Pacote DO.1+2 — Observações/Timeline no Resumo e Calendário Visual
+
+Date: 2026-08-18
+
+Work Log:
+- DO.1: campo `observations` no Processo; persistência sincroniza com `notes`; GET /processes/{id}/timeline reutiliza a coleção `history`
+- DO.1: Resumo com ProcessObservationsCard + ProcessSummaryTimeline (Progressive Disclosure; filme completo no tab Histórico)
+- DO.2: AgendaCalendar (Shadcn Calendar + vista semanal, pontos nos dias) no ConsultorDashboard e ClientPortal
+- DO.2: Portal GET /events?include_past=true; filtro visible_to_client mantém-se
+- Docs: ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Observações de fácil acesso no Resumo, com timeline cronológica compacta
+- Calendário visual da Agenda DH no Dashboard e no Portal (só eventos visíveis ao cliente)
+
+Files:
+- backend/models/process.py
+- backend/services/process_update.py, process_create.py, process_service.py
+- backend/services/process_timeline.py, portal_events.py
+- backend/routes/processes.py, portal.py
+- frontend/src/components/processDetails/ProcessObservationsCard.jsx
+- frontend/src/components/processDetails/ProcessSummaryTimeline.jsx
+- frontend/src/components/calendar/AgendaCalendar.jsx
+- frontend/src/pages/ProcessDetails.js, ConsultorDashboard.js, ClientPortal.jsx
+- ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: pacote-dn3-dn4-emails
 Agent: Cloud Agent (cursor/pacote-dn3-dn4-emails-edb4)
 Task: Pacote DN.3+4 — Emails do Processo e Contas Múltiplas

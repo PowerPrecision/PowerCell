@@ -114,6 +114,8 @@ def build_staff_process_doc(
         "created_at": now,
         "updated_at": now,
         "source": "lead" if is_lead else "staff_created",
+        "notes": "",
+        "observations": "",
     }
 
 
