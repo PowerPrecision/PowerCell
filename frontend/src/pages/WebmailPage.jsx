@@ -72,7 +72,7 @@ import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { format, isToday, isYesterday } from "date-fns";
 import { pt } from "date-fns/locale";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
 import { hasAnyRole } from "../utils/roleUtils";
@@ -134,6 +134,11 @@ const getAttachmentIcon = (filename) => {
 const WebmailPage = () => {
   const { token, user, effectiveRole } = useAuth();
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const initialFolder = FOLDERS.some((f) => f.id === searchParams.get("folder"))
+    ? searchParams.get("folder")
+    : "inbox";
+  const draftIdFromUrl = searchParams.get("id") || searchParams.get("draftId");
 
   // ── Multi-Tenant: active company_id from auth context ──────────
   // The backend reads company_id from X-Company-Id header (the same
@@ -154,7 +159,7 @@ const WebmailPage = () => {
     : "power";
 
   // Estado principal
-  const [activeFolder, setActiveFolder] = useState("inbox");
+  const [activeFolder, setActiveFolder] = useState(initialFolder);
   const [emails, setEmails] = useState([]);
   const [totalEmails, setTotalEmails] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
@@ -227,6 +232,7 @@ const WebmailPage = () => {
 
   // Debounce search
   const searchTimeoutRef = useRef(null);
+  const openedUrlDraftRef = useRef(false);
 
   // ============================================================
   // ROLE-BASED TABS: Initialize activeBox
@@ -816,6 +822,18 @@ const WebmailPage = () => {
         account: email.account || "precision",
         process_id: null,
       });
+    } else if (mode === "draft" && email) {
+      const toList = Array.isArray(email.to_emails)
+        ? email.to_emails.join(", ")
+        : (email.to_emails || email.to || "");
+      setComposerData({
+        to_emails: toList,
+        cc_emails: Array.isArray(email.cc_emails) ? email.cc_emails.join(", ") : (email.cc_emails || ""),
+        subject: email.subject || "",
+        body: email.body || email.body_html || "",
+        account: email.account || account,
+        process_id: email.process_id || null,
+      });
     } else {
       setComposerData({
         to_emails: "",
@@ -830,6 +848,15 @@ const WebmailPage = () => {
     setUploadAttachments([]);
     setComposerOpen(true);
   }, [account]);
+
+  // PACOTE DM: abrir compositor de rascunho quando o Dashboard envia ?folder=drafts&id=
+  useEffect(() => {
+    if (openedUrlDraftRef.current || !draftIdFromUrl || !emails.length) return;
+    const match = emails.find((e) => e.id === draftIdFromUrl);
+    if (!match) return;
+    openedUrlDraftRef.current = true;
+    openComposer("draft", match);
+  }, [emails, draftIdFromUrl, openComposer]);
 
   const handleSendEmail = useCallback(async () => {
     if (!composerData.to_emails.trim()) {
@@ -2429,7 +2456,7 @@ const WebmailPage = () => {
                       Assinatura (anexada automaticamente no envio)
                     </div>
                     <div
-                      className="text-xs text-muted-foreground/90 prose prose-sm max-w-none [&_a]:text-primary"
+                      className="text-xs text-muted-foreground/90 prose prose-sm max-w-none [&_a]:text-primary [&_img]:max-w-full [&_img]:h-auto [&_p]:my-1"
                       dangerouslySetInnerHTML={{
                         __html: sanitizeEmailHtml(resolvedSignature),
                       }}

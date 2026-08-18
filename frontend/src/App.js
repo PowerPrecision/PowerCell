@@ -314,7 +314,7 @@ function App() {
             }
           />
 
-          {/* Staff Dashboard (Consultor, Mediador, Diretor, Administrativo, CEO) - Resumo/KPIs */}
+          {/* Staff Dashboard (Consultor, Intermediário, Diretor, Administrativo, CEO) - Resumo/KPIs */}
           <Route
             path="/staff"
             element={

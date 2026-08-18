@@ -170,7 +170,7 @@ const AssignUsersModal = memo(({
               </div>
               
               <div>
-                <Label className="text-sm font-medium">Intermediário / Mediador</Label>
+                <Label className="text-sm font-medium">Intermediário</Label>
                 <Select 
                   value={selectedMediador || 'none'} 
                   onValueChange={(v) => setSelectedMediador(v === 'none' ? '' : v)}

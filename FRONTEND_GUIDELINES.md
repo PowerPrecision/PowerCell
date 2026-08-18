@@ -203,5 +203,15 @@ O conceito de "conta principal" foi removido. Não existe "Principal (Padrão)" 
 
 As settings de cada perfil (assinatura, webmail, preferências) são lidas do backend já scoped pelo UCR ativo (via `X-Company-Id`). O frontend não pré-preenche nem mistura contextos — cada aba carrega e guarda os seus dados de forma isolada. Ver `components/ProfileRoleTab.jsx`.
 
+### Pacote DM — gravação isolada + assinatura Rich Text + perfil Mediador
+
+- **Interceptor `api.js`**: nunca sobrescrever `X-Company-Id` / `X-Active-Role` se o pedido já os definiu. Sem isto, gravar IMAP/SMTP numa tab de perfil que não é a empresa activa global escrevia no UCR errado.
+- **EmailConfigForm**: POST/GET/test enviam `company_id` no body, na query e no header da tab (`ProfileRoleTab.companyId`).
+- **Assinatura**: renderizar com `RichTextViewer` / `dangerouslySetInnerHTML` + `sanitizeEmailHtml` (DOMPurify). Permitir `data:image`, `cid:` e `https` nas imagens. Se o HTML estiver gravado como entidades (`&lt;p&gt;`), `unescapeHtmlIfNeeded` recupera o markup.
+- **Perfil Mediador**: não existe. `normalizeRole('mediador')` → `intermediario`. Tabs e o `ContextSwitcher` filtram `REMOVED_ROLES`. A dropbox extra de empresa no Diretor está oculta — a empresa vem do perfil no Header.
+- **Impersonate**: o menu lateral usa o `user.role` impersonado. Abas de Administração (`showAdminButton`, Dashboard Executivo) escondem-se se o impersonado não for admin/CEO.
+- **Rascunhos no Dashboard**: `getDraftNavigationTarget` — emails → `/webmail?folder=drafts&id=`, pré-registo → `/registos-clientes?clientId=`, processos → `/processo/:id` (nunca ProcessDetails para rascunhos de email).
+
+
 
 

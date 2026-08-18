@@ -178,3 +178,60 @@ def test_forced_shared_uses_effective_role_not_primary():
             assert result2["config_source"] != "shared_role"
 
     asyncio.run(_resolver_uses_active_role())
+
+
+def test_save_email_config_prefers_body_company_over_header():
+    """PACOTE DM: gravar no company_id do body mesmo se o header for outra empresa."""
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from models.email_config import EmailConfigCreate
+    from services.users_api_email_config import run_save_my_email_config
+
+    async def _run():
+        request = MagicMock()
+        request.headers = {"X-Active-Role": "consultor", "X-Company-Id": "empresa-global"}
+        user = {"id": "u-dm", "role": "consultor", "company": "empresa-global"}
+        config = EmailConfigCreate(
+            email_address="perfil@empresa-b.pt",
+            imap_server="imap.b.pt",
+            smtp_server="smtp.b.pt",
+            password="secret",
+            company_id="empresa-b",
+        )
+        with patch(
+            "services.user_email_config_service.upsert_user_email_config",
+            new_callable=AsyncMock,
+        ) as upsert, patch(
+            "services.encryption.encryption_service.encrypt",
+            return_value="enc",
+        ), patch(
+            "services.users_api_email_config.db"
+        ) as mock_db, patch(
+            "services.auth.get_active_company_id_async",
+            new_callable=AsyncMock,
+            return_value="empresa-global",
+        ):
+            mock_db.users.find_one = AsyncMock(return_value={"email_config": {}})
+            mock_db.users.update_one = AsyncMock()
+            result = await run_save_my_email_config(
+                request, config, user, query_company_id="empresa-b",
+            )
+            assert result["success"] is True
+            assert result["company_id"] == "empresa-b"
+            upsert.assert_awaited()
+            assert upsert.await_args.kwargs["company_id"] == "empresa-b"
+            nested = mock_db.users.update_one.await_args.args[1]["$set"]["email_config"]
+            assert "company:empresa-b" in nested
+
+    asyncio.run(_run())
+
+
+def test_non_default_company_id_helper():
+    from services.users_api_email_config import _non_default_company_id
+
+    assert _non_default_company_id("default", None, "acme") == "acme"
+    assert _non_default_company_id("  ", "comp-2") == "comp-2"
+    assert _non_default_company_id(None, None) is None
+    assert _non_default_company_id("tab-company", "header-company") == "tab-company"
+

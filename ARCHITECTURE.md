@@ -1315,7 +1315,7 @@ A Área Pessoal gera **uma aba dinâmica por UCR real** (iterando `user.companie
 
 ### `X-Company-Id` header — o mecanismo de scoping
 
-O backend recebe o contexto de UCR ativo via header `X-Company-Id` (e `X-Active-Role`), injetado automaticamente pelo interceptor do `api.js` no frontend. Todos os endpoints de perfil/settings leem este header via `get_active_company_id_async(request, user)` para scope das queries ao UCR ativo.
+O backend recebe o contexto de UCR ativo via header `X-Company-Id` (e `X-Active-Role`), injetado automaticamente pelo interceptor do `api.js` no frontend. **Pacote DM:** o interceptor **não sobrescreve** estes headers se o pedido já os definiu (tabs da Área Pessoal). `POST /users/me/email-config` resolve `company_id` por ordem: body → query → header.
 
 ```python
 # services/auth.py
@@ -1324,6 +1324,18 @@ async def get_active_company_id_async(request, user):
     # valida que o user tem um UCR para esta company_id
     # retorna company_id ou fallback
 ```
+
+### Assinatura de email (Pacote DM)
+
+A assinatura por UCR (`user_company_roles.signature`) é HTML. A Área Pessoal pré-visualiza com `RichTextViewer`; o compositor do Webmail usa `sanitizeEmailHtml` (DOMPurify, tags `<p>`, `<br>`, `<img>` com `data:`/`https`/`cid`). HTML gravado como entidades é desescapado uma vez antes de sanitizar.
+
+### Impersonate e navegação (Pacote DM)
+
+Ao iniciar impersonate, `AuthContext.applyUserContext` redefine `activeRole` / `activeCompanyId` para o utilizador alvo. O `DashboardLayout` constrói o menu a partir de `user.role` (não do `effectiveRole` residual do admin). Menus de Administração só aparecem se o impersonado for `admin` ou `ceo`.
+
+### Perfil Mediador removido
+
+O role `mediador` não é um perfil de sistema. `normalizeRole` mapeia legado → `intermediario`. Campos de processo `assigned_mediador_id(s)` mantêm-se (atribuição de intermediários). A dropbox extra de empresa no Header para Diretor foi removida — a empresa está no selector de perfil.
 
 ### Preferências de Notificação — per-UCR com fallback (PACOTE DF)
 

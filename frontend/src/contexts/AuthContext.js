@@ -1,7 +1,7 @@
 /**
  * AuthContext — Contexto de autenticação centralizado com JWT, refresh tokens e impersonificação.
  *
- * PORQUÊ: O PowerCell suporta múltiplos perfis por utilizador (consultor, mediador,
+ * PORQUÊ: O PowerCell suporta múltiplos perfis por utilizador (consultor, intermediário,
  * admin, CEO) e a funcionalidade de impersonate permite ao admin visualizar o sistema
  * como outro utilizador sem partilhar credenciais. O refresh token garante sessões
  * longas sem que o utilizador tenha de fazer login repetidamente.
@@ -360,6 +360,30 @@ export function AuthProvider({ children }) {
     activeCompanyInitialized.current = false;
   }, []);
 
+  const applyUserContext = useCallback((userData) => {
+    const primaryRole = userData?.role || "consultor";
+    setActiveRole(primaryRole);
+    sessionStorage.setItem("activeRole", primaryRole);
+    activeRoleInitialized.current = true;
+
+    const companies = userData?.companies || [];
+    const matchingCompany = companies.find((c) => c.is_default)
+      || companies.find((c) => c.role === primaryRole)
+      || companies[0];
+    const companyId = matchingCompany?.company_id || userData?.company || null;
+    if (companyId) {
+      setActiveCompanyId(companyId);
+      localStorage.setItem("active_company_id", companyId);
+      sessionStorage.setItem("activeCompanyId", companyId);
+      applyBrandTheme(matchingCompany?.company_name || userData?.company);
+    } else {
+      setActiveCompanyId(null);
+      localStorage.removeItem("active_company_id");
+      sessionStorage.removeItem("activeCompanyId");
+    }
+    activeCompanyInitialized.current = true;
+  }, []);
+
   // Impersonate - ver como outro utilizador
   const impersonate = useCallback(async (userId) => {
     try {
@@ -373,13 +397,16 @@ export function AuthProvider({ children }) {
       setUser(userData);
       setIsImpersonating(true);
       setOriginalAdminName(userData.impersonated_by_name);
+      // PACOTE DM: o nav e os headers devem reflectir o utilizador impersonado,
+      // nunca o activeRole de admin que ficou no sessionStorage.
+      applyUserContext(userData);
       
       return userData;
     } catch (error) {
       console.error("Error impersonating:", error);
       throw error;
     }
-  }, []);
+  }, [applyUserContext]);
 
   // Terminar impersonate e voltar à conta original
   const stopImpersonating = useCallback(async () => {
@@ -400,6 +427,7 @@ export function AuthProvider({ children }) {
       setUser(userData);
       setIsImpersonating(false);
       setOriginalAdminName(null);
+      applyUserContext(userData);
       
       // Redirecionar para a página apropriada baseado no role
       const redirectPage = hasRole(userData, "admin") ? "/admin" : "/staff";
@@ -435,7 +463,7 @@ export function AuthProvider({ children }) {
       
       throw error;
     }
-  }, []);
+  }, [applyUserContext]);
 
   // ── Context Switching — Múltiplos Perfis (Hard Reload) ──
   // Recebe newRole e opcionalmente newCompanyId. Se newCompanyId não for

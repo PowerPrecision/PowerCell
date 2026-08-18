@@ -224,7 +224,9 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    const userRole = effectiveRole?.toLowerCase();
+    // PACOTE DM: em impersonate, o menu segue o role REAL do utilizador
+    // impersonado — nunca o activeRole residual do admin original.
+    const userRole = (isImpersonating ? user?.role : effectiveRole)?.toLowerCase();
     const isAdmin = userRole === "admin";
     const isCeo = userRole === "ceo";
     const canSeeAdminPanel = isAdmin || isCeo; // Botão Painel de Administração
@@ -534,6 +536,20 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const navData = getNavItems();
+  // PACOTE DM: defesa extra — menus de administração nunca visíveis se o
+  // utilizador impersonado não for admin/CEO, mesmo com activeRole residual.
+  if (
+    isImpersonating
+    && !["admin", "ceo"].includes((user?.role || "").toLowerCase())
+  ) {
+    navData.showAdminButton = false;
+    navData.groups = (navData.groups || []).filter(
+      (g) => g.id !== "dashboard-executivo",
+    );
+    if (navData.main?.[0]) {
+      navData.main[0] = { ...navData.main[0], href: "/staff" };
+    }
+  }
   
   // Impersonate offset (isImpersonating already consumed above)
   const impersonateOffset = isImpersonating ? 'top-12' : 'top-0';

@@ -127,10 +127,9 @@ export default function ProcessAssignDialog({
               </div>
 
               <div>
-                <Label className="text-sm font-medium mb-2 block">Intermediários / Mediadores</Label>
+                <Label className="text-sm font-medium mb-2 block">Intermediários</Label>
                 <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
                   {filterByAnyRole(appUsers, [
-                    "intermediario",
                     "intermediario",
                     "intermediario_credito",
                     "diretor",

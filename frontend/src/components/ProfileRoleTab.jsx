@@ -37,10 +37,11 @@ import { Badge } from "./ui/badge";
 import { toast } from "sonner";
 import api from "../services/api";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { htmlToText } from "../utils/sanitize";
 // PACOTE DF — role helpers centralizados (substituem getRoleLabel local)
 import { ROLE_LABELS, ROLE_COLORS } from "../utils/roleUtils";
 import EmailConfigForm from "./EmailConfigForm";
-import RichTextEditor from "./ui/RichTextEditor";
+import RichTextEditor, { RichTextViewer } from "./ui/RichTextEditor";
 import {
   Building2,
   PenLine,
@@ -340,6 +341,12 @@ const ProfileRoleTab = ({ companyId, role, companyName, user, onUpdate }) => {
             advanced
             minHeight="120px"
           />
+          {emailSignature && htmlToText(emailSignature).trim() && (
+            <div className="space-y-1.5">
+              <p className="text-xs font-medium text-muted-foreground">Pré-visualização</p>
+              <RichTextViewer html={emailSignature} />
+            </div>
+          )}
           <div className="flex items-center justify-between">
             <p className="text-xs text-muted-foreground">
               Suporta formatação de texto, cores, links e imagens. Esta

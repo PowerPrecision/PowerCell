@@ -35,6 +35,31 @@ export const VALID_ROLES = [
   "parceiro",
 ];
 
+/** Perfis removidos — nunca mostrar na UI (legacy na BD mapeia para intermediario/consultor) */
+export const REMOVED_ROLES = ["mediador", "consultor_intermediario"];
+
+/** Mapa de roles obsoletas para o equivalente actual */
+export const LEGACY_ROLE_MAP = {
+  mediador: "intermediario",
+  consultor_intermediario: "consultor",
+};
+
+/**
+ * Normaliza um role legado para o perfil actual.
+ * 'mediador' → 'intermediario'; desconhecidos ficam inalterados.
+ */
+export function normalizeRole(role) {
+  if (!role || typeof role !== "string") return role;
+  const key = role.toLowerCase();
+  return LEGACY_ROLE_MAP[key] || key;
+}
+
+/** True se o role pode aparecer em selectors / tabs de perfil */
+export function isSelectableRole(role) {
+  if (!role) return false;
+  return VALID_ROLES.includes(normalizeRole(role));
+}
+
 /** Perfis de staff (têm acesso à plataforma, exclui cliente e parceiro) */
 export const STAFF_ROLES = [
   "admin",
@@ -290,7 +315,8 @@ export const hasAccess = (user, requiredRole) => {
  * @returns {boolean}
  */
 export const isValidRole = (role) => {
-  return VALID_ROLES.includes(role);
+  if (!role) return false;
+  return VALID_ROLES.includes(normalizeRole(role));
 };
 
 /**
@@ -319,7 +345,8 @@ export const getRoleLevel = (role) => {
  * @returns {string} Rótulo amigável
  */
 export const getRoleLabel = (role) => {
-  return ROLE_LABELS[role] || role;
+  const normalized = normalizeRole(role);
+  return ROLE_LABELS[normalized] || ROLE_LABELS[role] || role;
 };
 
 /**

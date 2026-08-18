@@ -134,18 +134,27 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Injetar X-Active-Role para Context Isolation
+    // Injetar X-Active-Role para Context Isolation.
+    // PACOTE DM: não sobrescrever se o pedido já definiu o header
+    // (ex.: Área Pessoal a gravar no UCR de uma tab que não é a empresa activa).
     const activeRole = sessionStorage.getItem("activeRole") || localStorage.getItem("activeRole");
-    if (activeRole) {
+    const existingRole = typeof config.headers.get === "function"
+      ? config.headers.get("X-Active-Role")
+      : config.headers["X-Active-Role"];
+    if (activeRole && !existingRole) {
       config.headers["X-Active-Role"] = activeRole;
     }
 
     // PACOTE AR: Injetar X-Company-Id para Contexto Multi-Empresa.
     // Ler de localStorage (persiste entre sessões) com fallback para
     // sessionStorage (retrocompatibilidade).
+    // PACOTE DM: respeitar override por-pedido (ProfileRoleTab / EmailConfigForm).
     const activeCompanyId = localStorage.getItem("active_company_id")
       || sessionStorage.getItem("activeCompanyId");
-    if (activeCompanyId) {
+    const existingCompany = typeof config.headers.get === "function"
+      ? config.headers.get("X-Company-Id")
+      : config.headers["X-Company-Id"];
+    if (activeCompanyId && !existingCompany) {
       config.headers["X-Company-Id"] = activeCompanyId;
     }
 

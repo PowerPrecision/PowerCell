@@ -59,7 +59,7 @@ import { formatDateTime } from "../lib/utils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 // PACOTE DF — Role helpers centralizados (substituem getRoleLabel local)
-import { ROLE_LABELS, ROLE_ICONS } from "../utils/roleUtils";
+import { ROLE_LABELS, ROLE_ICONS, normalizeRole, isSelectableRole } from "../utils/roleUtils";
 // PACOTE DF — Sub-componente para as 3 cards por-UCR
 import ProfileRoleTab from "../components/ProfileRoleTab";
 import {
@@ -91,16 +91,18 @@ const ProfilePage = () => {
   const ucrTabs = useMemo(() => {
     if (!user?.companies || user.companies.length === 0) return [];
     return user.companies
-      .filter(c => c.role && c.company_id && c.company_id !== "default")
-      .map(c => ({
-        value: `${c.role}__${c.company_id}`,
-        role: c.role,
-        companyId: c.company_id,
-        companyName: c.company_name || c.company_id,
-        label: `${ROLE_LABELS[c.role] || c.role} @ ${c.company_name || c.company_id}`,
-        // PACOTE DF — ROLE_ICONS é um mapa de emojis (strings), não componentes
-        icon: ROLE_ICONS[c.role],
-      }));
+      .filter(c => isSelectableRole(c.role) && c.company_id && c.company_id !== "default")
+      .map(c => {
+        const role = normalizeRole(c.role);
+        return {
+          value: `${role}__${c.company_id}`,
+          role,
+          companyId: c.company_id,
+          companyName: c.company_name || c.company_id,
+          label: `${ROLE_LABELS[role] || role} @ ${c.company_name || c.company_id}`,
+          icon: ROLE_ICONS[role],
+        };
+      });
   }, [user?.companies]);
 
   // Tab ativa — default "global" (mais seguro do que pré-seleccionar um UCR)

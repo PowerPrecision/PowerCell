@@ -58,12 +58,23 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
   const hasMultipleRoles = isSelf && user?.additional_roles?.length > 0;
 
   // Build API URLs based on mode
+  const resolvedCompanyId = companyId || effectiveCompanyId || "default";
+
+  // PACOTE DM: headers isolados por UCR da tab (não a empresa activa global)
+  const companyRequestConfig = () => {
+    const headers = {};
+    if (resolvedCompanyId && resolvedCompanyId !== "default") {
+      headers["X-Company-Id"] = resolvedCompanyId;
+    }
+    return {
+      headers,
+      params: { company_id: resolvedCompanyId },
+    };
+  };
+
   const getConfigUrl = () => {
-    const cid = companyId || effectiveCompanyId || "default";
+    const cid = resolvedCompanyId;
     const base = isSelf ? "/users/me/email-config" : `/admin/users/${userId}/email-config`;
-    // FIX: Passar company_id como query param EXPLÍCITO para garantir que
-    // o backend resolve a config da empresa correcta, mesmo se o header
-    // X-Company-Id estiver dessincronizado com o sessionStorage.
     return `${base}?company_id=${encodeURIComponent(cid)}`;
   };
 
@@ -167,7 +178,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
     setHasPassword(false);
     setConfigSource("none");
     try {
-      const response = await api.get(getConfigUrl());
+      const response = await api.get(getConfigUrl(), companyRequestConfig());
       const config = response.data;
       if (config && (config.is_configured || config.imap_server)) {
         setConfigSource(config.config_source || "user");
@@ -242,8 +253,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
             Authorization: `Bearer ${token}`,
             "Content-Type": "application/json",
             ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
-            ...((companyId || effectiveCompanyId)
-              ? { "X-Company-Id": companyId || effectiveCompanyId }
+            ...(resolvedCompanyId && resolvedCompanyId !== "default"
+              ? { "X-Company-Id": resolvedCompanyId }
               : {}),
           },
         }
@@ -283,7 +294,7 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
 
   const handleGoogleOAuthDisconnect = async () => {
     try {
-      await api.delete("/auth/google/disconnect");
+      await api.delete("/auth/google/disconnect", companyRequestConfig());
       setGoogleOAuthConnected(false);
       toast.success("Google OAuth desconectado");
       loadConfig();
@@ -317,11 +328,11 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         imap_port: emailConfig.imap_port,
         smtp_server: emailConfig.smtp_server,
         smtp_port: emailConfig.smtp_port,
-        company_id: companyId,  // MULTI-EMPRESA
-      });
+        company_id: resolvedCompanyId,  // PACOTE DM: UCR da tab, não a empresa activa global
+      }, companyRequestConfig());
 
       // Now test with the just-saved stored credentials
-      const response = await api.post(testConfigUrl());
+      const response = await api.post(testConfigUrl(), null, companyRequestConfig());
       const result = response.data;
       setTestResult(result);
 
@@ -361,8 +372,8 @@ const EmailConfigForm = ({ mode = "self", userId, targetUserName, onSuccess, onC
         imap_port: emailConfig.imap_port,
         smtp_server: emailConfig.smtp_server,
         smtp_port: emailConfig.smtp_port,
-        company_id: companyId,  // MULTI-EMPRESA
-      });
+        company_id: resolvedCompanyId,  // PACOTE DM: UCR da tab, não a empresa activa global
+      }, companyRequestConfig());
       toast.success("Configuração de webmail guardada com sucesso");
       setEmailConfig((prev) => ({ ...prev, password: "" }));
       setTestResult(null);

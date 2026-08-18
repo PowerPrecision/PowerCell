@@ -46,10 +46,15 @@ async def get_my_email_config(
 async def save_my_email_config(
     request: Request,
     config: EmailConfigCreate,
+    company_id: Optional[str] = Query(
+        None, description="ID da empresa (fallback para body.company_id / X-Company-Id)",
+    ),
     current_user: dict = Depends(get_current_user),
 ):
-    """Guardar configuração de email do utilizador."""
-    return await run_save_my_email_config(request, config, current_user)
+    """Guardar configuração de email do utilizador, isolada por company_id."""
+    return await run_save_my_email_config(
+        request, config, current_user, query_company_id=company_id,
+    )
 
 
 @router.post("/me/email-config/test")

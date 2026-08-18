@@ -3,6 +3,18 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-08-18] — Pacote DM: Área Pessoal, Rascunhos e UX Base
+
+### Corrigido
+- **Configuração de email multi-perfil**: o interceptor Axios já não sobrescreve `X-Company-Id`/`X-Active-Role` definidos no pedido. `EmailConfigForm` grava IMAP/SMTP isolado por `company_id` (body + query + header da tab). Backend resolve na mesma ordem, com logs e tratamento de erros.
+- **Assinatura de email**: HTML (`<p>`, `<br>`, `<img>`) sanitizado com DOMPurify; imagens `data:`/`cid:`/`https`; unescape se estiver gravado como entidades. Pré-visualização na Área Pessoal e no compositor.
+- **Rascunhos no Dashboard**: o clique já não envia emails/leads para ProcessDetails. Emails abrem `/webmail?folder=drafts&id=`; pré-registo vai para Registos de Clientes; processos usam `/processo/:id`.
+
+### Alterado
+- Perfil **Mediador** removido da UI (`normalizeRole` → Intermediário). Dropbox extra de empresa no Diretor oculta — o contexto vem do perfil no Header.
+- **Impersonate**: menus de Administração só se o utilizador impersonado for admin/CEO; `activeRole` é redefinido para o alvo.
+
+---
 ## [2026-07-25] — Pacote DJ (Híbrido): Sistema de Confiança — Zero-Touch + HITL
 
 ### Alterado
