@@ -78,16 +78,20 @@ def personal_deadline_or_clauses(user_id: str, process_ids: list[str]) -> list[d
     ]
     if process_ids:
         clauses.append({"process_id": {"$in": process_ids}})
-    else:
-        clauses.append({"process_id": None})
     return clauses
 
 
 def company_event_or_clauses(company_id: Optional[str], process_ids: list[str]) -> list[dict]:
-    """Cláusulas $or para a vista de equipa da empresa activa."""
+    """Cláusulas $or para a vista de equipa da empresa activa.
+
+    Sem empresa (None / default) → lista vazia (o caller não filtra).
+    Com empresa → eventos da empresa, processos dessa empresa, e
+    eventos legado sem company_id (null/default).
+    """
     clauses: list[dict] = []
     if company_id and company_id != "default":
         clauses.append({"company_id": company_id})
+        clauses.append({"company_id": {"$in": [None, "", "default"]}})
     if process_ids:
         clauses.append({"process_id": {"$in": process_ids}})
     return clauses

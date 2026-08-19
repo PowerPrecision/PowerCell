@@ -62,7 +62,11 @@ async def run_create_deadline(
 
     company_id = user.get("company")
     if request is not None:
-        company_id = await get_active_company_id_async(request, user) or company_id
+        header_company = await get_active_company_id_async(request, user)
+        if header_company and header_company != "default":
+            company_id = header_company
+        elif not company_id:
+            company_id = header_company
 
     deadline_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()

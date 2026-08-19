@@ -62,11 +62,14 @@ def test_personal_deadline_or_clauses_include_assignments():
     assert {"assigned_user_ids": "u1"} in clauses
     assert {"created_by": "u1"} in clauses
     assert {"process_id": {"$in": ["p1", "p2"]}} in clauses
+    empty = personal_deadline_or_clauses("u1", [])
+    assert all("process_id" not in c for c in empty)
 
 
 def test_company_event_or_clauses():
     clauses = company_event_or_clauses("acme", ["p1"])
     assert {"company_id": "acme"} in clauses
+    assert {"company_id": {"$in": [None, "", "default"]}} in clauses
     assert {"process_id": {"$in": ["p1"]}} in clauses
     assert company_event_or_clauses("default", []) == []
     assert company_event_or_clauses(None, ["p1"]) == [
