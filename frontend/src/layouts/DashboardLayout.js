@@ -37,6 +37,7 @@ import {
   FileText,
   Users,
   Calendar,
+  CalendarDays,
   Settings,
   LogOut,
   Menu,
@@ -164,7 +165,7 @@ const DashboardLayout = ({ children, title }) => {
     
     // Rotas do grupo O Meu Negócio (inclui rotas de detalhe: /processo/:id, /imovel/:id, etc.)
     // PACOTE DB — "/registos-clientes" movido para Visão Global
-    const meuNegocioRoutes = ["/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro"];
+    const meuNegocioRoutes = ["/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/calendario", "/financeiro"];
     // Rotas do grupo Visão Global (inclui rotas de detalhe: /cliente/:id, /processo-detalhe/:id, etc.)
     // PACOTE DB — "/registos-clientes" adicionado aqui (Visão Global)
     const visaoGlobalRoutes = ["/registos-clientes", "/clientes", "/cliente", "/lista-processos"];
@@ -269,6 +270,7 @@ const DashboardLayout = ({ children, title }) => {
         // PACOTE BU — Menus temporariamente ocultos:
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
         { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Calendário", icon: CalendarDays, href: "/calendario" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ],
     };
@@ -419,6 +421,7 @@ const DashboardLayout = ({ children, title }) => {
         { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
         // PACOTE BU — Menus temporariamente ocultos:
         { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Calendário", icon: CalendarDays, href: "/calendario" },
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ];

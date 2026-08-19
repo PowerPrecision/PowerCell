@@ -17,8 +17,11 @@ import { pt } from "date-fns/locale";
 import { cn } from "../../lib/utils";
 import {
   agendaDateKey,
+  calendarEventChipStyle,
   eventKindLabel,
+  formatCalendarEventTitle,
   groupEventsByDay,
+  isAbsenceEvent,
   parseAgendaDate,
   weekDaysFrom,
 } from "../../utils/agendaCalendar";
@@ -30,6 +33,9 @@ export default function AgendaCalendar({
   onEventClick,
   className,
   compact = false,
+  isTeamView = false,
+  viewerId,
+  headerAction,
 }) {
   const [view, setView] = useState("month");
   const [selected, setSelected] = useState(new Date());
@@ -81,6 +87,7 @@ export default function AgendaCalendar({
               Semanal
             </ToggleGroupItem>
           </ToggleGroup>
+          {headerAction}
         </div>
       </CardHeader>
       <CardContent className="space-y-4">
@@ -174,22 +181,26 @@ export default function AgendaCalendar({
           ) : (
             <ScrollArea className={compact ? "h-[160px]" : "h-[220px]"}>
               <ul className="space-y-2 pr-2">
-                {selectedEvents.map((event) => (
+                {selectedEvents.map((event) => {
+                  const chip = calendarEventChipStyle(event);
+                  return (
                   <li key={event.id || `${event.title}-${event.due_date}`}>
                     <button
                       type="button"
                       disabled={!onEventClick}
                       onClick={() => onEventClick?.(event)}
                       className={cn(
-                        "w-full text-left rounded-md border border-border bg-muted/30 p-2.5",
-                        onEventClick && "hover:bg-muted/50 transition-colors"
+                        "w-full text-left rounded-md border p-2.5",
+                        onEventClick && "hover:bg-muted/50 transition-colors",
+                        chip.className
                       )}
+                      style={chip.style}
                     >
                       <div className="flex items-start justify-between gap-2">
                         <p className="text-sm font-medium truncate">
-                          {event.title || "Agendamento"}
+                          {formatCalendarEventTitle(event, { viewerId, isTeamView })}
                         </p>
-                        <Badge variant={event.type === "event" ? "secondary" : "outline"}>
+                        <Badge variant={isAbsenceEvent(event) || event.type === "event" ? "secondary" : "outline"}>
                           {eventKindLabel(event.type)}
                         </Badge>
                       </div>
@@ -200,7 +211,8 @@ export default function AgendaCalendar({
                       )}
                     </button>
                   </li>
-                ))}
+                  );
+                })}
               </ul>
             </ScrollArea>
           )}

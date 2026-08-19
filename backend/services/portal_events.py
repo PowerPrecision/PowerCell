@@ -30,6 +30,7 @@ def build_portal_events_filter(
         "process_id": process_id,
         "visible_to_client": True,
         "completed": {"$ne": True},
+        "type": {"$ne": "absence"},
     }
     if not include_past:
         query["due_date"] = {"$gte": today}

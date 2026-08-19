@@ -5,6 +5,33 @@ from typing import Optional, List, Literal
 # PACOTE DH — Opções válidas para reminder_time (multi-select de lembretes).
 REMINDER_TIME_OPTIONS = {"1h", "3h", "1d", "3d", "7d"}
 
+# PACOTE DQ — Agenda: prazos, marcações e ausências/férias.
+DEADLINE_TYPES = ("deadline", "event", "absence")
+DEADLINE_TYPE_ALIASES = {
+    "ferias": "absence",
+    "férias": "absence",
+    "ausencia": "absence",
+    "ausência": "absence",
+    "ausencias": "absence",
+    "ausências": "absence",
+}
+
+
+def normalize_deadline_type(value, *, default="deadline", allow_none=False):
+    """Normaliza o tipo de entrada da agenda (inclui aliases PT)."""
+    if value is None:
+        return None if allow_none else default
+    if isinstance(value, str):
+        v_lower = value.strip().lower()
+        v_lower = DEADLINE_TYPE_ALIASES.get(v_lower, v_lower)
+        if v_lower not in DEADLINE_TYPES:
+            raise ValueError(
+                f"type inválido: {value!r}. "
+                f"Valores válidos: {', '.join(DEADLINE_TYPES)}"
+            )
+        return v_lower
+    return value
+
 
 class DeadlineCreate(BaseModel):
     process_id: Optional[str] = None  # Optional - can create general deadline
@@ -17,10 +44,12 @@ class DeadlineCreate(BaseModel):
     assigned_consultor_id: Optional[str] = None
     assigned_mediador_id: Optional[str] = None
 
-    # PACOTE DH — Agenda: tipo (deadline|event), visibilidade no portal e lembretes.
-    type: Literal["deadline", "event"] = "deadline"
+    # PACOTE DH/DQ — Agenda: tipo, visibilidade no portal, lembretes, dia inteiro.
+    type: Literal["deadline", "event", "absence"] = "deadline"
     visible_to_client: bool = False
     reminder_time: Optional[List[str]] = None  # Valores: "1h", "3h", "1d", "3d", "7d"
+    all_day: bool = False
+    end_date: Optional[str] = None
 
     @field_validator("reminder_time", mode="before")
     @classmethod
@@ -48,17 +77,8 @@ class DeadlineCreate(BaseModel):
     @field_validator("type", mode="before")
     @classmethod
     def _validate_type(cls, v):
-        """PACOTE DH — Normalizar type para lowercase (compatibilidade com inputs legacy)."""
-        if v is None:
-            return "deadline"
-        if isinstance(v, str):
-            v_lower = v.lower()
-            if v_lower not in ("deadline", "event"):
-                raise ValueError(
-                    f"type inválido: {v!r}. Valores válidos: 'deadline', 'event'"
-                )
-            return v_lower
-        return v
+        """PACOTE DH/DQ — Normalizar type (deadline|event|absence + aliases PT)."""
+        return normalize_deadline_type(v)
 
 
 class DeadlineUpdate(BaseModel):
@@ -71,10 +91,12 @@ class DeadlineUpdate(BaseModel):
     assigned_consultor_id: Optional[str] = None
     assigned_mediador_id: Optional[str] = None
 
-    # PACOTE DH — Agenda: campos opcionais para update parcial.
-    type: Optional[Literal["deadline", "event"]] = None
+    # PACOTE DH/DQ — Agenda: campos opcionais para update parcial.
+    type: Optional[Literal["deadline", "event", "absence"]] = None
     visible_to_client: Optional[bool] = None
     reminder_time: Optional[List[str]] = None
+    all_day: Optional[bool] = None
+    end_date: Optional[str] = None
 
     @field_validator("reminder_time", mode="before")
     @classmethod
@@ -101,17 +123,8 @@ class DeadlineUpdate(BaseModel):
     @field_validator("type", mode="before")
     @classmethod
     def _validate_type(cls, v):
-        """PACOTE DH — Normalizar type no update (None mantém-se None)."""
-        if v is None:
-            return None
-        if isinstance(v, str):
-            v_lower = v.lower()
-            if v_lower not in ("deadline", "event"):
-                raise ValueError(
-                    f"type inválido: {v!r}. Valores válidos: 'deadline', 'event'"
-                )
-            return v_lower
-        return v
+        """PACOTE DH/DQ — Normalizar type no update (None mantém-se None)."""
+        return normalize_deadline_type(v, allow_none=True)
 
 
 class DeadlineResponse(BaseModel):
@@ -132,7 +145,15 @@ class DeadlineResponse(BaseModel):
     assigned_user_id: Optional[str] = None
     assigned_user_name: Optional[str] = None
 
-    # PACOTE DH — Agenda: novos campos na resposta (defaults para retrocompatibilidade).
-    type: Literal["deadline", "event"] = "deadline"
+    # PACOTE DH/DQ — Agenda: novos campos na resposta (defaults para retrocompatibilidade).
+    type: Literal["deadline", "event", "absence"] = "deadline"
     visible_to_client: bool = False
     reminder_time: Optional[List[str]] = None
+    all_day: bool = False
+    end_date: Optional[str] = None
+    company_id: Optional[str] = None
+
+    @field_validator("type", mode="before")
+    @classmethod
+    def _validate_type(cls, v):
+        return normalize_deadline_type(v)
