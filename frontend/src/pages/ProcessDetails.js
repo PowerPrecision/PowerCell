@@ -89,7 +89,6 @@ import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
-import ProcessSummaryCard from "../components/ProcessSummaryCard";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import ProcessAssignDialog from "../components/processDetails/ProcessAssignDialog";
 import ClientContextCard from "../components/processDetails/ClientContextCard";
@@ -124,6 +123,7 @@ import {
   Users,
   Sparkles,
   Mail,
+  Phone,
   FileSignature,
   FileDown,
   AlertTriangle,
@@ -145,7 +145,6 @@ import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeParseISO } from "../lib/utils";
 
-import { typeLabels } from "./processDetails/processDetailsConstants";
 import {
   cleanPersonalDataForSubmit,
   cleanTitular2DataForSubmit,
@@ -1237,7 +1236,7 @@ const ProcessDetails = () => {
   const handleSaveObservations = async (text) => {
     if (isProcessLocked) {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
-      return;
+      throw new Error("process_locked");
     }
     setSavingObservations(true);
     try {
@@ -1250,6 +1249,7 @@ const ProcessDetails = () => {
     } catch (error) {
       const detail = error.response?.data?.detail;
       toast.error(typeof detail === "string" ? detail : "Erro ao guardar observações");
+      throw error;
     } finally {
       setSavingObservations(false);
     }
@@ -1635,6 +1635,18 @@ const ProcessDetails = () => {
 
   const deadlineDates = deadlines.map((d) => safeParseISO(d.due_date)).filter(Boolean);
   const currentStatusInfo = getStatusInfo(process.status);
+  const headerClientName = safeString(
+    clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome,
+  );
+  const headerPhone = safeString(
+    process?.client_phone || personalData?.telefone || clientData?.contacto?.telefone,
+  );
+  const headerEmail = safeString(
+    process?.client_email || personalData?.email || clientData?.contacto?.email,
+  );
+  const headerConsultor =
+    safeStringArray(process.consultor_names).join(", ") ||
+    safeString(process.consultor_name || process.assigned_consultor_name);
 
   return (
     <DashboardLayout title="Detalhes do Processo">
@@ -1670,19 +1682,26 @@ const ProcessDetails = () => {
           </Button>
           <div className="flex-1 min-w-0">
             <PageHeader
-              title={`Processo #${safeString(process?.process_number || '')} — ${safeString(clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome) || 'Cliente'}`}
+              title={`Processo #${safeString(process?.process_number || "")}`}
               titleBadge={
                 <StatusBadge status={process.status} workflowStatuses={safeStatusOptions} showOrder={false} />
               }
               description={
-                <span className="flex items-center gap-2 flex-wrap">
-                  <span>{typeLabels[safeString(process.process_type)] || safeString(process.process_type)}</span>
-                  {process?.process_number && (
-                    <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
-                      Nº {safeString(process.process_number)}
-                    </span>
-                  )}
-                  {/* PACOTE DD — Etiquetas movidas para o PageHeader (badges compactos) */}
+                <span className="flex items-center gap-x-3 gap-y-1 flex-wrap text-sm text-muted-foreground">
+                  {headerClientName ? <span>{headerClientName}</span> : null}
+                  {headerPhone ? (
+                    <a href={`tel:${headerPhone}`} className="inline-flex items-center gap-1 hover:text-foreground">
+                      <Phone className="h-3 w-3" aria-hidden="true" />
+                      {headerPhone}
+                    </a>
+                  ) : null}
+                  {headerEmail ? (
+                    <a href={`mailto:${headerEmail}`} className="inline-flex items-center gap-1 hover:text-foreground truncate max-w-[220px]">
+                      <Mail className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      {headerEmail}
+                    </a>
+                  ) : null}
+                  {headerConsultor ? <span>Consultor: {headerConsultor}</span> : null}
                   {Array.isArray(process?.labels) && process.labels.map((label, idx) => (
                     <Badge key={`lbl-${idx}`} variant="secondary" className="text-xs">
                       {safeString(label)}
@@ -2112,18 +2131,8 @@ const ProcessDetails = () => {
                   </div>
                 )}
 
-                {/* Resumo do Processo */}
-                <ProcessSummaryCard
-                  process={process}
-                  statusInfo={currentStatusInfo}
-                  consultorNames={safeStringArray(process.consultor_names)}
-                  mediadorNames={safeStringArray(process.mediador_names)}
-                  consultorName={process.consultor_name || process.assigned_consultor_name}
-                  mediadorName={process.mediador_name || process.assigned_mediador_name}
-                />
-
-                {/* PACOTE DO.1 — Observações + Timeline compacta no Resumo */}
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                {/* PACOTE DO.1 / DP — Observações + Timeline compacta no Resumo */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                   <ProcessObservationsCard
                     process={process}
                     onSave={handleSaveObservations}

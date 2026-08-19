@@ -38,6 +38,7 @@
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
 import api, { setAuthToken, clearAuthToken } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
+import { collectUserRoles, getUserCompanyRecords } from "../utils/userProfiles";
 // PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
 import { isPublicRoute } from "../utils/publicRoutes";
 
@@ -184,7 +185,7 @@ export function AuthProvider({ children }) {
       // Initialize activeRole only once (not on every fetchUser call)
       if (!activeRoleInitialized.current) {
         const savedRole = sessionStorage.getItem("activeRole");
-        const allRoles = [userData.role, ...(userData.additional_roles || [])];
+        const allRoles = collectUserRoles(userData);
         if (savedRole && allRoles.includes(savedRole)) {
           setActiveRole(savedRole);
         } else {
@@ -198,7 +199,7 @@ export function AuthProvider({ children }) {
       if (!activeCompanyInitialized.current) {
         const savedCompanyId = localStorage.getItem("active_company_id")
           || sessionStorage.getItem("activeCompanyId");
-        const companies = userData.companies || [];
+        const companies = getUserCompanyRecords(userData);
 
         // PACOTE AS: Garantir que temos o currentActiveRole para comparar
         let currentActiveRole = activeRole || userData.role;
@@ -366,7 +367,7 @@ export function AuthProvider({ children }) {
     sessionStorage.setItem("activeRole", primaryRole);
     activeRoleInitialized.current = true;
 
-    const companies = userData?.companies || [];
+    const companies = getUserCompanyRecords(userData);
     const matchingCompany = companies.find((c) => c.is_default)
       || companies.find((c) => c.role === primaryRole)
       || companies[0];
@@ -465,40 +466,37 @@ export function AuthProvider({ children }) {
     }
   }, [applyUserContext]);
 
-  // ── Context Switching — Múltiplos Perfis (Hard Reload) ──
+  // ── Context Switching — Múltiplos Perfis ──
   // Recebe newRole e opcionalmente newCompanyId. Se newCompanyId não for
-  // fornecido, infere a empresa a partir de user.companies (procura a
-  // primeira empresa cujo role corresponda ao newRole).
-  // Após atualizar sessionStorage, faz hard reload para garantir que
-  // TODOS os componentes montam de novo, o interceptor api.js lê os
-  // cabeçalhos actualizados do sessionStorage, e cada ecrã carrega os
-  // dados da empresa/perfil certo — sem depender de invalidateQueries
-  // nem de refetch manual que pode falhar silenciosamente.
+  // fornecido, infere a empresa a partir dos UCRs (companies / company_roles).
+  // Pacote DP: actualiza React state + storage (incl. localStorage company)
+  // para que páginas como "Os Meus Processos" voltem a pedir a API sem
+  // depender de hard-reload. O interceptor lê os headers no pedido seguinte.
   const switchActiveRole = useCallback((newRole, newCompanyId = null) => {
     if (!newRole) return;
 
-    // Determinar a empresa associada ao novo role
     let resolvedCompanyId = newCompanyId;
-    if (!resolvedCompanyId && user?.companies) {
-      const matchingCompany = user.companies.find(c => c.role === newRole);
+    if (!resolvedCompanyId) {
+      const matchingCompany = getUserCompanyRecords(user).find((c) => c.role === newRole);
       if (matchingCompany) {
         resolvedCompanyId = matchingCompany.company_id;
       }
     }
 
-    // Gravar AMBOS os valores no sessionStorage ANTES do reload
-    // Isto garante que o interceptor api.js injecta os headers correctos
-    // em todos os pedidos subsequentes após o reload.
     sessionStorage.setItem("activeRole", newRole);
+    setActiveRole(newRole);
+
     if (resolvedCompanyId) {
       sessionStorage.setItem("activeCompanyId", resolvedCompanyId);
+      localStorage.setItem("active_company_id", resolvedCompanyId);
+      setActiveCompanyId(resolvedCompanyId);
+      const matching = getUserCompanyRecords(user).find(
+        (c) => c.company_id === resolvedCompanyId,
+      );
+      if (matching?.company_name) {
+        applyBrandTheme(matching.company_name);
+      }
     }
-
-    // Hard Reload — refresh completo da aplicação
-    // O interceptor api.js lê os novos cabeçalhos limpos do
-    // sessionStorage e todos os ecrãs carregam os dados da
-    // empresa certa, sem cache residual.
-    window.location.reload();
   }, [user]);
 
   // Context Switching - Múltiplas Empresas
@@ -512,7 +510,7 @@ export function AuthProvider({ children }) {
     setActiveCompanyId(companyId);
 
     // Atualizar brand theme antes do reload para feedback visual imediato
-    const companies = user?.companies || [];
+    const companies = getUserCompanyRecords(user);
     const target = companies.find(c => c.company_id === companyId);
     if (target) {
       applyBrandTheme(target.company_name);

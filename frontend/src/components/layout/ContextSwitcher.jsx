@@ -33,7 +33,12 @@ import {
   DropdownMenuLabel,
 } from "../ui/dropdown-menu";
 import { ChevronDown, Shield, Building2 } from "lucide-react";
-import { ROLE_LABELS, ROLE_ICONS, normalizeRole, isSelectableRole } from "../../utils/roleUtils";
+import { ROLE_LABELS, ROLE_ICONS } from "../../utils/roleUtils";
+import {
+  buildUserProfileItems,
+  getUserCompanyRecords,
+  normalizeCompanyRecord,
+} from "../../utils/userProfiles";
 
 const ContextSwitcher = () => {
   const {
@@ -41,77 +46,15 @@ const ContextSwitcher = () => {
     switchActiveCompany, effectiveCompanyId,
   } = useAuth();
 
-  const companies = user?.companies || [];
-  const additionalRoles = user?.additional_roles || [];
+  const companies = getUserCompanyRecords(user)
+    .map((c) => normalizeCompanyRecord(c))
+    .filter(Boolean);
+  const profileItems = buildUserProfileItems(user, { effectiveCompanyId });
 
-  // ── Construir lista de perfis para o dropdown de Role ──
-  // ESTRATÉGIA: Cada combinação empresa+role é um perfil DISTINTO.
-  // Não fazemos dedup por role — o mesmo role em empresas diferentes
-  // representa contextos diferentes (dados, assinatura, etc.).
-  // Além disso, adicionamos additional_roles que NÃO estejam cobertos
-  // por nenhuma empresa (ex: "admin" como role adicional sem empresa).
-  // Encontrar o nome da empresa ativa (necessário antes de construir profileItems)
+  // Encontrar o nome da empresa ativa
   const activeCompanyName = companies.find(c => c.company_id === effectiveCompanyId)?.company_name
     || user?.company
     || "";
-
-  let profileItems = [];
-
-  if (companies.length > 0) {
-    // Fonte principal: companies (objetos com company_id, role, company_name)
-    // SEM dedup — cada empresa é um perfil distinto
-    profileItems = [...companies];
-
-    // Adicionar additional_roles não cobertos por nenhuma empresa
-    // Atribuir a empresa ativa para que a troca de perfil funcione
-    const companyRoles = new Set(companies.map(c => c.role));
-    for (const role of additionalRoles) {
-      if (!companyRoles.has(role)) {
-        profileItems.push({
-          role,
-          company_id: effectiveCompanyId,
-          company_name: activeCompanyName || null,
-          // PACOTE DF — additional_roles não vêm de UCR real, não são is_default
-          is_default: false,
-        });
-      }
-    }
-
-    // Incluir o role primário se não estiver coberto por companies nem additional_roles
-    if (!companyRoles.has(user.role) && !additionalRoles.includes(user.role)) {
-      profileItems.unshift({
-        role: user.role,
-        company_id: effectiveCompanyId,
-        company_name: activeCompanyName || null,
-        // PACOTE DF — role primário sem UCR real; não marca como is_default
-        is_default: false,
-      });
-    }
-  } else {
-    // Fallback: additional_roles (strings) — sem company_id disponível
-    const allRoles = [user.role, ...additionalRoles.filter(r => r !== user.role)];
-    profileItems = allRoles.map(role => ({
-      role,
-      company_id: null,
-      company_name: null,
-      // PACOTE DF — fallback sem UCR real
-      is_default: false,
-    }));
-  }
-
-  // Filtrar entradas sem role válido e roles removidos (ex: Mediador)
-  profileItems = profileItems
-    .filter((p) => isSelectableRole(p.role))
-    .map((p) => ({ ...p, role: normalizeRole(p.role) }));
-
-  // Dedup após normalizar (UCR legado 'mediador' + 'intermediario' na mesma empresa)
-  const seenProfiles = new Set();
-  profileItems = profileItems.filter((p) => {
-    const key = `${p.role}__${p.company_id || ""}`;
-    if (seenProfiles.has(key)) return false;
-    seenProfiles.add(key);
-    return true;
-  });
 
   // Visibilidade: mostrar selector de Role se tem múltiplos perfis
   const hasMultipleRoles = profileItems.length > 1;

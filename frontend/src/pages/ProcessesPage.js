@@ -47,7 +47,7 @@ const ProcessesPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, effectiveRole } = useAuth();
+  const { user, effectiveRole, activeRole, activeCompanyId } = useAuth();
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
   
@@ -348,7 +348,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveRole]);
   
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
   const handleViewModeChange = (newMode) => {
@@ -437,10 +437,10 @@ const ProcessesPage = () => {
     setSortedProcesses(sorted);
   }, [processes, getPriorityWeight]);
 
-  // Re-fetch when filters, sort, view mode, role filter, or search term changes
+  // Re-fetch when filters, sort, view mode, role/company (Header), or search changes
   useEffect(() => {
     fetchProcesses();
-  }, [fetchProcesses, filterByRole, searchTerm]);
+  }, [fetchProcesses, filterByRole, searchTerm, activeRole, activeCompanyId]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {

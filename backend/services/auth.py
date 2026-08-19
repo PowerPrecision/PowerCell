@@ -605,6 +605,25 @@ async def get_user_companies(user_id: str) -> list:
          "signature": 1, "professional_phone": 1, "job_title": 1, "display_name": 1}
     ).sort("company_name", 1).to_list(50)
 
+    # Pacote DP — normalizar aliases (companyId / company) para o frontend
+    # mapear sempre `company_id` + `company_name`.
+    for assoc in associations:
+        company_id = (
+            assoc.get("company_id")
+            or assoc.get("companyId")
+            or assoc.get("company")
+        )
+        company_name = (
+            assoc.get("company_name")
+            or assoc.get("companyName")
+            or assoc.get("company")
+            or company_id
+        )
+        if company_id:
+            assoc["company_id"] = company_id
+        if company_name:
+            assoc["company_name"] = company_name
+
     return associations
 
 

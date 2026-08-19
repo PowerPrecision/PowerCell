@@ -165,6 +165,7 @@ async def run_get_me(request, user: dict):
         "email_signature": effective_email_signature,  # ← Mergeado: signature da empresa ativa ou global
         # ── Multi-empresa: SEMPRE presentes (fallback vazio) ──
         "companies": user_companies or [],
+        "company_roles": user_companies or [],  # alias (Área Pessoal / Header)
         "active_company_id": active_company_id or user.get("company"),
     }
 

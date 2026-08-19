@@ -1,7 +1,7 @@
 /**
- * PACOTE DO.1 — Observações no Resumo do Processo.
- * Textarea Shadcn + guardar no onBlur / botão. Campo `observations`
- * (com fallback para `notes` em processos antigos).
+ * PACOTE DO.1 / DP — Observações no Resumo do Processo.
+ * Textarea com altura automática (h-auto) + guardar no onBlur / botão.
+ * Campo `observations` (fallback `notes` em processos antigos).
  */
 import { useEffect, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "../ui/card";
@@ -32,12 +32,16 @@ export default function ProcessObservationsCard({
       setDirty(false);
       return;
     }
-    await onSave?.(next);
-    setDirty(false);
+    try {
+      await onSave?.(next);
+      setDirty(false);
+    } catch {
+      // Mantém dirty para o utilizador poder repetir; o toast de erro vem do pai.
+    }
   };
 
   return (
-    <Card className="border-border" data-testid="process-observations-card">
+    <Card className="border-border h-auto" data-testid="process-observations-card">
       <CardHeader className="pb-2 py-3 flex flex-row items-center justify-between gap-2 space-y-0">
         <CardTitle className="text-sm flex items-center gap-2">
           <StickyNote className="h-4 w-4 text-muted-foreground" />
@@ -68,7 +72,8 @@ export default function ProcessObservationsCard({
             setDirty(true);
           }}
           onBlur={persist}
-          className="min-h-[120px] text-sm resize-none"
+          rows={3}
+          className="min-h-[80px] h-auto text-sm resize-y"
         />
       </CardContent>
     </Card>
