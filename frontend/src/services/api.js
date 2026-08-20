@@ -12,8 +12,9 @@
  * - Instância Axios singleton com baseURL configurada via env var.
  * - Interceptor de request: injecta automaticamente o token JWT do localStorage.
  * - Interceptor de response com tratamento por código de estado:
- *   - 401: limpa tokens e redireciona para login (restaura sessão original se em
- *     modo impersonate).
+ *   - 401: tenta refresh silencioso; se falhar, bloqueia pedidos futuros (axios +
+ *     fetch), limpa auth, desliga o WebSocket e redirecciona de imediato para
+ *     /login (restaura sessão original se em modo impersonate).
  *   - 403: toast de acesso negado.
  *   - 429: retry automático até 3x com exponential backoff (2s → 4s → 8s) e jitter
  *     aleatório, respeitando o header Retry-When se presente.
@@ -43,6 +44,11 @@ import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 // PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
 import { isPublicRoute } from "../utils/publicRoutes";
+import {
+  forceSessionExpired,
+  installFetch401Guard,
+  isSessionInvalid,
+} from "./sessionExpiry";
 
 // ====================================================================
 // CONFIGURAÇÃO
@@ -128,6 +134,11 @@ api.get = (url, config) => deduplicatedRequest({ method: "get", url, ...config }
 // ====================================================================
 api.interceptors.request.use(
   (config) => {
+    // Pacote DX — sessão inválida: não enviar mais pedidos HTTP (corta polling 401)
+    if (isSessionInvalid()) {
+      return Promise.reject(new axios.CanceledError("Session expired"));
+    }
+
     // Adicionar token de autenticação se existir
     const token = localStorage.getItem("token");
     if (token) {
@@ -322,35 +333,11 @@ api.interceptors.response.use(
       }
 
       if (!isLoginAttempt) {
-        // ============================================================
-        // PACOTE DI — ROTAS PÚBLICAS: Não redirecionar utilizadores em
-        // /portal, /rgpd, /upload, /download para /login.
-        // Estas rotas têm sistemas de auth próprios (portal_token, URL token,
-        // magic link). Se um token de staff expirou enquanto o utilizador
-        // está numa rota pública, limpar apenas o token de staff sem
-        // redirecionar — a rota pública continua a funcionar com o seu token.
-        // ============================================================
-        const isOnPublicRoute = isPublicRoute();
-
-        if (!isOnPublicRoute) {
-          toast.error("Sessão Expirada", {
-            description: "A sua sessão expirou. Por favor, faça login novamente.",
-          });
-        }
-
-        // Limpar dados de autenticação de staff
-        localStorage.removeItem("token");
-        localStorage.removeItem("user");
-        localStorage.removeItem("originalToken");
-
-        // Redirecionar apenas se NÃO estiver numa rota pública
-        if (!isOnPublicRoute) {
-          setTimeout(() => {
-            window.location.href = "/login";
-          }, 1500);
-        }
+        // Pacote DX — bloqueia pedidos futuros, limpa auth, desliga WS e
+        // redirecciona de imediato (rotas públicas: só limpa token staff).
+        forceSessionExpired();
       }
-      
+
       return Promise.reject(error);
     }
     
@@ -502,6 +489,9 @@ export const clearAuthToken = () => {
   localStorage.removeItem("user");
   delete api.defaults.headers.common["Authorization"];
 };
+
+// Pacote DX — interceptar fetch() cru (webmail-stats, chat unread, etc.)
+installFetch401Guard(getRefreshedToken);
 
 /**
  * Verifica se o utilizador está autenticado.

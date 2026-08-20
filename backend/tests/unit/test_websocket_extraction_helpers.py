@@ -50,3 +50,25 @@ def test_websocket_router_is_thin_stubs_only():
     assert "/ws/notifications" in text
     assert "/ws/status" in text
     assert "mark_notification_read" not in text
+
+
+def test_auth_failure_accepts_before_custom_close_codes():
+    """Pacote DX: accept() before close(4001/4002) so browsers get the WS
+    close code instead of an HTTP 403 handshake (infinite reconnect as 1006).
+    """
+    path = Path(__file__).resolve().parents[2] / "services" / "websocket_api_notifications.py"
+    text = path.read_text()
+    expired_idx = text.find('user == "expired"')
+    invalid_idx = text.find('user == "invalid"')
+    assert expired_idx != -1
+    assert invalid_idx != -1
+
+    expired_block = text[expired_idx:invalid_idx]
+    assert "websocket.accept()" in expired_block
+    assert "code=4001" in expired_block
+    assert expired_block.find("websocket.accept()") < expired_block.find("code=4001")
+
+    invalid_block = text[invalid_idx:]
+    assert "websocket.accept()" in invalid_block
+    assert "code=4002" in invalid_block
+    assert invalid_block.find("websocket.accept()") < invalid_block.find("code=4002")
