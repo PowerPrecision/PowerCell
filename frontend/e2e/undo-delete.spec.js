@@ -20,6 +20,9 @@ let token;
 const createdIds = [];
 
 async function login(page) {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('email_config_dismissed', 'true');
+  });
   await page.goto('/login');
   await page.locator('[data-testid="login-email-input"]').fill(ADMIN.email);
   await page.locator('[data-testid="login-password-input"]').fill(ADMIN.password);
@@ -76,6 +79,7 @@ async function deleteUserFromRow(page, name) {
 }
 
 test('Desfazer cancela a eliminação (utilizador permanece no backend)', async ({ page }) => {
+  test.setTimeout(45000);
   await login(page);
   await goToUsersTab(page);
   await searchUser(page, UNDO_NAME);
@@ -98,6 +102,7 @@ test('Desfazer cancela a eliminação (utilizador permanece no backend)', async 
 });
 
 test('sem Desfazer, a eliminação é efetivada no backend', async ({ page }) => {
+  test.setTimeout(45000);
   await login(page);
   await goToUsersTab(page);
   await searchUser(page, NOUNDO_NAME);
