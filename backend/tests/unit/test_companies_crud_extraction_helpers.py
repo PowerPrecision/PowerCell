@@ -73,3 +73,15 @@ def test_company_models_include_is_active():
     assert updated.is_active is False
     response = CompanyResponse(id="1", name="Precision Crédito")
     assert response.is_active is True
+
+
+def test_create_company_strips_mongo_objectid():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "companies_crud_api_mutate.py"
+    ).read_text()
+    assert 'doc.pop("_id"' in text
+    assert 'updated.pop("_id"' in text

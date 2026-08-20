@@ -44,6 +44,7 @@ async def run_create_company(data: CompanyCreate):
     }
 
     await db.companies.insert_one(doc)
+    doc.pop("_id", None)
     logger.info(f"[COMPANIES] Empresa criada: {data.name} ({company_id})")
 
     return CompanyResponse(**doc)
@@ -96,6 +97,7 @@ async def run_update_company(company_id: str, data: CompanyUpdate):
         updated["id"] = real_id
     if not updated.get("name"):
         updated["name"] = company_id
+    updated.pop("_id", None)
 
     logger.info(f"[COMPANIES] Empresa atualizada: {real_id}")
     return CompanyResponse(**updated)

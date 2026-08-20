@@ -28,4 +28,25 @@ test.describe('Organização — Empresas e Acessos', () => {
     await page.locator('[data-testid="tab-utilizadores"]').click();
     await expect(page.locator('[data-testid="org-admin-users-tab"]')).toBeVisible();
   });
+
+  test('cria uma empresa pelo Dialog Nova Empresa', async ({ page }) => {
+    await page.goto('/login');
+    await page.locator('[data-testid="login-email-input"]').fill(ADMIN.email);
+    await page.locator('[data-testid="login-password-input"]').fill(ADMIN.password);
+    await page.locator('[data-testid="login-submit-btn"]').click();
+    await page.waitForURL(/\/(admin|staff|dashboard)/, { timeout: 20000 });
+
+    await page.goto('/admin/organizacao');
+    await expect(page.locator('[data-testid="btn-new-company"]')).toBeVisible({ timeout: 15000 });
+    await page.locator('[data-testid="btn-new-company"]').click();
+    await expect(page.locator('[data-testid="company-form-dialog"]')).toBeVisible();
+
+    const stamp = Date.now();
+    const name = `Empresa E2E ${stamp}`;
+    await page.locator('[data-testid="company-name-input"]').fill(name);
+    await page.locator('[data-testid="company-email-input"]').fill(`geral-${stamp}@e2e.pt`);
+    await page.locator('[data-testid="btn-save-company"]').click();
+
+    await expect(page.getByRole('cell', { name, exact: true })).toBeVisible({ timeout: 10000 });
+  });
 });
