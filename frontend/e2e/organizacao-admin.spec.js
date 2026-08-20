@@ -10,7 +10,7 @@ const ADMIN = {
 };
 
 test.describe('Organização — Empresas e Acessos', () => {
-  test('admin vê a página com tabs Empresas e Utilizadores', async ({ page }) => {
+  test('admin vê a página com tabs Empresas e Acessos/Equipa', async ({ page }) => {
     await page.goto('/login');
     await page.locator('[data-testid="login-email-input"]').fill(ADMIN.email);
     await page.locator('[data-testid="login-password-input"]').fill(ADMIN.password);
@@ -22,11 +22,13 @@ test.describe('Organização — Empresas e Acessos', () => {
       timeout: 15000,
     });
     await expect(page.locator('[data-testid="tab-empresas"]')).toBeVisible();
-    await expect(page.locator('[data-testid="tab-utilizadores"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tab-acessos"]')).toBeVisible();
     await expect(page.locator('[data-testid="btn-new-company"]')).toBeVisible();
+    await expect(page.getByRole('link', { name: 'Administração', exact: true })).toBeVisible();
 
-    await page.locator('[data-testid="tab-utilizadores"]').click();
+    await page.locator('[data-testid="tab-acessos"]').click();
     await expect(page.locator('[data-testid="org-admin-users-tab"]')).toBeVisible();
+    await expect(page.locator('[data-testid="org-admin-users-tab"]')).toContainText('Gerir Acessos');
   });
 
   test('cria uma empresa pelo Dialog Nova Empresa', async ({ page }) => {

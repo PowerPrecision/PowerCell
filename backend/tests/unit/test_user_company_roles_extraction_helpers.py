@@ -1,4 +1,5 @@
 """Unit tests for user_company_roles route thinning (user_company_roles_api_*)."""
+import pytest
 
 
 def test_user_company_roles_api_modules_exist():
@@ -59,7 +60,6 @@ def test_user_company_roles_router_is_thin_stubs_only():
 
 
 def test_user_role_assign_body_validates_role():
-    import pytest
     from pydantic import ValidationError
     from models.user_company_role import UserRoleAssignBody
 
@@ -69,3 +69,66 @@ def test_user_role_assign_body_validates_role():
 
     with pytest.raises(ValidationError):
         UserRoleAssignBody(company_id="c1", role="nao-existe")
+
+
+def test_create_ucr_strips_mongo_objectid():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "user_company_roles_api_crud.py"
+    ).read_text()
+    assert 'doc.pop("_id"' in text
+
+
+@pytest.mark.asyncio
+async def test_assign_user_company_role_resolves_company_and_creates():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from models.user_company_role import UserRoleAssignBody
+    from services import user_company_roles_api_crud as crud
+
+    payload = UserRoleAssignBody(company_id="co-1", role="diretor")
+    mock_db = MagicMock()
+    mock_db.companies.find_one = AsyncMock(
+        return_value={"id": "co-1", "name": "Empresa A"},
+    )
+    mock_db.users.find_one = AsyncMock(return_value={"id": "u1", "name": "Ana"})
+    mock_db.user_company_roles.find_one = AsyncMock(return_value=None)
+    mock_db.user_company_roles.count_documents = AsyncMock(return_value=0)
+    mock_db.user_company_roles.insert_one = AsyncMock()
+    mock_db.user_company_roles.update_many = AsyncMock()
+
+    with patch.object(crud, "db", mock_db):
+        result = await crud.run_assign_user_company_role("u1", payload)
+
+    assert result["success"] is True
+    assert result.get("id")
+    inserted = mock_db.user_company_roles.insert_one.call_args[0][0]
+    assert inserted["user_id"] == "u1"
+    assert inserted["company_id"] == "co-1"
+    assert inserted["company_name"] == "Empresa A"
+    assert inserted["role"] == "diretor"
+    assert inserted["is_default"] is True
+
+
+@pytest.mark.asyncio
+async def test_assign_user_company_role_404_when_company_missing():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from fastapi import HTTPException
+
+    from models.user_company_role import UserRoleAssignBody
+    from services import user_company_roles_api_crud as crud
+
+    payload = UserRoleAssignBody(company_id="missing", role="consultor")
+    mock_db = MagicMock()
+    mock_db.companies.find_one = AsyncMock(return_value=None)
+
+    with patch.object(crud, "db", mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await crud.run_assign_user_company_role("u1", payload)
+
+    assert exc.value.status_code == 404
+    assert "Empresa" in str(exc.value.detail)
