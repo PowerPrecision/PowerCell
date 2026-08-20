@@ -601,9 +601,27 @@ async def get_user_companies(user_id: str) -> list:
 
     associations = await _db.user_company_roles.find(
         {"user_id": user_id},
-        {"_id": 0, "id": 1, "company_id": 1, "company_name": 1, "role": 1, "is_default": 1,
-         "signature": 1, "professional_phone": 1, "job_title": 1, "display_name": 1}
+        {"_id": 0},
     ).sort("company_name", 1).to_list(50)
+
+    # Pacote DP — normalizar aliases (companyId / company) para o frontend
+    # mapear sempre `company_id` + `company_name`.
+    for assoc in associations:
+        company_id = (
+            assoc.get("company_id")
+            or assoc.get("companyId")
+            or assoc.get("company")
+        )
+        company_name = (
+            assoc.get("company_name")
+            or assoc.get("companyName")
+            or assoc.get("company")
+            or company_id
+        )
+        if company_id:
+            assoc["company_id"] = company_id
+        if company_name:
+            assoc["company_name"] = company_name
 
     return associations
 

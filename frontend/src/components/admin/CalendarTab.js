@@ -13,7 +13,7 @@ import { ScrollArea } from "../ui/scroll-area";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
 import { Calendar } from "../ui/calendar";
 import { Plus, Trash2, Eye, CalendarDays, Users } from "lucide-react";
-import { hasAnyRole, excludeRoles } from "../../utils/roleUtils";
+import { hasAnyRole, filterAssignmentStaff } from "../../utils/roleUtils";
 import { safeDateStr, formatDate } from "../../lib/utils";
 
 const priorityOrder = { high: 1, medium: 2, low: 3 };
@@ -43,7 +43,7 @@ const CalendarTab = ({
 
   // Lista de utilizadores para filtro (excluindo clientes, admin e ceo)
   const staffUsers = useMemo(() => {
-    return excludeRoles(users, ["cliente", "admin", "ceo"]);
+    return filterAssignmentStaff(users);
   }, [users]);
 
   // Ordenar e filtrar eventos do calendário
@@ -115,9 +115,14 @@ const CalendarTab = ({
               <CalendarDays className="h-5 w-5" />
               Calendário
             </CardTitle>
-            <Button size="sm" onClick={() => onCreateEvent(selectedDate)} className="bg-teal-600 hover:bg-teal-700">
-              <Plus className="h-4 w-4 mr-1" />Evento
-            </Button>
+            <div className="flex items-center gap-1">
+              <Button size="sm" variant="outline" onClick={() => navigate("/calendario")}>
+                Vista completa
+              </Button>
+              <Button size="sm" onClick={() => onCreateEvent(selectedDate)}>
+                <Plus className="h-4 w-4 mr-1" />Evento
+              </Button>
+            </div>
           </div>
         </CardHeader>
         <CardContent className="space-y-4">

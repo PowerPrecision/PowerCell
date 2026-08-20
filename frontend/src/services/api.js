@@ -134,18 +134,27 @@ api.interceptors.request.use(
       config.headers.Authorization = `Bearer ${token}`;
     }
 
-    // Injetar X-Active-Role para Context Isolation
+    // Injetar X-Active-Role para Context Isolation.
+    // PACOTE DM: não sobrescrever se o pedido já definiu o header
+    // (ex.: Área Pessoal a gravar no UCR de uma tab que não é a empresa activa).
     const activeRole = sessionStorage.getItem("activeRole") || localStorage.getItem("activeRole");
-    if (activeRole) {
+    const existingRole = typeof config.headers.get === "function"
+      ? config.headers.get("X-Active-Role")
+      : config.headers["X-Active-Role"];
+    if (activeRole && !existingRole) {
       config.headers["X-Active-Role"] = activeRole;
     }
 
     // PACOTE AR: Injetar X-Company-Id para Contexto Multi-Empresa.
     // Ler de localStorage (persiste entre sessões) com fallback para
     // sessionStorage (retrocompatibilidade).
+    // PACOTE DM: respeitar override por-pedido (ProfileRoleTab / EmailConfigForm).
     const activeCompanyId = localStorage.getItem("active_company_id")
       || sessionStorage.getItem("activeCompanyId");
-    if (activeCompanyId) {
+    const existingCompany = typeof config.headers.get === "function"
+      ? config.headers.get("X-Company-Id")
+      : config.headers["X-Company-Id"];
+    if (activeCompanyId && !existingCompany) {
       config.headers["X-Company-Id"] = activeCompanyId;
     }
 
@@ -441,7 +450,10 @@ api.interceptors.response.use(
         ? "Ocorreu um erro interno. Contacte o suporte se o problema persistir."
         : serverDetail;
 
-      toast.error("Erro de Servidor", { description });
+      const skipToast = config?.skipErrorToast;
+      if (!skipToast) {
+        toast.error("Erro de Servidor", { description });
+      }
 
       // Log do erro para debugging
       console.error("[API] Server error:", {
@@ -505,6 +517,7 @@ export const isAuthenticated = () => {
 
 // Processes
 export const getProcesses = (params = {}) => api.get("/processes", { params });
+export const getMyProcesses = (params = {}) => api.get("/processes/me", { params });
 export const getProcessesPaginated = (params = {}) => api.get("/processes/paginated", { params });
 export const getProcess = (id) => api.get(`/processes/${id}`);
 export const createProcess = (data) => api.post("/processes", data);
@@ -572,8 +585,15 @@ export const updateDeadline = (id, data) => api.put(`/deadlines/${id}`, data);
 export const deleteDeadline = (id) => api.delete(`/deadlines/${id}`);
 
 // Users (Admin)
-export const getUsers = (role) => 
-  api.get("/users", { params: { role } });
+export const getUsers = (role, { forAssignment } = {}) =>
+  api.get("/users", {
+    params: {
+      role,
+      ...(forAssignment ? { for_assignment: true } : {}),
+    },
+  });
+/** Staff para dropdowns de atribuição (sem admin/indexação). Pacote DT. */
+export const getStaffUsers = () => api.get("/users/staff");
 export const createUser = (data) => api.post("/admin/users", data);
 export const updateUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/admin/users/${id}`);
@@ -582,6 +602,24 @@ export const deleteUser = (id) => api.delete(`/admin/users/${id}`);
 export const getUserEmailConfig = (userId) => api.get(`/admin/users/${userId}/email-config`);
 export const setUserEmailConfig = (userId, data) => api.post(`/admin/users/${userId}/email-config`, data);
 export const testUserEmailConfig = (userId) => api.post(`/admin/users/${userId}/email-config/test`);
+
+// Contas de email do próprio utilizador (Pacote DN.4)
+export const listMyEmailAccounts = (companyId) =>
+  api.get("/users/me/email-accounts", {
+    params: companyId ? { company_id: companyId } : {},
+    headers: companyId && companyId !== "default" ? { "X-Company-Id": companyId } : {},
+  });
+export const addMyEmailAccount = (data, companyId) =>
+  api.post("/users/me/email-accounts", data, {
+    params: companyId ? { company_id: companyId } : {},
+    headers: companyId && companyId !== "default" ? { "X-Company-Id": companyId } : {},
+  });
+export const updateMyEmailAccount = (accountId, data) =>
+  api.put(`/users/me/email-accounts/${accountId}`, data);
+export const deleteMyEmailAccount = (accountId) =>
+  api.delete(`/users/me/email-accounts/${accountId}`);
+export const setPrimaryEmailAccount = (accountId) =>
+  api.post(`/users/me/email-accounts/${accountId}/set-primary`);
 
 // Stats
 export const getStats = () => api.get("/stats");
@@ -598,11 +636,15 @@ export const getActivities = (processId, limit = 50) => {
   return api.get("/activities", { params });
 };
 export const createActivity = (data) => api.post("/activities", data);
+export const addProcessObservationNote = (processId, text) =>
+  api.post(`/processes/${processId}/observation-notes`, { text });
 export const deleteActivity = (id) => api.delete(`/activities/${id}`);
 
 // History
 export const getHistory = (processId) => 
   api.get("/history", { params: { process_id: processId } });
+export const getProcessTimeline = (processId, limit = 40) =>
+  api.get(`/processes/${processId}/timeline`, { params: { limit } });
 
 // Workflow Statuses
 export const getWorkflowStatuses = () => api.get("/admin/workflow-statuses");
@@ -644,6 +686,15 @@ export const getS3DownloadUrl = (processId, filePath) =>
 export const analyzeDocument = (data) => api.post("/ai/analyze-document", data);
 export const analyzeOneDriveDocument = (data) => api.post("/ai/analyze-onedrive-document", data);
 export const getSupportedDocuments = () => api.get("/ai/supported-documents");
+export const getProcessAiAnalysis = (processId) =>
+  api.get(`/processes/${processId}/analyze`);
+export const generateProcessAiAnalysis = (processId, force = false) =>
+  api.post(`/processes/${processId}/analyze`, null, {
+    params: { force },
+    skipErrorToast: true,
+  });
+export const getProcessAiAgentAnalysis = (processId) =>
+  api.get(`/ai-agent/analyze/${processId}`);
 
 // PACOTE DJ — Revisão Human-in-the-Loop de Documentos
 // A IA sugere metadados (categoria, validade, nome, filename) em campos `suggested_*`
@@ -686,7 +737,13 @@ export const impersonateUser = (userId) => api.post(`/admin/impersonate/${userId
 export const stopImpersonate = () => api.post("/admin/stop-impersonate");
 
 // Admin Users (CRUD completo)
-export const getAdminUsers = (role) => api.get("/admin/users", { params: { role } });
+export const getAdminUsers = (role, { forAssignment } = {}) =>
+  api.get("/admin/users", {
+    params: {
+      role,
+      ...(forAssignment ? { for_assignment: true } : {}),
+    },
+  });
 export const createAdminUser = (data) => api.post("/admin/users", data);
 export const updateAdminUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);

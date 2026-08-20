@@ -3,6 +3,59 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-08-18] — Pacote DO.3+4: Caixa Geral no Diretor e SMTP dos balcões
+
+### Adicionado
+- **DO.3:** `GET /users/me/email-accounts` injeta a Caixa Geral da empresa quando o cargo activo do UCR é `diretor`, sem exigir password pessoal. Conta virtual `id=caixa-geral` (só leitura) na Área Pessoal e no Select do Webmail.
+
+### Corrigido
+- **DO.3:** o acesso à tab Caixa Geral e ao sync global usa o cargo efectivo (`X-Active-Role` / UCR), não só o role primário do JWT.
+- **DO.4:** «Enviar para balcões» deixa de autenticar no transporter `DOCUMENTS` (credenciais erradas / ENC:). Usa a password desencriptada do perfil de email activo ou da Caixa Geral. Erros SMTP são logados sem stack trace no cliente.
+
+---
+
+## [2026-08-18] — Pacote DO.1+2: Observações, Timeline no Resumo e Calendário Visual
+
+### Adicionado
+- **Observações no Resumo** (`observations` no modelo de Processo, sincronizado com `notes`): Textarea Shadcn com guardar no botão e no `onBlur`.
+- **Timeline compacta** no Resumo (linha vertical + nós) a partir do histórico existente; `GET /processes/{id}/timeline` normaliza criação + mudanças de fase. Histórico completo continua no tab Histórico.
+- **Calendário visual** (mensal/semanal, pontos nos dias com eventos) no Dashboard do Consultor e no Portal do Cliente. Consome a Agenda DH; o Portal só mostra `visible_to_client=true` (`GET /portal/events?include_past=true`).
+
+---
+
+## [2026-08-18] — Pacote DN.3+4: Emails do processo e contas múltiplas
+
+### Corrigido
+- **Separador Emails do processo**: a listagem (`GET /api/emails/process/{id}`) passa a incluir CC e a procurar no motor todas as mensagens em que De, Para ou CC correspondem ao email do cliente (e 2º titular / emails monitorizados). Mensagens ainda não ligadas a um processo aparecem no histórico; clique abre o leitor. Documentos incompletos (sem `status`/`created_at`) são normalizados para não devolver 500.
+
+### Adicionado
+- **Várias contas de email por perfil**: `user_email_configs` deixa de ser 1:1 por empresa. Índice único `{user_id, company_id, email_address}`; campo `is_primary`. Endpoints `GET/POST /users/me/email-accounts` e `PUT/DELETE /users/me/email-accounts/{id}` (+ `set-primary`).
+- Área Pessoal: lista de contas no cartão Webmail e botão **+ Adicionar Conta de Email** (IMAP/SMTP ou OAuth) num Dialog Shadcn.
+- Webmail: Select no topo para alternar entre as contas do perfil activo (`mailbox=` na listagem/sync).
+
+---
+
+### Corrigido
+- **Webmail misturava emails de vários perfis**: a página usava `user.company_id` e `fetch` sem `X-Active-Role`/`X-Company-Id` do Header. Passa a usar `activeCompanyId` do AuthContext e envia o contexto UCR em todos os pedidos. Backend filtra listagem/stats/sync pela mailbox da UCR activa (não inclui emails sem empresa de outras contas).
+- **Anexos de emails recebidos não descarregavam**: o botão só aparecia se existisse `attachment.url` (IMAP não gravava URL). Novo `GET /api/webmail/attachments/{id}` devolve stream binário (`Content-Disposition: attachment`) a partir de S3, BD ou IMAP; 404 se o anexo não existir.
+
+### Adicionado
+- IDs de anexo na sync IMAP; `company_id` nos emails sincronizados para o perfil activo.
+- UI de anexos no painel de leitura: nome, tamanho e botão de download (tokens Shadcn).
+
+---
+## [2026-08-18] — Pacote DM: Área Pessoal, Rascunhos e UX Base
+
+### Corrigido
+- **Configuração de email multi-perfil**: o interceptor Axios já não sobrescreve `X-Company-Id`/`X-Active-Role` definidos no pedido. `EmailConfigForm` grava IMAP/SMTP isolado por `company_id` (body + query + header da tab). Backend resolve na mesma ordem, com logs e tratamento de erros.
+- **Assinatura de email**: HTML (`<p>`, `<br>`, `<img>`) sanitizado com DOMPurify; imagens `data:`/`cid:`/`https`; unescape se estiver gravado como entidades. Pré-visualização na Área Pessoal e no compositor.
+- **Rascunhos no Dashboard**: o clique já não envia emails/leads para ProcessDetails. Emails abrem `/webmail?folder=drafts&id=`; pré-registo vai para Registos de Clientes; processos usam `/processo/:id`.
+
+### Alterado
+- Perfil **Mediador** removido da UI (`normalizeRole` → Intermediário). Dropbox extra de empresa no Diretor oculta — o contexto vem do perfil no Header.
+- **Impersonate**: menus de Administração só se o utilizador impersonado for admin/CEO; `activeRole` é redefinido para o alvo.
+
+---
 ## [2026-07-25] — Pacote DJ (Híbrido): Sistema de Confiança — Zero-Touch + HITL
 
 ### Alterado

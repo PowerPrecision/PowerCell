@@ -1,4 +1,163 @@
 ---
+Task ID: pacote-do3-do4-email-smtp
+Agent: Cloud Agent
+Task: Pacote DO.3+4 — Diretor na Caixa Geral e correção SMTP dos balcões
+
+Date: 2026-08-18
+
+Work Log:
+- DO.3: GET /users/me/email-accounts injeta a Caixa Geral (system_config.email / contas globais) quando o cargo activo do UCR é diretor; sem password pessoal; id virtual caixa-geral read-only
+- DO.3: Webmail tab/sync/stats usam effectiveRole + UCR; mailbox da Caixa Geral trata-se como box=general
+- DO.4: send-documentation autentica com password desencriptada do perfil activo, fallback Caixa Geral; deixa de usar system_purpose=DOCUMENTS
+- DO.4: decrypt_email_secret nunca envia blob ENC: ao SMTP; erros de autenticação logados (host/user) sem stack no cliente
+- Docs: ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Diretor vê a Caixa Geral na lista de contas do Webmail sem configurar password
+- Enviar para balcões usa as credenciais certas do perfil / caixa geral
+
+Files:
+- backend/services/email_config_resolver.py
+- backend/services/users_api_email_config.py
+- backend/services/email_webmail.py
+- backend/services/email_documentation.py
+- backend/services/email_service.py
+- backend/services/email.py
+- frontend/src/pages/WebmailPage.jsx
+- frontend/src/components/EmailAccountsCard.jsx
+- ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+---
+Task ID: pacote-do-resumo-calendario
+Agent: Cloud Agent (cursor/pacote-do-resumo-calendario-74b9)
+Task: Pacote DO.1+2 — Observações/Timeline no Resumo e Calendário Visual
+
+Date: 2026-08-18
+
+Work Log:
+- DO.1: campo `observations` no Processo; persistência sincroniza com `notes`; GET /processes/{id}/timeline reutiliza a coleção `history`
+- DO.1: Resumo com ProcessObservationsCard + ProcessSummaryTimeline (Progressive Disclosure; filme completo no tab Histórico)
+- DO.2: AgendaCalendar (Shadcn Calendar + vista semanal, pontos nos dias) no ConsultorDashboard e ClientPortal
+- DO.2: Portal GET /events?include_past=true; filtro visible_to_client mantém-se
+- Docs: ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Observações de fácil acesso no Resumo, com timeline cronológica compacta
+- Calendário visual da Agenda DH no Dashboard e no Portal (só eventos visíveis ao cliente)
+
+Files:
+- backend/models/process.py
+- backend/services/process_update.py, process_create.py, process_service.py
+- backend/services/process_timeline.py, portal_events.py
+- backend/routes/processes.py, portal.py
+- frontend/src/components/processDetails/ProcessObservationsCard.jsx
+- frontend/src/components/processDetails/ProcessSummaryTimeline.jsx
+- frontend/src/components/calendar/AgendaCalendar.jsx
+- frontend/src/pages/ProcessDetails.js, ConsultorDashboard.js, ClientPortal.jsx
+- ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+---
+Task ID: pacote-dn3-dn4-emails
+Agent: Cloud Agent (cursor/pacote-dn3-dn4-emails-edb4)
+Task: Pacote DN.3+4 — Emails do Processo e Contas Múltiplas
+
+Date: 2026-08-18
+
+Work Log:
+- DN.3: GET /emails/process/{id} e stats fazem match em from/to/cc do cliente (processo + 2º titular + monitored + clients.contacto.email); listagem normaliza docs incompletos (status/created_at)
+- DN.3: EmailsTab com tokens semânticos; clique na linha continua a abrir EmailViewerModal
+- DN.4: user_email_configs 1:N por empresa (unique user+company+email_address, is_primary)
+- DN.4: CRUD /users/me/email-accounts; Área Pessoal lista + Adicionar Conta; Webmail Select mailbox
+- Docs: ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Histórico de emails do processo inclui CC e mensagens do cliente ainda não ligadas
+- Um perfil pode ter várias contas IMAP/SMTP/OAuth e o Webmail troca entre elas
+
+Files:
+- backend/services/email_process_crud.py
+- backend/models/email_config.py
+- backend/services/user_email_config_service.py
+- backend/services/users_api_email_config.py
+- backend/routes/users.py
+- backend/services/email_webmail.py
+- frontend/src/components/EmailAccountsCard.jsx
+- frontend/src/components/ProfileRoleTab.jsx
+- frontend/src/pages/WebmailPage.jsx
+- frontend/src/components/processDetails/tabs/EmailsTab.jsx
+- ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+---
+Task ID: pacote-dn-webmail-perfil-anexos
+Agent: Cloud Agent (cursor/pacote-dn-webmail-perfil-anexos-90f2)
+Task: Pacote DN.1+2 — Motor de Webmail (filtro UCR + download anexos)
+
+Date: 2026-08-18
+
+Work Log:
+- DN.2: WebmailPage deixa de usar user.company_id; lê activeCompanyId/effectiveRole do AuthContext e envia X-Company-Id + X-Active-Role em todos os fetch
+- DN.2: listagem/stats usam build_ucr_mailbox_filter (company_id da UCR ou account=mailbox); já não misturam emails globais/outros perfis
+- DN.2: sync_user_emails grava company_id (resolved_company_id) e faz dedup por message_id+user+empresa
+- DN.1: GET /api/webmail/attachments/{id} (routes/webmail.py) → StreamingResponse; S3 → BD → IMAP; 404 se não encontrado
+- DN.1: painel de leitura mostra badges de anexo (nome/tamanho) com botão download sempre visível
+- Docs: ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Trocar perfil no Header recarrega a mailbox certa
+- Anexos de emails recebidos descarregam via endpoint autenticado
+
+Files:
+- frontend/src/pages/WebmailPage.jsx
+- backend/services/email_webmail.py
+- backend/services/email_mailbox_ops.py
+- backend/services/email_service.py
+- backend/services/email_process_crud.py
+- backend/routes/webmail.py
+- backend/routes/emails.py
+- backend/server.py
+- backend/tests/unit/test_webmail_profile_attachments.py
+- backend/tests/unit/test_email_extraction_helpers.py
+- ARCHITECTURE.md, CHANGELOG.md, worklog.md
+
+---
+Task ID: pacote-dm-area-pessoal-rascunhos-ux
+Agent: Cloud Agent (cursor/pacote-dm-area-pessoal-rascunhos-ux-08c2)
+Task: Pacote DM — Área Pessoal, Rascunhos e UX Base
+
+Date: 2026-08-18
+
+Work Log:
+- Email IMAP/SMTP: interceptor `api.js` deixa de sobrescrever `X-Company-Id`/`X-Active-Role`; `EmailConfigForm` grava com body+query+header do UCR da tab; backend `run_save_my_email_config` resolve company_id body → query → header, com try/except e logs
+- Assinatura: `sanitizeEmailHtml` permite data:/cid:/https nas imagens + unescape de HTML entity-encoded; pré-visualização `RichTextViewer` na Área Pessoal; compositor Webmail com classes de imagem
+- Perfil Mediador removido da UI (`normalizeRole` / `REMOVED_ROLES`); dropbox de empresa do Diretor oculta no `ContextSwitcher`
+- Impersonate: `applyUserContext` redefine role/empresa; sidebar esconde Administração se o impersonado não for admin/CEO
+- Dashboard rascunhos: `getDraftNavigationTarget` — email → webmail drafts+composer; pre_registo → registos-clientes; resto → `/processo/:id`
+- Docs: ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+Stage Summary:
+- Multi-perfil consegue guardar config de email da tab certa
+- Assinatura HTML/imagens renderiza em vez de código cru
+- Sem perfil fantasma Mediador; menus admin não vazam no impersonate
+- Clique em rascunho no Dashboard abre o editor correcto
+
+Files:
+- frontend/src/services/api.js
+- frontend/src/components/EmailConfigForm.jsx
+- frontend/src/components/ProfileRoleTab.jsx
+- frontend/src/utils/sanitize.js
+- frontend/src/utils/roleUtils.js
+- frontend/src/utils/draftNavigation.js
+- frontend/src/components/layout/ContextSwitcher.jsx
+- frontend/src/contexts/AuthContext.js
+- frontend/src/layouts/DashboardLayout.js
+- frontend/src/pages/ConsultorDashboard.js
+- frontend/src/pages/WebmailPage.jsx
+- backend/services/users_api_email_config.py
+- backend/routes/users.py
+- backend/tests/unit/test_users_extraction_helpers.py
+- ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: processdetails-mutations-docs
 Agent: Cloud Agent (cursor/multi-profile-ai-visits-toasts-0b1c)
 Task: ProcessDetails TanStack mutations + portal fulfill + toasts sticky + titular IA + docs

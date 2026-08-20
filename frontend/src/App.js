@@ -64,6 +64,7 @@ const ClientsPage = React.lazy(() => import("./pages/ClientsPage"));
 const LeadsPage = React.lazy(() => import("./pages/LeadsPage"));
 const TeamPerformanceDashboard = React.lazy(() => import("./pages/TeamPerformanceDashboard"));
 const VisitsPage = React.lazy(() => import("./pages/VisitsPage"));
+const CalendarPage = React.lazy(() => import("./pages/CalendarPage"));
 const MyClientsPage = React.lazy(() => import("./pages/MyClientsPage"));
 const ClientDetailPage = React.lazy(() => import("./pages/ClientDetailPage"));
 const BackupsPage = React.lazy(() => import("./pages/BackupsPage"));
@@ -314,7 +315,7 @@ function App() {
             }
           />
 
-          {/* Staff Dashboard (Consultor, Mediador, Diretor, Administrativo, CEO) - Resumo/KPIs */}
+          {/* Staff Dashboard (Consultor, Intermediário, Diretor, Administrativo, CEO) - Resumo/KPIs */}
           <Route
             path="/staff"
             element={
@@ -463,6 +464,19 @@ function App() {
               </ProtectedRoute>
             }
           />
+
+          {/* PACOTE DQ — Calendário dedicado (mensal/semanal) */}
+          <Route
+            path="/calendario"
+            element={
+              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+                <RouteBoundary name="Calendário">
+                  <CalendarPage />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+          <Route path="/agenda" element={<Navigate to="/calendario" replace />} />
           
           {/* Clients Page - Staff and Admin */}
           <Route

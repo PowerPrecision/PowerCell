@@ -110,16 +110,26 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                 imap_server = email_config.get("imap_server")
                 
                 if smtp_user and smtp_password and (smtp_server or imap_server):
-                    accounts.append(EmailAccount(
-                        name="power",
-                        imap_server=imap_server or smtp_server,
-                        imap_port=int(email_config.get("imap_port", 993)),
-                        smtp_server=smtp_server or imap_server,
-                        smtp_port=int(email_config.get("smtp_port", 465)),
-                        email=smtp_user,
-                        password=smtp_password
-                    ))
-                    logger.info(f"Conta Power carregada da DB: {smtp_user}")
+                    from services.email_config_resolver import decrypt_email_secret
+                    smtp_password = decrypt_email_secret(
+                        smtp_password,
+                        f"system_config.email power user={smtp_user}",
+                    )
+                    if not smtp_password:
+                        logger.warning(
+                            "Conta Power: password não desencriptável — a ignorar esta conta"
+                        )
+                    else:
+                        accounts.append(EmailAccount(
+                            name="power",
+                            imap_server=imap_server or smtp_server,
+                            imap_port=int(email_config.get("imap_port", 993)),
+                            smtp_server=smtp_server or imap_server,
+                            smtp_port=int(email_config.get("smtp_port", 465)),
+                            email=smtp_user,
+                            password=smtp_password
+                        ))
+                        logger.info(f"Conta Power carregada da DB: {smtp_user}")
                 else:
                     logger.warning(f"Conta Power incompleta: user={bool(smtp_user)}, pass={bool(smtp_password)}, server={bool(smtp_server or imap_server)}")
                 
@@ -130,16 +140,26 @@ async def get_email_accounts_async() -> List[EmailAccount]:
                 imap_server_2 = email_config.get("imap_server_2")
                 
                 if smtp_user_2 and smtp_password_2 and (smtp_server_2 or imap_server_2):
-                    accounts.append(EmailAccount(
-                        name="precision",
-                        imap_server=imap_server_2 or smtp_server_2,
-                        imap_port=int(email_config.get("imap_port_2", 993)),
-                        smtp_server=smtp_server_2 or imap_server_2,
-                        smtp_port=int(email_config.get("smtp_port_2", 465)),
-                        email=smtp_user_2,
-                        password=smtp_password_2
-                    ))
-                    logger.info(f"Conta Precision carregada da DB: {smtp_user_2}")
+                    from services.email_config_resolver import decrypt_email_secret
+                    smtp_password_2 = decrypt_email_secret(
+                        smtp_password_2,
+                        f"system_config.email precision user={smtp_user_2}",
+                    )
+                    if not smtp_password_2:
+                        logger.warning(
+                            "Conta Precision: password não desencriptável — a ignorar esta conta"
+                        )
+                    else:
+                        accounts.append(EmailAccount(
+                            name="precision",
+                            imap_server=imap_server_2 or smtp_server_2,
+                            imap_port=int(email_config.get("imap_port_2", 993)),
+                            smtp_server=smtp_server_2 or imap_server_2,
+                            smtp_port=int(email_config.get("smtp_port_2", 465)),
+                            email=smtp_user_2,
+                            password=smtp_password_2
+                        ))
+                        logger.info(f"Conta Precision carregada da DB: {smtp_user_2}")
                 else:
                     logger.warning(f"Conta Precision incompleta: user={bool(smtp_user_2)}, pass={bool(smtp_password_2)}, server={bool(smtp_server_2 or imap_server_2)}")
                     
@@ -452,6 +472,7 @@ async def send_email(
     skip_proc_tag: bool = False,
     from_email: Optional[str] = None,
     active_company_id: Optional[str] = None,
+    account_override: Optional["EmailAccount"] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -497,6 +518,8 @@ async def send_email(
             - content_type (str): Tipo MIME (ex: "application/pdf").
         force_system: Se True, nunca faz fallback para credenciais pessoais
             do utilizador. Usa exclusivamente a conta global do sistema.
+        account_override: Conta SMTP já resolvida (Pacote DO.4). Quando
+            fornecida, ignora a resolução por account_name / system_purpose.
 
     Returns:
         dict: Resultado da operação:
@@ -508,8 +531,13 @@ async def send_email(
         smtplib.SMTPException: Se a autenticação ou o envio SMTP falharem.
     """
     # === system_purpose: tentar config específica por propósito (zero downtime) ===
-    account = None
-    if force_system and system_purpose:
+    account = account_override
+    if account is not None:
+        logger.info(
+            "[Send Email] Usando account_override name=%s user=%s host=%s",
+            account.name, account.email, account.smtp_server,
+        )
+    if account is None and force_system and system_purpose:
         try:
             from services.email import get_system_transporter
             transporter = await get_system_transporter(system_purpose)
@@ -534,8 +562,9 @@ async def send_email(
         account = next((a for a in accounts if a.name == account_name), None)
     
     # Se a conta pedida é "personal", ir diretamente para a config do utilizador
-    # sem nunca cair nas contas globais (isolamento de remetente)
-    if account_name == "personal" and created_by:
+    # sem nunca cair nas contas globais (isolamento de remetente).
+    # Pacote DO.4: se já veio account_override, não voltar a resolver.
+    if account_override is None and account_name == "personal" and created_by:
         from services.encryption import encryption_service
         user = await db.users.find_one(
             {"id": created_by},
@@ -918,9 +947,24 @@ async def send_email(
             )
         else:
             # --- SMTP directo (legado) ---
+            from services.email_config_resolver import decrypt_email_secret
+            smtp_password = decrypt_email_secret(
+                account.password,
+                f"send_email account={account.name} user={account.email} host={account.smtp_server}",
+            )
+            if not smtp_password:
+                logger.error(
+                    "[Send Email] Password SMTP vazia ou não desencriptável "
+                    "account=%s user=%s host=%s:%s",
+                    account.name, account.email, account.smtp_server, account.smtp_port,
+                )
+                return {
+                    "success": False,
+                    "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa.",
+                }
             context = ssl.create_default_context()
             with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context, timeout=30) as server:
-                server.login(account.email, account.password)
+                server.login(account.email, smtp_password)
                 
                 all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
                 server.sendmail(account.email, all_recipients, msg.as_string())
@@ -932,9 +976,12 @@ async def send_email(
         if attachments:
             for att in attachments:
                 attachment_records.append({
+                    "id": att.get("id") or str(uuid.uuid4()),
                     "filename": att.get("filename", "documento"),
                     "content_type": att.get("content_type", "application/octet-stream"),
-                    "size": len(att.get("content_bytes", b""))
+                    "size": len(att.get("content_bytes", b"")),
+                    "s3_key": att.get("s3_key"),
+                    "temp_key": att.get("temp_key"),
                 })
         
         if process_id:
@@ -957,15 +1004,43 @@ async def send_email(
                 "synced_for_user": created_by,
                 "notes": f"Enviado via {account.name}" + (f" com {len(attachment_records)} anexo(s)" if attachment_records else ""),
                 "synced": False,
-                "account": account.name
+                "account": account.email or account.name,
             }
+            if active_company_id and active_company_id != "default":
+                email_doc["company_id"] = active_company_id
             await db.emails.insert_one(email_doc)
         
         return {"success": True, "account": account.name}
         
+    except smtplib.SMTPAuthenticationError as e:
+        logger.error(
+            "[Send Email] Autenticação SMTP recusada account=%s user=%s host=%s:%s: %s",
+            getattr(account, "name", "?"),
+            getattr(account, "email", "?"),
+            getattr(account, "smtp_server", "?"),
+            getattr(account, "smtp_port", "?"),
+            e,
+        )
+        return {
+            "success": False,
+            "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa ou da Caixa Geral.",
+        }
     except Exception as e:
-        logger.error(f"Erro ao enviar email via {account.name}: {e}")
-        return {"success": False, "error": str(e)}
+        logger.error(
+            "[Send Email] Erro ao enviar via %s user=%s host=%s: %s: %s",
+            getattr(account, "name", "?"),
+            getattr(account, "email", "?"),
+            getattr(account, "smtp_server", "?"),
+            type(e).__name__,
+            e,
+        )
+        err_lower = str(e).lower()
+        if "incorrect authentication" in err_lower or "authentication" in err_lower:
+            return {
+                "success": False,
+                "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa ou da Caixa Geral.",
+            }
+        return {"success": False, "error": "Não foi possível enviar o email. Tente novamente."}
 
 
 async def test_email_connection(account_name: str = None) -> Dict[str, Any]:
@@ -1140,7 +1215,7 @@ def _fetch_all_from_folder_sync(
                     except Exception:
                         email_date = datetime.now()
                 
-                # Extrair anexos
+                # Extrair anexos (com id estável para download — Pacote DN.1)
                 attachments = []
                 for part in msg.walk():
                     content_disposition = str(part.get("Content-Disposition", ""))
@@ -1149,9 +1224,10 @@ def _fetch_all_from_folder_sync(
                         filename = decode_email_header(filename)
                         size = len(part.get_payload(decode=True) or b"")
                         attachments.append({
+                            "id": str(uuid.uuid4()),
                             "filename": filename,
                             "content_type": part.get_content_type(),
-                            "size": size
+                            "size": size,
                         })
                 
                 emails_found.append({
@@ -1644,6 +1720,9 @@ async def sync_user_emails(
         user_login_email = (config.get("email_address") or "").lower().strip()
         if not config.get("encrypted_password"):
             return {"success": False, "error": "Password não configurada"}
+        company_id = (config.get("resolved_company_id") or "").strip() or None
+        if company_id == "default":
+            company_id = None
     else:
         user = await db.users.find_one(
             {"id": user_id},
@@ -1658,6 +1737,7 @@ async def sync_user_emails(
         config = user["email_config"]
         if not config.get("is_configured"):
             return {"success": False, "error": "Configuração de email não ativa"}
+        company_id = None
     
     encrypted_password = config.get("encrypted_password", "")
     if not encrypted_password:
@@ -1777,11 +1857,17 @@ async def sync_user_emails(
                 if not msg_id:
                     continue
                 
-                # Verificar se já existe (por message_id + user_id para isolamento)
-                existing = await db.emails.find_one({
+                # Verificar se já existe (por message_id + user_id + empresa)
+                existing_query = {
                     "message_id": msg_id,
                     "synced_for_user": user_id,
-                })
+                }
+                if company_id:
+                    existing_query["company_id"] = company_id
+                mailbox_addr = (config.get("email_address") or "").strip().lower()
+                if mailbox_addr:
+                    existing_query["account"] = mailbox_addr
+                existing = await db.emails.find_one(existing_query)
                 
                 if existing:
                     total_duplicates += 1
@@ -1862,6 +1948,8 @@ async def sync_user_emails(
                     "in_reply_to": in_reply_to or None,
                     "references": references or [],
                 }
+                if company_id:
+                    email_doc["company_id"] = company_id
                 
                 await db.emails.insert_one(email_doc)
                 total_synced += 1
@@ -2636,3 +2724,75 @@ async def _get_email_account_for_email(account_value: str, synced_for_user: str 
                 return acc
     
     return None
+
+
+def fetch_attachment_bytes_from_imap_sync(
+    account: "EmailAccount",
+    message_id: str,
+    filename: str,
+) -> Optional[bytes]:
+    """Lê o payload de um anexo IMAP pelo Message-ID + filename (Pacote DN.1)."""
+    if not account or not message_id or not filename:
+        return None
+
+    mail = None
+    try:
+        context = ssl.create_default_context()
+        mail = imaplib.IMAP4_SSL(
+            account.imap_server, account.imap_port, ssl_context=context, timeout=30
+        )
+        mail.login(account.email, account.password)
+
+        mid = message_id.strip()
+        variants = [mid]
+        if not mid.startswith("<"):
+            variants.append(f"<{mid}>")
+        elif mid.startswith("<") and mid.endswith(">"):
+            variants.append(mid[1:-1])
+
+        folders = [
+            "INBOX", "Sent", "INBOX.Sent", "Sent Items", "Enviados",
+            "[Gmail]/Sent Mail", "[Gmail]/E-mails enviados",
+            "Drafts", "INBOX.Drafts", "[Gmail]/Drafts",
+        ]
+        target = filename.lower().strip()
+
+        for folder in folders:
+            result, _ = mail.select(folder)
+            if result != "OK":
+                continue
+            for variant in variants:
+                try:
+                    search_result = mail.search(None, "HEADER", "Message-ID", variant)
+                except Exception:
+                    continue
+                nums = _safe_search_result(search_result)
+                if not nums or not nums[0]:
+                    continue
+                num = nums[0].split()[-1]
+                fetch_result = mail.fetch(num, "(BODY.PEEK[])")
+                email_bytes = _extract_email_bytes_from_fetch(fetch_result)
+                if not email_bytes:
+                    continue
+                msg = email.message_from_bytes(email_bytes)
+                for part in msg.walk():
+                    disposition = str(part.get("Content-Disposition", ""))
+                    if "attachment" not in disposition:
+                        continue
+                    part_name = decode_email_header(part.get_filename() or "")
+                    if part_name.lower().strip() != target:
+                        continue
+                    payload = part.get_payload(decode=True)
+                    if payload:
+                        return payload
+        return None
+    except Exception as exc:
+        logger.warning("[Webmail Attachment] IMAP fetch falhou: %s", exc)
+        return None
+    finally:
+        if mail:
+            try:
+                mail.logout()
+            except Exception:
+                pass
+

@@ -31,7 +31,7 @@
  * // O ID é obtido via useParams() internamente
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
@@ -84,20 +84,20 @@ import {
   impersonateClientPortal,
   // PACOTE DE — Download RGPD pré-preenchido (PDF para assinatura manual)
   downloadRGPDF,
+  getStaffUsers,
+  getUsers,
+  addProcessObservationNote,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
 import ProcessAlerts from "../components/ProcessAlerts";
 import TasksPanel from "../components/TasksPanel";
-import ProcessSummaryCard from "../components/ProcessSummaryCard";
 import ClientPropertyMatch from "../components/ClientPropertyMatch";
 import ProcessAssignDialog from "../components/processDetails/ProcessAssignDialog";
 import ClientContextCard from "../components/processDetails/ClientContextCard";
 import AssignmentContextCard from "../components/processDetails/AssignmentContextCard";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
-import DSTICalculator from "../components/DSTICalculator";
-import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
 import { getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import TempLinkButton from "../components/TempLinkButton";
@@ -124,13 +124,12 @@ import {
   Users,
   Sparkles,
   Mail,
+  Phone,
   FileSignature,
   FileDown,
   AlertTriangle,
   CheckCircle,
   Database,
-  Calculator,
-  TrendingUp,
   Lock,
   Eye,
   X,
@@ -139,13 +138,12 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, isValid } from "date-fns";
-import { hasRole, hasAnyRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
+import { hasRole, hasAnyRole, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeParseISO } from "../lib/utils";
 
-import { typeLabels } from "./processDetails/processDetailsConstants";
 import {
   cleanPersonalDataForSubmit,
   cleanTitular2DataForSubmit,
@@ -155,10 +153,6 @@ import {
 } from "./processDetails/processFormCleaners";
 import { validateNIF } from "../utils/validateNIF";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
-// PACOTE DH — Sheet para a Calculadora de Crédito Habitação (Simulações dropdown)
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../components/ui/sheet";
-// PACOTE DH — MortgageSimulator reutilizado do Pacote DD (Calculadoras globais)
-import MortgageSimulator from "../components/calculators/MortgageSimulator";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateProcessDetailsQueries } from "../lib/queryClient";
@@ -176,8 +170,11 @@ import VisitasTab from "../components/processDetails/tabs/VisitasTab";
 import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesTab";
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 import HistoryTab from "../components/processDetails/tabs/HistoryTab";
+import ProcessObservationsCard from "../components/processDetails/ProcessObservationsCard";
+import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
 import { StatusBadge } from "../components/shared/StatusBadge";
+import { resolveProcessTabsFromQuery } from "../utils/processDeepLink";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -186,6 +183,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, token } = useAuth();
   const queryClient = useQueryClient();
 
@@ -221,24 +219,41 @@ const ProcessDetails = () => {
   const savedProcessRef = useRef(null);
   const lastHydratedAtRef = useRef(0);
   const wasEditingRef = useRef(false);
-  // Refs para os triggers das calculadoras (desacopladas do Dropdown — Pacote AF)
-  const dstiRef = useRef(null);
-  const riskRef = useRef(null);
-  // PACOTE DH — Sheet da Calculadora de Crédito Habitação (Simulações dropdown)
-  const [mortgageSheetOpen, setMortgageSheetOpen] = useState(false);
   const [deadlines, setDeadlines] = useState([]);
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState("personal");
+  const [savingObservations, setSavingObservations] = useState(false);
+  const initialTabs = resolveProcessTabsFromQuery(searchParams.get("tab"));
+  const [activeTab, setActiveTab] = useState(initialTabs.activeTab);
   // Separadores de topo (Progressive Disclosure): Resumo / Documentos / Histórico
-  const [mainTab, setMainTab] = useState("resumo");
+  const [mainTab, setMainTab] = useState(initialTabs.mainTab);
 
   // Mensagens do Portal — estado/polling vivem no hook (badge do tab precisa de unread)
   const portal = useProcessPortalMessages(id, { isActive: activeTab === "mensagens" });
   portalRefreshRef.current = portal.refresh;
+
+  const tabQuery = searchParams.get("tab");
+  useEffect(() => {
+    const next = resolveProcessTabsFromQuery(tabQuery);
+    setMainTab(next.mainTab);
+    setActiveTab(next.activeTab);
+  }, [tabQuery]);
+
+  const writeTabQuery = (main, inner) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      let tab = "";
+      if (main && main !== "resumo") tab = main;
+      else if (inner === "mensagens") tab = "portal";
+      else if (inner && inner !== "personal") tab = inner;
+      if (tab) next.set("tab", tab);
+      else next.delete("tab");
+      return next;
+    }, { replace: true });
+  };
 
 
   const [accessDenied, setAccessDenied] = useState(false);
@@ -324,17 +339,23 @@ const ProcessDetails = () => {
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
-      const response = await fetch(`${API_URL}/api/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const [staffRes, idxRes, partnerRes] = await Promise.all([
+        getStaffUsers().catch(() => ({ data: [] })),
+        getUsers("indexacao").catch(() => ({ data: [] })),
+        getUsers("parceiro").catch(() => ({ data: [] })),
+      ]);
+      const merged = [
+        ...(Array.isArray(staffRes?.data) ? staffRes.data : []),
+        ...(Array.isArray(idxRes?.data) ? idxRes.data : []),
+        ...(Array.isArray(partnerRes?.data) ? partnerRes.data : []),
+      ].filter((u) => u && u.is_active !== false);
+      const byId = new Map();
+      merged.forEach((u) => {
+        if (u.id) byId.set(u.id, u);
       });
-      if (response.ok) {
-        const users = await response.json();
-        // Filtrar: ativos, não admin, não ceo — garantir que é array
-        const usersArray = Array.isArray(users) ? users : [];
-        const activeUsers = excludeRoles(usersArray.filter(u => u.is_active !== false), ["admin", "ceo"]);
-        setAppUsers(activeUsers);
-        return activeUsers;
-      }
+      const activeUsers = [...byId.values()];
+      setAppUsers(activeUsers);
+      return activeUsers;
     } catch (error) {
       console.error("Erro ao buscar utilizadores:", error);
       toast.error("Erro ao carregar utilizadores");
@@ -1104,6 +1125,7 @@ const ProcessDetails = () => {
         processUpdateData.monitored_emails = process.monitored_emails;
       }
       if (process.notes !== undefined) processUpdateData.notes = process.notes;
+      if (process.observations !== undefined) processUpdateData.observations = process.observations;
       if (process.prioridade) processUpdateData.prioridade = process.prioridade;
       if (process.labels !== undefined) processUpdateData.labels = process.labels;
 
@@ -1208,6 +1230,7 @@ const ProcessDetails = () => {
     try {
       const orgData = {
         notes: process?.notes || "",
+        observations: process?.observations ?? process?.notes ?? "",
         prioridade: process?.prioridade || "media",
         labels: Array.isArray(process?.labels) ? process.labels : [],
         ...overrides,
@@ -1226,6 +1249,29 @@ const ProcessDetails = () => {
       toast.error(errorMessage);
     } finally {
       setSavingOrg(false);
+    }
+  };
+
+  const handleAddObservationNote = async (text) => {
+    if (isProcessLocked) {
+      toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
+      throw new Error("process_locked");
+    }
+    setSavingObservations(true);
+    try {
+      const res = await addProcessObservationNote(id, text);
+      const updated = res?.data;
+      if (updated) {
+        setProcess((prev) => (prev ? { ...prev, ...updated } : updated));
+      }
+      toast.success("Nota adicionada");
+      await fetchData();
+    } catch (error) {
+      const detail = error.response?.data?.detail;
+      toast.error(typeof detail === "string" ? detail : "Erro ao adicionar nota");
+      throw error;
+    } finally {
+      setSavingObservations(false);
     }
   };
 
@@ -1609,6 +1655,18 @@ const ProcessDetails = () => {
 
   const deadlineDates = deadlines.map((d) => safeParseISO(d.due_date)).filter(Boolean);
   const currentStatusInfo = getStatusInfo(process.status);
+  const headerClientName = safeString(
+    clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome,
+  );
+  const headerPhone = safeString(
+    process?.client_phone || personalData?.telefone || clientData?.contacto?.telefone,
+  );
+  const headerEmail = safeString(
+    process?.client_email || personalData?.email || clientData?.contacto?.email,
+  );
+  const headerConsultor =
+    safeStringArray(process.consultor_names).join(", ") ||
+    safeString(process.consultor_name || process.assigned_consultor_name);
 
   return (
     <DashboardLayout title="Detalhes do Processo">
@@ -1644,19 +1702,26 @@ const ProcessDetails = () => {
           </Button>
           <div className="flex-1 min-w-0">
             <PageHeader
-              title={`Processo #${safeString(process?.process_number || '')} — ${safeString(clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome) || 'Cliente'}`}
+              title={`Processo #${safeString(process?.process_number || "")}`}
               titleBadge={
                 <StatusBadge status={process.status} workflowStatuses={safeStatusOptions} showOrder={false} />
               }
               description={
-                <span className="flex items-center gap-2 flex-wrap">
-                  <span>{typeLabels[safeString(process.process_type)] || safeString(process.process_type)}</span>
-                  {process?.process_number && (
-                    <span className="text-xs bg-muted px-2 py-0.5 rounded font-mono">
-                      Nº {safeString(process.process_number)}
-                    </span>
-                  )}
-                  {/* PACOTE DD — Etiquetas movidas para o PageHeader (badges compactos) */}
+                <span className="flex items-center gap-x-3 gap-y-1 flex-wrap text-sm text-muted-foreground">
+                  {headerClientName ? <span>{headerClientName}</span> : null}
+                  {headerPhone ? (
+                    <a href={`tel:${headerPhone}`} className="inline-flex items-center gap-1 hover:text-foreground">
+                      <Phone className="h-3 w-3" aria-hidden="true" />
+                      {headerPhone}
+                    </a>
+                  ) : null}
+                  {headerEmail ? (
+                    <a href={`mailto:${headerEmail}`} className="inline-flex items-center gap-1 hover:text-foreground truncate max-w-[220px]">
+                      <Mail className="h-3 w-3 shrink-0" aria-hidden="true" />
+                      {headerEmail}
+                    </a>
+                  ) : null}
+                  {headerConsultor ? <span>Consultor: {headerConsultor}</span> : null}
                   {Array.isArray(process?.labels) && process.labels.map((label, idx) => (
                     <Badge key={`lbl-${idx}`} variant="secondary" className="text-xs">
                       {safeString(label)}
@@ -1914,96 +1979,6 @@ const ProcessDetails = () => {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-
-                {/* Simulações agrupadas num Dropdown (Pacote AC)
-                    CORREÇÃO (Pacote AF): desacopladas do Dropdown para evitar
-                    que o menu fique preso aberto. As calculadoras ficam fora
-                    (div hidden) com refs aos botões de trigger; os itens do
-                    menu chamam ref.current?.click() para abrir o modal,
-                    permitindo ao Radix fechar o menu naturalmente. */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-amber-700 border-amber-200 hover:bg-amber-50 h-8 px-2 sm:px-3"
-                      title="Simulações"
-                    >
-                      <Sparkles className="h-3.5 w-3.5 sm:mr-1" />
-                      <span className="hidden sm:inline">Simulações</span>
-                      <ChevronDown className="h-3.5 w-3.5 sm:ml-1" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-blue-600"
-                      onSelect={() => dstiRef.current?.click()}
-                    >
-                      <Calculator className="h-4 w-4" />
-                      Calculadora DSTI
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-purple-600"
-                      onSelect={() => riskRef.current?.click()}
-                    >
-                      <TrendingUp className="h-4 w-4" />
-                      Calculadora de Risco
-                    </DropdownMenuItem>
-                    {/* PACOTE DH — Calculadora de Crédito Habitação (MortgageSimulator) */}
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-emerald-600"
-                      onSelect={() => setMortgageSheetOpen(true)}
-                    >
-                      <Home className="h-4 w-4" />
-                      Simulação de Crédito Habitação
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* Calculadoras desacopladas — invisíveis mas funcionais.
-                    Os botões reais de trigger estão aqui (hidden) e são
-                    clicados programaticamente pelos itens do Dropdown. */}
-                <div className="hidden" aria-hidden="true">
-                  <DSTICalculator
-                    trigger={<button ref={dstiRef} type="button" title="Calculadora DSTI" />}
-                    clientData={{
-                      rendimento_bruto: financialData?.rendimento_bruto,
-                      rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                      salario_liquido: financialData?.salario_liquido,
-                      renda_habitacao_atual: financialData?.renda_habitacao_atual,
-                      rendimento_co_titular: financialData?.rendimento_co_titular,
-                    }}
-                  />
-                  <RiskCalculator
-                    trigger={<button ref={riskRef} type="button" title="Calculadora de Risco" />}
-                    clientData={{
-                      rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                      valor_imovel: realEstateData?.valor_imovel || realEstateData?.valor,
-                      valor_entrada: financialData?.valor_entrada || financialData?.capital_proprio,
-                      capital_proprio: financialData?.capital_proprio,
-                      idade: personalData?.idade,
-                      data_nascimento: personalData?.data_nascimento || personalData?.birth_date,
-                    }}
-                  />
-                </div>
-
-                {/* PACOTE DH — Sheet da Calculadora de Crédito Habitação.
-                    Aberto a partir do item "Simulação de Crédito Habitação"
-                    no Dropdown de Simulações. Reutiliza o MortgageSimulator
-                    do Pacote DD (Calculadoras globais). */}
-                <Sheet open={mortgageSheetOpen} onOpenChange={setMortgageSheetOpen}>
-                  <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
-                    <SheetHeader>
-                      <SheetTitle className="flex items-center gap-2">
-                        <Home className="h-5 w-5" />
-                        Simulação de Crédito Habitação
-                      </SheetTitle>
-                    </SheetHeader>
-                    <div className="mt-4">
-                      <MortgageSimulator />
-                    </div>
-                  </SheetContent>
-                </Sheet>
               </>
             )}
             
@@ -2058,7 +2033,10 @@ const ProcessDetails = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* ── Coluna Esquerda: Ação & Exploração (2/3) ── */}
           <div className="lg:col-span-2 space-y-6">
-            <Tabs value={mainTab} onValueChange={setMainTab}>
+            <Tabs value={mainTab} onValueChange={(v) => {
+              setMainTab(v);
+              writeTabQuery(v, activeTab);
+            }}>
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="resumo" className="gap-1.5">
                   <ClipboardList className="h-4 w-4" />
@@ -2086,15 +2064,20 @@ const ProcessDetails = () => {
                   </div>
                 )}
 
-                {/* Resumo do Processo */}
-                <ProcessSummaryCard
-                  process={process}
-                  statusInfo={currentStatusInfo}
-                  consultorNames={safeStringArray(process.consultor_names)}
-                  mediadorNames={safeStringArray(process.mediador_names)}
-                  consultorName={process.consultor_name || process.assigned_consultor_name}
-                  mediadorName={process.mediador_name || process.assigned_mediador_name}
-                />
+                {/* PACOTE DO.1 / DP — Observações + Timeline compacta no Resumo */}
+                <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                  <ProcessObservationsCard
+                    process={process}
+                    onAdd={handleAddObservationNote}
+                    disabled={isViewMode || isProcessLocked}
+                    saving={savingObservations}
+                  />
+                  <ProcessSummaryTimeline
+                    process={process}
+                    history={history}
+                    onOpenFullHistory={() => setMainTab("historico")}
+                  />
+                </div>
 
                 {/* PACOTE DD — cartão de Etiquetas removido (movido para PageHeader) */}
 
@@ -2120,7 +2103,11 @@ const ProcessDetails = () => {
                     <CardTitle className="text-lg">Dados do Processo</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <Tabs value={activeTab} onValueChange={(v) => { setEditingCardId(null); setActiveTab(v); }}>
+                    <Tabs value={activeTab} onValueChange={(v) => {
+                      setEditingCardId(null);
+                      setActiveTab(v);
+                      writeTabQuery(mainTab, v);
+                    }}>
                       <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
                         {/* ── DADOS DO CLIENTE ── */}
                         <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">

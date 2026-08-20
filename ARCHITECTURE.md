@@ -969,7 +969,7 @@ sequenceDiagram
 
 **Email Transacional do Sistema (Bloco A):**
 
-Quando `send_email(force_system=True)` é chamado (ex: envio de documentação para bancos):
+Quando `send_email(force_system=True)` é chamado (ex: alertas de sistema):
 
 ```mermaid
 flowchart TD
@@ -980,6 +980,8 @@ flowchart TD
     TrySystemSMTP -->|Não configurado| Error["Erro: SMTP não configurado"]
 ```
 
+O envio de documentação para balcões **não** usa `force_system` + `DOCUMENTS`: resolve primeiro o SMTP do perfil UCR activo (password desencriptada) e cai na Caixa Geral.
+
 **Webmail Partilhado por Role (Bloco C):**
 
 ```mermaid
@@ -989,6 +991,34 @@ flowchart TD
     TryShared -->|Não encontrada| TrySystemWebmail["Ler SystemWebmailConfig<br/>(system_settings)"]
     TrySystemWebmail -->|Configurado| UseSystemWM["Usar Bloco C<br/>(IMAP partilhado)"]
     TrySystemWebmail -->|Não configurado| Error["Erro: Email partilhado<br/>não configurado"]
+```
+
+**Isolamento por perfil activo (Pacote DN.1+2):**
+
+O Webmail respeita o UCR escolhido no Header (`ContextSwitcher`):
+
+1. O frontend envia `X-Company-Id` e `X-Active-Role` em **todos** os `fetch` do Webmail (não só via interceptor Axios).
+2. Listagem (`GET /api/emails/webmail`) e stats filtram pela mailbox da UCR activa: `company_id` **ou** `account` = endereço IMAP dessa config. Emails globais / de outros perfis do mesmo user **não** entram.
+3. Sync pessoal (`POST /api/emails/webmail/sync-user`) resolve `user_email_configs` com a empresa activa (e `account_id` / `mailbox` se o utilizador escolheu uma conta) e grava `company_id` em cada email sincronizado.
+4. Anexos: `GET /api/webmail/attachments/{id}` (auth JWT) devolve `StreamingResponse` com `Content-Disposition: attachment`. Fonte: S3 (`s3_key`) → conteúdo na BD → IMAP on-demand. 404 se o anexo não existir.
+5. **Pacote DN.4:** um perfil pode ter várias contas (`user_email_configs` único em `{user_id, company_id, email_address}`). A Área Pessoal lista-as e o Webmail troca com um Select (`mailbox=`). `is_primary` é a conta por omissão (dual-write no `user.email_config` embebido).
+6. **Pacote DO.3:** se o cargo activo do UCR for `diretor`, `GET /users/me/email-accounts` injeta a **Caixa Geral** da empresa (`system_config.email` / contas globais) na lista, com `is_caixa_geral=true`, sem exigir password pessoal. A conta virtual `id=caixa-geral` é só de leitura.
+
+**Emails do processo (Pacote DN.3):** `GET /api/emails/process/{id}` devolve mensagens com `process_id` **ou** sem processo ligado cujo `from_email` / `to_emails` / `cc_emails` corresponde ao email do cliente (processo, 2º titular, emails monitorizados, `clients.contacto.email`). Clicar na linha abre o `EmailViewerModal`.
+
+**Envio para balcões (Pacote DO.4):** `POST /api/emails/send-documentation/{id}` autentica SMTP com a password desencriptada do **perfil de email activo**; se não houver, usa a Caixa Geral. Já não usa o transporter `system_purpose=DOCUMENTS` por omissão. Falhas de autenticação são logadas (host/user, sem password) e o cliente recebe uma mensagem genérica — sem stack trace.
+
+```mermaid
+flowchart TD
+    Header["ContextSwitcher<br/>perfil + empresa"] --> WP["WebmailPage"]
+    WP -->|"X-Company-Id<br/>X-Active-Role"| List["GET /emails/webmail"]
+    WP -->|"mesmo contexto"| Sync["POST /emails/webmail/sync-user"]
+    WP -->|"JWT + company"| Att["GET /webmail/attachments/id"]
+    List --> Filter["Filtro UCR:<br/>company_id OU account=mailbox"]
+    Sync --> Resolver["resolve_email_config_for_sync<br/>(user + company)"]
+    Resolver --> IMAP["IMAP da conta do perfil"]
+    IMAP --> DB["emails.company_id = UCR"]
+    Att --> S3["S3 / BD / IMAP"]
 ```
 
 **Storage Factory Pattern:**
@@ -1308,14 +1338,14 @@ Cada UCR (`user_company_roles` collection, chave única `{user_id, company_id}`)
 | `job_title` | `user_company_roles` | Cargo para esta empresa |
 | `display_name` | `user_company_roles` | Nome de exibição para esta empresa |
 | `notification_preferences` | `user_company_roles` | Preferências de notificação (14 bools) — **PACOTE DF** |
-| Webmail IMAP/SMTP | `user_email_configs` | Keyed by `{user_id, company_id}` |
+| Webmail IMAP/SMTP | `user_email_configs` | Keyed by `{user_id, company_id, email_address}` — várias contas por perfil (`is_primary`) |
 | Google OAuth tokens | `user_email_configs` + `users.email_config["company:<id>"]` | Dual-write per-UCR |
 
 A Área Pessoal gera **uma aba dinâmica por UCR real** (iterando `user.companies`), cada uma com os cartões: Dados Profissionais + Assinatura + Webmail. **Sem hardcode de roles** — só perfis que o utilizador realmente tem aparecem.
 
 ### `X-Company-Id` header — o mecanismo de scoping
 
-O backend recebe o contexto de UCR ativo via header `X-Company-Id` (e `X-Active-Role`), injetado automaticamente pelo interceptor do `api.js` no frontend. Todos os endpoints de perfil/settings leem este header via `get_active_company_id_async(request, user)` para scope das queries ao UCR ativo.
+O backend recebe o contexto de UCR ativo via header `X-Company-Id` (e `X-Active-Role`), injetado automaticamente pelo interceptor do `api.js` no frontend. **Pacote DM:** o interceptor **não sobrescreve** estes headers se o pedido já os definiu (tabs da Área Pessoal). `POST /users/me/email-config` resolve `company_id` por ordem: body → query → header.
 
 ```python
 # services/auth.py
@@ -1324,6 +1354,18 @@ async def get_active_company_id_async(request, user):
     # valida que o user tem um UCR para esta company_id
     # retorna company_id ou fallback
 ```
+
+### Assinatura de email (Pacote DM)
+
+A assinatura por UCR (`user_company_roles.signature`) é HTML. A Área Pessoal pré-visualiza com `RichTextViewer`; o compositor do Webmail usa `sanitizeEmailHtml` (DOMPurify, tags `<p>`, `<br>`, `<img>` com `data:`/`https`/`cid`). HTML gravado como entidades é desescapado uma vez antes de sanitizar.
+
+### Impersonate e navegação (Pacote DM)
+
+Ao iniciar impersonate, `AuthContext.applyUserContext` redefine `activeRole` / `activeCompanyId` para o utilizador alvo. O `DashboardLayout` constrói o menu a partir de `user.role` (não do `effectiveRole` residual do admin). Menus de Administração só aparecem se o impersonado for `admin` ou `ceo`.
+
+### Perfil Mediador removido
+
+O role `mediador` não é um perfil de sistema. `normalizeRole` mapeia legado → `intermediario`. Campos de processo `assigned_mediador_id(s)` mantêm-se (atribuição de intermediários). A dropbox extra de empresa no Header para Diretor foi removida — a empresa está no selector de perfil.
 
 ### Preferências de Notificação — per-UCR com fallback (PACOTE DF)
 
@@ -1472,7 +1514,39 @@ flowchart LR
     Reminder --> Notif
     Notif --> Consultor["Consultor (email + in-app)"]
     DB -->|"visible_to_client=true"| Portal["GET /portal/events"]
-    Portal --> ClientUI["ClientPortal — Próximos Eventos"]
+    Portal --> ClientUI["ClientPortal — Próximos Eventos + Calendário (DO.2)"]
+```
+
+---
+
+## Resumo do Processo e Calendário Visual (Pacote DO.1 + DO.2)
+
+### DO.1 — Observações + Timeline no Resumo
+
+O modelo de Processo tem o campo `observations` (string). Na persistência (`apply_cpcv_and_metadata_fields`) o valor sincroniza com `notes` quando só um dos dois é enviado — `notes` continua a alimentar o Kanban / "Notas do Consultor".
+
+O histórico de estados **já existia** (`GET /api/history`, coleção `history` via `log_history`). O Pacote DO.1 acrescenta um endpoint compacto para o Resumo:
+
+- `GET /api/processes/{id}/timeline` → `{ events, total }` com criação, mudanças de fase e restantes eventos, ordenados do mais recente para o mais antigo.
+- UI: `ProcessObservationsCard` (Textarea Shadcn, guardar no botão e no `onBlur`) + `ProcessSummaryTimeline` (linha vertical + nós) no separador Resumo. O histórico completo permanece no tab Histórico.
+
+### DO.2 — Calendário visual (Dashboard + Portal)
+
+`AgendaCalendar` (Shadcn `Calendar` + vista semanal) consome os prazos/eventos da Agenda (Pacote DH, `GET /deadlines/calendar`).
+
+| Superfície | Fonte | Filtro |
+|---|---|---|
+| Dashboard do Consultor | `getCalendarDeadlines()` | Processos/prazos do utilizador (já scoped no backend) |
+| Portal do Cliente | `GET /portal/events?include_past=true` | Apenas `visible_to_client=true` e não concluídos |
+
+Dias com agendamentos mostram um ponto; o dia seleccionado lista os títulos. O calendário vive numa tab (Progressive Disclosure), não no fluxo principal.
+
+```mermaid
+flowchart LR
+    DH["Agenda DH<br/>deadlines"] --> CalAPI["GET /deadlines/calendar"]
+    DH -->|"visible_to_client"| PortalAPI["GET /portal/events"]
+    CalAPI --> Dash["ConsultorDashboard<br/>tab Calendário"]
+    PortalAPI --> PortalCal["ClientPortal<br/>tab Agenda"]
 ```
 
 ---

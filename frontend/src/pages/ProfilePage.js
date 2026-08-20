@@ -5,10 +5,11 @@
  *   - Tab "Conta Global" (sempre presente): Informação de Login + Sessões
  *     Ativas. Contém configurações globais: password, sessões, role badge,
  *     "Membro desde".
- *   - Uma tab por UCR (user_company_roles) REAL: gerada dinamicamente a
- *     partir de `user.companies`. Cada tab renderiza o sub-componente
- *     <ProfileRoleTab> com os 3 Cards por-UCR (Dados Profissionais,
- *     Assinatura, Webmail).
+ *   - Uma tab por perfil válido: gerada dinamicamente a partir de
+ *     `user.companies` / `user.company_roles` (GET /auth/me) com fallback
+ *     para additional_roles + role primário — o mesmo critério do Header.
+ *     Cada tab renderiza <ProfileRoleTab> (Dados Profissionais, Assinatura,
+ *     Webmail).
  *
  * ANTES (Pacote W/K): pilha flat de 5 Cards. Tabs fantasma apareciam para
  * roles que o utilizador não tinha (effectiveRole hardcoded). AGORA: tabs
@@ -59,7 +60,8 @@ import { formatDateTime } from "../lib/utils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import DashboardLayout from "../layouts/DashboardLayout";
 // PACOTE DF — Role helpers centralizados (substituem getRoleLabel local)
-import { ROLE_LABELS, ROLE_ICONS } from "../utils/roleUtils";
+import { ROLE_LABELS } from "../utils/roleUtils";
+import { buildProfileRoleTabs } from "../utils/userProfiles";
 // PACOTE DF — Sub-componente para as 3 cards por-UCR
 import ProfileRoleTab from "../components/ProfileRoleTab";
 import {
@@ -81,27 +83,19 @@ import {
 // ====================================================================
 
 const ProfilePage = () => {
-  const { user, logout, refreshUser, effectiveRole } = useAuth();
+  const { user, logout, refreshUser, effectiveRole, effectiveCompanyId } = useAuth();
   const navigate = useNavigate();
 
-  // ── Tabs dinâmicas baseadas em UCRs reais (user.companies) ──
-  // PACOTE DF — Sem hardcode de roles. Só renderiza perfis que o
-  // utilizador realmente tem na coleção user_company_roles.
-  // Filtro de "default" remove o perfil fantasma "Conta Principal".
-  const ucrTabs = useMemo(() => {
-    if (!user?.companies || user.companies.length === 0) return [];
-    return user.companies
-      .filter(c => c.role && c.company_id && c.company_id !== "default")
-      .map(c => ({
-        value: `${c.role}__${c.company_id}`,
-        role: c.role,
-        companyId: c.company_id,
-        companyName: c.company_name || c.company_id,
-        label: `${ROLE_LABELS[c.role] || c.role} @ ${c.company_name || c.company_id}`,
-        // PACOTE DF — ROLE_ICONS é um mapa de emojis (strings), não componentes
-        icon: ROLE_ICONS[c.role],
-      }));
-  }, [user?.companies]);
+  // Pacote DP — mesmo mapeamento do Header: companies / company_roles /
+  // additional_roles. Não exigir company_id !== "default" (escondia UCRs reais).
+  const ucrTabs = useMemo(
+    () => buildProfileRoleTabs(user, { effectiveCompanyId }),
+    [user, effectiveCompanyId],
+  );
+
+  useEffect(() => {
+    refreshUser?.();
+  }, [refreshUser]);
 
   // Tab ativa — default "global" (mais seguro do que pré-seleccionar um UCR)
   const [activeTab, setActiveTab] = useState("global");
@@ -431,7 +425,7 @@ const ProfilePage = () => {
               </CardContent>
             </Card>
 
-            {/* PACOTE DF — Fallback: sem UCRs reais, mostrar mensagem */}
+            {/* Fallback só quando não há nenhum perfil mapeável */}
             {ucrTabs.length === 0 && (
               <div className="p-4 rounded-lg border border-dashed border-border bg-muted/30 text-center">
                 <p className="text-sm text-muted-foreground">
@@ -450,6 +444,7 @@ const ProfilePage = () => {
               className="space-y-6 mt-6"
             >
               <ProfileRoleTab
+                key={tab.id}
                 companyId={tab.companyId}
                 role={tab.role}
                 companyName={tab.companyName}

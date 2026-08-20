@@ -35,6 +35,31 @@ export const VALID_ROLES = [
   "parceiro",
 ];
 
+/** Perfis removidos — nunca mostrar na UI (legacy na BD mapeia para intermediario/consultor) */
+export const REMOVED_ROLES = ["mediador", "consultor_intermediario"];
+
+/** Mapa de roles obsoletas para o equivalente actual */
+export const LEGACY_ROLE_MAP = {
+  mediador: "intermediario",
+  consultor_intermediario: "consultor",
+};
+
+/**
+ * Normaliza um role legado para o perfil actual.
+ * 'mediador' → 'intermediario'; desconhecidos ficam inalterados.
+ */
+export function normalizeRole(role) {
+  if (!role || typeof role !== "string") return role;
+  const key = role.toLowerCase();
+  return LEGACY_ROLE_MAP[key] || key;
+}
+
+/** True se o role pode aparecer em selectors / tabs de perfil */
+export function isSelectableRole(role) {
+  if (!role) return false;
+  return VALID_ROLES.includes(normalizeRole(role));
+}
+
 /** Perfis de staff (têm acesso à plataforma, exclui cliente e parceiro) */
 export const STAFF_ROLES = [
   "admin",
@@ -45,6 +70,38 @@ export const STAFF_ROLES = [
   "intermediario",
   "indexacao",
 ];
+
+/**
+ * Pacote DT — cargos permitidos nas dropdowns de atribuição de responsáveis
+ * (calendário, processo → consultor/intermediário, tarefas).
+ * Admin e indexação ficam de fora; o picker dedicado de Indexação usa
+ * INDEXACAO_ASSIGNMENT_ROLES.
+ */
+export const ASSIGNMENT_STAFF_ROLES = [
+  "consultor",
+  "intermediario",
+  "mediador",
+  "diretor",
+  "ceo",
+];
+
+/** Cargo principal que nunca entra nas listas de atribuição de responsáveis. */
+export const EXCLUDED_ASSIGNMENT_ROLES = [
+  "admin",
+  "indexacao",
+  "index",
+  "cliente",
+  "parceiro",
+];
+
+/** Cargos no Select de consultor dum processo. */
+export const CONSULTOR_ASSIGNMENT_ROLES = ["consultor", "diretor", "ceo"];
+
+/** Cargos no Select de intermediário dum processo. */
+export const INTERMEDIARIO_ASSIGNMENT_ROLES = ["intermediario", "mediador", "diretor"];
+
+/** Picker dedicado do campo Indexação (não é a lista geral de responsáveis). */
+export const INDEXACAO_ASSIGNMENT_ROLES = ["indexacao"];
 
 /** Perfis que podem aceder ao Painel de Administração */
 export const ADMIN_PANEL_ROLES = ["admin", "ceo"];
@@ -290,7 +347,8 @@ export const hasAccess = (user, requiredRole) => {
  * @returns {boolean}
  */
 export const isValidRole = (role) => {
-  return VALID_ROLES.includes(role);
+  if (!role) return false;
+  return VALID_ROLES.includes(normalizeRole(role));
 };
 
 /**
@@ -319,7 +377,8 @@ export const getRoleLevel = (role) => {
  * @returns {string} Rótulo amigável
  */
 export const getRoleLabel = (role) => {
-  return ROLE_LABELS[role] || role;
+  const normalized = normalizeRole(role);
+  return ROLE_LABELS[normalized] || ROLE_LABELS[role] || role;
 };
 
 /**
@@ -404,6 +463,23 @@ export const excludeRoles = (users, excludeRoles) => {
     !excludeRoles.includes(u.role) &&
     !(u.additional_roles && u.additional_roles.some(r => excludeRoles.includes(r)))
   );
+};
+
+/**
+ * Pacote DT — utilizador elegível para Select de responsável.
+ * Exclui se o cargo actual (principal) for admin ou indexação.
+ */
+export const isAssignmentEligibleUser = (user) => {
+  if (!user) return false;
+  const primary = normalizeRole(user.role);
+  if (EXCLUDED_ASSIGNMENT_ROLES.includes(primary)) return false;
+  return hasAnyRole(user, ASSIGNMENT_STAFF_ROLES);
+};
+
+/** Filtra a lista de staff para dropdowns de atribuição. */
+export const filterAssignmentStaff = (users) => {
+  if (!users) return [];
+  return users.filter(isAssignmentEligibleUser);
 };
 
 /**

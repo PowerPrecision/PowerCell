@@ -23,20 +23,13 @@ import {
   DialogTitle,
   DialogDescription,
 } from "../components/ui/dialog";
-// PACOTE DD — Sheet global para Calculadora
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "../components/ui/sheet";
-import MortgageSimulator from "../components/calculators/MortgageSimulator";
+import CalculatorHub from "../components/calculators/CalculatorHub";
 import {
   LayoutDashboard,
   FileText,
   Users,
   Calendar,
+  CalendarDays,
   Settings,
   LogOut,
   Menu,
@@ -62,7 +55,6 @@ import {
   ClipboardList,
   Mail,
   Eye,
-  Calculator,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -100,8 +92,6 @@ const DashboardLayout = ({ children, title }) => {
   const [chatOpen, setChatOpen] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
-  // PACOTE DD — estado do Sheet global da Calculadora
-  const [calcSheetOpen, setCalcSheetOpen] = useState(false);
   const chatUnreadRef = useRef(0);
   const chatUnreadIntervalRef = useRef(null);
   
@@ -164,7 +154,7 @@ const DashboardLayout = ({ children, title }) => {
     
     // Rotas do grupo O Meu Negócio (inclui rotas de detalhe: /processo/:id, /imovel/:id, etc.)
     // PACOTE DB — "/registos-clientes" movido para Visão Global
-    const meuNegocioRoutes = ["/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/financeiro"];
+    const meuNegocioRoutes = ["/meus-clientes", "/processos", "/processo", "/kanban", "/imoveis", "/imovel", "/visitas", "/calendario", "/financeiro"];
     // Rotas do grupo Visão Global (inclui rotas de detalhe: /cliente/:id, /processo-detalhe/:id, etc.)
     // PACOTE DB — "/registos-clientes" adicionado aqui (Visão Global)
     const visaoGlobalRoutes = ["/registos-clientes", "/clientes", "/cliente", "/lista-processos"];
@@ -224,7 +214,9 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const getNavItems = () => {
-    const userRole = effectiveRole?.toLowerCase();
+    // PACOTE DM: em impersonate, o menu segue o role REAL do utilizador
+    // impersonado — nunca o activeRole residual do admin original.
+    const userRole = (isImpersonating ? user?.role : effectiveRole)?.toLowerCase();
     const isAdmin = userRole === "admin";
     const isCeo = userRole === "ceo";
     const canSeeAdminPanel = isAdmin || isCeo; // Botão Painel de Administração
@@ -267,6 +259,7 @@ const DashboardLayout = ({ children, title }) => {
         // PACOTE BU — Menus temporariamente ocultos:
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
         { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Calendário", icon: CalendarDays, href: "/calendario" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ],
     };
@@ -417,6 +410,7 @@ const DashboardLayout = ({ children, title }) => {
         { label: "Documentos Pendentes", icon: FileText, href: "/validades" },
         // PACOTE BU — Menus temporariamente ocultos:
         { label: "Visitas", icon: Calendar, href: "/visitas" },
+        { label: "Calendário", icon: CalendarDays, href: "/calendario" },
         // { label: "Imóveis", icon: Search, href: "/imoveis" },
         // { label: "Financeiro", icon: DollarSign, href: "/financeiro" },
       ];
@@ -534,6 +528,20 @@ const DashboardLayout = ({ children, title }) => {
   };
 
   const navData = getNavItems();
+  // PACOTE DM: defesa extra — menus de administração nunca visíveis se o
+  // utilizador impersonado não for admin/CEO, mesmo com activeRole residual.
+  if (
+    isImpersonating
+    && !["admin", "ceo"].includes((user?.role || "").toLowerCase())
+  ) {
+    navData.showAdminButton = false;
+    navData.groups = (navData.groups || []).filter(
+      (g) => g.id !== "dashboard-executivo",
+    );
+    if (navData.main?.[0]) {
+      navData.main[0] = { ...navData.main[0], href: "/staff" };
+    }
+  }
   
   // Impersonate offset (isImpersonating already consumed above)
   const impersonateOffset = isImpersonating ? 'top-12' : 'top-0';
@@ -813,25 +821,8 @@ const DashboardLayout = ({ children, title }) => {
                       </span>
                     )}
                   </Button>
-                  {/* PACOTE DD — Calculadora global (Sheet) */}
-                  <Sheet open={calcSheetOpen} onOpenChange={setCalcSheetOpen}>
-                    <SheetTrigger asChild>
-                      <Button variant="ghost" size="icon" aria-label="Calculadora" title="Calculadora de Prestações">
-                        <Calculator className="h-4 w-4" />
-                      </Button>
-                    </SheetTrigger>
-                    <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
-                      <SheetHeader>
-                        <SheetTitle className="flex items-center gap-2">
-                          <Calculator className="h-5 w-5" />
-                          Calculadora de Prestações
-                        </SheetTitle>
-                      </SheetHeader>
-                      <div className="mt-4">
-                        <MortgageSimulator />
-                      </div>
-                    </SheetContent>
-                  </Sheet>
+                  {/* Pacote DR — Hub de calculadoras (dropdown com todas) */}
+                  <CalculatorHub />
                   {/* Centro de Operações - Tarefas Assíncronas */}
                   <TasksDropdown compact={headerCollapsed} />
                   <NotificationsDropdown compact={headerCollapsed} />

@@ -1,6 +1,6 @@
 /**
  * EmailsTab — extraído de ProcessDetails.js (tab emails).
- * Histórico de emails associados ao processo.
+ * Histórico de emails associados ao processo (from/to/cc do cliente).
  */
 import { Card, CardContent } from "../../ui/card";
 import EmailHistoryPanel from "../../EmailHistoryPanel";
@@ -9,23 +9,22 @@ import { Send } from "lucide-react";
 export default function EmailsTab({ id, savedProcessRef, process, token }) {
   return (
     <div className="space-y-4">
-      {/* Header com info */}
-      <div className="bg-blue-50 dark:bg-blue-900/20 border border-blue-200 dark:border-blue-800 rounded-lg p-4">
+      <div className="rounded-lg border border-border bg-muted/40 p-4">
         <div className="flex items-center gap-3">
-          <div className="p-2 bg-blue-100 dark:bg-blue-900/40 rounded-lg">
-            <Send className="h-6 w-6 text-blue-600 dark:text-blue-400" />
+          <div className="p-2 rounded-lg bg-primary/10">
+            <Send className="h-6 w-6 text-primary" />
           </div>
           <div>
-            <h3 className="font-semibold text-blue-800 dark:text-blue-200">Histórico de Emails</h3>
-            <p className="text-sm text-blue-600 dark:text-blue-400">
-              Emails associados a este processo
+            <h3 className="font-semibold text-foreground">Histórico de Emails</h3>
+            <p className="text-sm text-muted-foreground">
+              Mensagens ligadas a este processo ou em que o cliente aparece em De, Para ou CC.
+              Clique numa linha para ler.
             </p>
           </div>
         </div>
       </div>
 
-      {/* Painel de Emails */}
-      <Card className="border-blue-200 dark:border-blue-800">
+      <Card>
         <CardContent className="pt-6">
           <EmailHistoryPanel
             processId={id}

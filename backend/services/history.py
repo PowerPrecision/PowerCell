@@ -1,3 +1,4 @@
+import json
 import uuid
 import logging
 from datetime import datetime, timezone
@@ -151,3 +152,121 @@ async def log_data_changes(process_id: str, user: dict, old_data: dict, new_data
                 f"Alterou {section}",
                 key, old_val, new_val
             )
+
+
+# ================================================================
+# PACOTE DS — Histórico rico (quem / o quê / quando / detalhes)
+# ================================================================
+# Os documentos na coleção `history` guardam action/field/old/new em
+# separado. A UI de auditoria precisa de uma frase legível
+# (ex: "Fase alterada de X para Y") e de um tipo de evento para ícones.
+# Estas funções são puras — usadas pelo GET /history e pela timeline.
+# ================================================================
+
+_STATUS_FIELDS = {"status", "estado", "fase"}
+_ASSIGNMENT_FIELDS = {
+    "consultor", "mediador", "assigned", "assigned_consultor_id",
+    "assigned_mediador_id", "assigned_indexacao_id", "assigned_parceiro_id",
+}
+
+
+def _stringify_history_value(value: Any) -> str:
+    """Valor de auditoria legível (nunca devolve None)."""
+    if value is None or value == "":
+        return "—"
+    if isinstance(value, (dict, list)):
+        try:
+            return json.dumps(value, ensure_ascii=False, default=str)
+        except Exception:
+            return str(value)
+    return str(value)
+
+
+def classify_history_event(item: dict | None) -> str:
+    """Classifica um registo de histórico para ícones / filtros da UI."""
+    item = item or {}
+    action = str(item.get("action") or "").lower()
+    field = str(item.get("field") or "").lower()
+
+    if (
+        item.get("comment")
+        or "coment" in action
+        or "observaç" in action
+        or "observac" in action
+        or field in ("observation_notes", "observations")
+    ):
+        return "comment"
+    if field in _STATUS_FIELDS or "estado" in action or "fase" in action or action.startswith("moveu processo"):
+        return "status_change"
+    if any(token in action for token in ("documento", "document", "carregou", "upload", "eliminou documento")):
+        return "document"
+    if "email" in action or "e-mail" in action:
+        return "email"
+    if "atribu" in action or field in _ASSIGNMENT_FIELDS:
+        return "assignment"
+    if "tarefa" in action or field == "tarefa":
+        return "task"
+    if action.startswith("criou processo"):
+        return "created"
+    if field:
+        return "edit"
+    return "other"
+
+
+def build_history_description(item: dict | None) -> str:
+    """Frase humana da alteração — 'Fase alterada de X para Y', etc."""
+    item = item or {}
+    action = str(item.get("action") or "").strip() or "Atualização"
+    field = item.get("field")
+    old_value = item.get("old_value")
+    new_value = item.get("new_value")
+    event_type = classify_history_event(item)
+    has_old = old_value not in (None, "")
+    has_new = new_value not in (None, "")
+
+    if event_type == "status_change" and (has_old or has_new):
+        return (
+            f"Fase alterada de {_stringify_history_value(old_value)} "
+            f"para {_stringify_history_value(new_value)}"
+        )
+
+    if has_old and has_new:
+        field_label = field or "valor"
+        return f"{action}: {field_label} alterado de {old_value} para {new_value}"
+
+    if has_new and not has_old:
+        if field:
+            return f"{action}: {field} → {new_value}"
+        return f"{action}: {new_value}"
+
+    if has_old and not has_new:
+        field_label = field or "valor"
+        return f"{action}: {field_label} removido (era {old_value})"
+
+    comment = item.get("comment")
+    if comment:
+        return str(comment)
+
+    return action
+
+
+def enrich_history_entry(item: dict | None) -> dict:
+    """Normaliza um documento da coleção `history` para a API de auditoria."""
+    src = dict(item or {})
+    src.pop("_id", None)
+
+    created_at = src.get("created_at")
+    if isinstance(created_at, datetime):
+        if created_at.tzinfo is None:
+            created_at = created_at.replace(tzinfo=timezone.utc)
+        src["created_at"] = created_at.isoformat()
+    elif created_at is None:
+        src["created_at"] = ""
+    else:
+        src["created_at"] = str(created_at)
+
+    src["action"] = src.get("action") or "Atualização"
+    src["user_name"] = src.get("user_name") or "Sistema"
+    src["event_type"] = classify_history_event(src)
+    src["description"] = build_history_description(src)
+    return src

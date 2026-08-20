@@ -132,6 +132,9 @@ class TestBuildStaffProcessDoc:
         assert doc["source"] == "lead"
         assert doc["status"] is None
         assert doc["client_ids"] == ["c1"]
+        assert doc["observations"] == ""
+        assert doc["notes"] == ""
+        assert doc["observation_notes"] == []
 
     def test_consultor_assignment(self):
         doc = build_staff_process_doc(
@@ -415,6 +418,7 @@ class TestUpdateProcessLeftovers:
         apply_cpcv_and_metadata_fields(update, data)
         assert update["prioridade"] == "alta"
         assert update["notes"] == "nota"
+        assert update["observations"] == "nota"
         assert update["monitored_emails"] == ["a@x.com"]
         bad = SimpleNamespace(
             co_buyers=None, co_applicants=None, vendedor=None, mediador=None,
@@ -425,6 +429,19 @@ class TestUpdateProcessLeftovers:
             assert False
         except HTTPException as e:
             assert e.status_code == 400
+
+    def test_apply_observations_syncs_notes(self):
+        from types import SimpleNamespace
+        from services.process_update import apply_cpcv_and_metadata_fields
+        update = {}
+        data = SimpleNamespace(
+            co_buyers=None, co_applicants=None, vendedor=None, mediador=None,
+            monitored_emails=None, notes=None, observations="obs livre",
+            prioridade=None, labels=None,
+        )
+        apply_cpcv_and_metadata_fields(update, data)
+        assert update["observations"] == "obs livre"
+        assert update["notes"] == "obs livre"
 
     def test_attach_field_metadata(self):
         from services.process_update import attach_field_metadata_if_present

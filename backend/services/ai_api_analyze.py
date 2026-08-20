@@ -15,7 +15,11 @@ from services.ai_document import (
     analyze_document_from_url,
     analyze_document_from_base64,
 )
-from services.ai_api_helpers import VALID_DOCUMENT_TYPES, map_extracted_data
+from services.ai_api_helpers import (
+    VALID_DOCUMENT_TYPES,
+    map_extracted_data,
+    normalize_document_type,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -26,46 +30,62 @@ class AnalyzeDocumentRequest(BaseModel):
     document_base64: Optional[str] = None
     mime_type: Optional[str] = "image/jpeg"
     document_type: str  # 'cc', 'recibo_vencimento', 'irs', 'outro'
+    process_id: Optional[str] = None
 
 
 class AnalyzeOneDriveDocumentRequest(BaseModel):
     """Request to analyze a document from S3 storage."""
-    client_folder: str
+    client_folder: Optional[str] = None
     file_name: str
     document_type: str
+    process_id: Optional[str] = None
+
+
+def _strip_base64_prefix(value: str | None) -> str | None:
+    if not value:
+        return value
+    if "," in value and value.strip().startswith("data:"):
+        return value.split(",", 1)[1]
+    return value
 
 
 async def run_analyze_document(request: AnalyzeDocumentRequest, user: dict) -> dict:
     """Analyze a document using AI and extract structured data."""
-    if not request.document_url and not request.document_base64:
-        raise HTTPException(status_code=400, detail="Forneça document_url ou document_base64")
-
-    if request.document_type not in VALID_DOCUMENT_TYPES:
+    document_type = normalize_document_type(request.document_type)
+    if not document_type:
         raise HTTPException(status_code=400, detail="document_type inválido")
 
-    if request.document_base64:
+    document_base64 = _strip_base64_prefix(request.document_base64)
+    if not request.document_url and not document_base64:
+        raise HTTPException(status_code=400, detail="Forneça document_url ou document_base64")
+
+    if document_type not in VALID_DOCUMENT_TYPES:
+        raise HTTPException(status_code=400, detail="document_type inválido")
+
+    if document_base64:
         result = await analyze_document_from_base64(
-            request.document_base64,
+            document_base64,
             request.mime_type,
-            request.document_type,
+            document_type,
         )
     else:
         result = await analyze_document_from_url(
             request.document_url,
-            request.document_type,
+            document_type,
         )
 
     if not result.get("success", False):
         raise HTTPException(status_code=500, detail=result.get("error", "Erro ao analisar documento"))
 
     extracted_data = result.get("extracted_data", {})
-    mapped_data = map_extracted_data(request.document_type, extracted_data)
+    mapped_data = map_extracted_data(document_type, extracted_data)
 
     return {
         "success": True,
-        "document_type": request.document_type,
+        "document_type": document_type,
         "extracted_data": extracted_data,
         "mapped_data": mapped_data,
+        "process_id": request.process_id,
     }
 
 
@@ -78,17 +98,31 @@ async def run_analyze_onedrive_document(
     from services.s3_storage import s3_service
 
     try:
-        process = await db.processes.find_one(
-            {"client_name": {"$regex": f"^{request.client_folder}$", "$options": "i"}},
-            {"id": 1, "client_name": 1, "second_client_name": 1, "titular2_data": 1, "s3_folder": 1},
-        )
-        if not process:
+        document_type = normalize_document_type(request.document_type)
+        if not document_type:
+            raise HTTPException(status_code=400, detail="document_type inválido")
+
+        process = None
+        if request.process_id:
             process = await db.processes.find_one(
-                {"client_name": {"$regex": request.client_folder, "$options": "i"}},
+                {"id": request.process_id},
                 {"id": 1, "client_name": 1, "second_client_name": 1, "titular2_data": 1, "s3_folder": 1},
             )
+        if not process and request.client_folder:
+            process = await db.processes.find_one(
+                {"client_name": {"$regex": f"^{request.client_folder}$", "$options": "i"}},
+                {"id": 1, "client_name": 1, "second_client_name": 1, "titular2_data": 1, "s3_folder": 1},
+            )
+            if not process:
+                process = await db.processes.find_one(
+                    {"client_name": {"$regex": request.client_folder, "$options": "i"}},
+                    {"id": 1, "client_name": 1, "second_client_name": 1, "titular2_data": 1, "s3_folder": 1},
+                )
         if not process:
-            raise HTTPException(status_code=404, detail=f"Cliente '{request.client_folder}' não encontrado")
+            raise HTTPException(
+                status_code=404,
+                detail="Processo/cliente não encontrado. Envie process_id ou client_folder.",
+            )
 
         client_id = process.get("id")
         client_name = process.get("client_name", request.client_folder)
@@ -122,21 +156,21 @@ async def run_analyze_onedrive_document(
         if not download_url:
             raise HTTPException(status_code=500, detail="Erro ao gerar URL de download do ficheiro")
 
-        result = await analyze_document_from_url(download_url, request.document_type)
+        result = await analyze_document_from_url(download_url, document_type)
 
         if not result.get("success", False):
             raise HTTPException(status_code=500, detail=result.get("error", "Erro ao analisar documento"))
 
         extracted_data = result.get("extracted_data", {})
-        # OneDrive path historically only mapped cc/recibo/irs
         mapped_data = {}
-        if request.document_type in ("cc", "recibo_vencimento", "irs"):
-            mapped_data = map_extracted_data(request.document_type, extracted_data)
+        if document_type in ("cc", "recibo_vencimento", "irs"):
+            mapped_data = map_extracted_data(document_type, extracted_data)
 
         return {
             "success": True,
-            "document_type": request.document_type,
+            "document_type": document_type,
             "file_name": request.file_name,
+            "process_id": client_id,
             "extracted_data": extracted_data,
             "mapped_data": mapped_data,
         }

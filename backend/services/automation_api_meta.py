@@ -48,7 +48,7 @@ async def run_list_actions():
             {"id": "create_task", "label": "Criar tarefa", "config_fields": [
                 {"key": "title", "label": "Título da tarefa (usar {client_name}, {status})", "type": "text", "default": "Contactar {client_name}"},
                 {"key": "urgency", "label": "Urgência", "type": "select", "options": ["low", "medium", "high"], "default": "medium", "option_labels": {"low": "Baixa", "medium": "Média", "high": "Alta"}},
-                {"key": "assigned_role", "label": "Atribuída a (role)", "type": "select", "options": ["consultor", "intermediario", "mediador", "indexacao"], "option_labels": {"consultor": "Consultor", "intermediario": "Intermediário", "mediador": "Mediador", "indexacao": "Indexação"}},
+                {"key": "assigned_role", "label": "Atribuída a (role)", "type": "select", "options": ["consultor", "intermediario", "indexacao"], "option_labels": {"consultor": "Consultor", "intermediario": "Intermediário", "indexacao": "Indexação"}},
                 {"key": "due_in_days", "label": "Prazo (dias, opcional)", "type": "number", "default": 7},
             ]},
         ]

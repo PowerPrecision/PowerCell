@@ -16,6 +16,7 @@ from services.auth import (
     hash_password,
     verify_password,
     needs_rehash,
+    get_user_companies,
 )
 from services.refresh_token_service import (
     create_access_token,
@@ -123,6 +124,11 @@ async def run_login_v2(request, data: UserLogin, response):
             ip_address=ip_address
         )
 
+        try:
+            user_companies = await get_user_companies(user["id"])
+        except Exception:
+            user_companies = []
+
         return JSONResponse(
             status_code=200,
             content={
@@ -136,9 +142,12 @@ async def run_login_v2(request, data: UserLogin, response):
                     "name": user["name"],
                     "phone": user.get("phone"),
                     "role": user["role"],
+                    "company": user.get("company"),
                     "created_at": user["created_at"],
                     "onedrive_folder": user.get("onedrive_folder"),
                     "additional_roles": user.get("additional_roles", []),
+                    "companies": user_companies or [],
+                    "company_roles": user_companies or [],
                     "permissions": synced_perms,
                 }
             }

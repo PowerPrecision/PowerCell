@@ -9,6 +9,7 @@ from fastapi import HTTPException
 from database import db
 from models.auth import UserRole
 from models.activity import HistoryResponse
+from services.history import enrich_history_entry
 
 
 async def run_get_history(process_id: str, user: dict):
@@ -22,4 +23,11 @@ async def run_get_history(process_id: str, user: dict):
     history = await db.history.find(
         {"process_id": process_id}, {"_id": 0}
     ).sort("created_at", -1).to_list(1000)
-    return [HistoryResponse(**h) for h in history]
+    enriched = []
+    for raw in history:
+        payload = enrich_history_entry(raw)
+        try:
+            enriched.append(HistoryResponse(**payload))
+        except Exception:
+            continue
+    return enriched

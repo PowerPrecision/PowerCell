@@ -106,6 +106,7 @@ def test_email_mailbox_ops_module_exports():
         "run_get_email_attachments",
         "run_download_attachment",
         "run_preview_attachment",
+        "run_download_webmail_attachment",
     ):
         assert callable(getattr(mod, name))
 
@@ -126,6 +127,9 @@ def test_email_remaining_modules_export_run_entrypoints():
         "run_webmail_stats",
         "run_webmail_sync",
         "run_get_configured_accounts",
+        "build_ucr_mailbox_filter",
+        "resolve_ucr_mailbox_filter",
+        "rewrite_box_for_caixa_geral",
     ):
         assert callable(getattr(wm, name))
     for name in (
@@ -148,3 +152,98 @@ def test_emails_router_is_thin_stubs_only():
     # No fat IMAP/webmail bodies left in the route file
     assert "ISOLAMENTO DE DADOS (Segurança)" not in text
     assert len(text.splitlines()) < 800
+
+
+def test_webmail_attachment_router_is_thin_stub():
+    from pathlib import Path
+    from routes.webmail import router
+
+    routes_path = Path(__file__).resolve().parents[2] / "routes" / "webmail.py"
+    text = routes_path.read_text()
+    assert "/attachments/{attachment_id}" in text
+    assert "return await run_download_webmail_attachment" in text
+    assert len(text.splitlines()) < 80
+    paths = [getattr(r, "path", "") for r in router.routes]
+    assert any("attachments" in p for p in paths)
+
+
+def test_process_participant_email_helpers_include_cc():
+    from services.email_process_crud import (
+        normalize_participant_email,
+        collect_emails_from_process_doc,
+        collect_emails_from_client_doc,
+        build_participant_address_match,
+        build_process_emails_base_conditions,
+    )
+
+    assert normalize_participant_email("Ana Silva <ana@cliente.pt>") == "ana@cliente.pt"
+    assert normalize_participant_email({"email": "B@X.PT"}) == "b@x.pt"
+
+    process_doc = {
+        "client_email": "ana@cliente.pt",
+        "monitored_emails": ["extra@cliente.pt"],
+        "titular2_data": {"email": "joao@cliente.pt"},
+    }
+    emails = collect_emails_from_process_doc(process_doc)
+    assert emails == {"ana@cliente.pt", "extra@cliente.pt", "joao@cliente.pt"}
+
+    client_doc = {"contacto": {"email": "ana@cliente.pt"}, "titular2_data": {"email": "t2@x.pt"}}
+    assert "t2@x.pt" in collect_emails_from_client_doc(client_doc)
+
+    match = build_participant_address_match({"ana@cliente.pt"})
+    blob = str(match)
+    assert "cc_emails" in blob
+    assert "to_emails" in blob
+    assert "from_email" in blob
+    assert "(^|<)" in blob
+
+    conditions = build_process_emails_base_conditions("proc-1", {"ana@cliente.pt"})
+    assert {"process_id": "proc-1"} in conditions
+    assert any("cc_emails" in str(c) for c in conditions)
+
+
+def test_coerce_email_response_fields_fills_required():
+    from services.email_process_crud import coerce_email_response_fields
+
+    coerced = coerce_email_response_fields({
+        "id": "e1",
+        "from_email": "ana@cliente.pt",
+        "subject": "Olá",
+    })
+    assert coerced["status"] in ("sent", "synced")
+    assert coerced["created_at"]
+    assert coerced["direction"] == "received"
+    assert coerced["to_emails"] == []
+    assert coerced["body"] == ""
+
+
+def test_send_documentation_wrapper_hides_stack_trace():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from fastapi import HTTPException
+    from services.email_documentation import run_send_documentation_email
+
+    async def _run():
+        with patch(
+            "services.email_documentation._send_documentation_email_impl",
+            new_callable=AsyncMock,
+            side_effect=RuntimeError("incorrect authentication data\nTraceback..."),
+        ):
+            try:
+                await run_send_documentation_email("p1", {}, {"id": "u1", "email": "a@b.pt"})
+                assert False, "expected HTTPException"
+            except HTTPException as exc:
+                assert exc.status_code == 500
+                assert "Traceback" not in str(exc.detail)
+                assert "incorrect authentication" not in str(exc.detail).lower()
+
+    asyncio.run(_run())
+
+
+def test_send_email_accepts_account_override_signature():
+    import inspect
+    from services.email_service import send_email
+
+    params = inspect.signature(send_email).parameters
+    assert "account_override" in params

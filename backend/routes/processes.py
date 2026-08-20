@@ -62,6 +62,11 @@ from services.process_detail import (
     run_get_process_detail,
     run_get_process_alerts,
 )
+from services.process_timeline import run_get_process_timeline
+from services.process_observation_notes import (
+    ObservationNoteCreate,
+    run_add_observation_note,
+)
 from services.process_clients_nm import (
     run_add_client_to_process,
     run_remove_client_from_process,
@@ -268,6 +273,46 @@ async def get_processes(
     )
 
 
+@router.get("/me")
+async def get_my_processes(
+    request: Request,
+    page: int = Query(1, ge=1, description="Número da página"),
+    size: int = Query(20, ge=1, le=100, description="Itens por página"),
+    status: Optional[str] = Query(None, description="Filtrar por status"),
+    search: Optional[str] = Query(None, description="Pesquisar por nome/email"),
+    view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical"),
+    sort_field: Optional[str] = Query(None, description="Campo de ordenação"),
+    sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
+    is_indexed: Optional[bool] = Query(None, description="Filtrar por estado de indexação"),
+    user: dict = Depends(get_current_user),
+):
+    """
+    PACOTE DU — Os Meus Processos.
+
+    Filtra SEMPRE por assigned_to / assigned_* == user_id, mesmo quando a
+    role activa é diretor (ou admin/ceo). A visão global continua em
+    GET /processes?show_all=true.
+    """
+    role = get_effective_role(request, user)
+    return await run_get_processes(
+        user=user,
+        role=role,
+        page=page,
+        size=size,
+        status=status,
+        search=search,
+        view_mode=view_mode,
+        sort_field=sort_field,
+        sort_order=sort_order,
+        show_all=False,
+        is_indexed=is_indexed,
+        all_roles=None,
+        decrypt_list_fn=decrypt_processes_list,
+        list_projection=PROCESS_LIST_PROJECTION,
+        mine_only=True,
+    )
+
+
 @router.get("/paginated")
 async def get_processes_paginated(
     limit: int = Query(20, ge=1, le=100),
@@ -418,6 +463,25 @@ async def get_process(process_id: str, user: dict = Depends(get_current_user)):
     )
 
 
+@router.post("/{process_id}/observation-notes")
+async def add_observation_note(
+    process_id: str,
+    data: ObservationNoteCreate,
+    user: dict = Depends(require_staff()),
+):
+    """PACOTE DU — acrescenta uma nota ao feed de Observações."""
+    return await run_add_observation_note(
+        process_id,
+        data,
+        user,
+        can_view_fn=can_view_process,
+        can_edit_fn=can_edit_process_data,
+        log_history_fn=log_history,
+        populate_fn=populate_client_data,
+        decrypt_fn=decrypt_sensitive_data,
+    )
+
+
 @router.get("/{process_id}/alerts")
 async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_current_user)):
     """Alertas activos do processo (idade, countdown, docs)."""
@@ -426,6 +490,21 @@ async def get_process_alerts_endpoint(process_id: str, user: dict = Depends(get_
         user,
         can_view_fn=can_view_process,
         get_alerts_fn=get_process_alerts,
+    )
+
+
+@router.get("/{process_id}/timeline")
+async def get_process_timeline(
+    process_id: str,
+    limit: int = Query(40, ge=1, le=100),
+    user: dict = Depends(get_current_user),
+):
+    """PACOTE DO.1 — Timeline compacta (criação + mudanças de fase + eventos)."""
+    return await run_get_process_timeline(
+        process_id,
+        user,
+        can_view_fn=can_view_process,
+        limit=limit,
     )
 
 

@@ -25,6 +25,113 @@ from utils.input_sanitization import sanitize_string
 
 logger = logging.getLogger(__name__)
 
+
+def build_ucr_mailbox_filter(
+    active_company_id: Optional[str],
+    mailbox_email: Optional[str],
+) -> Optional[dict]:
+    """Filtro Mongo estrito para a mailbox do UCR activo (Pacote DN.2).
+
+    Inclui emails com ``company_id`` da empresa activa **ou** cujo campo
+    ``account`` é o endereço IMAP dessa UCR (legado, sem company_id).
+
+    Não inclui emails globais / de outros perfis do mesmo utilizador.
+    """
+    clauses: List[dict] = []
+    company_id = (active_company_id or "").strip()
+    if company_id and company_id != "default":
+        clauses.append({"company_id": company_id})
+    mailbox = (mailbox_email or "").strip().lower()
+    if mailbox:
+        escaped = re.escape(mailbox)
+        clauses.append({"account": {"$regex": f"^{escaped}$", "$options": "i"}})
+    if not clauses:
+        return None
+    if len(clauses) == 1:
+        return clauses[0]
+    return {"$or": clauses}
+
+
+async def resolve_ucr_mailbox_filter(
+    request: Request,
+    current_user: dict,
+    box: Optional[str] = None,
+    mailbox: Optional[str] = None,
+) -> Optional[dict]:
+    """Resolve o filtro UCR a partir do header X-Company-Id + config de email.
+
+    Caixas partilhadas (geral / indexação) não são scoped por UCR pessoal.
+    Se ``mailbox`` for dado (Pacote DN.4), filtra só essa conta IMAP.
+    """
+    if box in ("general", "shared_indexacao"):
+        return None
+    from services.auth import get_active_company_id_async
+    from services.email_config_resolver import resolve_email_config_for_sync
+
+    active_company_id = None
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a ler empresa activa: %s", exc)
+
+    selected_mailbox = (mailbox or "").strip().lower() or None
+    if selected_mailbox:
+        try:
+            from services.email_config_resolver import load_caixa_geral_config
+            caixa = await load_caixa_geral_config(active_company_id)
+            caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
+            if caixa_email and caixa_email == selected_mailbox:
+                # Diretor a ver a Caixa Geral injetada na lista de contas
+                return None
+        except Exception as exc:
+            logger.warning("[Webmail] Falha a comparar mailbox com Caixa Geral: %s", exc)
+        # Conta pessoal específica — não misturar as outras do mesmo UCR
+        return build_ucr_mailbox_filter(None, selected_mailbox)
+
+    mailbox_email = None
+    try:
+        resolved = await resolve_email_config_for_sync(
+            current_user.get("id"),
+            active_role=get_effective_role(request, current_user),
+            active_company_id=active_company_id,
+        )
+        if resolved:
+            mailbox_email = (resolved.get("email_address") or "").strip() or None
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a resolver mailbox UCR: %s", exc)
+
+    return build_ucr_mailbox_filter(active_company_id, mailbox_email)
+
+
+def _and_query(query: dict, extra: Optional[dict]) -> dict:
+    """Combina um filtro extra sem esmagar um ``$or`` já presente."""
+    if not extra:
+        return query
+    return {"$and": [query, extra]}
+
+
+async def rewrite_box_for_caixa_geral(
+    request: Request,
+    current_user: dict,
+    box: Optional[str],
+    mailbox: Optional[str],
+):
+    """Se a mailbox seleccionada é a Caixa Geral, tratar como box=general."""
+    if not mailbox:
+        return box, mailbox
+    try:
+        from services.auth import get_active_company_id_async
+        from services.email_config_resolver import load_caixa_geral_config
+        cid = await get_active_company_id_async(request, current_user)
+        caixa = await load_caixa_geral_config(cid)
+        caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
+        if caixa_email and caixa_email == mailbox.strip().lower():
+            return "general", None
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a reescrever box para Caixa Geral: %s", exc)
+    return box, mailbox
+
+
 async def run_test_email_connections(current_user: dict, account: Optional[str] = None):
     """Testar ligação com as contas de email."""
     if current_user["role"] not in ["admin", "ceo"]:
@@ -48,7 +155,7 @@ async def run_get_configured_accounts(current_user: dict):
     ]
 
 
-async def run_webmail_list(request: Request, current_user: dict, folder: str = "inbox", page: int = 1, limit: int = 30, account: Optional[str] = None, search: Optional[str] = None, label: Optional[str] = None, custom_folder: Optional[str] = None, box: Optional[str] = None):
+async def run_webmail_list(request: Request, current_user: dict, folder: str = "inbox", page: int = 1, limit: int = 30, account: Optional[str] = None, search: Optional[str] = None, label: Optional[str] = None, custom_folder: Optional[str] = None, box: Optional[str] = None, mailbox: Optional[str] = None):
     """
     Listar emails no formato Webmail por pasta.
     
@@ -76,18 +183,19 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     user_id = current_user.get("id", "")
     effective_role = get_effective_role(request, current_user)  # Used for data filtering
     can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
     
     logger.debug(f"User {current_user.get('email')} (id={user_id}, role={user_role}, effective_role={effective_role}) querying box={box} folder={folder} account={account}")
     
     # === BOX FILTER: permissões e isolamento por caixa ===
     if box == "general":
-        # Blocked for consultor and indexacao
-        if user_role in (UserRole.CONSULTOR, UserRole.INDEXACAO):
+        # Bloquear consultor/indexação no cargo *activo* (UCR), não só no JWT.
+        if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
             raise HTTPException(
                 status_code=403,
-                detail=f"Acesso à caixa 'geral' não permitido para o role '{user_role}'."
+                detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail List] box=general, user={user_email}, role={user_role}")
+        logger.info(f"[Webmail List] box=general, user={user_email}, role={user_role}, effective_role={effective_role}")
     elif box == "shared_indexacao":
         # Blocked for everyone except admin and indexacao
         if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
@@ -118,20 +226,13 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     # Isso evita que múltiplos $or se sobreponham.
     and_conditions = []
     
-    # === MULTI-EMPRESA: filtrar emails por empresa ativa ===
-    # Mostrar: emails da empresa ativa + emails globais (sem company_id)
-    try:
-        from services.auth import get_active_company_id_async
-        active_company_id = await get_active_company_id_async(request, current_user)
-        if active_company_id:
-            and_conditions.append({"$or": [
-                {"company_id": active_company_id},
-                {"company_id": {"$exists": False}},
-                {"company_id": None},
-                {"company_id": ""},
-            ]})
-    except Exception:
-        pass  # Fallback: mostrar todos se não houver contexto
+    # === MULTI-EMPRESA (Pacote DN.2 + DN.4): filtrar pela mailbox do UCR / conta ──
+    # Estrito: só emails da empresa/conta IMAP do perfil escolhido no Header.
+    ucr_filter = await resolve_ucr_mailbox_filter(
+        request, current_user, box=box, mailbox=mailbox,
+    )
+    if ucr_filter:
+        and_conditions.append(ucr_filter)
     
     # === ISOLAMENTO POR UTILIZADOR ===
     # Quando box é fornecido, ele substitui a lógica de isolamento padrão.
@@ -434,7 +535,12 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     }
 
 
-async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
+async def run_webmail_stats(
+    current_user: dict,
+    box: Optional[str] = None,
+    request: Optional[Request] = None,
+    mailbox: Optional[str] = None,
+):
     """
     Estatísticas de Webmail para o utilizador logado.
     
@@ -443,22 +549,31 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
     Admin/CEO/Diretor vêem a caixa geral.
     
     BOX PARAM: filtra as estatísticas por caixa (personal, general, shared_indexacao).
+    Pacote DN.2: caixa pessoal filtrada pelo UCR activo (X-Company-Id).
     """
     from models.auth import UserRole
     
     user_email = (current_user.get("email") or "").lower().strip()
     user_role = current_user.get("role", "")
     user_id = current_user.get("id", "")
-    can_see_all = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    effective_role = get_effective_role(request, current_user) if request is not None else user_role
+    can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
+    if request is not None:
+        box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
+    ucr_filter = None
+    if request is not None:
+        ucr_filter = await resolve_ucr_mailbox_filter(
+            request, current_user, box=box, mailbox=mailbox,
+        )
     
     # === BOX permission checks ===
     if box == "general":
-        if user_role in (UserRole.CONSULTOR, UserRole.INDEXACAO):
+        if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
             raise HTTPException(
                 status_code=403,
-                detail=f"Acesso à caixa 'geral' não permitido para o role '{user_role}'."
+                detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail Stats] box=general, user={user_email}, role={user_role}")
+        logger.info(f"[Webmail Stats] box=general, user={user_email}, role={user_role}, effective_role={effective_role}")
     elif box == "shared_indexacao":
         if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
             raise HTTPException(
@@ -516,23 +631,23 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
         drafts_base["created_by"] = user_id
     
     # Unread count
-    unread_query = {**inbox_base, "is_read": False}
+    unread_query = _and_query({**inbox_base, "is_read": False}, ucr_filter)
     unread_count = await db.emails.count_documents(unread_query)
     
     # Sent today
     today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
-    sent_today_query = {
+    sent_today_query = _and_query({
         **sent_base,
         "sent_at": {"$gte": today_start}
-    }
+    }, ucr_filter)
     sent_today_count = await db.emails.count_documents(sent_today_query)
     
     # Drafts count
-    drafts_count = await db.emails.count_documents(drafts_base)
+    drafts_count = await db.emails.count_documents(_and_query(drafts_base, ucr_filter))
     
     # Full folder counts for sidebar badges
-    inbox_count = await db.emails.count_documents(inbox_base)
-    sent_count = await db.emails.count_documents(sent_base)
+    inbox_count = await db.emails.count_documents(_and_query(inbox_base, ucr_filter))
+    sent_count = await db.emails.count_documents(_and_query(sent_base, ucr_filter))
     
     # Starred count
     starred_base = {"is_starred": True, "is_archived": False}
@@ -552,7 +667,7 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
             {"synced_for_user": user_id},
             {"synced_for_user": user_email},
         ]
-    starred_count = await db.emails.count_documents(starred_base)
+    starred_count = await db.emails.count_documents(_and_query(starred_base, ucr_filter))
     
     # Trash count
     trash_base = {"is_archived": True}
@@ -572,7 +687,7 @@ async def run_webmail_stats(current_user: dict, box: Optional[str] = None):
             {"synced_for_user": user_id},
             {"synced_for_user": user_email},
         ]
-    trash_count = await db.emails.count_documents(trash_base)
+    trash_count = await db.emails.count_documents(_and_query(trash_base, ucr_filter))
     
     return {
         "unread_count": unread_count,
@@ -603,10 +718,13 @@ async def run_webmail_sync(current_user: dict, account: Optional[str] = None, da
     """
     from models.auth import UserRole
     from services.background_jobs import BackgroundJobService, JobType
-    
-    # Bloquear sync global para utilizadores não-admin
+
     user_role = current_user.get("role", "")
-    if user_role not in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR):
+    all_roles = [user_role] + list(current_user.get("additional_roles") or [])
+    can_sync_global = any(
+        r in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR) for r in all_roles
+    )
+    if not can_sync_global:
         raise HTTPException(
             status_code=403,
             detail="Sincronização global apenas disponível para administradores. Use /webmail/sync-user para sincronizar o seu email pessoal."
@@ -673,7 +791,12 @@ async def run_webmail_sync(current_user: dict, account: Optional[str] = None, da
     }
 
 
-async def run_webmail_sync_user(request: Request, current_user: dict):
+async def run_webmail_sync_user(
+    request: Request,
+    current_user: dict,
+    account_id: Optional[str] = None,
+    mailbox: Optional[str] = None,
+):
     """
     Sincronizar emails usando as credenciais do utilizador logado.
     
@@ -684,7 +807,39 @@ async def run_webmail_sync_user(request: Request, current_user: dict):
     
     user_id = current_user["id"]
     user_role = get_effective_role(request, current_user)
-    
+
+    from services.auth import get_active_company_id_async
+    from services.email_config_resolver import (
+        CAIXA_GERAL_ACCOUNT_ID,
+        CAIXA_GERAL_INJECT_ROLES,
+        load_caixa_geral_config,
+        resolve_active_ucr_role,
+    )
+    active_company_id = None
+    try:
+        active_company_id = await get_active_company_id_async(request, current_user)
+    except Exception:
+        active_company_id = None
+    ucr_role = await resolve_active_ucr_role(request, current_user, active_company_id)
+    selected_mailbox = (mailbox or "").strip().lower()
+    wants_caixa_geral = account_id == CAIXA_GERAL_ACCOUNT_ID
+    if selected_mailbox and not wants_caixa_geral:
+        try:
+            caixa = await load_caixa_geral_config(active_company_id)
+            caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
+            wants_caixa_geral = bool(caixa_email and caixa_email == selected_mailbox)
+        except Exception:
+            wants_caixa_geral = False
+    if wants_caixa_geral and (
+        ucr_role in CAIXA_GERAL_INJECT_ROLES
+        or user_role in CAIXA_GERAL_INJECT_ROLES | {"admin", "ceo"}
+    ):
+        logger.info(
+            "[Webmail Sync] Diretor a sincronizar Caixa Geral user=%s company=%s",
+            user_id, active_company_id,
+        )
+        return await run_webmail_sync(current_user)
+
     # === INDEXACAO / SUPORTE: usar conta partilhada do departamento ===
     if user_role in ("indexacao", "suporte"):
         # Tenta shared_role_email_configs primeiro, depois fallback para system_webmail (Bloco C)
@@ -740,7 +895,26 @@ async def run_webmail_sync_user(request: Request, current_user: dict):
     from services.email_config_resolver import resolve_email_config_for_sync
     from services.auth import get_active_company_id_async
     active_company_id = await get_active_company_id_async(request, current_user)
-    resolved = await resolve_email_config_for_sync(user_id, active_role=active_role, active_company_id=active_company_id)
+    resolved = await resolve_email_config_for_sync(
+        user_id,
+        active_role=active_role,
+        active_company_id=active_company_id,
+        account_id=account_id,
+    )
+    if mailbox and resolved and (resolved.get("email_address") or "").lower() != mailbox.strip().lower():
+        from services.user_email_config_service import list_company_email_configs
+        docs = await list_company_email_configs(user_id, active_company_id or "default")
+        match = next(
+            (d for d in docs if (d.get("email_address") or "").lower() == mailbox.strip().lower()),
+            None,
+        )
+        if match:
+            resolved = await resolve_email_config_for_sync(
+                user_id,
+                active_role=active_role,
+                active_company_id=active_company_id,
+                account_id=match.get("id"),
+            )
     
     if not resolved:
         return {
@@ -754,7 +928,7 @@ async def run_webmail_sync_user(request: Request, current_user: dict):
         job_type=JobType.EMAIL_SYNC,
         user_id=user_id,
         user_email=current_user.get("email", ""),
-        metadata={"sync_type": "user_personal"}
+        metadata={"sync_type": "user_personal", "company_id": active_company_id}
     )
     
     async def run_user_sync():

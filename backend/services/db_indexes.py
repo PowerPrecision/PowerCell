@@ -655,18 +655,26 @@ async def create_ttl_indexes(db) -> dict:
         await _create_index_safe(db.user_company_roles, idx, "user_company_roles", results)
 
     # ====================================================================
-    # ÍNDICES PARA COLECÇÃO 'user_email_configs' (Multi-Empresa)
+    # ÍNDICES PARA COLECÇÃO 'user_email_configs' (Multi-Empresa + Multi-Conta)
     # ====================================================================
-    # Config de email pessoal do utilizador por empresa.
-    # Unicidade: (user_id, company_id) — um utilizador só pode ter UMA
-    # config de email por empresa.
+    # Unicidade: (user_id, company_id, email_address) — várias contas por perfil.
+    try:
+        await db.user_email_configs.drop_index("idx_user_company_email_unique")
+        logger.info("Índice antigo idx_user_company_email_unique removido (DN.4)")
+    except Exception:
+        pass
     user_email_config_indexes = [
-        # Índice composto único — garante unicidade (user_id, company_id)
-        {"keys": [("user_id", 1), ("company_id", 1)], "name": "idx_user_company_email_unique", "unique": True},
-        # Índice no user_id — queries por utilizador
+        {
+            "keys": [("user_id", 1), ("company_id", 1), ("email_address", 1)],
+            "name": "idx_user_company_email_address_unique",
+            "unique": True,
+        },
         {"keys": [("user_id", 1)], "name": "idx_user_email_user_id"},
-        # Índice no company_id — queries por empresa
         {"keys": [("company_id", 1)], "name": "idx_user_email_company_id"},
+        {
+            "keys": [("user_id", 1), ("company_id", 1), ("is_primary", 1)],
+            "name": "idx_user_email_primary",
+        },
     ]
     for idx in user_email_config_indexes:
         await _create_index_safe(db.user_email_configs, idx, "user_email_configs", results)

@@ -12,8 +12,8 @@ Aplicações concretas já em produção:
 
 | Onde | Como |
 |---|---|
-| `ProcessDetails` — separador Resumo | Só dados críticos do processo (dados do cliente, financeiros, imóvel, crédito) — **sem** atividades/histórico |
-| `ProcessDetails` — separador Histórico | Timeline + Atividades + "Filme da Lead" (auditoria unificada) — tudo o que é cronológico, fora do fluxo de edição |
+| `ProcessDetails` — separador Resumo | Dados críticos + Observações (`observations`) + Timeline compacta (últimos eventos); o filme completo continua no separador Histórico |
+| `ProcessDetails` — separador Histórico | Timeline de fases + Atividades + "Filme da Lead" (auditoria unificada) — histórico completo, fora do fluxo de edição |
 | `HistoryTab.jsx` — "Registar Atividade" | Formulário só aparece dentro de um `Dialog`, aberto por um botão de destaque ("➕ Registar Atividade"); nunca inline permanentemente |
 | `S3FileManager` — Opções Avançadas | Accordion, fechado por defeito |
 | Calculadoras (`MortgageSimulator.jsx`) | Campos de Seguro de Vida / Multirriscos só aparecem depois de o `Switch` "Incluir Seguros" ser ativado |
@@ -202,6 +202,16 @@ O conceito de "conta principal" foi removido. Não existe "Principal (Padrão)" 
 ### Settings sempre pré-preenchidas do backend
 
 As settings de cada perfil (assinatura, webmail, preferências) são lidas do backend já scoped pelo UCR ativo (via `X-Company-Id`). O frontend não pré-preenche nem mistura contextos — cada aba carrega e guarda os seus dados de forma isolada. Ver `components/ProfileRoleTab.jsx`.
+
+### Pacote DM — gravação isolada + assinatura Rich Text + perfil Mediador
+
+- **Interceptor `api.js`**: nunca sobrescrever `X-Company-Id` / `X-Active-Role` se o pedido já os definiu. Sem isto, gravar IMAP/SMTP numa tab de perfil que não é a empresa activa global escrevia no UCR errado.
+- **EmailConfigForm**: POST/GET/test enviam `company_id` no body, na query e no header da tab (`ProfileRoleTab.companyId`).
+- **Assinatura**: renderizar com `RichTextViewer` / `dangerouslySetInnerHTML` + `sanitizeEmailHtml` (DOMPurify). Permitir `data:image`, `cid:` e `https` nas imagens. Se o HTML estiver gravado como entidades (`&lt;p&gt;`), `unescapeHtmlIfNeeded` recupera o markup.
+- **Perfil Mediador**: não existe. `normalizeRole('mediador')` → `intermediario`. Tabs e o `ContextSwitcher` filtram `REMOVED_ROLES`. A dropbox extra de empresa no Diretor está oculta — a empresa vem do perfil no Header.
+- **Impersonate**: o menu lateral usa o `user.role` impersonado. Abas de Administração (`showAdminButton`, Dashboard Executivo) escondem-se se o impersonado não for admin/CEO.
+- **Rascunhos no Dashboard**: `getDraftNavigationTarget` — emails → `/webmail?folder=drafts&id=`, pré-registo → `/registos-clientes?clientId=`, processos → `/processo/:id` (nunca ProcessDetails para rascunhos de email).
+
 
 
 

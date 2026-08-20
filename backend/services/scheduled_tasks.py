@@ -279,7 +279,7 @@ class ScheduledTasksService:
                             message=message,
                             notification_type=notif_type,
                             process_id=process_id,
-                            link="/admin?tab=calendar",
+                            link="/calendario",
                         )
                         notifications_created += 1
 
@@ -319,7 +319,7 @@ class ScheduledTasksService:
                             message=message,
                             notification_type="deadline_missed",
                             process_id=process_id,
-                            link="/admin?tab=calendar",
+                            link="/calendario",
                         )
                         notifications_created += 1
 
@@ -1637,7 +1637,9 @@ class ScheduledTasksService:
 
                         # Resolver a config canónica para este par user+empresa
                         resolved = await resolve_email_config_for_sync(
-                            uid, active_company_id=company_id
+                            uid,
+                            active_company_id=company_id,
+                            account_id=cfg.get("id"),
                         )
                         if not resolved:
                             logger.debug(

@@ -23,11 +23,20 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInDays } from "date-fns";
-import { safeDateStr, safeParseISO, formatDate as formatDateUtil } from "../../lib/utils";
-import { getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses, createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument } from "../../services/api";
+import { safeDateStr, safeParseISO, formatDate as formatDateUtil, formatDateTime } from "../../lib/utils";
+import {
+  getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses,
+  createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument,
+  getProcessAiAnalysis, generateProcessAiAnalysis, getProcessAiAgentAnalysis,
+} from "../../services/api";
 import { StatCard as SharedStatCard } from "../shared/StatCard";
 import { StatusBadge as SharedStatusBadge } from "../shared/StatusBadge";
 import { Spinner, LoadingSpinner as SharedLoadingSpinner } from "../ui/Spinner";
+import { Skeleton } from "../ui/skeleton";
+import { EmptyState } from "../ui/EmptyState";
+import { sanitizeHtml } from "../../utils/sanitize";
+import { markdownToHtml } from "../../utils/markdown";
+import { findProcessBySelectValue, resolveProcessId } from "../../utils/processAuditHistory";
 
 // ====================================================================
 // HELPERS
@@ -305,8 +314,35 @@ export const AddExpiryDialog = ({ isOpen, onClose, formData, setFormData, onSubm
 /** @deprecated Import from `components/ui/Spinner` — re-export for back-compat */
 export const LoadingSpinner = SharedLoadingSpinner;
 
+function formatAgentAnalysisMarkdown(data) {
+  if (!data || typeof data !== "object") return "";
+  const recs = Array.isArray(data.recommendations) ? data.recommendations : [];
+  const metrics = data.metrics || {};
+  const lines = [
+    `# Análise IA — ${data.client_name || "Processo"}`,
+    "",
+    `**Estado:** ${data.status || "—"}`,
+    `**Nível de risco:** ${data.risk_level || "—"}`,
+    `**Dias no sistema:** ${metrics.days_in_system ?? "—"}`,
+    `**Dias sem atualização:** ${metrics.days_since_update ?? "—"}`,
+  ];
+  if (metrics.estimated_completion) {
+    lines.push(`**Conclusão estimada:** ${metrics.estimated_completion}`);
+  }
+  if (recs.length) {
+    lines.push("", "## Recomendações");
+    recs.forEach((item) => {
+      const action = item.action ? ` — ${item.action}` : "";
+      lines.push(`- **${item.type || "nota"}:** ${item.message || ""}${action}`);
+    });
+  } else {
+    lines.push("", "Sem recomendações urgentes neste momento.");
+  }
+  return lines.join("\n");
+}
+
 /**
- * Tab de análise IA - seleção de cliente
+ * Tab de análise IA - seleção de cliente dispara GET/POST da análise.
  */
 export const AIAnalysisTab = ({
   processes,
@@ -314,31 +350,44 @@ export const AIAnalysisTab = ({
   onSelectClient,
   oneDriveFiles,
   isAnalyzing,
+  isLoadingFiles,
   onAnalyzeDocument,
-  analysisResult
+  analysisResult,
+  aiSummary,
+  aiAnalysisDate,
+  aiError,
+  onRefreshAnalysis,
 }) => (
-  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+  <div className="grid grid-cols-1 lg:grid-cols-2 gap-6" data-testid="dashboard-ai-analysis">
     <Card className="border-border">
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
-          <Sparkles className="h-5 w-5 text-purple-500" />
-          Análise de Documentos com IA
+          <Sparkles className="h-5 w-5 text-primary" />
+          Análise IA
         </CardTitle>
         <CardDescription>
-          Selecione um cliente e um documento do Drive para extrair dados automaticamente
+          Selecione um cliente para gerar (ou carregar) a análise do processo
         </CardDescription>
       </CardHeader>
       <CardContent>
         <div className="space-y-4">
           <div className="space-y-2">
-            <Label>Selecione um cliente</Label>
-            <Select onValueChange={onSelectClient}>
-              <SelectTrigger>
+            <Label htmlFor="dashboard-ai-client">Selecione um cliente</Label>
+            <Select
+              value={selectedClient?.id || undefined}
+              onValueChange={(value) => {
+                const process = findProcessBySelectValue(processes, value);
+                onSelectClient(process, value);
+              }}
+            >
+              <SelectTrigger data-testid="dashboard-ai-client-select" id="dashboard-ai-client">
                 <SelectValue placeholder="Escolha um cliente" />
               </SelectTrigger>
               <SelectContent>
-                {processes.map((p) => (
-                  <SelectItem key={p.id} value={p.id}>{safeString(p.client_name)}</SelectItem>
+                {(processes || []).filter((p) => p?.id).map((p) => (
+                  <SelectItem key={p.id} value={String(p.id)}>
+                    {safeString(p.client_name) || safeString(p.process_number) || p.id}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>
@@ -346,15 +395,65 @@ export const AIAnalysisTab = ({
 
           {selectedClient && (
             <div className="p-4 bg-muted/50 rounded-lg">
-              <p className="font-medium mb-2">Cliente: {safeString(selectedClient.client_name)}</p>
-              <p className="text-sm text-muted-foreground">Pasta Drive: {safeString(selectedClient.client_name)}</p>
+              <p className="font-medium mb-1">Cliente: {safeString(selectedClient.client_name)}</p>
+              {selectedClient.process_number && (
+                <p className="text-sm text-muted-foreground">Processo #{safeString(selectedClient.process_number)}</p>
+              )}
+              {aiAnalysisDate && (
+                <p className="text-xs text-muted-foreground mt-1">
+                  Última análise: {formatDateTime(aiAnalysisDate)}
+                </p>
+              )}
             </div>
           )}
 
-          {analysisResult && (
-            <div className="p-4 bg-green-50 dark:bg-green-900/20 rounded-lg border border-green-200 dark:border-green-800">
-              <p className="font-medium text-green-800 dark:text-green-200 mb-2">
-                ✓ Dados Extraídos: {analysisResult.fileName}
+          {isAnalyzing && (
+            <div className="space-y-3" data-testid="dashboard-ai-loading" role="status" aria-label="A carregar análise IA">
+              <div className="flex items-center gap-2 text-sm text-muted-foreground">
+                <Spinner size="sm" className="text-primary" />
+                A carregar análise IA...
+              </div>
+              <Skeleton className="h-4 w-3/4" />
+              <Skeleton className="h-4 w-full" />
+              <Skeleton className="h-4 w-5/6" />
+              <Skeleton className="h-24 w-full" />
+            </div>
+          )}
+
+          {!isAnalyzing && aiError && (
+            <p className="text-sm text-destructive">{aiError}</p>
+          )}
+
+          {!isAnalyzing && aiSummary && (
+            <div
+              className="p-4 rounded-lg border border-border bg-muted/30 max-h-[420px] overflow-y-auto"
+              data-testid="dashboard-ai-result"
+            >
+              <div
+                className="prose prose-sm dark:prose-invert max-w-none text-sm leading-relaxed"
+                dangerouslySetInnerHTML={{ __html: sanitizeHtml(markdownToHtml(aiSummary)) }}
+              />
+              {onRefreshAnalysis && (
+                <Button variant="outline" size="sm" className="mt-3" onClick={onRefreshAnalysis}>
+                  Atualizar análise
+                </Button>
+              )}
+            </div>
+          )}
+
+          {!selectedClient && !isAnalyzing && (
+            <EmptyState
+              icon={Sparkles}
+              title="Sem cliente selecionado"
+              message="Escolha um cliente no seletor para ver a análise IA."
+              className="py-8"
+            />
+          )}
+
+          {analysisResult && !isAnalyzing && (
+            <div className="p-4 bg-muted/50 rounded-lg border border-border">
+              <p className="font-medium mb-2">
+                Dados extraídos: {analysisResult.fileName}
               </p>
               <div className="text-sm space-y-1">
                 {analysisResult.mapped?.financial_data && (
@@ -381,40 +480,49 @@ export const AIAnalysisTab = ({
       <CardHeader>
         <CardTitle className="text-lg flex items-center gap-2">
           <FolderOpen className="h-5 w-5" />
-          Ficheiros do Drive
+          Ficheiros do cliente
         </CardTitle>
       </CardHeader>
       <CardContent>
         {!selectedClient ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <FolderOpen className="h-12 w-12 mx-auto mb-4 opacity-50" />
-            <p>Selecione um cliente para ver os ficheiros</p>
+          <EmptyState
+            icon={FolderOpen}
+            message="Selecione um cliente para ver os ficheiros"
+            className="py-8"
+          />
+        ) : isLoadingFiles ? (
+          <div className="space-y-2" role="status" aria-label="A carregar ficheiros">
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
+            <Skeleton className="h-12 w-full" />
           </div>
         ) : oneDriveFiles.length === 0 ? (
-          <div className="text-center py-8 text-muted-foreground">
-            <p>Nenhum ficheiro disponível nesta pasta</p>
-          </div>
+          <EmptyState message="Nenhum ficheiro disponível nesta pasta" className="py-8" />
         ) : (
           <div className="space-y-2">
-            {oneDriveFiles.map((file) => (
-              <div key={file.id} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg">
-                <div className="flex items-center gap-3">
-                  <FileText className="h-5 w-5 text-muted-foreground" />
-                  <span className="text-sm">{file.name}</span>
+            {oneDriveFiles.map((file) => {
+              const fileKey = file.path || file.id || file.name;
+              const fileName = file.name || file.filename || file.path;
+              return (
+                <div key={fileKey} className="flex items-center justify-between p-3 bg-muted/30 rounded-lg gap-2">
+                  <div className="flex items-center gap-3 min-w-0">
+                    <FileText className="h-5 w-5 text-muted-foreground shrink-0" />
+                    <span className="text-sm truncate">{fileName}</span>
+                  </div>
+                  <Select onValueChange={(docType) => onAnalyzeDocument(fileName, docType)}>
+                    <SelectTrigger className="w-40 shrink-0">
+                      <SelectValue placeholder="Analisar como..." />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cc">Cartão Cidadão</SelectItem>
+                      <SelectItem value="recibo_vencimento">Recibo Vencimento</SelectItem>
+                      <SelectItem value="irs">Declaração IRS</SelectItem>
+                      <SelectItem value="outro">Outro</SelectItem>
+                    </SelectContent>
+                  </Select>
                 </div>
-                <Select onValueChange={(docType) => onAnalyzeDocument(file.name, docType)}>
-                  <SelectTrigger className="w-40">
-                    <SelectValue placeholder="Analisar como..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="cc">Cartão Cidadão</SelectItem>
-                    <SelectItem value="recibo_vencimento">Recibo Vencimento</SelectItem>
-                    <SelectItem value="irs">Declaração IRS</SelectItem>
-                    <SelectItem value="outro">Outro</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-            ))}
+              );
+            })}
             {isAnalyzing && (
               <div className="flex items-center justify-center py-4 gap-2">
                 <Spinner size="sm" className="text-primary" />
@@ -511,9 +619,13 @@ export const useDocumentManagement = (fetchData) => {
   });
   const [formLoading, setFormLoading] = useState(false);
   const [isAnalyzing, setIsAnalyzing] = useState(false);
+  const [isLoadingFiles, setIsLoadingFiles] = useState(false);
   const [oneDriveFiles, setOneDriveFiles] = useState([]);
   const [selectedClient, setSelectedClient] = useState(null);
   const [analysisResult, setAnalysisResult] = useState(null);
+  const [aiSummary, setAiSummary] = useState(null);
+  const [aiAnalysisDate, setAiAnalysisDate] = useState(null);
+  const [aiError, setAiError] = useState(null);
 
   const handleAddExpiry = async (e) => {
     e.preventDefault();
@@ -542,10 +654,14 @@ export const useDocumentManagement = (fetchData) => {
   };
 
   const loadClientFiles = async (process) => {
-    setSelectedClient(process);
-    setAnalysisResult(null);
+    setIsLoadingFiles(true);
     try {
-      const res = await getClientS3Files(process.id);
+      const processId = resolveProcessId(process);
+      if (!processId) {
+        setOneDriveFiles([]);
+        return;
+      }
+      const res = await getClientS3Files(processId);
       const allFiles = [];
       if (res.data?.files) {
         Object.values(res.data.files).forEach(categoryFiles => {
@@ -558,7 +674,77 @@ export const useDocumentManagement = (fetchData) => {
     } catch (error) {
       console.error("Error loading S3 files:", error);
       setOneDriveFiles([]);
+    } finally {
+      setIsLoadingFiles(false);
     }
+  };
+
+  const fetchProcessAiAnalysis = async (process, { force = false } = {}) => {
+    const processId = resolveProcessId(process);
+    if (!processId) return;
+
+    setIsAnalyzing(true);
+    setAiError(null);
+    if (!force) setAiSummary(null);
+
+    try {
+      let summary = "";
+      let date = null;
+
+      if (!force) {
+        try {
+          const cached = await getProcessAiAnalysis(processId);
+          summary = cached.data?.ai_executive_summary || "";
+          date = cached.data?.ai_analysis_date || null;
+        } catch {
+          summary = "";
+        }
+      }
+
+      if (!summary || force) {
+        try {
+          const generated = await generateProcessAiAnalysis(processId, force);
+          summary = generated.data?.ai_executive_summary || summary;
+          date = generated.data?.ai_analysis_date || date;
+        } catch (genErr) {
+          const status = genErr.response?.status;
+          if (status !== 503 && status !== 409) {
+            throw genErr;
+          }
+        }
+      }
+
+      if (!summary) {
+        const agent = await getProcessAiAgentAnalysis(processId);
+        summary = formatAgentAnalysisMarkdown(agent.data);
+        date = agent.data?.analyzed_at || date;
+      }
+
+      setAiSummary(summary || "");
+      setAiAnalysisDate(date);
+      if (!summary) {
+        setAiError("A IA não devolveu conteúdo para este processo.");
+      }
+    } catch (error) {
+      const msg = extractErrorMessage(
+        error.response?.data?.detail,
+        "Erro ao gerar análise IA",
+      );
+      setAiError(msg);
+      toast.error(msg);
+    } finally {
+      setIsAnalyzing(false);
+    }
+  };
+
+  const loadClientAndAnalyze = async (process) => {
+    if (!process) return;
+    setSelectedClient(process);
+    setAnalysisResult(null);
+    await Promise.all([
+      loadClientFiles(process),
+      fetchProcessAiAnalysis(process),
+    ]);
   };
 
   const analyzeDocumentWithAI = async (fileName, docType) => {
@@ -568,6 +754,7 @@ export const useDocumentManagement = (fetchData) => {
     setAnalysisResult(null);
     try {
       const res = await analyzeOneDriveDocument({
+        process_id: selectedClient.id,
         client_folder: selectedClient.client_name,
         file_name: fileName,
         document_type: docType
@@ -608,10 +795,16 @@ export const useDocumentManagement = (fetchData) => {
     handleAddExpiry,
     openAddExpiryDialog,
     isAnalyzing,
+    isLoadingFiles,
     oneDriveFiles,
     selectedClient,
     analysisResult,
+    aiSummary,
+    aiAnalysisDate,
+    aiError,
     loadClientFiles,
+    loadClientAndAnalyze,
+    refreshAiAnalysis: () => selectedClient && fetchProcessAiAnalysis(selectedClient, { force: true }),
     analyzeDocumentWithAI
   };
 };

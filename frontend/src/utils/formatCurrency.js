@@ -3,7 +3,7 @@
  *
  * PORQUÊ: antes desta função existirem 7 implementações locais quase idênticas
  * (`FinanceDashboard`, `FinanceTab`, `BranchPerformancePage`, `FilteredProcessList`,
- * `ProcessSummaryCard`, `ProcessDetailsModal`) + 18 ficheiros com `Intl.NumberFormat`
+ * `ProcessDetailsModal`) + 18 ficheiros com `Intl.NumberFormat`
  * inline, cada uma com um fallback e número de casas decimais diferente. Esta função
  * é a única fonte de verdade para "como é que um valor em euros aparece no ecrã".
  *

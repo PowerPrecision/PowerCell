@@ -46,6 +46,15 @@ describe('sanitizeProcessUpdatePayload', () => {
     expect(out.notes).toBe('x');
   });
 
+  it('keeps observations and notes (Pacote DP)', () => {
+    const out = sanitizeProcessUpdatePayload({
+      observations: 'nota livre',
+      notes: 'nota livre',
+    });
+    expect(out.observations).toBe('nota livre');
+    expect(out.notes).toBe('nota livre');
+  });
+
   it('keeps non-empty arrays', () => {
     const out = sanitizeProcessUpdatePayload({
       monitored_emails: ['a@b.pt'],

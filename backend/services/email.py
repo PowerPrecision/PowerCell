@@ -590,7 +590,6 @@ async def get_system_transporter(purpose: str) -> dict:
         )
 
     from database import db as _db
-    from services.encryption import encryption_service
 
     # === PRIORIDADE 1: Config na DB ===
     try:
@@ -598,24 +597,35 @@ async def get_system_transporter(purpose: str) -> dict:
             {"purpose": purpose, "is_active": True}
         )
         if doc:
+            from services.email_config_resolver import decrypt_email_secret
             encrypted_pw = doc.get("encrypted_password", "")
-            password = encryption_service.decrypt(encrypted_pw) if encrypted_pw else ""
-
-            logger.info(
-                f"[get_system_transporter] Config DB encontrada para '{purpose}' "
-                f"(host={doc.get('host')}, user={doc.get('user')}, source=db)"
+            smtp_user = doc.get("user", "")
+            password = decrypt_email_secret(
+                encrypted_pw,
+                f"system_email_configs purpose={purpose} user={smtp_user}",
             )
-            return {
-                "host": doc.get("host", ""),
-                "port": int(doc.get("port", 465)),
-                "user": doc.get("user", ""),
-                "password": password,
-                "from_name": doc.get("from_name") or "",
-                "from_email": doc.get("from_email") or doc.get("user") or "",
-                "use_ssl": doc.get("use_ssl", True),
-                "use_tls": doc.get("use_tls", False),
-                "source": "db",
-            }
+            if not password:
+                logger.warning(
+                    "[get_system_transporter] Password vazia ou não desencriptável "
+                    "para '%s' (user=%s). A tentar fallback.",
+                    purpose, smtp_user,
+                )
+            else:
+                logger.info(
+                    f"[get_system_transporter] Config DB encontrada para '{purpose}' "
+                    f"(host={doc.get('host')}, user={smtp_user}, source=db)"
+                )
+                return {
+                    "host": doc.get("host", ""),
+                    "port": int(doc.get("port", 465)),
+                    "user": smtp_user,
+                    "password": password,
+                    "from_name": doc.get("from_name") or "",
+                    "from_email": doc.get("from_email") or smtp_user or "",
+                    "use_ssl": doc.get("use_ssl", True),
+                    "use_tls": doc.get("use_tls", False),
+                    "source": "db",
+                }
     except Exception as e:
         logger.warning(
             f"[get_system_transporter] Erro ao buscar config DB para '{purpose}': {e}"

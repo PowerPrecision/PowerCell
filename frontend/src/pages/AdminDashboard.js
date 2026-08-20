@@ -59,8 +59,9 @@ import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
 import TeamPerformanceTab from "../components/admin/TeamPerformanceTab";
-import { filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { filterByAnyRole, filterByRole, filterAssignmentStaff } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { processDeepLink } from "../utils/processDeepLink";
 const AdminDashboard = () => {
   const navigate = useNavigate();
   const { user } = useAuth();
@@ -105,8 +106,8 @@ const AdminDashboard = () => {
   const [isCreateEventDialogOpen, setIsCreateEventDialogOpen] = useState(false);
   const [selectedDateForEvent, setSelectedDateForEvent] = useState(new Date());
 
-  // Get staff users for assignment (excluindo admin e ceo)
-  const staffUsers = useMemo(() => excludeRoles(users || [], ["cliente", "admin", "ceo"]), [users]);
+  // Get staff users for assignment (Pacote DT: sem admin/indexação)
+  const staffUsers = useMemo(() => filterAssignmentStaff(users || []), [users]);
   const consultors = useMemo(() => filterByAnyRole(users || [], ["consultor", "diretor"]), [users]);
   const intermediarios = useMemo(() => filterByAnyRole(users || [], ["intermediario", "diretor"]), [users]);
   const indexacaoUsers = useMemo(() => filterByRole(users || [], "indexacao"), [users]);
@@ -429,7 +430,7 @@ const AdminDashboard = () => {
                       <div
                         key={msg.id}
                         className="flex items-start gap-3 p-3 rounded-lg bg-amber-50/50 dark:bg-amber-950/20 border border-amber-100 dark:border-amber-900/50 cursor-pointer hover:bg-amber-100/50 dark:hover:bg-amber-950/30 transition-colors"
-                        onClick={() => navigate(`/process/${msg.process_id}`)}
+                        onClick={() => navigate(processDeepLink(msg.process_id, "portal"))}
                       >
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2 mb-1">
@@ -474,7 +475,7 @@ const AdminDashboard = () => {
                       <div
                         key={email.id}
                         className="flex items-start gap-3 p-3 rounded-lg bg-blue-50/50 dark:bg-blue-950/20 border border-blue-100 dark:border-blue-900/50 cursor-pointer hover:bg-blue-100/50 dark:hover:bg-blue-950/30 transition-colors"
-                        onClick={() => email.process_id ? navigate(`/process/${email.process_id}`) : navigate('/webmail')}
+                        onClick={() => email.process_id ? navigate(processDeepLink(email.process_id, "emails")) : navigate('/webmail')}
                       >
                         <div className="min-w-0 flex-1">
                           <p className="font-medium text-sm truncate">{email.subject}</p>

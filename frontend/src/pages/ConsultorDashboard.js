@@ -37,13 +37,18 @@ import {
 } from "../components/dashboard/DashboardShared";
 import { PageHeader } from "../components/shared/PageHeader";
 import { EmptyState } from "../components/ui/EmptyState";
+import { processDeepLink } from "../utils/processDeepLink";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamMural from "../components/TeamMural";
-import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystemChangelogs } from "../services/api";
+import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystemChangelogs, getAutoDrafts } from "../services/api";
 import { safeString } from "../utils/safeString";
 import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
+import { markdownToHtml } from "../utils/markdown";
+import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
+import AgendaCalendar from "../components/calendar/AgendaCalendar";
+import { isTeamCalendarRole } from "../utils/agendaCalendar";
 
 /** Macro-fases do funil (agrupam estados finos do workflow) */
 const FUNNEL_MACRO = [
@@ -80,22 +85,7 @@ const FUNNEL_MACRO = [
   },
 ];
 
-const DRAFT_STATUSES = new Set(["clientes_espera", "fase_documental"]);
-
-function markdownToHtml(md) {
-  if (!md || typeof md !== "string") return "";
-  let html = md
-    .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 class="text-base font-bold mt-4 mb-2">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
-    .replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
-    .replace(/\n\n/g, '</p><p class="mb-2">')
-    .replace(/\n/g, "<br/>");
-  html = `<p class="mb-2">${html}</p>`;
-  return html.replace(/<p class="mb-2"><\/p>/g, "");
-}
+const DRAFT_STATUSES = PROCESS_DRAFT_STATUSES;
 
 const roleLabels = {
   admin: "Administrador",
@@ -109,10 +99,11 @@ const roleLabels = {
 
 const ConsultorDashboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const [exploreTab, setExploreTab] = useState("clients");
 
   const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
+  const [emailDrafts, setEmailDrafts] = useState([]);
   const [deadlines, setDeadlines] = useState([]);
   const [commsFeed, setCommsFeed] = useState({
     portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0,
@@ -141,10 +132,15 @@ const ConsultorDashboard = () => {
     handleAddExpiry,
     openAddExpiryDialog,
     isAnalyzing,
+    isLoadingFiles,
     oneDriveFiles,
     selectedClient,
     analysisResult,
-    loadClientFiles,
+    aiSummary,
+    aiAnalysisDate,
+    aiError,
+    loadClientAndAnalyze,
+    refreshAiAnalysis,
     analyzeDocumentWithAI
   } = useDocumentManagement(fetchData);
 
@@ -160,6 +156,9 @@ const ConsultorDashboard = () => {
         portal_messages: [], unread_emails: [], portal_unread_count: 0, email_unread_count: 0,
       }))
       .catch(() => {});
+    getAutoDrafts(5)
+      .then((res) => setEmailDrafts(res.data?.drafts || []))
+      .catch(() => {});
     getSystemChangelogs(1)
       .then((res) => {
         const data = res.data;
@@ -172,6 +171,22 @@ const ConsultorDashboard = () => {
     () => (processes || []).filter((p) => DRAFT_STATUSES.has(p.status)).slice(0, 5),
     [processes]
   );
+
+  const dashboardDrafts = useMemo(() => {
+    const emails = (emailDrafts || []).slice(0, 5).map((d) => ({
+      ...d,
+      kind: "email",
+      _label: d.subject || d.client_name || "Rascunho de email",
+      _sub: d.client_name || (Array.isArray(d.to_emails) ? d.to_emails[0] : "") || "Email",
+    }));
+    const procs = draftProcesses.map((p) => ({
+      ...p,
+      kind: p.status === "pre_registo" || p.is_lead ? "lead" : "process",
+      _label: p.client_name || "Processo em rascunho",
+      _sub: p.client_email || p.status || "",
+    }));
+    return [...emails, ...procs].slice(0, 8);
+  }, [emailDrafts, draftProcesses]);
 
   const upcomingDeadlines = useMemo(() => {
     return [...(deadlines || [])]
@@ -350,22 +365,25 @@ const ConsultorDashboard = () => {
                     <FileEdit className="h-4 w-4 text-muted-foreground" />
                     Em rascunho
                   </h3>
-                  <Badge variant="secondary" className="text-xs">{draftProcesses.length}</Badge>
+                  <Badge variant="secondary" className="text-xs">{dashboardDrafts.length}</Badge>
                 </div>
-                {draftProcesses.length === 0 ? (
+                {dashboardDrafts.length === 0 ? (
                   <p className="text-sm text-muted-foreground py-4">Nenhum processo em fase inicial</p>
                 ) : (
                   <ul className="space-y-2">
-                    {draftProcesses.map((p) => (
-                      <li key={p.id}>
+                    {dashboardDrafts.map((p) => (
+                      <li key={`${p.kind || "item"}-${p.id}`}>
                         <button
                           type="button"
                           className="w-full flex items-center justify-between gap-2 rounded-md border border-border bg-muted/30 p-2.5 text-left hover:bg-muted/50 transition-colors"
-                          onClick={() => navigate(`/process/${p.id}`)}
+                          onClick={() => {
+                            const { href } = getDraftNavigationTarget(p);
+                            navigate(href);
+                          }}
                         >
                           <div className="min-w-0">
-                            <p className="text-sm font-medium truncate">{safeString(p.client_name)}</p>
-                            <p className="text-xs text-muted-foreground truncate">{safeString(p.client_email)}</p>
+                            <p className="text-sm font-medium truncate">{safeString(p._label || p.client_name)}</p>
+                            <p className="text-xs text-muted-foreground truncate">{safeString(p._sub || p.client_email)}</p>
                           </div>
                           <ArrowRight className="h-4 w-4 text-muted-foreground shrink-0" />
                         </button>
@@ -466,6 +484,10 @@ const ConsultorDashboard = () => {
               <Users className="h-4 w-4" />
               Clientes
             </TabsTrigger>
+            <TabsTrigger value="calendar" className="gap-2">
+              <Calendar className="h-4 w-4" />
+              Calendário
+            </TabsTrigger>
             <TabsTrigger value="feed" className="gap-2">
               <Rss className="h-4 w-4" />
               Mural & Feed
@@ -515,6 +537,22 @@ const ConsultorDashboard = () => {
             </Card>
           </TabsContent>
 
+          <TabsContent value="calendar" className="mt-6">
+            <AgendaCalendar
+              events={deadlines}
+              compact
+              isTeamView={isTeamCalendarRole(effectiveRole)}
+              viewerId={user?.id}
+              title="Agenda"
+              description="Próximas marcações — abra o calendário completo para a vista mensal e semanal"
+              headerAction={
+                <Button variant="outline" size="sm" className="h-8" onClick={() => navigate("/calendario")}>
+                  Abrir calendário
+                </Button>
+              }
+            />
+          </TabsContent>
+
           <TabsContent value="feed" className="mt-6 space-y-6">
             <Card className="border-border">
               <CardHeader className="pb-3">
@@ -552,7 +590,7 @@ const ConsultorDashboard = () => {
                           type="button"
                           key={msg.id}
                           className="w-full flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
-                          onClick={() => navigate(`/process/${msg.process_id}`)}
+                          onClick={() => navigate(processDeepLink(msg.process_id, "portal"))}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 mb-1">
@@ -591,7 +629,7 @@ const ConsultorDashboard = () => {
                           type="button"
                           key={email.id}
                           className="w-full flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
-                          onClick={() => (email.process_id ? navigate(`/process/${email.process_id}`) : navigate("/webmail"))}
+                          onClick={() => (email.process_id ? navigate(processDeepLink(email.process_id, "emails")) : navigate("/webmail"))}
                         >
                           <div className="min-w-0 flex-1">
                             <p className="font-medium text-sm truncate">{email.subject}</p>
@@ -666,14 +704,18 @@ const ConsultorDashboard = () => {
             <AIAnalysisTab
               processes={processes}
               selectedClient={selectedClient}
-              onSelectClient={(value) => {
-                const process = processes.find((p) => p.id === value);
-                if (process) loadClientFiles(process);
+              onSelectClient={(process) => {
+                if (process) loadClientAndAnalyze(process);
               }}
               oneDriveFiles={oneDriveFiles}
               isAnalyzing={isAnalyzing}
+              isLoadingFiles={isLoadingFiles}
               onAnalyzeDocument={analyzeDocumentWithAI}
               analysisResult={analysisResult}
+              aiSummary={aiSummary}
+              aiAnalysisDate={aiAnalysisDate}
+              aiError={aiError}
+              onRefreshAnalysis={refreshAiAnalysis}
             />
           </TabsContent>
         </Tabs>

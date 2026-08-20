@@ -7,31 +7,66 @@ from __future__ import annotations
 import uuid
 from datetime import datetime, timezone
 
-from fastapi import HTTPException
+from typing import Optional
+
+from fastapi import HTTPException, Request
 
 from database import db
 from models.auth import UserRole
 from models.deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
+from services.auth import get_active_company_id_async
+from services.deadlines_api_helpers import is_absence_type
 from services.history import log_history
 from services.notification_service import send_notification_with_preference_check
 from utils.input_sanitization import sanitize_string
 
 
-async def run_create_deadline(data: DeadlineCreate, user: dict):
+async def run_create_deadline(
+    data: DeadlineCreate, user: dict, request: Optional[Request] = None,
+):
     """Criar um novo evento/prazo no calendário."""
     if user["role"] == UserRole.CLIENTE:
         raise HTTPException(
             status_code=403, detail="Clientes não podem criar prazos"
         )
 
-    if data.process_id:
+    event_type = data.type
+    process_id = data.process_id
+    visible_to_client = data.visible_to_client
+    all_day = bool(data.all_day)
+    end_date = data.end_date or None
+
+    # PACOTE DQ — Ausências/férias não ligam a cliente nem ao portal.
+    if is_absence_type(event_type):
+        process_id = None
+        visible_to_client = False
+        if not data.end_date and not data.all_day:
+            all_day = True
+
+    if end_date and data.due_date and end_date < data.due_date:
+        raise HTTPException(
+            status_code=400,
+            detail="A data de fim não pode ser anterior à data de início",
+        )
+    if all_day and not end_date:
+        end_date = data.due_date
+
+    if process_id:
         process = await db.processes.find_one(
-            {"id": data.process_id}, {"_id": 0}
+            {"id": process_id}, {"_id": 0}
         )
         if not process:
             raise HTTPException(
                 status_code=404, detail="Processo não encontrado"
             )
+
+    company_id = user.get("company")
+    if request is not None:
+        header_company = await get_active_company_id_async(request, user)
+        if header_company and header_company != "default":
+            company_id = header_company
+        elif not company_id:
+            company_id = header_company
 
     deadline_id = str(uuid.uuid4())
     now = datetime.now(timezone.utc).isoformat()
@@ -45,7 +80,7 @@ async def run_create_deadline(data: DeadlineCreate, user: dict):
 
     deadline_doc = {
         "id": deadline_id,
-        "process_id": data.process_id,
+        "process_id": process_id,
         "title": safe_title,
         "description": safe_description,
         "due_date": data.due_date,
@@ -57,16 +92,20 @@ async def run_create_deadline(data: DeadlineCreate, user: dict):
         "assigned_consultor_id": data.assigned_consultor_id,
         "assigned_mediador_id": data.assigned_mediador_id,
         # PACOTE DH — Agenda: tipo, visibilidade no portal e lembretes.
-        "type": data.type,
-        "visible_to_client": data.visible_to_client,
+        "type": event_type,
+        "visible_to_client": visible_to_client,
         "reminder_time": data.reminder_time,
+        # PACOTE DQ — Ausências e blocos de dia inteiro.
+        "all_day": all_day,
+        "end_date": end_date,
+        "company_id": company_id,
     }
 
     await db.deadlines.insert_one(deadline_doc)
 
-    if data.process_id:
+    if process_id:
         await log_history(
-            data.process_id, user, "Criou prazo", "deadline", None, safe_title
+            process_id, user, "Criou prazo", "deadline", None, safe_title
         )
 
     for assigned_id in assigned_users:
@@ -141,6 +180,23 @@ async def run_update_deadline(
         update_data["visible_to_client"] = data.visible_to_client
     if data.reminder_time is not None:
         update_data["reminder_time"] = data.reminder_time
+    if data.all_day is not None:
+        update_data["all_day"] = data.all_day
+    if data.end_date is not None:
+        update_data["end_date"] = data.end_date
+
+    next_type = data.type if data.type is not None else deadline.get("type")
+    if is_absence_type(next_type):
+        update_data["process_id"] = None
+        update_data["visible_to_client"] = False
+
+    next_due = data.due_date if data.due_date is not None else deadline.get("due_date")
+    next_end = data.end_date if data.end_date is not None else deadline.get("end_date")
+    if next_end and next_due and next_end < next_due:
+        raise HTTPException(
+            status_code=400,
+            detail="A data de fim não pode ser anterior à data de início",
+        )
 
     if update_data:
         await db.deadlines.update_one(
