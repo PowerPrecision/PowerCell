@@ -279,7 +279,7 @@ class ScheduledTasksService:
                             message=message,
                             notification_type=notif_type,
                             process_id=process_id,
-                            link="/admin?tab=calendar",
+                            link="/calendario",
                         )
                         notifications_created += 1
 
@@ -319,7 +319,7 @@ class ScheduledTasksService:
                             message=message,
                             notification_type="deadline_missed",
                             process_id=process_id,
-                            link="/admin?tab=calendar",
+                            link="/calendario",
                         )
                         notifications_created += 1
 

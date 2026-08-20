@@ -46,6 +46,7 @@ import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
 import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
 import AgendaCalendar from "../components/calendar/AgendaCalendar";
+import { isTeamCalendarRole } from "../utils/agendaCalendar";
 
 /** Macro-fases do funil (agrupam estados finos do workflow) */
 const FUNNEL_MACRO = [
@@ -111,7 +112,7 @@ const roleLabels = {
 
 const ConsultorDashboard = () => {
   const navigate = useNavigate();
-  const { user } = useAuth();
+  const { user, effectiveRole } = useAuth();
   const [exploreTab, setExploreTab] = useState("clients");
 
   const [webmailStats, setWebmailStats] = useState({ unread_count: 0, sent_today_count: 0, drafts_count: 0 });
@@ -547,11 +548,19 @@ const ConsultorDashboard = () => {
           <TabsContent value="calendar" className="mt-6">
             <AgendaCalendar
               events={deadlines}
+              compact
+              isTeamView={isTeamCalendarRole(effectiveRole)}
+              viewerId={user?.id}
               title="Agenda"
-              description="Escrituras, CPCV e prazos dos seus processos"
+              description="Próximas marcações — abra o calendário completo para a vista mensal e semanal"
               onEventClick={(event) => {
                 if (event?.process_id) navigate(`/processo/${event.process_id}`);
               }}
+              headerAction={
+                <Button variant="outline" size="sm" className="h-8" onClick={() => navigate("/calendario")}>
+                  Abrir calendário
+                </Button>
+              }
             />
           </TabsContent>
 

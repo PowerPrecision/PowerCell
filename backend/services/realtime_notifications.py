@@ -309,7 +309,7 @@ async def notify_deadline_reminder(deadline: dict, minutes_before: int = 30):
             title=title,
             message=message,
             notification_type="warning",
-            link="/admin?tab=calendar"
+            link="/calendario"
         )
         
         # Enviar evento específico via WebSocket

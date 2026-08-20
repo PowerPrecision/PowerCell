@@ -8,6 +8,7 @@ def test_deadlines_api_modules_exist():
     expected = [
         "deadlines_api_calendar.py",
         "deadlines_api_crud.py",
+        "deadlines_api_helpers.py",
         "deadlines_api_list.py",
     ]
     for name in expected:
@@ -21,6 +22,7 @@ def test_deadlines_api_export_run_entrypoints():
         deadlines_api_crud,
         deadlines_api_list,
         deadlines_api_calendar,
+        deadlines_api_helpers,
     )
 
     assert callable(deadlines_api_crud.run_create_deadline)
@@ -29,6 +31,7 @@ def test_deadlines_api_export_run_entrypoints():
     assert callable(deadlines_api_list.run_get_deadlines)
     assert callable(deadlines_api_list.run_get_my_deadlines)
     assert callable(deadlines_api_calendar.run_get_calendar_deadlines)
+    assert callable(deadlines_api_helpers.sees_team_calendar)
 
 
 def test_deadlines_router_is_thin_stubs_only():

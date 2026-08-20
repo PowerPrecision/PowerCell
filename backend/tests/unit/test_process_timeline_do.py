@@ -52,9 +52,11 @@ def test_portal_events_filter_upcoming_vs_all():
     upcoming = build_portal_events_filter("p1", "2026-08-18", include_past=False)
     assert upcoming["visible_to_client"] is True
     assert upcoming["due_date"] == {"$gte": "2026-08-18"}
+    assert upcoming["type"] == {"$ne": "absence"}
     all_events = build_portal_events_filter("p1", "2026-08-18", include_past=True)
     assert "due_date" not in all_events
     assert all_events["completed"] == {"$ne": True}
+    assert all_events["type"] == {"$ne": "absence"}
 
 
 def test_serialize_portal_event_strips_internals():

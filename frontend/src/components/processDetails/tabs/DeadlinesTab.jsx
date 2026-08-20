@@ -220,10 +220,10 @@ export default function DeadlinesTab({
                   </button>
                   {/* PACOTE DH — Badge a distinguir tipo: Evento vs Prazo */}
                   <Badge
-                    variant={deadline.type === 'event' ? 'secondary' : 'outline'}
+                    variant={deadline.type === "event" || deadline.type === "absence" ? "secondary" : "outline"}
                     className="shrink-0 text-[10px] px-1.5 py-0"
                   >
-                    {deadline.type === 'event' ? 'Evento' : 'Prazo'}
+                    {deadline.type === "event" ? "Evento" : deadline.type === "absence" ? "Ausência" : "Prazo"}
                   </Badge>
                   <div className="min-w-0 flex-1">
                     <p className={`text-sm truncate ${deadline.completed ? "line-through text-muted-foreground" : ""}`}>

@@ -8,7 +8,7 @@ Keep static /my-deadlines and /calendar before /{deadline_id}.
 """
 from typing import List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 
 from models.auth import UserRole
 from models.deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
@@ -29,10 +29,12 @@ router = APIRouter(prefix="/deadlines", tags=["Deadlines"])
 
 @router.post("", response_model=DeadlineResponse)
 async def create_deadline(
-    data: DeadlineCreate, user: dict = Depends(get_current_user),
+    data: DeadlineCreate,
+    request: Request,
+    user: dict = Depends(get_current_user),
 ):
     """Criar um novo evento/prazo no calendário."""
-    return await run_create_deadline(data, user)
+    return await run_create_deadline(data, user, request)
 
 
 @router.get("", response_model=List[DeadlineResponse])
@@ -52,12 +54,15 @@ async def get_my_deadlines(user: dict = Depends(get_current_user)):
 
 @router.get("/calendar")
 async def get_calendar_deadlines(
+    request: Request,
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
     user: dict = Depends(get_current_user),
 ):
-    """Obter eventos para o calendário."""
-    return await run_get_calendar_deadlines(consultor_id, mediador_id, user)
+    """Obter eventos para o calendário (scoped por cargo efectivo e empresa)."""
+    return await run_get_calendar_deadlines(
+        consultor_id, mediador_id, user, request,
+    )
 
 
 @router.put("/{deadline_id}", response_model=DeadlineResponse)
@@ -75,7 +80,9 @@ async def delete_deadline(
     deadline_id: str,
     user: dict = Depends(
         require_roles([
-            UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.ADMIN,
+            UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
+            UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+            UserRole.ADMINISTRATIVO,
         ])
     ),
 ):
