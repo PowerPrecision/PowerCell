@@ -264,7 +264,6 @@ const WebmailPage = () => {
   // Derived UI state
   const caixaGeralRoles = ['admin', 'ceo', 'diretor', 'administrativo'];
   const showTabs = caixaGeralRoles.includes(effectiveRole) || hasAnyRole(user, caixaGeralRoles);
-  const showAccountSelector = showTabs && activeBox === 'personal';
   // Perfis que podem usar contas globais (power/precision) para enviar email.
   // Os restantes roles (consultor, intermediario, administrativo, indexacao)
   // enviam obrigatoriamente pela conta pessoal (email_config) — o backend
@@ -1630,17 +1629,6 @@ const WebmailPage = () => {
                   </SelectGroup>
                 </SelectContent>
               </Select>
-              {showAccountSelector && (
-                <Select value={account} onValueChange={setAccount}>
-                  <SelectTrigger className="h-8 text-xs" aria-label="Conta empresa">
-                    <SelectValue placeholder="Conta empresa" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="precision">Precision Crédito</SelectItem>
-                    <SelectItem value="power">Power Real Estate</SelectItem>
-                  </SelectContent>
-                </Select>
-              )}
             </div>
 
             {/* Nova Mensagem */}
