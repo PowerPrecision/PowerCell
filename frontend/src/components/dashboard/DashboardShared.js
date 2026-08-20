@@ -23,7 +23,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { differenceInDays } from "date-fns";
-import { safeDateStr, safeParseISO, formatDate as formatDateUtil } from "../../lib/utils";
+import { safeDateStr, safeParseISO, formatDate as formatDateUtil, formatDateTime } from "../../lib/utils";
 import {
   getProcesses, getStats, getUpcomingExpiries, getWorkflowStatuses,
   createDocumentExpiry, getClientS3Files, analyzeOneDriveDocument,
@@ -401,7 +401,7 @@ export const AIAnalysisTab = ({
               )}
               {aiAnalysisDate && (
                 <p className="text-xs text-muted-foreground mt-1">
-                  Última análise: {safeString(aiAnalysisDate)}
+                  Última análise: {formatDateTime(aiAnalysisDate)}
                 </p>
               )}
             </div>

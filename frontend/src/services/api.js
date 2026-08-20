@@ -450,7 +450,10 @@ api.interceptors.response.use(
         ? "Ocorreu um erro interno. Contacte o suporte se o problema persistir."
         : serverDetail;
 
-      toast.error("Erro de Servidor", { description });
+      const skipToast = config?.skipErrorToast;
+      if (!skipToast) {
+        toast.error("Erro de Servidor", { description });
+      }
 
       // Log do erro para debugging
       console.error("[API] Server error:", {
@@ -676,7 +679,10 @@ export const getSupportedDocuments = () => api.get("/ai/supported-documents");
 export const getProcessAiAnalysis = (processId) =>
   api.get(`/processes/${processId}/analyze`);
 export const generateProcessAiAnalysis = (processId, force = false) =>
-  api.post(`/processes/${processId}/analyze`, null, { params: { force } });
+  api.post(`/processes/${processId}/analyze`, null, {
+    params: { force },
+    skipErrorToast: true,
+  });
 export const getProcessAiAgentAnalysis = (processId) =>
   api.get(`/ai-agent/analyze/${processId}`);
 
