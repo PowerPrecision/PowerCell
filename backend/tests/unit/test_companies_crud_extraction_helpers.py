@@ -62,3 +62,14 @@ def test_companies_crud_router_is_thin_stubs_only():
     available_pos = text.index('/available"')
     id_pos = text.index('/{company_id}"')
     assert available_pos < id_pos
+
+
+def test_company_models_include_is_active():
+    from models.company import CompanyCreate, CompanyUpdate, CompanyResponse
+
+    created = CompanyCreate(name="Precision Crédito")
+    assert created.is_active is True
+    updated = CompanyUpdate(is_active=False)
+    assert updated.is_active is False
+    response = CompanyResponse(id="1", name="Precision Crédito")
+    assert response.is_active is True

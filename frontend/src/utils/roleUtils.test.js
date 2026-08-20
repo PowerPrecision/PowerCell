@@ -8,8 +8,10 @@ import {
   ASSIGNMENT_STAFF_ROLES,
   CONSULTOR_ASSIGNMENT_ROLES,
   EXCLUDED_ASSIGNMENT_ROLES,
+  UCR_ASSIGNABLE_ROLES,
   filterAssignmentStaff,
   isAssignmentEligibleUser,
+  canAccessOrgAdmin,
 } from "./roleUtils.js";
 
 describe("assignment staff constants", () => {
@@ -52,5 +54,25 @@ describe("isAssignmentEligibleUser / filterAssignmentStaff", () => {
       { id: "p", role: "parceiro", name: "Parceiro" },
     ]);
     assert.deepEqual(filtered.map((u) => u.id), ["c"]);
+  });
+});
+
+describe("Pacote DW — org admin + UCR roles", () => {
+  it("UCR_ASSIGNABLE_ROLES covers admin/ceo/diretor/consultor/intermediario", () => {
+    assert.deepEqual(UCR_ASSIGNABLE_ROLES, [
+      "admin",
+      "ceo",
+      "diretor",
+      "consultor",
+      "intermediario",
+    ]);
+  });
+
+  it("canAccessOrgAdmin only when activeRole is admin or ceo", () => {
+    assert.equal(canAccessOrgAdmin("admin"), true);
+    assert.equal(canAccessOrgAdmin("CEO"), true);
+    assert.equal(canAccessOrgAdmin("diretor"), false);
+    assert.equal(canAccessOrgAdmin("consultor"), false);
+    assert.equal(canAccessOrgAdmin(null), false);
   });
 });

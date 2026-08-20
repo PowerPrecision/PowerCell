@@ -55,6 +55,7 @@ import {
   ClipboardList,
   Mail,
   Eye,
+  KeyRound,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -506,10 +507,24 @@ const DashboardLayout = ({ children, title }) => {
         ],
       };
 
+      const organizacaoGroup = {
+        id: "organizacao",
+        label: "Administração",
+        icon: Building2,
+        items: [
+          {
+            label: "Empresas e Acessos",
+            icon: KeyRound,
+            href: "/admin/organizacao",
+          },
+        ],
+      };
+
       const adminGroups = [
         { ...meuNegocioGroup, items: adminNegocioItems },
         visaoGlobalGroup,
         comunicacoesGroup,
+        organizacaoGroup,
         dashboardExecutivoGroup,
       ];
       // Só mostrar "Gestão e Operações" se tiver items após filtrar capabilities
@@ -536,7 +551,7 @@ const DashboardLayout = ({ children, title }) => {
   ) {
     navData.showAdminButton = false;
     navData.groups = (navData.groups || []).filter(
-      (g) => g.id !== "dashboard-executivo",
+      (g) => g.id !== "dashboard-executivo" && g.id !== "organizacao",
     );
     if (navData.main?.[0]) {
       navData.main[0] = { ...navData.main[0], href: "/staff" };

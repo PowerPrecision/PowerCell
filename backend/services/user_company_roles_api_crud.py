@@ -15,6 +15,7 @@ from database import db
 from models.user_company_role import (
     UserCompanyRoleCreate,
     UserCompanyRoleUpdate,
+    UserRoleAssignBody,
 )
 
 logger = logging.getLogger(__name__)
@@ -163,3 +164,33 @@ async def run_delete_user_company_role(role_id: str):
     )
 
     return {"success": True, "message": "Associação removida"}
+
+
+async def run_assign_user_company_role(user_id: str, payload: UserRoleAssignBody):
+    """Associa um acesso (empresa + cargo) a um utilizador.
+
+    Conveniência para POST /admin/users/{user_id}/roles — resolve o nome da
+    empresa se não vier no payload e reutiliza o create canónico.
+    """
+    company = await db.companies.find_one({"id": payload.company_id})
+    if not company:
+        company = await db.companies.find_one({"name": payload.company_id})
+    if not company:
+        raise HTTPException(status_code=404, detail="Empresa não encontrada")
+
+    company_id = company.get("id") or payload.company_id
+    company_name = (payload.company_name or company.get("name") or "").strip()
+    if not company_name:
+        raise HTTPException(status_code=400, detail="Nome da empresa é obrigatório")
+
+    existing_count = await db.user_company_roles.count_documents({"user_id": user_id})
+    is_default = payload.is_default or existing_count == 0
+
+    create_payload = UserCompanyRoleCreate(
+        user_id=user_id,
+        company_id=company_id,
+        company_name=company_name,
+        role=payload.role,
+        is_default=is_default,
+    )
+    return await run_create_user_company_role(create_payload)

@@ -43,6 +43,7 @@ const ProcessDetails = React.lazy(() => import("./pages/ProcessDetails"));
 // PÁGINAS COM CODE SPLITTING (lazy loading)
 // ====================================================================
 const AdminDashboard = React.lazy(() => import("./pages/AdminDashboard"));
+const OrganizationAdminPage = React.lazy(() => import("./pages/OrganizationAdminPage"));
 const SystemAdminPanel = React.lazy(() => import("./pages/SystemAdminPanel"));
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const StatisticsPage = React.lazy(() => import("./pages/StatisticsPage"));
@@ -337,6 +338,18 @@ function App() {
               <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <RouteBoundary name="Dashboard Operacional">
                   <AdminDashboard />
+                </RouteBoundary>
+              </ProtectedRoute>
+            }
+          />
+
+          {/* Pacote DW — Administração de Empresas e acessos UCR (perfil activo admin/ceo) */}
+          <Route
+            path="/admin/organizacao"
+            element={
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+                <RouteBoundary name="Administração — Empresas e Acessos">
+                  <OrganizationAdminPage />
                 </RouteBoundary>
               </ProtectedRoute>
             }

@@ -1147,6 +1147,19 @@ export const uploadCompanyLogo = (id, file) => {
   });
 };
 
+// ===== USER COMPANY ROLES (UCR — acessos multi-empresa) =====
+export const getUserCompanyRoles = (params = {}) =>
+  api.get("/admin/user-company-roles", { params });
+export const getUserRoles = (userId) => api.get(`/admin/users/${userId}/roles`);
+export const createUserCompanyRole = (data) =>
+  api.post("/admin/user-company-roles", data);
+export const assignUserRole = (userId, data) =>
+  api.post(`/admin/users/${userId}/roles`, data);
+export const updateUserCompanyRole = (roleId, data) =>
+  api.put(`/admin/user-company-roles/${roleId}`, data);
+export const deleteUserCompanyRole = (roleId) =>
+  api.delete(`/admin/user-company-roles/${roleId}`);
+
 // ===== COMPANY EMAIL CONFIG (IMAP/SMTP por empresa — Pacote AS) =====
 export const getCompanyEmailConfig = (companyName) =>
   api.get(`/admin/company-email-configs/${encodeURIComponent(companyName)}`);

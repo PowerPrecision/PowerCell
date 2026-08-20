@@ -38,3 +38,4 @@ def test_admin_router_is_thin_stubs_only():
     text = routes_path.read_text()
     assert text.count("return await run_") >= 70
     assert len(text.splitlines()) < 800
+    assert '/users/{user_id}/roles"' in text
