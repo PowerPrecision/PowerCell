@@ -33,6 +33,15 @@ def test_activities_api_stealth_guard_preserved():
     assert "sanitize_string" in src
 
 
+def test_activities_api_history_enriches_entries():
+    import inspect
+    from services import activities_api_history
+
+    src = inspect.getsource(activities_api_history)
+    assert "enrich_history_entry" in src
+    assert "description" in src or "HistoryResponse" in src
+
+
 def test_activities_router_is_thin_stubs_only():
     routes_path = Path(__file__).resolve().parents[2] / "routes" / "activities.py"
     text = routes_path.read_text()

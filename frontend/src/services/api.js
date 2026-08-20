@@ -673,6 +673,12 @@ export const getS3DownloadUrl = (processId, filePath) =>
 export const analyzeDocument = (data) => api.post("/ai/analyze-document", data);
 export const analyzeOneDriveDocument = (data) => api.post("/ai/analyze-onedrive-document", data);
 export const getSupportedDocuments = () => api.get("/ai/supported-documents");
+export const getProcessAiAnalysis = (processId) =>
+  api.get(`/processes/${processId}/analyze`);
+export const generateProcessAiAnalysis = (processId, force = false) =>
+  api.post(`/processes/${processId}/analyze`, null, { params: { force } });
+export const getProcessAiAgentAnalysis = (processId) =>
+  api.get(`/ai-agent/analyze/${processId}`);
 
 // PACOTE DJ — Revisão Human-in-the-Loop de Documentos
 // A IA sugere metadados (categoria, validade, nome, filename) em campos `suggested_*`
