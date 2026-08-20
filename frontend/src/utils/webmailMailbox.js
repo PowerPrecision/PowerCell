@@ -14,7 +14,7 @@
  */
 export function buildMailboxOptions({
   personalAccounts = [],
-  showGeneral = false,
+  showGeneral: _showGeneral = false,
   isIndexacao = false,
   unreadByBox = {},
 } = {}) {
@@ -30,12 +30,14 @@ export function buildMailboxOptions({
 
   const options = [];
   const seen = new Set();
+  let hasCaixaGeralWithEmail = false;
 
   for (const item of personalAccounts) {
     const email = (item?.email_address || "").trim();
     if (!email || seen.has(email)) continue;
     seen.add(email);
     if (item.is_caixa_geral) {
+      hasCaixaGeralWithEmail = true;
       options.push({
         value: `personal:${email}`,
         label: `Caixa Geral (${email})`,
@@ -51,13 +53,8 @@ export function buildMailboxOptions({
     }
   }
 
-  if (showGeneral && !options.some((opt) => opt.value === "general")) {
-    options.push({
-      value: "general",
-      label: "Caixa Geral",
-      unread: Number(unreadByBox.general) || 0,
-    });
-  }
+  // PACOTE DV — não injetar uma "Caixa Geral" fantasma sem email.
+  // A conta geral só existe se o backend a injectar com geral@empresa.pt.
 
   if (options.length === 0) {
     options.push({

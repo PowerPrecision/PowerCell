@@ -49,7 +49,6 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
-import { Textarea } from "./ui/textarea";
 import {
   AlertCircle,
   CheckCircle,
@@ -71,6 +70,7 @@ import {
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeString } from "../utils/safeString";
+import SmartRichEditor from "./ui/SmartRichEditor";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -846,15 +846,17 @@ const SendDocumentationModal = ({
                   <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
               ) : (
-                <Textarea
-                  value={emailHtml}
-                  onChange={(e) => setEmailHtml(e.target.value)}
-                  disabled={!bodyEditing}
-                  placeholder="Corpo do email…"
-                  rows={14}
-                  className="min-h-[300px] font-mono text-sm"
-                  data-testid="email-body-textarea"
-                />
+                <div data-testid="email-body-textarea">
+                  <SmartRichEditor
+                    value={emailHtml || ""}
+                    onChange={setEmailHtml}
+                    readOnly={!bodyEditing}
+                    placeholder="Corpo do email…"
+                    minHeight={300}
+                    advanced
+                    allowHtmlAdmin={bodyEditing}
+                  />
+                </div>
               )}
 
               {/* Tags Disponíveis para Templates */}

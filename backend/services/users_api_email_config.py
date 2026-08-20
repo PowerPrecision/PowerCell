@@ -399,7 +399,6 @@ async def run_list_my_email_accounts(
         CAIXA_GERAL_INJECT_ROLES,
         load_caixa_geral_config,
         publicize_caixa_geral_account,
-        resolve_active_ucr_role,
     )
 
     effective_role = get_effective_role(request, current_user)
@@ -411,13 +410,13 @@ async def run_list_my_email_accounts(
     docs = await list_company_email_configs(current_user["id"], active_company_id)
     accounts = [publicize_email_account(doc) for doc in docs]
 
-    ucr_role = await resolve_active_ucr_role(
-        request, current_user, active_company_id,
-    )
     caixa_injected = False
-    if ucr_role in CAIXA_GERAL_INJECT_ROLES or effective_role in CAIXA_GERAL_INJECT_ROLES:
+    # PACOTE DV — só o perfil ACTIVO (effective_role) injeta Caixa Geral,
+    # e apenas se a conta tiver email real. Sem mocks genéricos.
+    if effective_role in CAIXA_GERAL_INJECT_ROLES:
         caixa = await load_caixa_geral_config(active_company_id)
-        if caixa and caixa.get("email_address"):
+        caixa_email = ((caixa or {}).get("email_address") or "").strip()
+        if caixa and caixa_email and "@" in caixa_email:
             existing = {
                 (a.get("email_address") or "").strip().lower() for a in accounts
             }

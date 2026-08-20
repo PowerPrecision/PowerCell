@@ -822,6 +822,11 @@ const ProcessesPage = () => {
                               } else if (Array.isArray(process.activities) && process.activities.length > 0) {
                                 const lastAct = process.activities[process.activities.length - 1];
                                 noteText = lastAct?.content || lastAct?.description || '';
+                              } else if (typeof process.notes === 'string' && process.notes.trim()) {
+                                noteText = process.notes.trim();
+                              } else if (Array.isArray(process.observation_notes) && process.observation_notes.length > 0) {
+                                const lastNote = process.observation_notes[process.observation_notes.length - 1];
+                                noteText = (lastNote?.text || "").trim();
                               }
                               if (!noteText) return <span className="text-xs text-muted-foreground">—</span>;
                               return (

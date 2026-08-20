@@ -120,10 +120,13 @@ def build_role_visibility_conditions(
 
 def build_assigned_to_me_condition(user_id: str) -> dict:
     """
-    PACOTE DU — processos directamente atribuídos ao utilizador.
+    PACOTE DU / DV — processos directamente atribuídos ao utilizador.
 
     GET /processes/me filtra SEMPRE por esta condição, inclusive quando a
     role activa é diretor/admin/ceo (esses roles só vêem tudo em show_all).
+
+    ``assigned_to`` é o campo canónico; os ``assigned_*`` cobrem o schema
+    real (consultor/mediador/indexação/parceiro).
     """
     return {"$or": [
         {"assigned_to": user_id},
@@ -134,6 +137,32 @@ def build_assigned_to_me_condition(user_id: str) -> dict:
         {"assigned_indexacao_id": user_id},
         {"assigned_parceiro_id": user_id},
     ]}
+
+
+def build_company_scope_condition(company_id: Optional[str]) -> Optional[dict]:
+    """
+    PACOTE DV — isolamento por empresa activa.
+
+    GET /processes/me exige ``company_id == active_company_id`` (com fallback
+    para o campo legado ``company``). Processos sem empresa só entram no
+    sentinel ``default``.
+    """
+    cid = (company_id or "").strip()
+    if not cid:
+        return None
+
+    clauses: list[dict] = [
+        {"company_id": cid},
+        {"company": cid},
+    ]
+    if cid == "default":
+        clauses.extend([
+            {"company_id": {"$in": [None, "", "default"]}},
+            {"company_id": {"$exists": False}},
+            {"company": {"$in": [None, "", "default"]}},
+            {"company": {"$exists": False}},
+        ])
+    return {"$or": clauses}
 
 
 def build_view_mode_status_conditions(
@@ -215,19 +244,25 @@ def build_process_list_query(
     all_roles: Optional[list] = None,
     search_mode: str = "accent",
     mine_only: bool = False,
+    company_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Query MongoDB completa para listagens de processos.
 
     Combinada com $and — os filtros nunca se anulam mutuamente.
     mine_only=True (GET /processes/me) ignora a role e filtra sempre
-    por assigned_to / assigned_* == user_id.
+    por assigned_to / assigned_* == user_id E company_id da empresa activa.
     """
     and_conditions: list[dict] = []
 
     and_conditions.append(build_is_deleted_filter(status=status, view_mode=view_mode))
     if mine_only:
         and_conditions.append(build_assigned_to_me_condition(user["id"]))
+        company_cond = build_company_scope_condition(
+            company_id if company_id is not None else user.get("active_company_id") or user.get("company")
+        )
+        if company_cond:
+            and_conditions.append(company_cond)
     else:
         and_conditions.extend(
             build_role_visibility_conditions(

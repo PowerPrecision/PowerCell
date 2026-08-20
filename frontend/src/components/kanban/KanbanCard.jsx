@@ -44,6 +44,10 @@ const arePropsEqual = (prevProps, nextProps) => {
     prevProps.process.labels === nextProps.process.labels &&
     prevProps.process.has_unread_messages === nextProps.process.has_unread_messages &&
     prevProps.process.has_new_documents === nextProps.process.has_new_documents &&
+    prevProps.process.notes === nextProps.process.notes &&
+    prevProps.process.latest_note === nextProps.process.latest_note &&
+    prevProps.process.latest_activity_preview === nextProps.process.latest_activity_preview &&
+    prevProps.process.observation_notes === nextProps.process.observation_notes &&
     prevProps.isDragging === nextProps.isDragging &&
     prevProps.isLocked === nextProps.isLocked &&
     prevProps.lockedBy === nextProps.lockedBy
@@ -327,6 +331,26 @@ const KanbanCard = memo(({
               )}
             </div>
           )}
+
+          {/* PACOTE DV — última nota do feed / campo notes */}
+          {(() => {
+            const lastObs = Array.isArray(process.observation_notes)
+              ? process.observation_notes[process.observation_notes.length - 1]
+              : null;
+            const noteText = (
+              process.latest_activity_preview
+              || process.latest_note
+              || process.notes
+              || lastObs?.text
+              || ""
+            ).toString().trim();
+            if (!noteText) return null;
+            return (
+              <p className="text-[10px] text-muted-foreground italic line-clamp-2" title={noteText}>
+                {noteText}
+              </p>
+            );
+          })()}
         </div>
       </CardContent>
     </Card>

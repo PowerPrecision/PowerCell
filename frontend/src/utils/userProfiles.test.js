@@ -65,6 +65,31 @@ describe("buildProfileRoleTabs", () => {
     assert.ok(tabs[0].id);
     assert.ok(tabs[1].id);
     assert.notEqual(tabs[0].id, tabs[1].id);
+    assert.deepEqual(tabs[0].roleData, {
+      display_name: "",
+      professional_phone: "",
+      job_title: "",
+      signature: "",
+    });
+  });
+
+  it("passa role_data do UCR para a tab", () => {
+    const tabs = buildProfileRoleTabs({
+      role: "consultor",
+      companies: [{
+        role: "consultor",
+        company_id: "c1",
+        company_name: "Power",
+        display_name: "Ana Power",
+        professional_phone: "910000000",
+        job_title: "Consultora",
+        signature: "<p>Ana</p>",
+      }],
+    });
+    assert.equal(tabs[0].roleData.display_name, "Ana Power");
+    assert.equal(tabs[0].roleData.professional_phone, "910000000");
+    assert.equal(tabs[0].roleData.job_title, "Consultora");
+    assert.equal(tabs[0].roleData.signature, "<p>Ana</p>");
   });
 });
 

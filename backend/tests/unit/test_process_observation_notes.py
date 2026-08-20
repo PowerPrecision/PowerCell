@@ -41,3 +41,47 @@ def test_append_to_existing_array():
     process = {"observation_notes": [{"id": "n1", "text": "a"}]}
     out = append_observation_note(process, {"id": "n2", "text": "b"})
     assert [n["id"] for n in out] == ["n1", "n2"]
+
+
+def test_run_add_observation_note_syncs_base_notes_field():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from services.process_observation_notes import (
+        ObservationNoteCreate,
+        run_add_observation_note,
+    )
+
+    async def _run():
+        process = {
+            "id": "p1",
+            "observation_notes": [],
+            "notes": "",
+            "observations": "",
+        }
+        mock_db = MagicMock()
+        mock_db.processes.find_one = AsyncMock(side_effect=[process, {
+            **process,
+            "observation_notes": [{"text": "última nota"}],
+            "notes": "última nota",
+            "observations": "última nota",
+        }])
+        mock_db.processes.update_one = AsyncMock()
+        with patch("services.process_observation_notes.db", mock_db):
+            result = await run_add_observation_note(
+                "p1",
+                ObservationNoteCreate(text="última nota"),
+                {"id": "u1", "name": "Ana"},
+                can_view_fn=lambda *_: True,
+                can_edit_fn=lambda *_: (True, None),
+                log_history_fn=AsyncMock(),
+                populate_fn=AsyncMock(side_effect=lambda p: p),
+                decrypt_fn=lambda p: p,
+            )
+        payload = mock_db.processes.update_one.await_args.args[1]["$set"]
+        assert payload["notes"] == "última nota"
+        assert payload["observations"] == "última nota"
+        assert payload["observation_notes"][-1]["text"] == "última nota"
+        assert result["notes"] == "última nota"
+
+    asyncio.run(_run())

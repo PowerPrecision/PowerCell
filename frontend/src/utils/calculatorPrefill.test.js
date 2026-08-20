@@ -87,7 +87,16 @@ describe("webmail mailbox selector", () => {
     });
     assert.equal(options[0].label, "Caixa Pessoal (João)");
     assert.equal(options[1].label, "Caixa Geral (geral@empresa.pt)");
-    assert.ok(options.some((o) => o.value === "general" && o.label === "Caixa Geral"));
+    assert.equal(options.length, 2);
+    assert.ok(!options.some((o) => o.value === "general"));
+  });
+
+  it("does not inject a ghost Caixa Geral without email", () => {
+    const options = buildMailboxOptions({
+      personalAccounts: [{ email_address: "joao@empresa.pt" }],
+      showGeneral: true,
+    });
+    assert.ok(!options.some((o) => (o.label || "").includes("Caixa Geral")));
   });
 
   it("locks indexacao to the shared mailbox", () => {

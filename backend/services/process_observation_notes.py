@@ -96,6 +96,7 @@ async def run_add_observation_note(
     note = build_observation_note(text, user)
     new_notes = append_observation_note(process, note)
 
+    # PACOTE DV — o Kanban / listagem lê o campo base ``notes``.
     await db.processes.update_one(
         {"id": process_id},
         {"$set": {

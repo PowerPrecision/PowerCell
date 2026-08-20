@@ -18,7 +18,7 @@
  * @prop {string} companyId   — ID da empresa do UCR (ex: "comp-123")
  * @prop {string} role        — Role do UCR (ex: "consultor")
  * @prop {string} companyName — Nome da empresa (ex: "Power Real Estate")
- * @prop {Object} user        — User object do AuthContext (apenas para referência)
+ * @prop {Object} roleData    — Dados estritos do UCR (display_name, phone, job_title, signature)
  * @prop {Function} onUpdate  — Callback opcional após save (ex: refreshUser)
  */
 
@@ -54,12 +54,12 @@ import {
   Info,
 } from "lucide-react";
 
-const ProfileRoleTab = ({ companyId, role, companyName, user, onUpdate }) => {
-  // ── Campos por UCR (escopo: companyId) ──
-  const [displayName, setDisplayName] = useState("");
-  const [professionalPhone, setProfessionalPhone] = useState("");
-  const [jobTitle, setJobTitle] = useState("");
-  const [emailSignature, setEmailSignature] = useState("");
+const ProfileRoleTab = ({ companyId, role, companyName, roleData, onUpdate }) => {
+  // ── Campos por UCR (escopo: companyId) — PACOTE DV: só role_data, sem globais ──
+  const [displayName, setDisplayName] = useState(roleData?.display_name ?? "");
+  const [professionalPhone, setProfessionalPhone] = useState(roleData?.professional_phone ?? "");
+  const [jobTitle, setJobTitle] = useState(roleData?.job_title ?? "");
+  const [emailSignature, setEmailSignature] = useState(roleData?.signature ?? "");
   const [savingSignature, setSavingSignature] = useState(false);
   const [savingCompanyFields, setSavingCompanyFields] = useState(false);
   const [savedCompanyFields, setSavedCompanyFields] = useState(false);
@@ -85,10 +85,12 @@ const ProfileRoleTab = ({ companyId, role, companyName, user, onUpdate }) => {
         });
         const u = meResponse.data;
         if (cancelled) return;
-        setDisplayName(u.active_company_display_name ?? u.name ?? "");
-        setProfessionalPhone(u.active_company_professional_phone ?? u.phone ?? "");
+        // PACOTE DV — consumir apenas campos do UCR (active_company_*),
+        // sem fallback para name/phone/email_signature globais.
+        setDisplayName(u.active_company_display_name ?? "");
+        setProfessionalPhone(u.active_company_professional_phone ?? "");
         setJobTitle(u.active_company_job_title ?? "");
-        setEmailSignature(u.active_company_signature ?? u.email_signature ?? "");
+        setEmailSignature(u.active_company_signature ?? "");
 
         // 2) Carregar info de config de email para ESTE UCR
         try {

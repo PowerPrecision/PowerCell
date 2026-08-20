@@ -176,7 +176,12 @@ const ProcessDetailsModal = memo(({
       valor_avaliacao: crData.valuation_value || crData.valor_avaliacao || '',
       status: process.status || '',
       prioridade: process.prioridade || process.priority || 'media',
-      notes: process.notes || '',
+      notes: (() => {
+        const lastObs = Array.isArray(process.observation_notes)
+          ? process.observation_notes[process.observation_notes.length - 1]
+          : null;
+        return process.notes || lastObs?.text || process.observations || '';
+      })(),
     };
     setEditProcess(processState);
     originalProcessRef.current = processState;

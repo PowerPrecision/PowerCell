@@ -44,6 +44,10 @@ export function normalizeCompanyRecord(raw, fallbacks = {}) {
       company_id: fallbacks.companyId || null,
       company_name: fallbacks.companyName || null,
       is_default: false,
+      display_name: null,
+      professional_phone: null,
+      job_title: null,
+      signature: null,
     };
   }
   if (typeof raw !== "object") return null;
@@ -70,6 +74,10 @@ export function normalizeCompanyRecord(raw, fallbacks = {}) {
     company_name: companyName || null,
     is_default: Boolean(raw.is_default ?? raw.isDefault),
     id: raw.id || raw._id || null,
+    display_name: raw.display_name ?? raw.displayName ?? null,
+    professional_phone: raw.professional_phone ?? raw.professionalPhone ?? null,
+    job_title: raw.job_title ?? raw.jobTitle ?? null,
+    signature: raw.signature ?? raw.email_signature ?? null,
   };
 }
 
@@ -116,6 +124,10 @@ export function buildUserProfileItems(user, options = {}) {
         company_id: fallbackCompanyId,
         company_name: activeCompanyName || null,
         is_default: false,
+        display_name: null,
+        professional_phone: null,
+        job_title: null,
+        signature: null,
       });
     }
 
@@ -128,6 +140,10 @@ export function buildUserProfileItems(user, options = {}) {
           company_id: fallbackCompanyId,
           company_name: activeCompanyName || null,
           is_default: false,
+          display_name: null,
+          professional_phone: null,
+          job_title: null,
+          signature: null,
         });
       }
     }
@@ -170,6 +186,12 @@ export function buildProfileRoleTabs(user, options = {}) {
       companyName,
       label: `${ROLE_LABELS[p.role] || p.role} @ ${companyName}`,
       icon: ROLE_ICONS[p.role],
+      roleData: {
+        display_name: p.display_name ?? "",
+        professional_phone: p.professional_phone ?? "",
+        job_title: p.job_title ?? "",
+        signature: p.signature ?? "",
+      },
     };
   });
 }
