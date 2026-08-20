@@ -14,7 +14,7 @@
  * em `eslint.config.js`), e `formatCurrency` centralizado para todos os valores
  * monetários.
  */
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../ui/card";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
@@ -24,13 +24,26 @@ import { Calculator, Euro, Calendar, Percent, Shield, Heart, Home, TrendingUp } 
 import { formatCurrency } from "../../utils/formatCurrency";
 import { simularCreditoHabitacao } from "../../utils/mortgageCalculations";
 
-export default function MortgageSimulator() {
+export default function MortgageSimulator({ initialValues } = {}) {
+  const initialCapital = initialValues?.capital;
+  const initialPrazo = initialValues?.prazoAnos;
+  const initialTaxa = initialValues?.taxaJuro;
   const [capital, setCapital] = useState(200000);
   const [prazoAnos, setPrazoAnos] = useState(30);
   const [taxaJuro, setTaxaJuro] = useState(3.5);
   const [incluirSeguros, setIncluirSeguros] = useState(false);
   const [seguroVida, setSeguroVida] = useState(15);
   const [seguroMultirriscos, setSeguroMultirriscos] = useState(10);
+
+  // Pacote DR — pré-preencher a partir do processo ativo (hub / ficha).
+  useEffect(() => {
+    const nextCapital = Number(initialCapital);
+    const nextPrazo = Number(initialPrazo);
+    const nextTaxa = Number(initialTaxa);
+    if (Number.isFinite(nextCapital) && nextCapital > 0) setCapital(nextCapital);
+    if (Number.isFinite(nextPrazo) && nextPrazo > 0) setPrazoAnos(nextPrazo);
+    if (Number.isFinite(nextTaxa) && nextTaxa > 0) setTaxaJuro(nextTaxa);
+  }, [initialCapital, initialPrazo, initialTaxa]);
 
   const resultado = useMemo(
     () =>

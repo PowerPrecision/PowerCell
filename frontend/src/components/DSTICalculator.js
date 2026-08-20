@@ -139,8 +139,14 @@ const ComparisonBar = ({ label, value, max, color = "bg-blue-500", icon }) => {
  * Calculadora DSTI (Debt Service-to-Income Ratio)
  * Analisa a taxa de esforço do cliente para avaliar capacidade de crédito
  */
-const DSTICalculator = ({ trigger, clientData, onCalculate }) => {
-  const [open, setOpen] = useState(false);
+const DSTICalculator = ({ trigger, clientData, onCalculate, open: openProp, onOpenChange }) => {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : uncontrolledOpen;
+  const setOpen = (next) => {
+    if (!isControlled) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
 
   // Campos do formulário
   const [rendimentoBruto, setRendimentoBruto] = useState("");
@@ -169,6 +175,9 @@ const DSTICalculator = ({ trigger, clientData, onCalculate }) => {
       }
       if (clientData.rendimento_co_titular) {
         setRendimentoCoTitular(clientData.rendimento_co_titular.toString());
+      }
+      if (clientData.prestacao_nova || clientData.monthly_payment) {
+        setPrestacaoNova((clientData.prestacao_nova || clientData.monthly_payment).toString());
       }
     }
   }, [clientData, open]);
@@ -269,14 +278,16 @@ const DSTICalculator = ({ trigger, clientData, onCalculate }) => {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button variant="outline" size="sm" className="gap-2">
-            <Calculator className="h-4 w-4" />
-            DSTI
-          </Button>
-        )}
-      </DialogTrigger>
+      {(trigger || !isControlled) && (
+        <DialogTrigger asChild>
+          {trigger || (
+            <Button variant="outline" size="sm" className="gap-2">
+              <Calculator className="h-4 w-4" />
+              DSTI
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

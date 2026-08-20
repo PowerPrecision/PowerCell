@@ -23,15 +23,7 @@ import {
   DialogTitle,
   DialogDescription,
 } from "../components/ui/dialog";
-// PACOTE DD — Sheet global para Calculadora
-import {
-  Sheet,
-  SheetContent,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "../components/ui/sheet";
-import MortgageSimulator from "../components/calculators/MortgageSimulator";
+import CalculatorHub from "../components/calculators/CalculatorHub";
 import {
   LayoutDashboard,
   FileText,
@@ -63,7 +55,6 @@ import {
   ClipboardList,
   Mail,
   Eye,
-  Calculator,
 } from "lucide-react";
 import NotificationsDropdown from "../components/NotificationsDropdown";
 import TasksDropdown from "../components/TasksDropdown";
@@ -101,8 +92,6 @@ const DashboardLayout = ({ children, title }) => {
   const [chatOpen, setChatOpen] = useState(false);
   const [headerCollapsed, setHeaderCollapsed] = useState(false);
   const [chatUnreadCount, setChatUnreadCount] = useState(0);
-  // PACOTE DD — estado do Sheet global da Calculadora
-  const [calcSheetOpen, setCalcSheetOpen] = useState(false);
   const chatUnreadRef = useRef(0);
   const chatUnreadIntervalRef = useRef(null);
   
@@ -832,25 +821,8 @@ const DashboardLayout = ({ children, title }) => {
                       </span>
                     )}
                   </Button>
-                  {/* PACOTE DD — Calculadora global (Sheet) */}
-                  <Sheet open={calcSheetOpen} onOpenChange={setCalcSheetOpen}>
-                    <SheetTrigger asChild>
-                      <Button variant="ghost" size="icon" aria-label="Calculadora" title="Calculadora de Prestações">
-                        <Calculator className="h-4 w-4" />
-                      </Button>
-                    </SheetTrigger>
-                    <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
-                      <SheetHeader>
-                        <SheetTitle className="flex items-center gap-2">
-                          <Calculator className="h-5 w-5" />
-                          Calculadora de Prestações
-                        </SheetTitle>
-                      </SheetHeader>
-                      <div className="mt-4">
-                        <MortgageSimulator />
-                      </div>
-                    </SheetContent>
-                  </Sheet>
+                  {/* Pacote DR — Hub de calculadoras (dropdown com todas) */}
+                  <CalculatorHub />
                   {/* Centro de Operações - Tarefas Assíncronas */}
                   <TasksDropdown compact={headerCollapsed} />
                   <NotificationsDropdown compact={headerCollapsed} />

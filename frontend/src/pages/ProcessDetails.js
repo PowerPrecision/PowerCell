@@ -2045,7 +2045,13 @@ const ProcessDetails = () => {
                       </SheetTitle>
                     </SheetHeader>
                     <div className="mt-4">
-                      <MortgageSimulator />
+                      <MortgageSimulator
+                        initialValues={{
+                          capital: creditData?.requested_amount,
+                          prazoAnos: creditData?.loan_term_years,
+                          taxaJuro: creditData?.interest_rate,
+                        }}
+                      />
                     </div>
                   </SheetContent>
                 </Sheet>

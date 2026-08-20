@@ -182,8 +182,14 @@ const MetricCard = ({ label, value, icon, color, trend, subtitle }) => {
  * Calculadora de Risco de Crédito
  * Simula custos e valor mensal do crédito habitacional
  */
-const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
-  const [open, setOpen] = useState(false);
+const RiskCalculator = ({ trigger, clientData, onCalculate, open: openProp, onOpenChange }) => {
+  const [uncontrolledOpen, setUncontrolledOpen] = useState(false);
+  const isControlled = openProp !== undefined;
+  const open = isControlled ? openProp : uncontrolledOpen;
+  const setOpen = (next) => {
+    if (!isControlled) setUncontrolledOpen(next);
+    onOpenChange?.(next);
+  };
 
   // Campos do formulário
   const [valorImovel, setValorImovel] = useState("");
@@ -222,6 +228,15 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
           const age = new Date().getFullYear() - birthDate.getFullYear();
           setIdadeProponente(age.toString());
         }
+      }
+      if (clientData.prazo_anos) {
+        setPrazoAnos(String(clientData.prazo_anos));
+      }
+      if (clientData.taxa_anual || clientData.interest_rate) {
+        setTaxaAnual(String(clientData.taxa_anual || clientData.interest_rate));
+      }
+      if (clientData.spread) {
+        setSpreadEuribor(String(clientData.spread));
       }
     }
   }, [clientData, open]);
@@ -415,14 +430,16 @@ const RiskCalculator = ({ trigger, clientData, onCalculate }) => {
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
-      <DialogTrigger asChild>
-        {trigger || (
-          <Button variant="outline" size="sm" className="gap-2">
-            <TrendingUp className="h-4 w-4" />
-            Risco
-          </Button>
-        )}
-      </DialogTrigger>
+      {(trigger || !isControlled) && (
+        <DialogTrigger asChild>
+          {trigger || (
+            <Button variant="outline" size="sm" className="gap-2">
+              <TrendingUp className="h-4 w-4" />
+              Risco
+            </Button>
+          )}
+        </DialogTrigger>
+      )}
       <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">

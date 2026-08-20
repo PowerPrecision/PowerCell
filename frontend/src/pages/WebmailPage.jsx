@@ -16,12 +16,15 @@ import { Badge } from "../components/ui/badge";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { Separator } from "../components/ui/separator";
 import { Skeleton } from "../components/ui/skeleton";
+import { Label } from "../components/ui/label";
+import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "../components/ui/resizable";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import {
   Select,
   SelectContent,
   SelectItem,
+  SelectLabel,
   SelectTrigger,
   SelectValue,
 } from "../components/ui/select";
@@ -77,6 +80,11 @@ import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
 import { hasAnyRole } from "../utils/roleUtils";
 import { safeFormat } from "../lib/utils";
+import {
+  applyMailboxSelection,
+  buildMailboxOptions,
+  resolveMailboxSelection,
+} from "../utils/webmailMailbox";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -271,9 +279,71 @@ const WebmailPage = () => {
     (user?.active_company_signature !== undefined && user?.active_company_signature !== null
       ? user.active_company_signature
       : user?.email_signature) || "";
-  const pageSubtitle = !showTabs
-    ? (effectiveRole === 'indexacao' ? 'Caixa de Indexação (Partilhada)' : 'A Minha Caixa de Entrada')
-    : null;
+
+  const isIndexacao = effectiveRole === "indexacao";
+  const mailboxOptions = useMemo(
+    () =>
+      buildMailboxOptions({
+        personalAccounts,
+        showGeneral: showTabs,
+        isIndexacao,
+        unreadByBox,
+      }),
+    [personalAccounts, showTabs, isIndexacao, unreadByBox],
+  );
+  const mailboxValueRaw = resolveMailboxSelection({
+    activeBox,
+    selectedMailbox,
+    isIndexacao,
+  });
+  const mailboxValue = mailboxOptions.some((option) => option.value === mailboxValueRaw)
+    ? mailboxValueRaw
+    : (mailboxOptions[0]?.value || "personal:");
+  const handleMailboxChange = useCallback((value) => {
+    const next = applyMailboxSelection(value);
+    setActiveBox(next.activeBox);
+    if (Object.prototype.hasOwnProperty.call(next, "selectedMailbox")) {
+      setSelectedMailbox(next.selectedMailbox);
+    }
+    setCurrentPage(1);
+  }, []);
+
+  const [isDesktop, setIsDesktop] = useState(
+    () => (typeof window !== "undefined" ? window.innerWidth >= 768 : true),
+  );
+  const folderPanelRef = useRef(null);
+  const listPanelRef = useRef(null);
+  const readingPanelRef = useRef(null);
+
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+
+  useEffect(() => {
+    const folderPanel = folderPanelRef.current;
+    const listPanel = listPanelRef.current;
+    const readingPanel = readingPanelRef.current;
+    if (!folderPanel || !listPanel || !readingPanel) return;
+    if (isDesktop) {
+      folderPanel.expand?.();
+      listPanel.expand?.();
+      readingPanel.expand?.();
+      return;
+    }
+    if (showMobileReading) {
+      folderPanel.collapse?.();
+      listPanel.collapse?.();
+      readingPanel.expand?.();
+    } else {
+      folderPanel.expand?.();
+      listPanel.expand?.();
+      readingPanel.collapse?.();
+    }
+  }, [isDesktop, showMobileReading]);
 
   // ============================================================
   // WEBSOCKET: Escutar NEW_EMAIL em tempo real
@@ -1451,38 +1521,6 @@ const WebmailPage = () => {
             />
           </div>
 
-          {personalAccounts.length > 0 && activeBox === "personal" && effectiveRole !== "indexacao" && (
-          <Select value={selectedMailbox || personalAccounts[0]?.email_address || ""} onValueChange={setSelectedMailbox}>
-            <SelectTrigger className="w-[220px] h-8 text-xs">
-              <SelectValue placeholder="Conta de email" />
-            </SelectTrigger>
-            <SelectContent>
-              {personalAccounts.map((item) => (
-                <SelectItem key={item.id} value={item.email_address}>
-                  {item.is_caixa_geral
-                    ? `Caixa Geral (${item.email_address})`
-                    : item.label && item.label !== item.email_address
-                    ? `${item.label} (${item.email_address})`
-                    : item.email_address}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-          )}
-
-          {/* Account selector */}
-          {showAccountSelector && (
-          <Select value={account} onValueChange={setAccount}>
-            <SelectTrigger className="w-[160px] h-8 text-xs">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="precision">Precision Crédito</SelectItem>
-              <SelectItem value="power">Power Real Estate</SelectItem>
-            </SelectContent>
-          </Select>
-          )}
-
           {/* Select (multi-select toggle) */}
           <Tooltip>
             <TooltipTrigger asChild>
@@ -1537,49 +1575,71 @@ const WebmailPage = () => {
           )}
         </div>
 
-        {/* ===== TAB BAR (role-based) ===== */}
-        {showTabs && (
-          <div className="flex items-center gap-1 px-4 py-2 border-b bg-muted/20 shrink-0">
-            <button
-              onClick={() => { setActiveBox('personal'); setCurrentPage(1); }}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                activeBox === 'personal'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-            >
-              Caixa Pessoal
-              {unreadByBox.personal > 0 && (
-                <Badge variant="secondary" className="ml-2 h-5 text-[10px] px-1.5">
-                  {unreadByBox.personal}
-                </Badge>
-              )}
-            </button>
-            <button
-              onClick={() => { setActiveBox('general'); setCurrentPage(1); }}
-              className={`px-4 py-1.5 rounded-md text-sm font-medium transition-colors ${
-                activeBox === 'general'
-                  ? 'bg-primary text-primary-foreground'
-                  : 'text-muted-foreground hover:bg-accent hover:text-foreground'
-              }`}
-            >
-              Caixa Geral
-              {unreadByBox.general > 0 && (
-                <Badge variant="secondary" className="ml-2 h-5 text-[10px] px-1.5">
-                  {unreadByBox.general}
-                </Badge>
-              )}
-            </button>
-          </div>
-        )}
-
-        {/* ===== THREE PANE LAYOUT ===== */}
-        <div className="flex flex-1 overflow-hidden">
+        {/* ===== THREE PANE LAYOUT (Outlook) ===== */}
+        <div className="flex-1 overflow-hidden min-h-0">
+          <ResizablePanelGroup
+            direction="horizontal"
+            autoSaveId="webmail-outlook-panes"
+            className="h-full"
+          >
           {/* ========== COLUMN 1: SIDEBAR ========== */}
-          <div className={`
-            w-56 flex-shrink-0 border-r bg-muted/30 flex flex-col
-            ${showMobileReading ? "hidden md:flex" : "flex"}
-          `}>
+          <ResizablePanel
+            ref={folderPanelRef}
+            defaultSize={18}
+            minSize={14}
+            maxSize={28}
+            collapsible
+            collapsedSize={0}
+            className="min-h-0"
+            id="webmail-folder-pane"
+          >
+          <div
+            className="h-full border-r border-border bg-muted/30 flex flex-col overflow-hidden"
+            data-testid="webmail-folder-pane"
+          >
+            {/* Pacote DR — selector de caixa no topo da coluna 1 */}
+            <div className="p-3 space-y-2 border-b border-border">
+              <Label
+                htmlFor="webmail-mailbox-select"
+                className="text-[11px] uppercase tracking-wide text-muted-foreground"
+              >
+                A ler emails de
+              </Label>
+              <Select
+                value={mailboxValue}
+                onValueChange={handleMailboxChange}
+                disabled={isIndexacao}
+              >
+                <SelectTrigger
+                  id="webmail-mailbox-select"
+                  className="h-9 text-xs"
+                  data-testid="webmail-mailbox-select"
+                >
+                  <SelectValue placeholder="Selecionar caixa" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectLabel className="text-xs text-muted-foreground">Caixas</SelectLabel>
+                  {mailboxOptions.map((option) => (
+                    <SelectItem key={option.value || option.label} value={option.value || "personal:"}>
+                      {option.label}
+                      {option.unread > 0 ? ` (${option.unread})` : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {showAccountSelector && (
+                <Select value={account} onValueChange={setAccount}>
+                  <SelectTrigger className="h-8 text-xs" aria-label="Conta empresa">
+                    <SelectValue placeholder="Conta empresa" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="precision">Precision Crédito</SelectItem>
+                    <SelectItem value="power">Power Real Estate</SelectItem>
+                  </SelectContent>
+                </Select>
+              )}
+            </div>
+
             {/* Nova Mensagem */}
             <div className="p-3 space-y-2">
               <Button
@@ -1602,13 +1662,13 @@ const WebmailPage = () => {
 
             <Separator />
 
+            <div className="flex-1 min-h-0 overflow-y-auto">
             {/* Folders */}
             <nav className="p-2 space-y-0.5">
               {FOLDERS.map((folder) => {
                 const Icon = folder.icon;
                 const isActive = activeFolder === folder.id && !selectedLabel && !activeCustomFolder;
-                // Show role-specific label for inbox on non-tab roles
-                const folderLabel = (folder.id === 'inbox' && pageSubtitle) ? pageSubtitle : folder.label;
+                const folderLabel = folder.label;
                 return (
                   <button
                     key={folder.id}
@@ -1759,6 +1819,7 @@ const WebmailPage = () => {
                 })}
               </div>
             </div>
+            </div>
 
             {/* Footer info */}
             <div className="mt-auto p-3 border-t space-y-1">
@@ -1772,12 +1833,25 @@ const WebmailPage = () => {
               )}
             </div>
           </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle className="hidden md:flex" />
 
           {/* ========== COLUMN 2: EMAIL LIST ========== */}
-          <div className={`
-            w-80 flex-shrink-0 border-r flex flex-col bg-background
-            ${showMobileReading ? "hidden md:flex" : "flex"}
-          `}>
+          <ResizablePanel
+            ref={listPanelRef}
+            defaultSize={32}
+            minSize={22}
+            maxSize={45}
+            collapsible
+            collapsedSize={0}
+            className="min-h-0"
+            id="webmail-list-pane"
+          >
+          <div
+            className="h-full border-r border-border flex flex-col bg-background overflow-hidden"
+            data-testid="webmail-list-pane"
+          >
             {/* List header */}
             <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
               <div className="flex items-center gap-2">
@@ -1882,7 +1956,7 @@ const WebmailPage = () => {
 
                           {/* Unread dot */}
                           {!multiSelectMode && !email.is_read && (
-                            <span className="bg-blue-500 w-2 h-2 rounded-full mt-1.5 shrink-0" />
+                            <span className="bg-primary w-2 h-2 rounded-full mt-1.5 shrink-0" />
                           )}
                           {!multiSelectMode && email.is_read && <span className="w-2 shrink-0" />}
 
@@ -1999,13 +2073,23 @@ const WebmailPage = () => {
               </div>
             )}
           </div>
+          </ResizablePanel>
+
+          <ResizableHandle withHandle className="hidden md:flex" />
 
           {/* ========== COLUMN 3: READING PANE ========== */}
+          <ResizablePanel
+            ref={readingPanelRef}
+            defaultSize={50}
+            minSize={30}
+            collapsible
+            collapsedSize={0}
+            className="min-h-0"
+            id="webmail-reading-pane"
+          >
           <div
-            className={`
-              flex-1 flex flex-col bg-background overflow-hidden
-              ${!showMobileReading ? "hidden md:flex" : "flex"}
-            `}
+            className="h-full flex flex-col bg-background overflow-hidden"
+            data-testid="webmail-reading-pane"
           >
             {detailLoading ? (
               // Loading skeleton
@@ -2284,6 +2368,8 @@ const WebmailPage = () => {
               </div>
             )}
           </div>
+          </ResizablePanel>
+          </ResizablePanelGroup>
         </div>
 
         {/* ===== MULTI-SELECT FLOATING ACTION BAR ===== */}
