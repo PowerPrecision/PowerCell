@@ -62,7 +62,11 @@ DEFAULT_NOTIFICATION_PREFS = {
 
 
 
-async def run_get_users(user: dict, role: Optional[str] = None):
+async def run_get_users(
+    user: dict,
+    role: Optional[str] = None,
+    for_assignment: bool = False,
+):
     """Lista utilizadores do sistema, opcionalmente filtrados por role.
 
     O campo password é excluído da resposta por segurança.
@@ -70,19 +74,32 @@ async def run_get_users(user: dict, role: Optional[str] = None):
     estes roles precisam de ver informações de utilizadores para
     atribuição de processos e colaboração.
 
+    Pacote DT: `for_assignment=True` exclui admin e indexação — usar nas
+    dropdowns de responsáveis. A gestão de utilizadores chama sem este
+    flag para continuar a listar todos os cargos.
+
     Args:
         role: Filtro opcional por role (ex: "consultor", "admin").
         user: Utilizador autenticado com role permitido (injetado).
+        for_assignment: Se True, só devolve consultor/intermediario/diretor/ceo.
 
     Returns:
         List[UserResponse]: Lista de utilizadores (sem password).
     """
     from services.role_query import build_deep_role_query
+    from services.staff_assignment import (
+        apply_assignment_staff_filter,
+        filter_assignment_staff,
+    )
+
     query = {}
     if role:
         query = build_deep_role_query(query, role=role)
-    
+    query = apply_assignment_staff_filter(query, for_assignment)
+
     users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
+    if for_assignment:
+        users = filter_assignment_staff(users)
     return [UserResponse(**u) for u in users]
 
 

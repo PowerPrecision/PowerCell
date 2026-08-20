@@ -877,7 +877,7 @@ const VisitsPage = () => {
         fetch(`${API_URL}/api/processes`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
-        fetch(`${API_URL}/api/admin/users`, {
+        fetch(`${API_URL}/api/users/staff`, {
           headers: { Authorization: `Bearer ${token}` },
         }),
       ]);

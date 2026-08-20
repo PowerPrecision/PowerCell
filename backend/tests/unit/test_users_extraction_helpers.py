@@ -30,6 +30,7 @@ def test_users_api_export_run_entrypoints():
     assert "suporte" in users_api_helpers.FORCED_SHARED_ROLES
     assert callable(users_api_list.run_get_users)
     assert callable(users_api_list.run_get_user)
+    assert callable(users_api_list.run_get_staff_users)
     assert callable(users_api_email_config.run_get_my_email_config)
     assert callable(users_api_email_config.run_save_my_email_config)
     assert callable(users_api_email_config.run_test_my_email_config)
@@ -62,9 +63,11 @@ def test_users_router_is_thin_stubs_only():
     # Static /me paths declared before /{user_id}
     me_pos = text.index('/me/email-config"')
     accounts_pos = text.index("/me/email-accounts")
+    staff_pos = text.index('/staff"')
     id_pos = text.index('/{user_id}"')
     assert me_pos < id_pos
     assert accounts_pos < id_pos
+    assert staff_pos < id_pos
 
 
 def test_forced_shared_roles_block_on_save_constant():

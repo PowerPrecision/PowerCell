@@ -33,7 +33,7 @@ import {
 } from '../ui/select';
 import { Loader2, Users } from 'lucide-react';
 import { toast } from 'sonner';
-import { filterByAnyRole, excludeRoles } from '../../utils/roleUtils';
+import { filterByAnyRole, CONSULTOR_ASSIGNMENT_ROLES, INTERMEDIARIO_ASSIGNMENT_ROLES } from '../../utils/roleUtils';
 import { safeString } from '../../utils/safeString';
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -67,12 +67,12 @@ const AssignUsersModal = memo(({
   const fetchUsers = useCallback(async () => {
     setIsLoadingUsers(true);
     try {
-      const response = await fetch(`${API_URL}/api/admin/users`, {
+      const response = await fetch(`${API_URL}/api/users/staff`, {
         headers: { Authorization: `Bearer ${token}` },
       });
       if (response.ok) {
         const users = await response.json();
-        setAppUsers(excludeRoles(users.filter(u => u.is_active !== false), ['admin', 'ceo']));
+        setAppUsers((Array.isArray(users) ? users : []).filter(u => u.is_active !== false));
       }
     } catch (error) {
       console.error('Erro ao buscar utilizadores:', error);
@@ -158,7 +158,7 @@ const AssignUsersModal = memo(({
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
                     {appUsers
-                      .filter(u => filterByAnyRole(u, ['consultor', 'diretor', 'admin', 'ceo']))
+                      .filter(u => filterByAnyRole(u, CONSULTOR_ASSIGNMENT_ROLES))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})
@@ -181,7 +181,7 @@ const AssignUsersModal = memo(({
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
                     {appUsers
-                      .filter(u => filterByAnyRole(u, ['intermediario', 'diretor']))
+                      .filter(u => filterByAnyRole(u, INTERMEDIARIO_ASSIGNMENT_ROLES))
                       .map(u => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})

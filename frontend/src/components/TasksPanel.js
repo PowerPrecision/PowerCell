@@ -35,9 +35,9 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { pt } from "date-fns/locale";
-import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
+import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getStaffUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
-import { hasRole, excludeRoles } from "../utils/roleUtils";
+import { hasRole, filterAssignmentStaff } from "../utils/roleUtils";
 import { safeFormat, safeDate } from "../lib/utils";
 
 
@@ -97,7 +97,7 @@ const TasksPanel = ({
         tasksRes = await getTasks(params);
       }
       
-      const usersRes = await getUsers();
+      const usersRes = await getStaffUsers();
       
       // Filtrar tarefas concluídas se necessário
       let filteredTasks = tasksRes.data;
@@ -153,18 +153,18 @@ const TasksPanel = ({
           if (proc.created_by) involvedUserIds.add(String(proc.created_by));
           
           // Filtrar utilizadores: apenas os envolvidos + excluir clientes
-          const involvedUsers = excludeRoles(usersRes.data.filter(u => 
+          const involvedUsers = filterAssignmentStaff(usersRes.data.filter(u => 
             involvedUserIds.has(String(u.id))
-          ), ["cliente"]);
+          ));
           setUsers(involvedUsers);
         } catch (err) {
           // Fallback: mostrar todos os elegíveis se o processo não carregar
           console.warn("Não foi possível carregar utilizadores do processo, a usar todos:", err);
-          setUsers(excludeRoles(usersRes.data, ["cliente", "admin", "ceo"]));
+          setUsers(filterAssignmentStaff(usersRes.data));
         }
       } else {
         // Sem processo: mostrar todos os utilizadores elegíveis
-        setUsers(excludeRoles(usersRes.data, ["cliente", "admin", "ceo"]));
+        setUsers(filterAssignmentStaff(usersRes.data));
       }
     } catch (error) {
       console.error("Erro ao carregar tarefas:", error);

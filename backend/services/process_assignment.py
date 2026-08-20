@@ -334,25 +334,31 @@ async def unassign_self_from_process(
 async def get_users_for_assignment(role_filter: Optional[str] = None) -> list:
     """
     Obtém lista de utilizadores disponíveis para atribuição.
-    
-    Args:
-        role_filter: Filtrar por papel específico (opcional)
-        
-    Returns:
-        Lista de utilizadores
+
+    Pacote DT: exclui admin/indexação excepto quando o filtro pede
+    explicitamente indexação ou parceiro (campos dedicados).
     """
     from services.role_query import build_deep_role_query
+    from services.staff_assignment import apply_assignment_staff_filter, filter_assignment_staff
+
     query = {"is_active": True}
-    
+
     if role_filter:
         query = build_deep_role_query(query, role=role_filter)
-    
+
+    dedicated = (role_filter or "").lower() in {"indexacao", "index", "parceiro"}
+    if not dedicated:
+        query = apply_assignment_staff_filter(query, True)
+
     cursor = db.users.find(
         query,
-        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
+        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1},
     ).sort("name", 1)
-    
-    return await cursor.to_list(length=100)
+
+    users = await cursor.to_list(length=100)
+    if dedicated:
+        return users
+    return filter_assignment_staff(users)
 
 
 # ==== AUTO-ATRIBUIÇÃO INTELIGENTE DE INDEXADORES ====
