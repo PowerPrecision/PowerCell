@@ -1,25 +1,41 @@
 /**
- * Tab Utilizadores — gestão de acessos UCR (Pacote DW).
+ * Tab Utilizadores — contas + acessos UCR (Pacotes DW/DY).
  *
- * Tabela de utilizadores + Sheet para adicionar Empresa + Cargo.
- * Liga a GET /users, GET /admin/user-company-roles e
- * POST /admin/users/{id}/roles.
+ * Tabela de utilizadores com DropdownMenu de acções básicas
+ * (Editar Dados, Gerir Acessos UCR, Redefinir Password, Desativar)
+ * e Sheet para adicionar Empresa + Cargo.
  */
 import { useEffect, useMemo, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { KeyRound, Plus, Search, Trash2, Users } from "lucide-react";
+import {
+  KeyRound,
+  Lock,
+  MoreHorizontal,
+  Pencil,
+  Plus,
+  Search,
+  Trash2,
+  UserCheck,
+  UserPlus,
+  UserX,
+  Users,
+} from "lucide-react";
 import { toast } from "sonner";
 import {
   assignUserRole,
+  createUser,
+  deleteUser,
   deleteUserCompanyRole,
   getCompanies,
   getUserCompanyRoles,
   getUsers,
+  updateUser,
 } from "../../services/api";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import {
   groupRolesByUserId,
   isCompanyActive,
+  isUserActive,
   normalizeCompaniesPayload,
   normalizeRolesPayload,
 } from "../../utils/organizationAdmin";
@@ -29,6 +45,13 @@ import {
 } from "../../utils/roleUtils";
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "../ui/dropdown-menu";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
@@ -56,12 +79,24 @@ import {
 } from "../ui/table";
 import EmptyState from "../ui/EmptyState";
 import { TableSkeleton } from "../ui/skeletons";
+import {
+  UserCreateDialog,
+  UserEditDialog,
+  UserPasswordDialog,
+} from "./UserAccountDialogs";
+
+const USERS_QUERY_KEY = ["org-admin-users"];
+const UCR_QUERY_KEY = ["org-admin-ucrs"];
+const UNDO_WINDOW_MS = 8000;
 
 export default function UsersAccessAdminTab() {
   const queryClient = useQueryClient();
   const [search, setSearch] = useState("");
   const [selectedUser, setSelectedUser] = useState(null);
   const [sheetOpen, setSheetOpen] = useState(false);
+  const [createOpen, setCreateOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
   const [newCompanyId, setNewCompanyId] = useState("");
   const [newRole, setNewRole] = useState("");
   const [saving, setSaving] = useState(false);
@@ -71,7 +106,7 @@ export default function UsersAccessAdminTab() {
     isLoading: usersLoading,
     isError: usersError,
   } = useQuery({
-    queryKey: ["org-admin-users"],
+    queryKey: USERS_QUERY_KEY,
     queryFn: async () => {
       const res = await getUsers();
       return Array.isArray(res.data) ? res.data : res.data?.users || [];
@@ -82,7 +117,7 @@ export default function UsersAccessAdminTab() {
     data: roles = [],
     isError: rolesError,
   } = useQuery({
-    queryKey: ["org-admin-ucrs"],
+    queryKey: UCR_QUERY_KEY,
     queryFn: async () => {
       const res = await getUserCompanyRoles();
       return normalizeRolesPayload(res.data);
@@ -128,11 +163,157 @@ export default function UsersAccessAdminTab() {
     (c) => isCompanyActive(c) && !assignedCompanyIds.has(c.id),
   );
 
+  const invalidateUsers = () => {
+    queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY });
+    queryClient.invalidateQueries({ queryKey: ["users"] });
+  };
+
+  const setUsersCache = (updater) =>
+    queryClient.setQueryData(USERS_QUERY_KEY, (prev = []) =>
+      typeof updater === "function" ? updater(prev) : updater,
+    );
+
   const openAccessSheet = (user) => {
     setSelectedUser(user);
     setNewCompanyId("");
     setNewRole("");
     setSheetOpen(true);
+  };
+
+  const openEdit = (user) => {
+    setSelectedUser(user);
+    setEditOpen(true);
+  };
+
+  const openPassword = (user) => {
+    setSelectedUser(user);
+    setPasswordOpen(true);
+  };
+
+  const handleCreateUser = async (payload) => {
+    setSaving(true);
+    try {
+      await createUser(payload);
+      toast.success("Utilizador criado com sucesso");
+      if (payload.password) {
+        toast.success(
+          `Password: ${payload.password}. Copie e envie ao utilizador por um canal seguro.`,
+          { duration: 10000 },
+        );
+      }
+      invalidateUsers();
+      return true;
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(
+          err.response?.data?.detail || err.response?.data?.error,
+          "Erro ao criar utilizador",
+        ),
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleEditUser = async (payload) => {
+    if (!selectedUser?.id) return false;
+    setSaving(true);
+    try {
+      await updateUser(selectedUser.id, payload);
+      toast.success("Utilizador actualizado com sucesso");
+      invalidateUsers();
+      return true;
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(
+          err.response?.data?.detail || err.response?.data?.error,
+          "Erro ao actualizar utilizador",
+        ),
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleResetPassword = async (password) => {
+    if (!selectedUser?.id) return false;
+    setSaving(true);
+    try {
+      await updateUser(selectedUser.id, { password });
+      toast.success(`Password redefinida para ${selectedUser.name}`);
+      return true;
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(
+          err.response?.data?.detail || err.response?.data?.error,
+          "Erro ao redefinir password",
+        ),
+      );
+      return false;
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const handleToggleUserStatus = async (user) => {
+    const currentlyActive = isUserActive(user);
+    if (currentlyActive && user.role === "admin") {
+      toast.error("Não é possível desactivar o utilizador administrador.");
+      return;
+    }
+    try {
+      await updateUser(user.id, { is_active: !currentlyActive });
+      toast.success(
+        `Utilizador ${currentlyActive ? "desactivado" : "activado"} com sucesso`,
+      );
+      invalidateUsers();
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(
+          err.response?.data?.detail || err.response?.data?.error,
+          "Erro ao actualizar utilizador",
+        ),
+      );
+    }
+  };
+
+  const handleDeleteUser = (user) => {
+    if (!user?.id) return;
+    const restoreUser = () =>
+      setUsersCache((prev) =>
+        [...prev, user].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
+      );
+
+    setUsersCache((prev) => prev.filter((u) => u.id !== user.id));
+
+    const commitTimer = setTimeout(async () => {
+      try {
+        await deleteUser(user.id);
+        invalidateUsers();
+      } catch (err) {
+        restoreUser();
+        toast.error(
+          extractErrorMessage(
+            err.response?.data?.detail || err.response?.data?.error,
+            "Erro ao eliminar utilizador",
+          ),
+        );
+      }
+    }, UNDO_WINDOW_MS);
+
+    toast.success(`Utilizador "${user.name}" eliminado`, {
+      action: {
+        label: "Desfazer",
+        onClick: () => {
+          clearTimeout(commitTimer);
+          restoreUser();
+          toast.success("Acção desfeita");
+        },
+      },
+      duration: UNDO_WINDOW_MS,
+    });
   };
 
   const handleAddAccess = async (e) => {
@@ -160,7 +341,7 @@ export default function UsersAccessAdminTab() {
       );
       setNewCompanyId("");
       setNewRole("");
-      queryClient.invalidateQueries({ queryKey: ["org-admin-ucrs"] });
+      queryClient.invalidateQueries({ queryKey: UCR_QUERY_KEY });
     } catch (err) {
       toast.error(
         extractErrorMessage(
@@ -177,7 +358,7 @@ export default function UsersAccessAdminTab() {
     try {
       await deleteUserCompanyRole(roleId);
       toast.success("Acesso removido.");
-      queryClient.invalidateQueries({ queryKey: ["org-admin-ucrs"] });
+      queryClient.invalidateQueries({ queryKey: UCR_QUERY_KEY });
     } catch (err) {
       toast.error(
         extractErrorMessage(
@@ -190,15 +371,26 @@ export default function UsersAccessAdminTab() {
 
   return (
     <div className="space-y-4" data-testid="org-admin-users-tab">
-      <div className="relative max-w-sm">
-        <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
-        <Input
-          placeholder="Pesquisar utilizador..."
-          value={search}
-          onChange={(e) => setSearch(e.target.value)}
-          className="pl-9"
-          data-testid="org-admin-users-search"
-        />
+      <div className="flex flex-col sm:flex-row gap-3 sm:items-center sm:justify-between">
+        <div className="relative max-w-sm w-full">
+          <Search className="absolute left-2.5 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
+          <Input
+            placeholder="Pesquisar utilizador..."
+            value={search}
+            onChange={(e) => setSearch(e.target.value)}
+            className="pl-9"
+            data-testid="org-admin-users-search"
+          />
+        </div>
+        <Button
+          size="sm"
+          className="gap-1.5 shrink-0"
+          onClick={() => setCreateOpen(true)}
+          data-testid="btn-new-user"
+        >
+          <UserPlus className="h-4 w-4" />
+          Novo Utilizador
+        </Button>
       </div>
 
       {usersLoading && users.length === 0 ? (
@@ -216,6 +408,7 @@ export default function UsersAccessAdminTab() {
               <TableRow>
                 <TableHead>Utilizador</TableHead>
                 <TableHead>Email</TableHead>
+                <TableHead>Estado</TableHead>
                 <TableHead>Acessos</TableHead>
                 <TableHead className="text-right">Ações</TableHead>
               </TableRow>
@@ -223,16 +416,17 @@ export default function UsersAccessAdminTab() {
             <TableBody>
               {filteredUsers.map((user) => {
                 const ucrs = rolesByUser[user.id] || [];
+                const active = isUserActive(user);
                 return (
-                  <TableRow
-                    key={user.id}
-                    className="cursor-pointer"
-                    onClick={() => openAccessSheet(user)}
-                    data-testid={`user-row-${user.id}`}
-                  >
+                  <TableRow key={user.id} data-testid={`user-row-${user.id}`}>
                     <TableCell className="font-medium">{user.name}</TableCell>
                     <TableCell className="text-muted-foreground">
                       {user.email}
+                    </TableCell>
+                    <TableCell>
+                      <Badge variant={active ? "secondary" : "destructive"}>
+                        {active ? "Ativo" : "Inativo"}
+                      </Badge>
                     </TableCell>
                     <TableCell>
                       {ucrs.length === 0 ? (
@@ -250,19 +444,54 @@ export default function UsersAccessAdminTab() {
                       )}
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="gap-1.5"
-                        onClick={(e) => {
-                          e.stopPropagation();
-                          openAccessSheet(user);
-                        }}
-                        data-testid={`btn-manage-access-${user.id}`}
-                      >
-                        <KeyRound className="h-4 w-4" />
-                        Gerir Acessos
-                      </Button>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            aria-label={`Ações de ${user.name}`}
+                            data-testid={`btn-user-actions-${user.id}`}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={() => openEdit(user)}>
+                            <Pencil className="h-4 w-4" />
+                            Editar Dados
+                          </DropdownMenuItem>
+                          <DropdownMenuItem onClick={() => openAccessSheet(user)}>
+                            <KeyRound className="h-4 w-4" />
+                            Gerir Acessos UCR
+                          </DropdownMenuItem>
+                          {user.role !== "parceiro" ? (
+                            <DropdownMenuItem onClick={() => openPassword(user)}>
+                              <Lock className="h-4 w-4" />
+                              Redefinir Password
+                            </DropdownMenuItem>
+                          ) : null}
+                          <DropdownMenuItem
+                            disabled={active && user.role === "admin"}
+                            onClick={() => handleToggleUserStatus(user)}
+                          >
+                            {active ? (
+                              <UserX className="h-4 w-4" />
+                            ) : (
+                              <UserCheck className="h-4 w-4" />
+                            )}
+                            {active ? "Desativar" : "Ativar"}
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive focus:text-destructive"
+                            onClick={() => handleDeleteUser(user)}
+                            data-testid={`btn-delete-user-${user.id}`}
+                          >
+                            <Trash2 className="h-4 w-4" />
+                            Eliminar
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </TableCell>
                   </TableRow>
                 );
@@ -271,6 +500,27 @@ export default function UsersAccessAdminTab() {
           </Table>
         </ScrollArea>
       )}
+
+      <UserCreateDialog
+        open={createOpen}
+        onOpenChange={setCreateOpen}
+        onSubmit={handleCreateUser}
+        saving={saving}
+      />
+      <UserEditDialog
+        open={editOpen}
+        onOpenChange={setEditOpen}
+        user={selectedUser}
+        onSubmit={handleEditUser}
+        saving={saving}
+      />
+      <UserPasswordDialog
+        open={passwordOpen}
+        onOpenChange={setPasswordOpen}
+        user={selectedUser}
+        onSubmit={handleResetPassword}
+        saving={saving}
+      />
 
       <Sheet open={sheetOpen} onOpenChange={setSheetOpen}>
         <SheetContent

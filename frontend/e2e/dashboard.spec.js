@@ -114,7 +114,7 @@ test.describe('Menu Admin', () => {
 
   test('admin deve aceder a gestão de utilizadores', async ({ page }) => {
     // Navegar para gestão de utilizadores
-    await page.goto('/admin/users');
+    await page.goto('/admin/organizacao?tab=utilizadores');
     await page.waitForTimeout(2000);
     
     // Verificar se página carregou (pode redirecionar se não tiver permissão)

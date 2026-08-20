@@ -9,8 +9,8 @@ const ADMIN = {
   password: process.env.TEST_ADMIN_PASSWORD || 'admin',
 };
 
-test.describe('Organização — Empresas e Acessos', () => {
-  test('admin vê a página com tabs Empresas e Acessos/Equipa', async ({ page }) => {
+test.describe('Organização — Empresas e Utilizadores', () => {
+  test('admin vê a página com tabs Empresas e Utilizadores', async ({ page }) => {
     await page.goto('/login');
     await page.locator('[data-testid="login-email-input"]').fill(ADMIN.email);
     await page.locator('[data-testid="login-password-input"]').fill(ADMIN.password);
@@ -23,12 +23,21 @@ test.describe('Organização — Empresas e Acessos', () => {
     });
     await expect(page.locator('[data-testid="tab-empresas"]')).toBeVisible();
     await expect(page.locator('[data-testid="tab-acessos"]')).toBeVisible();
+    await expect(page.locator('[data-testid="tab-acessos"]')).toContainText('Utilizadores');
     await expect(page.locator('[data-testid="btn-new-company"]')).toBeVisible();
     await expect(page.getByRole('link', { name: 'Administração', exact: true })).toBeVisible();
 
     await page.locator('[data-testid="tab-acessos"]').click();
     await expect(page.locator('[data-testid="org-admin-users-tab"]')).toBeVisible();
-    await expect(page.locator('[data-testid="org-admin-users-tab"]')).toContainText('Gerir Acessos');
+    await expect(page.locator('[data-testid="btn-new-user"]')).toBeVisible();
+    await expect(page.locator('[data-testid="org-admin-users-search"]')).toBeVisible();
+
+    const firstActions = page.locator('[data-testid^="btn-user-actions-"]').first();
+    await expect(firstActions).toBeVisible({ timeout: 15000 });
+    await firstActions.click();
+    await expect(page.getByRole('menuitem', { name: 'Editar Dados' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: 'Gerir Acessos UCR' })).toBeVisible();
+    await expect(page.getByRole('menuitem', { name: /Desativar|Ativar/ })).toBeVisible();
   });
 
   test('cria uma empresa pelo Dialog Nova Empresa', async ({ page }) => {
