@@ -262,8 +262,10 @@ const WebmailPage = () => {
   }, [effectiveRole]);
 
   // Derived UI state
-  const caixaGeralRoles = ['admin', 'ceo', 'diretor', 'administrativo'];
-  const showTabs = caixaGeralRoles.includes(effectiveRole) || hasAnyRole(user, caixaGeralRoles);
+  // PACOTE DV — Caixa Geral só no perfil ACTIVO diretor/ceo/admin.
+  // hasAnyRole fazia aparecer uma caixa fantasma em todos os perfis.
+  const caixaGeralRoles = ['admin', 'ceo', 'diretor'];
+  const showTabs = caixaGeralRoles.includes(effectiveRole);
   // Perfis que podem usar contas globais (power/precision) para enviar email.
   // Os restantes roles (consultor, intermediario, administrativo, indexacao)
   // enviam obrigatoriamente pela conta pessoal (email_config) — o backend

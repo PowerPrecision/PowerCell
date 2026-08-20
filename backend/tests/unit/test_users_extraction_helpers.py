@@ -329,9 +329,6 @@ def test_list_email_accounts_injects_caixa_geral_for_diretor():
             "services.user_email_config_service.list_company_email_configs",
             new_callable=AsyncMock, return_value=[],
         ), patch(
-            "services.email_config_resolver.resolve_active_ucr_role",
-            new_callable=AsyncMock, return_value="diretor",
-        ), patch(
             "services.email_config_resolver.load_caixa_geral_config",
             new_callable=AsyncMock, return_value=caixa,
         ):
@@ -364,9 +361,6 @@ def test_list_email_accounts_skips_caixa_geral_for_consultor():
             "services.user_email_config_service.list_company_email_configs",
             new_callable=AsyncMock, return_value=[],
         ), patch(
-            "services.email_config_resolver.resolve_active_ucr_role",
-            new_callable=AsyncMock, return_value="consultor",
-        ), patch(
             "services.email_config_resolver.load_caixa_geral_config",
             new_callable=AsyncMock,
         ) as load_caixa:
@@ -374,6 +368,66 @@ def test_list_email_accounts_skips_caixa_geral_for_consultor():
         load_caixa.assert_not_awaited()
         assert result.get("caixa_geral_injected") is False
         assert result["accounts"] == []
+
+    asyncio.run(_run())
+
+
+def test_list_email_accounts_skips_caixa_geral_without_email():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from services.users_api_email_config import run_list_my_email_accounts
+
+    async def _run():
+        request = MagicMock()
+        user = {"id": "u-dir", "role": "diretor"}
+        with patch(
+            "services.auth.get_effective_role", return_value="diretor",
+        ), patch(
+            "services.auth.get_active_company_id_async",
+            new_callable=AsyncMock, return_value="acme",
+        ), patch(
+            "services.user_email_config_service.list_company_email_configs",
+            new_callable=AsyncMock, return_value=[],
+        ), patch(
+            "services.email_config_resolver.load_caixa_geral_config",
+            new_callable=AsyncMock, return_value={"label": "Caixa Geral"},
+        ):
+            result = await run_list_my_email_accounts(request, "acme", user)
+        assert result.get("caixa_geral_injected") is False
+        assert result["accounts"] == []
+
+    asyncio.run(_run())
+
+
+def test_list_email_accounts_uses_active_role_not_additional_diretor():
+    import asyncio
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from services.users_api_email_config import run_list_my_email_accounts
+
+    async def _run():
+        request = MagicMock()
+        user = {
+            "id": "u-c",
+            "role": "consultor",
+            "additional_roles": ["diretor"],
+        }
+        with patch(
+            "services.auth.get_effective_role", return_value="consultor",
+        ), patch(
+            "services.auth.get_active_company_id_async",
+            new_callable=AsyncMock, return_value="acme",
+        ), patch(
+            "services.user_email_config_service.list_company_email_configs",
+            new_callable=AsyncMock, return_value=[],
+        ), patch(
+            "services.email_config_resolver.load_caixa_geral_config",
+            new_callable=AsyncMock,
+        ) as load_caixa:
+            result = await run_list_my_email_accounts(request, "acme", user)
+        load_caixa.assert_not_awaited()
+        assert result.get("caixa_geral_injected") is False
 
     asyncio.run(_run())
 

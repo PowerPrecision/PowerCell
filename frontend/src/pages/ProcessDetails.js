@@ -155,7 +155,7 @@ import { validateNIF } from "../utils/validateNIF";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
-import { invalidateProcessDetailsQueries } from "../lib/queryClient";
+import { invalidateProcessDetailsQueries, queryKeys } from "../lib/queryClient";
 import { useProcessFullData } from "../hooks/queries/useProcessQuery";
 import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
 // Sub-componentes das abas — cada um é responsável apenas pelo seu domínio
@@ -1032,9 +1032,20 @@ const ProcessDetails = () => {
     lastHydratedAtRef.current = 0;
     setLoading(true);
     setProcess(null);
+    setClientData(null);
+    setClientId(null);
     setNotFound(false);
     setAccessDenied(false);
-  }, [id]);
+    return () => {
+      lastHydratedAtRef.current = 0;
+      if (!id) return;
+      queryClient.removeQueries({ queryKey: queryKeys.processes.detail(id) });
+      queryClient.removeQueries({ queryKey: queryKeys.history.byProcess(id) });
+      queryClient.removeQueries({ queryKey: queryKeys.activities.byProcess(id) });
+      queryClient.removeQueries({ queryKey: queryKeys.deadlines.byProcess(id) });
+      queryClient.removeQueries({ queryKey: queryKeys.tasks.byProcess(id) });
+    };
+  }, [id, queryClient]);
 
   // Legacy OneDrive functions - kept for compatibility but use S3FileManager instead
 

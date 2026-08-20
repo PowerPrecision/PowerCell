@@ -878,6 +878,7 @@ PROCESS_LIST_PROJECTION = {
     "labels": 1,
     "notes": 1,  # PACOTE BE: incluir notes para coluna 'Notas do Consultor'
     "observations": 1,  # PACOTE DO.1 — Resumo do Processo
+    "observation_notes": 1,  # PACOTE DV — feed de notas → Kanban
 }
 
 # Campos necessários para o Kanban (visualização em colunas)
@@ -912,6 +913,7 @@ PROCESS_KANBAN_PROJECTION = {
     "updated_at": 1,
     "notes": 1,
     "observations": 1,  # PACOTE DO.1
+    "observation_notes": 1,  # PACOTE DV — feed de notas → Kanban
     "tags": 1,
     "labels": 1,
     "co_buyers": 1,

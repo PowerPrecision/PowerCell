@@ -19,7 +19,7 @@ from models.auth import UserRole
 from models.process import (
     ProcessCreate, ProcessUpdate, ProcessResponse
 )
-from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles
+from services.auth import get_current_user, require_roles, require_staff, get_effective_role, get_all_user_roles, get_active_company_id_async
 from services.notification_service import send_to_admins
 from services.history import log_history
 from services.audit_trail_service import log_audit_event
@@ -287,13 +287,18 @@ async def get_my_processes(
     user: dict = Depends(get_current_user),
 ):
     """
-    PACOTE DU — Os Meus Processos.
+    PACOTE DU / DV — Os Meus Processos.
 
-    Filtra SEMPRE por assigned_to / assigned_* == user_id, mesmo quando a
-    role activa é diretor (ou admin/ceo). A visão global continua em
+    Filtro estrito: assigned_to / assigned_* == user_id E
+    company_id == active_company_id, mesmo quando a role activa é
+    diretor (ou admin/ceo). A visão global continua em
     GET /processes?show_all=true.
     """
     role = get_effective_role(request, user)
+    try:
+        active_company_id = await get_active_company_id_async(request, user)
+    except Exception:
+        active_company_id = user.get("company")
     return await run_get_processes(
         user=user,
         role=role,
@@ -310,6 +315,7 @@ async def get_my_processes(
         decrypt_list_fn=decrypt_processes_list,
         list_projection=PROCESS_LIST_PROJECTION,
         mine_only=True,
+        company_id=active_company_id,
     )
 
 

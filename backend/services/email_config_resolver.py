@@ -340,10 +340,11 @@ async def resolve_email_config_for_sync(
     return resolved
 
 
-# Pacote DO.3 — Diretor herda a Caixa Geral da empresa (sem password pessoal).
+# Pacote DO.3 / DV — Caixa Geral só para o perfil activo diretor/ceo/admin,
+# e apenas quando existe um email real (ex.: geral@empresa.pt).
 CAIXA_GERAL_ACCOUNT_ID = "caixa-geral"
-CAIXA_GERAL_INJECT_ROLES = {"diretor"}
-CAIXA_GERAL_ACCESS_ROLES = {"diretor", "admin", "ceo", "administrativo"}
+CAIXA_GERAL_INJECT_ROLES = {"diretor", "ceo", "admin"}
+CAIXA_GERAL_ACCESS_ROLES = {"diretor", "admin", "ceo"}
 
 
 def decrypt_email_secret(value: Optional[str], context: str = "") -> str:

@@ -47,7 +47,8 @@ export function useProcessQuery(processId, options = {}) {
       return response.data;
     },
     enabled: !!processId && enabled,
-    staleTime: 60 * 1000, // 1 minuto
+    staleTime: 0,
+    gcTime: 0,
   });
 
   return {
@@ -76,7 +77,8 @@ export function useClientQuery(clientId, options = {}) {
       return response.data;
     },
     enabled: !!clientId && enabled,
-    staleTime: 60 * 1000,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   return {
@@ -109,7 +111,8 @@ export function useProcessHistoryQuery(processId, options = {}) {
       }
     },
     enabled: !!processId && enabled,
-    staleTime: 30 * 1000,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   return {
@@ -141,7 +144,8 @@ export function useProcessActivitiesQuery(processId, options = {}) {
       }
     },
     enabled: !!processId && enabled,
-    staleTime: 30 * 1000,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   return {
@@ -169,7 +173,8 @@ export function useProcessTasksQuery(processId, options = {}) {
       return asArray(response.data);
     },
     enabled: !!processId && enabled,
-    staleTime: 60 * 1000,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   return {
@@ -201,7 +206,8 @@ export function useProcessDeadlinesQuery(processId, options = {}) {
       }
     },
     enabled: !!processId && enabled,
-    staleTime: 30 * 1000,
+    staleTime: 0,
+    gcTime: 0,
   });
 
   return {

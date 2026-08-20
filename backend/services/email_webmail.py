@@ -813,14 +813,12 @@ async def run_webmail_sync_user(
         CAIXA_GERAL_ACCOUNT_ID,
         CAIXA_GERAL_INJECT_ROLES,
         load_caixa_geral_config,
-        resolve_active_ucr_role,
     )
     active_company_id = None
     try:
         active_company_id = await get_active_company_id_async(request, current_user)
     except Exception:
         active_company_id = None
-    ucr_role = await resolve_active_ucr_role(request, current_user, active_company_id)
     selected_mailbox = (mailbox or "").strip().lower()
     wants_caixa_geral = account_id == CAIXA_GERAL_ACCOUNT_ID
     if selected_mailbox and not wants_caixa_geral:
@@ -830,10 +828,7 @@ async def run_webmail_sync_user(
             wants_caixa_geral = bool(caixa_email and caixa_email == selected_mailbox)
         except Exception:
             wants_caixa_geral = False
-    if wants_caixa_geral and (
-        ucr_role in CAIXA_GERAL_INJECT_ROLES
-        or user_role in CAIXA_GERAL_INJECT_ROLES | {"admin", "ceo"}
-    ):
+    if wants_caixa_geral and user_role in CAIXA_GERAL_INJECT_ROLES:
         logger.info(
             "[Webmail Sync] Diretor a sincronizar Caixa Geral user=%s company=%s",
             user_id, active_company_id,

@@ -74,7 +74,6 @@ import {
   Clock,
   MapPin,
   ArrowLeft,
-  Building2,
   User,
 } from "lucide-react";
 
@@ -83,7 +82,7 @@ import {
 // ====================================================================
 
 const ProfilePage = () => {
-  const { user, logout, refreshUser, effectiveRole, effectiveCompanyId } = useAuth();
+  const { user, logout, refreshUser, effectiveCompanyId } = useAuth();
   const navigate = useNavigate();
 
   // Pacote DP — mesmo mapeamento do Header: companies / company_roles /
@@ -321,19 +320,12 @@ const ProfilePage = () => {
                     Alterar Password
                   </Button>
                 </div>
-                {/* Role + Company badge (PACOTE DF — usa ROLE_LABELS centralizado) */}
+                {/* Role + member since — PACOTE DV: dados GLOBAIS do user,
+                    não o perfil UCR activo (effectiveRole / empresa). */}
                 <div className="flex items-center gap-2 flex-wrap">
                   <Badge variant="secondary">
-                    {ROLE_LABELS[effectiveRole || user?.role] ||
-                      effectiveRole ||
-                      user?.role}
+                    {ROLE_LABELS[user?.role] || user?.role || "—"}
                   </Badge>
-                  {user?.active_company_name && (
-                    <Badge variant="outline" className="text-xs font-normal">
-                      <Building2 className="h-3 w-3 mr-1" />
-                      {user.active_company_name}
-                    </Badge>
-                  )}
                   <span className="text-sm text-muted-foreground">
                     Membro desde {formatDateTime(user?.created_at)}
                   </span>
@@ -448,7 +440,7 @@ const ProfilePage = () => {
                 companyId={tab.companyId}
                 role={tab.role}
                 companyName={tab.companyName}
-                user={user}
+                roleData={tab.roleData}
                 onUpdate={refreshUser}
               />
             </TabsContent>

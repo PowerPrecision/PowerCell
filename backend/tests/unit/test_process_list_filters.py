@@ -173,6 +173,33 @@ class TestBuildProcessListQuery:
         ]
         assert vis == []
 
+    def test_legacy_process_note_prefers_observation_feed(self):
+        from services.process_list_enrichment import _legacy_process_note_text
+        assert _legacy_process_note_text({
+            "observation_notes": [{"text": "antiga"}, {"text": "nova"}],
+            "notes": "base",
+        }) == "nova"
+        assert _legacy_process_note_text({"notes": "kanban"}) == "kanban"
+        assert _legacy_process_note_text({"observations": "obs"}) == "obs"
+
+    def test_mine_only_requires_active_company(self):
+        from services.process_list_filters import build_company_scope_condition
+        user = {"id": "c1", "email": "c@x.com"}
+        q = build_process_list_query(
+            user, UserRole.CONSULTOR, view_mode="active_only",
+            mine_only=True, company_id="acme",
+        )
+        flat = q["$and"]
+        company = next(
+            c for c in flat
+            if "$or" in c and {"company_id": "acme"} in c["$or"]
+        )
+        assert {"company": "acme"} in company["$or"]
+        scoped = build_company_scope_condition("acme")
+        assert {"company_id": "acme"} in scoped["$or"]
+        assert build_company_scope_condition("") is None
+        assert build_company_scope_condition(None) is None
+
 
 class TestMergeQueryAnd:
     def test_empty_query(self):

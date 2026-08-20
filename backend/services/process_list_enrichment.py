@@ -115,9 +115,23 @@ async def enrich_processes_portal_flags(processes: list[dict]) -> None:
         p["has_new_documents"] = new_docs_map.get(pid, False)
 
 
+def _legacy_process_note_text(process: dict) -> str:
+    """Última nota do feed (observation_notes) ou o campo base ``notes``."""
+    notes = process.get("observation_notes")
+    if isinstance(notes, list) and notes:
+        last = notes[-1] or {}
+        text = str(last.get("text") or "").strip()
+        if text:
+            return text
+    return str(process.get("notes") or process.get("observations") or "").strip()
+
+
 async def enrich_processes_latest_notes(processes: list[dict]) -> None:
     """
     Injeta latest_note + latest_activity_preview (PACOTE BT/CZ — listagens).
+
+    PACOTE DV: se não houver actividade, usa a última observation_note /
+    campo ``notes`` (o Kanban lê estes aliases).
     """
     if not processes:
         return
@@ -125,7 +139,9 @@ async def enrich_processes_latest_notes(processes: list[dict]) -> None:
     notes_map = await fetch_latest_activity_notes_map(db, process_ids)
     for p in processes:
         note = notes_map.get(p.get("id"), {})
-        p["latest_note"] = note.get("latest_activity_note")
+        activity_text = (note.get("latest_activity_note") or "").strip()
+        fallback = _legacy_process_note_text(p)
+        p["latest_note"] = activity_text or fallback or None
         p["latest_note_at"] = note.get("latest_activity_note_at")
         p["latest_note_by"] = note.get("latest_activity_note_by")
         p["latest_activity_preview"] = p.get("latest_note")
@@ -158,6 +174,12 @@ async def enrich_processes_latest_activity(processes: list[dict]) -> None:
             act = acts_map.get(p.get("id"))
             if act:
                 p["latest_activity"] = {k: v for k, v in act.items() if k != "_id"}
+                continue
+            fallback = _legacy_process_note_text(p)
+            if fallback:
+                p["latest_activity"] = {"comment": fallback, "content": fallback}
+                if not (p.get("notes") or "").strip():
+                    p["notes"] = fallback
             else:
                 p["latest_activity"] = None
     except Exception as e:
@@ -304,6 +326,7 @@ async def run_get_processes(
     decrypt_list_fn,
     list_projection: dict,
     mine_only: bool = False,
+    company_id: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
@@ -319,6 +342,7 @@ async def run_get_processes(
         all_roles=all_roles,
         search_mode="accent",
         mine_only=mine_only,
+        company_id=company_id,
     )
 
     status_order = await load_workflow_status_order()
