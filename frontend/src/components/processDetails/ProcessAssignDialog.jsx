@@ -21,7 +21,7 @@ import {
   SelectValue,
 } from "../ui/select";
 import { Users, Loader2 } from "lucide-react";
-import { filterByAnyRole, filterByRole } from "../../utils/roleUtils";
+import { filterByAnyRole, filterByRole, CONSULTOR_ASSIGNMENT_ROLES, INTERMEDIARIO_ASSIGNMENT_ROLES, INDEXACAO_ASSIGNMENT_ROLES } from "../../utils/roleUtils";
 import { safeString } from "../dashboard/DashboardShared";
 
 export default function ProcessAssignDialog({
@@ -73,7 +73,7 @@ export default function ProcessAssignDialog({
               <div>
                 <Label className="text-sm font-medium mb-2 block">Consultores</Label>
                 <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"]).map((u) => (
+                  {filterByAnyRole(appUsers, CONSULTOR_ASSIGNMENT_ROLES).map((u) => (
                     <label
                       key={u.id}
                       className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded"
@@ -96,7 +96,7 @@ export default function ProcessAssignDialog({
                       </Badge>
                     </label>
                   ))}
-                  {filterByAnyRole(appUsers, ["consultor", "diretor", "admin", "ceo", "administrativo"]).length ===
+                  {filterByAnyRole(appUsers, CONSULTOR_ASSIGNMENT_ROLES).length ===
                     0 && (
                     <p className="text-sm text-muted-foreground text-center py-2">
                       Nenhum consultor disponível
@@ -129,11 +129,7 @@ export default function ProcessAssignDialog({
               <div>
                 <Label className="text-sm font-medium mb-2 block">Intermediários</Label>
                 <div className="border rounded-lg p-3 max-h-48 overflow-y-auto">
-                  {filterByAnyRole(appUsers, [
-                    "intermediario",
-                    "intermediario_credito",
-                    "diretor",
-                  ]).map((u) => (
+                  {filterByAnyRole(appUsers, INTERMEDIARIO_ASSIGNMENT_ROLES).map((u) => (
                     <label
                       key={u.id}
                       className="flex items-center gap-2 py-1.5 cursor-pointer hover:bg-gray-50 px-2 rounded"
@@ -156,12 +152,7 @@ export default function ProcessAssignDialog({
                       </Badge>
                     </label>
                   ))}
-                  {filterByAnyRole(appUsers, [
-                    "intermediario",
-                    "intermediario",
-                    "intermediario_credito",
-                    "diretor",
-                  ]).length === 0 && (
+                  {filterByAnyRole(appUsers, INTERMEDIARIO_ASSIGNMENT_ROLES).length === 0 && (
                     <p className="text-sm text-muted-foreground text-center py-2">
                       Nenhum intermediário disponível
                     </p>
@@ -201,7 +192,7 @@ export default function ProcessAssignDialog({
                   </SelectTrigger>
                   <SelectContent>
                     <SelectItem value="none">Nenhum</SelectItem>
-                    {filterByAnyRole(appUsers, ["indexacao", "administrativo", "admin", "ceo"]).map(
+                    {filterByAnyRole(appUsers, INDEXACAO_ASSIGNMENT_ROLES).map(
                       (u) => (
                         <SelectItem key={u.id} value={u.id}>
                           {u.name} ({u.role})

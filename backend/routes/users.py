@@ -14,7 +14,7 @@ from fastapi import APIRouter, Depends, Query, Request
 from models.auth import UserResponse
 from models.email_config import EmailConfigCreate
 from services.auth import get_current_user, require_staff
-from services.users_api_list import run_get_user, run_get_users
+from services.users_api_list import run_get_staff_users, run_get_user, run_get_users
 from services.users_api_email_config import (
     run_get_my_email_config,
     run_save_my_email_config,
@@ -30,9 +30,17 @@ router = APIRouter(prefix="/users", tags=["Users"])
 
 
 @router.get("", response_model=List[UserResponse])
-async def get_users(role: str = None, user: dict = Depends(require_staff())):
+async def get_users(
+    role: str = None,
+    for_assignment: bool = Query(
+        False,
+        description="Se true, devolve só staff elegível para atribuições "
+        "(exclui admin e indexação).",
+    ),
+    user: dict = Depends(require_staff()),
+):
     """Listar utilizadores do sistema."""
-    return await run_get_users(role, user)
+    return await run_get_users(role, user, for_assignment=for_assignment)
 
 
 @router.get("/me/email-config")
@@ -126,6 +134,12 @@ async def set_primary_email_account(
 ):
     """Definir a conta por omissão do perfil activo."""
     return await run_set_primary_email_account(request, account_id, current_user)
+
+
+@router.get("/staff", response_model=List[UserResponse])
+async def get_staff_users(user: dict = Depends(require_staff())):
+    """Staff para dropdowns de atribuição (sem admin/indexação)."""
+    return await run_get_staff_users(user)
 
 
 @router.get("/{user_id}", response_model=UserResponse)

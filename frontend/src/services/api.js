@@ -584,8 +584,15 @@ export const updateDeadline = (id, data) => api.put(`/deadlines/${id}`, data);
 export const deleteDeadline = (id) => api.delete(`/deadlines/${id}`);
 
 // Users (Admin)
-export const getUsers = (role) => 
-  api.get("/users", { params: { role } });
+export const getUsers = (role, { forAssignment } = {}) =>
+  api.get("/users", {
+    params: {
+      role,
+      ...(forAssignment ? { for_assignment: true } : {}),
+    },
+  });
+/** Staff para dropdowns de atribuição (sem admin/indexação). Pacote DT. */
+export const getStaffUsers = () => api.get("/users/staff");
 export const createUser = (data) => api.post("/admin/users", data);
 export const updateUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteUser = (id) => api.delete(`/admin/users/${id}`);
@@ -727,7 +734,13 @@ export const impersonateUser = (userId) => api.post(`/admin/impersonate/${userId
 export const stopImpersonate = () => api.post("/admin/stop-impersonate");
 
 // Admin Users (CRUD completo)
-export const getAdminUsers = (role) => api.get("/admin/users", { params: { role } });
+export const getAdminUsers = (role, { forAssignment } = {}) =>
+  api.get("/admin/users", {
+    params: {
+      role,
+      ...(forAssignment ? { for_assignment: true } : {}),
+    },
+  });
 export const createAdminUser = (data) => api.post("/admin/users", data);
 export const updateAdminUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);

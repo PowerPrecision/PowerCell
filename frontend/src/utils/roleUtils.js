@@ -71,6 +71,38 @@ export const STAFF_ROLES = [
   "indexacao",
 ];
 
+/**
+ * Pacote DT — cargos permitidos nas dropdowns de atribuição de responsáveis
+ * (calendário, processo → consultor/intermediário, tarefas).
+ * Admin e indexação ficam de fora; o picker dedicado de Indexação usa
+ * INDEXACAO_ASSIGNMENT_ROLES.
+ */
+export const ASSIGNMENT_STAFF_ROLES = [
+  "consultor",
+  "intermediario",
+  "mediador",
+  "diretor",
+  "ceo",
+];
+
+/** Cargo principal que nunca entra nas listas de atribuição de responsáveis. */
+export const EXCLUDED_ASSIGNMENT_ROLES = [
+  "admin",
+  "indexacao",
+  "index",
+  "cliente",
+  "parceiro",
+];
+
+/** Cargos no Select de consultor dum processo. */
+export const CONSULTOR_ASSIGNMENT_ROLES = ["consultor", "diretor", "ceo"];
+
+/** Cargos no Select de intermediário dum processo. */
+export const INTERMEDIARIO_ASSIGNMENT_ROLES = ["intermediario", "mediador", "diretor"];
+
+/** Picker dedicado do campo Indexação (não é a lista geral de responsáveis). */
+export const INDEXACAO_ASSIGNMENT_ROLES = ["indexacao"];
+
 /** Perfis que podem aceder ao Painel de Administração */
 export const ADMIN_PANEL_ROLES = ["admin", "ceo"];
 
@@ -431,6 +463,23 @@ export const excludeRoles = (users, excludeRoles) => {
     !excludeRoles.includes(u.role) &&
     !(u.additional_roles && u.additional_roles.some(r => excludeRoles.includes(r)))
   );
+};
+
+/**
+ * Pacote DT — utilizador elegível para Select de responsável.
+ * Exclui se o cargo actual (principal) for admin ou indexação.
+ */
+export const isAssignmentEligibleUser = (user) => {
+  if (!user) return false;
+  const primary = normalizeRole(user.role);
+  if (EXCLUDED_ASSIGNMENT_ROLES.includes(primary)) return false;
+  return hasAnyRole(user, ASSIGNMENT_STAFF_ROLES);
+};
+
+/** Filtra a lista de staff para dropdowns de atribuição. */
+export const filterAssignmentStaff = (users) => {
+  if (!users) return [];
+  return users.filter(isAssignmentEligibleUser);
 };
 
 /**

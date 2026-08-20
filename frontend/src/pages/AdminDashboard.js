@@ -59,7 +59,7 @@ import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamFeed from "../components/TeamFeed";
 import TeamPerformanceTab from "../components/admin/TeamPerformanceTab";
-import { filterByAnyRole, filterByRole, excludeRoles } from "../utils/roleUtils";
+import { filterByAnyRole, filterByRole, filterAssignmentStaff } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 const AdminDashboard = () => {
   const navigate = useNavigate();
@@ -105,8 +105,8 @@ const AdminDashboard = () => {
   const [isCreateEventDialogOpen, setIsCreateEventDialogOpen] = useState(false);
   const [selectedDateForEvent, setSelectedDateForEvent] = useState(new Date());
 
-  // Get staff users for assignment (excluindo admin e ceo)
-  const staffUsers = useMemo(() => excludeRoles(users || [], ["cliente", "admin", "ceo"]), [users]);
+  // Get staff users for assignment (Pacote DT: sem admin/indexação)
+  const staffUsers = useMemo(() => filterAssignmentStaff(users || []), [users]);
   const consultors = useMemo(() => filterByAnyRole(users || [], ["consultor", "diretor"]), [users]);
   const intermediarios = useMemo(() => filterByAnyRole(users || [], ["intermediario", "diretor"]), [users]);
   const indexacaoUsers = useMemo(() => filterByRole(users || [], "indexacao"), [users]);

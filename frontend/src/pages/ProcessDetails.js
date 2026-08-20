@@ -84,6 +84,8 @@ import {
   impersonateClientPortal,
   // PACOTE DE — Download RGPD pré-preenchido (PDF para assinatura manual)
   downloadRGPDF,
+  getStaffUsers,
+  getUsers,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
@@ -139,7 +141,7 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { format, isValid } from "date-fns";
-import { hasRole, hasAnyRole, excludeRoles, ROLE_LABELS } from "../utils/roleUtils";
+import { hasRole, hasAnyRole, ROLE_LABELS } from "../utils/roleUtils";
 import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -326,17 +328,23 @@ const ProcessDetails = () => {
   const fetchUsers = async () => {
     setLoadingUsers(true);
     try {
-      const response = await fetch(`${API_URL}/api/admin/users`, {
-        headers: { Authorization: `Bearer ${token}` },
+      const [staffRes, idxRes, partnerRes] = await Promise.all([
+        getStaffUsers().catch(() => ({ data: [] })),
+        getUsers("indexacao").catch(() => ({ data: [] })),
+        getUsers("parceiro").catch(() => ({ data: [] })),
+      ]);
+      const merged = [
+        ...(Array.isArray(staffRes?.data) ? staffRes.data : []),
+        ...(Array.isArray(idxRes?.data) ? idxRes.data : []),
+        ...(Array.isArray(partnerRes?.data) ? partnerRes.data : []),
+      ].filter((u) => u && u.is_active !== false);
+      const byId = new Map();
+      merged.forEach((u) => {
+        if (u.id) byId.set(u.id, u);
       });
-      if (response.ok) {
-        const users = await response.json();
-        // Filtrar: ativos, não admin, não ceo — garantir que é array
-        const usersArray = Array.isArray(users) ? users : [];
-        const activeUsers = excludeRoles(usersArray.filter(u => u.is_active !== false), ["admin", "ceo"]);
-        setAppUsers(activeUsers);
-        return activeUsers;
-      }
+      const activeUsers = [...byId.values()];
+      setAppUsers(activeUsers);
+      return activeUsers;
     } catch (error) {
       console.error("Erro ao buscar utilizadores:", error);
       toast.error("Erro ao carregar utilizadores");

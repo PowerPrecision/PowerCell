@@ -218,8 +218,16 @@ async def fix_duplicate_processes(user: dict = Depends(require_roles([UserRole.A
 
 
 @router.get("/users", response_model=List[UserResponse])
-async def get_users(role: Optional[str] = None, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO]))):
-    return await run_get_users(user, role)
+async def get_users(
+    role: Optional[str] = None,
+    for_assignment: bool = Query(
+        False,
+        description="Se true, devolve só staff elegível para atribuições "
+        "(exclui admin e indexação).",
+    ),
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO])),
+):
+    return await run_get_users(user, role, for_assignment=for_assignment)
 
 
 @router.post("/users", response_model=UserResponse)

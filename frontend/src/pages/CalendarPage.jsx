@@ -22,10 +22,10 @@ import {
   deleteDeadline,
   getCalendarDeadlines,
   getProcesses,
-  getUsers,
+  getStaffUsers,
 } from "../services/api";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { excludeRoles } from "../utils/roleUtils";
+import { filterAssignmentStaff } from "../utils/roleUtils";
 import { safeDateStr, formatDate } from "../lib/utils";
 import {
   agendaDateKey,
@@ -54,13 +54,13 @@ export default function CalendarPage() {
       const [calRes, procRes, usersRes] = await Promise.all([
         getCalendarDeadlines(),
         getProcesses({ size: 100 }).catch(() => ({ data: [] })),
-        getUsers().catch(() => ({ data: [] })),
+        getStaffUsers().catch(() => ({ data: [] })),
       ]);
       setEvents(Array.isArray(calRes.data) ? calRes.data : []);
       const procs = procRes?.data;
       setProcesses(Array.isArray(procs) ? procs : (procs?.items || procs?.processes || []));
       const users = Array.isArray(usersRes?.data) ? usersRes.data : [];
-      setStaffUsers(excludeRoles(users, ["cliente", "parceiro"]));
+      setStaffUsers(filterAssignmentStaff(users));
     } catch (error) {
       toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao carregar o calendário"));
     } finally {
