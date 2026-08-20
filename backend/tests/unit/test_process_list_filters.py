@@ -47,6 +47,17 @@ class TestRoleVisibility:
         user = {"id": "u1", "email": "a@x.com"}
         assert build_role_visibility_conditions(user, UserRole.ADMIN) == []
 
+    def test_diretor_without_show_all_sees_all_on_global_list(self):
+        user = {"id": "d1", "email": "d@x.com"}
+        assert build_role_visibility_conditions(user, UserRole.DIRETOR) == []
+
+    def test_assigned_to_me_includes_all_assignment_fields(self):
+        from services.process_list_filters import build_assigned_to_me_condition
+        cond = build_assigned_to_me_condition("u9")
+        assert {"assigned_to": "u9"} in cond["$or"]
+        assert {"assigned_consultor_ids": "u9"} in cond["$or"]
+        assert {"assigned_mediador_id": "u9"} in cond["$or"]
+
     def test_show_all_ignores_role(self):
         user = {"id": "u1"}
         assert build_role_visibility_conditions(
@@ -140,6 +151,27 @@ class TestBuildProcessListQuery:
         flat = q["$and"]
         assert any("$or" in c and any("assigned_consultor" in str(x) for x in c.get("$or", [])) for c in flat)
         assert any("$or" in c and any("client_name" in x for x in c.get("$or", [])) for c in flat)
+
+    def test_mine_only_filters_diretor_by_assigned_to(self):
+        user = {"id": "dir-1", "email": "d@x.com"}
+        q = build_process_list_query(
+            user, UserRole.DIRETOR, view_mode="active_only", mine_only=True,
+        )
+        flat = q["$and"]
+        assigned = next(
+            c for c in flat
+            if "$or" in c and any(
+                "assigned_to" in x or "assigned_consultor" in str(x)
+                for x in c["$or"]
+            )
+        )
+        assert {"assigned_to": "dir-1"} in assigned["$or"]
+        q_all = build_process_list_query(user, UserRole.DIRETOR, view_mode="active_only")
+        vis = [
+            c for c in q_all.get("$and", [q_all])
+            if "assigned_consultor" in str(c) or "assigned_to" in str(c)
+        ]
+        assert vis == []
 
 
 class TestMergeQueryAnd:

@@ -25,6 +25,7 @@ import {
   parseAgendaDate,
   weekDaysFrom,
 } from "../../utils/agendaCalendar";
+import CalendarEventDialog from "./CalendarEventDialog";
 
 export default function AgendaCalendar({
   events = [],
@@ -36,10 +37,12 @@ export default function AgendaCalendar({
   isTeamView = false,
   viewerId,
   headerAction,
+  showProcessLink = true,
 }) {
   const [view, setView] = useState("month");
   const [selected, setSelected] = useState(new Date());
   const [weekAnchor, setWeekAnchor] = useState(new Date());
+  const [detailEvent, setDetailEvent] = useState(null);
 
   const byDay = useMemo(() => groupEventsByDay(events), [events]);
   const selectedKey = agendaDateKey(selected);
@@ -187,11 +190,13 @@ export default function AgendaCalendar({
                   <li key={event.id || `${event.title}-${event.due_date}`}>
                     <button
                       type="button"
-                      disabled={!onEventClick}
-                      onClick={() => onEventClick?.(event)}
+                      onClick={() => {
+                        setDetailEvent(event);
+                        onEventClick?.(event);
+                      }}
                       className={cn(
                         "w-full text-left rounded-md border p-2.5",
-                        onEventClick && "hover:bg-muted/50 transition-colors",
+                        "hover:bg-muted/50 transition-colors",
                         chip.className
                       )}
                       style={chip.style}
@@ -218,6 +223,14 @@ export default function AgendaCalendar({
           )}
         </div>
       </CardContent>
+      <CalendarEventDialog
+        event={detailEvent}
+        open={!!detailEvent}
+        onOpenChange={(open) => {
+          if (!open) setDetailEvent(null);
+        }}
+        showProcessLink={showProcessLink}
+      />
     </Card>
   );
 }

@@ -221,6 +221,10 @@ class ProcessUpdate(BaseModel):
         None,
         description="PACOTE DO.1 — Observações de fácil acesso no Resumo do Processo",
     )
+    observation_notes: Optional[List[dict]] = Field(
+        None,
+        description="PACOTE DU — Feed de notas [{text, created_at, user_id, user_name}]",
+    )
     prioridade: Optional[str] = None  
     labels: Optional[List[str]] = None
     is_indexed: Optional[bool] = None  # Marcação de conclusão da indexação documental  
@@ -266,6 +270,10 @@ class ProcessResponse(BaseModel):
     observations: Optional[str] = Field(
         None,
         description="PACOTE DO.1 — Observações livres no Resumo do Processo",
+    )
+    observation_notes: Optional[List[dict]] = Field(
+        None,
+        description="PACOTE DU — Feed de notas [{text, created_at, user_id, user_name}]",
     )
     prioridade: Optional[str] = None  
     labels: Optional[List[str]] = None

@@ -24,6 +24,8 @@ def _kind_for_history_item(item: dict) -> str:
         return "created"
     if event_type == "status_change":
         return "status"
+    if event_type == "comment":
+        return "comment"
     return "event"
 
 

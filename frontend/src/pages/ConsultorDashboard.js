@@ -37,6 +37,7 @@ import {
 } from "../components/dashboard/DashboardShared";
 import { PageHeader } from "../components/shared/PageHeader";
 import { EmptyState } from "../components/ui/EmptyState";
+import { processDeepLink } from "../utils/processDeepLink";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import TasksPanel from "../components/TasksPanel";
 import TeamMural from "../components/TeamMural";
@@ -544,9 +545,6 @@ const ConsultorDashboard = () => {
               viewerId={user?.id}
               title="Agenda"
               description="Próximas marcações — abra o calendário completo para a vista mensal e semanal"
-              onEventClick={(event) => {
-                if (event?.process_id) navigate(`/processo/${event.process_id}`);
-              }}
               headerAction={
                 <Button variant="outline" size="sm" className="h-8" onClick={() => navigate("/calendario")}>
                   Abrir calendário
@@ -592,7 +590,7 @@ const ConsultorDashboard = () => {
                           type="button"
                           key={msg.id}
                           className="w-full flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
-                          onClick={() => navigate(`/process/${msg.process_id}`)}
+                          onClick={() => navigate(processDeepLink(msg.process_id, "portal"))}
                         >
                           <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 mb-1">
@@ -631,7 +629,7 @@ const ConsultorDashboard = () => {
                           type="button"
                           key={email.id}
                           className="w-full flex items-start gap-3 p-3 rounded-lg border border-border bg-muted/30 hover:bg-muted/50 transition-colors text-left"
-                          onClick={() => (email.process_id ? navigate(`/process/${email.process_id}`) : navigate("/webmail"))}
+                          onClick={() => (email.process_id ? navigate(processDeepLink(email.process_id, "emails")) : navigate("/webmail"))}
                         >
                           <div className="min-w-0 flex-1">
                             <p className="font-medium text-sm truncate">{email.subject}</p>

@@ -2589,6 +2589,7 @@ export default function ClientPortal() {
                 title="A minha agenda"
                 description="Escrituras, CPCV e outros agendamentos visíveis para si"
                 compact
+                showProcessLink={false}
               />
             )}
 

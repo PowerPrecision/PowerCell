@@ -31,7 +31,7 @@
  * // O ID é obtido via useParams() internamente
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
@@ -86,6 +86,7 @@ import {
   downloadRGPDF,
   getStaffUsers,
   getUsers,
+  addProcessObservationNote,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
@@ -97,8 +98,6 @@ import ClientContextCard from "../components/processDetails/ClientContextCard";
 import AssignmentContextCard from "../components/processDetails/AssignmentContextCard";
 import DataConflictResolver from "../components/DataConflictResolver";
 import CPCVModal from "../components/CPCVModal";
-import DSTICalculator from "../components/DSTICalculator";
-import RiskCalculator from "../components/RiskCalculator";
 import AutoDSTIBadge from "../components/AutoDSTIBadge";
 import { getFieldMeta, buildManualMetadata } from "../components/ui/AIBadge";
 import TempLinkButton from "../components/TempLinkButton";
@@ -131,8 +130,6 @@ import {
   AlertTriangle,
   CheckCircle,
   Database,
-  Calculator,
-  TrendingUp,
   Lock,
   Eye,
   X,
@@ -156,10 +153,6 @@ import {
 } from "./processDetails/processFormCleaners";
 import { validateNIF } from "../utils/validateNIF";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
-// PACOTE DH — Sheet para a Calculadora de Crédito Habitação (Simulações dropdown)
-import { Sheet, SheetContent, SheetHeader, SheetTitle } from "../components/ui/sheet";
-// PACOTE DH — MortgageSimulator reutilizado do Pacote DD (Calculadoras globais)
-import MortgageSimulator from "../components/calculators/MortgageSimulator";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateProcessDetailsQueries } from "../lib/queryClient";
@@ -181,6 +174,7 @@ import ProcessObservationsCard from "../components/processDetails/ProcessObserva
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
 import { StatusBadge } from "../components/shared/StatusBadge";
+import { resolveProcessTabsFromQuery } from "../utils/processDeepLink";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
@@ -189,6 +183,7 @@ const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
   const { user, token } = useAuth();
   const queryClient = useQueryClient();
 
@@ -224,11 +219,6 @@ const ProcessDetails = () => {
   const savedProcessRef = useRef(null);
   const lastHydratedAtRef = useRef(0);
   const wasEditingRef = useRef(false);
-  // Refs para os triggers das calculadoras (desacopladas do Dropdown — Pacote AF)
-  const dstiRef = useRef(null);
-  const riskRef = useRef(null);
-  // PACOTE DH — Sheet da Calculadora de Crédito Habitação (Simulações dropdown)
-  const [mortgageSheetOpen, setMortgageSheetOpen] = useState(false);
   const [deadlines, setDeadlines] = useState([]);
   const [activities, setActivities] = useState([]);
   const [history, setHistory] = useState([]);
@@ -236,13 +226,34 @@ const ProcessDetails = () => {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingObservations, setSavingObservations] = useState(false);
-  const [activeTab, setActiveTab] = useState("personal");
+  const initialTabs = resolveProcessTabsFromQuery(searchParams.get("tab"));
+  const [activeTab, setActiveTab] = useState(initialTabs.activeTab);
   // Separadores de topo (Progressive Disclosure): Resumo / Documentos / Histórico
-  const [mainTab, setMainTab] = useState("resumo");
+  const [mainTab, setMainTab] = useState(initialTabs.mainTab);
 
   // Mensagens do Portal — estado/polling vivem no hook (badge do tab precisa de unread)
   const portal = useProcessPortalMessages(id, { isActive: activeTab === "mensagens" });
   portalRefreshRef.current = portal.refresh;
+
+  const tabQuery = searchParams.get("tab");
+  useEffect(() => {
+    const next = resolveProcessTabsFromQuery(tabQuery);
+    setMainTab(next.mainTab);
+    setActiveTab(next.activeTab);
+  }, [tabQuery]);
+
+  const writeTabQuery = (main, inner) => {
+    setSearchParams((prev) => {
+      const next = new URLSearchParams(prev);
+      let tab = "";
+      if (main && main !== "resumo") tab = main;
+      else if (inner === "mensagens") tab = "portal";
+      else if (inner && inner !== "personal") tab = inner;
+      if (tab) next.set("tab", tab);
+      else next.delete("tab");
+      return next;
+    }, { replace: true });
+  };
 
 
   const [accessDenied, setAccessDenied] = useState(false);
@@ -1241,22 +1252,23 @@ const ProcessDetails = () => {
     }
   };
 
-  const handleSaveObservations = async (text) => {
+  const handleAddObservationNote = async (text) => {
     if (isProcessLocked) {
       toast.error("Não é possível editar um processo eliminado, desistido ou concluído.");
       throw new Error("process_locked");
     }
     setSavingObservations(true);
     try {
-      const value = text ?? "";
-      await processMutations.updateProcess.mutateAsync({
-        payload: { observations: value, notes: value },
-      });
-      setProcess((prev) => (prev ? { ...prev, observations: value, notes: value } : prev));
-      toast.success("Observações guardadas");
+      const res = await addProcessObservationNote(id, text);
+      const updated = res?.data;
+      if (updated) {
+        setProcess((prev) => (prev ? { ...prev, ...updated } : updated));
+      }
+      toast.success("Nota adicionada");
+      await fetchData();
     } catch (error) {
       const detail = error.response?.data?.detail;
-      toast.error(typeof detail === "string" ? detail : "Erro ao guardar observações");
+      toast.error(typeof detail === "string" ? detail : "Erro ao adicionar nota");
       throw error;
     } finally {
       setSavingObservations(false);
@@ -1967,102 +1979,6 @@ const ProcessDetails = () => {
                     </DropdownMenuItem>
                   </DropdownMenuContent>
                 </DropdownMenu>
-
-                {/* Simulações agrupadas num Dropdown (Pacote AC)
-                    CORREÇÃO (Pacote AF): desacopladas do Dropdown para evitar
-                    que o menu fique preso aberto. As calculadoras ficam fora
-                    (div hidden) com refs aos botões de trigger; os itens do
-                    menu chamam ref.current?.click() para abrir o modal,
-                    permitindo ao Radix fechar o menu naturalmente. */}
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="text-amber-700 border-amber-200 hover:bg-amber-50 h-8 px-2 sm:px-3"
-                      title="Simulações"
-                    >
-                      <Sparkles className="h-3.5 w-3.5 sm:mr-1" />
-                      <span className="hidden sm:inline">Simulações</span>
-                      <ChevronDown className="h-3.5 w-3.5 sm:ml-1" />
-                    </Button>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="end" className="w-52">
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-blue-600"
-                      onSelect={() => dstiRef.current?.click()}
-                    >
-                      <Calculator className="h-4 w-4" />
-                      Calculadora DSTI
-                    </DropdownMenuItem>
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-purple-600"
-                      onSelect={() => riskRef.current?.click()}
-                    >
-                      <TrendingUp className="h-4 w-4" />
-                      Calculadora de Risco
-                    </DropdownMenuItem>
-                    {/* PACOTE DH — Calculadora de Crédito Habitação (MortgageSimulator) */}
-                    <DropdownMenuItem
-                      className="cursor-pointer gap-2 text-emerald-600"
-                      onSelect={() => setMortgageSheetOpen(true)}
-                    >
-                      <Home className="h-4 w-4" />
-                      Simulação de Crédito Habitação
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                {/* Calculadoras desacopladas — invisíveis mas funcionais.
-                    Os botões reais de trigger estão aqui (hidden) e são
-                    clicados programaticamente pelos itens do Dropdown. */}
-                <div className="hidden" aria-hidden="true">
-                  <DSTICalculator
-                    trigger={<button ref={dstiRef} type="button" title="Calculadora DSTI" />}
-                    clientData={{
-                      rendimento_bruto: financialData?.rendimento_bruto,
-                      rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                      salario_liquido: financialData?.salario_liquido,
-                      renda_habitacao_atual: financialData?.renda_habitacao_atual,
-                      rendimento_co_titular: financialData?.rendimento_co_titular,
-                    }}
-                  />
-                  <RiskCalculator
-                    trigger={<button ref={riskRef} type="button" title="Calculadora de Risco" />}
-                    clientData={{
-                      rendimento_mensal: financialData?.monthly_income || financialData?.salario_liquido,
-                      valor_imovel: realEstateData?.valor_imovel || realEstateData?.valor,
-                      valor_entrada: financialData?.valor_entrada || financialData?.capital_proprio,
-                      capital_proprio: financialData?.capital_proprio,
-                      idade: personalData?.idade,
-                      data_nascimento: personalData?.data_nascimento || personalData?.birth_date,
-                    }}
-                  />
-                </div>
-
-                {/* PACOTE DH — Sheet da Calculadora de Crédito Habitação.
-                    Aberto a partir do item "Simulação de Crédito Habitação"
-                    no Dropdown de Simulações. Reutiliza o MortgageSimulator
-                    do Pacote DD (Calculadoras globais). */}
-                <Sheet open={mortgageSheetOpen} onOpenChange={setMortgageSheetOpen}>
-                  <SheetContent side="right" className="w-full sm:max-w-lg overflow-y-auto">
-                    <SheetHeader>
-                      <SheetTitle className="flex items-center gap-2">
-                        <Home className="h-5 w-5" />
-                        Simulação de Crédito Habitação
-                      </SheetTitle>
-                    </SheetHeader>
-                    <div className="mt-4">
-                      <MortgageSimulator
-                        initialValues={{
-                          capital: creditData?.requested_amount,
-                          prazoAnos: creditData?.loan_term_years,
-                          taxaJuro: creditData?.interest_rate,
-                        }}
-                      />
-                    </div>
-                  </SheetContent>
-                </Sheet>
               </>
             )}
             
@@ -2117,7 +2033,10 @@ const ProcessDetails = () => {
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* ── Coluna Esquerda: Ação & Exploração (2/3) ── */}
           <div className="lg:col-span-2 space-y-6">
-            <Tabs value={mainTab} onValueChange={setMainTab}>
+            <Tabs value={mainTab} onValueChange={(v) => {
+              setMainTab(v);
+              writeTabQuery(v, activeTab);
+            }}>
               <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="resumo" className="gap-1.5">
                   <ClipboardList className="h-4 w-4" />
@@ -2149,7 +2068,7 @@ const ProcessDetails = () => {
                 <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                   <ProcessObservationsCard
                     process={process}
-                    onSave={handleSaveObservations}
+                    onAdd={handleAddObservationNote}
                     disabled={isViewMode || isProcessLocked}
                     saving={savingObservations}
                   />
@@ -2184,7 +2103,11 @@ const ProcessDetails = () => {
                     <CardTitle className="text-lg">Dados do Processo</CardTitle>
                   </CardHeader>
                   <CardContent>
-                    <Tabs value={activeTab} onValueChange={(v) => { setEditingCardId(null); setActiveTab(v); }}>
+                    <Tabs value={activeTab} onValueChange={(v) => {
+                      setEditingCardId(null);
+                      setActiveTab(v);
+                      writeTabQuery(mainTab, v);
+                    }}>
                       <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
                         {/* ── DADOS DO CLIENTE ── */}
                         <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">

@@ -134,6 +134,7 @@ class TestBuildStaffProcessDoc:
         assert doc["client_ids"] == ["c1"]
         assert doc["observations"] == ""
         assert doc["notes"] == ""
+        assert doc["observation_notes"] == []
 
     def test_consultor_assignment(self):
         doc = build_staff_process_doc(

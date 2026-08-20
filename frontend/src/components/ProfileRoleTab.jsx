@@ -468,7 +468,7 @@ const ProfileRoleTab = ({ companyId, role, companyName, user, onUpdate }) => {
                 </span>
               </div>
             )}
-            <EmailAccountsCard companyId={companyId} onUpdate={onUpdate} />
+            <EmailAccountsCard key={`${companyId}__${role}`} companyId={companyId} onUpdate={onUpdate} />
           </CardContent>
         </Card>
       )}

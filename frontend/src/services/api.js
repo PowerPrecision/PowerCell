@@ -517,6 +517,7 @@ export const isAuthenticated = () => {
 
 // Processes
 export const getProcesses = (params = {}) => api.get("/processes", { params });
+export const getMyProcesses = (params = {}) => api.get("/processes/me", { params });
 export const getProcessesPaginated = (params = {}) => api.get("/processes/paginated", { params });
 export const getProcess = (id) => api.get(`/processes/${id}`);
 export const createProcess = (data) => api.post("/processes", data);
@@ -635,6 +636,8 @@ export const getActivities = (processId, limit = 50) => {
   return api.get("/activities", { params });
 };
 export const createActivity = (data) => api.post("/activities", data);
+export const addProcessObservationNote = (processId, text) =>
+  api.post(`/processes/${processId}/observation-notes`, { text });
 export const deleteActivity = (id) => api.delete(`/activities/${id}`);
 
 // History

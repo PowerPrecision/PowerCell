@@ -15,6 +15,7 @@ import { buildSummaryTimeline } from "../../utils/summaryTimeline";
 const KIND_LABEL = {
   created: "Criação",
   status: "Fase",
+  comment: "Nota",
   event: "Evento",
 };
 
@@ -65,7 +66,9 @@ export default function ProcessSummaryTimeline({
                         ? "bg-primary"
                         : item.kind === "created"
                           ? "bg-accent-foreground"
-                          : "bg-muted-foreground"
+                          : item.kind === "comment"
+                            ? "bg-primary/70"
+                            : "bg-muted-foreground"
                     }`}
                     aria-hidden
                   />

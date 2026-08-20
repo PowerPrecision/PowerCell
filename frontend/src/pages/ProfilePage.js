@@ -444,6 +444,7 @@ const ProfilePage = () => {
               className="space-y-6 mt-6"
             >
               <ProfileRoleTab
+                key={tab.id}
                 companyId={tab.companyId}
                 role={tab.role}
                 companyName={tab.companyName}
