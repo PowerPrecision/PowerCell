@@ -66,7 +66,7 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
-import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS } from "../utils/roleUtils";
+import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, canAccessOrgAdmin } from "../utils/roleUtils";
 import ErrorBoundary from "../components/ErrorBoundary";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -218,9 +218,7 @@ const DashboardLayout = ({ children, title }) => {
     // PACOTE DM: em impersonate, o menu segue o role REAL do utilizador
     // impersonado — nunca o activeRole residual do admin original.
     const userRole = (isImpersonating ? user?.role : effectiveRole)?.toLowerCase();
-    const isAdmin = userRole === "admin";
-    const isCeo = userRole === "ceo";
-    const canSeeAdminPanel = isAdmin || isCeo; // Botão Painel de Administração
+    const canSeeAdminPanel = canAccessOrgAdmin(userRole); // Sidebar Administração + Painel (activeRole admin/ceo)
     // ====================================================================
     // DASHBOARD
     // — admin e CEO: aponta para /admin (Painel de Administração)
@@ -488,7 +486,7 @@ const DashboardLayout = ({ children, title }) => {
     // — Gestão Financeira está na Tab "Finanças" do Painel de Administração
     // — SEM Configurações de Sistema espalhadas (tudo no Painel)
     // ====================================================================
-    if (isAdmin || isCeo) {
+    if (canSeeAdminPanel) {
       const adminNegocioItems = [
         ...meuNegocioGroup.items,
       ];
@@ -507,24 +505,16 @@ const DashboardLayout = ({ children, title }) => {
         ],
       };
 
-      const organizacaoGroup = {
-        id: "organizacao",
+      const organizacaoItem = {
         label: "Administração",
-        icon: Building2,
-        items: [
-          {
-            label: "Empresas e Acessos",
-            icon: KeyRound,
-            href: "/admin/organizacao",
-          },
-        ],
+        icon: KeyRound,
+        href: "/admin/organizacao",
       };
 
       const adminGroups = [
         { ...meuNegocioGroup, items: adminNegocioItems },
         visaoGlobalGroup,
         comunicacoesGroup,
-        organizacaoGroup,
         dashboardExecutivoGroup,
       ];
       // Só mostrar "Gestão e Operações" se tiver items após filtrar capabilities
@@ -532,7 +522,7 @@ const DashboardLayout = ({ children, title }) => {
         adminGroups.push(gestaoOperacoesGroup);
       }
       return {
-        main: [dashboardItem],
+        main: [dashboardItem, organizacaoItem],
         groups: adminGroups,
         showAdminButton: true,
       };
@@ -552,6 +542,9 @@ const DashboardLayout = ({ children, title }) => {
     navData.showAdminButton = false;
     navData.groups = (navData.groups || []).filter(
       (g) => g.id !== "dashboard-executivo" && g.id !== "organizacao",
+    );
+    navData.main = (navData.main || []).filter(
+      (item) => item.href !== "/admin/organizacao",
     );
     if (navData.main?.[0]) {
       navData.main[0] = { ...navData.main[0], href: "/staff" };
