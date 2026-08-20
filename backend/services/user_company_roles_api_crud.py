@@ -94,6 +94,7 @@ async def run_create_user_company_role(payload: UserCompanyRoleCreate):
         )
 
     await db.user_company_roles.insert_one(doc)
+    doc.pop("_id", None)
 
     logger.info(
         f"[UserCompanyRole] Associação criada: user={payload.user_id} "

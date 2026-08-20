@@ -5,6 +5,10 @@
  * Visível e acessível apenas quando o perfil activo é admin ou ceo.
  *
  * @route /admin/organizacao
+ *
+ * Nota: `/admin` permanece o dashboard operacional (KPIs/funil). Esta página
+ * é a Área de Administração (Empresas + Acessos/Equipa), visível na Sidebar
+ * só quando o perfil activo é admin ou ceo.
  */
 import { Navigate } from "react-router-dom";
 import { Building2, Users } from "lucide-react";
@@ -38,15 +42,15 @@ export default function OrganizationAdminPage() {
               <Building2 className="h-4 w-4" />
               Empresas
             </TabsTrigger>
-            <TabsTrigger value="utilizadores" className="gap-1.5" data-testid="tab-utilizadores">
+            <TabsTrigger value="acessos" className="gap-1.5" data-testid="tab-acessos">
               <Users className="h-4 w-4" />
-              Utilizadores
+              Acessos/Equipa
             </TabsTrigger>
           </TabsList>
           <TabsContent value="empresas" className="mt-4">
             <CompaniesAdminTab />
           </TabsContent>
-          <TabsContent value="utilizadores" className="mt-4">
+          <TabsContent value="acessos" className="mt-4">
             <UsersAccessAdminTab />
           </TabsContent>
         </Tabs>
