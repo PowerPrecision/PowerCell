@@ -22,6 +22,7 @@ import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../com
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import {
   Select,
+  SelectGroup,
   SelectContent,
   SelectItem,
   SelectLabel,
@@ -1618,13 +1619,15 @@ const WebmailPage = () => {
                   <SelectValue placeholder="Selecionar caixa" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectLabel className="text-xs text-muted-foreground">Caixas</SelectLabel>
-                  {mailboxOptions.map((option) => (
-                    <SelectItem key={option.value || option.label} value={option.value || "personal:"}>
-                      {option.label}
-                      {option.unread > 0 ? ` (${option.unread})` : ""}
-                    </SelectItem>
-                  ))}
+                  <SelectGroup>
+                    <SelectLabel className="text-xs text-muted-foreground">Caixas</SelectLabel>
+                    {mailboxOptions.map((option) => (
+                      <SelectItem key={option.value || option.label} value={option.value || "personal:"}>
+                        {option.label}
+                        {option.unread > 0 ? ` (${option.unread})` : ""}
+                      </SelectItem>
+                    ))}
+                  </SelectGroup>
                 </SelectContent>
               </Select>
               {showAccountSelector && (
