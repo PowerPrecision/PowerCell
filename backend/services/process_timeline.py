@@ -10,6 +10,8 @@ from __future__ import annotations
 
 from typing import Any
 
+from services.history import build_history_description, classify_history_event
+
 
 def _is_created_action(action: str | None) -> bool:
     text = (action or "").strip().lower()
@@ -17,29 +19,24 @@ def _is_created_action(action: str | None) -> bool:
 
 
 def _kind_for_history_item(item: dict) -> str:
-    action = item.get("action") or ""
-    field = (item.get("field") or "").lower()
-    if _is_created_action(action):
+    event_type = classify_history_event(item)
+    if event_type == "created" or _is_created_action(item.get("action")):
         return "created"
-    if field == "status" or "estado" in action.lower() or "fase" in action.lower():
+    if event_type == "status_change":
         return "status"
     return "event"
 
 
 def _description_for_history_item(item: dict) -> str | None:
-    field = item.get("field")
-    old_value = item.get("old_value")
-    new_value = item.get("new_value")
-    if not field and old_value is None and new_value is None:
-        return None
-    parts = []
-    if field:
-        parts.append(str(field))
-    if old_value not in (None, "") and new_value not in (None, ""):
-        parts.append(f"{old_value} → {new_value}")
-    elif new_value not in (None, ""):
-        parts.append(str(new_value))
-    return " · ".join(parts) if parts else None
+    description = build_history_description(item)
+    action = str(item.get("action") or "").strip()
+    if not description or description == action:
+        field = item.get("field")
+        old_value = item.get("old_value")
+        new_value = item.get("new_value")
+        if not field and old_value is None and new_value is None:
+            return None
+    return description or None
 
 
 def build_summary_timeline(

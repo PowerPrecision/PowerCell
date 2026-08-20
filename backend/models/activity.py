@@ -27,3 +27,6 @@ class HistoryResponse(BaseModel):
     old_value: Optional[Any] = None
     new_value: Optional[Any] = None
     created_at: str
+    # PACOTE DS — campos derivados para a tab Histórico (quem / o quê / detalhes)
+    description: Optional[str] = None
+    event_type: Optional[str] = None

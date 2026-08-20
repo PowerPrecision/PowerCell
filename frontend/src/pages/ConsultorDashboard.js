@@ -44,6 +44,7 @@ import { getWebmailStats, getCalendarDeadlines, getCommunicationsFeed, getSystem
 import { safeString } from "../utils/safeString";
 import { safeDateStr } from "../lib/utils";
 import { sanitizeHtml } from "../utils/sanitize";
+import { markdownToHtml } from "../utils/markdown";
 import { getDraftNavigationTarget, PROCESS_DRAFT_STATUSES } from "../utils/draftNavigation";
 import AgendaCalendar from "../components/calendar/AgendaCalendar";
 import { isTeamCalendarRole } from "../utils/agendaCalendar";
@@ -84,21 +85,6 @@ const FUNNEL_MACRO = [
 ];
 
 const DRAFT_STATUSES = PROCESS_DRAFT_STATUSES;
-
-function markdownToHtml(md) {
-  if (!md || typeof md !== "string") return "";
-  let html = md
-    .replace(/^### (.+)$/gm, '<h3 class="text-sm font-semibold mt-3 mb-1">$1</h3>')
-    .replace(/^## (.+)$/gm, '<h2 class="text-base font-bold mt-4 mb-2">$1</h2>')
-    .replace(/^# (.+)$/gm, '<h1 class="text-lg font-bold mt-4 mb-2">$1</h1>')
-    .replace(/\*\*(.+?)\*\*/g, "<strong>$1</strong>")
-    .replace(/(?<!\*)\*(?!\*)(.+?)(?<!\*)\*(?!\*)/g, "<em>$1</em>")
-    .replace(/^[-*] (.+)$/gm, '<li class="ml-4 list-disc">$1</li>')
-    .replace(/\n\n/g, '</p><p class="mb-2">')
-    .replace(/\n/g, "<br/>");
-  html = `<p class="mb-2">${html}</p>`;
-  return html.replace(/<p class="mb-2"><\/p>/g, "");
-}
 
 const roleLabels = {
   admin: "Administrador",
@@ -145,10 +131,15 @@ const ConsultorDashboard = () => {
     handleAddExpiry,
     openAddExpiryDialog,
     isAnalyzing,
+    isLoadingFiles,
     oneDriveFiles,
     selectedClient,
     analysisResult,
-    loadClientFiles,
+    aiSummary,
+    aiAnalysisDate,
+    aiError,
+    loadClientAndAnalyze,
+    refreshAiAnalysis,
     analyzeDocumentWithAI
   } = useDocumentManagement(fetchData);
 
@@ -715,14 +706,18 @@ const ConsultorDashboard = () => {
             <AIAnalysisTab
               processes={processes}
               selectedClient={selectedClient}
-              onSelectClient={(value) => {
-                const process = processes.find((p) => p.id === value);
-                if (process) loadClientFiles(process);
+              onSelectClient={(process) => {
+                if (process) loadClientAndAnalyze(process);
               }}
               oneDriveFiles={oneDriveFiles}
               isAnalyzing={isAnalyzing}
+              isLoadingFiles={isLoadingFiles}
               onAnalyzeDocument={analyzeDocumentWithAI}
               analysisResult={analysisResult}
+              aiSummary={aiSummary}
+              aiAnalysisDate={aiAnalysisDate}
+              aiError={aiError}
+              onRefreshAnalysis={refreshAiAnalysis}
             />
           </TabsContent>
         </Tabs>
