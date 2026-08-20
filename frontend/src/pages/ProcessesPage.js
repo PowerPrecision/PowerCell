@@ -24,7 +24,7 @@ import {
   Flame, X, ClipboardCheck, CheckCircle2, Download, RotateCcw, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
-import { getProcesses, markProcessIndexed, restoreProcess } from "../services/api";
+import { getProcesses, getMyProcesses, markProcessIndexed, restoreProcess } from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 // PACOTE CX — ClientDetailsModal para popup de detalhes ao clicar no nome
@@ -148,7 +148,8 @@ const ProcessesPage = () => {
       let totalPages = 1;
 
       while (page <= totalPages) {
-        const response = await getProcesses({ ...baseParams, page, size: 100 });
+        const listFn = isGlobalView ? getProcesses : getMyProcesses;
+        const response = await listFn({ ...baseParams, page, size: 100 });
         const items = response.data.items || response.data;
         allProcs = allProcs.concat(items);
         if (response.data.pages) {
@@ -303,10 +304,11 @@ const ProcessesPage = () => {
 
     try {
       setLoading(true);
-      // Para "/processos" (Os Meus Processos): NÃO enviar show_all — o backend
-      // filtra automaticamente por user_id. Para "/lista-processos": enviar show_all
-      // para mostrar TODOS os processos da empresa (visão global).
-      const response = await getProcesses({
+      // PACOTE DU — "/processos" (Os Meus Processos) usa GET /processes/me
+      // que filtra SEMPRE por assigned_to == user_id (incl. diretor).
+      // "/lista-processos" usa GET /processes?show_all=true (visão global).
+      const listFn = isGlobalView ? getProcesses : getMyProcesses;
+      const response = await listFn({
         page: pagination.page,
         size: pagination.size,
         search: searchTermRef.current || undefined,

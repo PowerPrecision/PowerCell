@@ -754,6 +754,7 @@ export const useDocumentManagement = (fetchData) => {
     setAnalysisResult(null);
     try {
       const res = await analyzeOneDriveDocument({
+        process_id: selectedClient.id,
         client_folder: selectedClient.client_name,
         file_name: fileName,
         document_type: docType

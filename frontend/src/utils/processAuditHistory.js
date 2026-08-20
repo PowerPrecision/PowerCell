@@ -40,7 +40,11 @@ export function classifyAuditEvent(entry) {
       || action.includes("estado") || action.includes("fase") || action.startsWith("moveu processo")) {
     return "status_change";
   }
-  if (entry.type === "comment" || entry.comment || action.includes("coment")) return "comment";
+  if (entry.type === "comment" || entry.comment || action.includes("coment")
+      || action.includes("observaç") || action.includes("observac")
+      || field === "observation_notes" || field === "observations") {
+    return "comment";
+  }
   if (entry.action === "DOCUMENT_UPLOADED_BY_CLIENT") return "portal_upload";
   if (entry.type === "document" || action.includes("document") || action.includes("documento")
       || action.includes("upload") || action.includes("carregou")) {

@@ -52,6 +52,11 @@ def test_document_and_email_and_task_types():
     assert classify_history_event({"action": "Criou tarefa", "field": "tarefa"}) == "task"
     assert classify_history_event({"action": "Atribuiu consultor"}) == "assignment"
     assert classify_history_event({"action": "Adicionou comentário", "comment": "ok"}) == "comment"
+    assert classify_history_event({
+        "action": "Adicionou observação",
+        "field": "observation_notes",
+        "new_value": "nota de escritório",
+    }) == "comment"
 
 
 def test_enrich_history_entry_adds_description_and_event_type():
@@ -90,3 +95,21 @@ def test_timeline_uses_rich_status_description():
     )
     status = next(e for e in events if e["kind"] == "status")
     assert status["description"] == "Fase alterada de A para B"
+
+
+def test_timeline_observation_note_is_comment_kind():
+    from services.process_timeline import build_summary_timeline
+
+    events = build_summary_timeline(
+        {"id": "p1"},
+        [{
+            "id": "h2",
+            "action": "Adicionou observação",
+            "field": "observation_notes",
+            "new_value": "cliente prefere manhã",
+            "user_name": "Ana",
+            "created_at": "2026-08-20T10:00:00+00:00",
+        }],
+    )
+    note = next(e for e in events if e["kind"] == "comment")
+    assert "observação" in note["title"].lower() or note["field"] == "observation_notes"

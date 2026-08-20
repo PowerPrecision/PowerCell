@@ -23,6 +23,26 @@ VALID_DOCUMENT_TYPES = [
     "outro",
 ]
 
+# Aliases enviados pelo AdminDashboard / selects legado → tipos canónicos.
+DOCUMENT_TYPE_ALIASES = {
+    "cartao_cidadao": "cc",
+    "cartão_cidadão": "cc",
+    "passaporte": "outro",
+    "contrato_trabalho": "outro",
+    "certidao_permanente": "outro",
+    "extrato_bancario": "outro",
+    "mapa_responsabilidades": "outro",
+}
+
+
+def normalize_document_type(document_type: str | None) -> str:
+    """Normaliza document_type do frontend para um valor em VALID_DOCUMENT_TYPES."""
+    raw = str(document_type or "").strip().lower()
+    mapped = DOCUMENT_TYPE_ALIASES.get(raw, raw)
+    if mapped in VALID_DOCUMENT_TYPES:
+        return mapped
+    return "outro" if raw else ""
+
 
 def map_extracted_data(document_type: str, extracted_data: Dict[str, Any]) -> Dict[str, Any]:
     """Map AI extracted fields onto process form sections."""

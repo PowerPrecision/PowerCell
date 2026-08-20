@@ -6,7 +6,6 @@
  * @route /calendario
  */
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { useNavigate } from "react-router-dom";
 import { toast } from "sonner";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { PageHeader } from "../components/shared/PageHeader";
@@ -15,6 +14,8 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../co
 import { Badge } from "../components/ui/badge";
 import { ScrollArea } from "../components/ui/scroll-area";
 import { EmptyState } from "../components/ui/EmptyState";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
+import { Label } from "../components/ui/label";
 import { CalendarDays, Plus } from "lucide-react";
 import { useAuth } from "../contexts/AuthContext";
 import {
@@ -30,15 +31,16 @@ import { safeDateStr, formatDate } from "../lib/utils";
 import {
   agendaDateKey,
   calendarEventChipStyle,
+  filterCalendarEvents,
   formatCalendarEventTitle,
   isAbsenceEvent,
   isTeamCalendarRole,
 } from "../utils/agendaCalendar";
 import GlobalCalendar from "../components/calendar/GlobalCalendar";
+import CalendarEventDialog from "../components/calendar/CalendarEventDialog";
 import CreateEventDialog from "../components/admin/CreateEventDialog";
 
 export default function CalendarPage() {
-  const navigate = useNavigate();
   const { user, effectiveRole } = useAuth();
   const isTeamView = isTeamCalendarRole(effectiveRole);
 
@@ -48,6 +50,9 @@ export default function CalendarPage() {
   const [loading, setLoading] = useState(true);
   const [dialogOpen, setDialogOpen] = useState(false);
   const [selectedDate, setSelectedDate] = useState(new Date());
+  const [consultorFilter, setConsultorFilter] = useState("all");
+  const [eventTypeFilter, setEventTypeFilter] = useState("all");
+  const [detailEvent, setDetailEvent] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -72,16 +77,24 @@ export default function CalendarPage() {
     load();
   }, [load]);
 
+  const filteredEvents = useMemo(
+    () => filterCalendarEvents(events, {
+      consultorId: consultorFilter,
+      eventType: eventTypeFilter,
+    }),
+    [events, consultorFilter, eventTypeFilter],
+  );
+
   const upcoming = useMemo(() => {
     const today = agendaDateKey(new Date());
-    return [...events]
+    return [...filteredEvents]
       .filter((e) => {
         const key = agendaDateKey(e.end_date || e.due_date);
         return key >= today;
       })
       .sort((a, b) => String(a.due_date).localeCompare(String(b.due_date)))
       .slice(0, 12);
-  }, [events]);
+  }, [filteredEvents]);
 
   const handleCreate = async (eventData) => {
     await createDeadline(eventData);
@@ -95,9 +108,7 @@ export default function CalendarPage() {
   };
 
   const handleEventClick = (event) => {
-    if (event?.process_id) {
-      navigate(`/processo/${event.process_id}`);
-    }
+    setDetailEvent(event || null);
   };
 
   const handleDelete = async (id) => {
@@ -130,13 +141,53 @@ export default function CalendarPage() {
           }
         />
 
+        <div
+          className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-muted/20 p-3"
+          data-testid="calendar-filters"
+        >
+          <div className="space-y-1 min-w-[180px]">
+            <Label htmlFor="calendar-filter-consultor" className="text-xs text-muted-foreground">
+              Consultor
+            </Label>
+            <Select value={consultorFilter} onValueChange={setConsultorFilter}>
+              <SelectTrigger id="calendar-filter-consultor" className="h-9">
+                <SelectValue placeholder="Todos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                {staffUsers.map((staff) => (
+                  <SelectItem key={staff.id} value={staff.id}>
+                    {staff.name || staff.email || staff.id}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1 min-w-[180px]">
+            <Label htmlFor="calendar-filter-type" className="text-xs text-muted-foreground">
+              Tipo de Evento
+            </Label>
+            <Select value={eventTypeFilter} onValueChange={setEventTypeFilter}>
+              <SelectTrigger id="calendar-filter-type" className="h-9">
+                <SelectValue placeholder="Todos" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">Todos</SelectItem>
+                <SelectItem value="deadline">Prazo</SelectItem>
+                <SelectItem value="event">Marcação</SelectItem>
+                <SelectItem value="absence">Ausência</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+
         {loading ? (
           <div className="h-[420px] rounded-lg border border-border bg-muted/30 animate-pulse" />
         ) : (
           <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
             <div className="lg:col-span-2 min-w-0">
               <GlobalCalendar
-                events={events}
+                events={filteredEvents}
                 isTeamView={isTeamView}
                 viewerId={user?.id}
                 onEventClick={handleEventClick}
@@ -213,6 +264,13 @@ export default function CalendarPage() {
           </div>
         )}
 
+        <CalendarEventDialog
+          event={detailEvent}
+          open={!!detailEvent}
+          onOpenChange={(open) => {
+            if (!open) setDetailEvent(null);
+          }}
+        />
         <CreateEventDialog
           open={dialogOpen}
           onOpenChange={setDialogOpen}

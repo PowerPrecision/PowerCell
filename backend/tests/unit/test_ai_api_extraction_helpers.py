@@ -41,7 +41,10 @@ def test_ai_api_modules_export_run_entrypoints():
     )
 
     assert callable(ai_api_helpers.map_extracted_data)
+    assert callable(ai_api_helpers.normalize_document_type)
     assert "cc" in ai_api_helpers.VALID_DOCUMENT_TYPES
+    assert ai_api_helpers.normalize_document_type("cartao_cidadao") == "cc"
+    assert ai_api_helpers.normalize_document_type("contrato_trabalho") == "outro"
 
     assert callable(ai_api_analyze.run_analyze_document)
     assert callable(ai_api_analyze.run_analyze_onedrive_document)

@@ -303,6 +303,7 @@ async def run_get_processes(
     all_roles: Optional[list],
     decrypt_list_fn,
     list_projection: dict,
+    mine_only: bool = False,
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
@@ -317,6 +318,7 @@ async def run_get_processes(
         is_indexed=is_indexed,
         all_roles=all_roles,
         search_mode="accent",
+        mine_only=mine_only,
     )
 
     status_order = await load_workflow_status_order()

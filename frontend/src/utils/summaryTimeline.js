@@ -12,6 +12,13 @@ function kindForHistoryItem(item) {
   const field = String(item?.field || "").toLowerCase();
   if (isCreatedAction(action)) return "created";
   if (field === "status" || /estado|fase/i.test(action)) return "status";
+  if (
+    field === "observation_notes"
+    || field === "observations"
+    || /observaç|observac|coment/i.test(action)
+  ) {
+    return "comment";
+  }
   return "event";
 }
 

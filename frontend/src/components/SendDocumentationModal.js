@@ -49,7 +49,7 @@ import { Input } from "./ui/input";
 import { Label } from "./ui/label";
 import { Badge } from "./ui/badge";
 import { ScrollArea } from "./ui/scroll-area";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
+import { Textarea } from "./ui/textarea";
 import {
   AlertCircle,
   CheckCircle,
@@ -60,8 +60,7 @@ import {
   Users,
   AlertTriangle,
   Building2,
-  Eye,
-  Edit3,
+  Pencil,
   Tag,
   Copy,
   ChevronDown,
@@ -71,8 +70,6 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { RichTextViewer } from "./ui/RichTextEditor";
-import SmartRichEditor from "./ui/SmartRichEditor";
 import { safeString } from "../utils/safeString";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
@@ -185,7 +182,7 @@ const SendDocumentationModal = ({
   const [emailHtml, setEmailHtml] = useState("");
   const [emailSubject, setEmailSubject] = useState("");
   const [previewLoading, setPreviewLoading] = useState(false);
-  const [activeTab, setActiveTab] = useState("preview"); // "preview" | "edit"
+  const [bodyEditing, setBodyEditing] = useState(false);
   const [tagsExpanded, setTagsExpanded] = useState(false);
   const [copiedTag, setCopiedTag] = useState(null);
 
@@ -199,6 +196,7 @@ const SendDocumentationModal = ({
   useEffect(() => {
     if (open && processId) {
       loadData();
+      setBodyEditing(false);
     }
   }, [open, processId]);
 
@@ -823,58 +821,41 @@ const SendDocumentationModal = ({
               </div>
             </div>
 
-            {/* Coluna Direita: Editor de Email */}
+            {/* Coluna Direita: Corpo do Email */}
             <div className="lg:col-span-2 space-y-4">
-              {/* Tabs: Preview vs Editor */}
-              <Tabs value={activeTab} onValueChange={setActiveTab}>
-                <div className="flex items-center justify-between">
-                  <Label className="text-sm font-medium">
-                    Corpo do Email
-                    <Badge variant="outline" className="ml-2 text-xs">
-                      Editável
-                    </Badge>
-                  </Label>
-                  <TabsList>
-                    <TabsTrigger value="preview" className="text-xs">
-                      <Eye className="h-3.5 w-3.5 mr-1" />
-                      Preview
-                    </TabsTrigger>
-                    <TabsTrigger value="edit" className="text-xs">
-                      <Edit3 className="h-3.5 w-3.5 mr-1" />
-                      Editar
-                    </TabsTrigger>
-                  </TabsList>
+              <div className="flex items-center justify-between">
+                <Label className="text-sm font-medium">
+                  Corpo do Email
+                </Label>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="gap-1.5"
+                  disabled={previewLoading}
+                  onClick={() => setBodyEditing((prev) => !prev)}
+                  data-testid="email-body-edit-toggle"
+                >
+                  <Pencil className="h-3.5 w-3.5" />
+                  {bodyEditing ? "Guardar" : "Editar"}
+                </Button>
+              </div>
+
+              {previewLoading ? (
+                <div className="flex items-center justify-center py-12 border rounded-lg">
+                  <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
                 </div>
-
-                <TabsContent value="preview" className="mt-2">
-                  {previewLoading ? (
-                    <div className="flex items-center justify-center py-12 border rounded-lg">
-                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : (
-                    <div className="border rounded-lg overflow-hidden">
-                      <RichTextViewer html={emailHtml} className="max-h-[400px] overflow-y-auto" />
-                    </div>
-                  )}
-                </TabsContent>
-
-                <TabsContent value="edit" className="mt-2">
-                  {previewLoading ? (
-                    <div className="flex items-center justify-center py-12 border rounded-lg">
-                      <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
-                    </div>
-                  ) : (
-                    <SmartRichEditor
-                      key={emailHtml ? 'preview-loaded' : 'preview-empty'}
-                      value={emailHtml}
-                      onChange={setEmailHtml}
-                      placeholder="Edite o conteúdo do email..."
-                      minHeight={300}
-                      advanced
-                    />
-                  )}
-                </TabsContent>
-              </Tabs>
+              ) : (
+                <Textarea
+                  value={emailHtml}
+                  onChange={(e) => setEmailHtml(e.target.value)}
+                  disabled={!bodyEditing}
+                  placeholder="Corpo do email…"
+                  rows={14}
+                  className="min-h-[300px] font-mono text-sm"
+                  data-testid="email-body-textarea"
+                />
+              )}
 
               {/* Tags Disponíveis para Templates */}
               <div className="border rounded-lg overflow-hidden">
@@ -949,7 +930,7 @@ const SendDocumentationModal = ({
                   <strong>Assunto:</strong> {emailSubject || `Documentação - ${safeString(process?.client_name) || "N/A"} (Proc. ${safeString(process?.process_number) || "N/A"})`}
                 </p>
                 <p>
-                  <strong>Nota:</strong> Pode editar o conteúdo visualmente no separador "Editar" ou alternar para o modo HTML no botão {'</>'} Editar HTML.
+                  <strong>Nota:</strong> Clique em Editar para alterar o corpo; Guardar volta a bloquear o campo.
                 </p>
               </div>
             </div>

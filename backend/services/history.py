@@ -188,7 +188,13 @@ def classify_history_event(item: dict | None) -> str:
     action = str(item.get("action") or "").lower()
     field = str(item.get("field") or "").lower()
 
-    if item.get("comment") or "coment" in action:
+    if (
+        item.get("comment")
+        or "coment" in action
+        or "observaç" in action
+        or "observac" in action
+        or field in ("observation_notes", "observations")
+    ):
         return "comment"
     if field in _STATUS_FIELDS or "estado" in action or "fase" in action or action.startswith("moveu processo"):
         return "status_change"

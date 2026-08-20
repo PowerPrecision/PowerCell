@@ -62,6 +62,9 @@ describe("buildProfileRoleTabs", () => {
     assert.equal(tabs[0].companyId, "Power");
     assert.match(tabs[0].label, /Consultor/);
     assert.equal(tabs[1].role, "intermediario");
+    assert.ok(tabs[0].id);
+    assert.ok(tabs[1].id);
+    assert.notEqual(tabs[0].id, tabs[1].id);
   });
 });
 

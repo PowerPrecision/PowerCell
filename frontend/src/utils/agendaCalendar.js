@@ -131,3 +131,31 @@ export function calendarEventChipStyle(event) {
     },
   };
 }
+
+export function eventConsultorIds(event) {
+  const ids = [
+    event?.responsible_id,
+    event?.assigned_consultor_id,
+    event?.user_id,
+    ...(Array.isArray(event?.assigned_user_ids) ? event.assigned_user_ids : []),
+  ];
+  return [...new Set(ids.filter(Boolean).map(String))];
+}
+
+export function eventMatchesConsultor(event, consultorId) {
+  if (!consultorId || consultorId === "all") return true;
+  return eventConsultorIds(event).includes(String(consultorId));
+}
+
+export function eventMatchesType(event, eventType) {
+  if (!eventType || eventType === "all") return true;
+  if (eventType === "absence") return isAbsenceEvent(event);
+  const t = String(event?.type || "deadline").toLowerCase();
+  return t === String(eventType).toLowerCase();
+}
+
+export function filterCalendarEvents(events, { consultorId, eventType } = {}) {
+  return (events || []).filter(
+    (event) => eventMatchesConsultor(event, consultorId) && eventMatchesType(event, eventType),
+  );
+}

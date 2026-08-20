@@ -69,6 +69,7 @@ export function normalizeCompanyRecord(raw, fallbacks = {}) {
     company_id: companyId || null,
     company_name: companyName || null,
     is_default: Boolean(raw.is_default ?? raw.isDefault),
+    id: raw.id || raw._id || null,
   };
 }
 
@@ -163,6 +164,7 @@ export function buildProfileRoleTabs(user, options = {}) {
     const companyName = p.company_name || p.company_id || user?.company || "Empresa";
     return {
       value: `${p.role}__${companyId}`,
+      id: p.id || `${p.role}__${companyId}`,
       role: p.role,
       companyId,
       companyName,

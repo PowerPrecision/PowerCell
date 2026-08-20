@@ -118,6 +118,24 @@ def build_role_visibility_conditions(
     return []
 
 
+def build_assigned_to_me_condition(user_id: str) -> dict:
+    """
+    PACOTE DU — processos directamente atribuídos ao utilizador.
+
+    GET /processes/me filtra SEMPRE por esta condição, inclusive quando a
+    role activa é diretor/admin/ceo (esses roles só vêem tudo em show_all).
+    """
+    return {"$or": [
+        {"assigned_to": user_id},
+        {"assigned_consultor_ids": user_id},
+        {"assigned_consultor_id": user_id},
+        {"assigned_mediador_ids": user_id},
+        {"assigned_mediador_id": user_id},
+        {"assigned_indexacao_id": user_id},
+        {"assigned_parceiro_id": user_id},
+    ]}
+
+
 def build_view_mode_status_conditions(
     *,
     status: Optional[str],
@@ -196,20 +214,26 @@ def build_process_list_query(
     is_indexed: Optional[bool] = None,
     all_roles: Optional[list] = None,
     search_mode: str = "accent",
+    mine_only: bool = False,
 ) -> dict[str, Any]:
     """
     Query MongoDB completa para listagens de processos.
 
     Combinada com $and — os filtros nunca se anulam mutuamente.
+    mine_only=True (GET /processes/me) ignora a role e filtra sempre
+    por assigned_to / assigned_* == user_id.
     """
     and_conditions: list[dict] = []
 
     and_conditions.append(build_is_deleted_filter(status=status, view_mode=view_mode))
-    and_conditions.extend(
-        build_role_visibility_conditions(
-            user, role, show_all=show_all, all_roles=all_roles,
+    if mine_only:
+        and_conditions.append(build_assigned_to_me_condition(user["id"]))
+    else:
+        and_conditions.extend(
+            build_role_visibility_conditions(
+                user, role, show_all=show_all, all_roles=all_roles,
+            )
         )
-    )
     and_conditions.extend(
         build_view_mode_status_conditions(status=status, view_mode=view_mode)
     )
