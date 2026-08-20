@@ -13,10 +13,10 @@
  * - Exponential backoff na reconexão: começa a 1s, duplica até 30s máximo.
  * - Heartbeat a cada 30s para manter a ligação activa e detectar desconexões silenciosas.
  * - Polling fallback: quando o WebSocket falha 3 vezes consecutivas, comuta para
- *   polling via REST (/api/notifications) até a ligação ser restabelecida.
+ *   polling via REST (/api/alerts/notifications) até a ligação ser restabelecida.
  * - Refresh de token automático: quando o servidor fecha com código 4001 (token expirado),
- *   tenta renovar via /api/auth/refresh e reconectar. Com código 4002 (token inválido),
- *   desiste e mantém polling.
+ *   tenta renovar via /api/auth/refresh e reconectar. Com código 4002 / HTTP 403
+ *   (token inválido), para reconexão e força logout (sem polling).
  * - Proteção contra React StrictMode double-mount via verificação de estado.
  * - Tipos de eventos tipados (WSEventType) para processos, documentos, notificações,
  *   prazos e presença de utilizadores.
@@ -50,6 +50,14 @@
 
 import { useState, useEffect, useRef, useCallback } from 'react';
 import { useAuth } from '../contexts/AuthContext';
+import {
+  forceSessionExpired,
+  isAuthWebSocketClose,
+  isSessionInvalid,
+  registerSessionCleanup,
+  WS_CLOSE_TOKEN_EXPIRED,
+  WS_CLOSE_TOKEN_INVALID,
+} from '../services/sessionExpiry';
 
 // Tipos de eventos WebSocket
 export const WSEventType = {
@@ -102,10 +110,7 @@ const HEARTBEAT_INTERVAL = 30000;
 const POLLING_INTERVAL = 30000;
 const MAX_WS_FAILS = 3;
 const API_URL = process.env.REACT_APP_BACKEND_URL + '/api';
-
-// WebSocket close codes
-const WS_CLOSE_TOKEN_EXPIRED = 4001;
-const WS_CLOSE_TOKEN_INVALID = 4002;
+const ALERTS_NOTIFICATIONS_URL = `${API_URL}/alerts/notifications`;
 
 // ====================================================================
 // WEBSOCKET MANAGER (Singleton — module level)
@@ -142,6 +147,9 @@ class WebSocketManager {
 
     // Token refresh lock (prevents concurrent refresh attempts)
     this._isRefreshing = false;
+
+    // Auth failure: stop reconnect/polling and force logout
+    this._authFailed = false;
 
     // Active process rooms (for auto-rejoin on reconnect)
     this._joinedRooms = new Set();
@@ -199,14 +207,18 @@ class WebSocketManager {
   // POLLING FALLBACK
   // ====================================================================
   _startPolling() {
-    if (this._pollingInterval) return;
+    if (this._pollingInterval || this._authFailed || isSessionInvalid()) return;
     this._pollingInterval = setInterval(async () => {
-      if (!this.token) return;
+      if (!this.token || this._authFailed || isSessionInvalid()) return;
       try {
-        const apiUrl = process.env.REACT_APP_BACKEND_URL;
-        const response = await fetch(`${apiUrl}/api/notifications?unread=true&limit=10`, {
-          headers: { Authorization: `Bearer ${this.token}` }
-        });
+        const response = await fetch(
+          `${ALERTS_NOTIFICATIONS_URL}?unread_only=true`,
+          { headers: { Authorization: `Bearer ${this.token}` } },
+        );
+        if (response.status === 401 || response.status === 403) {
+          this._handleAuthFailure();
+          return;
+        }
         if (response.ok) {
           const data = await response.json();
           const notifications = data.notifications || data;
@@ -217,7 +229,7 @@ class WebSocketManager {
           }
         }
       } catch {
-        // Silent fail
+        // Silent fail (network); auth failures are handled above / by fetch guard
       }
     }, POLLING_INTERVAL);
   }
@@ -253,6 +265,7 @@ class WebSocketManager {
       const currentRefreshToken = localStorage.getItem('refreshToken');
       if (!currentRefreshToken) {
         console.warn('WebSocket: Sem refresh token disponível');
+        this._handleAuthFailure();
         return false;
       }
 
@@ -264,6 +277,9 @@ class WebSocketManager {
 
       if (!response.ok) {
         console.warn('WebSocket: Refresh falhou, sessão pode ter expirado');
+        if (response.status === 401 || response.status === 403) {
+          this._handleAuthFailure();
+        }
         return false;
       }
 
@@ -340,8 +356,27 @@ class WebSocketManager {
   // ====================================================================
   // CONNECT / DISCONNECT
   // ====================================================================
+  /**
+   * Auth failure (403 / 4001-4002 / 401): stop reconnect + polling and logout.
+   */
+  _handleAuthFailure() {
+    if (this._authFailed) return;
+    this._authFailed = true;
+    this._stopPolling();
+    this.disconnect();
+    this._subscriberCount = 0;
+    forceSessionExpired();
+  }
+
+  disconnectForAuthFailure() {
+    this._authFailed = true;
+    this._stopPolling();
+    this.disconnect();
+    this._subscriberCount = 0;
+  }
+
   connect(token) {
-    if (!token) return;
+    if (!token || this._authFailed || isSessionInvalid()) return;
 
     this.token = token;
 
@@ -394,21 +429,21 @@ class WebSocketManager {
         this._stopHeartbeat();
         this._notifyStateListeners();
 
-        // Handle token expiration (4001) - try to refresh and reconnect
+        // Token expired (4001): try a single silent refresh before giving up
         if (event.code === WS_CLOSE_TOKEN_EXPIRED && this._subscriberCount > 0) {
           this._refreshAndReconnect();
           return;
         }
 
-        // Handle invalid token (4002) - no reconnect, session is dead
-        if (event.code === WS_CLOSE_TOKEN_INVALID) {
-          console.warn('WebSocket: Token inválido (4002), sem reconexão');
-          this._startPolling(); // Fall back to polling
+        // Invalid token / HTTP 403 handshake: stop reconnect and force logout
+        if (event.code === WS_CLOSE_TOKEN_INVALID || isAuthWebSocketClose(event)) {
+          console.warn(`WebSocket: Falha de autenticação (code=${event.code}), sem reconexão`);
+          this._handleAuthFailure();
           return;
         }
 
-        // Auto-reconnect unless intentional close
-        if (event.code !== 1000 && this._subscriberCount > 0) {
+        // Auto-reconnect unless intentional close or session already invalid
+        if (event.code !== 1000 && this._subscriberCount > 0 && !this._authFailed && !isSessionInvalid()) {
           const delay = this._reconnectInterval;
           this._reconnectAttempts++;
           this._reconnectInterval = Math.min(this._reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
@@ -420,7 +455,7 @@ class WebSocketManager {
         this._isConnecting = false;
         this.connectionError = 'Erro na conexão WebSocket';
         this._wsFailCount++;
-        if (this._wsFailCount >= MAX_WS_FAILS) {
+        if (this._wsFailCount >= MAX_WS_FAILS && !this._authFailed && !isSessionInvalid()) {
           this._startPolling();
         }
         this._notifyStateListeners();
@@ -461,6 +496,7 @@ class WebSocketManager {
    * Increment subscriber count and connect if first subscriber
    */
   addSubscriber(token) {
+    if (this._authFailed || isSessionInvalid()) return this._subscriberCount;
     this._subscriberCount++;
     if (this._subscriberCount === 1 && !this.isConnected) {
       this.connect(token);
@@ -555,6 +591,7 @@ class WebSocketManager {
 
 // Module-level singleton
 const wsManager = new WebSocketManager();
+registerSessionCleanup(() => wsManager.disconnectForAuthFailure());
 
 // ====================================================================
 // REACT HOOK (lightweight wrapper around singleton)

@@ -137,6 +137,15 @@ export const PRIMARY_ROLE_OPTIONS = [
   "admin",
 ];
 
+/** Cargos atribuíveis num acesso UCR (Pacote DW) */
+export const UCR_ASSIGNABLE_ROLES = [
+  "admin",
+  "ceo",
+  "diretor",
+  "consultor",
+  "intermediario",
+];
+
 // ====================================================================
 // MAPEAMENTO DE RÓTULOS AMIGÁVEIS
 // ====================================================================
@@ -299,6 +308,15 @@ export const hasAnyRole = (user, roles) => {
  */
 export const canAccessAdminPanel = (user) => {
   return hasAnyRole(user, ADMIN_PANEL_ROLES);
+};
+
+/**
+ * Pacote DW — o painel de Organização só é visível/acessível quando o
+ * perfil activo (activeRole / effectiveRole) é admin ou ceo.
+ */
+export const canAccessOrgAdmin = (activeRole) => {
+  if (!activeRole || typeof activeRole !== "string") return false;
+  return ADMIN_PANEL_ROLES.includes(activeRole.toLowerCase());
 };
 
 /**

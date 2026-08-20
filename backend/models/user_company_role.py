@@ -44,6 +44,22 @@ class CompanyRoleEnum(str, Enum):
     ADMIN = "admin"
 
 
+class UserRoleAssignBody(BaseModel):
+    """Payload compacto para POST /admin/users/{user_id}/roles."""
+    company_id: str
+    company_name: Optional[str] = None
+    role: str
+    is_default: bool = False
+
+    @field_validator("role")
+    @classmethod
+    def validate_assign_role(cls, v):
+        valid_roles = [e.value for e in CompanyRoleEnum]
+        if v not in valid_roles:
+            raise ValueError(f"Role inválido: {v}. Válidos: {valid_roles}")
+        return v
+
+
 class UserCompanyRoleCreate(BaseModel):
     """Payload para associar um utilizador a uma empresa com um role."""
     user_id: str

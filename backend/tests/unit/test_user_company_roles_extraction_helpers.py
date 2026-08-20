@@ -30,6 +30,7 @@ def test_user_company_roles_api_export_run_entrypoints():
     assert callable(user_company_roles_api_crud.run_create_user_company_role)
     assert callable(user_company_roles_api_crud.run_update_user_company_role)
     assert callable(user_company_roles_api_crud.run_delete_user_company_role)
+    assert callable(user_company_roles_api_crud.run_assign_user_company_role)
     assert callable(user_company_roles_api_migrate.run_migrate_company_field)
     assert callable(user_company_roles_api_migrate.run_migrate_email_configs)
     assert callable(user_company_roles_api_active.run_set_active_company)
@@ -55,3 +56,16 @@ def test_user_company_roles_router_is_thin_stubs_only():
     assert migrate_pos < id_pos
     assert set_active_pos < id_pos
     assert email_pos < id_pos
+
+
+def test_user_role_assign_body_validates_role():
+    import pytest
+    from pydantic import ValidationError
+    from models.user_company_role import UserRoleAssignBody
+
+    body = UserRoleAssignBody(company_id="c1", role="diretor")
+    assert body.role == "diretor"
+    assert body.is_default is False
+
+    with pytest.raises(ValidationError):
+        UserRoleAssignBody(company_id="c1", role="nao-existe")

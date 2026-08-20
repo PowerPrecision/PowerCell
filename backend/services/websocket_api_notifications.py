@@ -22,10 +22,14 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
     user = await verify_websocket_token(token)
 
     if user == "expired":
+        # Accept first so the browser receives close code 4001 instead of
+        # an HTTP 403 handshake rejection (which reconnects forever as 1006).
+        await websocket.accept()
         await websocket.close(code=4001, reason="Token expirado")
         return
 
     if user == "invalid" or user is None:
+        await websocket.accept()
         await websocket.close(code=4002, reason="Token inválido")
         return
 

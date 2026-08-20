@@ -35,6 +35,11 @@ from services.admin_workflow import (
     run_update_workflow_status,
 )
 
+from models.user_company_role import UserRoleAssignBody
+from services.user_company_roles_api_crud import (
+    run_assign_user_company_role,
+    run_list_user_company_roles,
+)
 from services.admin_users import (
     run_admin_get_user_email_config,
     run_admin_set_user_email_config,
@@ -243,6 +248,25 @@ async def update_user(user_id: str, data: UserUpdate, user: dict = Depends(requi
 @router.delete("/users/{user_id}")
 async def delete_user(user_id: str, user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))):
     return await run_delete_user(user_id, user)
+
+
+@router.get("/users/{user_id}/roles")
+async def list_user_roles(
+    user_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+):
+    """Lista os acessos UCR (empresa + cargo) de um utilizador."""
+    return await run_list_user_company_roles(user_id=user_id)
+
+
+@router.post("/users/{user_id}/roles")
+async def assign_user_role(
+    user_id: str,
+    payload: UserRoleAssignBody,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+):
+    """Adiciona um acesso (empresa + cargo) a um utilizador."""
+    return await run_assign_user_company_role(user_id, payload)
 
 
 @router.post("/impersonate/{user_id}")

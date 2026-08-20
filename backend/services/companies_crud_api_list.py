@@ -13,6 +13,23 @@ from models.company import CompanyListResponse, CompanyResponse
 from services.companies_crud_api_helpers import resolve_logo_url
 
 
+async def _count_company_users(company_id, company_name: str) -> int:
+    """Conta utilizadores via UCR, com fallback ao campo legado `users.company`."""
+    ucr_clauses = []
+    if company_id:
+        ucr_clauses.append({"company_id": company_id})
+    if company_name:
+        ucr_clauses.append({"company_name": company_name})
+    total_users = 0
+    if ucr_clauses:
+        total_users = await db.user_company_roles.count_documents(
+            {"$or": ucr_clauses}
+        )
+    if total_users == 0 and company_name:
+        total_users = await db.users.count_documents({"company": company_name})
+    return total_users
+
+
 async def run_list_companies(search: Optional[str] = None):
     """Lista todas as empresas configuradas no sistema."""
     query = {}
@@ -28,10 +45,9 @@ async def run_list_companies(search: Optional[str] = None):
 
     result = []
     for c in companies:
-        total_users = await db.users.count_documents({
-            "company": c.get("name", ""),
-        })
+        total_users = await _count_company_users(c.get("id"), c.get("name", ""))
         doc = {**c, "total_users": total_users}
+        doc.setdefault("is_active", True)
         doc["logo_url"] = resolve_logo_url(doc.get("logo_url"))
         result.append(CompanyResponse(**doc).model_dump())
 
@@ -59,11 +75,9 @@ async def run_get_company(company_id: str):
     if not company.get("name"):
         company["name"] = company_id
     company.setdefault("email_sync_enabled", False)
-    company.setdefault("total_users", 0)
-
-    total_users = await db.users.count_documents({
-        "company": company.get("name", ""),
-    })
-    company["total_users"] = total_users
+    company.setdefault("is_active", True)
+    company["total_users"] = await _count_company_users(
+        company.get("id"), company.get("name", ""),
+    )
     company["logo_url"] = resolve_logo_url(company.get("logo_url"))
     return CompanyResponse(**company)
