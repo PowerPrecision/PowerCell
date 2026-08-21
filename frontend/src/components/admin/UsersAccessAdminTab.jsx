@@ -88,6 +88,8 @@ import {
 const USERS_QUERY_KEY = ["org-admin-users"];
 const UCR_QUERY_KEY = ["org-admin-ucrs"];
 const UNDO_WINDOW_MS = 8000;
+const LAST_UCR_TOAST =
+  "Não é possível remover o único acesso deste utilizador. Um utilizador tem de ter pelo menos um acesso UCR.";
 
 export default function UsersAccessAdminTab() {
   const queryClient = useQueryClient();
@@ -99,7 +101,7 @@ export default function UsersAccessAdminTab() {
   const [passwordOpen, setPasswordOpen] = useState(false);
   const [newCompanyId, setNewCompanyId] = useState("");
   const [newRole, setNewRole] = useState("");
-  const [saving, setSaving] = useState(false);
+  const [removeError, setRemoveError] = useState("");
 
   const {
     data: users = [],
@@ -181,6 +183,7 @@ export default function UsersAccessAdminTab() {
     setSelectedUser(user);
     setNewCompanyId("");
     setNewRole("");
+    setRemoveError("");
     setSheetOpen(true);
   };
 
@@ -369,27 +372,27 @@ export default function UsersAccessAdminTab() {
       return;
     }
     if (selectedRoles.length <= 1) {
-      toast.error(
-        "Não é possível remover o único acesso deste utilizador. Um utilizador tem de ter pelo menos um acesso UCR.",
-      );
+      setRemoveError(LAST_UCR_TOAST);
+      toast.error(LAST_UCR_TOAST, { duration: 8000 });
       return;
     }
     try {
       await deleteUserCompanyRole(roleId);
+      setRemoveError("");
       toast.success("Acesso removido.");
       queryClient.invalidateQueries({ queryKey: UCR_QUERY_KEY });
     } catch (err) {
       const status = err.response?.status;
       const fallback =
         status === 400 || status === 409
-          ? "Não é possível remover o único acesso deste utilizador. Um utilizador tem de ter pelo menos um acesso UCR."
+          ? LAST_UCR_TOAST
           : "Erro ao remover o acesso.";
-      toast.error(
-        extractErrorMessage(
-          err.response?.data?.detail || err.response?.data?.error,
-          fallback,
-        ),
+      const message = extractErrorMessage(
+        err.response?.data?.detail || err.response?.data?.error,
+        fallback,
       );
+      setRemoveError(message);
+      toast.error(message, { duration: 8000 });
     }
   };
 
@@ -566,6 +569,11 @@ export default function UsersAccessAdminTab() {
           <div className="mt-6 space-y-6">
             <div>
               <p className="text-sm font-medium mb-2">Acessos actuais</p>
+              {removeError ? (
+                <p className="text-sm text-destructive mb-2" data-testid="ucr-remove-error">
+                  {removeError}
+                </p>
+              ) : null}
               {selectedRoles.length === 0 ? (
                 <p className="text-sm text-muted-foreground">
                   Ainda não tem nenhum acesso UCR.
