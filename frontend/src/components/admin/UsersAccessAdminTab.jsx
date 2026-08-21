@@ -45,6 +45,7 @@ import {
   LAST_UCR_DELETE_MESSAGE,
 } from "../../utils/organizationAdmin";
 import {
+  ROLE_LABELS,
   ROLE_SHORT_LABELS,
   UCR_ASSIGNABLE_ROLES,
 } from "../../utils/roleUtils";
@@ -460,15 +461,18 @@ export default function UsersAccessAdminTab() {
           message="Não foram encontrados utilizadores com os filtros actuais."
         />
       ) : (
-        <ScrollArea className="h-fit max-h-[560px] rounded-md border border-border">
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Utilizador</TableHead>
-                <TableHead>Email</TableHead>
-                <TableHead>Estado</TableHead>
-                <TableHead>Acessos</TableHead>
-                <TableHead className="text-right">Ações</TableHead>
+        <div
+          className="overflow-y-auto max-h-[calc(100vh-200px)] rounded-md border border-border"
+          data-testid="org-admin-users-table"
+        >
+          <Table containerClassName="overflow-visible">
+            <TableHeader className="sticky top-0 z-10 bg-background shadow-sm">
+              <TableRow className="hover:bg-transparent">
+                <TableHead className="bg-background">Utilizador</TableHead>
+                <TableHead className="bg-background">Email</TableHead>
+                <TableHead className="bg-background">Estado</TableHead>
+                <TableHead className="bg-background">Acessos</TableHead>
+                <TableHead className="bg-background text-right">Ações</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -561,7 +565,7 @@ export default function UsersAccessAdminTab() {
               })}
             </TableBody>
           </Table>
-        </ScrollArea>
+        </div>
       )}
 
       <UserCreateDialog
@@ -723,7 +727,7 @@ export default function UsersAccessAdminTab() {
                   <SelectContent className="max-h-72">
                     {availableRoles.map((role) => (
                       <SelectItem key={role} value={role}>
-                        {ROLE_SHORT_LABELS[role] || role}
+                        {ROLE_LABELS[role] || ROLE_SHORT_LABELS[role] || role}
                       </SelectItem>
                     ))}
                   </SelectContent>

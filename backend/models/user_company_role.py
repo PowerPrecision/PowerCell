@@ -36,7 +36,12 @@ from enum import Enum
 
 
 class CompanyRoleEnum(str, Enum):
-    """Roles que um utilizador pode ter numa empresa específica."""
+    """Roles que um utilizador pode ter numa empresa específica.
+
+    Alinhado com UserRoleEnum (exceto o pseudo-role `cliente`).
+    `admin` é o cargo canónico de administrador; `administrativo` é
+    Apoio Administrativo — cargos distintos, não aliases.
+    """
     CONSULTOR = "consultor"
     INTERMEDIARIO = "intermediario"
     ADMINISTRATIVO = "administrativo"
@@ -44,6 +49,7 @@ class CompanyRoleEnum(str, Enum):
     DIRETOR = "diretor"
     CEO = "ceo"
     ADMIN = "admin"
+    PARCEIRO = "parceiro"
 
 
 class UserRoleAssignBody(BaseModel):

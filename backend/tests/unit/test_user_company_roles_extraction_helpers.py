@@ -73,6 +73,23 @@ def test_user_role_assign_body_validates_role():
     with pytest.raises(ValidationError):
         UserRoleAssignBody(company_id="c1", role="nao-existe")
 
+    with pytest.raises(ValidationError):
+        UserRoleAssignBody(company_id="c1", role="adm")
+
+    parceiro_body = UserRoleAssignBody(company_id="c1", role="parceiro")
+    assert parceiro_body.role == "parceiro"
+
+
+def test_company_role_enum_has_canonical_admin_and_parceiro():
+    from models.user_company_role import CompanyRoleEnum
+
+    values = [e.value for e in CompanyRoleEnum]
+    assert "admin" in values
+    assert "administrativo" in values
+    assert "parceiro" in values
+    assert "adm" not in values
+    assert values.count("admin") == 1
+
 
 def test_create_ucr_strips_mongo_objectid():
     from pathlib import Path
