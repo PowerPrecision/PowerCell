@@ -4,11 +4,13 @@ MODELO: UserCompanyRole — Associação Muitos-para-Muitos
 ====================================================================
 Tabela intermédia que liga Utilizadores a Empresas com um Role específico.
 
-Um utilizador pode pertencer a várias empresas com papéis diferentes:
+Um utilizador pode pertencer a várias empresas e ter vários cargos na
+mesma empresa (Pacote EA):
   - Ex: Consultor na "Power Real Estate", Intermediário na "Precision Crédito"
+  - Ex: Diretor E Consultor na mesma "Empresa A"
 
 COLEÇÃO MONGODB: user_company_roles
-INDEX: { user_id: 1, company_id: 1 } (unique composto)
+INDEX: { user_id: 1, company_id: 1, role: 1 } (unique composto)
 INDEX: { company_id: 1 }
 INDEX: { user_id: 1, is_default: 1 } (sparse, para lookup rápido da empresa padrão)
 

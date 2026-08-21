@@ -41,6 +41,7 @@ import {
   formatUcrAccessLabel,
   companiesForNewAccess,
   rolesForNewAccess,
+  isUcrComboTaken,
   LAST_UCR_DELETE_MESSAGE,
 } from "../../utils/organizationAdmin";
 import {
@@ -192,6 +193,7 @@ export default function UsersAccessAdminTab() {
     newCompanyId,
     selectedRoles,
   );
+  const comboTaken = isUcrComboTaken(newCompanyId, newRole, selectedRoles);
 
   const invalidateUsers = () => {
     queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY });
@@ -364,6 +366,10 @@ export default function UsersAccessAdminTab() {
 
     const companyId = company.id || company.company_id;
     const companyName = company.name || company.company_name;
+    if (isUcrComboTaken(companyId, newRole, selectedRoles)) {
+      toast.error("Este cargo já existe nesta empresa para este utilizador.");
+      return;
+    }
     setSaving(true);
     try {
       await assignUserRole(selectedUser.id, {
@@ -587,8 +593,9 @@ export default function UsersAccessAdminTab() {
           <SheetHeader>
             <SheetTitle>Acessos de {selectedUser?.name || "utilizador"}</SheetTitle>
             <SheetDescription>
-              Defina em que empresa este utilizador opera e com que cargo
-              (ex.: Diretor na Empresa A, Consultor na Empresa B).
+              Defina em que empresa este utilizador opera e com que cargo.
+              Pode ter vários cargos na mesma empresa (ex.: Diretor e
+              Consultor na Empresa A).
             </SheetDescription>
           </SheetHeader>
 
@@ -696,9 +703,21 @@ export default function UsersAccessAdminTab() {
               </div>
               <div className="space-y-2">
                 <Label>Cargo</Label>
-                <Select value={newRole} onValueChange={setNewRole}>
+                <Select
+                  value={newRole}
+                  onValueChange={setNewRole}
+                  disabled={!newCompanyId}
+                >
                   <SelectTrigger data-testid="ucr-role-select">
-                    <SelectValue placeholder="Seleccionar cargo" />
+                    <SelectValue
+                      placeholder={
+                        !newCompanyId
+                          ? "Seleccione primeiro a empresa"
+                          : availableRoles.length === 0
+                            ? "Todos os cargos já estão atribuídos"
+                            : "Seleccionar cargo"
+                      }
+                    />
                   </SelectTrigger>
                   <SelectContent className="max-h-72">
                     {availableRoles.map((role) => (
@@ -712,7 +731,7 @@ export default function UsersAccessAdminTab() {
               <Button
                 type="submit"
                 className="w-full"
-                disabled={saving || !newCompanyId || !newRole}
+                disabled={saving || !newCompanyId || !newRole || comboTaken}
                 data-testid="btn-add-ucr"
               >
                 {saving ? "A guardar..." : "Adicionar acesso"}

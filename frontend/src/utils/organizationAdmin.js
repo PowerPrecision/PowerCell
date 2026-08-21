@@ -110,11 +110,23 @@ export function formatUcrAccessLabel(ucr, roleLabels = {}) {
 
 /**
  * Empresas para o Select de "Novo acesso": todas as activas.
- * Não exclui uma empresa só porque o utilizador já tem um cargo nela —
- * a exclusão é da combinação exacta Empresa+Cargo (ver rolesForNewAccess).
+ * Pacote EA — NÃO exclui uma empresa só porque o utilizador já tem um cargo
+ * nela (ex.: Diretor e Consultor na mesma Empresa A). A exclusão é da
+ * combinação exacta Empresa+Cargo (ver rolesForNewAccess / isUcrComboTaken).
  */
 export function companiesForNewAccess(companies) {
   return (companies || []).filter(isCompanyActive);
+}
+
+/** True se a combinação exacta empresa+cargo já está nos acessos actuais. */
+export function isUcrComboTaken(companyId, role, selectedRoles) {
+  if (!companyId || !role) return false;
+  const wantedCompany = String(companyId);
+  return (selectedRoles || []).some((entry) => {
+    const entryCompany = String(entry.company_id || entry.companyId || "");
+    const entryRole = entry.role || entry.role_name;
+    return entryCompany === wantedCompany && entryRole === role;
+  });
 }
 
 /** Cargos ainda disponíveis para a empresa seleccionada. */
