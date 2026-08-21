@@ -20,6 +20,43 @@ from models.user_company_role import (
 
 logger = logging.getLogger(__name__)
 
+LAST_UCR_DELETE_DETAIL = (
+    "Não é possível remover o único acesso deste utilizador. "
+    "Um utilizador tem de ter pelo menos um acesso UCR."
+)
+
+
+def _normalize_ucr_doc(doc: dict) -> dict:
+    """Garante keys estáveis para o frontend (id, company_name, role/role_name)."""
+    if not doc:
+        return doc
+    out = dict(doc)
+    raw_id = out.get("id") or out.get("_id")
+    out.pop("_id", None)
+    if raw_id is not None:
+        out["id"] = str(raw_id)
+
+    company_id = (
+        out.get("company_id")
+        or out.get("companyId")
+        or out.get("company")
+    )
+    company_name = (
+        out.get("company_name")
+        or out.get("companyName")
+        or (out.get("company") if isinstance(out.get("company"), str) else None)
+        or company_id
+    )
+    role = out.get("role") or out.get("role_name") or out.get("roleName")
+    if company_id:
+        out["company_id"] = str(company_id)
+    if company_name:
+        out["company_name"] = str(company_name).strip()
+    if role:
+        out["role"] = role
+        out["role_name"] = role
+    return out
+
 
 async def run_list_user_company_roles(
     user_id: Optional[str] = None,
@@ -32,21 +69,39 @@ async def run_list_user_company_roles(
     if company_id:
         query["company_id"] = company_id
 
-    roles = await db.user_company_roles.find(
-        query, {"_id": 0}
-    ).sort("company_name", 1).to_list(500)
+    roles = await db.user_company_roles.find(query).sort(
+        "company_name", 1
+    ).to_list(500)
 
-    return {"roles": roles, "total": len(roles)}
+    normalized = [_normalize_ucr_doc(role) for role in roles]
+    return {"roles": normalized, "total": len(normalized)}
+
+
+async def _find_ucr_by_id(role_id: str):
+    """Resolve UCR por `id` UUID ou, em docs legados, por `_id` Mongo."""
+    existing = await db.user_company_roles.find_one({"id": role_id})
+    if existing:
+        return existing
+    try:
+        from bson import ObjectId
+        from bson.errors import InvalidId
+    except ImportError:
+        return None
+    try:
+        existing = await db.user_company_roles.find_one({"_id": ObjectId(role_id)})
+        if existing:
+            return existing
+    except (InvalidId, TypeError, ValueError):
+        return None
+    return None
 
 
 async def run_get_user_company_role(role_id: str):
     """Obtém uma associação específica pelo ID."""
-    role = await db.user_company_roles.find_one(
-        {"id": role_id}, {"_id": 0}
-    )
+    role = await _find_ucr_by_id(role_id)
     if not role:
         raise HTTPException(status_code=404, detail="Associação não encontrada")
-    return role
+    return _normalize_ucr_doc(role)
 
 
 async def run_create_user_company_role(payload: UserCompanyRoleCreate):
@@ -152,12 +207,24 @@ async def run_update_user_company_role(
 
 
 async def run_delete_user_company_role(role_id: str):
-    """Remove uma associação user-company-role."""
-    existing = await db.user_company_roles.find_one({"id": role_id})
+    """Remove uma associação user-company-role.
+
+    Recusa deixar o utilizador sem nenhum acesso UCR (último vínculo).
+    """
+    existing = await _find_ucr_by_id(role_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Associação não encontrada")
 
-    await db.user_company_roles.delete_one({"id": role_id})
+    remaining = await db.user_company_roles.count_documents(
+        {"user_id": existing["user_id"]}
+    )
+    if remaining <= 1:
+        raise HTTPException(status_code=400, detail=LAST_UCR_DELETE_DETAIL)
+
+    if existing.get("id"):
+        await db.user_company_roles.delete_one({"id": existing["id"]})
+    else:
+        await db.user_company_roles.delete_one({"_id": existing["_id"]})
 
     logger.info(
         f"[UserCompanyRole] Associação removida: id={role_id} "

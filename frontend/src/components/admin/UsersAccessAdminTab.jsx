@@ -156,12 +156,16 @@ export default function UsersAccessAdminTab() {
     : [];
 
   const assignedCompanyIds = new Set(
-    selectedRoles.map((r) => r.company_id).filter(Boolean),
+    selectedRoles
+      .map((r) => r.company_id || r.companyId)
+      .filter(Boolean)
+      .map(String),
   );
 
-  const availableCompanies = companies.filter(
-    (c) => isCompanyActive(c) && !assignedCompanyIds.has(c.id),
-  );
+  const availableCompanies = companies.filter((c) => {
+    const companyId = c.id || c.company_id;
+    return isCompanyActive(c) && companyId && !assignedCompanyIds.has(String(companyId));
+  });
 
   const invalidateUsers = () => {
     queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY });
@@ -323,21 +327,25 @@ export default function UsersAccessAdminTab() {
       toast.error("Escolha a empresa e o cargo.");
       return;
     }
-    const company = companies.find((c) => c.id === newCompanyId);
+    const company = companies.find(
+      (c) => String(c.id || c.company_id) === String(newCompanyId),
+    );
     if (!company) {
       toast.error("Empresa inválida.");
       return;
     }
 
+    const companyId = company.id || company.company_id;
+    const companyName = company.name || company.company_name;
     setSaving(true);
     try {
       await assignUserRole(selectedUser.id, {
-        company_id: company.id,
-        company_name: company.name,
+        company_id: companyId,
+        company_name: companyName,
         role: newRole,
       });
       toast.success(
-        `Acesso adicionado: ${ROLE_SHORT_LABELS[newRole] || newRole} em ${company.name}.`,
+        `Acesso adicionado: ${ROLE_SHORT_LABELS[newRole] || newRole} em ${companyName}.`,
       );
       setNewCompanyId("");
       setNewRole("");
@@ -354,16 +362,32 @@ export default function UsersAccessAdminTab() {
     }
   };
 
-  const handleRemoveAccess = async (roleId) => {
+  const handleRemoveAccess = async (role) => {
+    const roleId = role?.id || role?._id || role?.role_id;
+    if (!roleId) {
+      toast.error("Não foi possível identificar este acesso.");
+      return;
+    }
+    if (selectedRoles.length <= 1) {
+      toast.error(
+        "Não é possível remover o único acesso deste utilizador. Um utilizador tem de ter pelo menos um acesso UCR.",
+      );
+      return;
+    }
     try {
       await deleteUserCompanyRole(roleId);
       toast.success("Acesso removido.");
       queryClient.invalidateQueries({ queryKey: UCR_QUERY_KEY });
     } catch (err) {
+      const status = err.response?.status;
+      const fallback =
+        status === 400 || status === 409
+          ? "Não é possível remover o único acesso deste utilizador. Um utilizador tem de ter pelo menos um acesso UCR."
+          : "Erro ao remover o acesso.";
       toast.error(
         extractErrorMessage(
           err.response?.data?.detail || err.response?.data?.error,
-          "Erro ao remover o acesso.",
+          fallback,
         ),
       );
     }
@@ -435,9 +459,12 @@ export default function UsersAccessAdminTab() {
                         </span>
                       ) : (
                         <div className="flex flex-wrap gap-1">
-                          {ucrs.map((ucr) => (
-                            <Badge key={ucr.id} variant="secondary">
-                              {ucr.company_name} · {ROLE_SHORT_LABELS[ucr.role] || ucr.role}
+                          {ucrs.map((role) => (
+                            <Badge key={role.id || role._id} variant="secondary">
+                              {role.company_name || role.company} ·{" "}
+                              {ROLE_SHORT_LABELS[role.role || role.role_name]
+                                || role.role
+                                || role.role_name}
                             </Badge>
                           ))}
                         </div>
@@ -545,33 +572,42 @@ export default function UsersAccessAdminTab() {
                 </p>
               ) : (
                 <ScrollArea className="h-fit max-h-[240px] rounded-md border border-border">
-                  <ul className="divide-y divide-border">
-                    {selectedRoles.map((ucr) => (
+                  <ul className="divide-y divide-border w-full">
+                    {selectedRoles.map((role) => {
+                      const roleId = role.id || role._id || role.role_id;
+                      const companyLabel =
+                        role.company_name || role.companyName || role.company || "—";
+                      const cargoKey = role.role || role.role_name;
+                      const cargoLabel =
+                        ROLE_SHORT_LABELS[cargoKey] || cargoKey || "—";
+                      return (
                       <li
-                        key={ucr.id}
+                        key={roleId}
                         className="flex items-center justify-between gap-2 p-3"
-                        data-testid={`ucr-row-${ucr.id}`}
+                        data-testid={`ucr-row-${roleId}`}
                       >
-                        <div className="min-w-0">
-                          <p className="text-sm font-medium truncate">
-                            {ucr.company_name}
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium truncate text-foreground">
+                            {companyLabel}
                           </p>
                           <p className="text-xs text-muted-foreground">
-                            {ROLE_SHORT_LABELS[ucr.role] || ucr.role}
-                            {ucr.is_default ? " · predefinido" : ""}
+                            {cargoLabel}
+                            {role.is_default ? " · predefinido" : ""}
                           </p>
                         </div>
                         <Button
                           variant="ghost"
                           size="icon"
+                          className="shrink-0"
                           aria-label="Remover acesso"
-                          onClick={() => handleRemoveAccess(ucr.id)}
-                          data-testid={`btn-remove-ucr-${ucr.id}`}
+                          onClick={() => handleRemoveAccess(role)}
+                          data-testid={`btn-remove-ucr-${roleId}`}
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
                       </li>
-                    ))}
+                      );
+                    })}
                   </ul>
                 </ScrollArea>
               )}
@@ -599,11 +635,16 @@ export default function UsersAccessAdminTab() {
                     />
                   </SelectTrigger>
                   <SelectContent>
-                    {availableCompanies.map((company) => (
-                      <SelectItem key={company.id} value={company.id}>
-                        {company.name}
-                      </SelectItem>
-                    ))}
+                    {availableCompanies.map((company) => {
+                      const companyId = String(company.id || company.company_id);
+                      const companyName =
+                        company.name || company.company_name || companyId;
+                      return (
+                        <SelectItem key={companyId} value={companyId}>
+                          {companyName}
+                        </SelectItem>
+                      );
+                    })}
                   </SelectContent>
                 </Select>
               </div>

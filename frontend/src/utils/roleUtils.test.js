@@ -58,13 +58,15 @@ describe("isAssignmentEligibleUser / filterAssignmentStaff", () => {
 });
 
 describe("Pacote DW — org admin + UCR roles", () => {
-  it("UCR_ASSIGNABLE_ROLES covers admin/ceo/diretor/consultor/intermediario", () => {
+  it("UCR_ASSIGNABLE_ROLES includes Index (indexacao) and administrativo", () => {
     assert.deepEqual(UCR_ASSIGNABLE_ROLES, [
       "admin",
       "ceo",
       "diretor",
+      "administrativo",
       "consultor",
       "intermediario",
+      "indexacao",
     ]);
   });
 

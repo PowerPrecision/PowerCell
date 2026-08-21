@@ -7,6 +7,8 @@ import assert from "node:assert/strict";
 import {
   normalizeCompaniesPayload,
   normalizeRolesPayload,
+  normalizeUcrRecord,
+  normalizeCompanyEntity,
   groupRolesByUserId,
   isCompanyActive,
   isUserActive,
@@ -27,6 +29,24 @@ describe("normalizeCompaniesPayload", () => {
       "b",
     );
   });
+
+  it("mapeia company_id / company_name para id / name", () => {
+    const list = normalizeCompaniesPayload({
+      companies: [
+        { company_id: "c1", company_name: "Power", is_active: true },
+      ],
+    });
+    assert.equal(list[0].id, "c1");
+    assert.equal(list[0].name, "Power");
+  });
+});
+
+describe("normalizeCompanyEntity", () => {
+  it("preenche id a partir de company_id", () => {
+    const company = normalizeCompanyEntity({ company_id: "x", name: "Y" });
+    assert.equal(company.id, "x");
+    assert.equal(company.name, "Y");
+  });
 });
 
 describe("normalizeRolesPayload / groupRolesByUserId", () => {
@@ -37,6 +57,23 @@ describe("normalizeRolesPayload / groupRolesByUserId", () => {
     assert.equal(roles.length, 1);
   });
 
+  it("mapeia role_name, company_name e _id", () => {
+    const roles = normalizeRolesPayload({
+      roles: [
+        {
+          _id: "abc",
+          user_id: "u1",
+          company_name: "Precision",
+          role_name: "indexacao",
+        },
+      ],
+    });
+    assert.equal(roles[0].id, "abc");
+    assert.equal(roles[0].company_name, "Precision");
+    assert.equal(roles[0].role, "indexacao");
+    assert.equal(roles[0].role_name, "indexacao");
+  });
+
   it("agrupa por user_id", () => {
     const grouped = groupRolesByUserId([
       { user_id: "u1", company_name: "A", role: "diretor" },
@@ -45,6 +82,21 @@ describe("normalizeRolesPayload / groupRolesByUserId", () => {
     ]);
     assert.equal(grouped.u1.length, 2);
     assert.equal(grouped.u2.length, 1);
+  });
+});
+
+describe("normalizeUcrRecord", () => {
+  it("aceita role.role_name e company_name", () => {
+    const role = normalizeUcrRecord({
+      id: "r1",
+      company_name: "Power Real Estate",
+      role_name: "diretor",
+      user_id: "u1",
+    });
+    assert.equal(role.company_name, "Power Real Estate");
+    assert.equal(role.role, "diretor");
+    assert.equal(role.role_name, "diretor");
+    assert.equal(role.id, "r1");
   });
 });
 
