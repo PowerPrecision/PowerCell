@@ -331,7 +331,8 @@ class WebSocketManager {
     try {
       const data = JSON.parse(event.data);
       this.lastMessage = data;
-      const { type, data: payload } = data;
+      const type = data.type || data.event;
+      const payload = data.data !== undefined ? data.data : data;
 
       // Dispatch to all registered handlers
       this._dispatchEvent(type, payload, data);

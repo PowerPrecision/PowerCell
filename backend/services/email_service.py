@@ -1573,60 +1573,17 @@ async def sync_webmail_emails(
 
                     # ── WebSocket: Notificar utilizadores em tempo real ──
                     try:
-                        from services.websocket_manager import manager, WSEventType, create_ws_message
+                        from services.email_realtime import (
+                            notify_new_email,
+                            notify_new_email_for_global_mailbox,
+                        )
 
-                        is_received = email_doc.get("direction") == "received"
-                        sender = email_doc.get("from_email", "")
-                        subject = email_doc.get("subject", "")
-                        email_id = email_doc.get("id", "")
                         account_name = email_doc.get("account", "")
-
-                        ws_payload = {
-                            "email_id": email_id,
-                            "from_email": sender,
-                            "subject": subject,
-                            "account": account_name,
-                            "folder": "inbox" if is_received else "sent",
-                            "direction": email_doc.get("direction", "received"),
-                        }
-                        ws_msg = create_ws_message(WSEventType.NEW_EMAIL, ws_payload)
-
-                        # 1) Notificar utilizadores com email_config que aponta
-                        #    para esta conta (caixa pessoal)
                         if account_name and account_name.startswith("user_"):
-                            # sync_user_emails: notificar o dono
                             target_user_id = account_name.replace("user_", "")
-                            # Tentar expandir o ID (pode estar truncado)
-                            await manager.send_personal_message(ws_msg, target_user_id)
+                            await notify_new_email(target_user_id, email_doc)
                         else:
-                            # sync_webmail_emails (global): notificar utilizadores
-                            # que têm acesso à caixa geral (admin, ceo, diretor, administrativo)
-                            # e cujo email pessoal corresponde a um destinatário
-                            to_set = set(email_doc.get("to_emails", []))
-                            cc_set = set(email_doc.get("cc_emails", []))
-                            all_recipients = to_set | cc_set
-
-                            # Buscar utilizadores com acesso à caixa geral
-                            staff_cursor = db.users.find(
-                                {"is_active": {"$ne": False}},
-                                {"_id": 0, "id": 1, "role": 1, "email": 1, "email_config": 1}
-                            )
-                            async for u in staff_cursor:
-                                should_notify = False
-                                # Admin/CEO/Diretor/Administrativo: sempre notificar
-                                # para emails da caixa geral
-                                if u.get("role") in ("admin", "ceo", "diretor", "administrativo"):
-                                    should_notify = True
-                                # Qualquer utilizador cujo email pessoal
-                                # está nos destinatários
-                                elif u.get("email", "").lower() in all_recipients:
-                                    should_notify = True
-                                # Indexação: notificar se for caixa partilhada
-                                elif u.get("role") == "indexacao" and is_received:
-                                    should_notify = True
-
-                                if should_notify and manager.is_user_connected(u["id"]):
-                                    await manager.send_personal_message(ws_msg, u["id"])
+                            await notify_new_email_for_global_mailbox(email_doc)
                     except Exception as ws_err:
                         # Falha no WebSocket NÃO deve quebrar o sync
                         logger.debug(f"[Webmail Sync] WS NEW_EMAIL falhou (non-critical): {ws_err}")
@@ -1956,20 +1913,8 @@ async def sync_user_emails(
 
                 # ── WebSocket: Notificar o dono da caixa pessoal em tempo real ──
                 try:
-                    from services.websocket_manager import manager, WSEventType, create_ws_message
-
-                    is_received = email_doc.get("direction") == "received"
-                    ws_payload = {
-                        "email_id": email_doc.get("id", ""),
-                        "from_email": email_doc.get("from_email", ""),
-                        "subject": email_doc.get("subject", ""),
-                        "account": email_doc.get("account", ""),
-                        "folder": "inbox" if is_received else "sent",
-                        "direction": email_doc.get("direction", "received"),
-                        "box": "personal",
-                    }
-                    ws_msg = create_ws_message(WSEventType.NEW_EMAIL, ws_payload)
-                    await manager.send_personal_message(ws_msg, user_id)
+                    from services.email_realtime import notify_new_email
+                    await notify_new_email(user_id, email_doc, extra={"box": "personal"})
                 except Exception as ws_err:
                     logger.debug(f"[User Email Sync] WS NEW_EMAIL falhou (non-critical): {ws_err}")
 
@@ -2127,7 +2072,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                         if await db.processes.find_one({"id": tag_pid}, {"_id": 0, "id": 1}):
                             resolved_process_id = tag_pid
 
-                await db.emails.insert_one({
+                email_doc = {
                     "id": str(uuid.uuid4()),
                     "process_id": resolved_process_id,
                     "direction": email_data.get("direction", "received"),
@@ -2155,8 +2100,14 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                     "source": "shared_webmail_sync",
                     "in_reply_to": email_data.get("in_reply_to") or None,
                     "references": email_data.get("references") or [],
-                })
+                }
+                await db.emails.insert_one(email_doc)
                 total_synced += 1
+                try:
+                    from services.email_realtime import notify_new_email_for_shared_role
+                    await notify_new_email_for_shared_role(role, email_doc)
+                except Exception as ws_err:
+                    logger.debug(f"[Shared Role Sync] WS NEW_EMAIL falhou (non-critical): {ws_err}")
             except Exception as e:
                 logger.error(f"[Shared Role Sync] Erro ao guardar email INBOX: {e}")
                 total_errors += 1
@@ -2206,7 +2157,7 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                         if await db.processes.find_one({"id": tag_pid}, {"_id": 0, "id": 1}):
                             resolved_process_id = tag_pid
 
-                await db.emails.insert_one({
+                email_doc = {
                     "id": str(uuid.uuid4()),
                     "process_id": resolved_process_id,
                     "direction": email_data.get("direction", "sent"),
@@ -2234,8 +2185,14 @@ async def sync_shared_role_emails(role: str, days: int = 3, max_emails: int = 20
                     "source": "shared_webmail_sync",
                     "in_reply_to": email_data.get("in_reply_to") or None,
                     "references": email_data.get("references") or [],
-                })
+                }
+                await db.emails.insert_one(email_doc)
                 total_synced += 1
+                try:
+                    from services.email_realtime import notify_new_email_for_shared_role
+                    await notify_new_email_for_shared_role(role, email_doc)
+                except Exception as ws_err:
+                    logger.debug(f"[Shared Role Sync] WS NEW_EMAIL falhou (non-critical): {ws_err}")
             except Exception as e:
                 logger.error(f"[Shared Role Sync] Erro ao guardar email SENT: {e}")
                 total_errors += 1

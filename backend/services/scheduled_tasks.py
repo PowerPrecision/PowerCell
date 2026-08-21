@@ -27,7 +27,7 @@ import logging
 import argparse
 import random
 from datetime import datetime, timezone, timedelta
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 import uuid
 import os
 import tempfile
@@ -46,6 +46,26 @@ logging.basicConfig(
     format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
 )
 logger = logging.getLogger(__name__)
+
+# Pacote EC — intervalo do loop de auto-sync IMAP no processo API (WebSocket).
+# 60s + jitter curto ≈ 1–2 min entre ciclos (o sleep corre DEPOIS do sync).
+_DEFAULT_EMAIL_AUTO_SYNC_INTERVAL = 60
+_MIN_EMAIL_AUTO_SYNC_INTERVAL = 30
+_MAX_EMAIL_AUTO_SYNC_INTERVAL = 300
+
+
+def get_email_auto_sync_interval_seconds(default: int = _DEFAULT_EMAIL_AUTO_SYNC_INTERVAL) -> int:
+    """Intervalo entre ciclos de auto-sync IMAP (segundos).
+
+    Override: ``EMAIL_AUTO_SYNC_INTERVAL_SECONDS``. Clamp 30–300s para evitar
+    martelar o IMAP ou voltar aos intervalos longos de 3–15 minutos.
+    """
+    raw = os.environ.get("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", str(default))
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = default
+    return max(_MIN_EMAIL_AUTO_SYNC_INTERVAL, min(value, _MAX_EMAIL_AUTO_SYNC_INTERVAL))
 
 
 class ScheduledTasksService:
@@ -1720,7 +1740,7 @@ class ScheduledTasksService:
         }
 
 
-async def run_email_auto_sync(interval_seconds: int = 180):
+async def run_email_auto_sync(interval_seconds: Optional[int] = None):
     import os
     env = os.environ.get('ENVIRONMENT', '')
     sync_enabled = os.environ.get('EMAIL_SYNC_ENABLED', '').lower() == 'true'
@@ -1728,10 +1748,17 @@ async def run_email_auto_sync(interval_seconds: int = 180):
         logger.info("[run_email_auto_sync] BLOCKED — ENVIRONMENT != production e EMAIL_SYNC_ENABLED != true")
         return  # Aborta em DEV a menos que EMAIL_SYNC_ENABLED=true
 
+    if interval_seconds is None:
+        interval_seconds = get_email_auto_sync_interval_seconds()
+
     # Aguardar 30s antes da primeira execução para dar tempo ao server arrancar
     await asyncio.sleep(30)
     
     service = ScheduledTasksService()
+    logger.info(
+        "[Email Auto-Sync] Loop iniciado — intervalo %ss (+ jitter curto)",
+        interval_seconds,
+    )
     
     while True:
         try:
@@ -1745,9 +1772,9 @@ async def run_email_auto_sync(interval_seconds: int = 180):
         finally:
             await service.disconnect()
         
-        # Jitter: adicionar variação aleatória de 0-60s para evitar que
-        # múltiplas instâncias sincronizem ao mesmo tempo
-        jitter = random.randint(0, 60)
+        # Jitter curto (até 15s ou 1/4 do intervalo) para evitar thundering herd
+        # sem empurrar o ciclo para os 3–4 minutos do intervalo antigo de 180s.
+        jitter = random.randint(0, min(15, max(1, interval_seconds // 4)))
         await asyncio.sleep(interval_seconds + jitter)
 
 

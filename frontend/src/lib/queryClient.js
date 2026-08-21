@@ -140,6 +140,7 @@ export const queryKeys = {
   // Emails
   emails: {
     all: ['emails'],
+    webmail: (filters) => [...queryKeys.emails.all, 'webmail', filters],
     byProcess: (processId, direction) => [...queryKeys.emails.all, 'process', processId, { direction }],
     stats: (processId) => [...queryKeys.emails.all, 'stats', processId],
     monitored: (processId) => [...queryKeys.emails.all, 'monitored', processId],

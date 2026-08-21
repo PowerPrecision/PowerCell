@@ -38,6 +38,8 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
 
     try:
         await manager.connect(websocket, user_id)
+        from services.email_realtime import join_user_email_room
+        join_user_email_room(user_id)
 
         await websocket.send_json(create_ws_message(
             WSEventType.CONNECTION_STATUS,

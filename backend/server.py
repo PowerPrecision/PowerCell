@@ -1066,11 +1066,20 @@ async def startup():
 
         # Iniciar Auto-Sync de Emails
         try:
-            from services.scheduled_tasks import run_email_auto_sync
-            email_sync_task = asyncio.create_task(run_email_auto_sync(interval_seconds=180))
+            from services.scheduled_tasks import (
+                get_email_auto_sync_interval_seconds,
+                run_email_auto_sync,
+            )
+            email_sync_interval = get_email_auto_sync_interval_seconds()
+            email_sync_task = asyncio.create_task(
+                run_email_auto_sync(interval_seconds=email_sync_interval)
+            )
             _background_tasks.add(email_sync_task)
             email_sync_task.add_done_callback(_background_tasks.discard)
-            logger.info("✅ Auto-sync de email iniciado (Apenas Produção).")
+            logger.info(
+                "✅ Auto-sync de email iniciado (Apenas Produção, intervalo %ss).",
+                email_sync_interval,
+            )
         except Exception as email_sync_err:
             logger.warning(f"⚠️ Erro ao iniciar Auto-Sync Email: {email_sync_err}")
     elif _is_production and not _is_primary_worker:

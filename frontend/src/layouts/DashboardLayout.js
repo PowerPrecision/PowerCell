@@ -66,6 +66,8 @@ import ChatPanel from "../components/ChatPanel";
 import WelcomeConfigModal from "../components/WelcomeConfigModal";
 import { useKeyboardShortcuts, KeyboardShortcutsHelp } from "../hooks/useKeyboardShortcuts";
 import { useWebSocket } from "../hooks/useWebSocket";
+import { useQueryClient } from "@tanstack/react-query";
+import { invalidateEmailQueries } from "../hooks/useNewEmailRealtime";
 import { hasRole, hasPermission, ROLE_LABELS, ROLE_SIDEBAR_COLORS, canAccessOrgAdmin } from "../utils/roleUtils";
 import ErrorBoundary from "../components/ErrorBoundary";
 
@@ -137,7 +139,10 @@ const DashboardLayout = ({ children, title }) => {
     }
   }, [chatOpen, fetchChatUnreadCount]);
 
+  const queryClient = useQueryClient();
+
   // --- WebSocket: incrementar badge de chat em tempo real ---
+  // Pacote EC: new_email → invalidate React Query (lista do Webmail em fundo)
   useWebSocket({
     autoConnect: true,
     onChatMessage: useCallback((chatData) => {
@@ -146,6 +151,9 @@ const DashboardLayout = ({ children, title }) => {
       chatUnreadRef.current += 1;
       setChatUnreadCount(prev => prev + 1);
     }, []),
+    onNewEmail: useCallback(() => {
+      invalidateEmailQueries(queryClient);
+    }, [queryClient]),
   });
   
   // Determinar quais secções devem estar abertas baseado na rota actual
