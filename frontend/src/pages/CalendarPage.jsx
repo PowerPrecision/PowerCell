@@ -24,6 +24,7 @@ import {
   getCalendarDeadlines,
   getProcesses,
   getStaffUsers,
+  updateDeadline,
 } from "../services/api";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { filterAssignmentStaff } from "../utils/roleUtils";
@@ -33,11 +34,11 @@ import {
   calendarEventChipStyle,
   filterCalendarEvents,
   formatCalendarEventTitle,
+  formatEventClockRange,
   isAbsenceEvent,
   isTeamCalendarRole,
 } from "../utils/agendaCalendar";
 import GlobalCalendar from "../components/calendar/GlobalCalendar";
-import CalendarEventDialog from "../components/calendar/CalendarEventDialog";
 import CreateEventDialog from "../components/admin/CreateEventDialog";
 
 export default function CalendarPage() {
@@ -52,7 +53,7 @@ export default function CalendarPage() {
   const [selectedDate, setSelectedDate] = useState(new Date());
   const [consultorFilter, setConsultorFilter] = useState("all");
   const [eventTypeFilter, setEventTypeFilter] = useState("all");
-  const [detailEvent, setDetailEvent] = useState(null);
+  const [editingEvent, setEditingEvent] = useState(null);
 
   const load = useCallback(async () => {
     try {
@@ -96,29 +97,48 @@ export default function CalendarPage() {
       .slice(0, 12);
   }, [filteredEvents]);
 
-  const handleCreate = async (eventData) => {
-    await createDeadline(eventData);
-    toast.success("Evento criado");
-    await load();
+  const handleSubmit = async (eventData, eventId) => {
+    try {
+      if (eventId) {
+        await updateDeadline(eventId, eventData);
+        toast.success("Alterações guardadas");
+      } else {
+        await createDeadline(eventData);
+        toast.success("Evento criado");
+      }
+      await load();
+    } catch (error) {
+      toast.error(extractErrorMessage(error.response?.data?.detail, "Não foi possível guardar o evento"));
+      throw error;
+    }
   };
 
   const openCreate = (date) => {
+    setEditingEvent(null);
     setSelectedDate(date || new Date());
     setDialogOpen(true);
   };
 
   const handleEventClick = (event) => {
-    setDetailEvent(event || null);
+    if (!event) return;
+    setEditingEvent(event);
+    setDialogOpen(true);
   };
 
-  const handleDelete = async (id) => {
-    if (!window.confirm("Eliminar este evento?")) return;
+  const handleDialogOpenChange = (open) => {
+    setDialogOpen(open);
+    if (!open) setEditingEvent(null);
+  };
+
+  const handleDelete = async (id, { confirm = true } = {}) => {
+    if (confirm && !window.confirm("Eliminar este evento?")) return;
     try {
       await deleteDeadline(id);
       toast.success("Evento eliminado");
       await load();
     } catch (error) {
       toast.error(extractErrorMessage(error.response?.data?.detail, "Não foi possível eliminar"));
+      throw error;
     }
   };
 
@@ -233,7 +253,8 @@ export default function CalendarPage() {
                                   </p>
                                   <p className="text-xs text-muted-foreground">
                                     {formatDate(safeDateStr(event.due_date))}
-                                    {event.end_date && event.end_date !== event.due_date
+                                    {formatEventClockRange(event) ? ` · ${formatEventClockRange(event)}` : ""}
+                                    {event.end_date && agendaDateKey(event.end_date) !== agendaDateKey(event.due_date)
                                       ? ` – ${formatDate(safeDateStr(event.end_date))}`
                                       : ""}
                                   </p>
@@ -264,21 +285,16 @@ export default function CalendarPage() {
           </div>
         )}
 
-        <CalendarEventDialog
-          event={detailEvent}
-          open={!!detailEvent}
-          onOpenChange={(open) => {
-            if (!open) setDetailEvent(null);
-          }}
-        />
         <CreateEventDialog
           open={dialogOpen}
-          onOpenChange={setDialogOpen}
-          onSubmit={handleCreate}
+          onOpenChange={handleDialogOpenChange}
+          onSubmit={handleSubmit}
+          onDelete={(id) => handleDelete(id, { confirm: false })}
           processes={processes}
           staffUsers={staffUsers}
           currentUserId={user?.id}
           initialDate={selectedDate}
+          event={editingEvent}
         />
       </div>
     </DashboardLayout>

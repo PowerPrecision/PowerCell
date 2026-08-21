@@ -6,8 +6,10 @@ from models.deadline import (
 )
 from services.deadlines_api_helpers import (
     company_event_or_clauses,
+    end_is_before_start,
     first_name,
     is_absence_type,
+    parse_deadline_datetime,
     personal_deadline_or_clauses,
     pick_responsible,
     sees_team_calendar,
@@ -41,6 +43,31 @@ def test_deadline_update_accepts_all_day():
     upd = DeadlineUpdate(all_day=True, type="absence")
     assert upd.all_day is True
     assert upd.type == "absence"
+
+
+def test_deadline_create_accepts_iso_datetimes():
+    created = DeadlineCreate(
+        title="Reunião banco",
+        due_date="2026-08-21T09:00:00",
+        end_date="2026-08-21T10:30:00",
+        type="event",
+        all_day=False,
+    )
+    assert created.due_date == "2026-08-21T09:00:00"
+    assert created.end_date == "2026-08-21T10:30:00"
+    assert created.all_day is False
+
+
+def test_deadline_update_accepts_process_id_and_iso_times():
+    upd = DeadlineUpdate(
+        due_date="2026-08-21T11:00:00",
+        end_date="2026-08-21T12:00:00",
+        process_id="proc-1",
+        all_day=False,
+    )
+    assert upd.process_id == "proc-1"
+    assert upd.due_date == "2026-08-21T11:00:00"
+    assert "process_id" in upd.model_fields_set
 
 
 def test_sees_team_calendar_by_effective_role():
@@ -87,6 +114,13 @@ def test_pick_responsible_and_first_name():
     assert first_name("") == ""
     assert is_absence_type("férias") is True
     assert is_absence_type("deadline") is False
+
+
+def test_end_is_before_start_handles_date_and_datetime():
+    assert end_is_before_start("2026-08-21T10:00:00", "2026-08-21T09:00:00") is True
+    assert end_is_before_start("2026-08-21T09:00:00", "2026-08-21T10:30:00") is False
+    assert end_is_before_start("2026-08-21", "2026-08-21") is False
+    assert parse_deadline_datetime("2026-08-21T09:15:00").hour == 9
 
 
 class _Cursor:

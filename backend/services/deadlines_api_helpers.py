@@ -5,6 +5,7 @@ vista pessoal, responsável do evento e filtro de empresa activa.
 """
 from __future__ import annotations
 
+from datetime import datetime
 from typing import Optional
 
 from models.auth import UserRole
@@ -43,6 +44,28 @@ def is_absence_type(value: Optional[str]) -> bool:
         return normalize_deadline_type(value, default="deadline") == "absence"
     except ValueError:
         return False
+
+
+def parse_deadline_datetime(value: Optional[str]) -> Optional[datetime]:
+    """Parse date-only (`YYYY-MM-DD`) or ISO datetime strings for comparisons."""
+    if not value:
+        return None
+    raw = str(value).strip().replace("Z", "+00:00")
+    try:
+        if "T" in raw:
+            return datetime.fromisoformat(raw)
+        return datetime.fromisoformat(f"{raw[:10]}T00:00:00")
+    except (TypeError, ValueError):
+        return None
+
+
+def end_is_before_start(start: Optional[str], end: Optional[str]) -> bool:
+    """True when both values parse and the end moment is before the start."""
+    start_dt = parse_deadline_datetime(start)
+    end_dt = parse_deadline_datetime(end)
+    if not start_dt or not end_dt:
+        return False
+    return end_dt < start_dt
 
 
 def first_name(full_name: Optional[str]) -> str:
@@ -102,6 +125,8 @@ __all__ = [
     "SELF_CALENDAR_ROLES",
     "sees_team_calendar",
     "is_absence_type",
+    "parse_deadline_datetime",
+    "end_is_before_start",
     "first_name",
     "pick_responsible",
     "personal_deadline_or_clauses",

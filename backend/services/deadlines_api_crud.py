@@ -15,7 +15,7 @@ from database import db
 from models.auth import UserRole
 from models.deadline import DeadlineCreate, DeadlineUpdate, DeadlineResponse
 from services.auth import get_active_company_id_async
-from services.deadlines_api_helpers import is_absence_type
+from services.deadlines_api_helpers import end_is_before_start, is_absence_type
 from services.history import log_history
 from services.notification_service import send_notification_with_preference_check
 from utils.input_sanitization import sanitize_string
@@ -43,7 +43,7 @@ async def run_create_deadline(
         if not data.end_date and not data.all_day:
             all_day = True
 
-    if end_date and data.due_date and end_date < data.due_date:
+    if end_date and data.due_date and end_is_before_start(data.due_date, end_date):
         raise HTTPException(
             status_code=400,
             detail="A data de fim não pode ser anterior à data de início",
@@ -151,6 +151,16 @@ async def run_update_deadline(
         )
     if data.due_date is not None:
         update_data["due_date"] = data.due_date
+    if "process_id" in data.model_fields_set:
+        update_data["process_id"] = data.process_id or None
+        if update_data["process_id"]:
+            process = await db.processes.find_one(
+                {"id": update_data["process_id"]}, {"_id": 0}
+            )
+            if not process:
+                raise HTTPException(
+                    status_code=404, detail="Processo não encontrado"
+                )
     if data.priority is not None:
         update_data["priority"] = data.priority
     if data.completed is not None:
@@ -192,7 +202,7 @@ async def run_update_deadline(
 
     next_due = data.due_date if data.due_date is not None else deadline.get("due_date")
     next_end = data.end_date if data.end_date is not None else deadline.get("end_date")
-    if next_end and next_due and next_end < next_due:
+    if next_end and next_due and end_is_before_start(next_due, next_end):
         raise HTTPException(
             status_code=400,
             detail="A data de fim não pode ser anterior à data de início",

@@ -34,6 +34,8 @@ import {
   calendarEventChipStyle,
   eventKindLabel,
   formatCalendarEventTitle,
+  formatEventClockRange,
+  formatEventStartTime,
   groupEventsByDay,
   isAbsenceEvent,
   weekDaysFrom,
@@ -43,10 +45,11 @@ function EventChip({ event, isTeamView, viewerId, onClick, compact }) {
   const title = formatCalendarEventTitle(event, { viewerId, isTeamView });
   const chip = calendarEventChipStyle(event);
   const absence = isAbsenceEvent(event);
+  const clock = compact ? formatEventStartTime(event) : formatEventClockRange(event);
   return (
     <button
       type="button"
-      title={title}
+      title={clock ? `${clock} ${title}` : title}
       onClick={(e) => {
         e.stopPropagation();
         onClick?.(event);
@@ -58,8 +61,9 @@ function EventChip({ event, isTeamView, viewerId, onClick, compact }) {
         chip.className
       )}
       style={chip.style}
+      data-testid="calendar-event-chip"
     >
-      {title}
+      {clock ? `${clock} ${title}` : title}
     </button>
   );
 }
@@ -263,6 +267,11 @@ export default function GlobalCalendar({
                           {eventKindLabel(event.type)}
                         </Badge>
                       </div>
+                      {formatEventClockRange(event) && (
+                        <p className="text-xs text-muted-foreground mt-0.5">
+                          {formatEventClockRange(event)}
+                        </p>
+                      )}
                       {(event.client_name || event.description) && (
                         <p className="text-xs text-muted-foreground mt-0.5 truncate">
                           {isAbsenceEvent(event)
