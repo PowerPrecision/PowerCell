@@ -12,6 +12,7 @@ from typing import Optional
 from bson import ObjectId
 from bson.errors import InvalidId
 from fastapi import HTTPException
+from pymongo.errors import DuplicateKeyError
 
 from database import db
 from models.user_company_role import (
@@ -25,6 +26,10 @@ logger = logging.getLogger(__name__)
 LAST_UCR_DELETE_DETAIL = (
     "Não é possível remover o único acesso deste utilizador. "
     "Um utilizador tem de ter pelo menos um acesso UCR."
+)
+
+DUPLICATE_UCR_DETAIL = (
+    "Utilizador já tem este cargo nesta empresa."
 )
 
 
@@ -149,17 +154,16 @@ async def run_create_user_company_role(payload: UserCompanyRoleCreate):
     if not user:
         raise HTTPException(status_code=404, detail="Utilizador não encontrado")
 
+    # Pacote EA — só bloqueia a combinação exacta empresa + cargo.
     existing = await db.user_company_roles.find_one({
         "user_id": payload.user_id,
         "company_id": payload.company_id,
+        "role": payload.role,
     })
     if existing:
         raise HTTPException(
             status_code=409,
-            detail=(
-                f"Utilizador já está associado a esta empresa com role "
-                f"'{existing.get('role')}'"
-            ),
+            detail=DUPLICATE_UCR_DETAIL,
         )
 
     role_id = str(uuid.uuid4())
@@ -185,7 +189,10 @@ async def run_create_user_company_role(payload: UserCompanyRoleCreate):
             {"$set": {"is_default": False, "updated_at": now}},
         )
 
-    await db.user_company_roles.insert_one(doc)
+    try:
+        await db.user_company_roles.insert_one(doc)
+    except DuplicateKeyError:
+        raise HTTPException(status_code=409, detail=DUPLICATE_UCR_DETAIL)
     doc.pop("_id", None)
 
     logger.info(
@@ -209,7 +216,20 @@ async def run_update_user_company_role(
     update_data = {"updated_at": now}
 
     if payload.role is not None:
-        update_data["role"] = payload.role
+        new_role = payload.role
+        if new_role != existing.get("role"):
+            collision = await db.user_company_roles.find_one({
+                "user_id": existing["user_id"],
+                "company_id": existing.get("company_id"),
+                "role": new_role,
+                "id": {"$ne": role_id},
+            })
+            if collision:
+                raise HTTPException(
+                    status_code=409,
+                    detail=DUPLICATE_UCR_DETAIL,
+                )
+        update_data["role"] = new_role
 
     if payload.is_default is not None:
         if payload.is_default:
