@@ -90,6 +90,7 @@ class DeadlineUpdate(BaseModel):
     assigned_user_ids: Optional[List[str]] = None
     assigned_consultor_id: Optional[str] = None
     assigned_mediador_id: Optional[str] = None
+    process_id: Optional[str] = None
 
     # PACOTE DH/DQ — Agenda: campos opcionais para update parcial.
     type: Optional[Literal["deadline", "event", "absence"]] = None

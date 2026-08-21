@@ -571,7 +571,9 @@ export const getCalendarDeadlines = (consultorId, mediadorId) =>
     params: { consultor_id: consultorId, mediador_id: mediadorId } 
   });
 export const createDeadline = (data) => api.post("/deadlines", data);
+/** Pacote FA — edição de eventos do calendário (PUT /deadlines/{id}). */
 export const updateDeadline = (id, data) => api.put(`/deadlines/${id}`, data);
+/** Pacote FA — eliminação de eventos do calendário (DELETE /deadlines/{id}). */
 export const deleteDeadline = (id) => api.delete(`/deadlines/${id}`);
 
 // Users (Admin)

@@ -1,5 +1,5 @@
 /**
- * CreateEventDialog - Dialog para criar eventos/prazos/ausências (Pacote DQ)
+ * CreateEventDialog - Criar e editar eventos/prazos/ausências (Pacote FA)
  */
 import { useEffect, useState } from "react";
 import { Dialog, DialogContent, DialogDescription, DialogFooter, DialogHeader, DialogTitle } from "../ui/dialog";
@@ -11,9 +11,16 @@ import { Checkbox } from "../ui/checkbox";
 import { Badge } from "../ui/badge";
 import { Switch } from "../ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../ui/select";
-import { Loader2 } from "lucide-react";
+import { Loader2, Trash2 } from "lucide-react";
 import { safeString } from "../../utils/safeString";
-import { agendaDateKey } from "../../utils/agendaCalendar";
+import {
+  agendaDateKey,
+  agendaTimeValue,
+  buildEventPayload,
+  DEFAULT_EVENT_END_TIME,
+  DEFAULT_EVENT_START_TIME,
+  isAbsenceEvent,
+} from "../../utils/agendaCalendar";
 
 const roleLabels = {
   admin: "Administrador",
@@ -31,6 +38,8 @@ function emptyForm(currentUserId, initialDate) {
     description: "",
     due_date: due,
     end_date: due,
+    start_time: DEFAULT_EVENT_START_TIME,
+    end_time: DEFAULT_EVENT_END_TIME,
     priority: "medium",
     process_id: "",
     assigned_user_ids: currentUserId ? [currentUserId] : [],
@@ -40,24 +49,56 @@ function emptyForm(currentUserId, initialDate) {
   };
 }
 
+function formFromEvent(event, currentUserId) {
+  const due = agendaDateKey(event?.due_date) || agendaDateKey(new Date());
+  const end = agendaDateKey(event?.end_date) || due;
+  const startTime = agendaTimeValue(event?.due_date) || DEFAULT_EVENT_START_TIME;
+  const endTime = agendaTimeValue(event?.end_date) || DEFAULT_EVENT_END_TIME;
+  const assigned = Array.isArray(event?.assigned_user_ids) ? event.assigned_user_ids : [];
+  return {
+    title: event?.title || "",
+    description: event?.description || "",
+    due_date: due,
+    end_date: end,
+    start_time: startTime,
+    end_time: endTime,
+    priority: event?.priority || "medium",
+    process_id: event?.process_id || "",
+    assigned_user_ids: assigned.length > 0
+      ? assigned
+      : (currentUserId ? [currentUserId] : []),
+    type: isAbsenceEvent(event) ? "absence" : (event?.type || "event"),
+    all_day: event?.all_day === true || isAbsenceEvent(event),
+    visible_to_client: !!event?.visible_to_client,
+  };
+}
+
 const CreateEventDialog = ({
   open,
   onOpenChange,
   onSubmit,
+  onDelete,
   processes,
   staffUsers,
   currentUserId,
-  initialDate
+  initialDate,
+  event = null,
 }) => {
   const [loading, setLoading] = useState(false);
+  const [deleting, setDeleting] = useState(false);
+  const [timeError, setTimeError] = useState("");
   const [formData, setFormData] = useState(() => emptyForm(currentUserId, initialDate));
+
+  const isEditing = Boolean(event?.id);
 
   useEffect(() => {
     if (!open) return;
-    setFormData(emptyForm(currentUserId, initialDate));
-  }, [open, initialDate, currentUserId]);
+    setTimeError("");
+    setFormData(event?.id ? formFromEvent(event, currentUserId) : emptyForm(currentUserId, initialDate));
+  }, [open, initialDate, currentUserId, event]);
 
   const isAbsence = formData.type === "absence";
+  const showTimes = !isAbsence && !formData.all_day;
 
   const handleTypeChange = (value) => {
     setFormData((prev) => ({
@@ -67,28 +108,39 @@ const CreateEventDialog = ({
       visible_to_client: value === "absence" ? false : prev.visible_to_client,
       all_day: value === "absence" ? true : prev.all_day,
     }));
+    setTimeError("");
   };
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    setTimeError("");
+    const isAbsenceType = formData.type === "absence";
+    const payload = buildEventPayload(formData, {
+      currentUserId,
+      isAbsence: isAbsenceType,
+    });
+    if (!payload.all_day && payload.end_date && payload.due_date && payload.end_date <= payload.due_date) {
+      setTimeError("A hora de fim deve ser posterior à hora de início.");
+      return;
+    }
     setLoading(true);
     try {
-      const payload = {
-        ...formData,
-        process_id: isAbsence ? null : (formData.process_id || null),
-        assigned_user_ids: formData.assigned_user_ids.length > 0
-          ? formData.assigned_user_ids
-          : [currentUserId],
-        visible_to_client: isAbsence ? false : !!formData.visible_to_client,
-        all_day: isAbsence ? true : !!formData.all_day,
-        end_date: (isAbsence || formData.all_day)
-          ? (formData.end_date || formData.due_date)
-          : null,
-      };
-      await onSubmit(payload);
+      await onSubmit(payload, event?.id || null);
       onOpenChange(false);
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!event?.id || !onDelete) return;
+    if (!window.confirm("Eliminar este evento?")) return;
+    setDeleting(true);
+    try {
+      await onDelete(event.id);
+      onOpenChange(false);
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -102,13 +154,17 @@ const CreateEventDialog = ({
     });
   };
 
+  const busy = loading || deleting;
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-md" aria-describedby="create-event-description">
+      <DialogContent className="sm:max-w-lg" data-testid="create-event-dialog" aria-describedby="create-event-description">
         <DialogHeader>
-          <DialogTitle>Criar Novo Evento</DialogTitle>
+          <DialogTitle>{isEditing ? "Editar Evento" : "Criar Novo Evento"}</DialogTitle>
           <DialogDescription id="create-event-description">
-            Adicione um prazo, marcação ou ausência ao calendário.
+            {isEditing
+              ? "Altere os dados da marcação, incluindo data e horário."
+              : "Adicione um prazo, marcação ou ausência ao calendário."}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -147,53 +203,35 @@ const CreateEventDialog = ({
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label htmlFor="event-date">{isAbsence ? "Início *" : "Data *"}</Label>
+              <Label htmlFor="event-date">{isAbsence ? "Início *" : "Data de início *"}</Label>
               <Input
                 id="event-date"
                 type="date"
                 value={formData.due_date}
-                onChange={(e) => setFormData({ ...formData, due_date: e.target.value })}
+                onChange={(e) => {
+                  const next = e.target.value;
+                  setFormData((prev) => ({
+                    ...prev,
+                    due_date: next,
+                    end_date: !prev.end_date || prev.end_date < next ? next : prev.end_date,
+                  }));
+                }}
                 required
               />
             </div>
             <div className="space-y-2">
-              <Label htmlFor="event-priority">Prioridade</Label>
-              <Select
-                value={formData.priority}
-                onValueChange={(value) => setFormData({ ...formData, priority: value })}
-              >
-                <SelectTrigger id="event-priority">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="low">Baixa</SelectItem>
-                  <SelectItem value="medium">Média</SelectItem>
-                  <SelectItem value="high">Alta</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label htmlFor="event-start-time">Hora de Início</Label>
+              <Input
+                id="event-start-time"
+                type="time"
+                step="60"
+                value={formData.start_time}
+                onChange={(e) => setFormData({ ...formData, start_time: e.target.value })}
+                required={showTimes}
+                disabled={!showTimes}
+                data-testid="event-start-time"
+              />
             </div>
-          </div>
-
-          <div className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30">
-            <Switch
-              id="event-all-day"
-              checked={isAbsence || formData.all_day}
-              disabled={isAbsence}
-              onCheckedChange={(checked) => setFormData({ ...formData, all_day: checked })}
-            />
-            <div className="space-y-0.5">
-              <Label htmlFor="event-all-day" className="text-sm cursor-pointer">
-                Dia inteiro
-              </Label>
-              <p className="text-xs text-muted-foreground">
-                {isAbsence
-                  ? "As ausências ocupam o dia completo e podem cruzar vários dias."
-                  : "O bloco ocupa o dia completo no calendário."}
-              </p>
-            </div>
-          </div>
-
-          {(isAbsence || formData.all_day) && (
             <div className="space-y-2">
               <Label htmlFor="event-end-date">Data de fim</Label>
               <Input
@@ -204,7 +242,68 @@ const CreateEventDialog = ({
                 onChange={(e) => setFormData({ ...formData, end_date: e.target.value })}
               />
             </div>
+            <div className="space-y-2">
+              <Label htmlFor="event-end-time">Hora de Fim</Label>
+              <Input
+                id="event-end-time"
+                type="time"
+                step="60"
+                value={formData.end_time}
+                onChange={(e) => setFormData({ ...formData, end_time: e.target.value })}
+                required={showTimes}
+                disabled={!showTimes}
+                data-testid="event-end-time"
+              />
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label htmlFor="event-priority">Prioridade</Label>
+            <Select
+              value={formData.priority}
+              onValueChange={(value) => setFormData({ ...formData, priority: value })}
+            >
+              <SelectTrigger id="event-priority">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="low">Baixa</SelectItem>
+                <SelectItem value="medium">Média</SelectItem>
+                <SelectItem value="high">Alta</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {timeError && (
+            <p className="text-sm text-destructive" data-testid="event-time-error">{timeError}</p>
           )}
+
+          <div className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30">
+            <Switch
+              id="event-all-day"
+              checked={isAbsence || formData.all_day}
+              disabled={isAbsence}
+              onCheckedChange={(checked) => {
+                setFormData((prev) => ({
+                  ...prev,
+                  all_day: checked,
+                  start_time: prev.start_time || DEFAULT_EVENT_START_TIME,
+                  end_time: prev.end_time || DEFAULT_EVENT_END_TIME,
+                }));
+                setTimeError("");
+              }}
+            />
+            <div className="space-y-0.5">
+              <Label htmlFor="event-all-day" className="text-sm cursor-pointer">
+                Dia inteiro
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {isAbsence
+                  ? "As ausências ocupam o dia completo e podem cruzar vários dias."
+                  : "Desative para definir hora de início e de fim."}
+              </p>
+            </div>
+          </div>
 
           {!isAbsence && (
             <div className="space-y-2">
@@ -245,33 +344,51 @@ const CreateEventDialog = ({
               </Button>
             </div>
             <div className="border rounded-md p-3 max-h-40 overflow-y-auto space-y-2">
-              {(staffUsers || []).map((staffUser) => (
-                <div key={staffUser.id} className="flex items-center space-x-2">
-                  <Checkbox
-                    id={`user-${staffUser.id}`}
-                    checked={formData.assigned_user_ids?.includes(staffUser.id) || staffUser.id === currentUserId}
-                    disabled={staffUser.id === currentUserId}
-                    onCheckedChange={() => toggleUserAssignment(staffUser.id)}
-                  />
-                  <label
-                    htmlFor={`user-${staffUser.id}`}
-                    className={`text-sm cursor-pointer flex items-center gap-2 ${staffUser.id === currentUserId ? "font-medium" : ""}`}
-                  >
-                    {staffUser.name}
-                    {staffUser.id === currentUserId && <Badge variant="outline" className="text-xs">Você</Badge>}
-                    <span className="text-xs text-muted-foreground">({roleLabels[staffUser.role] || staffUser.role})</span>
-                  </label>
-                </div>
-              ))}
+              {(staffUsers || []).map((staffUser) => {
+                const forceSelf = !isEditing && staffUser.id === currentUserId;
+                return (
+                  <div key={staffUser.id} className="flex items-center space-x-2">
+                    <Checkbox
+                      id={`user-${staffUser.id}`}
+                      checked={formData.assigned_user_ids?.includes(staffUser.id) || forceSelf}
+                      disabled={forceSelf}
+                      onCheckedChange={() => toggleUserAssignment(staffUser.id)}
+                    />
+                    <label
+                      htmlFor={`user-${staffUser.id}`}
+                      className={`text-sm cursor-pointer flex items-center gap-2 ${staffUser.id === currentUserId ? "font-medium" : ""}`}
+                    >
+                      {staffUser.name}
+                      {staffUser.id === currentUserId && <Badge variant="outline" className="text-xs">Você</Badge>}
+                      <span className="text-xs text-muted-foreground">({roleLabels[staffUser.role] || staffUser.role})</span>
+                    </label>
+                  </div>
+                );
+              })}
             </div>
           </div>
-          <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
-              Cancelar
-            </Button>
-            <Button type="submit" disabled={loading}>
-              {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : "Criar Evento"}
-            </Button>
+          <DialogFooter className={isEditing ? "sm:justify-between" : undefined}>
+            {isEditing && onDelete && (
+              <Button
+                type="button"
+                variant="ghost"
+                className="gap-1.5 text-destructive hover:text-destructive"
+                onClick={handleDelete}
+                disabled={busy}
+                data-testid="event-delete"
+              >
+                {deleting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Trash2 className="h-4 w-4" />}
+                Eliminar
+              </Button>
+            )}
+            <div className="flex flex-col-reverse sm:flex-row gap-2 sm:space-x-2">
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)} disabled={busy}>
+                Cancelar
+              </Button>
+              <Button type="submit" disabled={busy} className="gap-1.5" data-testid="event-submit">
+                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : (isEditing ? "Guardar Alterações" : "Criar Evento")}
+              </Button>
+            </div>
           </DialogFooter>
         </form>
       </DialogContent>

@@ -31,6 +31,80 @@ export function agendaDateKey(value) {
   return `${y}-${m}-${day}`;
 }
 
+const TIME_HH_MM = /^(\d{2}):(\d{2})/;
+
+/** Extract `HH:mm` from an ISO datetime (`2026-08-21T09:30:00`). Date-only → "". */
+export function agendaTimeValue(value) {
+  if (!value) return "";
+  if (value instanceof Date) {
+    if (Number.isNaN(value.getTime())) return "";
+    const hh = String(value.getHours()).padStart(2, "0");
+    const mm = String(value.getMinutes()).padStart(2, "0");
+    return `${hh}:${mm}`;
+  }
+  const raw = String(value);
+  const match = /T(\d{2}):(\d{2})/.exec(raw);
+  return match ? `${match[1]}:${match[2]}` : "";
+}
+
+/** Join a `YYYY-MM-DD` date with `HH:mm` into a local ISO datetime (no Z). */
+export function combineDateAndTime(dateStr, timeStr) {
+  const date = agendaDateKey(dateStr);
+  if (!date) return "";
+  const rawTime = String(timeStr || "").trim();
+  const match = TIME_HH_MM.exec(rawTime);
+  if (!match) return date;
+  return `${date}T${match[1]}:${match[2]}:00`;
+}
+
+export function eventHasClockTime(event) {
+  if (!event || event.all_day) return false;
+  return Boolean(agendaTimeValue(event.due_date) || agendaTimeValue(event.end_date));
+}
+
+export function formatEventStartTime(event) {
+  if (!eventHasClockTime(event)) return "";
+  return agendaTimeValue(event.due_date);
+}
+
+export function formatEventClockRange(event) {
+  if (!eventHasClockTime(event)) return "";
+  const start = agendaTimeValue(event.due_date);
+  const end = agendaTimeValue(event.end_date);
+  if (start && end && start !== end) return `${start}–${end}`;
+  return start || end;
+}
+
+export const DEFAULT_EVENT_START_TIME = "09:00";
+export const DEFAULT_EVENT_END_TIME = "10:00";
+
+/**
+ * Join form date + time into ISO strings the API stores on due_date / end_date.
+ */
+export function buildEventPayload(formData, { currentUserId, isAbsence } = {}) {
+  const allDay = isAbsence ? true : !!formData.all_day;
+  const startDate = formData.due_date;
+  const endDate = formData.end_date || formData.due_date;
+  const startTime = formData.start_time || DEFAULT_EVENT_START_TIME;
+  const endTime = formData.end_time || DEFAULT_EVENT_END_TIME;
+  return {
+    title: formData.title,
+    description: formData.description,
+    priority: formData.priority,
+    type: formData.type,
+    process_id: isAbsence ? null : (formData.process_id || null),
+    assigned_user_ids: (formData.assigned_user_ids || []).length > 0
+      ? formData.assigned_user_ids
+      : (currentUserId ? [currentUserId] : []),
+    visible_to_client: isAbsence ? false : !!formData.visible_to_client,
+    all_day: allDay,
+    due_date: allDay ? startDate : combineDateAndTime(startDate, startTime),
+    end_date: allDay
+      ? (endDate || startDate)
+      : combineDateAndTime(endDate || startDate, endTime),
+  };
+}
+
 export function eventDateKeys(event) {
   const startKey = agendaDateKey(event?.due_date);
   if (!startKey) return [];

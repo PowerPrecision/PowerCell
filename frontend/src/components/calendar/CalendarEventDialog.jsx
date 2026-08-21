@@ -14,17 +14,19 @@ import { Button } from "../ui/button";
 import { Badge } from "../ui/badge";
 import { CalendarDays, User, Tag, ExternalLink } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { formatDate } from "../../lib/utils";
-import { eventKindLabel } from "../../utils/agendaCalendar";
+import { formatDate, formatDateTime } from "../../lib/utils";
+import { eventHasClockTime, eventKindLabel } from "../../utils/agendaCalendar";
 import { processDeepLink } from "../../utils/processDeepLink";
 
 export default function CalendarEventDialog({ event, open, onOpenChange, showProcessLink = true }) {
   const navigate = useNavigate();
   if (!event) return null;
 
-  const dateLabel = formatDate(event.due_date || event.start_date || event.date);
+  const dateLabel = eventHasClockTime(event)
+    ? formatDateTime(event.due_date || event.start_date || event.date)
+    : formatDate(event.due_date || event.start_date || event.date);
   const endLabel = event.end_date && event.end_date !== event.due_date
-    ? ` – ${formatDate(event.end_date)}`
+    ? ` – ${eventHasClockTime(event) ? formatDateTime(event.end_date) : formatDate(event.end_date)}`
     : "";
 
   const openProcess = () => {
