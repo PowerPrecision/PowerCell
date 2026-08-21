@@ -9,6 +9,8 @@ import uuid
 from datetime import datetime, timezone
 from typing import Optional
 
+from bson import ObjectId
+from bson.errors import InvalidId
 from fastapi import HTTPException
 
 from database import db
@@ -19,6 +21,95 @@ from models.user_company_role import (
 )
 
 logger = logging.getLogger(__name__)
+
+LAST_UCR_DELETE_DETAIL = (
+    "Não é possível remover o único acesso deste utilizador. "
+    "Um utilizador tem de ter pelo menos um acesso UCR."
+)
+
+
+def serialize_ucr(doc: dict, company_names: Optional[dict] = None) -> dict:
+    """Normaliza um documento UCR para o frontend (id, company_name, role/role_name)."""
+    if not doc:
+        return doc
+    out = dict(doc)
+    raw_id = out.get("id") or out.get("_id")
+    out.pop("_id", None)
+    if raw_id is not None:
+        out["id"] = str(raw_id)
+
+    nested_company = out.get("company") if isinstance(out.get("company"), dict) else None
+    company_id = (
+        out.get("company_id")
+        or out.get("companyId")
+        or (nested_company.get("id") if nested_company else None)
+        or (out.get("company") if isinstance(out.get("company"), str) else None)
+    )
+    company_name = (
+        out.get("company_name")
+        or out.get("companyName")
+        or (nested_company.get("name") if nested_company else None)
+        or (nested_company.get("company_name") if nested_company else None)
+        or (out.get("company") if isinstance(out.get("company"), str) else None)
+    )
+    if not company_name and company_id and company_names:
+        company_name = (
+            company_names.get(company_id)
+            or company_names.get(str(company_id))
+        )
+    if not company_name and company_id:
+        company_name = company_id
+
+    role = out.get("role") or out.get("role_name") or out.get("roleName") or ""
+    user_id = out.get("user_id") or out.get("userId")
+
+    if company_id:
+        out["company_id"] = str(company_id)
+    if company_name:
+        out["company_name"] = str(company_name).strip()
+    if role:
+        out["role"] = role
+        out["role_name"] = role
+    if user_id:
+        out["user_id"] = user_id
+    return out
+
+
+# Alias usado pelos testes da feature branch.
+_normalize_ucr_doc = serialize_ucr
+
+
+async def _company_name_map() -> dict:
+    companies = await db.companies.find(
+        {}, {"_id": 0, "id": 1, "name": 1}
+    ).to_list(200)
+    mapping = {}
+    for company in companies:
+        cid, name = company.get("id"), company.get("name")
+        if cid and name:
+            mapping[cid] = name
+            mapping[str(cid)] = name
+        if name:
+            mapping[name] = name
+    return mapping
+
+
+async def _find_ucr(role_id: str) -> Optional[dict]:
+    """Resolve UCR por `id` UUID ou, em docs legados, por `_id` Mongo."""
+    if not role_id:
+        return None
+    doc = await db.user_company_roles.find_one({"id": role_id})
+    if doc:
+        return doc
+    if ObjectId.is_valid(role_id):
+        try:
+            return await db.user_company_roles.find_one({"_id": ObjectId(role_id)})
+        except (InvalidId, TypeError, ValueError):
+            return None
+    return None
+
+
+_find_ucr_by_id = _find_ucr
 
 
 async def run_list_user_company_roles(
@@ -32,21 +123,22 @@ async def run_list_user_company_roles(
     if company_id:
         query["company_id"] = company_id
 
-    roles = await db.user_company_roles.find(
-        query, {"_id": 0}
-    ).sort("company_name", 1).to_list(500)
+    roles = await db.user_company_roles.find(query).sort(
+        "company_name", 1
+    ).to_list(500)
+    company_names = await _company_name_map()
+    serialized = [serialize_ucr(role, company_names) for role in roles]
 
-    return {"roles": roles, "total": len(roles)}
+    return {"roles": serialized, "total": len(serialized)}
 
 
 async def run_get_user_company_role(role_id: str):
     """Obtém uma associação específica pelo ID."""
-    role = await db.user_company_roles.find_one(
-        {"id": role_id}, {"_id": 0}
-    )
+    role = await _find_ucr(role_id)
     if not role:
         raise HTTPException(status_code=404, detail="Associação não encontrada")
-    return role
+    company_names = await _company_name_map()
+    return serialize_ucr(role, company_names)
 
 
 async def run_create_user_company_role(payload: UserCompanyRoleCreate):
@@ -151,17 +243,37 @@ async def run_update_user_company_role(
     return {"success": True, "message": "Associação atualizada"}
 
 
-async def run_delete_user_company_role(role_id: str):
-    """Remove uma associação user-company-role."""
-    existing = await db.user_company_roles.find_one({"id": role_id})
+async def run_delete_user_company_role(
+    role_id: str, user_id: Optional[str] = None,
+):
+    """Remove uma associação user-company-role.
+
+    Recusa deixar o utilizador sem nenhum acesso UCR (último vínculo).
+    """
+    existing = await _find_ucr(role_id)
     if not existing:
         raise HTTPException(status_code=404, detail="Associação não encontrada")
 
-    await db.user_company_roles.delete_one({"id": role_id})
+    owner_id = existing.get("user_id") or existing.get("userId")
+    if user_id and owner_id and user_id != owner_id:
+        raise HTTPException(status_code=404, detail="Associação não encontrada")
+
+    remaining = await db.user_company_roles.count_documents(
+        {"user_id": owner_id}
+    )
+    if remaining <= 1:
+        raise HTTPException(status_code=400, detail=LAST_UCR_DELETE_DETAIL)
+
+    if existing.get("id"):
+        deleted = await db.user_company_roles.delete_one({"id": existing["id"]})
+        if deleted.deleted_count == 0 and existing.get("_id") is not None:
+            await db.user_company_roles.delete_one({"_id": existing["_id"]})
+    elif existing.get("_id") is not None:
+        await db.user_company_roles.delete_one({"_id": existing["_id"]})
 
     logger.info(
         f"[UserCompanyRole] Associação removida: id={role_id} "
-        f"user={existing['user_id']} company='{existing.get('company_name')}'"
+        f"user={owner_id} company='{existing.get('company_name')}'"
     )
 
     return {"success": True, "message": "Associação removida"}

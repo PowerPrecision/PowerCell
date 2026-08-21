@@ -38,6 +38,7 @@ from services.admin_workflow import (
 from models.user_company_role import UserRoleAssignBody
 from services.user_company_roles_api_crud import (
     run_assign_user_company_role,
+    run_delete_user_company_role,
     run_list_user_company_roles,
 )
 from services.admin_users import (
@@ -267,6 +268,16 @@ async def assign_user_role(
 ):
     """Adiciona um acesso (empresa + cargo) a um utilizador."""
     return await run_assign_user_company_role(user_id, payload)
+
+
+@router.delete("/users/{user_id}/roles/{role_id}")
+async def delete_user_role(
+    user_id: str,
+    role_id: str,
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO])),
+):
+    """Remove um acesso UCR (empresa + cargo) de um utilizador."""
+    return await run_delete_user_company_role(role_id, user_id=user_id)
 
 
 @router.post("/impersonate/{user_id}")

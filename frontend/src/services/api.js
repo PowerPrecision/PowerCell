@@ -1147,8 +1147,10 @@ export const assignUserRole = (userId, data) =>
   api.post(`/admin/users/${userId}/roles`, data);
 export const updateUserCompanyRole = (roleId, data) =>
   api.put(`/admin/user-company-roles/${roleId}`, data);
-export const deleteUserCompanyRole = (roleId) =>
-  api.delete(`/admin/user-company-roles/${roleId}`);
+export const deleteUserCompanyRole = (roleId, userId) =>
+  userId
+    ? api.delete(`/admin/users/${userId}/roles/${roleId}`)
+    : api.delete(`/admin/user-company-roles/${roleId}`);
 
 // ===== COMPANY EMAIL CONFIG (IMAP/SMTP por empresa — Pacote AS) =====
 export const getCompanyEmailConfig = (companyName) =>

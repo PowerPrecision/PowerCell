@@ -137,13 +137,15 @@ export const PRIMARY_ROLE_OPTIONS = [
   "admin",
 ];
 
-/** Cargos atribuíveis num acesso UCR (Pacote DW) */
+/** Cargos atribuíveis num acesso UCR (alinhado com CompanyRoleEnum) */
 export const UCR_ASSIGNABLE_ROLES = [
   "admin",
   "ceo",
   "diretor",
+  "administrativo",
   "consultor",
   "intermediario",
+  "indexacao",
 ];
 
 // ====================================================================
@@ -172,6 +174,8 @@ export const ROLE_SHORT_LABELS = {
   consultor: "Consultor",
   intermediario: "Intermediário",
   indexacao: "Indexação",
+  index: "Indexação",
+  indexador: "Indexação",
   parceiro: "Parceiro",
   cliente: "Cliente",
 };

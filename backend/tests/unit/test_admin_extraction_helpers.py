@@ -39,3 +39,4 @@ def test_admin_router_is_thin_stubs_only():
     assert text.count("return await run_") >= 70
     assert len(text.splitlines()) < 800
     assert '/users/{user_id}/roles"' in text
+    assert "/users/{user_id}/roles/{role_id}" in text
