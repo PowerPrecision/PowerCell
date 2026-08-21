@@ -12,6 +12,9 @@ from services.staff_assignment import (
     filter_assignment_staff,
 )
 
+# Pacote EB — lista global sem paginação curta (alinhado com /admin/users).
+USERS_LIST_LIMIT = 10000
+
 
 async def run_get_users(
     role: str | None,
@@ -21,6 +24,7 @@ async def run_get_users(
     """Listar utilizadores do sistema (filtro opcional por role).
 
     Pacote DT: `for_assignment=True` exclui admin/indexação das dropdowns.
+    Pacote EB: por defeito devolve TODOS (admin, indexação, inativos).
     """
     from services.role_query import build_deep_role_query
 
@@ -29,7 +33,9 @@ async def run_get_users(
         query = build_deep_role_query(query, role=role)
     query = apply_assignment_staff_filter(query, for_assignment)
 
-    users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(500)
+    users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
+        USERS_LIST_LIMIT
+    )
     if for_assignment:
         return filter_assignment_staff(users)
     return users

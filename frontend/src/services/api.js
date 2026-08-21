@@ -578,7 +578,7 @@ export const deleteDeadline = (id) => api.delete(`/deadlines/${id}`);
 export const getUsers = (role, { forAssignment } = {}) =>
   api.get("/users", {
     params: {
-      role,
+      ...(role ? { role } : {}),
       ...(forAssignment ? { for_assignment: true } : {}),
     },
   });
@@ -730,10 +730,13 @@ export const stopImpersonate = () => api.post("/admin/stop-impersonate");
 export const getAdminUsers = (role, { forAssignment } = {}) =>
   api.get("/admin/users", {
     params: {
-      role,
+      ...(role ? { role } : {}),
       ...(forAssignment ? { for_assignment: true } : {}),
     },
   });
+/** Lista completa para a Tab Utilizadores da Administração (Pacote EB).
+ *  Sem `for_assignment` — inclui admin, indexação e inativos. */
+export const getAllAdminUsers = () => api.get("/admin/users");
 export const createAdminUser = (data) => api.post("/admin/users", data);
 export const updateAdminUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);

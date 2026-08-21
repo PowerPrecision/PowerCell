@@ -276,6 +276,64 @@ def test_decrypt_email_secret_passthrough_and_failed_enc():
     assert leftover == "" or not leftover.startswith("ENC:")
 
 
+@pytest.mark.asyncio
+async def test_run_get_users_includes_admin_index_and_inactive():
+    """Pacote EB: GET /users sem for_assignment devolve a lista completa."""
+    from unittest.mock import MagicMock, patch
+
+    from services import users_api_list as ual
+
+    docs = [
+        {"id": "u-admin", "name": "Admin", "role": "admin", "is_active": True},
+        {"id": "u-index", "name": "Index", "role": "indexacao", "is_active": True},
+        {"id": "u-off", "name": "Inativo", "role": "consultor", "is_active": False},
+        {"id": "u-ceo", "name": "CEO", "role": "ceo", "is_active": True},
+    ]
+    captured = {}
+
+    class _Cursor:
+        async def to_list(self, n):
+            captured["limit"] = n
+            return docs
+
+    mock_db = MagicMock()
+    mock_db.users.find = MagicMock(return_value=_Cursor())
+
+    with patch.object(ual, "db", mock_db):
+        result = await ual.run_get_users(None, {"id": "caller", "role": "admin"})
+
+    query = mock_db.users.find.call_args[0][0]
+    assert query == {}
+    assert captured["limit"] >= 1000
+    assert [u["id"] for u in result] == ["u-admin", "u-index", "u-off", "u-ceo"]
+
+
+@pytest.mark.asyncio
+async def test_run_get_staff_users_excludes_admin_and_index():
+    from unittest.mock import MagicMock, patch
+
+    from services import users_api_list as ual
+
+    docs = [
+        {"id": "u-admin", "name": "Admin", "role": "admin"},
+        {"id": "u-index", "name": "Index", "role": "indexacao"},
+        {"id": "u-con", "name": "Ana", "role": "consultor"},
+    ]
+
+    class _Cursor:
+        async def to_list(self, _n):
+            return docs
+
+    mock_db = MagicMock()
+    mock_db.users.find = MagicMock(return_value=_Cursor())
+
+    with patch.object(ual, "db", mock_db):
+        result = await ual.run_get_staff_users({"id": "caller", "role": "admin"})
+
+    ids = [u["id"] for u in result]
+    assert ids == ["u-con"]
+
+
 def test_publicize_caixa_geral_account_strips_password():
     from services.email_config_resolver import (
         CAIXA_GERAL_ACCOUNT_ID,
