@@ -102,6 +102,7 @@ export default function UsersAccessAdminTab() {
   const [newCompanyId, setNewCompanyId] = useState("");
   const [newRole, setNewRole] = useState("");
   const [removeError, setRemoveError] = useState("");
+  const [saving, setSaving] = useState(false);
 
   const {
     data: users = [],
