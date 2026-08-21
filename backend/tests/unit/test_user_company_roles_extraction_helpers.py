@@ -199,7 +199,7 @@ async def test_delete_ucr_when_multiple_succeeds():
 
 @pytest.mark.asyncio
 async def test_list_ucr_normalizes_role_name():
-    from unittest.mock import AsyncMock, MagicMock, patch
+    from unittest.mock import MagicMock, patch
 
     from services import user_company_roles_api_crud as crud
 
