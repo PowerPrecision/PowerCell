@@ -82,7 +82,11 @@ _INDEX_DEFINITIONS = {
         {"keys": [("id", 1)], "name": "idx_company_id", "unique": True},
     ],
     "user_company_roles": [
-        {"keys": [("user_id", 1), ("company_id", 1)], "name": "idx_ucr_unique", "unique": True},
+        {
+            "keys": [("user_id", 1), ("company_id", 1), ("role", 1)],
+            "name": "idx_user_company_role_unique",
+            "unique": True,
+        },
     ],
     "user_email_configs": [
         {"keys": [("user_id", 1), ("company_id", 1)], "name": "idx_uec_unique", "unique": True},

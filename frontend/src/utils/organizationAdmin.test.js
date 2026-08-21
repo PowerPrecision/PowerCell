@@ -16,6 +16,7 @@ import {
   formatUcrAccessLabel,
   companiesForNewAccess,
   rolesForNewAccess,
+  isUcrComboTaken,
 } from "./organizationAdmin.js";
 
 describe("normalizeCompaniesPayload", () => {
@@ -158,6 +159,36 @@ describe("companiesForNewAccess / rolesForNewAccess", () => {
       [{ company_id: "c1", role: "diretor" }],
     );
     assert.deepEqual(roles, ["consultor", "ceo"]);
+  });
+
+  it("mantém a empresa no Select mesmo com um cargo já atribuído", () => {
+    const companies = [
+      { id: "c1", name: "Empresa A" },
+      { id: "c2", name: "Empresa B" },
+    ];
+    const list = companiesForNewAccess(companies);
+    assert.deepEqual(list.map((c) => c.id), ["c1", "c2"]);
+  });
+});
+
+describe("isUcrComboTaken", () => {
+  it("detecta a combinação exacta empresa+cargo nos acessos actuais", () => {
+    const selected = [
+      { company_id: "c1", role: "diretor" },
+      { company_id: "c1", role: "consultor" },
+    ];
+    assert.equal(isUcrComboTaken("c1", "diretor", selected), true);
+    assert.equal(isUcrComboTaken("c1", "ceo", selected), false);
+    assert.equal(isUcrComboTaken("c2", "diretor", selected), false);
+  });
+
+  it("aceita aliases companyId / role_name", () => {
+    assert.equal(
+      isUcrComboTaken("c1", "consultor", [
+        { companyId: "c1", role_name: "consultor" },
+      ]),
+      true,
+    );
   });
 });
 

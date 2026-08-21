@@ -139,6 +139,11 @@ DEPRECATED_INDEXES = {
     "system_error_logs": [
         "idx_ttl",  # Índice TTL antigo (90 dias) em campo ISO string - não funciona. Substituído por ttl_system_error_logs
     ],
+    # Pacote EA — unique (user_id, company_id) bloqueava vários cargos na mesma empresa
+    "user_company_roles": [
+        "idx_user_company_unique",  # unique antigo (user_id, company_id)
+        "idx_ucr_unique",           # nome usado em backup_restore
+    ],
 }
 
 # ====================================================================
@@ -643,9 +648,36 @@ async def create_ttl_indexes(db) -> dict:
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'user_company_roles' (M:N User-Company)
     # ====================================================================
+    # Pacote EA — vários cargos na mesma empresa: unique é (user_id, company_id, role).
+    # Drop defensivo de qualquer unique residual só em (user_id, company_id).
+    try:
+        existing_ucr_indexes = await db.user_company_roles.index_information()
+        for existing_name, existing_info in existing_ucr_indexes.items():
+            if existing_name == "_id_":
+                continue
+            existing_key = list(existing_info.get("key", []))
+            if existing_info.get("unique") and existing_key == [
+                ("user_id", 1),
+                ("company_id", 1),
+            ]:
+                await db.user_company_roles.drop_index(existing_name)
+                logger.info(
+                    "Índice único restritivo removido (Pacote EA): "
+                    f"user_company_roles.{existing_name}"
+                )
+    except Exception as drop_err:
+        logger.warning(
+            f"Não foi possível inspeccionar índices UCR para Pacote EA: {drop_err}"
+        )
+
     user_company_role_indexes = [
-        # Índice composto único — um user só pode ter um role por empresa
-        {"keys": [("user_id", 1), ("company_id", 1)], "name": "idx_user_company_unique", "unique": True},
+        # Índice composto único — um user pode ter vários cargos na mesma
+        # empresa; só a combinação exacta user+empresa+cargo é única.
+        {
+            "keys": [("user_id", 1), ("company_id", 1), ("role", 1)],
+            "name": "idx_user_company_role_unique",
+            "unique": True,
+        },
         # Índice no company_id — queries por empresa
         {"keys": [("company_id", 1)], "name": "idx_company_id"},
         # Índice para lookup rápido da empresa padrão

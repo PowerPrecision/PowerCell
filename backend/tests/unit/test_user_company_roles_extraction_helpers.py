@@ -114,6 +114,10 @@ async def test_assign_user_company_role_resolves_company_and_creates():
     assert inserted["company_name"] == "Empresa A"
     assert inserted["role"] == "diretor"
     assert inserted["is_default"] is True
+    ucr_query = mock_db.user_company_roles.find_one.call_args[0][0]
+    assert ucr_query["user_id"] == "u1"
+    assert ucr_query["company_id"] == "co-1"
+    assert ucr_query["role"] == "diretor"
 
 
 @pytest.mark.asyncio
@@ -271,3 +275,115 @@ async def test_list_ucr_normalizes_role_name():
     assert role["company_name"] == "Precision"
     assert role["role"] == "indexacao"
     assert role["role_name"] == "indexacao"
+
+
+@pytest.mark.asyncio
+async def test_create_ucr_allows_second_role_same_company():
+    """Pacote EA — diretor já existente não bloqueia consultor na mesma empresa."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from models.user_company_role import UserCompanyRoleCreate
+    from services import user_company_roles_api_crud as crud
+
+    payload = UserCompanyRoleCreate(
+        user_id="u1",
+        company_id="co-1",
+        company_name="Empresa A",
+        role="consultor",
+    )
+    mock_db = MagicMock()
+    mock_db.users.find_one = AsyncMock(return_value={"id": "u1", "name": "Ana"})
+    mock_db.user_company_roles.find_one = AsyncMock(return_value=None)
+    mock_db.user_company_roles.insert_one = AsyncMock()
+    mock_db.user_company_roles.update_many = AsyncMock()
+
+    with patch.object(crud, "db", mock_db):
+        result = await crud.run_create_user_company_role(payload)
+
+    assert result["success"] is True
+    query = mock_db.user_company_roles.find_one.call_args[0][0]
+    assert query == {
+        "user_id": "u1",
+        "company_id": "co-1",
+        "role": "consultor",
+    }
+    inserted = mock_db.user_company_roles.insert_one.call_args[0][0]
+    assert inserted["role"] == "consultor"
+    assert inserted["company_id"] == "co-1"
+
+
+@pytest.mark.asyncio
+async def test_create_ucr_409_when_same_company_and_role():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from fastapi import HTTPException
+
+    from models.user_company_role import UserCompanyRoleCreate
+    from services import user_company_roles_api_crud as crud
+
+    payload = UserCompanyRoleCreate(
+        user_id="u1",
+        company_id="co-1",
+        company_name="Empresa A",
+        role="diretor",
+    )
+    mock_db = MagicMock()
+    mock_db.users.find_one = AsyncMock(return_value={"id": "u1", "name": "Ana"})
+    mock_db.user_company_roles.find_one = AsyncMock(
+        return_value={"id": "r1", "role": "diretor", "company_id": "co-1"},
+    )
+    mock_db.user_company_roles.insert_one = AsyncMock()
+
+    with patch.object(crud, "db", mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await crud.run_create_user_company_role(payload)
+
+    assert exc.value.status_code == 409
+    assert "cargo" in str(exc.value.detail).lower()
+    mock_db.user_company_roles.insert_one.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_update_ucr_409_when_role_collides_same_company():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from fastapi import HTTPException
+
+    from models.user_company_role import UserCompanyRoleUpdate
+    from services import user_company_roles_api_crud as crud
+
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(
+        side_effect=[
+            {"id": "r1", "user_id": "u1", "company_id": "co-1", "role": "consultor"},
+            {"id": "r2", "user_id": "u1", "company_id": "co-1", "role": "diretor"},
+        ]
+    )
+    mock_db.user_company_roles.update_one = AsyncMock()
+
+    with patch.object(crud, "db", mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await crud.run_update_user_company_role(
+                "r1", UserCompanyRoleUpdate(role="diretor"),
+            )
+
+    assert exc.value.status_code == 409
+    mock_db.user_company_roles.update_one.assert_not_called()
+
+
+def test_ucr_unique_index_includes_role():
+    from pathlib import Path
+
+    indexes = (
+        Path(__file__).resolve().parents[2] / "services" / "db_indexes.py"
+    ).read_text()
+    assert '("user_id", 1), ("company_id", 1), ("role", 1)' in indexes
+    assert "idx_user_company_role_unique" in indexes
+    assert "idx_user_company_unique" in indexes  # still listed as deprecated
+    crud = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "user_company_roles_api_crud.py"
+    ).read_text()
+    assert '"role": payload.role,' in crud
+    assert "já está associado a esta empresa" not in crud
