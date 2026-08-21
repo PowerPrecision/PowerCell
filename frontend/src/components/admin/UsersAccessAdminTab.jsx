@@ -29,7 +29,7 @@ import {
   getCompanies,
   getUserCompanyRoles,
   getUserRoles,
-  getUsers,
+  getAllAdminUsers,
   updateUser,
 } from "../../services/api";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
@@ -115,7 +115,8 @@ export default function UsersAccessAdminTab() {
   } = useQuery({
     queryKey: USERS_QUERY_KEY,
     queryFn: async () => {
-      const res = await getUsers();
+      // Pacote EB — GET /admin/users (lista global, sem for_assignment).
+      const res = await getAllAdminUsers();
       return Array.isArray(res.data) ? res.data : res.data?.users || [];
     },
   });

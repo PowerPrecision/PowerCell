@@ -42,6 +42,10 @@ from models.permissions import (
 
 logger = logging.getLogger(__name__)
 
+# Pacote EB — a Tab de Utilizadores da Administração precisa da lista completa
+# (admin, indexação, inativos, parceiros). Sem paginação curta (ex. limit=10).
+ADMIN_USERS_LIST_LIMIT = 10000
+
 
 DEFAULT_NOTIFICATION_PREFS = {
     "email_new_process": False,  # Novo processo criado
@@ -78,6 +82,10 @@ async def run_get_users(
     dropdowns de responsáveis. A gestão de utilizadores chama sem este
     flag para continuar a listar todos os cargos.
 
+    Pacote EB: por defeito NÃO filtra `is_active` nem cargos de staff —
+    devolve admin, indexação, inativos e restantes, até
+    ``ADMIN_USERS_LIST_LIMIT``.
+
     Args:
         role: Filtro opcional por role (ex: "consultor", "admin").
         user: Utilizador autenticado com role permitido (injetado).
@@ -97,7 +105,9 @@ async def run_get_users(
         query = build_deep_role_query(query, role=role)
     query = apply_assignment_staff_filter(query, for_assignment)
 
-    users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(1000)
+    users = await db.users.find(query, {"_id": 0, "password": 0}).to_list(
+        ADMIN_USERS_LIST_LIMIT
+    )
     if for_assignment:
         users = filter_assignment_staff(users)
     return [UserResponse(**u) for u in users]
