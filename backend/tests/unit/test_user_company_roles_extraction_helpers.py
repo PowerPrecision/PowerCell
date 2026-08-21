@@ -132,3 +132,65 @@ async def test_assign_user_company_role_404_when_company_missing():
 
     assert exc.value.status_code == 404
     assert "Empresa" in str(exc.value.detail)
+
+
+def test_serialize_ucr_fills_aliases_and_company_name():
+    from services.user_company_roles_api_crud import serialize_ucr
+
+    doc = {
+        "_id": "mongo",
+        "userId": "u1",
+        "companyId": "c1",
+        "role_name": "diretor",
+    }
+    out = serialize_ucr(doc, {"c1": "Empresa Power"})
+    assert out["id"] == "mongo"
+    assert "_id" not in out
+    assert out["user_id"] == "u1"
+    assert out["company_id"] == "c1"
+    assert out["company_name"] == "Empresa Power"
+    assert out["role"] == "diretor"
+
+
+@pytest.mark.asyncio
+async def test_delete_last_ucr_returns_400():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from fastapi import HTTPException
+
+    from services import user_company_roles_api_crud as crud
+
+    existing = {"id": "r1", "user_id": "u1", "company_name": "A"}
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(return_value=existing)
+    mock_db.user_company_roles.count_documents = AsyncMock(return_value=1)
+    mock_db.user_company_roles.delete_one = AsyncMock()
+
+    with patch.object(crud, "db", mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await crud.run_delete_user_company_role("r1")
+
+    assert exc.value.status_code == 400
+    assert "único acesso" in exc.value.detail
+    mock_db.user_company_roles.delete_one.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_delete_ucr_when_multiple_remain():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from services import user_company_roles_api_crud as crud
+
+    existing = {"id": "r1", "user_id": "u1", "company_name": "A"}
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(return_value=existing)
+    mock_db.user_company_roles.count_documents = AsyncMock(return_value=2)
+    deleted = MagicMock()
+    deleted.deleted_count = 1
+    mock_db.user_company_roles.delete_one = AsyncMock(return_value=deleted)
+
+    with patch.object(crud, "db", mock_db):
+        result = await crud.run_delete_user_company_role("r1", user_id="u1")
+
+    assert result["success"] is True
+    mock_db.user_company_roles.delete_one.assert_called()
