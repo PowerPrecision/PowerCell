@@ -59,7 +59,7 @@ import { useNavigate } from "react-router-dom";
 import { hasRole } from "../utils/roleUtils";
 
 // Embedded pages — Gestão (eager: leves)
-import UsersManagementPage from "./UsersManagementPage";
+import UsersAccessAdminTab from "../components/admin/UsersAccessAdminTab";
 import AutomationPage from "./AutomationPage";
 import PermissionsTab from "../components/admin/PermissionsTab";
 
@@ -252,9 +252,9 @@ const SystemAdminPanel = () => {
           {/* === CONTEÚDO DAS TABS DE GESTÃO (amber/gold) === */}
           {/* ================================================================ */}
 
-          {/* Utilizadores — Gestão completa (UsersManagementPage em modo embedded) */}
+          {/* Utilizadores — contas + UCR (tab consolidada, Pacote DY) */}
           <TabsContent value="users-mgmt" className="mt-6">
-            <UsersManagementPage embedded={true} />
+            <UsersAccessAdminTab />
           </TabsContent>
 
           {/* Permissões Granulares — PermissionsTab */}

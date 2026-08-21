@@ -47,7 +47,6 @@ const OrganizationAdminPage = React.lazy(() => import("./pages/OrganizationAdmin
 const SystemAdminPanel = React.lazy(() => import("./pages/SystemAdminPanel"));
 const RGPDAdminPage = React.lazy(() => import("./pages/RGPDAdminPage"));
 const StatisticsPage = React.lazy(() => import("./pages/StatisticsPage"));
-const UsersManagementPage = React.lazy(() => import("./pages/UsersManagementPage"));
 const ProcessesPage = React.lazy(() => import("./pages/ProcessesPage"));
 const SettingsPage = React.lazy(() => import("./pages/SettingsPage"));
 const FilteredProcessList = React.lazy(() => import("./pages/FilteredProcessList"));
@@ -417,18 +416,9 @@ function App() {
           
           {/* Finance Settings — REDIRECT to SystemAdminPanel > Tab Finanças */}
           <Route path="/finance/settings" element={<Navigate to="/system-admin" replace />} />
-          
-          {/* Users Management Page - Admin and CEO */}
-          <Route
-            path="/utilizadores"
-            element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
-                <RouteBoundary name="Gestão de Utilizadores">
-                  <UsersManagementPage />
-                </RouteBoundary>
-              </ProtectedRoute>
-            }
-          />
+
+          {/* Pacote DY — gestão de utilizadores consolidada em /admin/organizacao */}
+          <Route path="/utilizadores" element={<Navigate to="/admin/organizacao?tab=utilizadores" replace />} />
           
           {/* Processes Page - Staff and Admin */}
           <Route

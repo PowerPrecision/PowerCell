@@ -9,6 +9,8 @@ import {
   normalizeRolesPayload,
   groupRolesByUserId,
   isCompanyActive,
+  isUserActive,
+  generateTempPassword,
 } from "./organizationAdmin.js";
 
 describe("normalizeCompaniesPayload", () => {
@@ -51,5 +53,24 @@ describe("isCompanyActive", () => {
     assert.equal(isCompanyActive({}), true);
     assert.equal(isCompanyActive({ is_active: true }), true);
     assert.equal(isCompanyActive({ is_active: false }), false);
+  });
+});
+
+describe("isUserActive", () => {
+  it("trata ausência de is_active como activo", () => {
+    assert.equal(isUserActive({}), true);
+    assert.equal(isUserActive({ is_active: true }), true);
+    assert.equal(isUserActive({ is_active: false }), false);
+  });
+});
+
+describe("generateTempPassword", () => {
+  it("gera password com maiúscula, minúscula, dígito e símbolo", () => {
+    const password = generateTempPassword();
+    assert.equal(password.length, 12);
+    assert.match(password, /[A-Z]/);
+    assert.match(password, /[a-z]/);
+    assert.match(password, /[0-9]/);
+    assert.match(password, /[!@#$%^&*]/);
   });
 });
