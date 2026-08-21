@@ -28,16 +28,20 @@ import {
   deleteUserCompanyRole,
   getCompanies,
   getUserCompanyRoles,
+  getUserRoles,
   getUsers,
   updateUser,
 } from "../../services/api";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import {
   groupRolesByUserId,
-  isCompanyActive,
   isUserActive,
   normalizeCompaniesPayload,
   normalizeRolesPayload,
+  formatUcrAccessLabel,
+  companiesForNewAccess,
+  rolesForNewAccess,
+  LAST_UCR_DELETE_MESSAGE,
 } from "../../utils/organizationAdmin";
 import {
   ROLE_SHORT_LABELS,
@@ -88,8 +92,7 @@ import {
 const USERS_QUERY_KEY = ["org-admin-users"];
 const UCR_QUERY_KEY = ["org-admin-ucrs"];
 const UNDO_WINDOW_MS = 8000;
-const LAST_UCR_TOAST =
-  "Não é possível remover o único acesso deste utilizador. Um utilizador tem de ter pelo menos um acesso UCR.";
+const LAST_UCR_TOAST = LAST_UCR_DELETE_MESSAGE;
 
 export default function UsersAccessAdminTab() {
   const queryClient = useQueryClient();
@@ -135,6 +138,15 @@ export default function UsersAccessAdminTab() {
     },
   });
 
+  const { data: userSheetRoles } = useQuery({
+    queryKey: [...UCR_QUERY_KEY, selectedUser?.id],
+    queryFn: async () => {
+      const res = await getUserRoles(selectedUser.id);
+      return normalizeRolesPayload(res.data);
+    },
+    enabled: Boolean(sheetOpen && selectedUser?.id),
+  });
+
   useEffect(() => {
     if (usersError) toast.error("Erro ao carregar utilizadores.");
   }, [usersError]);
@@ -144,6 +156,22 @@ export default function UsersAccessAdminTab() {
   }, [rolesError]);
 
   const rolesByUser = useMemo(() => groupRolesByUserId(roles), [roles]);
+
+  const companyNameById = useMemo(() => {
+    const map = {};
+    for (const company of companies) {
+      if (company.id && company.name) map[company.id] = company.name;
+      if (company.name) map[company.name] = company.name;
+    }
+    return map;
+  }, [companies]);
+
+  const enrichUcr = (ucr) => {
+    if (!ucr) return ucr;
+    if (ucr.company_name) return ucr;
+    const name = companyNameById[ucr.company_id] || "";
+    return name ? { ...ucr, company_name: name } : ucr;
+  };
 
   const filteredUsers = useMemo(() => {
     const term = search.trim().toLowerCase();
@@ -155,20 +183,15 @@ export default function UsersAccessAdminTab() {
   }, [users, search]);
 
   const selectedRoles = selectedUser
-    ? rolesByUser[selectedUser.id] || []
+    ? (userSheetRoles ?? rolesByUser[selectedUser.id] ?? []).map(enrichUcr)
     : [];
 
-  const assignedCompanyIds = new Set(
-    selectedRoles
-      .map((r) => r.company_id || r.companyId)
-      .filter(Boolean)
-      .map(String),
+  const availableCompanies = companiesForNewAccess(companies);
+  const availableRoles = rolesForNewAccess(
+    UCR_ASSIGNABLE_ROLES,
+    newCompanyId,
+    selectedRoles,
   );
-
-  const availableCompanies = companies.filter((c) => {
-    const companyId = c.id || c.company_id;
-    return isCompanyActive(c) && companyId && !assignedCompanyIds.has(String(companyId));
-  });
 
   const invalidateUsers = () => {
     queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY });
@@ -378,7 +401,7 @@ export default function UsersAccessAdminTab() {
       return;
     }
     try {
-      await deleteUserCompanyRole(roleId);
+      await deleteUserCompanyRole(roleId, selectedUser?.id);
       setRemoveError("");
       toast.success("Acesso removido.");
       queryClient.invalidateQueries({ queryKey: UCR_QUERY_KEY });
@@ -463,14 +486,16 @@ export default function UsersAccessAdminTab() {
                         </span>
                       ) : (
                         <div className="flex flex-wrap gap-1">
-                          {ucrs.map((role) => (
-                            <Badge key={role.id || role._id} variant="secondary">
-                              {role.company_name || role.company} ·{" "}
-                              {ROLE_SHORT_LABELS[role.role || role.role_name]
-                                || role.role
-                                || role.role_name}
-                            </Badge>
-                          ))}
+                          {ucrs.map((ucr) => {
+                            const item = enrichUcr(ucr);
+                            const cargoKey = item.role || item.role_name;
+                            return (
+                              <Badge key={item.id || item._id || `${item.company_id}-${cargoKey}`} variant="secondary">
+                                {formatUcrAccessLabel(item, ROLE_SHORT_LABELS)
+                                  || `${item.company_name || item.company || ""} · ${ROLE_SHORT_LABELS[cargoKey] || cargoKey || ""}`.trim()}
+                              </Badge>
+                            );
+                          })}
                         </div>
                       )}
                     </TableCell>
@@ -591,9 +616,9 @@ export default function UsersAccessAdminTab() {
                         ROLE_SHORT_LABELS[cargoKey] || cargoKey || "—";
                       return (
                       <li
-                        key={roleId}
+                        key={roleId || `${role.company_id}-${cargoKey}`}
                         className="flex items-center justify-between gap-2 p-3"
-                        data-testid={`ucr-row-${roleId}`}
+                        data-testid={`ucr-row-${roleId || "unknown"}`}
                       >
                         <div className="min-w-0 flex-1">
                           <p className="text-sm font-medium truncate text-foreground">
@@ -605,12 +630,13 @@ export default function UsersAccessAdminTab() {
                           </p>
                         </div>
                         <Button
+                          type="button"
                           variant="ghost"
                           size="icon"
                           className="shrink-0"
-                          aria-label="Remover acesso"
+                          aria-label={`Remover acesso ${cargoLabel} em ${companyLabel}`}
                           onClick={() => handleRemoveAccess(role)}
-                          data-testid={`btn-remove-ucr-${roleId}`}
+                          data-testid={`btn-remove-ucr-${roleId || "unknown"}`}
                         >
                           <Trash2 className="h-4 w-4 text-destructive" />
                         </Button>
@@ -631,7 +657,17 @@ export default function UsersAccessAdminTab() {
                 <Label>Empresa</Label>
                 <Select
                   value={newCompanyId}
-                  onValueChange={setNewCompanyId}
+                  onValueChange={(id) => {
+                    setNewCompanyId(id);
+                    const nextRoles = rolesForNewAccess(
+                      UCR_ASSIGNABLE_ROLES,
+                      id,
+                      selectedRoles,
+                    );
+                    if (newRole && !nextRoles.includes(newRole)) {
+                      setNewRole("");
+                    }
+                  }}
                   disabled={availableCompanies.length === 0}
                 >
                   <SelectTrigger data-testid="ucr-company-select">
@@ -643,9 +679,10 @@ export default function UsersAccessAdminTab() {
                       }
                     />
                   </SelectTrigger>
-                  <SelectContent>
+                  <SelectContent className="max-h-72">
                     {availableCompanies.map((company) => {
-                      const companyId = String(company.id || company.company_id);
+                      const companyId = String(company.id || company.company_id || company._id || "");
+                      if (!companyId) return null;
                       const companyName =
                         company.name || company.company_name || companyId;
                       return (
@@ -663,8 +700,8 @@ export default function UsersAccessAdminTab() {
                   <SelectTrigger data-testid="ucr-role-select">
                     <SelectValue placeholder="Seleccionar cargo" />
                   </SelectTrigger>
-                  <SelectContent>
-                    {UCR_ASSIGNABLE_ROLES.map((role) => (
+                  <SelectContent className="max-h-72">
+                    {availableRoles.map((role) => (
                       <SelectItem key={role} value={role}>
                         {ROLE_SHORT_LABELS[role] || role}
                       </SelectItem>
