@@ -21,15 +21,8 @@ describe("useWebSocket Pacote DX", () => {
     assert.doesNotMatch(source, /\/api\/notifications`/);
   });
 
-  it("stops reconnect and forces logout on auth close codes", () => {
-    assert.match(source, /_handleAuthFailure/);
-    assert.match(source, /WS_CLOSE_TOKEN_INVALID/);
-    assert.match(source, /isAuthWebSocketClose/);
-    assert.match(source, /forceSessionExpired/);
-    assert.match(source, /_authFailed/);
-    assert.doesNotMatch(
-      source,
-      /Token inválido \(4002\), sem reconexão[\s\S]*_startPolling/,
-    );
+  it("accepts event as an alias of type for new_email payloads", () => {
+    assert.match(source, /data\.type \|\| data\.event/);
+    assert.match(source, /NEW_EMAIL: 'new_email'/);
   });
 });

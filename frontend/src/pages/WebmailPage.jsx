@@ -8,7 +8,10 @@
 import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
-import useWebSocket from "../hooks/useWebSocket";
+import { useQueryClient } from "@tanstack/react-query";
+import { useNewEmailRealtime } from "../hooks/useNewEmailRealtime";
+import { useWebmailEmails, patchWebmailEmail } from "../hooks/useWebmailEmails";
+import useDebounce from "../hooks/useDebounce";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
@@ -142,6 +145,7 @@ const getAttachmentIcon = (filename) => {
 
 const WebmailPage = () => {
   const { token, user, effectiveRole, activeCompanyId, effectiveCompanyId } = useAuth();
+  const queryClient = useQueryClient();
   const navigate = useNavigate();
   const [searchParams] = useSearchParams();
   const initialFolder = FOLDERS.some((f) => f.id === searchParams.get("folder"))
@@ -174,17 +178,14 @@ const WebmailPage = () => {
 
   // Estado principal
   const [activeFolder, setActiveFolder] = useState(initialFolder);
-  const [emails, setEmails] = useState([]);
-  const [totalEmails, setTotalEmails] = useState(0);
   const [currentPage, setCurrentPage] = useState(1);
-  const [totalPages, setTotalPages] = useState(1);
   const [unreadCount, setUnreadCount] = useState(0);
   const [selectedEmail, setSelectedEmail] = useState(null);
   const [emailDetail, setEmailDetail] = useState(null);
   const [downloadingAttachmentId, setDownloadingAttachmentId] = useState(null);
-  const [loading, setLoading] = useState(false);
   const [detailLoading, setDetailLoading] = useState(false);
   const [searchQuery, setSearchQuery] = useState("");
+  const debouncedSearch = useDebounce(searchQuery, 400);
   const [account, setAccount] = useState(defaultAccount);
   const [personalAccounts, setPersonalAccounts] = useState([]);
   const [selectedMailbox, setSelectedMailbox] = useState("");
@@ -247,8 +248,6 @@ const WebmailPage = () => {
   const [contextMenuPosition, setContextMenuPosition] = useState(null);
   const [contextMenuFolder, setContextMenuFolder] = useState(null);
 
-  // Debounce search
-  const searchTimeoutRef = useRef(null);
   const openedUrlDraftRef = useRef(false);
 
   // ============================================================
@@ -350,18 +349,15 @@ const WebmailPage = () => {
   // ============================================================
   // WEBSOCKET: Escutar NEW_EMAIL em tempo real
   // ============================================================
-  // Ref para as funções de refresh (evita stale closures)
-  const handleRefreshRef = useRef(null);
   const fetchUnreadCountsRef = useRef(null);
 
-  const onNewEmail = useCallback((payload) => {
+  const onNewEmailReceived = useCallback((payload) => {
     if (!payload) return;
 
     const fromEmail = payload.from_email || "remetente desconhecido";
     const subject = payload.subject || "";
     const direction = payload.direction || "received";
 
-    // Ação A: Toast de notificação
     if (direction === "received") {
       toast.info(`📧 Novo email recebido de: ${fromEmail}`, {
         description: subject ? (subject.length > 60 ? subject.slice(0, 57) + "..." : subject) : undefined,
@@ -369,19 +365,14 @@ const WebmailPage = () => {
       });
     }
 
-    // Ação B: Refresh automático da lista de emails e contadores
-    // (sem mostrar loading spinner — atualização silenciosa)
-    if (handleRefreshRef.current) {
-      handleRefreshRef.current();
-    }
     if (fetchUnreadCountsRef.current) {
       fetchUnreadCountsRef.current();
     }
   }, []);
 
-  useWebSocket({
+  useNewEmailRealtime({
     autoConnect: true,
-    onNewEmail,
+    onReceived: onNewEmailReceived,
   });
 
   // ============================================================
@@ -543,70 +534,50 @@ const WebmailPage = () => {
   }, [fetchUnreadCounts]);
 
   // ============================================================
-  // FETCH EMAILS
+  // FETCH EMAILS (React Query — cache instantânea + refetch em fundo)
   // ============================================================
-  const fetchEmails = useCallback(async (folder, page, search, label, customFolderId) => {
-    if (!token) return;
-    setLoading(true);
-    try {
-      const actualFolder = customFolderId ? "custom" : (folder || activeFolder);
-      const params = new URLSearchParams({
-        folder: actualFolder,
-        page: String(page || 1),
-        limit: "30",
-        account: account,
-      });
-      if (search && search.trim()) {
-        params.append("search", search.trim());
-      }
-      if (label) {
-        params.append("label", label);
-      }
-      if (customFolderId) {
-        params.append("custom_folder", customFolderId);
-      }
-      // Always enforce box=shared_indexacao for active indexacao profile
-      const effectiveBox = effectiveRole === 'indexacao' ? 'shared_indexacao' : activeBox;
-      if (effectiveBox) {
-        params.append("box", effectiveBox);
-      }
-      // ── Multi-Tenant: incluir company_id nos params ────────────
-      if (companyId) {
-        params.append("company_id", companyId);
-      }
-      if (selectedMailbox) {
-        params.append("mailbox", selectedMailbox);
-      }
+  const effectiveBox = effectiveRole === "indexacao" ? "shared_indexacao" : activeBox;
+  const {
+    data: webmailData,
+    isLoading: emailsLoading,
+    isFetched: emailsFetched,
+  } = useWebmailEmails({
+    token,
+    headers: webmailHeaders(),
+    folder: activeCustomFolder ? "custom" : activeFolder,
+    page: currentPage,
+    search: debouncedSearch,
+    label: selectedLabel,
+    customFolderId: activeCustomFolder,
+    account,
+    box: effectiveBox,
+    companyId,
+    mailbox: selectedMailbox,
+    enabled: Boolean(token),
+  });
 
-      const response = await fetch(
-        `${API_URL}/api/emails/webmail?${params.toString()}`,
-        {
-          headers: webmailHeaders(),
-        }
-      );
+  const emails = webmailData?.emails || [];
+  const totalEmails = webmailData?.total || 0;
+  const totalPages = webmailData?.pages || 1;
+  // Skeleton só na 1ª carga sem cache — refetch de new_email / staleTime é silencioso
+  const loading = emailsLoading;
 
-      if (!response.ok) {
-        const errorData = await response.json().catch(() => ({}));
-        throw new Error(errorData.detail || `Erro ${response.status} ao carregar emails`);
-      }
-      const data = await response.json();
-
-      console.debug("[Webmail] folder=%s, account=%s, total=%d", actualFolder, account, data?.total || 0);
-
-      setEmails(data.emails || []);
-      setTotalEmails(data.total || 0);
-      setCurrentPage(data.page || 1);
-      setIsLoadingConfig(false);  // ← Config check passed — emails loaded
-      isLoadingConfigRef.current = false;
-      setTotalPages(data.pages || 1);
-      setUnreadCount(data.unread_count || 0);
-    } catch (error) {
-      console.error("Erro ao carregar emails:", error);
-      toast.error("Erro ao carregar emails");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (typeof webmailData?.unread_count === "number") {
+      setUnreadCount(webmailData.unread_count);
     }
-  }, [token, activeFolder, account, activeBox, effectiveRole, companyId, webmailHeaders, selectedMailbox]);
+  }, [webmailData?.unread_count]);
+
+  useEffect(() => {
+    if (emailsFetched) {
+      setIsLoadingConfig(false);
+      isLoadingConfigRef.current = false;
+    }
+  }, [emailsFetched]);
+
+  useEffect(() => {
+    setCurrentPage(1);
+  }, [debouncedSearch, activeFolder, selectedLabel, activeCustomFolder, activeBox, selectedMailbox]);
 
   // Auto-sync emails on page mount (on-demand model — no background polling in dev)
   // Only triggers once when the user navigates to the Webmail page
@@ -618,52 +589,27 @@ const WebmailPage = () => {
     if (lastSyncedProfile.current === profileKey) return;
     lastSyncedProfile.current = profileKey;
     hasAutoSynced.current = true;
-    setCurrentPage(1);
     setSelectedEmail(null);
     setEmailDetail(null);
     handleSyncEmails();
   }, [token, companyId, effectiveRole]); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Carregar emails quando muda pasta, página ou label
+  // Reset selecção ao mudar pasta/página (a lista vem da query)
   useEffect(() => {
-    if (activeCustomFolder) {
-      fetchEmails("custom", currentPage, "", null, activeCustomFolder);
-    } else {
-      fetchEmails(activeFolder, currentPage, "", selectedLabel);
-    }
     setSelectedEmail(null);
     setEmailDetail(null);
     setShowMobileReading(false);
     setSelectedEmails(new Set());
-  }, [activeFolder, currentPage, selectedLabel, activeCustomFolder, activeBox, fetchEmails]);
+  }, [activeFolder, currentPage, selectedLabel, activeCustomFolder, activeBox]);
 
-  // Debounced search
   const handleSearchChange = useCallback((value) => {
     setSearchQuery(value);
-    if (searchTimeoutRef.current) {
-      clearTimeout(searchTimeoutRef.current);
-    }
-    searchTimeoutRef.current = setTimeout(() => {
-      setCurrentPage(1);
-      if (activeCustomFolder) {
-        fetchEmails("custom", 1, value, null, activeCustomFolder);
-      } else {
-        fetchEmails(activeFolder, 1, value, selectedLabel);
-      }
-    }, 400);
-  }, [activeFolder, fetchEmails, selectedLabel, activeCustomFolder]);
+  }, []);
 
-  // Refresh
   const handleRefresh = useCallback(() => {
-    if (activeCustomFolder) {
-      fetchEmails("custom", currentPage, searchQuery, null, activeCustomFolder);
-    } else {
-      fetchEmails(activeFolder, currentPage, searchQuery, selectedLabel);
-    }
-  }, [activeFolder, currentPage, searchQuery, fetchEmails, selectedLabel, activeCustomFolder]);
+    queryClient.invalidateQueries({ queryKey: ["emails"] });
+  }, [queryClient]);
 
-  // Manter refs atualizados para o callback do WebSocket
-  useEffect(() => { handleRefreshRef.current = handleRefresh; }, [handleRefresh]);
   useEffect(() => { fetchUnreadCountsRef.current = fetchUnreadCounts; }, [fetchUnreadCounts]);
 
   // ============================================================
@@ -865,9 +811,7 @@ const WebmailPage = () => {
             body: JSON.stringify({ type: "read" }),
           });
           // Atualizar lista local
-          setEmails((prev) =>
-            prev.map((e) => (e.id === email.id ? { ...e, is_read: true } : e))
-          );
+          patchWebmailEmail(queryClient, email.id, { is_read: true }, -1);
           setUnreadCount((prev) => Math.max(0, prev - 1));
         } catch {
           // Falha silenciosa - não é crítica
@@ -879,7 +823,7 @@ const WebmailPage = () => {
     } finally {
       setDetailLoading(false);
     }
-  }, [token, multiSelectMode, webmailHeaders]);
+  }, [token, multiSelectMode, webmailHeaders, queryClient]);
 
   // ============================================================
   // TOGGLE STAR
@@ -895,11 +839,7 @@ const WebmailPage = () => {
       });
 
       // Atualizar lista local
-      setEmails((prev) =>
-        prev.map((em) =>
-          em.id === email.id ? { ...em, is_starred: newStarred } : em
-        )
-      );
+      patchWebmailEmail(queryClient, email.id, { is_starred: newStarred });
       if (emailDetail?.id === email.id) {
         setEmailDetail((prev) => prev ? { ...prev, is_starred: newStarred } : prev);
       }
@@ -907,7 +847,7 @@ const WebmailPage = () => {
     } catch {
       toast.error("Erro ao alterar destaque");
     }
-  }, [token, emailDetail]);
+  }, [token, emailDetail, queryClient, webmailHeaders]);
 
   // ============================================================
   // COMPOSER
@@ -1111,18 +1051,17 @@ const WebmailPage = () => {
         setEmailDetail((prev) =>
           prev ? { ...prev, process_id: processId, client_name: clientName || prev.client_name } : prev
         );
-        setEmails((prev) =>
-          prev.map((e) =>
-            e.id === selectedEmail.id ? { ...e, process_id: processId, client_name: clientName || e.client_name } : e
-          )
-        );
+        patchWebmailEmail(queryClient, selectedEmail.id, {
+          process_id: processId,
+          client_name: clientName || selectedEmail.client_name,
+        });
       } catch {
         toast.error("Erro ao associar email ao processo");
       } finally {
         setLinkSaving(false);
       }
     },
-    [token, selectedEmail]
+    [token, selectedEmail, queryClient, webmailHeaders]
   );
 
   // ============================================================
@@ -1491,7 +1430,7 @@ const WebmailPage = () => {
   // ============================================================
   return (
     <DashboardLayout title="Email">
-      {isLoadingConfig ? (
+      {isLoadingConfig && !webmailData ? (
         <div className="flex items-center justify-center h-[calc(100vh-64px)]">
           <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
         </div>

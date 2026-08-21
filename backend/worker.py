@@ -213,8 +213,12 @@ async def scheduler_loop():
                 await task_queue.add_task("match_leads", {})
                 last_runs["matching"] = now
 
-            # Sincronização Webmail — 🛑 Só em produção (ENVIRONMENT=production)
-            if os.environ.get('ENVIRONMENT') == 'production' and now - last_runs["webmail"] > 900:
+            # Sincronização Webmail — rede de segurança no worker.
+            # O sync FREQUENTE (1 min) corre no processo API via
+            # run_email_auto_sync para poder emitir WebSocket new_email.
+            # Este ciclo (10 min) cobre o caso do API worker primário estar em baixo.
+            # 🛑 Só em produção (ENVIRONMENT=production)
+            if os.environ.get('ENVIRONMENT') == 'production' and now - last_runs["webmail"] > 600:
                 logger.info("Agendando sincronização de webmail por utilizador...")
                 try:
                     from services.email_service import sync_user_emails

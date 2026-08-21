@@ -655,6 +655,11 @@ async def gmail_api_sync_to_db(
 
                 await db.emails.insert_one(email_doc)
                 total_synced += 1
+                try:
+                    from services.email_realtime import notify_new_email_for_shared_role
+                    await notify_new_email_for_shared_role(role, email_doc)
+                except Exception as ws_err:
+                    logger.debug(f"[Gmail Sync] WS NEW_EMAIL falhou (non-critical): {ws_err}")
 
             except Exception as e:
                 logger.warning(f"[Gmail Sync] Erro ao processar mensagem {msg_ref['id']}: {e}")
