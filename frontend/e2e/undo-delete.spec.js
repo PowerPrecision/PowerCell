@@ -20,6 +20,9 @@ let token;
 const createdIds = [];
 
 async function login(page) {
+  await page.addInitScript(() => {
+    sessionStorage.setItem('email_config_dismissed', 'true');
+  });
   await page.goto('/login');
   await page.locator('[data-testid="login-email-input"]').fill(ADMIN.email);
   await page.locator('[data-testid="login-password-input"]').fill(ADMIN.password);
@@ -59,16 +62,29 @@ test.afterAll(async () => {
   await apiCtx.dispose();
 });
 
-test('Desfazer cancela a eliminação (utilizador permanece no backend)', async ({ page }) => {
-  await login(page);
-  await page.goto('/utilizadores');
-  await page.getByPlaceholder('Pesquisar utilizador...').fill(UNDO_NAME);
+async function goToUsersTab(page) {
+  await page.goto('/admin/organizacao?tab=utilizadores');
+  await expect(page.locator('[data-testid="org-admin-users-tab"]')).toBeVisible({ timeout: 15000 });
+}
 
-  const row = page.locator('tr', { hasText: UNDO_NAME });
+async function searchUser(page, name) {
+  await page.getByPlaceholder('Pesquisar utilizador...').fill(name);
+}
+
+async function deleteUserFromRow(page, name) {
+  const row = page.locator('tr', { hasText: name });
   await expect(row).toBeVisible({ timeout: 10000 });
+  await row.locator('[data-testid^="btn-user-actions-"]').click();
+  await page.getByRole('menuitem', { name: 'Eliminar' }).click();
+}
 
-  // Eliminar (ícone trash) -> remoção otimista
-  await row.locator('button:has(svg[class*="trash"])').click();
+test('Desfazer cancela a eliminação (utilizador permanece no backend)', async ({ page }) => {
+  test.setTimeout(45000);
+  await login(page);
+  await goToUsersTab(page);
+  await searchUser(page, UNDO_NAME);
+
+  await deleteUserFromRow(page, UNDO_NAME);
   await expect(page.locator('tr', { hasText: UNDO_NAME })).toHaveCount(0, { timeout: 5000 });
 
   // Desfazer -> restaura e cancela o commit
@@ -77,8 +93,8 @@ test('Desfazer cancela a eliminação (utilizador permanece no backend)', async 
 
   // Esperar para lá da janela de commit (8s) e recarregar (lê do backend)
   await page.waitForTimeout(9000);
-  await page.reload();
-  await page.getByPlaceholder('Pesquisar utilizador...').fill(UNDO_NAME);
+  await goToUsersTab(page);
+  await searchUser(page, UNDO_NAME);
   await expect(page.locator('tr', { hasText: UNDO_NAME })).toBeVisible({ timeout: 10000 });
 
   // Confirmação via API: o utilizador ainda existe.
@@ -86,20 +102,18 @@ test('Desfazer cancela a eliminação (utilizador permanece no backend)', async 
 });
 
 test('sem Desfazer, a eliminação é efetivada no backend', async ({ page }) => {
+  test.setTimeout(45000);
   await login(page);
-  await page.goto('/utilizadores');
-  await page.getByPlaceholder('Pesquisar utilizador...').fill(NOUNDO_NAME);
+  await goToUsersTab(page);
+  await searchUser(page, NOUNDO_NAME);
 
-  const row = page.locator('tr', { hasText: NOUNDO_NAME });
-  await expect(row).toBeVisible({ timeout: 10000 });
-
-  await row.locator('button:has(svg[class*="trash"])').click();
+  await deleteUserFromRow(page, NOUNDO_NAME);
   await expect(page.locator('tr', { hasText: NOUNDO_NAME })).toHaveCount(0, { timeout: 5000 });
 
   // NÃO clicar Desfazer. Esperar para lá da janela de commit e recarregar.
   await page.waitForTimeout(9000);
-  await page.reload();
-  await page.getByPlaceholder('Pesquisar utilizador...').fill(NOUNDO_NAME);
+  await goToUsersTab(page);
+  await searchUser(page, NOUNDO_NAME);
   await expect(page.locator('tr', { hasText: NOUNDO_NAME })).toHaveCount(0, { timeout: 10000 });
 
   // Confirmação via API: o utilizador foi mesmo eliminado.

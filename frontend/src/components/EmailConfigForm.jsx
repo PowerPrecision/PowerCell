@@ -3,7 +3,7 @@
  *
  * UTILIZAÇÃO:
  * - ProfilePage.js (mode="self"): Utilizador configura o próprio email
- * - UsersManagementPage.js (mode="admin"): Admin configura email de outro utilizador
+ * - Painel de Administração (mode="admin"): Admin configura email de outro utilizador
  *
  * PROPS:
  * - mode: "self" | "admin"
