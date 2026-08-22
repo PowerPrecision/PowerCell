@@ -236,6 +236,16 @@ export const queryKeys = {
     notifications: () => [...queryKeys.backgroundJobs.all, 'notifications'],
     metrics: (days) => [...queryKeys.backgroundJobs.all, 'metrics', { days }],
   },
+
+  // Administração de Organização (Empresas + Utilizadores/UCR)
+  orgAdmin: {
+    all: ['org-admin'],
+    companiesAll: () => [...queryKeys.orgAdmin.all, 'companies'],
+    companies: (search) => [...queryKeys.orgAdmin.companiesAll(), search ?? ''],
+    users: () => [...queryKeys.orgAdmin.all, 'users'],
+    ucrs: () => [...queryKeys.orgAdmin.all, 'ucrs'],
+    ucrByUser: (userId) => [...queryKeys.orgAdmin.ucrs(), userId],
+  },
 };
 
 /**

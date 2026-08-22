@@ -20,6 +20,7 @@ from models.email import (
     EmailFilter, EmailSendRequest,
 )
 from services.auth import get_effective_role
+from services.email_draft_service import is_draft_status, stamp_draft_ttl_fields
 from services.email_enrich import enrich_email, enrich_emails
 from services.email_service import (
     sync_emails_for_process,
@@ -870,7 +871,8 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
 async def run_create_email_record(email_data: EmailCreate, current_user: dict):
     """Registar um email no histórico."""
     email_id = str(uuid.uuid4())
-    now = datetime.now(timezone.utc).isoformat()
+    now_dt = datetime.now(timezone.utc)
+    now = now_dt.isoformat()
     
     # Sanitize inputs before DB insert
     from_email = sanitize_email(email_data.from_email)
@@ -896,6 +898,7 @@ async def run_create_email_record(email_data: EmailCreate, current_user: dict):
         "status": email_data.status.value,
         "sent_at": email_data.sent_at or now,
         "created_at": now,
+        "updated_at": now,
         "created_by": current_user["id"],
         "notes": notes,
         "is_important": False,
@@ -904,6 +907,8 @@ async def run_create_email_record(email_data: EmailCreate, current_user: dict):
         "is_archived": False,
         "labels": []
     }
+    if is_draft_status(email_data.status):
+        stamp_draft_ttl_fields(email, now=now_dt)
     
     await db.emails.insert_one(email)
     logger.info(f"Email registado: {email_id} para processo {email_data.process_id}")
@@ -992,7 +997,8 @@ async def run_update_email(email_id: str, email_data: EmailUpdate, current_user:
     if not email:
         raise HTTPException(status_code=404, detail="Email não encontrado")
     
-    update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
+    now_dt = datetime.now(timezone.utc)
+    update_data = {"updated_at": now_dt.isoformat()}
     if email_data.subject is not None:
         update_data["subject"] = sanitize_string(email_data.subject, max_length=300)
     if email_data.body is not None:
@@ -1011,6 +1017,10 @@ async def run_update_email(email_id: str, email_data: EmailUpdate, current_user:
         update_data["is_archived"] = email_data.is_archived
     if email_data.labels is not None:
         update_data["labels"] = email_data.labels
+
+    resulting_status = update_data.get("status", email.get("status"))
+    if is_draft_status(resulting_status):
+        stamp_draft_ttl_fields(update_data, now=now_dt, include_created=False)
     
     if update_data:
         await db.emails.update_one({"id": email_id}, {"$set": update_data})

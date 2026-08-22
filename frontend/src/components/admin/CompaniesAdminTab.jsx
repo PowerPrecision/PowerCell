@@ -8,6 +8,7 @@ import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { Building2, Pencil, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
 import { createCompany, getCompanies, updateCompany } from "../../services/api";
+import { queryKeys } from "../../lib/queryClient";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { validateNIF } from "../../utils/validateNIF";
 import {
@@ -60,7 +61,7 @@ export default function CompaniesAdminTab() {
     isLoading,
     isError,
   } = useQuery({
-    queryKey: ["org-admin-companies", debouncedSearch],
+    queryKey: queryKeys.orgAdmin.companies(debouncedSearch),
     queryFn: async () => {
       const res = await getCompanies(debouncedSearch || undefined);
       return normalizeCompaniesPayload(res.data);
@@ -123,8 +124,7 @@ export default function CompaniesAdminTab() {
         toast.success(`Empresa "${payload.name}" criada.`);
       }
       setDialogOpen(false);
-      queryClient.invalidateQueries({ queryKey: ["org-admin-companies"] });
-      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgAdmin.companiesAll() });
     } catch (err) {
       toast.error(
         extractErrorMessage(
