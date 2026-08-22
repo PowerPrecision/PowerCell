@@ -2,7 +2,7 @@
 
 ## Descrição
 
-Sistema CRM completo para gestão de processos de crédito imobiliário, clientes, documentação e automação. Inclui formulário público dinâmico com campos personalizáveis, motor de automação "No-Code", gestão de permissões, templates de formulário, análise de documentos por IA, e dashboard financeiro.
+Sistema CRM completo para gestão de processos de crédito imobiliário, clientes, documentação e automação (**v2.0 em Produção**). Inclui formulário público dinâmico com campos personalizáveis, motor de automação "No-Code", gestão UCR multi-cargo (vários papéis por empresa), webmail em tempo real, calendário de precisão, análise de documentos por IA, e dashboard financeiro.
 
 ## Tecnologias
 
@@ -126,9 +126,11 @@ PowerCell/
 - Gestão de Clientes e Leads com cursor pagination
 - Upload e Gestão de Documentação (Storage agnóstico: S3 / Local / OneDrive via Factory Pattern)
 - Quadro Kanban com drag-drop (@dnd-kit) e filtros (data, urgência)
+- **Calendário de precisão** (`/calendario`): eventos com hora exacta (início/fim), edição e eliminação; vista mensal/semanal
 - Dashboard e Estatísticas (com cache Redis)
 - Sistema de Notificações em tempo real (WebSocket + polling fallback)
 - Tarefas assíncronas com centro de operações (ARQ worker)
+- **Administração de plataforma** (`/admin/organizacao`): empresas + utilizadores/UCR, exclusiva para `admin`/`ceo`
 
 ### Inteligência Artificial
 - **Análise de documentos**: Extração automática de dados do CC, IRS, recibos vencimento
@@ -192,11 +194,13 @@ PowerCell/
 - **Alerta de processos sem atualização**: Exclui processos concluídos, desistências e arquivados
 
 ### Administração
+- **Dashboard operacional** (`/admin`): KPIs, funil, calendário, documentos, leads — dia-a-dia da operação (admin/CEO)
+- **Área de configuração de plataforma** (`/admin/organizacao`): Empresas (`is_active` / soft-delete) + Utilizadores e acessos UCR (vários cargos por empresa, proteção do último acesso, cargos oficiais Parceiro e Indexação). Exclusiva para perfil activo `admin` ou `ceo`
 - **Gestão de Perfis e Permissões** (`/configuracoes-perfis`): Controlo granular de páginas e ações por utilizador
 - **Gestão do Formulário** (`/gestao-formulario`): Ativar/desativar campos, criar campos personalizados, gerir templates
 - **Motor de Automação** (`/automation`): Regras "Se X, Então Y" sem código
 - **Gestão de Estados do Workflow** (`/workflow-estados`): Cores, labels, ordem
-- **Configurações do Sistema** (`/configuracoes`): RGPD, DSTI, emails, backups, notificações, **Integrações (SMTP Sistema, Storage Provider, Webmail Partilhado)**
+- **Configurações do Sistema** (`/configuracoes` / `/system-admin`): RGPD, DSTI, emails, backups, notificações, **Integrações (SMTP Sistema, Storage Provider, Webmail Partilhado)**
 
 ### RGPD
 - **Página pública de consentimento** (`/rgpd/:token`): Assinatura digital do cliente
@@ -222,8 +226,8 @@ PowerCell/
 - **Disponível via API** e **CLI standalone** com suporte a `PROD_MONGO_URL`, `PROD_DB_NAME`, `DEV_MONGO_URL`, `DEV_DB_NAME`
 
 ### Webmail (Email IMAP)
-- **Sincronização automática**: Background job sincroniza emails via IMAP (30 dias)
-- **Sincronização manual**: Botão "Sincronizar" no WebmailPage para trigger imediato
+- **Sincronização em tempo real (v2.0)**: o background sync IMAP corre **no processo da API a cada 60s** (não no ARQ Worker). Cada email novo emite WebSocket `new_email` para a room do utilizador; o React Query invalida a cache (`staleTime: 60s`) e actualiza a lista **sem skeleton nem reload**
+- **Sincronização manual**: Botão "Sincronizar" no WebmailPage para FETCH imediato de todas as pastas
 - **Múltiplas contas**: Suporte a Precision Crédito e Power Real Estate (IMAP separado)
 - **Seletor de conta no composer (role-based)**: O seletor "Conta:" (Precision/Power) só aparece para admin/CEO/diretor (`canUseGlobalAccounts`). Os restantes perfis (consultor, intermediário, administrativo, indexação) enviam obrigatoriamente pela conta pessoal (ou partilhada, no caso de Indexação) — o seletor é ocultado e o pedido usa `account=personal`. Erros de envio (ex.: 403 por falta de config pessoal) mostram a mensagem acionável do backend num toast alargado (8s).
 - **Pastas padrão e personalizadas**: 5 pastas padrão (Inbox, Sent, Starred, Drafts, Trash) + pastas personalizadas criadas pelo utilizador
@@ -257,7 +261,7 @@ PowerCell/
 
 ### Perfis de Utilizador e Permissões
 
-O sistema suporta os seguintes perfis (roles), cada um com permissões específicas de páginas e ações:
+O sistema suporta os seguintes perfis (roles), cada um com permissões específicas de páginas e ações. Na **v2.0** o mesmo utilizador pode ter **vários cargos na mesma empresa** (UCR: índice `{user_id, company_id, role}`):
 
 | Perfil | Páginas Acedidas | Ações Permitidas |
 |-------|-------------------|------------------|
@@ -268,6 +272,7 @@ O sistema suporta os seguintes perfis (roles), cada um com permissões específi
 | **Mediador/Intermediário** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, AI Insights, Minutas, Ficheiros (Explorador) | CRUD processos/clientes, upload docs, financeiros |
 | **Administrativo** | Dashboard, Kanban, Processos, Clientes, Docs, Calendário, Notificações, Registos, Validades | CRUD processos/clientes, upload/delete docs |
 | **Indexação** | Kanban, Processos, Clientes, Docs, Notificações, **Meus Clientes** | Upload/delete/download docs, atribuir clientes, gerir tarefas, chat |
+| **Parceiro** | Nenhuma (utilizador fantasma) | Cargo oficial UCR — visível na gestão de acessos; sem login operacional típico |
 | **Cliente** | Nenhuma (acesso externo via Magic Link) | Upload/download docs |
 
 #### Perfil INDEXACAO - Detalhes
@@ -422,6 +427,8 @@ flowchart TD
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
 | GET/PUT | `/api/admin/users` | Gestão de utilizadores |
+| GET/POST/PUT | `/api/admin/companies` | Gestão de empresas (`is_active` = soft-delete) |
+| POST/DELETE | `/api/admin/users/{id}/roles` | Acessos UCR (vários cargos por empresa; recusa apagar o último) |
 | POST | `/api/admin/impersonate/{id}` | Impersonate utilizador |
 | POST | `/api/admin/stop-impersonate` | Parar impersonate |
 | GET/POST/PUT/DELETE | `/api/documents/portal-requests/*` | Gestão pedidos documentos portal |
@@ -439,12 +446,15 @@ flowchart TD
 | Rota | Componente | Descrição |
 |------|-----------|----------|
 | `/` | StaffDashboard / AdminDashboard | Dashboard principal (conforme role) |
+| `/admin` | AdminDashboard | Dashboard **operacional** (admin/CEO) — KPIs, funil, calendário |
+| `/admin/organizacao` | OrganizationAdminPage | **Configuração de plataforma** (admin/CEO) — Empresas + Utilizadores/UCR |
+| `/system-admin` | SystemAdminPanel | Configuração técnica do sistema (admin/CEO; tabs técnicas só admin) |
 | `/kanban` | KanbanPage | Quadro Kanban com drag-drop |
 | `/processos` | MyClientsPage | Lista de processos |
 | `/processos/:id` | ProcessDetails | Detalhes do processo |
 | `/clientes` | ClientsPage | Gestão de clientes |
 | `/docs` | DocumentsPage | Documentação |
-| `/calendario` | CalendarPage | Calendário |
+| `/calendario` | CalendarPage | Calendário de precisão (hora exacta, editar/eliminar eventos) |
 | `/notificacoes` | NotificationsPage | Notificações |
 | `/imoveis` | PropertiesPage | Imóveis |
 | `/minutas` | DraftsPage | Minutas |
@@ -660,7 +670,7 @@ O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Ren
 
 | Serviço | DEV (`!= production`) | PROD (`== production`) |
 |---------|----------------------|------------------------|
-| **Email Auto-Sync** (IMAP polling) | ❌ Desativado | ✅ Ativo (cada 15 min) |
+| **Email Auto-Sync** (IMAP no processo da API) | ❌ Desativado | ✅ Ativo (cada **60s** + jitter; emite `new_email` via WebSocket) |
 | **Webmail Sync** (`sync_webmail_emails`) | ❌ Retorna mock | ✅ Ativo |
 | **Gov Scraper** (Playwright/Chromium) | ❌ Retorna mock | ✅ Ativo |
 | **Portal Scraper endpoints** (`/fetch-financas`, `/fetch-seguranca-social`) | ❌ Retorna mock JSON | ✅ Ativo |
@@ -691,6 +701,13 @@ O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Ren
 - **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretos, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Configurações do Sistema (`/configuracoes`).
 
 ## Histórico de Correções Recentes (dev)
+
+### 2026-08 — v2.0 em Produção (Pacote FC — documentação)
+- **UCR multi-cargo**: vários papéis por empresa (ex. Diretor e Consultor em simultâneo); proteção contra a eliminação do último acesso; cargos oficiais Parceiro e Indexação; `Company.is_active` (soft-delete).
+- **Webmail em tempo real**: sync IMAP no processo da API a cada 60s + WebSocket `new_email` + React Query (`staleTime: 60s`) — sincronização instantânea sem interrupções de UI.
+- **Calendário de precisão**: hora exacta + edição/eliminação de eventos (`CreateEventDialog`).
+- **Administração**: `/admin` = dashboard operacional; `/admin/organizacao` = configuração de plataforma (Empresas + Utilizadores), exclusiva para `admin`/`ceo`.
+- Documentação: `ARCHITECTURE.md`, `README.md`, `CHANGELOG.md` alinhados com o código.
 
 ### 2026-07 — Finalização UX (Prioridade, Resumo/Histórico), Calculadora de Prestações
 - **Toast com botão X**: `<Toaster closeButton />` confirmado em `App.js` — todos os toasts (incluindo os "sticky" de tarefas em background) têm sempre uma forma manual de fechar.
