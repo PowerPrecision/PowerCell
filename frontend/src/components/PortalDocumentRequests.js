@@ -119,11 +119,6 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newDoc, setNewDoc] = useState({ categories: [], notes: "", custom_label: "" });
   const [detailsDoc, setDetailsDoc] = useState(null);
-  const [documents, setDocuments] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [actionLoading, setActionLoading] = useState(null); // track which action is loading
-  const [showAddDialog, setShowAddDialog] = useState(false);
-  const [newDoc, setNewDoc] = useState({ categories: [], notes: "", custom_label: "" });
 
   const fetchDocuments = useCallback(async () => {
     if (!processId) return;
