@@ -745,7 +745,7 @@ const EmailAccountsPage = ({ embedded = false }) => {
 
           {/* PACOTE BG: CompanyEmailCard removido — a configuração de email
               por empresa passa a ser feita no detalhe de cada Empresa
-              (CompaniesManagementPage, Pacote BF). */}
+              (CompaniesAdminTab). */}
         </div>
       </div>
   );

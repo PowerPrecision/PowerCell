@@ -32,6 +32,7 @@ import {
   getAllAdminUsers,
   updateUser,
 } from "../../services/api";
+import { queryKeys } from "../../lib/queryClient";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import {
   groupRolesByUserId,
@@ -91,8 +92,6 @@ import {
   UserPasswordDialog,
 } from "./UserAccountDialogs";
 
-const USERS_QUERY_KEY = ["org-admin-users"];
-const UCR_QUERY_KEY = ["org-admin-ucrs"];
 const UNDO_WINDOW_MS = 8000;
 const LAST_UCR_TOAST = LAST_UCR_DELETE_MESSAGE;
 
@@ -114,7 +113,7 @@ export default function UsersAccessAdminTab() {
     isLoading: usersLoading,
     isError: usersError,
   } = useQuery({
-    queryKey: USERS_QUERY_KEY,
+    queryKey: queryKeys.orgAdmin.users(),
     queryFn: async () => {
       // Pacote EB — GET /admin/users (lista global, sem for_assignment).
       const res = await getAllAdminUsers();
@@ -126,7 +125,7 @@ export default function UsersAccessAdminTab() {
     data: roles = [],
     isError: rolesError,
   } = useQuery({
-    queryKey: UCR_QUERY_KEY,
+    queryKey: queryKeys.orgAdmin.ucrs(),
     queryFn: async () => {
       const res = await getUserCompanyRoles();
       return normalizeRolesPayload(res.data);
@@ -134,7 +133,7 @@ export default function UsersAccessAdminTab() {
   });
 
   const { data: companies = [] } = useQuery({
-    queryKey: ["org-admin-companies", ""],
+    queryKey: queryKeys.orgAdmin.companies(""),
     queryFn: async () => {
       const res = await getCompanies();
       return normalizeCompaniesPayload(res.data);
@@ -142,7 +141,7 @@ export default function UsersAccessAdminTab() {
   });
 
   const { data: userSheetRoles } = useQuery({
-    queryKey: [...UCR_QUERY_KEY, selectedUser?.id],
+    queryKey: queryKeys.orgAdmin.ucrByUser(selectedUser?.id),
     queryFn: async () => {
       const res = await getUserRoles(selectedUser.id);
       return normalizeRolesPayload(res.data);
@@ -198,12 +197,12 @@ export default function UsersAccessAdminTab() {
   const comboTaken = isUcrComboTaken(newCompanyId, newRole, selectedRoles);
 
   const invalidateUsers = () => {
-    queryClient.invalidateQueries({ queryKey: USERS_QUERY_KEY });
-    queryClient.invalidateQueries({ queryKey: ["users"] });
+    queryClient.invalidateQueries({ queryKey: queryKeys.orgAdmin.users() });
+    queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
   };
 
   const setUsersCache = (updater) =>
-    queryClient.setQueryData(USERS_QUERY_KEY, (prev = []) =>
+    queryClient.setQueryData(queryKeys.orgAdmin.users(), (prev = []) =>
       typeof updater === "function" ? updater(prev) : updater,
     );
 
@@ -384,7 +383,7 @@ export default function UsersAccessAdminTab() {
       );
       setNewCompanyId("");
       setNewRole("");
-      queryClient.invalidateQueries({ queryKey: UCR_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgAdmin.ucrs() });
     } catch (err) {
       toast.error(
         extractErrorMessage(
@@ -412,7 +411,7 @@ export default function UsersAccessAdminTab() {
       await deleteUserCompanyRole(roleId, selectedUser?.id);
       setRemoveError("");
       toast.success("Acesso removido.");
-      queryClient.invalidateQueries({ queryKey: UCR_QUERY_KEY });
+      queryClient.invalidateQueries({ queryKey: queryKeys.orgAdmin.ucrs() });
     } catch (err) {
       const status = err.response?.status;
       const fallback =

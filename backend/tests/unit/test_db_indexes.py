@@ -104,13 +104,19 @@ class TestPacoteFfCriticalIndexes:
 
 class TestIndexStats:
     """Testes para estatísticas de índices."""
-    
-    @pytest.mark.asyncio
-    async def test_get_index_stats_structure(self):
-        """Verifica estrutura das estatísticas."""
-        # Este teste seria com mock do db
-        # Verificar que retorna dict com collections e seus índices
-        assert True  # Placeholder
+
+    def _source(self) -> str:
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parents[2] / "services" / "db_indexes.py"
+        ).read_text()
+
+    def test_get_index_stats_lists_fj_collections(self):
+        src = self._source()
+        stats_block = src.split("async def get_index_stats")[1].split("return stats")[0]
+        for name in ("emails", "user_company_roles", "notifications", "companies"):
+            assert f'"{name}"' in stats_block
 
 
 # Função auxiliar que pode ser testada

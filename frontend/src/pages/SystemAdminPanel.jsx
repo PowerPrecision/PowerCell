@@ -60,6 +60,7 @@ import { hasRole } from "../utils/roleUtils";
 
 // Embedded pages — Gestão (eager: leves)
 import UsersAccessAdminTab from "../components/admin/UsersAccessAdminTab";
+import CompaniesAdminTab from "../components/admin/CompaniesAdminTab";
 import AutomationPage from "./AutomationPage";
 import PermissionsTab from "../components/admin/PermissionsTab";
 
@@ -81,7 +82,6 @@ const AIConfigPage = lazy(() => import("./AIConfigPage"));
 const BackgroundJobsPage = lazy(() => import("./BackgroundJobsPage"));
 const ProcessMigrationTab = lazy(() => import("../components/admin/ProcessMigrationTab"));
 const FinanceTab = lazy(() => import("../components/admin/FinanceTab"));
-const CompaniesManagementPage = lazy(() => import("./CompaniesManagementPage"));
 
 // PACOTE BG: SystemEmailsSectionWrapper e IntegrationsConfigSectionWrapper
 // removidos — as sub-tabs 'Emails de Sistema' e 'Integrações' foram
@@ -272,9 +272,9 @@ const SystemAdminPanel = () => {
             <AutomationPage embedded={true} />
           </TabsContent>
 
-          {/* Empresas — CompaniesManagementPage em modo embedded */}
+          {/* Empresas — CompaniesAdminTab */}
           <TabsContent value="empresas" className="mt-6">
-            <Suspense fallback={<TabLoader />}><CompaniesManagementPage embedded={true} /></Suspense>
+            <CompaniesAdminTab />
           </TabsContent>
 
           {/* ================================================================ */}

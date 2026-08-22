@@ -745,7 +745,22 @@ async def get_index_stats(db) -> dict:
     """
     stats = {}
     
-    collections = ["processes", "clients", "users", "system_error_logs", "properties", "tasks", "chat_messages", "chat_groups", "history", "compliance_audit_logs"]
+    collections = [
+        "processes",
+        "clients",
+        "users",
+        "system_error_logs",
+        "properties",
+        "tasks",
+        "chat_messages",
+        "chat_groups",
+        "history",
+        "compliance_audit_logs",
+        "emails",
+        "user_company_roles",
+        "notifications",
+        "companies",
+    ]
     
     for collection_name in collections:
         try:

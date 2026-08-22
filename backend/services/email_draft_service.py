@@ -22,6 +22,32 @@ from services.ai_document_analyzer import get_openai_client
 
 logger = logging.getLogger(__name__)
 
+
+def is_draft_status(status) -> bool:
+    """True if status is the draft enum or the string 'draft'."""
+    if status is None:
+        return False
+    value = status.value if hasattr(status, "value") else status
+    return str(value).lower() == "draft"
+
+
+def stamp_draft_ttl_fields(
+    target: dict,
+    *,
+    now: datetime | None = None,
+    include_created: bool = True,
+) -> datetime:
+    """Stamp native BSON Date fields required by ttl_email_drafts.
+
+    MongoDB TTL indexes ignore ISO strings — they need datetime objects.
+    """
+    now = now or datetime.now(timezone.utc)
+    if include_created:
+        target["created_at_dt"] = now
+    target["updated_at_dt"] = now
+    return now
+
+
 # Prompt base para geração de rascunhos
 DEFAULT_DRAFT_PROMPT = """Escreve um e-mail profissional em português (pt-PT) para um cliente de crédito habitação.
 
@@ -223,15 +249,13 @@ async def create_missing_doc_draft(
             # Campos ISO string (compatibilidade com código existente)
             "created_at": now.isoformat(),
             "updated_at": now.isoformat(),
-            # Campos datetime nativo (para TTL indexes)
-            "created_at_dt": now,  # BSON Date
-            "updated_at_dt": now,  # BSON Date - TTL index usa este campo
             "is_important": False,
             "is_read": True,
             "is_starred": False,
             "is_archived": False,
             "labels": ["auto-draft"],
         }
+        stamp_draft_ttl_fields(draft_doc, now=now)
 
         await db.emails.insert_one(draft_doc)
 
@@ -364,8 +388,7 @@ async def update_draft(draft_id: str, update_data: Dict[str, Any]) -> Dict[str, 
     updates = {k: v for k, v in update_data.items() if k in allowed_fields}
     # Campos ISO string (compatibilidade)
     updates["updated_at"] = now.isoformat()
-    # Campo datetime nativo (para TTL index)
-    updates["updated_at_dt"] = now
+    stamp_draft_ttl_fields(updates, now=now, include_created=False)
 
     if updates:
         await db.emails.update_one(

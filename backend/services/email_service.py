@@ -1567,6 +1567,9 @@ async def sync_webmail_emails(
                         "references": references or [],
                         "is_general": True,
                     }
+                    if email_doc.get("status") == "draft":
+                        from services.email_draft_service import stamp_draft_ttl_fields
+                        stamp_draft_ttl_fields(email_doc)
                     
                     await db.emails.insert_one(email_doc)
                     synced += 1
@@ -1907,6 +1910,9 @@ async def sync_user_emails(
                 }
                 if company_id:
                     email_doc["company_id"] = company_id
+                if email_doc.get("status") == "draft":
+                    from services.email_draft_service import stamp_draft_ttl_fields
+                    stamp_draft_ttl_fields(email_doc)
                 
                 await db.emails.insert_one(email_doc)
                 total_synced += 1
