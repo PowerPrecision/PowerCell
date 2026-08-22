@@ -321,6 +321,30 @@ erDiagram
         datetime updated_at
     }
 
+    COMPANIES {
+        string id PK
+        string name
+        string nif
+        boolean is_active
+        boolean email_sync_enabled
+        string logo_url
+        datetime created_at
+        datetime updated_at
+    }
+
+    USER_COMPANY_ROLES {
+        string id PK
+        string user_id FK
+        string company_id FK
+        string company_name
+        string role
+        boolean is_default
+        string signature
+        object notification_preferences
+        datetime created_at
+        datetime updated_at
+    }
+
     PROCESSES {
         string id PK
         string client_name
@@ -467,6 +491,8 @@ erDiagram
     USERS ||--o{ PROCESSES : "consultor de"
     USERS ||--o{ TASKS : "responsável por"
     USERS ||--o{ ACTIVITIES : "criou"
+    USERS ||--o{ USER_COMPANY_ROLES : "tem acessos"
+    COMPANIES ||--o{ USER_COMPANY_ROLES : "concede cargos"
     CLIENTS ||--o{ PROCESSES : "dono de"
     LEADS ||--o{ CLIENTS : "converte-se em"
 ```
@@ -652,6 +678,8 @@ O script `backend/scripts/migrate_clients_to_processes.py` executa a migração 
 | **Thin Route + Service** | `routes/documents.py` / `routes/processes.py` — stubs FastAPI; lógica em `services/document_*.py` e `services/process_*.py` (ver `AGENTS.md`) |
 | **Safe Partial Update** | `sanitizeProcessUpdatePayload` (frontend) — omite arrays vazios / `documents` / `onedrive_links` no PUT processo |
 | **Sticky Toast** | `TasksContext` — `toast.loading` com `duration: Infinity` e id estável; sem auto-dismiss na navegação |
+| **Passive Cache Invalidation** | Webmail — WS `new_email` → `invalidateQueries(['emails'])` com `staleTime: 60s`; refetch silencioso sem skeleton |
+| **Last-Access Guard** | UCR — `run_delete_user_company_role` recusa HTTP 400 se for o único acesso do utilizador |
 | **Portal Checklist Fulfill** | `document_portal_fulfill` — upload staff CRM satisfaz REQUESTED do portal |
 | **MongoDB `$set` Partial Write** | Todas as escritas em `services/*.py` usam `update_one({...}, {"$set": {...}})` — nunca substituem o documento inteiro. Preserva campos não incluídos no payload (ex: `document_metadata.ai_analyzed`, mapeamentos S3, timestamps de outros subsistemas) |
 
@@ -794,11 +822,30 @@ sequenceDiagram
 
 ## Navegação e Controlo de Acessos (RBAC)
 
-### Painel de Administração Centralizado (/admin)
+### Separação das áreas de Administração (v2.0)
 
-O Painel de Administração é o hub centralizado para gestão do sistema, acessível via rota `/admin` para os roles `admin` e `CEO`. Substitui a dispersão de links de configuração pela Sidebar.
+A Administração deixou de ser um único hub. Existem **duas superfícies distintas**, ambas restritas aos perfis activos `admin` e `ceo` (`canAccessOrgAdmin` / `ADMIN_PANEL_ROLES`):
 
-**Tabs do Painel de Administração:**
+```mermaid
+flowchart LR
+    Sidebar["Sidebar — perfil activo admin/ceo"] --> Ops["/admin<br/>Dashboard operacional"]
+    Sidebar --> Org["/admin/organizacao<br/>Configuração de plataforma"]
+    Sidebar --> Sys["/system-admin<br/>Configuração técnica"]
+    Ops --> KPIs["KPIs, funil, calendário,<br/>documentos, leads, tarefas"]
+    Org --> Empresas["Tab Empresas<br/>(CRUD + is_active)"]
+    Org --> Users["Tab Utilizadores<br/>(contas + acessos UCR)"]
+    Sys --> Tech["SMTP, Storage, Workflow,<br/>Backups, Logs, IA"]
+```
+
+| Rota | Superfície | Quem acede | Conteúdo |
+|------|------------|------------|----------|
+| **`/admin`** | Dashboard **operacional** | admin, ceo | KPIs, funil de conversão, calendário, documentos a expirar, pesquisa, tarefas, leads — o dia-a-dia da operação |
+| **`/admin/organizacao`** | Área de **configuração de plataforma** | **apenas** perfil activo `admin` ou `ceo` | Tab **Empresas** + tab **Utilizadores** (contas, cargos UCR, Parceiro/Indexação). Substitui `/utilizadores` (redirect) |
+| **`/system-admin`** | Painel técnico / sistema | admin, ceo (tabs técnicas só admin) | Configurações, automações, permissões, backups, logs, IA, RGPD |
+
+O gate usa o **perfil activo** (`effectiveRole` / `X-Active-Role`), não só o `user.role` do JWT: um CEO que muda o ContextSwitcher para Consultor deixa de ver Administração.
+
+**Dashboard operacional (`/admin`) — tabs de negócio:**
 
 | Tab | Visível para | Descrição |
 |-----|-------------|-----------|
@@ -809,9 +856,21 @@ O Painel de Administração é o hub centralizado para gestão do sistema, acess
 | Pesquisar | admin, CEO | Pesquisa global de clientes |
 | Tarefas | admin, CEO | Gestão de tarefas assíncronas |
 | Leads | admin, CEO | Pipeline de leads |
-| **Utilizadores** | admin, CEO | Gestão completa de utilizadores (UsersManagementPage) |
+
+**Área de configuração de plataforma (`/admin/organizacao`):**
+
+| Tab | Visível para | Descrição |
+|-----|-------------|-----------|
+| **Empresas** | admin, ceo | CRUD de empresas do grupo; `is_active` (soft-delete) em vez de eliminar o documento |
+| **Utilizadores** | admin, ceo | Contas + acessos UCR (vários cargos por empresa, proteção do último acesso, cargos oficiais Parceiro e Indexação) |
+
+**Painel técnico (`/system-admin`) — tabs de sistema:**
+
+| Tab | Visível para | Descrição |
+|-----|-------------|-----------|
 | **Configurações** | admin, CEO | Configurações gerais do sistema (SystemConfigPage) |
 | **Automações** | admin, CEO | Regras de automação "Se X, Então Y" |
+| **Permissões** | admin, CEO | Capabilities por utilizador / role |
 | **Segurança & Backups** | **apenas admin** | Backups da BD e verificação de integridade |
 | **Logs & Diagnósticos** | **apenas admin** | Logs do sistema, importação IA e diagnósticos |
 
@@ -823,19 +882,22 @@ O Painel de Administração é o hub centralizado para gestão do sistema, acess
 | **consultor/mediador/intermediário** | Dashboard + O Meu Negócio + Visão Global + Comunicações | Acesso operacional standard |
 | **diretor** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão e Operações | Vê Estatísticas e Rascunhos; sem Painel Admin |
 | **administrativo** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão (com RGPD) | Vê RGPD; sem Painel Admin |
-| **CEO** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão + ⚙️ Painel Admin | Acesso total ao negócio; tabs técnicas escondidas |
-| **admin** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão + ⚙️ Painel Admin | Acesso total incluindo tabs técnicas |
+| **CEO** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão + ⚙️ Administração (`/admin/organizacao`) + Painel operacional (`/admin`) | Acesso total ao negócio; tabs técnicas de `/system-admin` escondidas |
+| **admin** | Dashboard + O Meu Negócio + Visão Global + Comunicações + Gestão + ⚙️ Administração (`/admin/organizacao`) + Painel operacional (`/admin`) | Acesso total incluindo tabs técnicas |
 
 ### Rotas Obsoletas na Sidebar
 
 As rotas `/rgpd-admin` e `/templates` foram removidas da navegação principal da Sidebar. As páginas continuam acessíveis via URLs diretas e através do Painel de Administração (Tabs de Configurações e Utilizadores).
+
+`/utilizadores` redirecciona para `/admin/organizacao?tab=utilizadores` (Pacote DY).
 
 ### Arquitetura de Páginas Embedded
 
 As páginas integradas como Tabs no Painel de Administração suportam um modo `embedded` que omite o wrapper `<DashboardLayout>`, permitindo que o conteúdo seja renderizado dentro das Tabs sem duplicar a sidebar e o header.
 
 Componentes com suporte `embedded`:
-- `UsersManagementPage` — Gestão de utilizadores
+- `UsersAccessAdminTab` — Gestão de utilizadores e acessos UCR (`/admin/organizacao`)
+- `UsersManagementPage` — Gestão de utilizadores (legado / atalho técnico)
 - `SystemConfigPage` — Configurações do sistema
 - `AutomationPage` — Automações de workflow
 - `BackupsPage` — Backups da base de dados
@@ -894,11 +956,76 @@ Anteriormente gerava o link na mesma, mas o Portal do Cliente poderia ter funcio
 | `/admin/companies/{id}` | DELETE | Eliminar empresa (bloqueia se tem utilizadores associados) |
 | `/admin/companies/{id}/logo` | POST | Upload de logótipo para S3 (max 2MB, PNG/JPEG/GIF/WebP/SVG) |
 
-**Campos**: name, nif, address, phone, email, website, logo_url, email_sync_enabled, total_users (computado).
+**Campos**: name, nif, address, phone, email, website, logo_url, email_sync_enabled, **`is_active`** (default `true`), total_users (computado).
 
-**Frontend**: Tab "Empresas" no SystemAdminPanel (grupo GESTÃO, amber). Página `CompaniesManagementPage.jsx` com painel esquerdo (lista + pesquisa) e painel direito (formulário de edição com 3 secções: Dados Base, Branding/Logo, Motor de E-mail com toggle).
+**Soft-delete (`is_active`)**: o modelo `Company` passou a suportar `is_active`. A UI de Administração (`CompaniesAdminTab`) **não apaga** a empresa — o Switch Activa/Inactiva faz `PUT` com `is_active: false`. Empresas inactivas deixam de aparecer no Select de "Novo acesso" UCR (`companiesForNewAccess` filtra `is_active !== false`). O endpoint `DELETE /admin/companies/{id}` continua a existir para limpeza administrativa (bloqueia se há utilizadores cuja única empresa é esta).
 
-**Acesso**: Admin e CEO (via `require_admin()`).
+**Frontend**: rota canónica **`/admin/organizacao`** (tab Empresas). Página `OrganizationAdminPage.jsx` + `CompaniesAdminTab.jsx`. A tab "Empresas" no SystemAdminPanel permanece como atalho técnico.
+
+**Acesso**: perfil activo admin ou ceo (`canAccessOrgAdmin`).
+
+---
+
+## Gestão UCR (User-Company-Role) — v2.0
+
+A plataforma deixa de ter **um único cargo por empresa**. A coleção `user_company_roles` é a fonte de verdade dos acessos: um utilizador pode ter **vários cargos na mesma empresa em simultâneo** (ex.: Diretor **e** Consultor na "Empresa A") e cargos diferentes em empresas diferentes.
+
+```mermaid
+erDiagram
+    USERS ||--o{ USER_COMPANY_ROLES : "n acessos"
+    COMPANIES ||--o{ USER_COMPANY_ROLES : "n cargos"
+    USER_COMPANY_ROLES {
+        string user_id FK
+        string company_id FK
+        string role
+        boolean is_default
+    }
+```
+
+### Índice único composto
+
+| Antes (v1) | Depois (v2.0) |
+|---|---|
+| Unique `{ user_id, company_id }` — um cargo por empresa | Unique `{ user_id, company_id, role }` — vários cargos por empresa |
+| Select de "Novo acesso" excluía empresas já atribuídas | Select lista **todas** as empresas activas; só bloqueia a combinação exacta Empresa+Cargo (`isUcrComboTaken`) |
+
+Modelo: `backend/models/user_company_role.py` (`CompanyRoleEnum`). Serviço: `services/user_company_roles_api_crud.py`. Helper de UI: `frontend/src/utils/organizationAdmin.js`.
+
+### Cargos oficiais
+
+`CompanyRoleEnum` / `UCR_ASSIGNABLE_ROLES` incluem os cargos oficiais de sistema:
+
+| Cargo | Notas |
+|-------|-------|
+| `admin` | Administrador do sistema |
+| `ceo` | CEO |
+| `diretor` | Diretor(a) |
+| `administrativo` | Apoio Administrativo |
+| `consultor` | Consultor(a) |
+| `intermediario` | Intermediário(a) de Crédito |
+| **`indexacao`** | Indexação de Dados — cargo oficial (não é um "extra") |
+| **`parceiro`** | Parceiro — utilizador fantasma (sem login operacional típico; visível na gestão de acessos) |
+
+O perfil legado `mediador` continua mapeado para `intermediario` (`normalizeRole`).
+
+### Proteção contra a eliminação do último acesso
+
+Remover um UCR **não** pode deixar o utilizador sem nenhum acesso:
+
+```python
+# services/user_company_roles_api_crud.py — run_delete_user_company_role
+LAST_UCR_DELETE_DETAIL = (
+    "Não é possível remover o único acesso deste utilizador. "
+    "Um utilizador tem de ter pelo menos um acesso UCR."
+)
+# HTTP 400 se count_documents({user_id}) <= 1
+```
+
+A UI (`UsersAccessAdminTab` / `LAST_UCR_DELETE_MESSAGE`) mostra a mesma mensagem. Para revogar o acesso total, desactivar a conta (`users.is_active = false`) em vez de apagar o último UCR.
+
+### Empresa activa vs. inactiva
+
+Novos acessos UCR só podem ser criados contra empresas com `is_active !== false`. Uma empresa inactivada deixa de ser oferecida no formulário de novo acesso, mas os UCRs já existentes **não** são apagados automaticamente (soft-delete da empresa, não cascade).
 
 ---
 
@@ -928,19 +1055,21 @@ Anteriormente gerava o link na mesma, mas o Portal do Cliente poderia ter funcio
 sequenceDiagram
     actor User as Consultor
     participant WP as WebmailPage
+    participant RQ as React Query
     participant API as FastAPI
-    participant Worker as ARQ Worker
     participant IMAP as IMAP Servers
     participant DB as MongoDB
     participant WS as WebSocket
 
-    %% Sync automático (Worker)
-    loop A cada 15 minutos
-        Worker->>IMAP: FETCH emails (Precision + Power)
-        IMAP-->>Worker: Lista de mensagens
-        Worker->>DB: Upsert emails (dedup por message_id)
-        Worker->>WS: broadcast(email_sync_completed)
-        WS-->>User: Notificação de novos emails
+    %% Sync automático híbrido (Pacote EC) — corre no processo da API
+    loop A cada 60s (+ jitter curto)
+        API->>IMAP: FETCH emails (IMAP pessoal + partilhado)
+        IMAP-->>API: Lista de mensagens
+        API->>DB: Upsert emails (dedup por message_id)
+        API->>WS: new_email na room user_{id}
+        WS-->>User: Evento new_email (sem reload)
+        WS-->>RQ: invalidateQueries emails
+        RQ-->>WP: refetch silencioso (staleTime 60s)
     end
 
     %% Sync manual (botão)
@@ -959,6 +1088,33 @@ sequenceDiagram
     API->>SMTP: Enviar via SendGrid/Resend/SMTP
     API-->>WP: Email enviado
 ```
+
+### Motor Real-Time do Webmail (v2.0 — Pacote EC)
+
+O sync IMAP **já não corre no ARQ Worker a cada 15 minutos**. O `ConnectionManager` WebSocket vive **em memória no processo da API** (`uvicorn`); um worker separado não consegue emitir eventos para os clientes ligados. Por isso o loop de auto-sync passou a correr **no próprio processo da API**.
+
+```mermaid
+flowchart TD
+    Start["server.py startup"] --> Loop["run_email_auto_sync()<br/>intervalo 60s + jitter ≤15s"]
+    Loop --> IMAP["IMAP FETCH<br/>pessoal + partilhado + Gmail"]
+    IMAP -->|insert novo| WS["email_realtime.notify_new_email"]
+    WS --> Room["broadcast_to_room(user_{id})"]
+    Room --> FE["useNewEmailRealtime"]
+    FE --> Inv["invalidateQueries(['emails'])"]
+    Inv --> RQ["React Query<br/>staleTime: 60s"]
+    RQ -->|"cache ainda fresh"| Instant["Lista actualiza em fundo<br/>sem skeleton / sem reload"]
+```
+
+| Peça | Onde | Comportamento |
+|------|------|----------------|
+| Loop IMAP | `scheduled_tasks.run_email_auto_sync` no processo FastAPI | Default **60s** (`EMAIL_AUTO_SYNC_INTERVAL_SECONDS`, clamp 30–300). Sleep **depois** do sync + jitter curto |
+| Evento | `services/email_realtime.py` | `new_email` (`WSEventType.NEW_EMAIL`) para a room `user_{id}` (e rooms de mailbox global / role partilhado) |
+| Join da room | WebSocket connect | `join_user_email_room(user_id)` para o broadcast chegar ao cliente |
+| Frontend | `useNewEmailRealtime` + `useWebmailEmails` | Listener WS → `invalidateQueries({ queryKey: queryKeys.emails.all })`. `staleTime: 60s` + `keepPreviousData` — a lista **não** mostra skeleton no refetch |
+| Kill switch | `ENVIRONMENT=production` **ou** `EMAIL_SYNC_ENABLED=true` | Em DEV o loop não arranca (evita OOM no Render free) |
+| Sync manual | Botão "Sincronizar" | Continua a existir (`POST /api/emails/webmail/sync`) para FETCH imediato de todas as pastas |
+
+O resultado: a caixa de correio **sincroniza em tempo real** sem interrupções de UI — o utilizador continua a ler/compor enquanto a cache é invalidada em background.
 
 **Contas de email suportadas:**
 
@@ -1293,13 +1449,12 @@ flowchart LR
         Auth["Informação de Login<br/>(email, password)"]
         Sessions["Sessões Ativas<br/>(JWT tokens)"]
     end
-    subgraph UCR1["UCR: Consultor @ Power RE"]
-        Sig1["Assinatura de Email"]
-        Phone1["Telefone Profissional"]
-        Job1["Cargo"]
-        Mail1["Config Webmail<br/>(IMAP/SMTP)"]
-        Google1["Google OAuth"]
-        Notif1["Preferências de<br/>Notificação"]
+    subgraph UCR1a["UCR: Diretor @ Power RE"]
+        Sig1a["Assinatura / Telefone / Cargo"]
+    end
+    subgraph UCR1b["UCR: Consultor @ Power RE"]
+        Sig1b["Assinatura / Telefone / Cargo"]
+        Mail1["Config Webmail (IMAP/SMTP)"]
     end
     subgraph UCR2["UCR: Intermediário @ Precision"]
         Sig2["Assinatura de Email"]
@@ -1310,7 +1465,8 @@ flowchart LR
         Notif2["Preferências de<br/>Notificação"]
     end
     User["Utilador"] --> Global
-    User -->|"user.companies[]"| UCR1
+    User -->|"UCR Diretor + Consultor<br/>na mesma empresa"| UCR1a
+    User --> UCR1b
     User -->|"user.companies[]"| UCR2
 ```
 
@@ -1329,7 +1485,7 @@ A aba "Conta Global" da Área Pessoal contém APENAS estes cartões: Informaçã
 
 ### Role/Perfil (Local) — pertence ao `user_company_role`
 
-Cada UCR (`user_company_roles` collection, chave única `{user_id, company_id}`) tem os seus próprios:
+Cada UCR (`user_company_roles` collection, chave única `{user_id, company_id, role}` — v2.0 permite **vários cargos na mesma empresa**) tem os seus próprios:
 
 | Campo | Coleção | Scoping |
 |---|---|---|
@@ -1341,7 +1497,7 @@ Cada UCR (`user_company_roles` collection, chave única `{user_id, company_id}`)
 | Webmail IMAP/SMTP | `user_email_configs` | Keyed by `{user_id, company_id, email_address}` — várias contas por perfil (`is_primary`) |
 | Google OAuth tokens | `user_email_configs` + `users.email_config["company:<id>"]` | Dual-write per-UCR |
 
-A Área Pessoal gera **uma aba dinâmica por UCR real** (iterando `user.companies`), cada uma com os cartões: Dados Profissionais + Assinatura + Webmail. **Sem hardcode de roles** — só perfis que o utilizador realmente tem aparecem.
+A Área Pessoal gera **uma aba dinâmica por UCR real** (iterando `user.companies` / `user_company_roles`), cada uma com os cartões: Dados Profissionais + Assinatura + Webmail. **Sem hardcode de roles** — só perfis que o utilizador realmente tem aparecem. Na v2.0, o mesmo utilizador pode ter **duas abas para a mesma empresa** (ex.: Diretor e Consultor).
 
 ### `X-Company-Id` header — o mecanismo de scoping
 
@@ -1540,6 +1696,20 @@ O histórico de estados **já existia** (`GET /api/history`, coleção `history`
 | Portal do Cliente | `GET /portal/events?include_past=true` | Apenas `visible_to_client=true` e não concluídos |
 
 Dias com agendamentos mostram um ponto; o dia seleccionado lista os títulos. O calendário vive numa tab (Progressive Disclosure), não no fluxo principal.
+
+### Calendário de precisão (v2.0 — Pacote FA)
+
+A página `/calendario` (`CalendarPage.jsx`) passou a ser um calendário de **hora exacta**, não só de dia civil:
+
+| Capacidade | Implementação |
+|------------|----------------|
+| **Hora de início/fim** | Inputs `type="time"` em `CreateEventDialog` (`start_time` / `end_time`). Persistidos em `due_date` / `end_date` como ISO local `YYYY-MM-DDTHH:mm:00` via `combineDateAndTime` (`utils/agendaCalendar.js`). Default 09:00–10:00 |
+| **Dia inteiro** | Switch `all_day` — omite a hora (ausências/férias forçam dia inteiro) |
+| **Edição** | Clique no evento abre o mesmo dialog em modo edição (`editingEvent`); `PUT /deadlines/{id}` |
+| **Eliminação** | Botão eliminar no dialog de edição (`Trash2`) → `DELETE /deadlines/{id}` |
+| **Vista** | Chip no calendário mostra o intervalo (`formatEventClockRange`, ex.: `09:00–10:30`) |
+
+`due_date` continua a aceitar `YYYY-MM-DD` (legado, dia inteiro). Eventos novos com hora usam datetime ISO sem `Z` (hora local, evita o salto UTC).
 
 ```mermaid
 flowchart LR

@@ -3,6 +3,28 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2.0.0] — 2026-08-22 — Pacote FC: Documentação oficial da v2.0
+
+Lançamento em Produção da **versão 2.0** do PowerCell CRM. Este pacote actualiza `ARCHITECTURE.md`, `README.md` e este changelog para reflectir o estado real da plataforma (UCR multi-cargo, Webmail em tempo real, Calendário de precisão e Administração reformulada).
+
+### Adicionado
+- **Calendário de precisão** (`/calendario`): selecção exacta de horas (`start_time` / `end_time`, default 09:00–10:00) persistida em ISO local `YYYY-MM-DDTHH:mm:00`; edição e eliminação de eventos no mesmo dialog (`CreateEventDialog` em modo edição + `DELETE /deadlines/{id}`). Chip no calendário mostra o intervalo (ex.: `09:00–10:30`).
+- **Sincronização instantânea do Webmail**: loop IMAP no **processo da API** a cada **60s** (+ jitter curto); cada insert emite WebSocket `new_email` para a room `user_{id}`. O frontend (`useNewEmailRealtime`) invalida a cache TanStack Query (`staleTime: 60s`) — a lista actualiza em fundo **sem skeleton nem reload**.
+- **Área de Administração de plataforma** (`/admin/organizacao`): exclusiva para perfil activo `admin` / `ceo`. Tab Empresas + tab Utilizadores (contas e acessos UCR). Separada do dashboard operacional (`/admin`).
+- **UCR multi-cargo**: o mesmo utilizador pode ser, em simultâneo, Diretor **e** Consultor na mesma empresa (índice único `{user_id, company_id, role}`).
+- **Cargos oficiais** `parceiro` e `indexacao` no `CompanyRoleEnum` / `UCR_ASSIGNABLE_ROLES`.
+- **Soft-delete de empresas**: modelo `Company.is_active` — inactivar em vez de apagar o documento.
+
+### Alterado
+- **Proteção do último acesso UCR**: `DELETE` do único vínculo devolve HTTP 400 (`Não é possível remover o único acesso deste utilizador`).
+- **Painel de Utilizadores e Empresas** reformulado: gestão consolidada em `/admin/organizacao` (redirect de `/utilizadores`); Select de novo acesso lista todas as empresas **activas** e só bloqueia a combinação exacta Empresa+Cargo.
+- Documentação de arquitectura alinhada com o código (diagramas Mermaid do sync IMAP, RBAC das duas áreas admin, ER de `COMPANIES` / `USER_COMPANY_ROLES`).
+
+### Documentação
+- **`ARCHITECTURE.md`**: secções novas/actualizadas — Gestão UCR v2.0, Motor Real-Time do Webmail, Calendário de precisão, separação `/admin` vs `/admin/organizacao`.
+- **`README.md`**: funcionalidades v2.0, rotas, sync IMAP 60s, perfil Parceiro, tabela ENVIRONMENT.
+
+---
 ## [2026-08-18] — Pacote DO.3+4: Caixa Geral no Diretor e SMTP dos balcões
 
 ### Adicionado
