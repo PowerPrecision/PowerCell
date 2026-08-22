@@ -466,6 +466,16 @@ export function AuthProvider({ children }) {
     }
   }, [applyUserContext]);
 
+  // Pacote FH / C6: persistir UCR activo em /auth/active-company (user+company+role).
+  const persistActiveCompany = useCallback(async (companyId, role) => {
+    if (!companyId || !role) return;
+    try {
+      await api.post("/auth/active-company", { company_id: companyId, role });
+    } catch (error) {
+      console.warn("[AuthContext] Erro ao definir empresa/cargo ativo no backend:", error);
+    }
+  }, []);
+
   // ── Context Switching — Múltiplos Perfis ──
   // Recebe newRole e opcionalmente newCompanyId. Se newCompanyId não for
   // fornecido, infere a empresa a partir dos UCRs (companies / company_roles).
@@ -496,8 +506,9 @@ export function AuthProvider({ children }) {
       if (matching?.company_name) {
         applyBrandTheme(matching.company_name);
       }
+      persistActiveCompany(resolvedCompanyId, newRole);
     }
-  }, [user]);
+  }, [user, persistActiveCompany]);
 
   // Context Switching - Múltiplas Empresas
   const switchActiveCompany = useCallback(async (companyId) => {
@@ -516,19 +527,14 @@ export function AuthProvider({ children }) {
       applyBrandTheme(target.company_name);
     }
 
-    // Notificar o backend para atualizar a empresa ativa (fire-and-forget
-    // — não esperamos a resposta antes do reload)
-    try {
-      await api.post("/admin/user-company-roles/set-active-company", { company_id: companyId });
-    } catch (error) {
-      console.warn("[AuthContext] Erro ao definir empresa ativa no backend:", error);
-    }
+    const role = target?.role || activeRole || user?.role;
+    await persistActiveCompany(companyId, role);
 
     // PACOTE AR: Hard reload para limpar toda a cache (TanStack Query, estado
     // de componentes, etc.) e evitar fugas de dados da empresa anterior na UI.
     // É a forma mais segura num CRM multi-empresa.
     window.location.reload();
-  }, [user]);
+  }, [user, activeRole, persistActiveCompany]);
 
   // Refresh user data from /auth/me (e.g. after email config save)
   const refreshUser = useCallback(async () => {

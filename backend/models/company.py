@@ -9,8 +9,24 @@ INDEX: { name: 1 } (unique)
 ====================================================================
 """
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 from typing import Optional, List
+import re
+
+from utils.validation import validate_nif
+
+
+def _validate_optional_company_nif(value: Optional[str]) -> Optional[str]:
+    """NIF/NIPC opcional com checksum módulo 11 (não confiar só no frontend)."""
+    if value is None:
+        return None
+    cleaned = str(value).strip()
+    if not cleaned:
+        return None
+    is_valid, error = validate_nif(cleaned)
+    if not is_valid:
+        raise ValueError(error)
+    return re.sub(r"\D", "", cleaned)
 
 
 class CompanyCreate(BaseModel):
@@ -25,6 +41,11 @@ class CompanyCreate(BaseModel):
     email_sync_enabled: bool = Field(False, description="Ativar sincronização de e-mail")
     is_active: bool = Field(True, description="Estado da empresa (activa / inactiva)")
 
+    @field_validator("nif")
+    @classmethod
+    def validate_nif_field(cls, v):
+        return _validate_optional_company_nif(v)
+
 
 class CompanyUpdate(BaseModel):
     """Payload para atualizar uma empresa (todos os campos opcionais)."""
@@ -37,6 +58,11 @@ class CompanyUpdate(BaseModel):
     logo_url: Optional[str] = None
     email_sync_enabled: Optional[bool] = None
     is_active: Optional[bool] = None
+
+    @field_validator("nif")
+    @classmethod
+    def validate_nif_field(cls, v):
+        return _validate_optional_company_nif(v)
 
 
 class CompanyResponse(BaseModel):

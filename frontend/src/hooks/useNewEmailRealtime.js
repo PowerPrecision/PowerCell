@@ -1,8 +1,8 @@
 /**
  * Pacote EC — listener WebSocket `new_email` → refetch silencioso da lista.
  *
- * Usa React Query `invalidateQueries({ queryKey: ['emails'] })` para que o
- * Webmail actualize em background sem spinners de loading.
+ * Usa React Query `invalidateQueries` na key `emails.webmailAll()` para que
+ * só a lista do Webmail actualize em background — não a cache global de emails.
  */
 import { useCallback } from "react";
 import { useQueryClient } from "@tanstack/react-query";
@@ -10,7 +10,7 @@ import useWebSocket from "./useWebSocket";
 import { queryKeys } from "../lib/queryClient";
 
 export function invalidateEmailQueries(queryClient) {
-  return queryClient.invalidateQueries({ queryKey: queryKeys.emails.all });
+  return queryClient.invalidateQueries({ queryKey: queryKeys.emails.webmailAll() });
 }
 
 export function useNewEmailRealtime({ onReceived, autoConnect = true } = {}) {

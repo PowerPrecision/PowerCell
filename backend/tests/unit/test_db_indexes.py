@@ -68,6 +68,40 @@ class TestIndexCreation:
                         assert isinstance(key[1], int)
 
 
+class TestPacoteFfCriticalIndexes:
+    """Pacote FF — índices críticos em emails e user_company_roles."""
+
+    def _source(self) -> str:
+        from pathlib import Path
+
+        return (
+            Path(__file__).resolve().parents[2] / "services" / "db_indexes.py"
+        ).read_text()
+
+    def test_emails_id_unique_index(self):
+        src = self._source()
+        assert '{"keys": [("id", 1)], "name": "idx_emails_id", "unique": True}' in src
+
+    def test_emails_mailbox_compound_index(self):
+        src = self._source()
+        assert '("company_id", 1), ("direction", 1), ("sent_at", -1)' in src
+        assert "idx_emails_mailbox" in src
+
+    def test_emails_process_timeline_index(self):
+        src = self._source()
+        assert '("process_id", 1), ("sent_at", 1)' in src
+        assert "idx_emails_process_timeline" in src
+
+    def test_emails_message_dedup_index(self):
+        src = self._source()
+        assert '("message_id", 1), ("account", 1)' in src
+        assert "idx_emails_message_dedup" in src
+
+    def test_ucr_id_unique_index(self):
+        src = self._source()
+        assert '{"keys": [("id", 1)], "name": "idx_ucr_id", "unique": True}' in src
+
+
 class TestIndexStats:
     """Testes para estatísticas de índices."""
     

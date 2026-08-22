@@ -21,10 +21,11 @@ describe("Pacote EC webmail React Query", () => {
     assert.match(webmailSource, /staleTime: WEBMAIL_STALE_TIME_MS/);
     assert.match(webmailSource, /queryKeys\.emails\.webmail/);
     assert.match(queryClientSource, /webmail: \(filters\) => \[\.\.\.queryKeys\.emails\.all, 'webmail', filters\]/);
+    assert.match(queryClientSource, /webmailAll: \(\) => \[\.\.\.queryKeys\.emails\.all, 'webmail'\]/);
   });
 
-  it("invalidates ['emails'] on new_email for silent refetch", () => {
-    assert.match(realtimeSource, /invalidateQueries\(\{ queryKey: queryKeys\.emails\.all \}\)/);
+  it("invalidates emails.webmailAll on new_email for silent refetch", () => {
+    assert.match(realtimeSource, /invalidateQueries\(\{ queryKey: queryKeys\.emails\.webmailAll\(\) \}\)/);
     assert.match(realtimeSource, /onNewEmail/);
     assert.match(pageSource, /useNewEmailRealtime/);
     assert.match(layoutSource, /invalidateEmailQueries|onNewEmail/);

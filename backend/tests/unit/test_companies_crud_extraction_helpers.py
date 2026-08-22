@@ -1,4 +1,5 @@
 """Unit tests for companies_crud route thinning helpers (companies_crud_api_*)."""
+import pytest
 
 
 def test_companies_crud_api_modules_exist():
@@ -75,6 +76,46 @@ def test_company_models_include_is_active():
     assert response.is_active is True
 
 
+def test_list_companies_escapes_regex_search():
+    """Pacote FF — pesquisa de empresas não injeta $regex cru."""
+    import asyncio
+    from unittest.mock import MagicMock, patch
+
+    from services import companies_crud_api_list as listing
+
+    class _Cursor:
+        def sort(self, *args, **kwargs):
+            return self
+
+        async def to_list(self, n):
+            return []
+
+    mock_db = MagicMock()
+    mock_db.companies.find = MagicMock(return_value=_Cursor())
+
+    with patch.object(listing, "db", mock_db):
+        asyncio.run(listing.run_list_companies(search="Power.*(+"))
+
+    query = mock_db.companies.find.call_args[0][0]
+    name_regex = query["$or"][0]["name"]["$regex"]
+    nif_regex = query["$or"][1]["nif"]["$regex"]
+    assert name_regex == r"Power\.\*\(\+"
+    assert nif_regex == name_regex
+    assert name_regex != "Power.*(+"
+
+
+def test_list_companies_search_imports_escape_regex():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "companies_crud_api_list.py"
+    ).read_text()
+    assert "from utils.input_sanitization import escape_regex" in text
+    assert "escape_regex(search)" in text
+
+
 def test_create_company_strips_mongo_objectid():
     from pathlib import Path
 
@@ -85,3 +126,26 @@ def test_create_company_strips_mongo_objectid():
     ).read_text()
     assert 'doc.pop("_id"' in text
     assert 'updated.pop("_id"' in text
+
+
+def test_company_create_validates_nif_checksum():
+    from pydantic import ValidationError
+    from models.company import CompanyCreate, CompanyUpdate
+
+    created = CompanyCreate(name="Precision Crédito")
+    assert created.nif is None
+
+    ok = CompanyCreate(name="Precision Crédito", nif="501442600")
+    assert ok.nif == "501442600"
+
+    spaced = CompanyCreate(name="X", nif="501 442 600")
+    assert spaced.nif == "501442600"
+
+    with pytest.raises(ValidationError):
+        CompanyCreate(name="X", nif="123456780")
+
+    with pytest.raises(ValidationError):
+        CompanyCreate(name="X", nif="12")
+
+    with pytest.raises(ValidationError):
+        CompanyUpdate(nif="000000000")

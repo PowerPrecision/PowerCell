@@ -20,7 +20,7 @@ from models.email import (
     EmailFilter, EmailSendRequest,
 )
 from services.auth import get_effective_role
-from services.email_enrich import enrich_email
+from services.email_enrich import enrich_email, enrich_emails
 from services.email_service import (
     sync_emails_for_process,
     send_email,
@@ -263,11 +263,8 @@ async def run_advanced_email_search(filters: EmailFilter, current_user: dict, pa
         {"_id": 0}
     ).sort("sent_at", -1).skip(skip).limit(limit).to_list(limit)
     
-    # Enriquecer emails
-    enriched_emails = []
-    for email in emails:
-        enriched = await enrich_email(email)
-        enriched_emails.append(enriched)
+    # Enriquecer emails (batch $in)
+    enriched_emails = await enrich_emails(emails)
     
     return {
         "emails": enriched_emails,
@@ -375,9 +372,10 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
 
     emails = await db.emails.find(query, {"_id": 0}).sort("sent_at", -1).to_list(500)
     
+    batch = await enrich_emails(emails)
     enriched_emails = []
-    for email in emails:
-        enriched = coerce_email_response_fields(await enrich_email(email))
+    for email in batch:
+        enriched = coerce_email_response_fields(email)
         try:
             enriched_emails.append(EmailResponse(**enriched))
         except Exception as exc:
@@ -604,14 +602,7 @@ async def run_search_emails(q: str, current_user: dict, limit: int = 20):
         {"_id": 0, "id": 1, "subject": 1, "from_email": 1, "to_emails": 1, "sent_at": 1, "process_id": 1}
     ).sort("sent_at", -1).limit(limit).to_list(limit)
     
-    for email in emails:
-        if email.get("process_id"):
-            process = await db.processes.find_one(
-                {"id": email["process_id"]},
-                {"_id": 0, "client_name": 1}
-            )
-            if process:
-                email["client_name"] = process.get("client_name")
+    emails = await enrich_emails(emails)
     
     return {"emails": emails, "total": len(emails)}
 

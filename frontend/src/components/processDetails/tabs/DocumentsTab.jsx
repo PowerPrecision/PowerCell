@@ -144,6 +144,8 @@ export default function DocumentsTab({
       {/* Pedidos de Documentos do Portal */}
       <PortalDocumentRequests
         processId={id}
+        processNumber={process?.process_number}
+        clientName={process?.client_name}
         onDocumentsChange={() => setDocumentsRefreshKey(k => k + 1)}
       />
     </div>

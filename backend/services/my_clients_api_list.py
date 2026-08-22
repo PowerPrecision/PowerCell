@@ -19,6 +19,7 @@ from services.my_clients_api_helpers import (
     format_lead_row,
     resolve_list_context,
 )
+from services.process_list_filters import role_has_client_portfolio
 from services.process_my_clients import (
     fetch_latest_activity_notes_map,
     fetch_new_documents_map,
@@ -39,6 +40,9 @@ async def run_get_my_clients(request: Request, user: dict):
     A estes somam-se os Leads (clientes sem processo) criados pelo utilizador.
     """
     user_id, user_email, role, wants_deleted = resolve_list_context(request, user)
+
+    if not role_has_client_portfolio(role):
+        return {"clients": [], "total": 0, "leads_count": 0}
 
     query = build_my_clients_process_query(
         user_id=user_id,

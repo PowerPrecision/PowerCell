@@ -34,6 +34,8 @@ from typing import Optional, List, Dict
 from datetime import datetime, timezone
 from enum import Enum
 
+from utils.input_sanitization import sanitize_email_signature
+
 
 class CompanyRoleEnum(str, Enum):
     """Roles que um utilizador pode ter numa empresa específica.
@@ -99,6 +101,11 @@ class UserCompanyRoleCreate(BaseModel):
             raise ValueError("Nome da empresa é obrigatório")
         return v.strip()
 
+    @field_validator("signature")
+    @classmethod
+    def sanitize_signature(cls, v):
+        return sanitize_email_signature(v)
+
 
 class UserCompanyRoleUpdate(BaseModel):
     """Payload para atualizar uma associação existente."""
@@ -120,6 +127,11 @@ class UserCompanyRoleUpdate(BaseModel):
             if v not in valid_roles:
                 raise ValueError(f"Role inválido: {v}. Válidos: {valid_roles}")
         return v
+
+    @field_validator("signature")
+    @classmethod
+    def sanitize_signature(cls, v):
+        return sanitize_email_signature(v)
 
 
 class UserCompanyRoleResponse(BaseModel):

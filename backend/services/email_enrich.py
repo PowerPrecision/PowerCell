@@ -5,41 +5,73 @@ Extraído de `routes/emails.py`.
 """
 from __future__ import annotations
 
+from typing import Iterable, List, Sequence
+
 from database import db
 
 
-async def enrich_email(email: dict) -> dict:
-    """Enriquece um registo de email com nomes de processo e criador.
+async def enrich_emails(emails: Sequence[dict]) -> List[dict]:
+    """Enriquece uma lista de emails com nomes de processo e criador.
 
-    Adiciona ``client_name`` (nome do cliente do processo associado)
-    e ``created_by_name`` (nome do utilizador que criou o email).
-
-    Porquê este enriquecimento: a lista de emails no frontend precisa
-    de mostrar nomes legíveis em vez de apenas IDs.
+    Substitui o padrão N+1 (``find_one`` por email) por dois ``find`` com
+    ``$in``, juntando os resultados em memória.
 
     Args:
-        email: Dicionário do documento de email da MongoDB.
+        emails: Documentos de email da MongoDB (mutados in-place).
 
     Returns:
-        dict: Mesmo dicionário com campos client_name e
-            created_by_name adicionados (se encontrado).
+        list[dict]: Os mesmos dicionários, com ``client_name`` e
+            ``created_by_name`` preenchidos quando encontrados.
     """
-    # Nome do processo/cliente
-    if email.get("process_id"):
-        process = await db.processes.find_one(
-            {"id": email["process_id"]},
-            {"_id": 0, "client_name": 1}
-        )
-        if process:
-            email["client_name"] = process.get("client_name", "")
-    
-    # Nome de quem criou
-    if email.get("created_by"):
-        user = await db.users.find_one(
-            {"id": email["created_by"]},
-            {"_id": 0, "name": 1}
-        )
-        if user:
-            email["created_by_name"] = user.get("name", "")
-    
-    return email
+    if not emails:
+        return list(emails)
+
+    process_ids = list({
+        email["process_id"]
+        for email in emails
+        if email.get("process_id")
+    })
+    creator_ids = list({
+        email["created_by"]
+        for email in emails
+        if email.get("created_by")
+    })
+
+    process_names = await _id_name_map(
+        db.processes, process_ids, name_field="client_name",
+    )
+    creator_names = await _id_name_map(
+        db.users, creator_ids, name_field="name",
+    )
+
+    for email in emails:
+        process_id = email.get("process_id")
+        if process_id and process_id in process_names:
+            email["client_name"] = process_names[process_id]
+        created_by = email.get("created_by")
+        if created_by and created_by in creator_names:
+            email["created_by_name"] = creator_names[created_by]
+
+    return list(emails)
+
+
+async def enrich_email(email: dict) -> dict:
+    """Enriquece um único registo de email (wrapper do batch)."""
+    enriched = await enrich_emails([email])
+    return enriched[0] if enriched else email
+
+
+async def _id_name_map(collection, ids: Iterable, name_field: str) -> dict:
+    """Busca ``id`` → ``name_field`` numa colecção com um único ``$in``."""
+    id_list = [item for item in ids if item]
+    if not id_list:
+        return {}
+    docs = await collection.find(
+        {"id": {"$in": id_list}},
+        {"_id": 0, "id": 1, name_field: 1},
+    ).to_list(len(id_list))
+    return {
+        doc["id"]: doc.get(name_field, "") or ""
+        for doc in docs
+        if doc.get("id")
+    }

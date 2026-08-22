@@ -25,6 +25,11 @@ import {
 
 const EMPTY_LIST = Object.freeze([]);
 
+/** 60s — evita refetch em cada navegação/foco; alinhado com queryClient default. */
+export const PROCESS_STALE_TIME_MS = 60 * 1000;
+/** 5 minutos — mantém o bundle em memória ao sair e voltar a ProcessDetails. */
+export const PROCESS_GC_TIME_MS = 5 * 60 * 1000;
+
 function asArray(data) {
   return Array.isArray(data) ? data : EMPTY_LIST;
 }
@@ -47,8 +52,8 @@ export function useProcessQuery(processId, options = {}) {
       return response.data;
     },
     enabled: !!processId && enabled,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: PROCESS_STALE_TIME_MS,
+    gcTime: PROCESS_GC_TIME_MS,
   });
 
   return {
@@ -77,8 +82,8 @@ export function useClientQuery(clientId, options = {}) {
       return response.data;
     },
     enabled: !!clientId && enabled,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: PROCESS_STALE_TIME_MS,
+    gcTime: PROCESS_GC_TIME_MS,
   });
 
   return {
@@ -111,8 +116,8 @@ export function useProcessHistoryQuery(processId, options = {}) {
       }
     },
     enabled: !!processId && enabled,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: PROCESS_STALE_TIME_MS,
+    gcTime: PROCESS_GC_TIME_MS,
   });
 
   return {
@@ -144,8 +149,8 @@ export function useProcessActivitiesQuery(processId, options = {}) {
       }
     },
     enabled: !!processId && enabled,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: PROCESS_STALE_TIME_MS,
+    gcTime: PROCESS_GC_TIME_MS,
   });
 
   return {
@@ -173,8 +178,8 @@ export function useProcessTasksQuery(processId, options = {}) {
       return asArray(response.data);
     },
     enabled: !!processId && enabled,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: PROCESS_STALE_TIME_MS,
+    gcTime: PROCESS_GC_TIME_MS,
   });
 
   return {
@@ -206,8 +211,8 @@ export function useProcessDeadlinesQuery(processId, options = {}) {
       }
     },
     enabled: !!processId && enabled,
-    staleTime: 0,
-    gcTime: 0,
+    staleTime: PROCESS_STALE_TIME_MS,
+    gcTime: PROCESS_GC_TIME_MS,
   });
 
   return {

@@ -11,10 +11,19 @@ ALLOWED_ROLES = ["indexacao", "suporte", "comercial", "admin"]
 
 
 def require_admin(current_user: dict) -> None:
-    """Verifica se o utilizador é admin ou CEO."""
+    """Verifica se o cargo efetivo (UCR) ou, em fallback, o JWT, é admin/CEO."""
     from models.auth import UserRole
-    if current_user.get("role") not in (UserRole.ADMIN, UserRole.CEO):
+    role = authorization_role_from_user(current_user)
+    if role not in (UserRole.ADMIN, UserRole.CEO):
         raise HTTPException(status_code=403, detail="Acesso restrito a administradores")
+
+
+def authorization_role_from_user(current_user: dict) -> str:
+    """Prefere ``effective_role`` já resolvido; fallback JWT primário."""
+    role = (current_user.get("effective_role") or current_user.get("role") or "")
+    if role == "__all_roles__":
+        role = current_user.get("role") or ""
+    return (role or "").strip().lower()
 
 
 # Alias matching original private name

@@ -112,6 +112,12 @@ export const USER_MANAGEMENT_ROLES = ["admin", "ceo"];
 /** Perfis de gestão (diretoria + admin) */
 export const MANAGEMENT_ROLES = ["admin", "ceo", "diretor"];
 
+/**
+ * Perfis puramente administrativos — sem carteira em "Os Meus Clientes".
+ * Um admin/CEO/indexação de sistema não tem clientes atribuídos a este cargo.
+ */
+export const NO_CLIENT_PORTFOLIO_ROLES = ["admin", "ceo", "indexacao"];
+
 /** Perfis com Super Admin Bypass — têm todas as capabilities sempre ligadas */
 export const SUPER_ADMIN_ROLES = ["admin", "ceo"];
 
@@ -322,6 +328,26 @@ export const canAccessAdminPanel = (user) => {
 export const canAccessOrgAdmin = (activeRole) => {
   if (!activeRole || typeof activeRole !== "string") return false;
   return ADMIN_PANEL_ROLES.includes(activeRole.toLowerCase());
+};
+
+/**
+ * Pacote FH / C3 — gate de rotas pelo cargo efetivo (UCR / effectiveRole).
+ * Não consulta additional_roles do JWT.
+ */
+export const canAccessByEffectiveRole = (effectiveRole, allowedRoles) => {
+  if (!allowedRoles || allowedRoles.length === 0) return true;
+  if (!effectiveRole || typeof effectiveRole !== "string") return false;
+  const role = effectiveRole.toLowerCase();
+  return allowedRoles.some((r) => (r || "").toLowerCase() === role);
+};
+
+/**
+ * True se o perfil activo (admin / ceo / indexacao) não tem carteira
+ * de clientes em "Os Meus Clientes".
+ */
+export const hasNoClientPortfolio = (activeRole) => {
+  if (!activeRole || typeof activeRole !== "string") return false;
+  return NO_CLIENT_PORTFOLIO_ROLES.includes(activeRole.toLowerCase());
 };
 
 /**

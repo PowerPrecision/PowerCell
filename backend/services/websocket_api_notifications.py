@@ -12,7 +12,12 @@ from fastapi import WebSocket, WebSocketDisconnect
 
 from database import db
 from services.websocket_manager import manager, WSEventType, create_ws_message
-from services.websocket_api_helpers import verify_websocket_token, is_disconnect_error
+from services.websocket_api_helpers import (
+    verify_websocket_token,
+    is_disconnect_error,
+    process_room_name,
+    authorize_process_room_access,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -124,32 +129,59 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
                         connected = False
                         break
 
-                elif data.get("type") == "process_locked":
-                    lock_message = create_ws_message(
-                        WSEventType.PROCESS_LOCKED,
-                        {
-                            "process_id": data.get("process_id"),
-                            "user_id": str(user.get("id", "")),
-                            "user_name": user.get("name", "Unknown"),
-                        }
-                    )
-                    await manager.broadcast(lock_message, exclude_user=str(user.get("id", "")))
+                elif msg_type == "process_locked":
+                    process_id = data.get("process_id")
+                    if process_id and await authorize_process_room_access(user, process_id):
+                        lock_message = create_ws_message(
+                            WSEventType.PROCESS_LOCKED,
+                            {
+                                "process_id": process_id,
+                                "user_id": str(user.get("id", "")),
+                                "user_name": user.get("name", "Unknown"),
+                            }
+                        )
+                        await manager.broadcast_to_room(
+                            process_room_name(process_id),
+                            lock_message,
+                            exclude_user=str(user.get("id", "")),
+                        )
 
-                elif data.get("type") == "process_unlocked":
-                    unlock_message = create_ws_message(
-                        WSEventType.PROCESS_UNLOCKED,
-                        {
-                            "process_id": data.get("process_id"),
-                            "user_id": str(user.get("id", "")),
-                            "user_name": user.get("name", "Unknown"),
-                        }
-                    )
-                    await manager.broadcast(unlock_message, exclude_user=str(user.get("id", "")))
+                elif msg_type == "process_unlocked":
+                    process_id = data.get("process_id")
+                    if process_id and await authorize_process_room_access(user, process_id):
+                        unlock_message = create_ws_message(
+                            WSEventType.PROCESS_UNLOCKED,
+                            {
+                                "process_id": process_id,
+                                "user_id": str(user.get("id", "")),
+                                "user_name": user.get("name", "Unknown"),
+                            }
+                        )
+                        await manager.broadcast_to_room(
+                            process_room_name(process_id),
+                            unlock_message,
+                            exclude_user=str(user.get("id", "")),
+                        )
 
                 elif msg_type == "join_process_room":
                     process_id = data.get("process_id")
                     if process_id:
-                        room_name = f"process_{process_id}"
+                        if not await authorize_process_room_access(user, process_id):
+                            logger.warning(
+                                "[ROOM] ACL recusou join process_%s user=%s",
+                                process_id,
+                                user_id,
+                            )
+                            try:
+                                await websocket.send_json(create_ws_message(
+                                    "room_join_denied",
+                                    {"process_id": process_id},
+                                ))
+                            except Exception:
+                                connected = False
+                                break
+                            continue
+                        room_name = process_room_name(process_id)
                         manager.join_room(room_name, user_id)
                         try:
                             await websocket.send_json(create_ws_message(
@@ -164,7 +196,7 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
                 elif msg_type == "leave_process_room":
                     process_id = data.get("process_id")
                     if process_id:
-                        room_name = f"process_{process_id}"
+                        room_name = process_room_name(process_id)
                         manager.leave_room(room_name, user_id)
                         try:
                             await websocket.send_json(create_ws_message(

@@ -11,6 +11,7 @@ from fastapi import HTTPException
 from database import db
 from models.company import CompanyListResponse, CompanyResponse
 from services.companies_crud_api_helpers import resolve_logo_url
+from utils.input_sanitization import escape_regex
 
 
 async def _count_company_users(company_id, company_name: str) -> int:
@@ -34,9 +35,10 @@ async def run_list_companies(search: Optional[str] = None):
     """Lista todas as empresas configuradas no sistema."""
     query = {}
     if search:
+        escaped = escape_regex(search)
         query["$or"] = [
-            {"name": {"$regex": search, "$options": "i"}},
-            {"nif": {"$regex": search, "$options": "i"}},
+            {"name": {"$regex": escaped, "$options": "i"}},
+            {"nif": {"$regex": escaped, "$options": "i"}},
         ]
 
     companies = await db.companies.find(

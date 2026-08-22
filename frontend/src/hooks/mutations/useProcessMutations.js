@@ -89,7 +89,7 @@ export function useMoveProcessMutation(addPendingMove, removePendingMove, option
       });
 
       addPendingMove?.(processId);
-      queryClient.cancelQueries({ queryKey: queryKeys.processes.all }).catch(() => {});
+      queryClient.cancelQueries({ queryKey: queryKeys.processes.kanban(filters) }).catch(() => {});
 
       return { previousKanban };
     },
@@ -247,7 +247,7 @@ export function useAssignProcessMutation(processId, options = {}) {
     onSuccess: (data, variables, context) => {
       notifySuccess(options, 'Atribuição atualizada');
       queryClient.invalidateQueries({ queryKey: queryKeys.processes.detail(processId) });
-      queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanban({}) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanbanAll() });
       onSuccess?.(data, variables, context);
     },
 

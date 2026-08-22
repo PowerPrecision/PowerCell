@@ -1,4 +1,5 @@
 """Unit tests for email route thinning helpers (template vars + labels)."""
+import pytest
 from services.email_template_vars import (
     _extract_email_variables,
     _build_professional_email_html,
@@ -241,9 +242,96 @@ def test_send_documentation_wrapper_hides_stack_trace():
     asyncio.run(_run())
 
 
+def test_webmail_search_escapes_regex():
+    """Pacote FF — pesquisa textual do webmail usa escape_regex."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "email_webmail.py"
+    ).read_text()
+    assert "from utils.input_sanitization import escape_regex, sanitize_string" in src
+    assert "escape_regex(sanitize_string(search, max_length=200))" in src
+    # User input must not be interpolated raw into $regex after sanitise-only.
+    search_block = src.split("# === PESQUISA TEXTUAL ===", 1)[1].split(
+        "# Montar query final", 1
+    )[0]
+    assert '{"$regex": search, "$options": "i"}' in search_block
+    assert "escape_regex" in search_block
+
+
 def test_send_email_accepts_account_override_signature():
     import inspect
     from services.email_service import send_email
 
     params = inspect.signature(send_email).parameters
     assert "account_override" in params
+
+
+def test_facet_count_reads_empty_and_present():
+    from services.email_webmail import _facet_count
+
+    assert _facet_count({"unread": [{"n": 4}]}, "unread") == 4
+    assert _facet_count({"unread": []}, "unread") == 0
+    assert _facet_count({}, "unread") == 0
+    assert _facet_count(None, "unread") == 0
+
+
+def test_webmail_stats_uses_single_facet_not_sequential_counts():
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2] / "services" / "email_webmail.py"
+    ).read_text()
+    start = src.index("async def run_webmail_stats")
+    end = src.index("async def run_webmail_sync")
+    stats = src[start:end]
+    assert '"$facet"' in stats
+    assert "count_documents(" not in stats
+
+
+@pytest.mark.asyncio
+async def test_enrich_emails_batches_with_in_instead_of_find_one():
+    from unittest.mock import MagicMock, patch
+
+    from services import email_enrich as mod
+
+    class _Cursor:
+        def __init__(self, docs):
+            self._docs = docs
+
+        async def to_list(self, n):
+            return self._docs
+
+    emails = [
+        {"id": "e1", "process_id": "p1", "created_by": "u1"},
+        {"id": "e2", "process_id": "p1", "created_by": "u2"},
+        {"id": "e3", "process_id": "p2"},
+    ]
+    mock_db = MagicMock()
+    mock_db.processes.find = MagicMock(return_value=_Cursor([
+        {"id": "p1", "client_name": "Ana"},
+        {"id": "p2", "client_name": "Bruno"},
+    ]))
+    mock_db.users.find = MagicMock(return_value=_Cursor([
+        {"id": "u1", "name": "Consultor"},
+        {"id": "u2", "name": "Mediador"},
+    ]))
+
+    with patch.object(mod, "db", mock_db):
+        result = await mod.enrich_emails(emails)
+
+    process_filter = mock_db.processes.find.call_args[0][0]
+    user_filter = mock_db.users.find.call_args[0][0]
+    assert set(process_filter["id"]["$in"]) == {"p1", "p2"}
+    assert set(user_filter["id"]["$in"]) == {"u1", "u2"}
+    assert mock_db.processes.find.call_count == 1
+    assert mock_db.users.find.call_count == 1
+    assert mock_db.processes.find_one.call_count == 0
+    assert mock_db.users.find_one.call_count == 0
+    assert result[0]["client_name"] == "Ana"
+    assert result[0]["created_by_name"] == "Consultor"
+    assert result[1]["created_by_name"] == "Mediador"
+    assert result[2]["client_name"] == "Bruno"
+

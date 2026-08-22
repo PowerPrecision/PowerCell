@@ -32,7 +32,7 @@
  * @param {boolean} [options.autoConnect=true] — Conectar automaticamente ao montar
  *
  * @returns {Object} Estado e funções do WebSocket:
- *   - isConnected, isPolling, lastMessage, connectionError,
+ *   - isConnected, isPolling, connectionError,
  *   - connect, disconnect, sendMessage,
  *   - markNotificationRead, markAllNotificationsRead,
  *   - on, off
@@ -121,9 +121,8 @@ class WebSocketManager {
     this.token = null;
     this.isConnected = false;
     this.connectionError = null;
-    this.lastMessage = null;
 
-    // State listeners (React setState wrappers)
+    // State listeners (React setState wrappers) — connection only, never per-message
     this._stateListeners = new Set();
 
     // Event handlers registry
@@ -180,7 +179,6 @@ class WebSocketManager {
     this._stateListeners.forEach(listener => listener({
       isConnected: this.isConnected,
       connectionError: this.connectionError,
-      lastMessage: this.lastMessage,
     }));
   }
 
@@ -330,25 +328,12 @@ class WebSocketManager {
   _handleMessage(event) {
     try {
       const data = JSON.parse(event.data);
-      this.lastMessage = data;
       const type = data.type || data.event;
       const payload = data.data !== undefined ? data.data : data;
 
-      // Dispatch to all registered handlers
+      // Event subscribers only — do not push frames into React state
+      // (heartbeats every 30s would re-render every useWebSocket() consumer).
       this._dispatchEvent(type, payload, data);
-
-      // Notify state listeners (for lastMessage update)
-      this._notifyStateListeners();
-
-      // System-level logging (minimal)
-      switch (type) {
-        case WSEventType.CONNECTION_STATUS:
-          break;
-        case WSEventType.HEARTBEAT:
-          break;
-        default:
-          break;
-      }
     } catch (error) {
       console.error('WebSocket: Erro ao processar mensagem:', error);
     }
@@ -600,7 +585,6 @@ registerSessionCleanup(() => wsManager.disconnectForAuthFailure());
 export function useWebSocket(options = {}) {
   const { token } = useAuth();
   const [isConnected, setIsConnected] = useState(false);
-  const [lastMessage, setLastMessage] = useState(null);
   const [connectionError, setConnectionError] = useState(null);
 
   const optionsRef = useRef(options);
@@ -626,18 +610,16 @@ export function useWebSocket(options = {}) {
     }
   }, [token]);
 
-  // Subscribe to singleton state changes
+  // Subscribe to singleton connection-state changes only (not per-message)
   useEffect(() => {
-    const unsubscribe = wsManager.subscribe(({ isConnected: connected, connectionError: error, lastMessage: msg }) => {
+    const unsubscribe = wsManager.subscribe(({ isConnected: connected, connectionError: error }) => {
       setIsConnected(connected);
       setConnectionError(error);
-      setLastMessage(msg);
     });
 
     // Initialize with current state
     setIsConnected(wsManager.isConnected);
     setConnectionError(wsManager.connectionError);
-    setLastMessage(wsManager.lastMessage);
 
     return unsubscribe;
   }, []);
@@ -715,7 +697,6 @@ export function useWebSocket(options = {}) {
   return {
     isConnected,
     isPolling: !!wsManager._pollingInterval,
-    lastMessage,
     connectionError,
     connect: (t) => wsManager.connect(t || token),
     disconnect: () => wsManager.removeSubscriber(),

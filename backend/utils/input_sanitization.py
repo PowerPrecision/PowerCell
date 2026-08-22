@@ -81,6 +81,30 @@ EMAIL_SAFE_ATTRIBUTES = {
 # Protocolos permitidos em URLs
 ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
+# Tags cujo conteúdo interno também é perigoso (não basta remover a tag).
+_DANGEROUS_BLOCK_TAGS = (
+    "script", "iframe", "object", "embed", "form", "link", "meta", "style",
+)
+
+
+def _strip_dangerous_blocks(html: str) -> str:
+    """Remove tags de bloco perigosas *incluindo* o conteúdo interior."""
+    cleaned = html
+    for tag in _DANGEROUS_BLOCK_TAGS:
+        cleaned = re.sub(
+            rf"<\s*{tag}\b[^>]*>.*?</\s*{tag}\s*>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        cleaned = re.sub(
+            rf"<\s*{tag}\b[^>]*/?\s*>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    return cleaned
+
 
 def sanitize_string(value: str, max_length: int = 200) -> str:
     """
@@ -152,8 +176,9 @@ def sanitize_html(value: str, allow_basic_formatting: bool = False, allow_email_
     if not isinstance(value, str):
         value = str(value)
     
-    # Remover caracteres nulos
+    # Remover caracteres nulos e blocos <script>/<iframe>/… (conteúdo incluído)
     value = value.replace('\x00', '')
+    value = _strip_dangerous_blocks(value)
     
     if allow_email_html:
         # Permitir todas as tags seguras para email profissional
@@ -201,6 +226,22 @@ def sanitize_html(value: str, allow_basic_formatting: bool = False, allow_email_
         cleaned = re.sub(pattern, '', cleaned, flags=re.IGNORECASE)
     
     return cleaned.strip()
+
+
+def sanitize_email_signature(value: Optional[str]) -> Optional[str]:
+    """Sanitiza HTML de assinatura de email (UCR / perfil).
+
+    Permite formatação de email profissional (``allow_email_html``) e remove
+    tags/atributos perigosos (``<script>``, ``javascript:``, event handlers).
+    ``None`` e strings vazias passam sem alteração.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    if not value.strip():
+        return value
+    return sanitize_html(value, allow_email_html=True)
 
 
 def sanitize_email(email: str) -> str:
@@ -377,6 +418,27 @@ def sanitize_url(url: str, max_length: int = 2000) -> str:
             return ""
     
     return url
+
+
+def escape_regex(value: str) -> str:
+    """
+    Escapa metacaracteres de regex em input do utilizador.
+
+    Impede injecção de padrões MongoDB ``$regex`` (ReDoS / query injection)
+    em pesquisas de webmail, empresas, login, etc.
+
+    Args:
+        value: String a usar como padrão ``$regex``.
+
+    Returns:
+        String segura para interpolar em ``$regex`` (``re.escape``).
+        String vazia se o valor for nulo/vazio.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    return re.escape(value)
 
 
 def log_sanitization_rejection(field_name: str, original_value: str, reason: str):

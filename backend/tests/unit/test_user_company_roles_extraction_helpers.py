@@ -46,16 +46,17 @@ def test_user_company_roles_router_is_thin_stubs_only():
         / "user_company_roles.py"
     )
     text = routes_path.read_text()
-    assert text.count("return await run_") >= 8
+    assert text.count("return await run_") >= 7
     assert len(text.splitlines()) < 120
     assert "db.user_company_roles" not in text
+    # Pacote FH / C6: set-active-company saiu deste router (agora /auth/active-company)
+    assert "/set-active-company" not in text
+    assert "run_set_active_company" not in text
     # Static paths before /{role_id}
     migrate_pos = text.index('/migrate"')
-    set_active_pos = text.index('/set-active-company"')
     email_pos = text.index('/migrate-email-configs"')
     id_pos = text.index('/{role_id}"')
     assert migrate_pos < id_pos
-    assert set_active_pos < id_pos
     assert email_pos < id_pos
 
 
@@ -397,6 +398,8 @@ def test_ucr_unique_index_includes_role():
     assert '("user_id", 1), ("company_id", 1), ("role", 1)' in indexes
     assert "idx_user_company_role_unique" in indexes
     assert "idx_user_company_unique" in indexes  # still listed as deprecated
+    assert '("id", 1)' in indexes
+    assert "idx_ucr_id" in indexes
     crud = (
         Path(__file__).resolve().parents[2]
         / "services"
@@ -404,3 +407,95 @@ def test_ucr_unique_index_includes_role():
     ).read_text()
     assert '"role": payload.role,' in crud
     assert "já está associado a esta empresa" not in crud
+
+
+@pytest.mark.asyncio
+async def test_set_active_company_requires_role_and_matches_ucr_triple():
+    """Pacote FH / C6: is_default aplica-se a {user_id, company_id, role}."""
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from fastapi import HTTPException
+    from services import user_company_roles_api_active as active
+
+    with pytest.raises(HTTPException) as missing_role:
+        await active.run_set_active_company(
+            {"company_id": "c1"}, {"id": "u1"},
+        )
+    assert missing_role.value.status_code == 400
+
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(
+        return_value={
+            "user_id": "u1",
+            "company_id": "c1",
+            "role": "consultor",
+            "company_name": "Acme",
+        },
+    )
+    mock_db.user_company_roles.update_many = AsyncMock()
+    mock_db.user_company_roles.update_one = AsyncMock()
+    mock_db.users.update_one = AsyncMock()
+
+    with patch.object(active, "db", mock_db):
+        result = await active.run_set_active_company(
+            {"company_id": "c1", "role": "consultor"},
+            {"id": "u1"},
+        )
+
+    assert result["success"] is True
+    assert result["active_company_role"] == "consultor"
+    assert mock_db.user_company_roles.find_one.call_args[0][0] == {
+        "user_id": "u1",
+        "company_id": "c1",
+        "role": "consultor",
+    }
+    assert mock_db.user_company_roles.update_one.call_args[0][0] == {
+        "user_id": "u1",
+        "company_id": "c1",
+        "role": "consultor",
+    }
+
+
+@pytest.mark.asyncio
+async def test_set_active_company_403_when_role_not_on_company():
+    from unittest.mock import AsyncMock, MagicMock, patch
+
+    from fastapi import HTTPException
+    from services import user_company_roles_api_active as active
+
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(return_value=None)
+
+    with patch.object(active, "db", mock_db):
+        with pytest.raises(HTTPException) as exc:
+            await active.run_set_active_company(
+                {"company_id": "c1", "role": "diretor"},
+                {"id": "u1"},
+            )
+    assert exc.value.status_code == 403
+
+
+def test_ucr_signature_strips_dangerous_html():
+    from models.user_company_role import UserCompanyRoleCreate, UserCompanyRoleUpdate
+
+    created = UserCompanyRoleCreate(
+        user_id="u1",
+        company_id="c1",
+        company_name="Empresa A",
+        role="consultor",
+        signature='Olá<script>alert(1)</script><b>Mundo</b>',
+    )
+    assert created.signature is not None
+    assert "<script>" not in created.signature.lower()
+    assert "alert(1)" not in created.signature
+    assert "Mundo" in created.signature
+
+    updated = UserCompanyRoleUpdate(
+        signature='<p onclick="steal()">Hi</p><a href="javascript:alert(1)">x</a>',
+    )
+    html = (updated.signature or "").lower()
+    assert "onclick" not in html
+    assert "javascript:" not in html
+    assert updated.signature is not None
+
+

@@ -10,7 +10,7 @@ import { queryClient } from "./lib/queryClient";
 import ImpersonateBanner from "./components/ImpersonateBanner";
 import GlobalUploadProgress from "./components/GlobalUploadProgress";
 import ErrorBoundary from "./components/ErrorBoundary";
-import { hasRole, hasPermission, STAFF_ROLES } from "./utils/roleUtils";
+import { hasPermission, STAFF_ROLES, canAccessByEffectiveRole, canAccessOrgAdmin } from "./utils/roleUtils";
 import React, { Suspense, Component } from "react";
 import * as Sentry from "@sentry/react";
 import { FullPageSkeleton } from "./components/ui/skeletons";
@@ -189,7 +189,7 @@ import "./App.css";
 const ADMIN_ROLES = ["admin", "ceo"];
 
 function ProtectedRoute({ children, allowedRoles, requiredCapability }) {
-  const { user, loading } = useAuth();
+  const { user, loading, effectiveRole } = useAuth();
 
   if (loading) {
     return (
@@ -203,13 +203,13 @@ function ProtectedRoute({ children, allowedRoles, requiredCapability }) {
     return <Navigate to="/login" replace />;
   }
 
-  // Verificação de role (compatibilidade existente)
-  if (allowedRoles && !allowedRoles.some(r => hasRole(user, r))) {
+  // Pacote FH / C3: gate pelo cargo efetivo (UCR), não por additional_roles do JWT.
+  if (allowedRoles && !canAccessByEffectiveRole(effectiveRole, allowedRoles)) {
     return <Navigate to="/staff" replace />;
   }
 
-  // Verificação de capability granular (se especificada)
-  if (requiredCapability && !hasPermission(user, requiredCapability)) {
+  // Verificação de capability granular (se especificada) — usa o cargo efetivo
+  if (requiredCapability && !hasPermission({ ...user, role: effectiveRole || user?.role }, requiredCapability)) {
     return <Navigate to="/staff" replace />;
   }
 
@@ -217,7 +217,7 @@ function ProtectedRoute({ children, allowedRoles, requiredCapability }) {
 }
 
 function DashboardRedirect() {
-  const { user, loading } = useAuth();
+  const { user, loading, effectiveRole } = useAuth();
 
   if (loading) {
     return (
@@ -229,8 +229,7 @@ function DashboardRedirect() {
 
   if (!user) return <Navigate to="/login" replace />;
 
-  // Admin e CEO vão para /admin (Painel de Administração), todos os outros staff vão para /staff
-  if (hasRole(user, "admin") || hasRole(user, "ceo")) {
+  if (canAccessOrgAdmin(effectiveRole)) {
     return <Navigate to="/admin" replace />;
   }
   return <Navigate to="/staff" replace />;
@@ -238,7 +237,7 @@ function DashboardRedirect() {
 
 // Componente para redirecionar a rota raiz baseado no estado de autenticação
 function RootRedirect() {
-  const { user, loading } = useAuth();
+  const { user, loading, effectiveRole } = useAuth();
 
   if (loading) {
     return (
@@ -248,9 +247,9 @@ function RootRedirect() {
     );
   }
 
-  // Se autenticado, redireciona para o dashboard adequado
+  // Se autenticado, redireciona para o dashboard adequado (cargo efetivo UCR)
   if (user) {
-    if (hasRole(user, "admin") || hasRole(user, "ceo")) {
+    if (canAccessOrgAdmin(effectiveRole)) {
       return <Navigate to="/admin" replace />;
     }
     return <Navigate to="/staff" replace />;

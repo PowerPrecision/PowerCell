@@ -87,6 +87,9 @@ export const queryKeys = {
     list: (filters) => [...queryKeys.processes.lists(), filters],
     details: () => [...queryKeys.processes.all, 'detail'],
     detail: (id) => [...queryKeys.processes.details(), id],
+    // Prefixo de todas as queries Kanban (sem filters) — invalidar só o Kanban,
+    // nunca ['processes'] inteiro (detalhe/listas/my-clients).
+    kanbanAll: () => [...queryKeys.processes.all, 'kanban'],
     kanban: (filters) => [...queryKeys.processes.all, 'kanban', filters],
     // Query key INDEPENDENTE para Concluídos — quando completedDays muda,
     // só esta query é invalidada, não a query das colunas activas
@@ -140,6 +143,9 @@ export const queryKeys = {
   // Emails
   emails: {
     all: ['emails'],
+    // Prefixo só da lista Webmail — new_email / refresh NÃO devem invalidar
+    // emails de processo, drafts, stats ou monitored.
+    webmailAll: () => [...queryKeys.emails.all, 'webmail'],
     webmail: (filters) => [...queryKeys.emails.all, 'webmail', filters],
     byProcess: (processId, direction) => [...queryKeys.emails.all, 'process', processId, { direction }],
     stats: (processId) => [...queryKeys.emails.all, 'stats', processId],
@@ -246,7 +252,7 @@ export async function invalidateProcessDetailsQueries(
     queryClient.invalidateQueries({ queryKey: queryKeys.history.byProcess(processId) }),
     queryClient.invalidateQueries({ queryKey: queryKeys.activities.byProcess(processId) }),
     queryClient.invalidateQueries({ queryKey: queryKeys.deadlines.byProcess(processId) }),
-    queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanban({}) }),
+    queryClient.invalidateQueries({ queryKey: queryKeys.processes.kanbanAll() }),
     queryClient.invalidateQueries({ queryKey: queryKeys.processes.lists() }),
   ];
   if (clientId) {

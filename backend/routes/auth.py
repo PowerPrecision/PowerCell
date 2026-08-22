@@ -15,6 +15,7 @@ from models.auth import UserRegister, UserLogin, TokenResponse
 from services.auth import get_current_user
 from middleware.rate_limit import limiter
 
+from services.user_company_roles_api_active import run_set_active_company
 from services.auth_register_handlers import run_register
 from services.auth_login_handlers import run_login, run_login_v2
 from services.auth_profile_handlers import (
@@ -128,3 +129,16 @@ async def revoke_session(session_id: str, user: dict = Depends(get_current_user)
 @router.post("/validate-password")
 async def validate_password_endpoint(data: dict):
     return await run_validate_password(data)
+
+
+@router.post("/active-company")
+async def set_active_company(
+    data: dict,
+    user: dict = Depends(get_current_user),
+):
+    """Define o UCR ativo (empresa + cargo) do utilizador autenticado.
+
+    Pacote FH / C6: endpoint autenticado com get_current_user — qualquer
+    staff pode persistir o seu próprio contexto (já não vive no router admin).
+    """
+    return await run_set_active_company(data, user)

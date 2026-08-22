@@ -95,3 +95,37 @@ class TestPendingActionsAndRow:
         assert row["has_property"] is True
         assert row["pending_count"] == 1
         assert row["latest_activity_note"] == "OK"
+
+
+def test_run_get_my_clients_admin_returns_empty_without_query():
+    import asyncio
+    from unittest.mock import MagicMock
+
+    from models.auth import UserRole
+    from services.process_my_clients import run_get_my_clients
+
+    db = MagicMock()
+
+    async def _run():
+        return await run_get_my_clients(
+            db=db,
+            user={"id": "a1", "email": "a@x.com"},
+            role=UserRole.ADMIN,
+            page=1,
+            size=50,
+            decrypt_list_fn=lambda items, **kwargs: items,
+            my_clients_projection={},
+            build_process_query_fn=lambda *args, **kwargs: (_ for _ in ()).throw(
+                AssertionError("admin must not query processes")
+            ),
+            build_leads_query_fn=lambda *args, **kwargs: {},
+            slice_page_fn=lambda *args, **kwargs: ([], 0, 0),
+            load_status_map_fn=lambda: {},
+        )
+
+    result = asyncio.run(_run())
+    assert result["clients"] == []
+    assert result["total"] == 0
+    assert result["leads_count"] == 0
+    assert result["user_role"] == UserRole.ADMIN
+    db.processes.find.assert_not_called()

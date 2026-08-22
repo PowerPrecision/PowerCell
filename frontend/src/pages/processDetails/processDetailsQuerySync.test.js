@@ -20,7 +20,7 @@ describe('invalidateProcessDetailsQueries', () => {
     expect(serialized).toContain(JSON.stringify(queryKeys.deadlines.byProcess('p1')));
     expect(serialized).toContain(JSON.stringify(queryKeys.history.byProcess('p1')));
     expect(serialized).toContain(JSON.stringify(queryKeys.clients.detail('c1')));
-    expect(serialized).toContain(JSON.stringify(queryKeys.processes.kanban({})));
+    expect(serialized).toContain(JSON.stringify(queryKeys.processes.kanbanAll()));
   });
 
   it('skips client invalidation when clientId omitted', async () => {

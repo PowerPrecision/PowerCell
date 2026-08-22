@@ -527,7 +527,30 @@ async def create_indexes(db) -> dict:
     
     for idx in announcement_indexes:
         await _create_index_safe(db.announcements, idx, "announcements", results)
-    
+
+    # ====================================================================
+    # ÍNDICES PARA COLECÇÃO 'emails' (Pacote FF — C1/C5)
+    # ====================================================================
+    # Lookup por id, listagem de mailbox, timeline de processo e
+    # deduplicação IMAP (message_id + account).
+    email_indexes = [
+        {"keys": [("id", 1)], "name": "idx_emails_id", "unique": True},
+        {
+            "keys": [("company_id", 1), ("direction", 1), ("sent_at", -1)],
+            "name": "idx_emails_mailbox",
+        },
+        {
+            "keys": [("process_id", 1), ("sent_at", 1)],
+            "name": "idx_emails_process_timeline",
+        },
+        {
+            "keys": [("message_id", 1), ("account", 1)],
+            "name": "idx_emails_message_dedup",
+        },
+    ]
+    for idx in email_indexes:
+        await _create_index_safe(db.emails, idx, "emails", results)
+
     # Resumo
     logger.info(
         f"Criação de índices concluída: "
@@ -671,6 +694,8 @@ async def create_ttl_indexes(db) -> dict:
         )
 
     user_company_role_indexes = [
+        # Pacote FF — lookup único pelo id da associação user↔empresa
+        {"keys": [("id", 1)], "name": "idx_ucr_id", "unique": True},
         # Índice composto único — um user pode ter vários cargos na mesma
         # empresa; só a combinação exacta user+empresa+cargo é única.
         {
