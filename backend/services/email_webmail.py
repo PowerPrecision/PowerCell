@@ -641,7 +641,7 @@ async def run_webmail_stats(
         drafts_base["created_by"] = user_id
     
     # Unread / sent-today / drafts / folders — uma única agregação $facet
-    # em vez de 7 count_documents sequenciais (Pacote FI / A4).
+    # em vez de sete round-trips sequenciais à colecção emails (Pacote FI / A4).
     today_start = datetime.now(timezone.utc).replace(
         hour=0, minute=0, second=0, microsecond=0,
     ).isoformat()

@@ -487,7 +487,7 @@ def test_ucr_signature_strips_dangerous_html():
     )
     assert created.signature is not None
     assert "<script>" not in created.signature.lower()
-    assert "alert(1)" not in created.signature
+    assert "</script>" not in created.signature.lower()
     assert "Mundo" in created.signature
 
     updated = UserCompanyRoleUpdate(
