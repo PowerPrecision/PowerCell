@@ -71,4 +71,172 @@ def test_auth_failure_accepts_before_custom_close_codes():
     invalid_block = text[invalid_idx:]
     assert "websocket.accept()" in invalid_block
     assert "code=4002" in invalid_block
-    assert invalid_block.find("websocket.accept()") < invalid_block.find("code=4002")
+    assert     invalid_block.find("websocket.accept()") < invalid_block.find("code=4002")
+
+
+def test_websocket_api_export_acl_helpers():
+    from services.websocket_api_helpers import (
+        process_room_name,
+        user_can_join_process_room,
+        authorize_process_room_access,
+        load_process_for_room_acl,
+    )
+
+    assert process_room_name("abc") == "process_abc"
+    assert callable(user_can_join_process_room)
+    assert callable(authorize_process_room_access)
+    assert callable(load_process_for_room_acl)
+
+
+def test_lock_events_broadcast_to_process_room_not_globally():
+    """Pacote FG / C2: process_locked/unlocked go to process_{id} only."""
+    path = Path(__file__).resolve().parents[2] / "services" / "websocket_api_notifications.py"
+    text = path.read_text()
+
+    locked_idx = text.find('msg_type == "process_locked"')
+    unlocked_idx = text.find('msg_type == "process_unlocked"')
+    join_idx = text.find('msg_type == "join_process_room"')
+    assert locked_idx != -1 and unlocked_idx != -1 and join_idx != -1
+
+    locked_block = text[locked_idx:unlocked_idx]
+    unlocked_block = text[unlocked_idx:join_idx]
+    for block in (locked_block, unlocked_block):
+        assert "broadcast_to_room" in block
+        assert "process_room_name" in block
+        assert "authorize_process_room_access" in block
+        assert "manager.broadcast(" not in block
+
+    # Remaining global broadcasts are presence (admin/ceo online/offline)
+    assert text.count("await manager.broadcast(") == 2
+    assert "authorize_process_room_access" in text[join_idx:]
+    assert "room_join_denied" in text[join_idx:]
+    assert "manager.join_room" in text[join_idx:]
+
+
+class TestUserCanJoinProcessRoom:
+    def _process(self, **overrides):
+        doc = {
+            "id": "p1",
+            "client_id": "cli1",
+            "status": "documentacao",
+            "created_by": "ix@x.com",
+        }
+        doc.update(overrides)
+        return doc
+
+    def test_missing_user_or_process_denied(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        assert user_can_join_process_room(None, self._process()) is False
+        assert user_can_join_process_room({"id": "u1", "role": "admin"}, None) is False
+
+    def test_gestor_can_join_any(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        process = self._process()
+        for role in ("admin", "ceo", "diretor", "administrativo"):
+            assert user_can_join_process_room({"id": "g1", "role": role}, process) is True
+
+    def test_consultor_only_if_assigned(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        consultor = {"id": "c1", "role": "consultor"}
+        assert user_can_join_process_room(consultor, self._process()) is False
+        assert user_can_join_process_room(
+            consultor, self._process(assigned_consultor_id="c1")
+        ) is True
+        assert user_can_join_process_room(
+            consultor, self._process(assigned_consultor_ids=["c1", "c2"])
+        ) is True
+        assert user_can_join_process_room(
+            consultor, self._process(assigned_to="c1")
+        ) is True
+
+    def test_intermediario_only_if_assigned(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        user = {"id": "m1", "role": "intermediario"}
+        assert user_can_join_process_room(user, self._process()) is False
+        assert user_can_join_process_room(
+            user, self._process(assigned_mediador_id="m1")
+        ) is True
+
+    def test_legacy_mediador_role_maps_to_intermediario(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        user = {"id": "m1", "role": "mediador"}
+        assert user_can_join_process_room(
+            user, self._process(assigned_mediador_ids=["m1"])
+        ) is True
+
+    def test_indexacao_fila_or_assigned_or_creator(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        creator = {"id": "ix1", "role": "indexacao", "email": "ix@x.com"}
+        other = {"id": "ix2", "role": "indexacao", "email": "other@x.com"}
+        assert user_can_join_process_room(
+            creator, self._process(created_by="ix@x.com", status="documentacao")
+        ) is True
+        assert user_can_join_process_room(
+            other, self._process(created_by="ix@x.com", status="documentacao")
+        ) is False
+        assert user_can_join_process_room(
+            other, self._process(created_by="ix@x.com", status="fila_espera")
+        ) is True
+        assert user_can_join_process_room(
+            other, self._process(created_by="ix@x.com", assigned_indexacao_id="ix2")
+        ) is True
+
+    def test_cliente_own_process_only(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        user = {"id": "cli1", "role": "cliente"}
+        assert user_can_join_process_room(user, self._process()) is True
+        assert user_can_join_process_room(
+            {"id": "cli2", "role": "cliente"}, self._process()
+        ) is False
+
+    def test_parceiro_denied(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        user = {"id": "par1", "role": "parceiro"}
+        assert user_can_join_process_room(
+            user, self._process(assigned_consultor_id="par1")
+        ) is False
+
+    def test_unknown_role_denied(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        assert user_can_join_process_room(
+            {"id": "u1", "role": "hacker"}, self._process()
+        ) is False
+
+    def test_additional_roles_gestor_grants_access(self):
+        from services.websocket_api_helpers import user_can_join_process_room
+
+        user = {
+            "id": "c1",
+            "role": "consultor",
+            "additional_roles": ["diretor"],
+        }
+        assert user_can_join_process_room(user, self._process()) is True
+
+
+def test_authorize_process_room_access_uses_db_document(monkeypatch):
+    import asyncio
+    from services import websocket_api_helpers as helpers
+
+    async def fake_load(process_id):
+        assert process_id == "p9"
+        return {"id": "p9", "assigned_consultor_id": "c1"}
+
+    monkeypatch.setattr(helpers, "load_process_for_room_acl", fake_load)
+
+    allowed = asyncio.run(
+        helpers.authorize_process_room_access({"id": "c1", "role": "consultor"}, "p9")
+    )
+    denied = asyncio.run(
+        helpers.authorize_process_room_access({"id": "c2", "role": "consultor"}, "p9")
+    )
+    assert allowed is True
+    assert denied is False

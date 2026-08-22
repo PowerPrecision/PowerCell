@@ -26,3 +26,26 @@ describe("useWebSocket Pacote DX", () => {
     assert.match(source, /NEW_EMAIL: 'new_email'/);
   });
 });
+
+describe("useWebSocket Pacote FG / A2", () => {
+  it("does not store lastMessage in React state", () => {
+    assert.doesNotMatch(source, /lastMessage/);
+    assert.doesNotMatch(source, /setLastMessage/);
+  });
+
+  it("does not notify React state listeners from _handleMessage", () => {
+    const start = source.indexOf("_handleMessage(event)");
+    assert.ok(start > 0);
+    const end = source.indexOf("_handleAuthFailure()", start);
+    const body = source.slice(start, end);
+    assert.match(body, /_dispatchEvent\(type, payload, data\)/);
+    assert.doesNotMatch(body, /_notifyStateListeners/);
+  });
+
+  it("connection subscribe payload is isConnected + connectionError only", () => {
+    assert.match(
+      source,
+      /subscribe\(\(\{ isConnected: connected, connectionError: error \}\)/,
+    );
+  });
+});

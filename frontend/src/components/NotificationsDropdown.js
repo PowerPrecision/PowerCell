@@ -38,6 +38,7 @@ import { Bell, BellRing, UserPlus, Clock, FileText, Calendar, AlertTriangle, Che
 import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
 import { safeDateStr } from "../lib/utils";
+import { playNotificationBeep } from "../utils/notificationSound";
 
 
 const notificationIcons = {
@@ -100,41 +101,11 @@ const NotificationsDropdown = () => {
   const intervalRef = useRef(null);
   const consecutiveSuccessRef = useRef(0);
 
-  // Play notification sound — declared before useWebSocket callback reference
+  // Play notification sound — declared before useWebSocket callback reference.
+  // Reuses a single AudioContext (see utils/notificationSound.js).
   const playNotificationSound = useCallback(() => {
     if (!soundEnabled) return;
-    
-    try {
-      // Create a simple beep sound using Web Audio API
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
-      const oscillator = audioContext.createOscillator();
-      const gainNode = audioContext.createGain();
-      
-      oscillator.connect(gainNode);
-      gainNode.connect(audioContext.destination);
-      
-      oscillator.frequency.value = 800;
-      oscillator.type = 'sine';
-      gainNode.gain.value = 0.3;
-      
-      oscillator.start();
-      oscillator.stop(audioContext.currentTime + 0.15);
-      
-      // Second beep
-      setTimeout(() => {
-        const osc2 = audioContext.createOscillator();
-        const gain2 = audioContext.createGain();
-        osc2.connect(gain2);
-        gain2.connect(audioContext.destination);
-        osc2.frequency.value = 1000;
-        osc2.type = 'sine';
-        gain2.gain.value = 0.3;
-        osc2.start();
-        osc2.stop(audioContext.currentTime + 0.15);
-      }, 150);
-    } catch {
-      // Audio not available
-    }
+    playNotificationBeep();
   }, [soundEnabled]);
 
   // Determinar ação de navegação para uma notificação
