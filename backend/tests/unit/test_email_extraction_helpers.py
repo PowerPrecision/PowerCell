@@ -288,7 +288,7 @@ def test_webmail_stats_uses_single_facet_not_sequential_counts():
     end = src.index("async def run_webmail_sync")
     stats = src[start:end]
     assert '"$facet"' in stats
-    assert "await db.emails.count_documents" not in stats
+    assert "count_documents(" not in stats
 
 
 @pytest.mark.asyncio

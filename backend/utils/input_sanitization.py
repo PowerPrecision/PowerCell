@@ -81,6 +81,30 @@ EMAIL_SAFE_ATTRIBUTES = {
 # Protocolos permitidos em URLs
 ALLOWED_PROTOCOLS = ['http', 'https', 'mailto']
 
+# Tags cujo conteúdo interno também é perigoso (não basta remover a tag).
+_DANGEROUS_BLOCK_TAGS = (
+    "script", "iframe", "object", "embed", "form", "link", "meta", "style",
+)
+
+
+def _strip_dangerous_blocks(html: str) -> str:
+    """Remove tags de bloco perigosas *incluindo* o conteúdo interior."""
+    cleaned = html
+    for tag in _DANGEROUS_BLOCK_TAGS:
+        cleaned = re.sub(
+            rf"<\s*{tag}\b[^>]*>.*?</\s*{tag}\s*>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE | re.DOTALL,
+        )
+        cleaned = re.sub(
+            rf"<\s*{tag}\b[^>]*/?\s*>",
+            "",
+            cleaned,
+            flags=re.IGNORECASE,
+        )
+    return cleaned
+
 
 def sanitize_string(value: str, max_length: int = 200) -> str:
     """
@@ -152,8 +176,9 @@ def sanitize_html(value: str, allow_basic_formatting: bool = False, allow_email_
     if not isinstance(value, str):
         value = str(value)
     
-    # Remover caracteres nulos
+    # Remover caracteres nulos e blocos <script>/<iframe>/… (conteúdo incluído)
     value = value.replace('\x00', '')
+    value = _strip_dangerous_blocks(value)
     
     if allow_email_html:
         # Permitir todas as tags seguras para email profissional
