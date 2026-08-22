@@ -201,6 +201,67 @@ class TestBuildProcessListQuery:
         assert build_company_scope_condition(None) is None
 
 
+class TestAssignedUserFilter:
+    def test_empty_returns_none(self):
+        from services.process_list_filters import build_assigned_user_filter
+        assert build_assigned_user_filter(None) is None
+        assert build_assigned_user_filter("") is None
+        assert build_assigned_user_filter("  ") is None
+
+    def test_matches_all_assignment_fields(self):
+        from services.process_list_filters import build_assigned_user_filter
+        cond = build_assigned_user_filter("u-42")
+        assert "$or" in cond
+        assert {"assigned_consultor_ids": "u-42"} in cond["$or"]
+        assert {"assigned_consultor_id": "u-42"} in cond["$or"]
+        assert {"assigned_mediador_ids": "u-42"} in cond["$or"]
+        assert {"assigned_mediador_id": "u-42"} in cond["$or"]
+        assert {"assigned_indexacao_id": "u-42"} in cond["$or"]
+        assert {"assigned_parceiro_id": "u-42"} in cond["$or"]
+        assert {"assigned_to": "u-42"} in cond["$or"]
+        assert {"assigned_users": "u-42"} in cond["$or"]
+        assert {"consultant_id": "u-42"} in cond["$or"]
+        assert {"manager_id": "u-42"} in cond["$or"]
+
+    def test_list_query_includes_assigned_user_and(self):
+        user = {"id": "admin-1", "email": "a@x.com"}
+        q = build_process_list_query(
+            user, UserRole.ADMIN, view_mode="active_only",
+            assigned_user_id="c-9",
+        )
+        flat = q["$and"]
+        assigned = next(
+            c for c in flat
+            if "$or" in c and {"assigned_consultor_id": "c-9"} in c["$or"]
+        )
+        assert {"assigned_mediador_id": "c-9"} in assigned["$or"]
+
+
+class TestProcessTypeFilter:
+    def test_empty_returns_none(self):
+        from services.process_list_filters import build_process_type_condition
+        assert build_process_type_condition(None) is None
+        assert build_process_type_condition("") is None
+
+    def test_matches_canonical_and_legacy(self):
+        from services.process_list_filters import build_process_type_condition
+        cond = build_process_type_condition("credito_habitacao")
+        assert {"process_type": "credito_habitacao"} in cond["$or"]
+        assert {"type": "credito_habitacao"} in cond["$or"]
+
+    def test_list_query_ands_process_type(self):
+        user = {"id": "a1", "email": "a@x.com"}
+        q = build_process_list_query(
+            user, UserRole.ADMIN, view_mode="active_only",
+            process_type="arrendamento",
+        )
+        flat = q["$and"]
+        assert any(
+            "$or" in c and {"process_type": "arrendamento"} in c.get("$or", [])
+            for c in flat
+        )
+
+
 class TestMergeQueryAnd:
     def test_empty_query(self):
         from services.process_list_filters import merge_query_and

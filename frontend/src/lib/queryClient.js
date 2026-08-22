@@ -164,6 +164,7 @@ export const queryKeys = {
   users: {
     all: ['users'],
     list: (role) => [...queryKeys.users.all, 'list', { role }],
+    forAssignment: () => [...queryKeys.users.all, 'list', { for_assignment: true }],
   },
   
   // Leads
