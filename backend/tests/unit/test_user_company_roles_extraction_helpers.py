@@ -397,6 +397,8 @@ def test_ucr_unique_index_includes_role():
     assert '("user_id", 1), ("company_id", 1), ("role", 1)' in indexes
     assert "idx_user_company_role_unique" in indexes
     assert "idx_user_company_unique" in indexes  # still listed as deprecated
+    assert '("id", 1)' in indexes
+    assert "idx_ucr_id" in indexes
     crud = (
         Path(__file__).resolve().parents[2]
         / "services"

@@ -21,7 +21,7 @@ from services.email_service import (
     get_email_accounts_async,
     sync_webmail_emails,
 )
-from utils.input_sanitization import sanitize_string
+from utils.input_sanitization import escape_regex, sanitize_string
 
 logger = logging.getLogger(__name__)
 
@@ -424,7 +424,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     
     # === PESQUISA TEXTUAL ===
     if search:
-        search = sanitize_string(search, max_length=200)
+        search = escape_regex(sanitize_string(search, max_length=200))
         and_conditions.append({
             "$or": [
                 {"subject": {"$regex": search, "$options": "i"}},

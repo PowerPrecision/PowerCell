@@ -241,6 +241,25 @@ def test_send_documentation_wrapper_hides_stack_trace():
     asyncio.run(_run())
 
 
+def test_webmail_search_escapes_regex():
+    """Pacote FF — pesquisa textual do webmail usa escape_regex."""
+    from pathlib import Path
+
+    src = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "email_webmail.py"
+    ).read_text()
+    assert "from utils.input_sanitization import escape_regex, sanitize_string" in src
+    assert "escape_regex(sanitize_string(search, max_length=200))" in src
+    # User input must not be interpolated raw into $regex after sanitise-only.
+    search_block = src.split("# === PESQUISA TEXTUAL ===", 1)[1].split(
+        "# Montar query final", 1
+    )[0]
+    assert '{"$regex": search, "$options": "i"}' in search_block
+    assert "escape_regex" in search_block
+
+
 def test_send_email_accepts_account_override_signature():
     import inspect
     from services.email_service import send_email

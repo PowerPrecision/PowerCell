@@ -379,6 +379,27 @@ def sanitize_url(url: str, max_length: int = 2000) -> str:
     return url
 
 
+def escape_regex(value: str) -> str:
+    """
+    Escapa metacaracteres de regex em input do utilizador.
+
+    Impede injecção de padrões MongoDB ``$regex`` (ReDoS / query injection)
+    em pesquisas de webmail, empresas, login, etc.
+
+    Args:
+        value: String a usar como padrão ``$regex``.
+
+    Returns:
+        String segura para interpolar em ``$regex`` (``re.escape``).
+        String vazia se o valor for nulo/vazio.
+    """
+    if value is None:
+        return ""
+    if not isinstance(value, str):
+        value = str(value)
+    return re.escape(value)
+
+
 def log_sanitization_rejection(field_name: str, original_value: str, reason: str):
     """
     Regista tentativa de input malicioso para análise.
