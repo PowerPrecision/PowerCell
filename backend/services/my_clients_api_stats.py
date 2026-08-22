@@ -6,6 +6,7 @@ from __future__ import annotations
 
 from database import db
 from services.my_clients_api_helpers import build_my_clients_stats_query
+from services.process_list_filters import role_has_client_portfolio
 
 
 async def run_get_my_clients_stats(user: dict):
@@ -13,6 +14,13 @@ async def run_get_my_clients_stats(user: dict):
     user_id = user["id"]
     user_email = user.get("email", "")
     role = user["role"]
+
+    if not role_has_client_portfolio(role):
+        return {
+            "total_clients": 0,
+            "by_status": {},
+            "pending_tasks": 0,
+        }
 
     query = build_my_clients_stats_query(
         user_id=user_id,

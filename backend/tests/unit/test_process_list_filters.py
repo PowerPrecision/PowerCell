@@ -271,10 +271,26 @@ class TestMyClientsQuery:
         assert {"status": {"$nin": INACTIVE_STATUSES}} in q["$and"]
         assert {"status": {"$nin": LEAD_STATUS_VALUES}} in q["$and"]
 
-    def test_admin_only_hides_pre_registo(self):
-        from services.process_list_filters import build_my_clients_process_query
+    def test_admin_has_empty_portfolio(self):
+        from services.process_list_filters import (
+            EMPTY_PORTFOLIO_QUERY,
+            build_my_clients_process_query,
+            role_has_client_portfolio,
+        )
         q = build_my_clients_process_query("a1", "a@x.com", UserRole.ADMIN)
-        assert q == {"status": {"$nin": LEAD_STATUS_VALUES}}
+        assert q == EMPTY_PORTFOLIO_QUERY
+        assert role_has_client_portfolio(UserRole.ADMIN) is False
+        assert role_has_client_portfolio(UserRole.CEO) is False
+        assert role_has_client_portfolio(UserRole.INDEXACAO) is False
+        assert role_has_client_portfolio(UserRole.CONSULTOR) is True
+
+    def test_ceo_and_indexacao_have_empty_portfolio(self):
+        from services.process_list_filters import (
+            EMPTY_PORTFOLIO_QUERY,
+            build_my_clients_process_query,
+        )
+        assert build_my_clients_process_query("c1", "c@x.com", UserRole.CEO) == EMPTY_PORTFOLIO_QUERY
+        assert build_my_clients_process_query("i1", "i@x.com", UserRole.INDEXACAO) == EMPTY_PORTFOLIO_QUERY
 
     def test_intermediario_includes_created_by_email(self):
         from services.process_list_filters import build_my_clients_process_query

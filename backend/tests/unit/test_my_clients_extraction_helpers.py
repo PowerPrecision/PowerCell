@@ -73,6 +73,7 @@ def test_build_query_consultor_active():
 
 def test_build_query_deleted_admin():
     from services.my_clients_api_helpers import build_my_clients_process_query
+    from services.process_list_filters import EMPTY_PORTFOLIO_QUERY
 
     q = build_my_clients_process_query(
         user_id="u1",
@@ -80,7 +81,33 @@ def test_build_query_deleted_admin():
         role=UserRole.ADMIN,
         wants_deleted=True,
     )
-    assert q == {"is_deleted": True}
+    assert q == EMPTY_PORTFOLIO_QUERY
+
+
+def test_build_query_admin_ceo_indexacao_empty():
+    from services.my_clients_api_helpers import build_my_clients_process_query
+    from services.process_list_filters import EMPTY_PORTFOLIO_QUERY
+
+    for role in (UserRole.ADMIN, UserRole.CEO, UserRole.INDEXACAO):
+        q = build_my_clients_process_query(
+            user_id="u1",
+            user_email="a@b.c",
+            role=role,
+            wants_deleted=False,
+        )
+        assert q == EMPTY_PORTFOLIO_QUERY, role
+
+
+def test_stats_query_admin_empty():
+    from services.my_clients_api_helpers import build_my_clients_stats_query
+    from services.process_list_filters import EMPTY_PORTFOLIO_QUERY
+
+    q = build_my_clients_stats_query(
+        user_id="u1",
+        user_email="a@b.c",
+        role=UserRole.ADMIN,
+    )
+    assert q == EMPTY_PORTFOLIO_QUERY
 
 
 def test_format_lead_row():

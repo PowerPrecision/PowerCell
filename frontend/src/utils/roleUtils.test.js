@@ -14,6 +14,8 @@ import {
   filterAssignmentStaff,
   isAssignmentEligibleUser,
   canAccessOrgAdmin,
+  hasNoClientPortfolio,
+  NO_CLIENT_PORTFOLIO_ROLES,
 } from "./roleUtils.js";
 
 describe("assignment staff constants", () => {
@@ -90,5 +92,16 @@ describe("Pacote DW — org admin + UCR roles", () => {
     assert.equal(canAccessOrgAdmin("diretor"), false);
     assert.equal(canAccessOrgAdmin("consultor"), false);
     assert.equal(canAccessOrgAdmin(null), false);
+  });
+
+  it("hasNoClientPortfolio for admin, ceo and indexacao", () => {
+    assert.deepEqual(NO_CLIENT_PORTFOLIO_ROLES, ["admin", "ceo", "indexacao"]);
+    assert.equal(hasNoClientPortfolio("admin"), true);
+    assert.equal(hasNoClientPortfolio("CEO"), true);
+    assert.equal(hasNoClientPortfolio("indexacao"), true);
+    assert.equal(hasNoClientPortfolio("consultor"), false);
+    assert.equal(hasNoClientPortfolio("diretor"), false);
+    assert.equal(hasNoClientPortfolio("intermediario"), false);
+    assert.equal(hasNoClientPortfolio(null), false);
   });
 });

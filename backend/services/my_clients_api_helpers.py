@@ -9,6 +9,10 @@ from fastapi import Request
 
 from models.auth import UserRole
 from services.auth import get_effective_role
+from services.process_list_filters import (
+    EMPTY_PORTFOLIO_QUERY,
+    role_has_client_portfolio,
+)
 
 # Mesmos status inactivos que processes.py / process_status.py
 INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
@@ -74,6 +78,9 @@ def build_my_clients_process_query(
     wants_deleted: bool,
 ) -> dict:
     """Build Mongo query for processes in GET /my-clients."""
+    if not role_has_client_portfolio(role):
+        return EMPTY_PORTFOLIO_QUERY
+
     if wants_deleted:
         if role == UserRole.CONSULTOR:
             return {
@@ -96,24 +103,12 @@ def build_my_clients_process_query(
                     {"is_deleted": True},
                 ]
             }
-        if role == UserRole.INDEXACAO:
-            return {
-                "$and": [
-                    {"$or": [
-                        {"assigned_indexacao_id": user_id},
-                        {"created_by": user_email},
-                    ]},
-                    {"is_deleted": True},
-                ]
-            }
         if role in [
-            UserRole.ADMIN,
-            UserRole.CEO,
             UserRole.DIRETOR,
             UserRole.ADMINISTRATIVO,
         ]:
             return {"is_deleted": True}
-        return {"_id": None}
+        return EMPTY_PORTFOLIO_QUERY
 
     if role == UserRole.CONSULTOR:
         return {
@@ -140,16 +135,7 @@ def build_my_clients_process_query(
                 {"is_deleted": {"$ne": True}},
             ]
         }
-    if role == UserRole.INDEXACAO:
-        return {
-            "$or": [
-                {"assigned_indexacao_id": user_id},
-                {"created_by": user_email},
-            ]
-        }
     if role in [
-        UserRole.ADMIN,
-        UserRole.CEO,
         UserRole.DIRETOR,
         UserRole.ADMINISTRATIVO,
     ]:
@@ -157,12 +143,12 @@ def build_my_clients_process_query(
             "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
             "is_active": {"$ne": False},
         }
-    return {"_id": None}
+    return EMPTY_PORTFOLIO_QUERY
 
 
 def apply_pre_registo_exclusion(query: dict) -> dict:
     """PACOTE BK/DB — exclude pre_registo + None (Lead) from Meus Clientes."""
-    if query == {"_id": None}:
+    if query == EMPTY_PORTFOLIO_QUERY:
         return query
     pre_registo_filter = {"status": {"$nin": LEAD_STATUS_VALUES}}
     if "$and" in query:
@@ -180,6 +166,8 @@ def build_my_clients_stats_query(
     role: str,
 ) -> dict:
     """Build Mongo query for GET /my-clients/stats (no deleted / pre_registo variants)."""
+    if not role_has_client_portfolio(role):
+        return EMPTY_PORTFOLIO_QUERY
     if role == UserRole.CONSULTOR:
         return {
             "$and": [
@@ -205,16 +193,7 @@ def build_my_clients_stats_query(
                 {"is_deleted": {"$ne": True}},
             ]
         }
-    if role == UserRole.INDEXACAO:
-        return {
-            "$or": [
-                {"assigned_indexacao_id": user_id},
-                {"created_by": user_email},
-            ]
-        }
     if role in [
-        UserRole.ADMIN,
-        UserRole.CEO,
         UserRole.DIRETOR,
         UserRole.ADMINISTRATIVO,
     ]:
@@ -222,7 +201,7 @@ def build_my_clients_stats_query(
             "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
             "is_active": {"$ne": False},
         }
-    return {"_id": None}
+    return EMPTY_PORTFOLIO_QUERY
 
 
 def resolve_list_context(request: Request, user: dict) -> tuple[str, str, str, bool]:

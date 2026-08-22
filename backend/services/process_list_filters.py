@@ -485,6 +485,25 @@ def build_kanban_query(
 # MY-CLIENTS QUERY BUILDERS
 # ====================================================================
 
+# Perfis puramente administrativos: não têm carteira própria em
+# "Os Meus Clientes". Um admin/CEO/indexação de sistema não deve ver
+# todos os clientes da plataforma nesta vista (nem os que eventualmente
+# estejam atribuídos a si enquanto cargo operacional).
+NO_CLIENT_PORTFOLIO_ROLES = frozenset({
+    UserRole.ADMIN,
+    UserRole.CEO,
+    UserRole.INDEXACAO,
+})
+
+# Query que não casa com nenhum documento Mongo (os docs têm sempre _id).
+EMPTY_PORTFOLIO_QUERY = {"_id": None}
+
+
+def role_has_client_portfolio(role: str) -> bool:
+    """False para admin / ceo / indexacao (perfil activo sem carteira)."""
+    return (role or "") not in NO_CLIENT_PORTFOLIO_ROLES
+
+
 def build_my_clients_process_query(
     user_id: str,
     user_email: str,
@@ -496,7 +515,11 @@ def build_my_clients_process_query(
     SINCRONIZAÇÃO COM "Os Meus Processos":
     Consultor/intermediário usam o mesmo critério base (assigned_* + is_active
     + status activo). Pré-registo é sempre excluído nesta vista.
+    Admin / CEO / Indexação devolvem query vazia (sem carteira).
     """
+    if not role_has_client_portfolio(role):
+        return EMPTY_PORTFOLIO_QUERY
+
     if role == UserRole.CONSULTOR:
         query: dict[str, Any] = {
             "$and": [
@@ -520,13 +543,6 @@ def build_my_clients_process_query(
                 {"is_active": {"$ne": False}},
                 {"status": {"$nin": INACTIVE_STATUSES}},
                 {"is_deleted": {"$ne": True}},
-            ]
-        }
-    elif role == UserRole.INDEXACAO:
-        query = {
-            "$or": [
-                {"assigned_indexacao_id": user_id},
-                {"created_by": user_email},
             ]
         }
     else:

@@ -8,6 +8,8 @@ from __future__ import annotations
 
 from typing import Any, Callable, Optional
 
+from services.process_list_filters import role_has_client_portfolio
+
 
 LEAD_CLIENTS_PROJECTION = {
     "_id": 0,
@@ -331,9 +333,22 @@ async def run_get_my_clients(
     slice_page_fn,
     load_status_map_fn,
 ) -> dict:
-    """Orquestra GET /my-clients."""
+    """Orquestra GET /processes/my-clients."""
     user_id = user["id"]
     user_email = user.get("email", "")
+
+    # Admin / CEO / Indexação: sem carteira — devolver vazio de imediato.
+    if not role_has_client_portfolio(role):
+        return build_my_clients_response(
+            clients=[],
+            total=0,
+            page=page,
+            size=size,
+            pages=0,
+            user_id=user_id,
+            user_role=role,
+            leads_count=0,
+        )
 
     query = build_process_query_fn(user_id, user_email, role)
     processes = await db.processes.find(

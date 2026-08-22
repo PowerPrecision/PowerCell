@@ -39,8 +39,12 @@ import {
   Loader2,
   FileText,
   FileCheck,
+  Eye,
+  User,
+  FolderOpen,
 } from "lucide-react";
 import { toast } from "sonner";
+import { formatDateTime } from "../lib/utils";
 import {
   getPortalDocRequests,
   createPortalDocRequest,
@@ -81,6 +85,20 @@ function getCategoryInfo(categoryKey) {
   return DOCUMENT_CATEGORIES.find(c => c.value === key) || { value: key, label: key, icon: "📎" };
 }
 
+const SOURCE_LABELS = {
+  client_portal: "Portal do Cliente",
+  admin_request: "Pedido da equipa",
+  auto_default: "Checklist automática",
+};
+
+function formatFileSize(bytes) {
+  const n = Number(bytes);
+  if (!Number.isFinite(n) || n <= 0) return null;
+  if (n < 1024) return `${n} B`;
+  if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
+  return `${(n / (1024 * 1024)).toFixed(1)} MB`;
+}
+
 const STATUS_CONFIG = {
   REQUESTED: { label: "Pendente", color: "bg-amber-100 text-amber-800 border-amber-200", icon: Clock },
   PENDING: { label: "Pendente", color: "bg-amber-100 text-amber-800 border-amber-200", icon: Clock },
@@ -94,7 +112,13 @@ const STATUS_CONFIG = {
   pending: { label: "Pendente", color: "bg-amber-100 text-amber-800 border-amber-200", icon: Clock },
 };
 
-export default function PortalDocumentRequests({ processId, onDocumentsChange }) {
+export default function PortalDocumentRequests({ processId, processNumber, clientName, onDocumentsChange }) {
+  const [documents, setDocuments] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [actionLoading, setActionLoading] = useState(null); // track which action is loading
+  const [showAddDialog, setShowAddDialog] = useState(false);
+  const [newDoc, setNewDoc] = useState({ categories: [], notes: "", custom_label: "" });
+  const [detailsDoc, setDetailsDoc] = useState(null);
   const [documents, setDocuments] = useState([]);
   const [loading, setLoading] = useState(true);
   const [actionLoading, setActionLoading] = useState(null); // track which action is loading
@@ -169,6 +193,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
     try {
       await updatePortalDocRequest(processId, docId, { status: "RECEIVED" });
       toast.success("Documento marcado como recebido!");
+      setDetailsDoc(null);
       fetchDocuments();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
@@ -184,6 +209,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
     try {
       await updatePortalDocRequest(processId, docId, { status: "REQUESTED" });
       toast.success("Pedido reativado com sucesso!");
+      setDetailsDoc(null);
       fetchDocuments();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
@@ -199,7 +225,8 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
     setActionLoading(docId);
     try {
       await deletePortalDocRequest(processId, docId);
-      toast.success("Pedido removido");
+      toast.success("Pedido recusado e removido");
+      setDetailsDoc(null);
       fetchDocuments();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
@@ -229,6 +256,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
   const receivedCount = receivedDocs.length;
 
   return (
+    <>
     <Card className="border-teal-200">
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
@@ -393,6 +421,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
                     key={doc.id}
                     doc={doc}
                     loading={actionLoading === doc.id}
+                    onViewDetails={() => setDetailsDoc(doc)}
                     onMarkReceived={() => handleMarkReceived(doc.id)}
                     onDelete={() => handleDelete(doc.id)}
                   />
@@ -412,6 +441,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
                     key={doc.id}
                     doc={doc}
                     loading={actionLoading === doc.id}
+                    onViewDetails={() => setDetailsDoc(doc)}
                     onMarkReceived={() => handleMarkReceived(doc.id)}
                     onDelete={() => handleDelete(doc.id)}
                   />
@@ -431,6 +461,7 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
                     key={doc.id}
                     doc={doc}
                     loading={actionLoading === doc.id}
+                    onViewDetails={() => setDetailsDoc(doc)}
                     onMarkPending={() => handleMarkPending(doc.id)}
                     onDelete={() => handleDelete(doc.id)}
                     isReceived
@@ -442,11 +473,25 @@ export default function PortalDocumentRequests({ processId, onDocumentsChange })
         )}
       </CardContent>
     </Card>
+
+      <RequestDetailsDialog
+        doc={detailsDoc}
+        open={Boolean(detailsDoc)}
+        onOpenChange={(open) => { if (!open) setDetailsDoc(null); }}
+        processId={processId}
+        processNumber={processNumber}
+        clientName={clientName}
+        loading={detailsDoc ? actionLoading === detailsDoc.id : false}
+        onAccept={() => detailsDoc && handleMarkReceived(detailsDoc.id)}
+        onReject={() => detailsDoc && handleDelete(detailsDoc.id)}
+        onReactivate={() => detailsDoc && handleMarkPending(detailsDoc.id)}
+      />
+    </>
   );
 }
 
 // ── Individual document item ──────────────────────────────────────
-function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isReceived }) {
+function DocItem({ doc, loading, onViewDetails, onMarkReceived, onMarkPending, onDelete, isReceived }) {
   const catInfo = getCategoryInfo(doc.category);
   const statusKey = safeString(doc.status, 'REQUESTED').toUpperCase();
   const statusCfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG[safeString(doc.status)] || STATUS_CONFIG.REQUESTED;
@@ -455,45 +500,68 @@ function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isRece
   const displayName = safeString(doc.custom_label) || catInfo.label;
 
   return (
-    <div className={`flex items-center gap-2.5 p-2.5 rounded-lg border transition-colors ${
-      isReceived
-        ? "bg-emerald-50/50 border-emerald-100"
-        : "bg-white border-gray-100 hover:border-gray-200"
-    }`}>
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onViewDetails}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || e.key === " ") {
+          e.preventDefault();
+          onViewDetails?.();
+        }
+      }}
+      className={`flex items-center gap-2.5 p-2.5 rounded-lg border transition-colors cursor-pointer ${
+        isReceived
+          ? "bg-emerald-50/50 border-emerald-100"
+          : "bg-background border-border hover:border-muted-foreground/30"
+      }`}
+      data-testid={`portal-request-row-${doc.id}`}
+    >
       <span className="text-lg flex-shrink-0">{catInfo.icon}</span>
       <div className="flex-1 min-w-0">
-        <p className="text-sm font-medium text-gray-800 truncate">{displayName}</p>
+        <p className="text-sm font-medium text-foreground truncate">{displayName}</p>
         <div className="flex items-center gap-2 mt-0.5">
           <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${statusCfg.color}`}>
             <StatusIcon className="h-2.5 w-2.5" />
             {statusCfg.label}
           </span>
           {doc.notes && (
-            <span className="text-[10px] text-gray-400 truncate">{safeString(doc.notes)}</span>
+            <span className="text-[10px] text-muted-foreground truncate">{safeString(doc.notes)}</span>
           )}
           {doc.original_filename && (
-            <span className="text-[10px] text-blue-500 truncate">📎 {safeString(doc.original_filename)}</span>
+            <span className="text-[10px] text-primary truncate">📎 {safeString(doc.original_filename)}</span>
           )}
         </div>
       </div>
-      <div className="flex items-center gap-1 flex-shrink-0">
+      <div className="flex items-center gap-1 flex-shrink-0" onClick={(e) => e.stopPropagation()}>
         {loading ? (
           <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
         ) : (
           <>
+            <button
+              type="button"
+              onClick={onViewDetails}
+              className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
+              title="Ver detalhes"
+              data-testid={`portal-request-details-${doc.id}`}
+            >
+              <Eye className="h-4 w-4" />
+            </button>
             {!isReceived ? (
               <>
                 <button
+                  type="button"
                   onClick={onMarkReceived}
-                  className="p-1.5 rounded-md hover:bg-emerald-100 text-emerald-600 transition-colors"
-                  title="Marcar como recebido"
+                  className="p-1.5 rounded-md hover:bg-accent text-primary transition-colors"
+                  title="Aceitar / marcar como recebido"
                 >
                   <Check className="h-4 w-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={onDelete}
-                  className="p-1.5 rounded-md hover:bg-red-100 text-red-400 hover:text-red-600 transition-colors"
-                  title="Remover pedido"
+                  className="p-1.5 rounded-md hover:bg-destructive/10 text-destructive transition-colors"
+                  title="Recusar / remover pedido"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
                 </button>
@@ -501,15 +569,17 @@ function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isRece
             ) : (
               <>
                 <button
+                  type="button"
                   onClick={onMarkPending}
-                  className="p-1.5 rounded-md hover:bg-amber-100 text-amber-600 transition-colors"
+                  className="p-1.5 rounded-md hover:bg-accent text-muted-foreground hover:text-foreground transition-colors"
                   title="Voltar a solicitar"
                 >
                   <RotateCcw className="h-4 w-4" />
                 </button>
                 <button
+                  type="button"
                   onClick={onDelete}
-                  className="p-1.5 rounded-md hover:bg-red-100 text-red-400 hover:text-red-600 transition-colors"
+                  className="p-1.5 rounded-md hover:bg-destructive/10 text-destructive transition-colors"
                   title="Remover"
                 >
                   <Trash2 className="h-3.5 w-3.5" />
@@ -520,5 +590,145 @@ function DocItem({ doc, loading, onMarkReceived, onMarkPending, onDelete, isRece
         )}
       </div>
     </div>
+  );
+}
+
+function DetailRow({ label, children }) {
+  if (children == null || children === "" || children === "-") return null;
+  return (
+    <div className="grid grid-cols-3 gap-2 py-2 border-b border-border last:border-0">
+      <dt className="text-xs font-medium text-muted-foreground">{label}</dt>
+      <dd className="col-span-2 text-sm text-foreground break-words">{children}</dd>
+    </div>
+  );
+}
+
+function RequestDetailsDialog({
+  doc,
+  open,
+  onOpenChange,
+  processId,
+  processNumber,
+  clientName,
+  loading,
+  onAccept,
+  onReject,
+  onReactivate,
+}) {
+  if (!doc) return null;
+
+  const catInfo = getCategoryInfo(doc.category);
+  const statusKey = safeString(doc.status, "REQUESTED").toUpperCase();
+  const statusCfg = STATUS_CONFIG[statusKey] || STATUS_CONFIG[safeString(doc.status)] || STATUS_CONFIG.REQUESTED;
+  const StatusIcon = statusCfg.icon;
+  const displayName = safeString(doc.custom_label) || catInfo.label;
+  const isReceived = statusKey === "RECEIVED";
+  const sourceLabel = SOURCE_LABELS[safeString(doc.source)] || safeString(doc.source, null);
+  const attachedFiles = Array.isArray(doc.attached_files) ? doc.attached_files : [];
+  const fileSize = formatFileSize(doc.file_size);
+  const processLabel = processNumber
+    ? `#${processNumber}`
+    : (safeString(doc.process_id) || processId || "—");
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-lg" title="Detalhes do pedido" description="Informação completa do pedido do portal">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <span>{catInfo.icon}</span>
+            {displayName}
+          </DialogTitle>
+          <DialogDescription>
+            Reveja o contexto do pedido antes de aceitar ou recusar.
+          </DialogDescription>
+        </DialogHeader>
+
+        <dl className="space-y-0">
+          <DetailRow label="Estado">
+            <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-xs font-medium ${statusCfg.color}`}>
+              <StatusIcon className="h-3 w-3" />
+              {statusCfg.label}
+            </span>
+          </DetailRow>
+          <DetailRow label="Tipo de documento">{catInfo.label}</DetailRow>
+          {safeString(doc.custom_label) ? (
+            <DetailRow label="Descrição">{safeString(doc.custom_label)}</DetailRow>
+          ) : null}
+          <DetailRow label="Processo associado">{processLabel}</DetailRow>
+          {clientName ? (
+            <DetailRow label="Cliente">
+              <span className="inline-flex items-center gap-1">
+                <User className="h-3.5 w-3.5 text-muted-foreground" />
+                {clientName}
+              </span>
+            </DetailRow>
+          ) : null}
+          <DetailRow label="Origem">{sourceLabel}</DetailRow>
+          <DetailRow label="Mensagem / notas">
+            {safeString(doc.notes) || (
+              <span className="text-muted-foreground italic">Sem mensagem</span>
+            )}
+          </DetailRow>
+          <DetailRow label="Ficheiro">{safeString(doc.original_filename || doc.filename)}</DetailRow>
+          <DetailRow label="Tipo MIME">{safeString(doc.content_type)}</DetailRow>
+          <DetailRow label="Tamanho">{fileSize}</DetailRow>
+          <DetailRow label="Pedido por">{safeString(doc.requested_by_name)}</DetailRow>
+          <DetailRow label="Criado em">{doc.created_at ? formatDateTime(doc.created_at) : null}</DetailRow>
+          <DetailRow label="Submetido em">{doc.uploaded_at ? formatDateTime(doc.uploaded_at) : null}</DetailRow>
+          <DetailRow label="Atualizado em">{doc.updated_at ? formatDateTime(doc.updated_at) : null}</DetailRow>
+          {attachedFiles.length > 0 ? (
+            <DetailRow label="Ficheiros anexados">
+              <ul className="space-y-1">
+                {attachedFiles.map((f, idx) => (
+                  <li key={f.file_id || f.s3_path || idx} className="flex items-center gap-1.5 text-xs">
+                    <FolderOpen className="h-3 w-3 text-muted-foreground shrink-0" />
+                    <span className="truncate">{safeString(f.original_filename || f.filename, "Ficheiro")}</span>
+                    {f.uploaded_at ? (
+                      <span className="text-muted-foreground shrink-0">
+                        {formatDateTime(f.uploaded_at)}
+                      </span>
+                    ) : null}
+                  </li>
+                ))}
+              </ul>
+            </DetailRow>
+          ) : null}
+        </dl>
+
+        <DialogFooter className="gap-2 sm:gap-2">
+          {loading ? (
+            <Loader2 className="h-4 w-4 animate-spin text-muted-foreground" />
+          ) : isReceived ? (
+            <>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Fechar
+              </Button>
+              <Button type="button" variant="outline" onClick={onReactivate}>
+                <RotateCcw className="h-4 w-4" />
+                Voltar a solicitar
+              </Button>
+              <Button type="button" variant="destructive" onClick={onReject}>
+                <Trash2 className="h-4 w-4" />
+                Recusar
+              </Button>
+            </>
+          ) : (
+            <>
+              <Button type="button" variant="outline" onClick={() => onOpenChange(false)}>
+                Fechar
+              </Button>
+              <Button type="button" variant="destructive" onClick={onReject}>
+                <Trash2 className="h-4 w-4" />
+                Recusar
+              </Button>
+              <Button type="button" onClick={onAccept}>
+                <CheckCircle className="h-4 w-4" />
+                Aceitar
+              </Button>
+            </>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
   );
 }

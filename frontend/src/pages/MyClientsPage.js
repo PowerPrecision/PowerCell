@@ -27,7 +27,7 @@ import {
 import { getMyClients, getWorkflowStatuses, getExportPermission } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText,
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download, Trash2
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download, Trash2, Shield
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 // PACOTE CP — ClientDetailsModal reutilizável
@@ -37,7 +37,8 @@ import * as XLSX from 'xlsx';
 import { pt } from "date-fns/locale";
 import { safeFormat } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
-import { hasAnyRole } from "../utils/roleUtils";
+import { hasAnyRole, hasNoClientPortfolio } from "../utils/roleUtils";
+import { EmptyState } from "../components/ui/EmptyState";
 
 /**
  * Calcula a cor de texto (preto ou branco) com base na luminosidade da cor de fundo.
@@ -66,7 +67,7 @@ const getContrastColor = (bgColor) => {
  */
 
 const MyClientsPage = () => {
-  const { user } = useAuth();
+  const { user, effectiveRole, loading: authLoading } = useAuth();
   const [clients, setClients] = useState([]);
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -79,6 +80,7 @@ const MyClientsPage = () => {
   
   // Admin/CEO sempre podem exportar
   const canExportExcel = allowExcelExport || hasAnyRole(user, ['admin', 'ceo']);
+  const hasNoPortfolio = hasNoClientPortfolio(effectiveRole || user?.role);
   
   // Sync filters with URL
   const searchTerm = searchParams.get("search") || "";
@@ -108,10 +110,14 @@ const MyClientsPage = () => {
   const setSortOrder = (v) => updateParam("order", v);
 
   useEffect(() => {
+    if (hasNoPortfolio) {
+      setLoading(false);
+      return;
+    }
     fetchData();
     checkExportPermission();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showInactive, showDeleted]);
+  }, [showInactive, showDeleted, hasNoPortfolio]);
 
   const checkExportPermission = async () => {
     try {
@@ -299,6 +305,34 @@ const MyClientsPage = () => {
     
     return { total, withPendingTasks, withProperty };
   }, [clients]);
+
+  if (authLoading) {
+    return (
+      <DashboardLayout title="Os Meus Clientes">
+        <div className="space-y-6" data-testid="loading-spinner">
+          <div className="h-8 w-48 bg-muted animate-pulse rounded" />
+          <TableSkeleton rows={8} columns={5} />
+        </div>
+      </DashboardLayout>
+    );
+  }
+
+  if (hasNoPortfolio) {
+    return (
+      <DashboardLayout title="Os Meus Clientes">
+        <div className="space-y-6" data-testid="my-clients-page">
+          <div data-testid="admin-empty-portfolio">
+            <EmptyState
+              icon={Shield}
+              title="Sem carteira de clientes"
+              message="Administradores, CEO e Indexação não têm carteira de clientes atribuída. Mude para um perfil operacional (consultor ou intermediário) para ver os seus clientes."
+              className="py-20"
+            />
+          </div>
+        </div>
+      </DashboardLayout>
+    );
+  }
 
   if (loading) {
     return (
