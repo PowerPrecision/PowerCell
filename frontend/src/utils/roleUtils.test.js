@@ -8,6 +8,8 @@ import {
   ASSIGNMENT_STAFF_ROLES,
   CONSULTOR_ASSIGNMENT_ROLES,
   EXCLUDED_ASSIGNMENT_ROLES,
+  ROLE_LABELS,
+  ROLE_SHORT_LABELS,
   UCR_ASSIGNABLE_ROLES,
   filterAssignmentStaff,
   isAssignmentEligibleUser,
@@ -58,7 +60,7 @@ describe("isAssignmentEligibleUser / filterAssignmentStaff", () => {
 });
 
 describe("Pacote DW — org admin + UCR roles", () => {
-  it("UCR_ASSIGNABLE_ROLES includes Index (indexacao) and administrativo", () => {
+  it("UCR_ASSIGNABLE_ROLES includes Index, administrativo and parceiro", () => {
     assert.deepEqual(UCR_ASSIGNABLE_ROLES, [
       "admin",
       "ceo",
@@ -67,7 +69,19 @@ describe("Pacote DW — org admin + UCR roles", () => {
       "consultor",
       "intermediario",
       "indexacao",
+      "parceiro",
     ]);
+  });
+
+  it("does not use the non-canonical Adm. label for administrativo", () => {
+    assert.equal(ROLE_SHORT_LABELS.admin, "Admin");
+    assert.equal(ROLE_SHORT_LABELS.administrativo, "Administrativo");
+    assert.equal(ROLE_SHORT_LABELS.parceiro, "Parceiro");
+    assert.notEqual(ROLE_SHORT_LABELS.administrativo, ROLE_SHORT_LABELS.admin);
+    assert.equal(ROLE_LABELS.admin, "Administrador do Sistema");
+    assert.equal(ROLE_LABELS.administrativo, "Apoio Administrativo");
+    assert.equal(ROLE_LABELS.parceiro, "Parceiro");
+    assert.equal(UCR_ASSIGNABLE_ROLES.includes("adm"), false);
   });
 
   it("canAccessOrgAdmin only when activeRole is admin or ceo", () => {

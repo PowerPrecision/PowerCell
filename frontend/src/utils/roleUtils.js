@@ -146,6 +146,7 @@ export const UCR_ASSIGNABLE_ROLES = [
   "consultor",
   "intermediario",
   "indexacao",
+  "parceiro",
 ];
 
 // ====================================================================
@@ -170,7 +171,7 @@ export const ROLE_SHORT_LABELS = {
   admin: "Admin",
   ceo: "CEO",
   diretor: "Diretor",
-  administrativo: "Adm.",
+  administrativo: "Administrativo",
   consultor: "Consultor",
   intermediario: "Intermediário",
   indexacao: "Indexação",
