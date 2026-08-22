@@ -441,11 +441,14 @@ async def webmail_stats(
 
 @router.post("/webmail/sync")
 async def webmail_sync(
+    request: Request,
     account: Optional[str] = None,
     days: int = Query(7, ge=1, le=30),
     current_user: dict = Depends(get_current_user)
 ):
-    return await run_webmail_sync(current_user, account=account, days=days)
+    return await run_webmail_sync(
+        current_user, account=account, days=days, request=request,
+    )
 
 
 @router.post("/webmail/sync-user")

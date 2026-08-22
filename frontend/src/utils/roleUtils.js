@@ -331,6 +331,17 @@ export const canAccessOrgAdmin = (activeRole) => {
 };
 
 /**
+ * Pacote FH / C3 — gate de rotas pelo cargo efetivo (UCR / effectiveRole).
+ * Não consulta additional_roles do JWT.
+ */
+export const canAccessByEffectiveRole = (effectiveRole, allowedRoles) => {
+  if (!allowedRoles || allowedRoles.length === 0) return true;
+  if (!effectiveRole || typeof effectiveRole !== "string") return false;
+  const role = effectiveRole.toLowerCase();
+  return allowedRoles.some((r) => (r || "").toLowerCase() === role);
+};
+
+/**
  * True se o perfil activo (admin / ceo / indexacao) não tem carteira
  * de clientes em "Os Meus Clientes".
  */

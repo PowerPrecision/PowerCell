@@ -93,6 +93,7 @@ def test_forced_shared_uses_effective_role_not_primary():
             "id": "u1",
             "role": "consultor",
             "additional_roles": ["indexacao"],
+            "effective_role": "indexacao",
         }
         config = EmailConfigCreate(
             email_address="a@b.com",
@@ -115,6 +116,7 @@ def test_forced_shared_uses_effective_role_not_primary():
             "role": "indexacao",
             "additional_roles": ["consultor"],
             "company": "acme",
+            "effective_role": "consultor",
         }
         config = EmailConfigCreate(
             email_address="a@b.com",

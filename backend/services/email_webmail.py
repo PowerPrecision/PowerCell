@@ -13,7 +13,6 @@ from typing import Optional, List
 from fastapi import HTTPException, BackgroundTasks, Request
 
 from database import db
-from services.auth import get_effective_role
 from services.email_enrich import enrich_email
 from services.email_service import (
     test_email_connection,
@@ -65,7 +64,7 @@ async def resolve_ucr_mailbox_filter(
     """
     if box in ("general", "shared_indexacao"):
         return None
-    from services.auth import get_active_company_id_async
+    from services.auth import get_active_company_id_async, get_effective_role_async
     from services.email_config_resolver import resolve_email_config_for_sync
 
     active_company_id = None
@@ -92,7 +91,7 @@ async def resolve_ucr_mailbox_filter(
     try:
         resolved = await resolve_email_config_for_sync(
             current_user.get("id"),
-            active_role=get_effective_role(request, current_user),
+            active_role=await get_effective_role_async(request, current_user),
             active_company_id=active_company_id,
         )
         if resolved:
@@ -134,7 +133,8 @@ async def rewrite_box_for_caixa_geral(
 
 async def run_test_email_connections(current_user: dict, account: Optional[str] = None):
     """Testar ligação com as contas de email."""
-    if current_user["role"] not in ["admin", "ceo"]:
+    role = (current_user.get("effective_role") or current_user.get("role") or "")
+    if role not in ["admin", "ceo"]:
         raise HTTPException(status_code=403, detail="Sem permissão")
     
     results = await test_email_connection(account)
@@ -177,35 +177,36 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     - custom: emails numa pasta personalizada (requer custom_folder param)
     """
     from models.auth import UserRole
-    
+    from services.auth import get_effective_role_async
+
     user_email = (current_user.get("email") or "").lower().strip()
-    user_role = current_user.get("role", "")  # Used for permission checks (403)
     user_id = current_user.get("id", "")
-    effective_role = get_effective_role(request, current_user)  # Used for data filtering
+    effective_role = await get_effective_role_async(request, current_user)
     can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
-    
-    logger.debug(f"User {current_user.get('email')} (id={user_id}, role={user_role}, effective_role={effective_role}) querying box={box} folder={folder} account={account}")
-    
-    # === BOX FILTER: permissões e isolamento por caixa ===
+
+    logger.debug(
+        f"User {current_user.get('email')} (id={user_id}, "
+        f"effective_role={effective_role}) querying box={box} folder={folder} account={account}"
+    )
+
+    # === BOX FILTER: permissões e isolamento por caixa (exclusivo UCR) ===
     if box == "general":
-        # Bloquear consultor/indexação no cargo *activo* (UCR), não só no JWT.
         if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail List] box=general, user={user_email}, role={user_role}, effective_role={effective_role}")
+        logger.info(f"[Webmail List] box=general, user={user_email}, effective_role={effective_role}")
     elif box == "shared_indexacao":
-        # Blocked for everyone except admin and indexacao
-        if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
+        if effective_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
             raise HTTPException(
                 status_code=403,
-                detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{user_role}'."
+                detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail List] box=shared_indexacao, user={user_email}, role={user_role}")
+        logger.info(f"[Webmail List] box=shared_indexacao, user={user_email}, effective_role={effective_role}")
     elif box == "personal":
-        logger.info(f"[Webmail List] box=personal, user={user_email}, role={user_role}")
+        logger.info(f"[Webmail List] box=personal, user={user_email}, effective_role={effective_role}")
     
     # === OBTER EMAIL DA CONTA IMAP SELECIONADA ===
     # Quando o user seleciona uma conta (ex: "power"), obtém o email dessa conta
@@ -332,7 +333,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
         #    podem ver emails sincronizados via Gmail API para esse role
         # NOTA: admin/ceo/diretor podem ver TUDO (can_see_all = True)
         user_id_isolation = current_user["id"]
-        user_role_isolation = current_user.get("role", "")
+        user_role_isolation = effective_role
 
         # Verificar se o utilizador pertence a um role com email partilhado
         shared_role_config = None
@@ -552,11 +553,14 @@ async def run_webmail_stats(
     Pacote DN.2: caixa pessoal filtrada pelo UCR activo (X-Company-Id).
     """
     from models.auth import UserRole
-    
+    from services.auth import get_effective_role_async
+
     user_email = (current_user.get("email") or "").lower().strip()
-    user_role = current_user.get("role", "")
     user_id = current_user.get("id", "")
-    effective_role = get_effective_role(request, current_user) if request is not None else user_role
+    if request is not None:
+        effective_role = await get_effective_role_async(request, current_user)
+    else:
+        effective_role = (current_user.get("effective_role") or current_user.get("role") or "")
     can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     if request is not None:
         box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
@@ -565,22 +569,22 @@ async def run_webmail_stats(
         ucr_filter = await resolve_ucr_mailbox_filter(
             request, current_user, box=box, mailbox=mailbox,
         )
-    
-    # === BOX permission checks ===
+
+    # === BOX permission checks (exclusivo UCR) ===
     if box == "general":
         if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail Stats] box=general, user={user_email}, role={user_role}, effective_role={effective_role}")
+        logger.info(f"[Webmail Stats] box=general, user={user_email}, effective_role={effective_role}")
     elif box == "shared_indexacao":
-        if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
+        if effective_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
             raise HTTPException(
                 status_code=403,
-                detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{user_role}'."
+                detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{effective_role}'."
             )
-        logger.info(f"[Webmail Stats] box=shared_indexacao, user={user_email}, role={user_role}")
+        logger.info(f"[Webmail Stats] box=shared_indexacao, user={user_email}, effective_role={effective_role}")
     
     # Base queries
     inbox_base = {
@@ -703,12 +707,17 @@ async def run_webmail_stats(
     }
 
 
-async def run_webmail_sync(current_user: dict, account: Optional[str] = None, days: int = 7):
+async def run_webmail_sync(
+    current_user: dict,
+    account: Optional[str] = None,
+    days: int = 7,
+    request: Optional[Request] = None,
+):
     """
     Sincronizar emails do IMAP para o Webmail (background).
     
     ISOLAMENTO DE DADOS:
-    - admin/ceo/diretor: podem sincronizar contas globais (power, precision)
+    - admin/ceo/diretor (cargo efetivo UCR): podem sincronizar contas globais
     - outros roles: BLOQUEADOS — devem usar POST /webmail/sync-user
       para sincronizar a sua caixa pessoal.
     
@@ -717,13 +726,14 @@ async def run_webmail_sync(current_user: dict, account: Optional[str] = None, da
     devem usar o endpoint /webmail/sync-user.
     """
     from models.auth import UserRole
+    from services.auth import get_effective_role_async
     from services.background_jobs import BackgroundJobService, JobType
 
-    user_role = current_user.get("role", "")
-    all_roles = [user_role] + list(current_user.get("additional_roles") or [])
-    can_sync_global = any(
-        r in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR) for r in all_roles
-    )
+    if request is not None:
+        effective_role = await get_effective_role_async(request, current_user)
+    else:
+        effective_role = (current_user.get("effective_role") or current_user.get("role") or "")
+    can_sync_global = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     if not can_sync_global:
         raise HTTPException(
             status_code=403,
@@ -806,7 +816,8 @@ async def run_webmail_sync_user(
     from services.background_jobs import BackgroundJobService, JobType
     
     user_id = current_user["id"]
-    user_role = get_effective_role(request, current_user)
+    from services.auth import get_effective_role_async
+    user_role = await get_effective_role_async(request, current_user)
 
     from services.auth import get_active_company_id_async
     from services.email_config_resolver import (
@@ -966,8 +977,9 @@ async def run_get_email_job_status(job_id: str, current_user: dict):
     if not job:
         raise HTTPException(status_code=404, detail="Job não encontrado")
     
-    # Verificar permissão: apenas o dono do job ou admin podem ver
-    if job.get("user_id") != current_user.get("id") and current_user.get("role") not in ["admin", "ceo", "diretor"]:
+    # Verificar permissão: apenas o dono do job ou gestão (cargo efetivo UCR)
+    viewer_role = (current_user.get("effective_role") or current_user.get("role") or "")
+    if job.get("user_id") != current_user.get("id") and viewer_role not in ["admin", "ceo", "diretor"]:
         raise HTTPException(status_code=403, detail="Sem permissão")
     
     return job

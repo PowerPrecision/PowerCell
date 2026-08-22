@@ -3,8 +3,11 @@
 ROTAS: UserCompanyRole — thin FastAPI stubs
 ====================================================================
 Logic in services/user_company_roles_api_*.py.
-Keep static /migrate*, /set-active-company before /{role_id}.
+Keep static /migrate* before /{role_id}.
 PREFIX: /admin/user-company-roles
+
+Pacote FH / C6: POST set-active-company vive em /auth/active-company
+(get_current_user, sem require_admin).
 ====================================================================
 """
 from typing import Optional
@@ -15,7 +18,7 @@ from models.user_company_role import (
     UserCompanyRoleCreate,
     UserCompanyRoleUpdate,
 )
-from services.auth import require_admin, get_current_user
+from services.auth import require_admin
 from services.user_company_roles_api_crud import (
     run_list_user_company_roles,
     run_get_user_company_role,
@@ -27,7 +30,6 @@ from services.user_company_roles_api_migrate import (
     run_migrate_company_field,
     run_migrate_email_configs,
 )
-from services.user_company_roles_api_active import run_set_active_company
 
 router = APIRouter(
     prefix="/admin/user-company-roles",
@@ -55,15 +57,6 @@ async def create_user_company_role(payload: UserCompanyRoleCreate):
 async def migrate_company_field():
     """Migração: popula user_company_roles a partir do campo `company`."""
     return await run_migrate_company_field()
-
-
-@router.post("/set-active-company")
-async def set_active_company(
-    data: dict,
-    user: dict = Depends(get_current_user),
-):
-    """Define a empresa ativa para o utilizador autenticado."""
-    return await run_set_active_company(data, user)
 
 
 @router.post("/migrate-email-configs")

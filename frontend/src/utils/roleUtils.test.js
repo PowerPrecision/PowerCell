@@ -14,6 +14,7 @@ import {
   filterAssignmentStaff,
   isAssignmentEligibleUser,
   canAccessOrgAdmin,
+  canAccessByEffectiveRole,
   hasNoClientPortfolio,
   NO_CLIENT_PORTFOLIO_ROLES,
 } from "./roleUtils.js";
@@ -84,6 +85,16 @@ describe("Pacote DW — org admin + UCR roles", () => {
     assert.equal(ROLE_LABELS.administrativo, "Apoio Administrativo");
     assert.equal(ROLE_LABELS.parceiro, "Parceiro");
     assert.equal(UCR_ASSIGNABLE_ROLES.includes("adm"), false);
+  });
+
+  it("canAccessByEffectiveRole ignores JWT additional_roles (Pacote FH / C3)", () => {
+    assert.equal(canAccessByEffectiveRole("admin", ["admin", "ceo"]), true);
+    assert.equal(canAccessByEffectiveRole("CEO", ["admin", "ceo"]), true);
+    assert.equal(canAccessByEffectiveRole("consultor", ["admin", "ceo"]), false);
+    assert.equal(canAccessByEffectiveRole("consultor", ["consultor", "intermediario"]), true);
+    assert.equal(canAccessByEffectiveRole("indexacao", ["admin", "indexacao"]), true);
+    assert.equal(canAccessByEffectiveRole(null, ["admin"]), false);
+    assert.equal(canAccessByEffectiveRole("consultor", []), true);
   });
 
   it("canAccessOrgAdmin only when activeRole is admin or ceo", () => {

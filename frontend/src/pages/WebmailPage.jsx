@@ -82,7 +82,6 @@ import { pt } from "date-fns/locale";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
-import { hasAnyRole } from "../utils/roleUtils";
 import { safeFormat } from "../lib/utils";
 import {
   applyMailboxSelection,
@@ -270,7 +269,7 @@ const WebmailPage = () => {
   // enviam obrigatoriamente pela conta pessoal (email_config) — o backend
   // ignora a conta global e força "personal". Nestes casos o seletor de conta
   // do composer não deve aparecer (o utilizador só tem uma conta útil).
-  const canUseGlobalAccounts = ['admin', 'ceo', 'diretor'].includes(effectiveRole) || hasAnyRole(user, ['admin', 'ceo', 'diretor']);
+  const canUseGlobalAccounts = ['admin', 'ceo', 'diretor'].includes(effectiveRole);
   // Assinatura resolvida para pré-visualização no composer.
   // O /auth/me já devolve email_signature (mergeado: empresa ativa ou global)
   // e active_company_signature (None se não definida na UCR da empresa ativa).
@@ -459,10 +458,10 @@ const WebmailPage = () => {
   // ============================================================
   const fetchUnreadCounts = useCallback(async () => {
     if (!token) return;
-    const role = user?.role;
+    const role = effectiveRole || user?.role;
     if (!role) return;
 
-    if (hasAnyRole(user, ['admin', 'ceo', 'diretor', 'administrativo'])) {
+    if (['admin', 'ceo', 'diretor', 'administrativo'].includes(role)) {
       // Fetch both personal and general unread counts
       try {
         const [personalRes, generalRes] = await Promise.all([

@@ -203,7 +203,60 @@ def create_access_token(data: Dict[str, Any]) -> str:
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
 
 
-async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(security)):
+_EFFECTIVE_ROLE_CACHE = "_effective_role"
+
+
+def _jwt_primary_role(user: dict) -> str:
+    """Cargo primário do JWT / documento users — fallback restrito (sem additional_roles)."""
+    return (user.get("role") or "").strip().lower()
+
+
+def authorization_role(effective_role: str, user: dict) -> str:
+    """Role a usar nas dependências RBAC.
+
+    ``__all_roles__`` é um sentinel de filtragem de dados, não um bypass de
+    autorização — cai no cargo JWT primário.
+    """
+    role = (effective_role or "").strip().lower()
+    if not role or role == "__all_roles__":
+        return _jwt_primary_role(user)
+    return role
+
+
+def effective_role_is_allowed(user_role: str, allowed_roles: List[str]) -> bool:
+    """Hierarquia RBAC aplicada ao cargo *efetivo* (UCR), não ao JWT.
+
+    Pacote FH / C3: additional_roles do JWT já não concedem acesso.
+    """
+    user_role = (user_role or "").strip().lower()
+    allowed = [
+        (r or "").strip().lower() if isinstance(r, str) else r
+        for r in (allowed_roles or [])
+    ]
+    if user_role == UserRole.ADMIN:
+        return True
+    if user_role == UserRole.CEO:
+        if any(r in allowed for r in (
+            UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.CEO,
+        )):
+            return True
+    if user_role == UserRole.DIRETOR:
+        if any(r in allowed for r in (
+            UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR,
+        )):
+            return True
+    if user_role == UserRole.ADMINISTRATIVO:
+        if any(r in allowed for r in (
+            UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO,
+        )):
+            return True
+    return user_role in allowed
+
+
+async def get_current_user(
+    request: Request,
+    credentials: HTTPAuthorizationCredentials = Depends(security),
+):
     """Dependency do FastAPI que extrai e valida o utilizador a partir do JWT.
 
     Esta é a dependency de autenticação principal — é injetada em todos os
@@ -214,18 +267,20 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
     3. Procura o utilizador na BD pelo ``sub`` (user_id).
     4. Verifica se a conta está ativa.
     5. Se o token contém metadados de impersonate, adiciona-os ao utilizador.
+    6. Resolve o cargo efetivo contra UCR (X-Active-Role × X-Company-Id).
 
     O suporte a impersonate permite que um admin assuma a identidade de outro
     utilizador para troubleshooting, sem revelar a password real.
 
     Args:
+        request: Pedido HTTP (headers de contexto UCR).
         credentials: Credenciais HTTP Bearer extraídas automaticamente pelo
             FastAPI (``HTTPBearer``).
 
     Returns:
         dict: Documento do utilizador da BD (sem ``_id``), com campos
-            adicionais ``is_impersonated``, ``impersonated_by`` e
-            ``impersonated_by_name`` se aplicável.
+            adicionais ``is_impersonated``, ``impersonated_by``,
+            ``impersonated_by_name`` e ``effective_role`` se aplicável.
 
     Raises:
         HTTPException: 401 se o token estiver expirado, inválido, o utilizador
@@ -238,13 +293,23 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
             raise HTTPException(status_code=401, detail="Utilizador não encontrado")
         if not user.get("is_active", True):
             raise HTTPException(status_code=401, detail="Conta desativada")
-        
+
         # Adicionar informação de impersonate se presente no token
         if payload.get("is_impersonated"):
             user["is_impersonated"] = True
             user["impersonated_by"] = payload.get("impersonated_by")
             user["impersonated_by_name"] = payload.get("impersonated_by_name")
-        
+
+        try:
+            user["effective_role"] = await get_effective_role_async(request, user)
+        except Exception as exc:
+            logger.warning(
+                "[get_current_user] Falha a resolver cargo UCR user=%s: %s. "
+                "Fallback JWT.",
+                user.get("id"), exc,
+            )
+            user["effective_role"] = _jwt_primary_role(user)
+
         return user
     except jwt.ExpiredSignatureError:
         raise HTTPException(status_code=401, detail="Token expirado")
@@ -254,20 +319,18 @@ async def get_current_user(credentials: HTTPAuthorizationCredentials = Depends(s
 
 def require_roles(allowed_roles: List[str]):
     """
-    Dependency do FastAPI que verifica se o utilizador autenticado possui
-    pelo menos um dos roles permitidos, incluindo roles adicionais.
+    Dependency do FastAPI que verifica o cargo *efetivo* (UCR) do utilizador.
 
-    Porquê uma hierarquia de permissões implícita: em vez de exigir
-    que cada endpoint liste explicitamente todos os roles com acesso,
-    esta função implementa herança de permissões:
+    Pacote FH / C3: cruza ``X-Active-Role`` e ``X-Company-Id`` com
+    ``user_company_roles``. ``users.role`` (JWT) só entra como fallback
+    restrito. ``additional_roles`` do JWT já não concedem acesso.
+
+    Hierarquia (aplicada ao cargo efetivo):
     - Admin: acesso total a tudo.
-    - CEO: acesso a rotas de consultor, mediador e CEO.
-    - Diretor: acesso a rotas de consultor, mediador e diretor.
-    - Administrativo: acesso a rotas de consultor, mediador e administrativo.
-    - Outros: verificação direta contra roles primário + adicionais.
-
-    Isto simplifica a manutenção — ao adicionar um novo nível
-    hierárquico, basta atualizar este ponto central.
+    - CEO: acesso a rotas de consultor, intermediário e CEO.
+    - Diretor: acesso a rotas de consultor, intermediário e diretor.
+    - Administrativo: acesso a rotas de consultor, intermediário e administrativo.
+    - Outros: o cargo efetivo tem de estar em ``allowed_roles``.
 
     Args:
         allowed_roles: Lista de roles que têm permissão para aceder
@@ -277,86 +340,136 @@ def require_roles(allowed_roles: List[str]):
         Callable: Dependency function para uso com ``Depends()``.
 
     Raises:
-        HTTPException: 403 se o utilizador não tiver nenhum dos roles permitidos.
+        HTTPException: 403 se o cargo efetivo não tiver permissão.
     """
-    async def role_checker(user: dict = Depends(get_current_user)):
-        user_role = user.get("role", "")
-        additional_roles = user.get("additional_roles", [])
-        
-        # Combine primary role with additional roles for checking
-        all_user_roles = [user_role] + (additional_roles if additional_roles else [])
-        
-        # Admin and CEO have access to most things
-        if user_role == UserRole.ADMIN:
-            return user
-        
-        # CEO has access to consultor and intermediario routes
-        if user_role == UserRole.CEO:
-            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.CEO]):
-                return user
-        
-        # Diretor has access to both consultor and intermediario routes
-        if user_role == UserRole.DIRETOR:
-            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.DIRETOR]):
-                return user
-        
-        # Administrativo has general access to most routes
-        if user_role == UserRole.ADMINISTRATIVO:
-            if any(r in allowed_roles for r in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO]):
-                return user
-        
-        # Standard role check - check against ALL user roles (primary + additional)
-        if not any(r in allowed_roles for r in all_user_roles):
+    async def role_checker(
+        request: Request,
+        user: dict = Depends(get_current_user),
+    ):
+        effective = await get_effective_role_async(request, user)
+        user_role = authorization_role(effective, user)
+        if not effective_role_is_allowed(user_role, allowed_roles):
             raise HTTPException(status_code=403, detail="Permissão negada")
         return user
     return role_checker
 
 
+async def get_effective_role_async(request: Request, user: dict) -> str:
+    """Cargo efetivo validado contra a coleção UCR.
+
+    Prioridade:
+    1. Cache em ``request.state`` (mesmo pedido).
+    2. Header ``X-Active-Role`` se existir UCR ``{user_id, role}``
+       (e ``company_id`` quando ``X-Company-Id`` não é o sentinel ``default``).
+    3. Fallback restrito: ``users.role`` do JWT — nunca ``additional_roles``.
+
+    O sentinel ``all`` continua a devolver ``__all_roles__`` (filtragem
+    multi-cargo); as dependências RBAC traduzem-no via ``authorization_role``.
+    """
+    jwt_role = _jwt_primary_role(user)
+    if request is None:
+        return jwt_role
+
+    if hasattr(request, "state"):
+        cached = getattr(request.state, _EFFECTIVE_ROLE_CACHE, None)
+        if isinstance(cached, str):
+            return cached
+
+    active_role = (request.headers.get("X-Active-Role") or "").strip().lower()
+    if not active_role:
+        result = jwt_role
+    elif active_role == "all":
+        result = "__all_roles__"
+    else:
+        company_id = (request.headers.get("X-Company-Id") or "").strip()
+        query = {"user_id": user.get("id"), "role": active_role}
+        if company_id and company_id != "default":
+            query["company_id"] = company_id
+        try:
+            from database import db as _db
+            assoc = await _db.user_company_roles.find_one(
+                query,
+                {"_id": 0, "role": 1},
+            )
+            if assoc:
+                result = active_role
+            else:
+                logger.warning(
+                    "X-Active-Role não corresponde a UCR: '%s' company='%s' "
+                    "user=%s. Fallback JWT '%s'.",
+                    active_role,
+                    company_id or "-",
+                    user.get("id"),
+                    jwt_role,
+                )
+                result = jwt_role
+        except Exception as exc:
+            logger.warning(
+                "[get_effective_role_async] Erro a validar UCR para user %s: %s. "
+                "Fallback JWT.",
+                user.get("id"),
+                exc,
+            )
+            result = jwt_role
+
+    if hasattr(request, "state"):
+        setattr(request.state, _EFFECTIVE_ROLE_CACHE, result)
+    return result
+
+
 def get_effective_role(request: Request, user: dict) -> str:
     """
-    Extrai o cargo efetivo do pedido HTTP, considerando o Context Isolation.
-    
+    Extrai o cargo efetivo do pedido HTTP (Context Isolation).
+
+    Pacote FH / C3: se o resolvedor async já correu neste pedido (via
+    ``get_current_user`` / ``require_roles``), devolve a cache UCR.
+    Sem cache, o header só é honrado se coincidir com o cargo JWT
+    primário — ``additional_roles`` já não validam o header.
+
     Prioridade:
-    1. Header X-Active-Role — se presente e válido para este utilizador
-    2. user["role"] — cargo primário do JWT (fallback)
-    
-    Validação: O X-Active-Role só é aceite se existir no role primário
-    OU na lista de additional_roles do utilizador. Isto impede que um
-    utilizador simule um cargo que não lhe pertence.
-    
+    1. Cache UCR em ``request.state``
+    2. Header X-Active-Role == users.role (legado, sem UCR)
+    3. Fallback restrito: users.role
+
     Args:
         request: Objeto FastAPI Request (para ler headers)
         user: Dicionário do utilizador (do JWT)
-    
+
     Returns:
         str: O cargo efetivo a usar para filtragem de dados
     """
+    jwt_role = _jwt_primary_role(user)
+    if request is None:
+        return user.get("effective_role") or jwt_role
+
+    if hasattr(request, "state"):
+        cached = getattr(request.state, _EFFECTIVE_ROLE_CACHE, None)
+        if isinstance(cached, str):
+            return cached
+
+    attached = user.get("effective_role")
+    if isinstance(attached, str) and attached:
+        return attached
+
     active_role = request.headers.get("X-Active-Role")
-    
     if not active_role:
-        return user.get("role", "")
-    
-    # Normalizar para lowercase
+        return jwt_role
+
     active_role = active_role.strip().lower()
-    
-    # Se for "all", retornar sentinel especial para processar multi-cargo
     if active_role == "all":
         return "__all_roles__"
-    
-    # Validar: o cargo deve ser o primário ou estar nos additional_roles
-    user_primary = user.get("role", "")
-    additional = user.get("additional_roles", []) or []
-    
-    if active_role == user_primary or active_role in additional:
+
+    if active_role == jwt_role:
         return active_role
-    
-    # Cargo inválido — ignorar e usar o primário
+
     logger.warning(
-        f"X-Active-Role inválido: '{active_role}' para user {user.get('id')} "
-        f"(primário: {user_primary}, adicionais: {additional}). "
-        f"A usar cargo primário."
+        "X-Active-Role '%s' ignorado sem validação UCR para user %s "
+        "(JWT primário: %s). A usar cargo primário.",
+        active_role,
+        user.get("id"),
+        jwt_role,
     )
-    return user_primary
+    return jwt_role
 
 
 def get_all_user_roles(user: dict) -> list:
@@ -436,8 +549,13 @@ def require_staff():
     Raises:
         HTTPException: 403 se o utilizador autenticado tiver role "cliente".
     """
-    async def staff_checker(user: dict = Depends(get_current_user)):
-        if not UserRole.is_staff(user["role"]):
+    async def staff_checker(
+        request: Request,
+        user: dict = Depends(get_current_user),
+    ):
+        effective = await get_effective_role_async(request, user)
+        role = authorization_role(effective, user)
+        if not UserRole.is_staff(role):
             raise HTTPException(status_code=403, detail="Permissão negada")
         return user
     return staff_checker
@@ -649,9 +767,15 @@ def require_permission(capability: str):
     Raises:
         HTTPException: 403 se o utilizador não tiver a capability.
     """
-    async def permission_checker(user: dict = Depends(get_current_user)):
+    async def permission_checker(
+        request: Request,
+        user: dict = Depends(get_current_user),
+    ):
         from models.permissions import resolve_capability as _resolve
-        if not _resolve(user, capability):
+        effective = await get_effective_role_async(request, user)
+        role = authorization_role(effective, user)
+        scoped = {**user, "role": role}
+        if not _resolve(scoped, capability):
             raise HTTPException(
                 status_code=403,
                 detail=f"Permissão negada: requer capability '{capability}'"

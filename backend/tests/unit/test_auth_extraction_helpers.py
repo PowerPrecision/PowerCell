@@ -14,6 +14,8 @@ def test_auth_core_service_not_overwritten():
     assert callable(auth.validate_password_strength)
     assert callable(auth.get_user_companies)
     assert callable(auth.get_active_company_id_async)
+    assert callable(auth.get_effective_role_async)
+    assert callable(auth.effective_role_is_allowed)
 
     core = Path(__file__).resolve().parents[2] / "services" / "auth.py"
     assert core.exists()
@@ -85,6 +87,9 @@ def test_auth_router_is_thin_stubs_only():
     assert "/login-v2" in text
     assert "run_login" in text
     assert "run_login_v2" in text
+    assert "/active-company" in text
+    assert "run_set_active_company" in text
+    assert "require_admin" not in text
 
 
 def test_auth_routes_reexport_get_current_user():
