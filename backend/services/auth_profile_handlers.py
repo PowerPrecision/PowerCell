@@ -10,7 +10,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
-from utils.input_sanitization import log_sanitization_rejection
+from utils.input_sanitization import log_sanitization_rejection, sanitize_email_signature
 from services.auth import get_user_companies, get_active_company_id_async
 
 logger = logging.getLogger(__name__)
@@ -416,7 +416,7 @@ async def run_update_profile(data: dict, request, user: dict):
     for field in allowed_fields:
         if field in data and data[field] is not None:
             if field == "email_signature":
-                update_data[field] = data[field]
+                update_data[field] = sanitize_email_signature(data[field])
             else:
                 update_data[field] = str(data[field]).strip()
 
@@ -429,7 +429,7 @@ async def run_update_profile(data: dict, request, user: dict):
     # ── Campos específicos por empresa — guardar em user_company_roles ──
     company_specific_fields = {}
     if "signature" in data and data["signature"] is not None:
-        company_specific_fields["signature"] = data["signature"]
+        company_specific_fields["signature"] = sanitize_email_signature(data["signature"])
     if "professional_phone" in data and data["professional_phone"] is not None:
         company_specific_fields["professional_phone"] = str(data["professional_phone"]).strip()
     if "job_title" in data and data["job_title"] is not None:

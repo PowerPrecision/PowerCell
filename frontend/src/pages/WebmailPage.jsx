@@ -9,7 +9,7 @@ import { useState, useCallback, useEffect, useMemo, useRef } from "react";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useQueryClient } from "@tanstack/react-query";
-import { useNewEmailRealtime } from "../hooks/useNewEmailRealtime";
+import { useNewEmailRealtime, invalidateEmailQueries } from "../hooks/useNewEmailRealtime";
 import { useWebmailEmails, patchWebmailEmail } from "../hooks/useWebmailEmails";
 import useDebounce from "../hooks/useDebounce";
 import { Button } from "../components/ui/button";
@@ -606,7 +606,7 @@ const WebmailPage = () => {
   }, []);
 
   const handleRefresh = useCallback(() => {
-    queryClient.invalidateQueries({ queryKey: ["emails"] });
+    invalidateEmailQueries(queryClient);
   }, [queryClient]);
 
   useEffect(() => { fetchUnreadCountsRef.current = fetchUnreadCounts; }, [fetchUnreadCounts]);

@@ -155,7 +155,7 @@ import { validateNIF } from "../utils/validateNIF";
 import CardHeaderWithEditBase from "../components/processDetails/CardHeaderWithEdit";
 import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
-import { invalidateProcessDetailsQueries, queryKeys } from "../lib/queryClient";
+import { invalidateProcessDetailsQueries } from "../lib/queryClient";
 import { useProcessFullData } from "../hooks/queries/useProcessQuery";
 import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
 // Sub-componentes das abas — cada um é responsável apenas pelo seu domínio
@@ -189,6 +189,11 @@ const ProcessDetails = () => {
 
   // Live TanStack queries (process + client + side panels)
   const processBundle = useProcessFullData(id);
+  // Side panels consomem a query directamente — sem copiar para useState.
+  const deadlines = processBundle.deadlines;
+  const activities = processBundle.activities;
+  const history = processBundle.history;
+  const workflowStatuses = processBundle.workflowStatuses;
 
   // Mutations TanStack (silent — toasts ficam na página; payload sanitizado no hook)
   const processMutations = useProcessMutations(id, {
@@ -219,10 +224,6 @@ const ProcessDetails = () => {
   const savedProcessRef = useRef(null);
   const lastHydratedAtRef = useRef(0);
   const wasEditingRef = useRef(false);
-  const [deadlines, setDeadlines] = useState([]);
-  const [activities, setActivities] = useState([]);
-  const [history, setHistory] = useState([]);
-  const [workflowStatuses, setWorkflowStatuses] = useState([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [savingObservations, setSavingObservations] = useState(false);
@@ -891,24 +892,7 @@ const ProcessDetails = () => {
     fetchRgpdStatus();
   }, [id]);
 
-  // Side panels: live sync from TanStack queries (only when reference changes)
-  useEffect(() => {
-    setDeadlines((prev) => (prev === processBundle.deadlines ? prev : (processBundle.deadlines || [])));
-  }, [processBundle.deadlines]);
-
-  useEffect(() => {
-    setActivities((prev) => (prev === processBundle.activities ? prev : (processBundle.activities || [])));
-  }, [processBundle.activities]);
-
-  useEffect(() => {
-    setHistory((prev) => (prev === processBundle.history ? prev : (processBundle.history || [])));
-  }, [processBundle.history]);
-
-  useEffect(() => {
-    setWorkflowStatuses((prev) => (
-      prev === processBundle.workflowStatuses ? prev : (processBundle.workflowStatuses || [])
-    ));
-  }, [processBundle.workflowStatuses]);
+  // Side panels: consume TanStack query directly (no local copy)
 
   // Loading / error from live process query
   useEffect(() => {
@@ -1036,16 +1020,9 @@ const ProcessDetails = () => {
     setClientId(null);
     setNotFound(false);
     setAccessDenied(false);
-    return () => {
-      lastHydratedAtRef.current = 0;
-      if (!id) return;
-      queryClient.removeQueries({ queryKey: queryKeys.processes.detail(id) });
-      queryClient.removeQueries({ queryKey: queryKeys.history.byProcess(id) });
-      queryClient.removeQueries({ queryKey: queryKeys.activities.byProcess(id) });
-      queryClient.removeQueries({ queryKey: queryKeys.deadlines.byProcess(id) });
-      queryClient.removeQueries({ queryKey: queryKeys.tasks.byProcess(id) });
-    };
-  }, [id, queryClient]);
+    // Não remover a cache no unmount — gcTime (5 min) trata da GC.
+    // removeQueries aqui anulava staleTime e forçava refetch em cada visita.
+  }, [id]);
 
   // Legacy OneDrive functions - kept for compatibility but use S3FileManager instead
 

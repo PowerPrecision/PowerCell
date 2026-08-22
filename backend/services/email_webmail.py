@@ -13,7 +13,7 @@ from typing import Optional, List
 from fastapi import HTTPException, BackgroundTasks, Request
 
 from database import db
-from services.email_enrich import enrich_email
+from services.email_enrich import enrich_emails
 from services.email_service import (
     test_email_connection,
     get_email_accounts,
@@ -107,6 +107,14 @@ def _and_query(query: dict, extra: Optional[dict]) -> dict:
     if not extra:
         return query
     return {"$and": [query, extra]}
+
+
+def _facet_count(facet_doc: dict, key: str) -> int:
+    """Lê o ``$count`` de um ramo ``$facet`` (0 se o match foi vazio)."""
+    rows = (facet_doc or {}).get(key) or []
+    if not rows:
+        return 0
+    return int(rows[0].get("n") or 0)
 
 
 async def rewrite_box_for_caixa_geral(
@@ -514,17 +522,15 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
             })
         unread_count = await db.emails.count_documents({"$and": unread_and})
     
-    # Enriquecer emails com nome do processo/cliente
-    enriched = []
-    for email in emails:
-        e = await enrich_email(email)
+    # Enriquecer emails com nome do processo/cliente (batch $in, não N+1)
+    enriched = await enrich_emails(emails)
+    for e in enriched:
         e["id"] = str(e.get("id", ""))
         # Preview: primeira linha do body (buscar sem os campos excluídos acima)
-        body_preview = email.get("body", "")[:120]
+        body_preview = e.get("body", "")[:120]
         if len(body_preview) == 120:
             body_preview += "..."
         e["preview"] = body_preview
-        enriched.append(e)
     
     return {
         "emails": enriched,
@@ -634,26 +640,20 @@ async def run_webmail_stats(
         sent_base["$or"] = user_isolation_or
         drafts_base["created_by"] = user_id
     
-    # Unread count
+    # Unread / sent-today / drafts / folders — uma única agregação $facet
+    # em vez de 7 count_documents sequenciais (Pacote FI / A4).
+    today_start = datetime.now(timezone.utc).replace(
+        hour=0, minute=0, second=0, microsecond=0,
+    ).isoformat()
     unread_query = _and_query({**inbox_base, "is_read": False}, ucr_filter)
-    unread_count = await db.emails.count_documents(unread_query)
-    
-    # Sent today
-    today_start = datetime.now(timezone.utc).replace(hour=0, minute=0, second=0, microsecond=0).isoformat()
     sent_today_query = _and_query({
         **sent_base,
-        "sent_at": {"$gte": today_start}
+        "sent_at": {"$gte": today_start},
     }, ucr_filter)
-    sent_today_count = await db.emails.count_documents(sent_today_query)
-    
-    # Drafts count
-    drafts_count = await db.emails.count_documents(_and_query(drafts_base, ucr_filter))
-    
-    # Full folder counts for sidebar badges
-    inbox_count = await db.emails.count_documents(_and_query(inbox_base, ucr_filter))
-    sent_count = await db.emails.count_documents(_and_query(sent_base, ucr_filter))
-    
-    # Starred count
+    drafts_query = _and_query(drafts_base, ucr_filter)
+    inbox_query = _and_query(inbox_base, ucr_filter)
+    sent_query = _and_query(sent_base, ucr_filter)
+
     starred_base = {"is_starred": True, "is_archived": False}
     if box == "personal":
         starred_base["$or"] = [
@@ -671,9 +671,8 @@ async def run_webmail_stats(
             {"synced_for_user": user_id},
             {"synced_for_user": user_email},
         ]
-    starred_count = await db.emails.count_documents(_and_query(starred_base, ucr_filter))
-    
-    # Trash count
+    starred_query = _and_query(starred_base, ucr_filter)
+
     trash_base = {"is_archived": True}
     if box == "personal":
         trash_base["$or"] = [
@@ -691,7 +690,28 @@ async def run_webmail_stats(
             {"synced_for_user": user_id},
             {"synced_for_user": user_email},
         ]
-    trash_count = await db.emails.count_documents(_and_query(trash_base, ucr_filter))
+    trash_query = _and_query(trash_base, ucr_filter)
+
+    facet_rows = await db.emails.aggregate([{
+        "$facet": {
+            "unread": [{"$match": unread_query}, {"$count": "n"}],
+            "sent_today": [{"$match": sent_today_query}, {"$count": "n"}],
+            "drafts": [{"$match": drafts_query}, {"$count": "n"}],
+            "inbox": [{"$match": inbox_query}, {"$count": "n"}],
+            "sent": [{"$match": sent_query}, {"$count": "n"}],
+            "starred": [{"$match": starred_query}, {"$count": "n"}],
+            "trash": [{"$match": trash_query}, {"$count": "n"}],
+        }
+    }]).to_list(1)
+    facet_doc = facet_rows[0] if facet_rows else {}
+
+    unread_count = _facet_count(facet_doc, "unread")
+    sent_today_count = _facet_count(facet_doc, "sent_today")
+    drafts_count = _facet_count(facet_doc, "drafts")
+    inbox_count = _facet_count(facet_doc, "inbox")
+    sent_count = _facet_count(facet_doc, "sent")
+    starred_count = _facet_count(facet_doc, "starred")
+    trash_count = _facet_count(facet_doc, "trash")
     
     return {
         "unread_count": unread_count,

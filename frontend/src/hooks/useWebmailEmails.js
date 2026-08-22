@@ -65,7 +65,7 @@ export async function fetchWebmailEmails({
 }
 
 export function patchWebmailEmail(queryClient, emailId, patch, unreadDelta = 0) {
-  queryClient.setQueriesData({ queryKey: queryKeys.emails.all }, (old) => {
+  queryClient.setQueriesData({ queryKey: queryKeys.emails.webmailAll() }, (old) => {
     if (!old || !Array.isArray(old.emails)) return old;
     const next = {
       ...old,

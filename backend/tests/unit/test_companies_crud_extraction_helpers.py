@@ -1,4 +1,5 @@
 """Unit tests for companies_crud route thinning helpers (companies_crud_api_*)."""
+import pytest
 
 
 def test_companies_crud_api_modules_exist():
@@ -125,3 +126,26 @@ def test_create_company_strips_mongo_objectid():
     ).read_text()
     assert 'doc.pop("_id"' in text
     assert 'updated.pop("_id"' in text
+
+
+def test_company_create_validates_nif_checksum():
+    from pydantic import ValidationError
+    from models.company import CompanyCreate, CompanyUpdate
+
+    created = CompanyCreate(name="Precision Crédito")
+    assert created.nif is None
+
+    ok = CompanyCreate(name="Precision Crédito", nif="501442600")
+    assert ok.nif == "501442600"
+
+    spaced = CompanyCreate(name="X", nif="501 442 600")
+    assert spaced.nif == "501442600"
+
+    with pytest.raises(ValidationError):
+        CompanyCreate(name="X", nif="123456780")
+
+    with pytest.raises(ValidationError):
+        CompanyCreate(name="X", nif="12")
+
+    with pytest.raises(ValidationError):
+        CompanyUpdate(nif="000000000")

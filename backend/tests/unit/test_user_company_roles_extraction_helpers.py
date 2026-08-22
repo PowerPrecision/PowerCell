@@ -474,3 +474,28 @@ async def test_set_active_company_403_when_role_not_on_company():
             )
     assert exc.value.status_code == 403
 
+
+def test_ucr_signature_strips_dangerous_html():
+    from models.user_company_role import UserCompanyRoleCreate, UserCompanyRoleUpdate
+
+    created = UserCompanyRoleCreate(
+        user_id="u1",
+        company_id="c1",
+        company_name="Empresa A",
+        role="consultor",
+        signature='Olá<script>alert(1)</script><b>Mundo</b>',
+    )
+    assert created.signature is not None
+    assert "<script>" not in created.signature.lower()
+    assert "alert(1)" not in created.signature
+    assert "Mundo" in created.signature
+
+    updated = UserCompanyRoleUpdate(
+        signature='<p onclick="steal()">Hi</p><a href="javascript:alert(1)">x</a>',
+    )
+    html = (updated.signature or "").lower()
+    assert "onclick" not in html
+    assert "javascript:" not in html
+    assert updated.signature is not None
+
+

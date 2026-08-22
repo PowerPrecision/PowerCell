@@ -203,6 +203,22 @@ def sanitize_html(value: str, allow_basic_formatting: bool = False, allow_email_
     return cleaned.strip()
 
 
+def sanitize_email_signature(value: Optional[str]) -> Optional[str]:
+    """Sanitiza HTML de assinatura de email (UCR / perfil).
+
+    Permite formatação de email profissional (``allow_email_html``) e remove
+    tags/atributos perigosos (``<script>``, ``javascript:``, event handlers).
+    ``None`` e strings vazias passam sem alteração.
+    """
+    if value is None:
+        return None
+    if not isinstance(value, str):
+        value = str(value)
+    if not value.strip():
+        return value
+    return sanitize_html(value, allow_email_html=True)
+
+
 def sanitize_email(email: str) -> str:
     """
     Sanitiza e valida formato de email.
