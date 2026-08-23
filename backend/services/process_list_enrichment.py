@@ -328,6 +328,8 @@ async def run_get_processes(
     mine_only: bool = False,
     company_id: Optional[str] = None,
     assigned_user_id: Optional[str] = None,
+    assigned_user_ids: Optional[list] = None,
+    assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
@@ -346,6 +348,8 @@ async def run_get_processes(
         mine_only=mine_only,
         company_id=company_id,
         assigned_user_id=assigned_user_id,
+        assigned_user_ids=assigned_user_ids,
+        assigned_logic=assigned_logic,
         process_type=process_type,
     )
 
@@ -394,6 +398,8 @@ async def run_get_processes_paginated(
     decrypt_list_fn,
     list_projection: dict,
     assigned_user_id: Optional[str] = None,
+    assigned_user_ids: Optional[list] = None,
+    assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes/paginated (cursor-based)."""
@@ -408,6 +414,8 @@ async def run_get_processes_paginated(
         view_mode=view_mode,
         search_mode="multiword",
         assigned_user_id=assigned_user_id,
+        assigned_user_ids=assigned_user_ids,
+        assigned_logic=assigned_logic,
         process_type=process_type,
     )
 

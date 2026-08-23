@@ -170,6 +170,7 @@ class SystemSettings(BaseModel):
     currency: str = "EUR"
     date_format: str = "dd/MM/yyyy"
     allow_excel_export: bool = True
+    auto_backup_enabled: bool = False
 
 
 class DocumentRecipientsConfig(BaseModel):

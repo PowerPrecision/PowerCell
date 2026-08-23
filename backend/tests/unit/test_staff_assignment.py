@@ -1,4 +1,4 @@
-"""Pacote DT — filtro global de staff para atribuições."""
+"""Pacote DT / FL — filtro global de staff para atribuições."""
 from services.staff_assignment import (
     ASSIGNMENT_ALLOWED_ROLES,
     ASSIGNMENT_EXCLUDED_PRIMARY_ROLES,
@@ -9,14 +9,15 @@ from services.staff_assignment import (
 )
 
 
-def test_allowed_roles_exclude_admin_and_index():
+def test_allowed_roles_exclude_admin_include_indexacao():
     assert "admin" not in ASSIGNMENT_ALLOWED_ROLES
-    assert "indexacao" not in ASSIGNMENT_ALLOWED_ROLES
-    assert "index" not in ASSIGNMENT_ALLOWED_ROLES
-    for role in ("consultor", "intermediario", "diretor", "ceo"):
+    assert "cliente" not in ASSIGNMENT_ALLOWED_ROLES
+    assert "parceiro" not in ASSIGNMENT_ALLOWED_ROLES
+    for role in ("consultor", "intermediario", "diretor", "ceo", "indexacao", "index"):
         assert role in ASSIGNMENT_ALLOWED_ROLES
-    for role in ("admin", "indexacao", "index"):
-        assert role in ASSIGNMENT_EXCLUDED_PRIMARY_ROLES
+    assert "admin" in ASSIGNMENT_EXCLUDED_PRIMARY_ROLES
+    assert "indexacao" not in ASSIGNMENT_EXCLUDED_PRIMARY_ROLES
+    assert "index" not in ASSIGNMENT_EXCLUDED_PRIMARY_ROLES
 
 
 def test_mongo_filter_nins_admin_and_requires_allowed_role():
@@ -24,7 +25,7 @@ def test_mongo_filter_nins_admin_and_requires_allowed_role():
     assert "$and" in query
     nin = query["$and"][0]["role"]["$nin"]
     assert "admin" in nin
-    assert "indexacao" in nin
+    assert "indexacao" not in nin
     or_clause = query["$and"][1]["$or"]
     assert {"role": {"$in": list(ASSIGNMENT_ALLOWED_ROLES)}} in or_clause or any(
         "role" in part for part in or_clause
@@ -47,9 +48,9 @@ def test_is_assignment_eligible_user_matrix():
     assert is_assignment_eligible_user({"role": "diretor"}) is True
     assert is_assignment_eligible_user({"role": "ceo"}) is True
     assert is_assignment_eligible_user({"role": "mediador"}) is True
+    assert is_assignment_eligible_user({"role": "indexacao"}) is True
+    assert is_assignment_eligible_user({"role": "index"}) is True
     assert is_assignment_eligible_user({"role": "admin"}) is False
-    assert is_assignment_eligible_user({"role": "indexacao"}) is False
-    assert is_assignment_eligible_user({"role": "index"}) is False
     assert is_assignment_eligible_user({"role": "administrativo"}) is False
     assert is_assignment_eligible_user({"role": "cliente"}) is False
     # Cargo actual admin, mesmo com consultor adicional, fica de fora.
@@ -57,14 +58,14 @@ def test_is_assignment_eligible_user_matrix():
         "role": "admin",
         "additional_roles": ["consultor"],
     }) is False
-    # Consultor com indexação adicional continua elegível (cargo actual = consultor).
+    # Consultor com indexação adicional continua elegível.
     assert is_assignment_eligible_user({
         "role": "consultor",
         "additional_roles": ["indexacao"],
     }) is True
 
 
-def test_filter_assignment_staff_drops_admin_and_index():
+def test_filter_assignment_staff_keeps_indexacao_drops_admin():
     users = [
         {"id": "1", "role": "admin", "name": "Admin"},
         {"id": "2", "role": "indexacao", "name": "Index"},
@@ -72,4 +73,4 @@ def test_filter_assignment_staff_drops_admin_and_index():
         {"id": "4", "role": "ceo", "name": "Pedro"},
     ]
     filtered = filter_assignment_staff(users)
-    assert [u["id"] for u in filtered] == ["3", "4"]
+    assert [u["id"] for u in filtered] == ["2", "3", "4"]

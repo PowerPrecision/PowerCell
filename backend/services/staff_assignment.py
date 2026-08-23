@@ -1,8 +1,8 @@
-"""Filtro global de staff para dropdowns de atribuição (Pacote DT).
+"""Filtro global de staff para dropdowns de atribuição (Pacote DT / FL).
 
-Admins, indexação, clientes e parceiros nunca entram nas listas de
+Admins, clientes e parceiros nunca entram nas listas de
 responsáveis. Elegíveis: consultor, intermediario (incl. mediador legado),
-diretor e ceo.
+diretor, ceo e indexacao.
 """
 from __future__ import annotations
 
@@ -17,13 +17,13 @@ ASSIGNMENT_ALLOWED_ROLES = (
     "mediador",
     "diretor",
     "ceo",
+    "indexacao",
+    "index",
 )
 
 # Cargo actual (role principal) que nunca entra nestas listas.
 ASSIGNMENT_EXCLUDED_PRIMARY_ROLES = (
     "admin",
-    "indexacao",
-    "index",
     "cliente",
     "parceiro",
 )
@@ -64,7 +64,12 @@ def is_assignment_eligible_user(user: Optional[dict]) -> bool:
     if primary in ASSIGNMENT_EXCLUDED_PRIMARY_ROLES:
         return False
     roles = {primary}
-    extra = user.get("additional_roles") or []
+    extra = (
+        user.get("additional_roles")
+        or user.get("additional_roles")
+        or user.get("extra_roles")
+        or []
+    )
     if isinstance(extra, Iterable):
         for item in extra:
             roles.add(_norm_role(item))

@@ -97,6 +97,9 @@ async def run_verify_backups(user: dict) -> dict:
 async def run_get_backup_config(user: dict) -> dict:
     """Obtém configuração actual do sistema de backup."""
     s3_configured = get_s3_client() is not None
+    from services.backup import is_auto_backup_enabled
+
+    auto_enabled = await is_auto_backup_enabled()
 
     return {
         "success": True,
@@ -107,8 +110,9 @@ async def run_get_backup_config(user: dict) -> dict:
             "cloud_retention_days": config.CLOUD_RETENTION_DAYS,
             "max_backup_size_mb": config.MAX_BACKUP_SIZE_MB,
             "s3_configured": s3_configured,
+            "auto_backup_enabled": auto_enabled,
             "scheduled_backup": {
-                "enabled": True,
+                "enabled": auto_enabled,
                 "schedule": "03:00 UTC diariamente",
                 "next_run": "Calculado automaticamente",
             },

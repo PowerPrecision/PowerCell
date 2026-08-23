@@ -123,7 +123,18 @@ const ProcessesPage = () => {
   // PACOTE FK — filtros lógicos de processos (estado, tipo, atribuído a)
   const statusFilter = searchParams.get("status") || "";
   const processTypeFilter = searchParams.get("process_type") || "";
-  const assignedUserIdFilter = searchParams.get("assigned_user_id") || "";
+  const assignedUserIdsFilter = (
+    searchParams.get("assigned_user_ids") ||
+    searchParams.get("assigned_user_id") ||
+    ""
+  )
+    .split(",")
+    .map((s) => s.trim())
+    .filter(Boolean);
+  const assignedLogicFilter =
+    (searchParams.get("assigned_logic") || "OR").toUpperCase() === "AND"
+      ? "AND"
+      : "OR";
   const updateProcessFilter = useCallback((key, value) => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
@@ -136,12 +147,28 @@ const ProcessesPage = () => {
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+  const updateAssignedUserIds = useCallback((ids) => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete("assigned_user_id");
+      if (ids && ids.length) {
+        next.set("assigned_user_ids", ids.join(","));
+      } else {
+        next.delete("assigned_user_ids");
+        next.delete("assigned_logic");
+      }
+      next.set("page", "1");
+      return next;
+    }, { replace: true });
+  }, [setSearchParams]);
   const resetProcessFilters = useCallback(() => {
     setSearchParams(prev => {
       const next = new URLSearchParams(prev);
       next.delete("status");
       next.delete("process_type");
       next.delete("assigned_user_id");
+      next.delete("assigned_user_ids");
+      next.delete("assigned_logic");
       next.set("page", "1");
       return next;
     }, { replace: true });
@@ -171,7 +198,12 @@ const ProcessesPage = () => {
         ...(isGlobalView ? { show_all: true } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
-        ...(assignedUserIdFilter ? { assigned_user_id: assignedUserIdFilter } : {}),
+        ...(assignedUserIdsFilter.length
+          ? {
+              assigned_user_ids: assignedUserIdsFilter.join(","),
+              assigned_logic: assignedLogicFilter,
+            }
+          : {}),
       };
 
       let allProcs = [];
@@ -255,7 +287,7 @@ const ProcessesPage = () => {
     } finally {
       setExporting(false);
     }
-  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdFilter]);
+  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter]);
 
   const handleMarkIndexed = useCallback(async (e, processId) => {
     e.stopPropagation();
@@ -353,7 +385,12 @@ const ProcessesPage = () => {
            indexStatusFilter === 'pending' ? { is_indexed: false } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
-        ...(assignedUserIdFilter ? { assigned_user_id: assignedUserIdFilter } : {}),
+        ...(assignedUserIdsFilter.length
+          ? {
+              assigned_user_ids: assignedUserIdsFilter.join(","),
+              assigned_logic: assignedLogicFilter,
+            }
+          : {}),
       });
       
       // Ignorar resposta se o pedido foi cancelado (dependency mudou entretanto)
@@ -384,7 +421,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveRole, statusFilter, processTypeFilter, assignedUserIdFilter]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveRole, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter]);
   
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
   const handleViewModeChange = (newMode) => {
@@ -726,8 +763,10 @@ const ProcessesPage = () => {
                 onStatusChange={(v) => updateProcessFilter("status", v)}
                 processType={processTypeFilter || "all"}
                 onProcessTypeChange={(v) => updateProcessFilter("process_type", v)}
-                assignedUserId={assignedUserIdFilter || "all"}
-                onAssignedUserIdChange={(v) => updateProcessFilter("assigned_user_id", v)}
+                assignedUserIds={assignedUserIdsFilter}
+                onAssignedUserIdsChange={updateAssignedUserIds}
+                assignedLogic={assignedLogicFilter}
+                onAssignedLogicChange={(v) => updateProcessFilter("assigned_logic", v === "AND" ? "AND" : "OR")}
                 onReset={resetProcessFilters}
               />
             </div>

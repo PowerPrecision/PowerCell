@@ -8,7 +8,7 @@ isolados das regras de visibilidade / view_mode / pesquisa.
 from __future__ import annotations
 
 import re
-from typing import Any, Optional
+from typing import Any, Iterable, Optional, Sequence, Union
 
 from models.auth import UserRole
 from services.process_status import (
@@ -118,48 +118,114 @@ def build_role_visibility_conditions(
     return []
 
 
+# Campos de atribuição canónicos + aliases legados. Usados tanto em
+# GET /processes/me (mine_only) como no filtro "Atribuído a".
+ASSIGNMENT_ID_FIELDS: tuple[str, ...] = (
+    "assigned_to",
+    "assigned_consultor_ids",
+    "assigned_consultor_id",
+    "assigned_consultant_ids",
+    "assigned_consultant_id",
+    "assigned_mediador_ids",
+    "assigned_mediador_id",
+    "assigned_indexacao_id",
+    "assigned_parceiro_id",
+    "assigned_users",
+    "assigned_user_ids",
+    "consultant_id",
+    "consultor_id",
+    "mediador_id",
+    "manager_id",
+)
+
+_SENTINEL_IDS = frozenset({"", "all", "undefined", "null"})
+
+
+def _assignment_clauses_for_id(user_id: str) -> list[dict]:
+    return [{field: user_id} for field in ASSIGNMENT_ID_FIELDS]
+
+
 def build_assigned_to_me_condition(user_id: str) -> dict:
     """
-    PACOTE DU / DV — processos directamente atribuídos ao utilizador.
+    PACOTE DU / DV / FL — processos directamente atribuídos ao utilizador.
 
     GET /processes/me filtra SEMPRE por esta condição, inclusive quando a
     role activa é diretor/admin/ceo (esses roles só vêem tudo em show_all).
 
-    ``assigned_to`` é o campo canónico; os ``assigned_*`` cobrem o schema
-    real (consultor/mediador/indexação/parceiro).
+    Inclui campos canónicos (``assigned_*``) e aliases legados
+    (``consultant_id``, ``manager_id``, ``assigned_users``, ``mediador_id``)
+    para o filtro base não devolver lista vazia em dados antigos.
     """
-    return {"$or": [
-        {"assigned_to": user_id},
-        {"assigned_consultor_ids": user_id},
-        {"assigned_consultor_id": user_id},
-        {"assigned_mediador_ids": user_id},
-        {"assigned_mediador_id": user_id},
-        {"assigned_indexacao_id": user_id},
-        {"assigned_parceiro_id": user_id},
-    ]}
+    return {"$or": _assignment_clauses_for_id(user_id)}
+
+
+def normalize_assigned_user_ids(
+    assigned_user_id: Optional[str] = None,
+    assigned_user_ids: Optional[Union[str, Sequence[str]]] = None,
+) -> list[str]:
+    """Junta ``assigned_user_id`` (legado) e ``assigned_user_ids`` (lista/CSV)."""
+    raw: list[Any] = []
+    if assigned_user_ids is not None:
+        if isinstance(assigned_user_ids, str):
+            raw.extend(assigned_user_ids.split(","))
+        elif isinstance(assigned_user_ids, Iterable):
+            for item in assigned_user_ids:
+                if item is None:
+                    continue
+                raw.extend(str(item).split(","))
+    if assigned_user_id:
+        raw.extend(str(assigned_user_id).split(","))
+
+    ids: list[str] = []
+    seen: set[str] = set()
+    for piece in raw:
+        uid = str(piece).strip()
+        if not uid or uid.lower() in _SENTINEL_IDS or uid in seen:
+            continue
+        seen.add(uid)
+        ids.append(uid)
+    return ids
+
+
+def parse_assigned_logic(assigned_logic: Optional[str]) -> str:
+    logic = (assigned_logic or "OR").strip().upper()
+    return "AND" if logic == "AND" else "OR"
+
+
+def match_users_on_assignment_fields(
+    user_ids: Sequence[str],
+    logic: str = "OR",
+) -> Optional[dict]:
+    """Filtro de atribuição para 1+ IDs. OR = pelo menos um; AND = todos."""
+    ids = [uid for uid in user_ids if uid]
+    if not ids:
+        return None
+    logic_n = parse_assigned_logic(logic)
+    if logic_n == "AND":
+        if len(ids) == 1:
+            return {"$or": _assignment_clauses_for_id(ids[0])}
+        return {"$and": [{"$or": _assignment_clauses_for_id(uid)} for uid in ids]}
+    if len(ids) == 1:
+        return {"$or": _assignment_clauses_for_id(ids[0])}
+    return {"$or": [{field: {"$in": ids}} for field in ASSIGNMENT_ID_FIELDS]}
 
 
 def build_assigned_user_filter(assigned_user_id: Optional[str]) -> Optional[dict]:
-    """
-    PACOTE FK — filtro opcional ``assigned_user_id`` na listagem de processos.
+    """Compat PACOTE FK — um único ID. Delega no filtro multi-utilizador."""
+    return match_users_on_assignment_fields(
+        normalize_assigned_user_ids(assigned_user_id=assigned_user_id),
+        "OR",
+    )
 
-    Casa o ID em todos os campos de atribuição conhecidos (consultor,
-    intermediário, indexação, parceiro) e nos aliases legados
-    (``assigned_users``, ``consultant_id``, ``manager_id``).
-    """
-    uid = (assigned_user_id or "").strip()
-    if not uid:
-        return None
-    cond = build_assigned_to_me_condition(uid)
-    extra = [
-        {"assigned_users": uid},
-        {"consultant_id": uid},
-        {"manager_id": uid},
-    ]
-    for clause in extra:
-        if clause not in cond["$or"]:
-            cond["$or"].append(clause)
-    return cond
+
+def build_assigned_users_filter(
+    assigned_user_ids: Optional[Union[str, Sequence[str]]] = None,
+    assigned_logic: Optional[str] = "OR",
+    assigned_user_id: Optional[str] = None,
+) -> Optional[dict]:
+    """PACOTE FL — filtro multi-utilizador com lógica AND/OR."""
+    ids = normalize_assigned_user_ids(assigned_user_id, assigned_user_ids)
+    return match_users_on_assignment_fields(ids, assigned_logic)
 
 
 def build_process_type_condition(process_type: Optional[str]) -> Optional[dict]:
@@ -280,6 +346,8 @@ def build_process_list_query(
     mine_only: bool = False,
     company_id: Optional[str] = None,
     assigned_user_id: Optional[str] = None,
+    assigned_user_ids: Optional[Union[str, Sequence[str]]] = None,
+    assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """
@@ -287,16 +355,19 @@ def build_process_list_query(
 
     Combinada com $and — os filtros nunca se anulam mutuamente.
     mine_only=True (GET /processes/me) ignora a role e filtra sempre
-    por assigned_to / assigned_* == user_id E company_id da empresa activa.
+    por assigned_to / assigned_* / consultant_id / manager_id / assigned_users
+    == user_id E company_id da empresa activa.
 
-    PACOTE FK: ``assigned_user_id`` e ``process_type`` são filtros opcionais
-    da listagem (AND com visibilidade / view_mode).
+    PACOTE FL: ``assigned_user_ids`` + ``assigned_logic`` (AND/OR) são
+    filtros opcionais da listagem (AND com visibilidade / mine_only /
+    view_mode). ``assigned_user_id`` mantém-se como alias legado.
     """
     and_conditions: list[dict] = []
 
     and_conditions.append(build_is_deleted_filter(status=status, view_mode=view_mode))
     if mine_only:
-        and_conditions.append(build_assigned_to_me_condition(user["id"]))
+        user_id = user.get("id") or user.get("user_id") or ""
+        and_conditions.append(build_assigned_to_me_condition(user_id))
         company_cond = build_company_scope_condition(
             company_id if company_id is not None else user.get("active_company_id") or user.get("company")
         )
@@ -313,7 +384,11 @@ def build_process_list_query(
     )
     and_conditions.extend(build_is_indexed_conditions(is_indexed))
 
-    assigned_cond = build_assigned_user_filter(assigned_user_id)
+    assigned_cond = build_assigned_users_filter(
+        assigned_user_ids=assigned_user_ids,
+        assigned_logic=assigned_logic,
+        assigned_user_id=assigned_user_id,
+    )
     if assigned_cond:
         and_conditions.append(assigned_cond)
 

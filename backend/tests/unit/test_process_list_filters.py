@@ -57,6 +57,9 @@ class TestRoleVisibility:
         assert {"assigned_to": "u9"} in cond["$or"]
         assert {"assigned_consultor_ids": "u9"} in cond["$or"]
         assert {"assigned_mediador_id": "u9"} in cond["$or"]
+        assert {"consultant_id": "u9"} in cond["$or"]
+        assert {"manager_id": "u9"} in cond["$or"]
+        assert {"assigned_users": "u9"} in cond["$or"]
 
     def test_show_all_ignores_role(self):
         user = {"id": "u1"}
@@ -173,6 +176,27 @@ class TestBuildProcessListQuery:
         ]
         assert vis == []
 
+    def test_mine_only_is_not_replaced_by_assigned_user_ids(self):
+        user = {"id": "dir-1", "email": "d@x.com"}
+        q = build_process_list_query(
+            user, UserRole.DIRETOR, view_mode="active_only", mine_only=True,
+            assigned_user_ids=["u-a", "u-b"], assigned_logic="OR",
+        )
+        flat = q["$and"]
+        mine = next(
+            c for c in flat
+            if "$or" in c and {"assigned_to": "dir-1"} in c["$or"]
+        )
+        extra = next(
+            c for c in flat
+            if "$or" in c and any(
+                isinstance(x.get("assigned_to"), dict) and "$in" in x["assigned_to"]
+                for x in c["$or"]
+            )
+        )
+        assert {"assigned_to": "dir-1"} in mine["$or"]
+        assert {"assigned_to": {"$in": ["u-a", "u-b"]}} in extra["$or"]
+
     def test_legacy_process_note_prefers_observation_feed(self):
         from services.process_list_enrichment import _legacy_process_note_text
         assert _legacy_process_note_text({
@@ -235,6 +259,30 @@ class TestAssignedUserFilter:
             if "$or" in c and {"assigned_consultor_id": "c-9"} in c["$or"]
         )
         assert {"assigned_mediador_id": "c-9"} in assigned["$or"]
+
+    def test_or_logic_uses_in_on_assignment_fields(self):
+        from services.process_list_filters import build_assigned_users_filter
+        cond = build_assigned_users_filter(
+            assigned_user_ids=["u1", "u2"], assigned_logic="OR",
+        )
+        assert "$or" in cond
+        assert {"assigned_consultor_id": {"$in": ["u1", "u2"]}} in cond["$or"]
+        assert {"consultant_id": {"$in": ["u1", "u2"]}} in cond["$or"]
+
+    def test_and_logic_requires_every_user(self):
+        from services.process_list_filters import build_assigned_users_filter
+        cond = build_assigned_users_filter(
+            assigned_user_ids=["u1", "u2"], assigned_logic="AND",
+        )
+        assert "$and" in cond
+        assert len(cond["$and"]) == 2
+        assert {"assigned_consultor_id": "u1"} in cond["$and"][0]["$or"]
+        assert {"assigned_consultor_id": "u2"} in cond["$and"][1]["$or"]
+
+    def test_csv_and_legacy_id_are_normalized(self):
+        from services.process_list_filters import normalize_assigned_user_ids
+        assert normalize_assigned_user_ids("u1,u2", None) == ["u1", "u2"]
+        assert normalize_assigned_user_ids(None, ["u1", "all", "u2"]) == ["u1", "u2"]
 
 
 class TestProcessTypeFilter:

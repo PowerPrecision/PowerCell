@@ -11,7 +11,7 @@ Autor: PowerCell Development Team
 ====================================================================
 """
 import logging
-from typing import Optional
+from typing import List, Optional
 from fastapi import APIRouter, Depends, Query, Request
 
 from database import db
@@ -251,7 +251,9 @@ async def get_processes(
     sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
     show_all: Optional[bool] = Query(False, description="Visão global: ignorar filtro de utilizador e mostrar todos os processos"),
     is_indexed: Optional[bool] = Query(None, description="PACOTE BZ — Filtrar por estado de indexação: true=indexados, false=pendentes"),
-    assigned_user_id: Optional[str] = Query(None, description="PACOTE FK — Filtrar por utilizador atribuído (qualquer papel)"),
+    assigned_user_id: Optional[str] = Query(None, description="PACOTE FK — Filtrar por utilizador atribuído (legado, um ID)"),
+    assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
+    assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
     user: dict = Depends(get_current_user)
 ):
@@ -273,6 +275,8 @@ async def get_processes(
         decrypt_list_fn=decrypt_processes_list,
         list_projection=PROCESS_LIST_PROJECTION,
         assigned_user_id=assigned_user_id,
+        assigned_user_ids=assigned_user_ids,
+        assigned_logic=assigned_logic,
         process_type=process_type,
     )
 
@@ -289,6 +293,8 @@ async def get_my_processes(
     sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
     is_indexed: Optional[bool] = Query(None, description="Filtrar por estado de indexação"),
     assigned_user_id: Optional[str] = Query(None, description="PACOTE FK — Filtrar por utilizador atribuído"),
+    assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
+    assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
     user: dict = Depends(get_current_user),
 ):
@@ -323,6 +329,8 @@ async def get_my_processes(
         mine_only=True,
         company_id=active_company_id,
         assigned_user_id=assigned_user_id,
+        assigned_user_ids=assigned_user_ids,
+        assigned_logic=assigned_logic,
         process_type=process_type,
     )
 
@@ -337,6 +345,8 @@ async def get_processes_paginated(
     search: Optional[str] = None,
     view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical"),
     assigned_user_id: Optional[str] = Query(None, description="PACOTE FK — Filtrar por utilizador atribuído"),
+    assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
+    assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
     user: dict = Depends(get_current_user)
 ):
@@ -354,6 +364,8 @@ async def get_processes_paginated(
         decrypt_list_fn=decrypt_processes_list,
         list_projection=PROCESS_LIST_PROJECTION,
         assigned_user_id=assigned_user_id,
+        assigned_user_ids=assigned_user_ids,
+        assigned_logic=assigned_logic,
         process_type=process_type,
     )
 

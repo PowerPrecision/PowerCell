@@ -450,6 +450,29 @@ async def full_backup_workflow(upload_to_cloud: bool = True, cleanup_after: bool
 _scheduled_backup_running = False
 
 
+async def is_auto_backup_enabled() -> bool:
+    """Lê ``settings.auto_backup_enabled`` na config de sistema.
+
+    Default False: se a config falhar ou o campo não existir, o job
+    das 03:00 não corre e não escreve nada em /tmp.
+    """
+    try:
+        from services.system_config import get_system_config
+
+        config = await get_system_config()
+        settings = getattr(config, "settings", None)
+        if settings is None:
+            return False
+        return bool(getattr(settings, "auto_backup_enabled", False))
+    except Exception as exc:
+        logger.warning(
+            "[SCHEDULED BACKUP] Não foi possível ler auto_backup_enabled (%s). "
+            "Backup automático desligado.",
+            exc,
+        )
+        return False
+
+
 async def scheduled_backup_job():
     """
     Job de backup agendado que corre diariamente às 03:00 UTC.
@@ -463,11 +486,15 @@ async def scheduled_backup_job():
     e regista cada execução na coleção backup_history para auditoria.
     """
     global _scheduled_backup_running
-    
+
+    if not await is_auto_backup_enabled():
+        logger.info("[SCHEDULED BACKUP] Ignorado — auto_backup_enabled=False")
+        return
+
     if _scheduled_backup_running:
         logger.warning("Scheduled backup já está a correr, ignorando...")
         return
-    
+
     _scheduled_backup_running = True
     
     try:

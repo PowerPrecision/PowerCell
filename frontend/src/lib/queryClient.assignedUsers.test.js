@@ -41,6 +41,15 @@ describe("Pacote FK filter query keys", () => {
     assert.match(processFiltersSource, /Atribuído a|Todos os utilizadores/);
   });
 
+  it("ProcessFilters supports multi-select AND/OR assigned users", () => {
+    assert.match(processFiltersSource, /process-assigned-logic/);
+    assert.match(processFiltersSource, /ToggleGroup/);
+    assert.match(processFiltersSource, /assignedUserIds/);
+    assert.match(processFiltersSource, /assignedLogic/);
+    assert.match(processFiltersSource, />\s*E\s*</);
+    assert.match(processFiltersSource, />\s*OU\s*</);
+  });
+
   it("ClientFilters is independent of process assignment fields", () => {
     assert.match(clientFiltersSource, /client-fonte-filter/);
     assert.match(clientFiltersSource, /client-tipo-filter/);

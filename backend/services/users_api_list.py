@@ -23,7 +23,8 @@ async def run_get_users(
 ):
     """Listar utilizadores do sistema (filtro opcional por role).
 
-    Pacote DT: `for_assignment=True` exclui admin/indexação das dropdowns.
+    Pacote DT: `for_assignment=True` exclui admin das dropdowns.
+    Pacote FL: inclui indexação nas dropdowns de atribuição.
     Pacote EB: por defeito devolve TODOS (admin, indexação, inativos).
     """
     from services.role_query import build_deep_role_query

@@ -9,7 +9,7 @@ import { getUsers, getWorkflowStatuses } from "../../services/api";
 const EMPTY_LIST = Object.freeze([]);
 
 /**
- * Staff para o filtro "Atribuído a" (exclui admin/indexação).
+ * Staff para o filtro "Atribuído a" (exclui admin; inclui indexação).
  */
 export function useAssignmentUsersQuery(options = {}) {
   const { enabled = true } = options;
