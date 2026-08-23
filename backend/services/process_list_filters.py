@@ -139,6 +139,40 @@ def build_assigned_to_me_condition(user_id: str) -> dict:
     ]}
 
 
+def build_assigned_user_filter(assigned_user_id: Optional[str]) -> Optional[dict]:
+    """
+    PACOTE FK — filtro opcional ``assigned_user_id`` na listagem de processos.
+
+    Casa o ID em todos os campos de atribuição conhecidos (consultor,
+    intermediário, indexação, parceiro) e nos aliases legados
+    (``assigned_users``, ``consultant_id``, ``manager_id``).
+    """
+    uid = (assigned_user_id or "").strip()
+    if not uid:
+        return None
+    cond = build_assigned_to_me_condition(uid)
+    extra = [
+        {"assigned_users": uid},
+        {"consultant_id": uid},
+        {"manager_id": uid},
+    ]
+    for clause in extra:
+        if clause not in cond["$or"]:
+            cond["$or"].append(clause)
+    return cond
+
+
+def build_process_type_condition(process_type: Optional[str]) -> Optional[dict]:
+    """Filtro opcional por tipo de processo (campo canónico + alias legado)."""
+    pt = (process_type or "").strip()
+    if not pt:
+        return None
+    return {"$or": [
+        {"process_type": pt},
+        {"type": pt},
+    ]}
+
+
 def build_company_scope_condition(company_id: Optional[str]) -> Optional[dict]:
     """
     PACOTE DV — isolamento por empresa activa.
@@ -245,6 +279,8 @@ def build_process_list_query(
     search_mode: str = "accent",
     mine_only: bool = False,
     company_id: Optional[str] = None,
+    assigned_user_id: Optional[str] = None,
+    process_type: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Query MongoDB completa para listagens de processos.
@@ -252,6 +288,9 @@ def build_process_list_query(
     Combinada com $and — os filtros nunca se anulam mutuamente.
     mine_only=True (GET /processes/me) ignora a role e filtra sempre
     por assigned_to / assigned_* == user_id E company_id da empresa activa.
+
+    PACOTE FK: ``assigned_user_id`` e ``process_type`` são filtros opcionais
+    da listagem (AND com visibilidade / view_mode).
     """
     and_conditions: list[dict] = []
 
@@ -273,6 +312,14 @@ def build_process_list_query(
         build_view_mode_status_conditions(status=status, view_mode=view_mode)
     )
     and_conditions.extend(build_is_indexed_conditions(is_indexed))
+
+    assigned_cond = build_assigned_user_filter(assigned_user_id)
+    if assigned_cond:
+        and_conditions.append(assigned_cond)
+
+    type_cond = build_process_type_condition(process_type)
+    if type_cond:
+        and_conditions.append(type_cond)
 
     search_cond = build_process_search_condition(search, mode=search_mode)
     if search_cond:

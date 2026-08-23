@@ -41,8 +41,74 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
+from services.client_list_filters import (
+    build_client_entity_query,
+    client_doc_to_list_item,
+)
 
 logger = logging.getLogger(__name__)
+
+
+def _merge_entity_client_docs(
+    clients: list,
+    extra_docs: list,
+    search: Optional[str] = None,
+) -> list:
+    """Copia fonte/tipo para as linhas existentes e acrescenta clientes sem processo."""
+    if not extra_docs:
+        return clients
+    extra_by_id = {d["id"]: d for d in extra_docs if d.get("id")}
+    present = {c.get("id") for c in clients if c.get("id")}
+    search_lc = (search or "").strip().lower()
+
+    for c in clients:
+        extra = extra_by_id.get(c.get("id"))
+        if not extra:
+            continue
+        if extra.get("fonte") and not c.get("fonte"):
+            c["fonte"] = extra["fonte"]
+        item = client_doc_to_list_item(extra)
+        c["tipo_cliente"] = item["tipo_cliente"]
+
+    for doc in extra_docs:
+        cid = doc.get("id")
+        if not cid or cid in present:
+            continue
+        if search_lc:
+            blob = " ".join([
+                str(doc.get("nome") or ""),
+                str((doc.get("contacto") or {}).get("email") or ""),
+                str((doc.get("dados_pessoais") or {}).get("nif") or ""),
+            ]).lower()
+            if search_lc not in blob:
+                continue
+        clients.append(client_doc_to_list_item(doc))
+        present.add(cid)
+    return clients
+
+
+async def _enrich_clients_fonte(clients: list) -> list:
+    """Preenche ``fonte`` / ``tipo_cliente`` a partir da colecção clients."""
+    ids = [c.get("id") for c in clients if c.get("id")]
+    if not ids:
+        return clients
+    docs = await db.clients.find(
+        {"id": {"$in": ids}},
+        {
+            "_id": 0, "id": 1, "fonte": 1, "tipo": 1, "tipo_cliente": 1,
+            "titular2_data": 1, "titular2_name": 1,
+        },
+    ).to_list(length=None)
+    by_id = {d["id"]: d for d in docs if d.get("id")}
+    for c in clients:
+        extra = by_id.get(c.get("id"))
+        if not extra:
+            continue
+        if extra.get("fonte") and not c.get("fonte"):
+            c["fonte"] = extra["fonte"]
+        if not c.get("tipo_cliente"):
+            c["tipo_cliente"] = client_doc_to_list_item(extra)["tipo_cliente"]
+    return clients
 
 async def run_search_clients(
     q: str,
@@ -97,7 +163,10 @@ async def run_list_clients(
     exclude_deleted: Optional[bool] = False,
     deleted_only: Optional[bool] = False,
     limit: Optional[int] = 100,
-    skip: Optional[int] = 0
+    skip: Optional[int] = 0,
+    fonte: Optional[str] = None,
+    tipo: Optional[str] = None,
+    status: Optional[str] = None,
 ):
     """
     Listar clientes.
@@ -129,6 +198,42 @@ async def run_list_clients(
         status_filter = sanitize_string(status_filter, max_length=50)
     if assignment_filter:
         assignment_filter = sanitize_string(assignment_filter, max_length=50)
+    if fonte:
+        fonte = sanitize_string(fonte, max_length=50)
+    if tipo:
+        tipo = sanitize_string(tipo, max_length=50)
+    if status:
+        status = sanitize_string(status, max_length=50)
+
+    # PACOTE FK — filtros da entidade Cliente (independentes do processo).
+    client_entity_query = build_client_entity_query(fonte=fonte, tipo=tipo, status=status)
+    matching_client_ids = None
+    extra_client_docs: list[dict] = []
+    if client_entity_query:
+        extra_client_docs = await db.clients.find(
+            client_entity_query,
+            {
+                "_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais": 1,
+                "process_ids": 1, "fonte": 1, "created_at": 1, "updated_at": 1,
+                "is_active": 1, "is_deleted": 1, "prioridade": 1, "priority": 1,
+                "titular2_data": 1, "titular2_name": 1, "tipo": 1, "tipo_cliente": 1,
+            },
+        ).to_list(length=None)
+        matching_client_ids = [d["id"] for d in extra_client_docs if d.get("id")]
+        if not matching_client_ids:
+            workflow_statuses = await db.workflow_statuses.find(
+                {}, {"_id": 0}
+            ).sort("order", 1).to_list(100)
+            available_statuses = [
+                {"name": s["name"], "label": s.get("label", s["name"])}
+                for s in workflow_statuses
+            ]
+            return {
+                "clients": [],
+                "total": 0,
+                "showing_all": bool(show_all),
+                "available_statuses": available_statuses,
+            }
     
     # Buscar workflow statuses para labels
     workflow_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
@@ -149,6 +254,14 @@ async def run_list_clients(
                     {"personal_data.nif": simple_regex}
                 ]
             }
+
+        # PACOTE FK — restringir processos aos clientes que casam fonte/tipo/estado
+        if matching_client_ids is not None:
+            id_filter = {"client_id": {"$in": matching_client_ids}}
+            if process_query:
+                process_query = {"$and": [process_query, id_filter]}
+            else:
+                process_query = id_filter
         
         # Filtro por fase/status
         if status_filter:
@@ -379,6 +492,9 @@ async def run_list_clients(
         # Filtrar por ter processo activo
         if has_active_process is not None:
             clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
+
+        clients = _merge_entity_client_docs(clients, extra_client_docs, search)
+        clients = await _enrich_clients_fonte(clients)
         
         # Aplicar paginação ao resultado final (clientes, não processos)
         total_count = len(clients)
@@ -429,6 +545,13 @@ async def run_list_clients(
             ]
         }
         process_query = {"$and": [process_query, search_filter]}
+    
+    if matching_client_ids is not None:
+        id_filter = {"client_id": {"$in": matching_client_ids}}
+        if "$and" in process_query:
+            process_query["$and"].append(id_filter)
+        else:
+            process_query = {"$and": [process_query, id_filter]}
     
     # Filtro de eliminados (soft delete) - non-show_all path
     # PACOTE DG — usar is_deleted como filtro principal (defesa em
@@ -522,6 +645,9 @@ async def run_list_clients(
     # Filtrar por ter processo activo
     if has_active_process is not None:
         clients = [c for c in clients if (c["active_processes_count"] > 0) == has_active_process]
+
+    clients = _merge_entity_client_docs(clients, extra_client_docs, search)
+    clients = await _enrich_clients_fonte(clients)
     
     # Desencriptar dados sensíveis
     clients = decrypt_clients_list(clients)

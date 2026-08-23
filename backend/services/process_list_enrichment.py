@@ -327,6 +327,8 @@ async def run_get_processes(
     list_projection: dict,
     mine_only: bool = False,
     company_id: Optional[str] = None,
+    assigned_user_id: Optional[str] = None,
+    process_type: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
@@ -343,6 +345,8 @@ async def run_get_processes(
         search_mode="accent",
         mine_only=mine_only,
         company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        process_type=process_type,
     )
 
     status_order = await load_workflow_status_order()
@@ -389,6 +393,8 @@ async def run_get_processes_paginated(
     view_mode: Optional[str],
     decrypt_list_fn,
     list_projection: dict,
+    assigned_user_id: Optional[str] = None,
+    process_type: Optional[str] = None,
 ) -> dict:
     """Orquestra GET /processes/paginated (cursor-based)."""
     from services.cursor_pagination import CursorPaginator
@@ -401,6 +407,8 @@ async def run_get_processes_paginated(
         search=search,
         view_mode=view_mode,
         search_mode="multiword",
+        assigned_user_id=assigned_user_id,
+        process_type=process_type,
     )
 
     order = -1 if sort_order.lower() == "desc" else 1

@@ -49,7 +49,6 @@ import {
   ArrowUpDown,
   ArrowUp,
   ArrowDown,
-  Filter,
   // PACOTE DG — removidos ícones `CheckCircle` e `XCircle` (dropdown de Status removido).
   Flame,
   Download,
@@ -66,6 +65,7 @@ import { hasAnyRole, hasRole } from "../utils/roleUtils";
 import CreateProcessModal from "../components/CreateProcessModal";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { getExportPermission } from "../services/api";
+import ClientFilters from "../components/filters/ClientFilters";
 
 const API_URL = (process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com") + "/api";
 
@@ -87,11 +87,12 @@ export default function ClientsPage() {
   const searchTerm = searchParams.get("search") || "";
   const sortField = searchParams.get("sort") || "created_at";
   const sortOrder = searchParams.get("order") || "desc";
-  // PACOTE DG — removidos filtros `statusFilter` (Ativos/Inativos/Eliminados) e `phaseFilter`
-  // (workflow). Clientes não têm lifecycle states — apenas Processos têm.
-  const assignmentFilter = searchParams.get("assignment") || "all";
-  const indexacaoFilter = searchParams.get("indexacao") || "all";
-  const showDeleted = searchParams.get("show_deleted") === "true";
+  // PACOTE FK — filtros da entidade Cliente (origem, tipo, estado).
+  // Independentes dos filtros de Processos (atribuição / indexação / fase).
+  const fonteFilter = searchParams.get("fonte") || "all";
+  const tipoFilter = searchParams.get("tipo") || "all";
+  const statusFilter = searchParams.get("status") || "all";
+  const showDeleted = statusFilter === "deleted" || searchParams.get("show_deleted") === "true";
   
   const updateParam = (key, value) => {
     setSearchParams(prev => {
@@ -106,9 +107,21 @@ export default function ClientsPage() {
   };
   
   const setSearchTerm = (v) => updateParam("search", v);
-  // PACOTE DG — removidos setters `setStatusFilter` e `setPhaseFilter` (filtros removidos).
-  const setAssignmentFilter = (v) => updateParam("assignment", v);
-  const setIndexacaoFilter = (v) => updateParam("indexacao", v);
+  const setFonteFilter = (v) => updateParam("fonte", v);
+  const setTipoFilter = (v) => updateParam("tipo", v);
+  const setStatusFilter = (v) => updateParam("status", v);
+  const resetClientFilters = () => {
+    setSearchParams(prev => {
+      const next = new URLSearchParams(prev);
+      next.delete("fonte");
+      next.delete("tipo");
+      next.delete("status");
+      next.delete("assignment");
+      next.delete("indexacao");
+      next.delete("show_deleted");
+      return next;
+    }, { replace: true });
+  };
 
   // Search local state — o input só dispara a pesquisa ao submeter o formulário
   // (Enter ou botão “Pesquisar”), evitando pesquisas automáticas a cada tecla
@@ -147,14 +160,11 @@ export default function ClientsPage() {
       params.append("show_all", "true"); // Mostrar todos os clientes da empresa
       params.append("limit", "500"); // Aumentar limite para ver todos
       if (searchTerm) params.append("search", searchTerm);
-      // PACOTE DG — removidos params `has_active_process`, `deleted_only`, `status_filter`
-      // (filtros de lifecycle/fase não se aplicam a clientes). Mantém-se `exclude_deleted=true`
-      // abaixo para o backend continuar a filtrar clientes eliminados por defeito.
-      // Filtro por atribuição
-      if (assignmentFilter && assignmentFilter !== "all") params.append("assignment_filter", assignmentFilter);
-      // Filtro por indexação
-      if (indexacaoFilter && indexacaoFilter !== "all") params.append("indexacao_filter", indexacaoFilter);
-      // Hide deleted clients by default
+      // PACOTE FK — filtros da entidade Cliente (não da fase/atribuição do processo).
+      if (fonteFilter && fonteFilter !== "all") params.append("fonte", fonteFilter);
+      if (tipoFilter && tipoFilter !== "all") params.append("tipo", tipoFilter);
+      if (statusFilter && statusFilter !== "all") params.append("status", statusFilter);
+      // Hide deleted clients by default unless the status filter is "eliminados"
       if (!showDeleted) params.append("exclude_deleted", "true");
 
       const response = await fetch(`${API_URL}/clients?${params}`, {
@@ -176,7 +186,7 @@ export default function ClientsPage() {
       setLoading(false);
     }
   // PACOTE DG — deps array: removidos `statusFilter` e `phaseFilter` (filtros removidos).
-  }, [searchTerm, assignmentFilter, indexacaoFilter, showDeleted]);
+  }, [searchTerm, fonteFilter, tipoFilter, statusFilter, showDeleted]);
 
   useEffect(() => {
     fetchClients();
@@ -454,32 +464,15 @@ export default function ClientsPage() {
                   </Button>
                 </form>
                 <div className="flex flex-wrap gap-2 w-full sm:w-auto">
-                {/* PACOTE DG — removidos dropdowns de Status (Ativos/Inativos/Eliminados) e Fase (workflow).
-                    Clientes não têm lifecycle states — apenas Processos têm. */}
-                <Select value={assignmentFilter} onValueChange={setAssignmentFilter}>
-                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="assignment-filter">
-                    <Users className="h-4 w-4 mr-2" />
-                    <SelectValue placeholder="Atribuição" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas</SelectItem>
-                    <SelectItem value="both">Consultor + Intermediário</SelectItem>
-                    <SelectItem value="consultor">Apenas Consultor</SelectItem>
-                    <SelectItem value="intermediario">Apenas Intermediário</SelectItem>
-                    <SelectItem value="none">Sem Atribuição</SelectItem>
-                  </SelectContent>
-                </Select>
-                <Select value={indexacaoFilter} onValueChange={setIndexacaoFilter}>
-                  <SelectTrigger className="w-full sm:w-[150px]" data-testid="indexacao-filter">
-                    <Filter className="h-4 w-4 mr-2" />
-                    <SelectValue placeholder="Indexação" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="all">Todas</SelectItem>
-                    <SelectItem value="assigned">Com Indexação</SelectItem>
-                    <SelectItem value="unassigned">Sem Indexação</SelectItem>
-                  </SelectContent>
-                </Select>
+                <ClientFilters
+                  fonte={fonteFilter}
+                  onFonteChange={setFonteFilter}
+                  tipo={tipoFilter}
+                  onTipoChange={setTipoFilter}
+                  status={statusFilter}
+                  onStatusChange={setStatusFilter}
+                  onReset={resetClientFilters}
+                />
                 <Select value={`${sortField}_${sortOrder}`} onValueChange={(v) => {
                   const lastIdx = v.lastIndexOf('_');
                   const field = v.substring(0, lastIdx);
