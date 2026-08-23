@@ -55,16 +55,20 @@ export function normalizeCompanyRecord(raw, fallbacks = {}) {
   const role = normalizeRole(raw.role || raw.role_name);
   if (!isSelectableRole(role)) return null;
 
+  const rawName = raw.company_name || raw.companyName || null;
+  const rawCompany = typeof raw.company === "string" ? raw.company : null;
+  // company_id can be a slug/UUID *or* a name in older UCRs, but never copy
+  // company_name into company_id when both exist — that is what sent
+  // X-Company-Id: "Precision Crédito" against a UUID UCR.
   const companyId =
     raw.company_id ||
     raw.companyId ||
-    raw.company ||
+    (rawName ? null : rawCompany) ||
     fallbacks.companyId ||
     null;
   const companyName =
-    raw.company_name ||
-    raw.companyName ||
-    (typeof raw.company === "string" && raw.company !== companyId ? raw.company : null) ||
+    rawName ||
+    (rawCompany && rawCompany !== companyId ? rawCompany : null) ||
     fallbacks.companyName ||
     null;
 
@@ -194,6 +198,40 @@ export function buildProfileRoleTabs(user, options = {}) {
       },
     };
   });
+}
+
+/**
+ * Resolve the canonical company_id for API headers (X-Company-Id).
+ * Accepts a stored id *or* a display name and never returns a name when a
+ * real UCR company_id is available.
+ */
+export function resolveCompanyIdFromUser(user, hint, role) {
+  const records = getUserCompanyRecords(user)
+    .map((c) =>
+      normalizeCompanyRecord(c, {
+        companyName: user?.company_name || null,
+      }),
+    )
+    .filter((c) => c && c.company_id);
+
+  const normalizedHint = (hint || "").trim();
+  if (normalizedHint) {
+    const exact = records.find((c) => c.company_id === normalizedHint);
+    if (exact) return exact.company_id;
+    const lower = normalizedHint.toLowerCase();
+    const byName = records.find(
+      (c) =>
+        (c.company_name && c.company_name.toLowerCase() === lower) ||
+        c.company_id.toLowerCase() === lower,
+    );
+    if (byName) return byName.company_id;
+  }
+  if (role) {
+    const byRole = records.find((c) => c.role === role);
+    if (byRole) return byRole.company_id;
+  }
+  const fallback = records.find((c) => c.is_default) || records[0];
+  return fallback?.company_id || null;
 }
 
 /** Roles presentes no user (primário + additional + UCRs) — para validar activeRole. */

@@ -36,9 +36,9 @@
  * const { user, token, logout } = useAuth();
  */
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
-import api, { setAuthToken, clearAuthToken } from "../services/api";
+import api, { setAuthToken, clearAuthToken, syncAuthContextHeaders } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
-import { collectUserRoles, getUserCompanyRecords } from "../utils/userProfiles";
+import { collectUserRoles, getUserCompanyRecords, resolveCompanyIdFromUser } from "../utils/userProfiles";
 // PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
 import { isPublicRoute } from "../utils/publicRoutes";
 
@@ -195,52 +195,32 @@ export function AuthProvider({ children }) {
         activeRoleInitialized.current = true;
       }
       
-      // Initialize activeCompanyId only once
+      // Initialize activeCompanyId only once. Never persist user.company
+      // (display name) as X-Company-Id — UCR lookup is by company_id.
       if (!activeCompanyInitialized.current) {
         const savedCompanyId = localStorage.getItem("active_company_id")
           || sessionStorage.getItem("activeCompanyId");
-        const companies = getUserCompanyRecords(userData);
-
-        // PACOTE AS: Garantir que temos o currentActiveRole para comparar
         let currentActiveRole = activeRole || userData.role;
         if (!activeRoleInitialized.current) {
           currentActiveRole = sessionStorage.getItem("activeRole") || userData.role;
         }
-
-        if (companies.length > 0) {
-          if (savedCompanyId && companies.some(c => c.company_id === savedCompanyId)) {
-            // Empresa guardada ainda é válida — manter
-            setActiveCompanyId(savedCompanyId);
-            localStorage.setItem("active_company_id", savedCompanyId);
-          } else {
-            // PACOTE AS: Procurar empresa que corresponde ao role ativo.
-            // Se não encontrar, fallback para is_default ou primeira.
-            const matchingCompany = companies.find(c => c.role === currentActiveRole)
-              || companies.find(c => c.is_default)
-              || companies[0];
-            const companyId = matchingCompany.company_id;
-            setActiveCompanyId(companyId);
-            localStorage.setItem("active_company_id", companyId);
-            sessionStorage.setItem("activeCompanyId", companyId);
-            applyBrandTheme(matchingCompany.company_name || userData.company);
-          }
+        const companyId = resolveCompanyIdFromUser(
+          userData,
+          savedCompanyId,
+          currentActiveRole,
+        );
+        if (companyId) {
+          setActiveCompanyId(companyId);
+          localStorage.setItem("active_company_id", companyId);
+          sessionStorage.setItem("activeCompanyId", companyId);
+          const companies = getUserCompanyRecords(userData);
+          const matchingCompany = companies.find((c) => c.company_id === companyId)
+            || companies.find((c) => c.company_name === savedCompanyId);
+          applyBrandTheme(matchingCompany?.company_name || userData.company);
         } else {
-          // PACOTE DF — remove "default" fallback; se não há UCRs reais,
-          // activeCompanyId fica null. A página de Perfil e o ContextSwitcher
-          // lidam com este caso (mostram mensagem "sem perfis atribuídos").
-          // Não escrever "null" no localStorage — seria interpretado como
-          // string "null" pelo interceptor api.js.
-          const fallbackId = userData.company || null;
-          if (fallbackId) {
-            setActiveCompanyId(fallbackId);
-            localStorage.setItem("active_company_id", fallbackId);
-            sessionStorage.setItem("activeCompanyId", fallbackId);
-          } else {
-            // PACOTE DF — limpar state e storage para não reutilizar lixo
-            setActiveCompanyId(null);
-            localStorage.removeItem("active_company_id");
-            sessionStorage.removeItem("activeCompanyId");
-          }
+          setActiveCompanyId(null);
+          localStorage.removeItem("active_company_id");
+          sessionStorage.removeItem("activeCompanyId");
         }
         activeCompanyInitialized.current = true;
       }
@@ -355,8 +335,10 @@ export function AuthProvider({ children }) {
     // Clear active role and company on logout
     sessionStorage.removeItem("activeRole");
     sessionStorage.removeItem("activeCompanyId");
+    localStorage.removeItem("active_company_id");
     setActiveRole(null);
     setActiveCompanyId(null);
+    syncAuthContextHeaders({ role: null, companyId: null });
     activeRoleInitialized.current = false;
     activeCompanyInitialized.current = false;
   }, []);
@@ -371,7 +353,11 @@ export function AuthProvider({ children }) {
     const matchingCompany = companies.find((c) => c.is_default)
       || companies.find((c) => c.role === primaryRole)
       || companies[0];
-    const companyId = matchingCompany?.company_id || userData?.company || null;
+    const companyId = resolveCompanyIdFromUser(
+      userData,
+      matchingCompany?.company_id,
+      primaryRole,
+    );
     if (companyId) {
       setActiveCompanyId(companyId);
       localStorage.setItem("active_company_id", companyId);
@@ -485,13 +471,11 @@ export function AuthProvider({ children }) {
   const switchActiveRole = useCallback((newRole, newCompanyId = null) => {
     if (!newRole) return;
 
-    let resolvedCompanyId = newCompanyId;
-    if (!resolvedCompanyId) {
-      const matchingCompany = getUserCompanyRecords(user).find((c) => c.role === newRole);
-      if (matchingCompany) {
-        resolvedCompanyId = matchingCompany.company_id;
-      }
-    }
+    const resolvedCompanyId = resolveCompanyIdFromUser(
+      user,
+      newCompanyId,
+      newRole,
+    );
 
     sessionStorage.setItem("activeRole", newRole);
     setActiveRole(newRole);
@@ -514,21 +498,25 @@ export function AuthProvider({ children }) {
   const switchActiveCompany = useCallback(async (companyId) => {
     if (!companyId) return;
 
+    const resolvedId = resolveCompanyIdFromUser(user, companyId, activeRole || user?.role)
+      || companyId;
+
     // PACOTE AR: guardar em localStorage (persiste entre sessões) E sessionStorage
     // (retrocompatibilidade). O interceptor api.js lê de localStorage primeiro.
-    localStorage.setItem("active_company_id", companyId);
-    sessionStorage.setItem("activeCompanyId", companyId);
-    setActiveCompanyId(companyId);
+    localStorage.setItem("active_company_id", resolvedId);
+    sessionStorage.setItem("activeCompanyId", resolvedId);
+    setActiveCompanyId(resolvedId);
 
     // Atualizar brand theme antes do reload para feedback visual imediato
     const companies = getUserCompanyRecords(user);
-    const target = companies.find(c => c.company_id === companyId);
+    const target = companies.find(c => c.company_id === resolvedId)
+      || companies.find(c => c.company_name === companyId);
     if (target) {
       applyBrandTheme(target.company_name);
     }
 
     const role = target?.role || activeRole || user?.role;
-    await persistActiveCompany(companyId, role);
+    await persistActiveCompany(resolvedId, role);
 
     // PACOTE AR: Hard reload para limpar toda a cache (TanStack Query, estado
     // de componentes, etc.) e evitar fugas de dados da empresa anterior na UI.
@@ -545,6 +533,14 @@ export function AuthProvider({ children }) {
       console.error("Error refreshing user:", error);
     }
   }, []);
+
+  // Keep axios headers aligned with the selected UCR (not sessionStorage sentinels).
+  useEffect(() => {
+    syncAuthContextHeaders({
+      role: activeRole || user?.role || null,
+      companyId: activeCompanyId || null,
+    });
+  }, [activeRole, activeCompanyId, user?.role]);
 
   // Memoize context value to prevent unnecessary re-renders of all consumers
   // when unrelated state changes. Without useMemo, every setState call creates
@@ -567,7 +563,7 @@ export function AuthProvider({ children }) {
     switchActiveCompany,
     refreshUser,
     effectiveRole: activeRole || user?.role,
-    effectiveCompanyId: activeCompanyId || user?.company,
+    effectiveCompanyId: activeCompanyId || null,
   }), [user, token, loading, login, register, logout, isImpersonating, originalAdminName, impersonate, stopImpersonating, activeRole, switchActiveRole, activeCompanyId, switchActiveCompany, refreshUser]);
 
   return (

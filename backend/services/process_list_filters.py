@@ -254,6 +254,7 @@ def build_company_scope_condition(company_id: Optional[str]) -> Optional[dict]:
     clauses: list[dict] = [
         {"company_id": cid},
         {"company": cid},
+        {"company_name": cid},
     ]
     if cid == "default":
         clauses.extend([

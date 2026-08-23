@@ -219,8 +219,10 @@ class TestBuildProcessListQuery:
             if "$or" in c and {"company_id": "acme"} in c["$or"]
         )
         assert {"company": "acme"} in company["$or"]
+        assert {"company_name": "acme"} in company["$or"]
         scoped = build_company_scope_condition("acme")
         assert {"company_id": "acme"} in scoped["$or"]
+        assert {"company_name": "acme"} in scoped["$or"]
         assert build_company_scope_condition("") is None
         assert build_company_scope_condition(None) is None
 
