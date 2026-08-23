@@ -1032,6 +1032,32 @@ A UI (`UsersAccessAdminTab` / `LAST_UCR_DELETE_MESSAGE`) mostra a mesma mensagem
 
 Novos acessos UCR só podem ser criados contra empresas com `is_active !== false`. Uma empresa inactivada deixa de ser oferecida no formulário de novo acesso, mas os UCRs já existentes **não** são apagados automaticamente (soft-delete da empresa, não cascade).
 
+### Resolução de cargo e empresa activos (Pacote FN)
+
+Alguns UCRs legados guardam o **nome** da empresa (`Precision Crédito`) em `company_id` / `company` em vez do id canónico. Um match estrito por id falhava: o backend fazia fallback silencioso para o cargo JWT e `GET /processes/me` devolvia lista vazia (o utilizador via o ContextSwitcher certo, mas a API filtrava outro contexto).
+
+```mermaid
+flowchart LR
+    CS["ContextSwitcher"] --> AC["AuthContext<br/>activeRole + activeCompanyId"]
+    AC --> Sync["syncAuthContextHeaders"]
+    Sync --> AX["api.js interceptor"]
+    AX -->|"X-Active-Role<br/>X-Company-Id"| API["get_effective_role_async"]
+    API --> UCR["_find_ucr<br/>id OU nome"]
+    UCR -->|match| Honor["Honra o header"]
+    UCR -->|JWT+empresa válidos| Honor
+    UCR -->|sem match| JWT["Fallback JWT + log"]
+```
+
+Regras:
+
+1. **Frontend envia id canónico.** `resolveCompanyIdFromUser` aceita um hint que seja id **ou** nome e devolve o `company_id` do UCR. `AuthContext` persiste esse id em `sessionStorage.activeCompanyId` — **nunca** `user.company` (display name).
+2. **Backend aceita id ou nome.** `_find_ucr` / `_company_match_or` comparam `company_id`, `company_name` e `company` (exacto + regex case-insensitive).
+3. **Header honrado se o JWT já tem o cargo** e o utilizador pertence à empresa (por id ou nome), mesmo sem linha UCR `{user_id, role, company_id}` exacta. Evita esvaziar `/processes/me` após fallback.
+4. **Sentinel `all`**: só o ContextSwitcher (vista multi-cargo) pode pôr `X-Active-Role: all` → `__all_roles__` para filtragem. `ProcessesPage` **não** escreve `"all"` no `sessionStorage` — esse valor não é um UCR e desincronizava todos os pedidos seguintes.
+5. **Sentinel `default`**: aceite sem validação UCR quando o utilizador não tem empresas (gravação de assinatura, etc.).
+
+Código: `services/auth.py` (`_find_ucr`, `get_effective_role_async`, `get_active_company_id_async`); `frontend/src/utils/userProfiles.js`; `AuthContext.js`; `services/api.js`.
+
 ---
 
 ## Segurança
@@ -1506,14 +1532,18 @@ A Área Pessoal gera **uma aba dinâmica por UCR real** (iterando `user.companie
 
 ### `X-Company-Id` header — o mecanismo de scoping
 
-O backend recebe o contexto de UCR ativo via header `X-Company-Id` (e `X-Active-Role`), injetado automaticamente pelo interceptor do `api.js` no frontend. **Pacote DM:** o interceptor **não sobrescreve** estes headers se o pedido já os definiu (tabs da Área Pessoal). `POST /users/me/email-config` resolve `company_id` por ordem: body → query → header.
+O backend recebe o contexto de UCR ativo via header `X-Company-Id` (e `X-Active-Role`), injetado automaticamente pelo interceptor do `api.js` no frontend.
+
+**Pacote DM:** o interceptor **não sobrescreve** estes headers se o pedido já os definiu (tabs da Área Pessoal). `POST /users/me/email-config` resolve `company_id` por ordem: body → query → header.
+
+**Pacote FN:** a fonte de verdade dos headers é o snapshot do AuthContext (`syncAuthContextHeaders`), não o `sessionStorage` (páginas já chegaram a escrever o sentinel `"all"` em `activeRole`). O valor de `X-Company-Id` é o **id canónico** do UCR; o backend ainda aceita um nome de exibição e devolve o `company_id` da associação encontrada.
 
 ```python
 # services/auth.py
 async def get_active_company_id_async(request, user):
-    company_id = request.headers.get("X-Company-Id")
-    # valida que o user tem um UCR para esta company_id
-    # retorna company_id ou fallback
+    hint = request.headers.get("X-Company-Id")
+    assoc = await _find_ucr(user["id"], company_hint=hint)  # id OU nome
+    return (assoc.get("company_id") if assoc else None) or fallback
 ```
 
 ### Assinatura de email (Pacote DM)
@@ -1523,6 +1553,18 @@ A assinatura por UCR (`user_company_roles.signature`) é HTML. A Área Pessoal p
 ### Impersonate e navegação (Pacote DM)
 
 Ao iniciar impersonate, `AuthContext.applyUserContext` redefine `activeRole` / `activeCompanyId` para o utilizador alvo. O `DashboardLayout` constrói o menu a partir de `user.role` (não do `effectiveRole` residual do admin). Menus de Administração só aparecem se o impersonado for `admin` ou `ceo`.
+
+### Os Meus Processos — `GET /processes/me` (Pacote FN)
+
+`/processos` (`ProcessesPage`) lista **só** os processos atribuídos ao utilizador autenticado. `/lista-processos` (visão global) usa `GET /processes?show_all=true`.
+
+`GET /processes/me` (`mine_only`) em `services/process_list_filters.py`:
+
+- Filtra **sempre** por atribuição (`consultant_id` / `manager_id` / utilizadores assigned), independentemente do cargo efectivo.
+- Isola pela empresa activa: `build_company_scope_condition` casa `company_id`, `company` **ou** `company_name` com o hint do header (id ou nome). Processos sem empresa só entram no sentinel `default`.
+- Não depende de `X-Active-Role: all`. A página **não** deve escrever `"all"` no `sessionStorage` — o AuthContext é dono do cargo activo.
+
+O fetch da lista usa dependências estáveis (`useMemo` no filtro `assigned_user_ids`). Reconstruir o array em cada render relançava o `useCallback`/`useEffect` em loop, sobretudo quando a resposta vinha vazia (o sintoma de produção).
 
 ### Perfil Mediador removido
 

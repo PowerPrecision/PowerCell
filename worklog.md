@@ -1,4 +1,30 @@
 ---
+Task ID: pacote-fn-processes-me-ucr
+Agent: Cloud Agent
+Task: Pacote FN — loop GET /processes/me, mismatch UCR (id vs nome) e documentação
+
+Date: 2026-08-23
+
+Work Log:
+- Frontend: ProcessesPage deixa de reconstruir assignedUserIdsFilter em cada render; não escreve "all" no sessionStorage.activeRole
+- AuthContext persiste company_id canónico (resolveCompanyIdFromUser); syncAuthContextHeaders alinha o interceptor Axios
+- Backend: _find_ucr / get_effective_role_async aceitam company_id ou company_name; honram o header se JWT+empresa válidos
+- GET /processes/me: build_company_scope_condition casa company_id / company / company_name
+- Docs: ARCHITECTURE.md, README.md, CHANGELOG.md, FRONTEND_GUIDELINES.md, AGENTS.md
+
+Stage Summary:
+- Os Meus Processos deixa de loopar e de voltar lista vazia quando o UCR tem o nome da empresa em vez do id
+
+Files:
+- backend/services/auth.py
+- backend/services/process_list_filters.py
+- frontend/src/contexts/AuthContext.js
+- frontend/src/pages/ProcessesPage.js
+- frontend/src/services/api.js
+- frontend/src/utils/userProfiles.js
+- ARCHITECTURE.md, README.md, CHANGELOG.md, FRONTEND_GUIDELINES.md, AGENTS.md, worklog.md
+
+---
 Task ID: pacote-do3-do4-email-smtp
 Agent: Cloud Agent
 Task: Pacote DO.3+4 — Diretor na Caixa Geral e correção SMTP dos balcões

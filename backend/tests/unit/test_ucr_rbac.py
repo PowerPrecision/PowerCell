@@ -73,6 +73,58 @@ async def test_effective_role_async_accepts_ucr_match():
 
 
 @pytest.mark.asyncio
+async def test_effective_role_async_accepts_company_name_as_company_id():
+    """X-Company-Id may be the display name (Precision Crédito) while UCR stores a slug/UUID."""
+    request = _FakeRequest({
+        "X-Active-Role": "consultor",
+        "X-Company-Id": "Precision Crédito",
+    })
+    user = {"id": "u1", "role": "consultor", "company": "Precision Crédito"}
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(
+        side_effect=[
+            None,
+            {"role": "consultor", "company_id": "co-uuid", "company_name": "Precision Crédito"},
+        ]
+    )
+    with patch("database.db", mock_db):
+        role = await get_effective_role_async(request, user)
+    assert role == "consultor"
+
+
+@pytest.mark.asyncio
+async def test_effective_role_async_honours_jwt_role_when_company_name_matches_user():
+    request = _FakeRequest({
+        "X-Active-Role": "consultor",
+        "X-Company-Id": "Precision Crédito",
+    })
+    user = {"id": "u1", "role": "consultor", "company": "Precision Crédito"}
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(return_value=None)
+    with patch("database.db", mock_db):
+        role = await get_effective_role_async(request, user)
+    assert role == "consultor"
+
+
+@pytest.mark.asyncio
+async def test_active_company_id_resolves_name_to_ucr_id():
+    from services.auth import get_active_company_id_async
+
+    request = _FakeRequest({"X-Company-Id": "Precision Crédito"})
+    user = {"id": "u1", "role": "consultor", "company": "Precision Crédito"}
+    mock_db = MagicMock()
+    mock_db.user_company_roles.find_one = AsyncMock(
+        side_effect=[
+            None,
+            {"company_id": "co-uuid", "company_name": "Precision Crédito"},
+        ]
+    )
+    with patch("database.db", mock_db):
+        cid = await get_active_company_id_async(request, user)
+    assert cid == "co-uuid"
+
+
+@pytest.mark.asyncio
 async def test_effective_role_async_rejects_forged_header_without_ucr():
     request = _FakeRequest({
         "X-Active-Role": "indexacao",

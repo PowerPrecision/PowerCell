@@ -56,19 +56,10 @@ const ProcessesPage = () => {
   const [filterByRole, setFilterByRole] = useState(true);
   const hasMultipleRoles = (user?.additional_roles?.length || 0) > 0;
 
-  // Sincronizar X-Active-Role com o toggle de filtragem por cargo
-  // Quando toggle ON: usa o effectiveRole do ContextSwitcher
-  // Quando toggle OFF: envia "all" para o backend devolver todos os processos
-  useEffect(() => {
-    if (!hasMultipleRoles) return;
-    if (filterByRole) {
-      // Restaurar o effectiveRole do ContextSwitcher
-      sessionStorage.setItem("activeRole", effectiveRole);
-    } else {
-      // Enviar "all" para desativar filtro por cargo
-      sessionStorage.setItem("activeRole", "all");
-    }
-  }, [filterByRole, effectiveRole, hasMultipleRoles]);
+  // X-Active-Role is owned by AuthContext / ContextSwitcher (UCR).
+  // Do not write "all" into sessionStorage — that desyncs the header from
+  // the selected role and triggered UCR fallback + empty /processes/me.
+  // GET /processes/me already filters by assignment (mine_only).
 
   // Determinar título baseado na rota
   // /lista-processos → "Todos os Processos" (Visão Global)
@@ -123,14 +114,14 @@ const ProcessesPage = () => {
   // PACOTE FK — filtros lógicos de processos (estado, tipo, atribuído a)
   const statusFilter = searchParams.get("status") || "";
   const processTypeFilter = searchParams.get("process_type") || "";
-  const assignedUserIdsFilter = (
+  const assignedUserIdsParam =
     searchParams.get("assigned_user_ids") ||
     searchParams.get("assigned_user_id") ||
-    ""
-  )
-    .split(",")
-    .map((s) => s.trim())
-    .filter(Boolean);
+    "";
+  const assignedUserIdsFilter = useMemo(
+    () => assignedUserIdsParam.split(",").map((s) => s.trim()).filter(Boolean),
+    [assignedUserIdsParam],
+  );
   const assignedLogicFilter =
     (searchParams.get("assigned_logic") || "OR").toUpperCase() === "AND"
       ? "AND"
@@ -421,7 +412,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveRole, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter]);
   
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
   const handleViewModeChange = (newMode) => {
@@ -513,7 +504,7 @@ const ProcessesPage = () => {
   // Re-fetch when filters, sort, view mode, role/company (Header), or search changes
   useEffect(() => {
     fetchProcesses();
-  }, [fetchProcesses, filterByRole, searchTerm, activeRole, activeCompanyId]);
+  }, [fetchProcesses, searchTerm]);
 
   // Funções de paginação
   const goToPage = useCallback((page) => {

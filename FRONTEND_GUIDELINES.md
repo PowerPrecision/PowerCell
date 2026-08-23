@@ -212,6 +212,14 @@ As settings de cada perfil (assinatura, webmail, preferências) são lidas do ba
 - **Impersonate**: o menu lateral usa o `user.role` impersonado. Abas de Administração (`showAdminButton`, Dashboard Executivo) escondem-se se o impersonado não for admin/CEO.
 - **Rascunhos no Dashboard**: `getDraftNavigationTarget` — emails → `/webmail?folder=drafts&id=`, pré-registo → `/registos-clientes?clientId=`, processos → `/processo/:id` (nunca ProcessDetails para rascunhos de email).
 
+### Pacote FN — headers UCR e Os Meus Processos
+
+- **`X-Company-Id` é um id.** `AuthContext` guarda `activeCompanyId` via `resolveCompanyIdFromUser` (`utils/userProfiles.js`). Nunca persistir `user.company` (nome de exibição, ex. `Precision Crédito`) — o interceptor envia esse valor e o UCR deixa de bater.
+- **Fonte dos headers:** `syncAuthContextHeaders({ role, companyId })` no AuthContext. O interceptor em `api.js` prefere este snapshot ao `sessionStorage`. Continua a **não sobrescrever** headers já definidos no pedido (tabs da Área Pessoal).
+- **Não escrever `"all"` em `sessionStorage.activeRole`.** Esse sentinel não é um UCR. O cargo activo é do `ContextSwitcher`. `GET /processes/me` já filtra por atribuição (`mine_only`).
+- **`ProcessesPage`:** dependências do `fetchProcesses` estáveis. `assignedUserIdsFilter` vem de `useMemo` sobre o query param — um array novo em cada render relança o efeito e, com lista vazia, entra em loop de `GET /processes/me`.
+- Rotas: `/processos` = Os Meus Processos; `/lista-processos` = visão global; `/meus-clientes` = Os Meus Clientes.
+
 ---
 
 ## 11. Listagens — contextos Cliente vs Processo + Query Keys (Pacotes FK/FL/FJ)
