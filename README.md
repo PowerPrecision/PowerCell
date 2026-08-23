@@ -82,7 +82,8 @@ PowerCell/
 │   │   │   │   ├── processFormCleaners.js
 │   │   │   │   └── processUpdatePayload.js  # Bloqueia arrays vazios / documents wipe
 │   │   │   ├── StaffDashboard.js         # Dashboard staff (consultor)
-│   │   │   ├── MyClientsPage.js          # Os Meus Processos (filtros)
+│   │   │   ├── ProcessesPage.js          # Os Meus Processos (/processos) + visão global
+│   │   │   ├── MyClientsPage.js          # Os Meus Clientes (/meus-clientes)
 │   │   │   ├── FinanceDashboard.js       # Dashboard financeiro
 │   │   │   ├── KanbanPage.js             # Quadro Kanban
 │   │   │   ├── ProfileSettingsPage.js    # Gestão permissões
@@ -97,14 +98,15 @@ PowerCell/
 │   │   │   ├── queries/         # TanStack Query (ex.: useProcessFullData)
 │   │   │   └── mutations/       # TanStack Mutations (ex.: useProcessMutations)
 │   │   ├── contexts/          # React Context providers
-│   │   │   ├── AuthContext.js   # JWT + multi-perfil (effectiveRole / X-Active-Role)
+│   │   │   ├── AuthContext.js   # JWT + UCR (effectiveRole / company_id canónico)
 │   │   │   ├── TasksContext.js  # BG jobs: sticky toasts + circuit breaker
 │   │   │   ├── UploadProgressContext.js
 │   │   │   └── ThemeContext.js  # Light/Dark mode
 │   │   ├── services/
-│   │   │   └── api.js          # Axios + interceptors (429 retry)
+│   │   │   └── api.js          # Axios + interceptors (429, X-Active-Role / X-Company-Id)
 │   │   ├── utils/
 │   │   │   ├── roleUtils.js          # Helpers de roles/permissões
+│   │   │   ├── userProfiles.js       # UCR → company_id canónico (não o nome)
 │   │   │   └── workflowStatuses.js   # KNOWN_PROCESS_STATUSES + buildStatusOptions (baseline estático + fallback p/ dropdown de estado)
 │   │   └── layouts/
 │   │       └── DashboardLayout.js # Sidebar + header
@@ -180,11 +182,18 @@ PowerCell/
 - Quando o processo é criado manualmente no CRM, usa a **1ª fase real do `workflow_statuses`**
 - Link S3 automático ao criar processo: `s3://…/Documentação Clientes/Nome_Do_Cliente/`
 
-### Os Meus Processos (`/meus-clientes`)
-- Vista personalizada por utilizador (apenas processos atribuídos)
-- **Filtros por defeito**: Exclui status terminais (concluído, arquivo, perdido, desistências, cancelado)
-- **Toggle "Mostrar Concluídos"**: Botão para incluir/excluir processos inativos
-- 3 cards de estatísticas (Total, Com Tarefas Pendentes, Com Imóvel)
+### Os Meus Processos (`/processos`)
+- `ProcessesPage` + `GET /api/processes/me` — apenas processos **atribuídos** ao utilizador (`mine_only`)
+- Isolamento por empresa activa: o header `X-Company-Id` é o **id** do UCR; o backend também aceita o nome de exibição (UCRs legados)
+- `X-Active-Role` / `X-Company-Id` vêm do AuthContext (`syncAuthContextHeaders`), não de sentinels escritos pela página
+- **Filtros por defeito**: `view_mode=active_only` (exclui arquivo / terminais); toggle para incluir concluídos
+- Filtros de estado, tipo e "Atribuído a" (AND/OR) na query string
+- `/lista-processos` é a visão global (`GET /processes?show_all=true`)
+
+### Os Meus Clientes (`/meus-clientes`)
+- `MyClientsPage` — clientes associados ao utilizador autenticado
+- **Filtros por defeito**: exclui status terminais nos processos do cliente
+- **Toggle "Mostrar Concluídos"**: incluir processos inativos do portefólio
 - Pesquisa com normalização de acentos (NFD)
 
 ### Dashboard
@@ -441,6 +450,14 @@ flowchart TD
 | GET/PUT | `/api/system-config/*` | Configurações do sistema |
 | GET | `/api/admin/ai-training/stats` | Estatísticas de chamadas IA |
 
+### Processos (autenticação + staff)
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| GET | `/api/processes/me` | Os Meus Processos — atribuição ao user + empresa activa (`company_id` **ou** nome) |
+| GET | `/api/processes` | Lista (visão global com `show_all=true` em `/lista-processos`) |
+
+Headers obrigatórios de contexto UCR em todos os pedidos autenticados: `X-Active-Role`, `X-Company-Id` (id canónico; o backend aceita também o nome de exibição).
+
 ## Rotas Principais (Frontend)
 
 | Rota | Componente | Descrição |
@@ -450,8 +467,9 @@ flowchart TD
 | `/admin/organizacao` | OrganizationAdminPage | **Configuração de plataforma** (admin/CEO) — Empresas + Utilizadores/UCR |
 | `/system-admin` | SystemAdminPanel | Configuração técnica do sistema (admin/CEO; tabs técnicas só admin) |
 | `/kanban` | KanbanPage | Quadro Kanban com drag-drop |
-| `/processos` | MyClientsPage | Lista de processos |
-| `/processos/:id` | ProcessDetails | Detalhes do processo |
+| `/processos` | ProcessesPage | **Os Meus Processos** (`GET /processes/me`) |
+| `/lista-processos` | ProcessesPage | Todos os Processos (visão global) |
+| `/processo/:id` | ProcessDetails | Detalhes do processo |
 | `/clientes` | ClientsPage | Gestão de clientes |
 | `/docs` | DocumentsPage | Documentação |
 | `/calendario` | CalendarPage | Calendário de precisão (hora exacta, editar/eliminar eventos) |
@@ -459,7 +477,7 @@ flowchart TD
 | `/imoveis` | PropertiesPage | Imóveis |
 | `/minutas` | DraftsPage | Minutas |
 | `/leads` | LeadsPage | Leads |
-| `/meus-clientes` | MyClientsPage | Os Meus Processos |
+| `/meus-clientes` | MyClientsPage | Os Meus Clientes |
 | `/financeiro` | FinanceDashboard | Dashboard financeiro |
 | `/calculadoras` | CalculatorsPage | Calculadoras (Prestação de Crédito Habitação, DSTI, Risco) |
 | `/automation` | AutomationPage | Motor de automação No-Code |
@@ -701,6 +719,11 @@ O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Ren
 - **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretos, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Configurações do Sistema (`/configuracoes`).
 
 ## Histórico de Correções Recentes (dev)
+
+### 2026-08-23 — Pacote FN: `/processes/me` e UCR
+- **Os Meus Processos** deixou de entrar em loop de `GET /processes/me` (filtro `assigned_user_ids` memoizado; a página já não escreve `"all"` no `sessionStorage`).
+- `AuthContext` / `api.js` enviam `X-Company-Id` como **id** do UCR (nunca o nome de exibição) e `X-Active-Role` do perfil seleccionado.
+- Backend: match UCR por `company_id` **ou** `company_name`; se o JWT já tem o cargo e o user pertence à empresa, o header é honrado. `/processes/me` filtra por atribuição + empresa (id ou nome).
 
 ### 2026-08 — v2.0 em Produção (Pacote FC — documentação)
 - **UCR multi-cargo**: vários papéis por empresa (ex. Diretor e Consultor em simultâneo); proteção contra a eliminação do último acesso; cargos oficiais Parceiro e Indexação; `Company.is_active` (soft-delete).
