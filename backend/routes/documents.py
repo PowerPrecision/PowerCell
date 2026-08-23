@@ -479,28 +479,38 @@ async def get_download_url(
 
 
 
-@router.get("/download-url/{file_path:path}", responses={500: HTTP_500_RESPONSE})
+@router.get("/download-url/{file_path:path}", responses={403: HTTP_403_RESPONSE, 500: HTTP_500_RESPONSE})
 async def get_download_url_by_path(
     file_path: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(require_staff())
 ):
     """
     Gera URL temporário (pre-signed) para download ou preview de um
     ficheiro por caminho S3 direto.
+
+    Restrito a staff (`require_staff`) e ao path estar dentro da raiz
+    "Documentação Clientes/" (`assert_path_within_document_root`,
+    aplicado em `run_get_download_url_by_path`) — evita servir chaves S3
+    fora do âmbito de documentos (ex.: backups/*.zip).
     """
     return await run_get_download_url_by_path(file_path)
 
 
 
-@router.get("/proxy/{file_path:path}", responses={500: HTTP_500_RESPONSE})
+@router.get("/proxy/{file_path:path}", responses={403: HTTP_403_RESPONSE, 500: HTTP_500_RESPONSE})
 async def proxy_s3_file(
     file_path: str,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(require_staff())
 ):
     """
     Proxy para download de ficheiros S3.
     Resolve problemas de CORS ao fazer streaming do ficheiro através do backend.
-    
+
+    Restrito a staff (`require_staff`) e ao path estar dentro da raiz
+    "Documentação Clientes/" (`assert_path_within_document_root`, aplicado
+    em `run_proxy_s3_file`) — evita servir chaves S3 fora do âmbito de
+    documentos (ex.: backups/*.zip, logótipos de empresas).
+
     Args:
         file_path: Path completo do ficheiro no S3 (URL encoded)
         
@@ -1036,7 +1046,7 @@ async def check_employer_nif(
 @router.post("/bulk-download", responses={400: HTTP_400_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def bulk_download_documents(
     data: dict,
-    user: dict = Depends(get_current_user)
+    user: dict = Depends(require_staff())
 ):
     """
     Faz download de múltiplos documentos empacotados num ficheiro ZIP.
@@ -1044,7 +1054,11 @@ async def bulk_download_documents(
     Body:
     - document_ids: Lista de IDs de documentos (s3_paths) ou paths diretos
     - process_id: ID do processo (opcional, para verificação de permissões)
-    
+
+    Cada `document_id`/path é validado contra a raiz "Documentação Clientes/"
+    (ver `document_bulk_download.run_bulk_download_documents`) — paths fora
+    do âmbito são ignorados e reportados em `errors`, não incluídos no ZIP.
+
     Returns:
     - StreamingResponse com o ficheiro ZIP
     """
