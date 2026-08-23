@@ -517,7 +517,10 @@ erDiagram
         object contacto
         object dados_pessoais
         list process_ids FK
-        string fonte
+        string fonte "origem comercial (Website, Indicação, …)"
+        string tipo "particular | dois_titulares | empresa"
+        bool is_active
+        bool is_deleted
         list tags
         string notas
         datetime created_at
@@ -618,7 +621,8 @@ O script `backend/scripts/migrate_clients_to_processes.py` executa a migração 
 | Fase | Descrição | Estado |
 |------|-----------|--------|
 | **Fase 1** | Modelos + Migração | ✅ Concluída |
-| **Fase 2** | Adaptar rotas backend + remover campos deprecados | 🔜 Pendente |
+| **Fase 2a — Listagens** | Filtros de listagem separados (Cliente vs Processo) + `assigned_user_ids` AND/OR | ✅ Pacotes FK/FL |
+| **Fase 2** | Remover campos deprecados nas rotas de escrita / snapshots | 🔜 Pendente |
 | **Fase 3** | Remover `personal_data` do Processo (apenas referência) | 🔜 Pendente |
 
 ---
@@ -629,7 +633,7 @@ O script `backend/scripts/migrate_clients_to_processes.py` executa a migração 
 |--------|-----------|------------|
 | **Frontend** | React 19 + Vite 6 | SPA com code splitting e lazy loading |
 | **Estado Cliente** | Zustand | Estado local leve |
-| **Estado Servidor** | TanStack Query v5 | Cache, mutations, optimistic updates |
+| **Estado Servidor** | TanStack Query v5 | Cache, mutations, optimistic updates. Factory `queryKeys` em `frontend/src/lib/queryClient.js` |
 | **UI** | shadcn/ui (New York) + Tailwind CSS 4 | Componentes e estilização |
 | **Drag-Drop** | @dnd-kit/core | Kanban board interativo |
 | **Backend** | FastAPI (Python 3.12) | API REST async com Pydantic |
@@ -896,11 +900,12 @@ As rotas `/rgpd-admin` e `/templates` foram removidas da navegação principal d
 As páginas integradas como Tabs no Painel de Administração suportam um modo `embedded` que omite o wrapper `<DashboardLayout>`, permitindo que o conteúdo seja renderizado dentro das Tabs sem duplicar a sidebar e o header.
 
 Componentes com suporte `embedded`:
-- `UsersAccessAdminTab` — Gestão de utilizadores e acessos UCR (`/admin/organizacao`)
+- `UsersAccessAdminTab` — Gestão de utilizadores e acessos UCR (`/admin/organizacao`); cache `queryKeys.orgAdmin`
+- `CompaniesAdminTab` — Empresas (substitui a página removida `CompaniesManagementPage.jsx`)
 - `UsersManagementPage` — Gestão de utilizadores (legado / atalho técnico)
 - `SystemConfigPage` — Configurações do sistema
 - `AutomationPage` — Automações de workflow
-- `BackupsPage` — Backups da base de dados
+- `BackupsPage` — Backups da base de dados; toggle `auto_backup_enabled` (Pacote FL)
 - `UnifiedLogsPage` — Logs unificados
 - `DiagnosticsPage` — Diagnósticos do sistema
 - `ProcessMigrationTab` — Migração Fase 1 (Separação Cliente ↔ Processo)
@@ -1600,12 +1605,12 @@ A entidade **Cliente** **não possui estado de ciclo de vida** (Ativo/Concluído
 
 | Entidade | Tem `status`? | Tem `fase`? | Lifecycle |
 |---|---|---|---|
-| **Cliente** | ❌ Não | ❌ Não | Apenas `is_deleted` (soft delete) |
+| **Cliente** | ❌ Não (a ficha tem `is_active` / `is_deleted`, não fase de workflow) | ❌ Não | Soft-delete + activo/inactivo da ficha |
 | **Processo** | ✅ Sim (16 fases) | ✅ Sim (`workflow_statuses`) | `pre_registo` → `clientes_espera` → ... → `concluido` |
 
 ### Listagem de Clientes
 
-O ecrã de Clientes é uma **lista unificada de "Clientes Registados"** — sem tabs/filtros de Ativos/Concluídos. A métrica útil exibida por cliente é o **número de processos associados** (`client.process_ids.length`), não uma fase.
+O ecrã de Clientes (`ClientsPage.js`, rota `/clientes`) é uma **lista unificada de "Clientes Registados"** — sem tabs de Ativos/Concluídos no sentido de workflow. A métrica útil exibida por cliente é o **número de processos associados** (`client.process_ids.length`), não uma fase.
 
 ```jsx
 // ClientsPage.js — coluna "Processos" (Pacote DG)
@@ -1615,9 +1620,105 @@ O ecrã de Clientes é uma **lista unificada de "Clientes Registados"** — sem 
 </Badge>
 ```
 
+**Pacote FK** — os filtros desta página são **exclusivos da entidade Cliente**. Não há dropdown de fase, atribuição ou indexação (isso vive em Processos). UI: `components/filters/ClientFilters.jsx`. Query string da página:
+
+| Param URL | API `GET /clients` | Valores | Semântica |
+|-----------|--------------------|---------|-----------|
+| `search` | `search` | texto | Nome, email ou NIF (accent-insensitive) |
+| `fonte` | `fonte` | `staff_created`, `Website`, `Manual`, `Indicação`, `Telefone`, `Email`, `Feira`, `trello`, `auto_created` | Origem comercial (`clients.fonte`, match exacto case-insensitive) |
+| `tipo` | `tipo` | `particular`, `dois_titulares`, `empresa` | Tipo de ficha — **não** é `process_type`. Particular = sem 2.º titular; dois titulares = `titular2_data` / `titular2_name` preenchido; empresa = `tipo` / `tipo_cliente` |
+| `status` | `status` | `active`, `inactive`, `deleted` | Estado da **ficha**: activo (`is_deleted ≠ true` e `is_active ≠ false`); inactivo (`is_active = false`); eliminado (`is_deleted = true`) |
+
+Builders: `services/client_list_filters.py` (`build_client_entity_query`). A listagem (`client_list_search.run_list_clients`) aplica primeiro o filtro na colecção `clients`; se não houver IDs, devolve vazio. Clientes sem processo que casem o filtro são fundidos na resposta (`_merge_entity_client_docs`). Params legados (`status_filter`, `assignment_filter`, `indexacao_filter`) continuam no endpoint por compatibilidade mas **não** são expostos na UI de Clientes.
+
+### Listagem de Processos (contexto separado)
+
+`ProcessesPage.js` serve duas rotas com o **mesmo** componente e **filtros de processo**:
+
+| Rota | Título | Endpoint | Âmbito |
+|------|--------|----------|--------|
+| `/processos` | Os Meus Processos | `GET /processes/me` | Sempre `mine_only`: atribuído ao utilizador actual **e** `company_id` da empresa activa (incl. director/admin/ceo). `show_all` não se aplica. |
+| `/lista-processos` | Todos os Processos | `GET /processes?show_all=true` | Visão global (RBAC de role). |
+
+UI: `components/filters/ProcessFilters.jsx`. Query string:
+
+| Param URL | API | Valores | Semântica |
+|-----------|-----|---------|-----------|
+| `search` | `search` | texto | Nome / email / NIF / nº processo |
+| `status` | `status` | slug do workflow | Fase do **processo** (não o estado da ficha de cliente) |
+| `process_type` | `process_type` | chaves de `PROCESS_TYPE_LABELS` | Tipo de operação (`process_type` ou alias legado `type`) |
+| `assigned_user_ids` | `assigned_user_ids` | CSV de user ids | Multi-select de staff atribuído |
+| `assigned_logic` | `assigned_logic` | `OR` (default) / `AND` | OR = pelo menos um dos IDs; AND = todos os IDs têm de aparecer nos campos de atribuição |
+| `assigned_user_id` | `assigned_user_id` | um id | Alias legado (Pacote FK); o frontend migra para `assigned_user_ids` |
+| `view_mode` | `view_mode` | `active_only` / `all` / `historical` / `deleted` | Activos vs arquivo vs eliminados |
+| `is_indexed` | `is_indexed` | `true` / `false` | Estado de indexação |
+
+Builders: `services/process_list_filters.py`. O filtro de atribuição percorre um conjunto canónico **e** aliases legados (`assigned_to`, `assigned_consultor_id(s)`, `assigned_mediador_id(s)`, `assigned_indexacao_id`, `consultant_id`, `manager_id`, `assigned_users`, …) para dados antigos não desaparecerem da lista.
+
+**AND com `GET /processes/me`:** `mine_only` **não** é substituído por `assigned_user_ids`. O resultado é sempre «processos meus nesta empresa» ∩ «atribuídos aos IDs escolhidos».
+
+Staff do dropdown: `GET /users?for_assignment=true` (exclui `admin`; inclui indexação). Hook: `useAssignmentUsersQuery` com `queryKeys.users.forAssignment()`.
+
+Os mesmos query params existem em `GET /processes/paginated` (cursor).
+
+```mermaid
+flowchart LR
+    subgraph UI_C["/clientes"]
+        CF["ClientFilters<br/>fonte / tipo / status ficha"]
+    end
+    subgraph UI_P["/processos e /lista-processos"]
+        PF["ProcessFilters<br/>fase / tipo processo / atribuído a"]
+    end
+    CF --> API_C["GET /clients"]
+    PF --> API_P["GET /processes ou /processes/me"]
+    API_C --> SvcC["client_list_filters<br/>só colecção clients"]
+    API_P --> SvcP["process_list_filters<br/>só colecção processes"]
+```
+
 ### Soft-delete de Clientes
 
-Todas as queries de listagem/pesquisa de clientes filtram ativamente `is_deleted: {"$ne": True}` (defense-in-depth com `status: {"$ne": "eliminado"}`). O soft-delete (`client_delete.py`) define `is_deleted: True`, `deleted_at: <timestamp>`, `is_active: False`, `status: "eliminado"` — todos os 4 campos para compatibilidade.
+Todas as queries de listagem/pesquisa de clientes filtram ativamente `is_deleted: {"$ne": True}` (defense-in-depth com `status: {"$ne": "eliminado"}`), excepto quando o filtro de ficha é `status=deleted`. O soft-delete (`client_delete.py`) define `is_deleted: True`, `deleted_at: <timestamp>`, `is_active: False`, `status: "eliminado"` — todos os 4 campos para compatibilidade.
+
+---
+
+## TanStack Query — factory `queryKeys` (`queryClient.js`)
+
+Fonte única: `frontend/src/lib/queryClient.js`. **Não** declarar arrays literais (`['org-admin-companies']`) nem constantes locais (`USERS_QUERY_KEY`) nos ecrãs admin — invalidações parciais partem-se.
+
+Hierarquia relevante para listagens e org-admin:
+
+```
+queryKeys.processes.list(filters)     // GET /processes — filters inclui assigned_user_ids / assigned_logic
+queryKeys.processes.kanban(filters)   // prefixo kanbanAll: invalidar só o board, nunca ['processes'] inteiro
+queryKeys.clients.list(filters)       // GET /clients — filters de entidade (fonte/tipo/status)
+queryKeys.users.forAssignment()       // ['users','list',{ for_assignment: true }]
+queryKeys.orgAdmin.all                // ['org-admin']
+queryKeys.orgAdmin.companies(search)
+queryKeys.orgAdmin.users()
+queryKeys.orgAdmin.ucrs()
+queryKeys.orgAdmin.ucrByUser(userId)
+```
+
+`CompaniesAdminTab` e `UsersAccessAdminTab` usam `queryKeys.orgAdmin.*`. A página obsoleta `CompaniesManagementPage.jsx` foi removida (Pacote FJ); o painel `SystemAdminPanel` embute `CompaniesAdminTab`.
+
+---
+
+## Índices MongoDB e TTL nativo
+
+Índices de query e de ciclo de vida vivem em `services/db_indexes.py`, criados no arranque (`create_indexes` → `cleanup_deprecated_indexes` + `create_ttl_indexes`). `get_index_stats` reporta nomes/contagens (incl. `emails`, `user_company_roles`).
+
+**Query (amostra, colecção `processes` / `clients`):** `idx_status`, `idx_consultor` / `idx_mediador`, compostos `status+assigned_*`, `idx_process_type`, `idx_client_assigned_to`, blind indexes `*_hash` (nunca no NIF/email em claro).
+
+**TTL nativo (`expireAfterSeconds`)** — o mongod apaga documentos automaticamente. O campo **tem** de ser BSON Date (`datetime` Python), não ISO string. Serviços que escrevem dados efémeros carimbam `*_dt` (ex.: `stamp_draft_ttl_fields` em `email_draft_service.py`).
+
+| Colecção | Campo | TTL | Nome | Notas |
+|----------|-------|-----|------|--------|
+| `refresh_tokens` | `created_at_dt` | 24 h | `ttl_refresh_tokens` | Extra à expiração lógica `expires_at` |
+| `system_error_logs` | `timestamp_dt` | 30 dias | `ttl_system_error_logs` | Substitui o `idx_ttl` antigo em ISO string |
+| `emails` | `updated_at_dt` | 7 dias | `ttl_email_drafts` | Partial index `status: draft` |
+| `oauth_states` | `created_at` | 10 min | `idx_oauth_state_ttl` | CSRF state OAuth |
+
+Diagnóstico: `GET /diagnostics/ttl-status` e migração `POST /diagnostics/migrate-ttl-fields` (documentos antigos só com ISO string).
 
 ---
 

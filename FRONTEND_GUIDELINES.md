@@ -212,6 +212,22 @@ As settings de cada perfil (assinatura, webmail, preferências) são lidas do ba
 - **Impersonate**: o menu lateral usa o `user.role` impersonado. Abas de Administração (`showAdminButton`, Dashboard Executivo) escondem-se se o impersonado não for admin/CEO.
 - **Rascunhos no Dashboard**: `getDraftNavigationTarget` — emails → `/webmail?folder=drafts&id=`, pré-registo → `/registos-clientes?clientId=`, processos → `/processo/:id` (nunca ProcessDetails para rascunhos de email).
 
+---
+
+## 11. Listagens — contextos Cliente vs Processo + Query Keys (Pacotes FK/FL/FJ)
+
+**Regra**: filtros de **Cliente** e de **Processo** não se misturam na UI nem nas query keys. A query string da página é a fonte de verdade (partilhável, back/forward).
+
+| Página | Componente de filtros | Params de URL | Não incluir |
+|--------|----------------------|---------------|-------------|
+| `/clientes` | `ClientFilters.jsx` | `search`, `fonte`, `tipo`, `status` (ficha: `active` / `inactive` / `deleted`) | `assigned_user_ids`, fase de workflow, `is_indexed` |
+| `/processos`, `/lista-processos` | `ProcessFilters.jsx` | `search`, `status` (fase), `process_type`, `assigned_user_ids`, `assigned_logic` (`OR`/`AND`) | `fonte` / `tipo` da ficha de cliente |
+
+- Dropdown «Atribuído a»: `useAssignmentUsersQuery` → `queryKeys.users.forAssignment()` → `GET /users?for_assignment=true`.
+- Admin de organização: **sempre** `queryKeys.orgAdmin.companies(search)` / `.users()` / `.ucrs()` / `.ucrByUser(id)`. Proibido arrays literais (`['org-admin-companies']`) ou constantes locais (`USERS_QUERY_KEY`) — partem invalidações parciais.
+- Invalidar Kanban com `queryKeys.processes.kanbanAll()`, nunca `['processes']` inteiro (apagaria detalhe/listas/`my-clients`).
+- Código novo de cor: tokens Shadcn (`bg-primary`, `text-muted-foreground`, …), não classes Tailwind cruas.
+
 
 
 
