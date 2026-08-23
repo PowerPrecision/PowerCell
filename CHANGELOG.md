@@ -3,6 +3,21 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-08-23] — Pacote FN: Loop `/processes/me` e mismatch UCR
+
+Correcção de produção: **Os Meus Processos** (`/processos`) nunca carregava e repetia `GET /api/processes/me`. Os headers `X-Active-Role` / `X-Company-Id` não batiam com o UCR (ex.: cargo `consultor` + empresa guardada como nome `Precision Crédito` em vez do `company_id`), e o fallback silencioso para o JWT devolvia lista vazia.
+
+### Corrigido
+- **Loop infinito no frontend**: `ProcessesPage` deixou de reconstruir `assignedUserIdsFilter` em cada render (agora `useMemo` sobre o query param). A página **não** escreve o sentinel `"all"` em `sessionStorage.activeRole` — esse valor não corresponde a nenhum UCR e desincronizava o header do `ContextSwitcher`.
+- **`X-Company-Id` é um id, não um nome**: `AuthContext` resolve e persiste o `company_id` canónico via `resolveCompanyIdFromUser` (`utils/userProfiles.js`). Nunca grava `user.company` (nome de exibição) como header.
+- **Interceptor Axios**: `syncAuthContextHeaders` envia o cargo/empresa do AuthContext (UCR seleccionado), não sentinels escritos por páginas. Continua a **não sobrescrever** headers já definidos no pedido (Pacote DM).
+- **Match UCR por id ou nome**: `get_effective_role_async` / `_find_ucr` aceitam `company_id` **ou** `company_name` (case-insensitive). Se o JWT já tem o cargo e o utilizador pertence à empresa, o header é honrado em vez de cair no fallback silencioso.
+- **`GET /processes/me`**: `build_company_scope_condition` filtra por atribuição (`consultant_id` / `manager_id` / assigned) e casa a empresa activa por `company_id`, `company` **ou** `company_name`.
+
+### Documentação
+- `ARCHITECTURE.md`, `README.md`, `FRONTEND_GUIDELINES.md`, `AGENTS.md` e `worklog.md` alinhados com o comportamento UCR / headers / `/processes/me`.
+
+---
 ## [2.0.0] — 2026-08-22 — Pacote FC: Documentação oficial da v2.0
 
 Lançamento em Produção da **versão 2.0** do PowerCell CRM. Este pacote actualiza `ARCHITECTURE.md`, `README.md` e este changelog para reflectir o estado real da plataforma (UCR multi-cargo, Webmail em tempo real, Calendário de precisão e Administração reformulada).

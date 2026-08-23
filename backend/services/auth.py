@@ -211,6 +211,65 @@ def _jwt_primary_role(user: dict) -> str:
     return (user.get("role") or "").strip().lower()
 
 
+def _hints_match(left: Optional[str], right: Optional[str]) -> bool:
+    a = (left or "").strip()
+    b = (right or "").strip()
+    if not a or not b:
+        return False
+    return a.casefold() == b.casefold()
+
+
+def _company_match_or(hint: str) -> list:
+    """Mongo $or clauses matching company_id or display name (case-insensitive)."""
+    hint = (hint or "").strip()
+    if not hint:
+        return []
+    escaped = re.escape(hint)
+    rx = {"$regex": f"^{escaped}$", "$options": "i"}
+    return [
+        {"company_id": hint},
+        {"company_id": rx},
+        {"company_name": hint},
+        {"company_name": rx},
+        {"company": hint},
+        {"company": rx},
+    ]
+
+
+def _user_company_hint_matches(user: dict, hint: str) -> bool:
+    return any(
+        _hints_match(user.get(field), hint)
+        for field in ("company_id", "company_name", "company")
+    )
+
+
+_UCR_COMPANY_PROJECTION = {
+    "_id": 0,
+    "role": 1,
+    "company_id": 1,
+    "company_name": 1,
+    "company": 1,
+}
+
+
+async def _find_ucr(user_id: str, *, role: Optional[str] = None, company_hint: Optional[str] = None):
+    """Locate a UCR by role and/or company (id or name). Exact company_id first."""
+    from database import db as _db
+
+    query: dict = {"user_id": user_id}
+    if role:
+        query["role"] = role
+    hint = (company_hint or "").strip()
+    if hint and hint != "default":
+        exact = dict(query)
+        exact["company_id"] = hint
+        assoc = await _db.user_company_roles.find_one(exact, _UCR_COMPANY_PROJECTION)
+        if assoc:
+            return assoc
+        query["$or"] = _company_match_or(hint)
+    return await _db.user_company_roles.find_one(query, _UCR_COMPANY_PROJECTION)
+
+
 def authorization_role(effective_role: str, user: dict) -> str:
     """Role a usar nas dependências RBAC.
 
@@ -382,16 +441,23 @@ async def get_effective_role_async(request: Request, user: dict) -> str:
         result = "__all_roles__"
     else:
         company_id = (request.headers.get("X-Company-Id") or "").strip()
-        query = {"user_id": user.get("id"), "role": active_role}
-        if company_id and company_id != "default":
-            query["company_id"] = company_id
         try:
-            from database import db as _db
-            assoc = await _db.user_company_roles.find_one(
-                query,
-                {"_id": 0, "role": 1},
+            assoc = await _find_ucr(
+                user.get("id"),
+                role=active_role,
+                company_hint=company_id or None,
             )
             if assoc:
+                result = active_role
+            elif active_role == jwt_role and (
+                not company_id
+                or company_id == "default"
+                or _user_company_hint_matches(user, company_id)
+                or await _find_ucr(user.get("id"), company_hint=company_id)
+            ):
+                # JWT already has this role and the user is tied to the company
+                # (by id or display name). Honour the header instead of emptying
+                # GET /processes/me after a silent UCR fallback.
                 result = active_role
             else:
                 logger.warning(
@@ -595,7 +661,6 @@ def get_active_company_id(request: Request, user: dict) -> Optional[str]:
 
     # Importar db aqui para evitar circular imports
     import asyncio
-    from database import db as _db
 
     # Validar: o utilizador deve ter associação com esta empresa
     # Usar cache em request.state para evitar queries repetidas
@@ -610,20 +675,18 @@ def get_active_company_id(request: Request, user: dict) -> Optional[str]:
         loop = asyncio.get_event_loop()
 
         async def _check():
-            assoc = await _db.user_company_roles.find_one(
-                {"user_id": user["id"], "company_id": active_company},
-                {"_id": 0, "company_id": 1}
-            )
-            return assoc is not None
+            return await _find_ucr(user["id"], company_hint=active_company)
 
-        is_valid = loop.run_until_complete(_check())
+        assoc = loop.run_until_complete(_check())
+        is_valid = assoc is not None
+        canonical = (assoc.get("company_id") if assoc else None) or active_company
 
         # Cache result on request state
         if hasattr(request, 'state'):
             setattr(request.state, cache_key, is_valid)
 
         if is_valid:
-            return active_company
+            return canonical
 
     except Exception as e:
         logger.warning(
@@ -682,20 +745,16 @@ async def get_active_company_id_async(request: Request, user: dict) -> Optional[
             return active_company if cached else (user.get("company") or None)
 
     try:
-        from database import db as _db
-
-        assoc = await _db.user_company_roles.find_one(
-            {"user_id": user["id"], "company_id": active_company},
-            {"_id": 0, "company_id": 1}
-        )
+        assoc = await _find_ucr(user["id"], company_hint=active_company)
 
         is_valid = assoc is not None
+        canonical = (assoc.get("company_id") if assoc else None) or active_company
 
         if hasattr(request, 'state'):
             setattr(request.state, cache_key, is_valid)
 
         if is_valid:
-            return active_company
+            return canonical
 
     except Exception as e:
         logger.warning(

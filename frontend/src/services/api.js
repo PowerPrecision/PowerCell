@@ -130,6 +130,20 @@ function deduplicatedRequest(config) {
 api.get = (url, config) => deduplicatedRequest({ method: "get", url, ...config });
 
 // ====================================================================
+// AUTH CONTEXT → HEADERS
+// Snapshot written by AuthContext so X-Active-Role / X-Company-Id follow
+// the selected UCR even if a page overwrites sessionStorage (e.g. "all").
+// ====================================================================
+let authContextHeaders = { role: null, companyId: null };
+
+export function syncAuthContextHeaders({ role, companyId } = {}) {
+  authContextHeaders = {
+    role: role || null,
+    companyId: companyId || null,
+  };
+}
+
+// ====================================================================
 // INTERCEPTOR DE REQUEST
 // ====================================================================
 api.interceptors.request.use(
@@ -148,7 +162,11 @@ api.interceptors.request.use(
     // Injetar X-Active-Role para Context Isolation.
     // PACOTE DM: não sobrescrever se o pedido já definiu o header
     // (ex.: Área Pessoal a gravar no UCR de uma tab que não é a empresa activa).
-    const activeRole = sessionStorage.getItem("activeRole") || localStorage.getItem("activeRole");
+    // Prefer AuthContext (selected UCR role) over sessionStorage, which
+    // ProcessesPage used to overwrite with the sentinel "all".
+    const activeRole = authContextHeaders.role
+      || sessionStorage.getItem("activeRole")
+      || localStorage.getItem("activeRole");
     const existingRole = typeof config.headers.get === "function"
       ? config.headers.get("X-Active-Role")
       : config.headers["X-Active-Role"];
@@ -160,7 +178,8 @@ api.interceptors.request.use(
     // Ler de localStorage (persiste entre sessões) com fallback para
     // sessionStorage (retrocompatibilidade).
     // PACOTE DM: respeitar override por-pedido (ProfileRoleTab / EmailConfigForm).
-    const activeCompanyId = localStorage.getItem("active_company_id")
+    const activeCompanyId = authContextHeaders.companyId
+      || localStorage.getItem("active_company_id")
       || sessionStorage.getItem("activeCompanyId");
     const existingCompany = typeof config.headers.get === "function"
       ? config.headers.get("X-Company-Id")

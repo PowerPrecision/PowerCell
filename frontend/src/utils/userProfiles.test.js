@@ -9,6 +9,7 @@ import {
   buildUserProfileItems,
   collectUserRoles,
   getUserCompanyRecords,
+  resolveCompanyIdFromUser,
 } from "./userProfiles.js";
 
 describe("getUserCompanyRecords", () => {
@@ -102,5 +103,30 @@ describe("collectUserRoles", () => {
     });
     assert.ok(roles.includes("consultor"));
     assert.ok(roles.includes("intermediario"));
+  });
+});
+
+describe("resolveCompanyIdFromUser", () => {
+  const user = {
+    role: "consultor",
+    company: "Precision Crédito",
+    companies: [
+      { role: "consultor", company_id: "co-uuid", company_name: "Precision Crédito" },
+    ],
+  };
+
+  it("resolve o id canónico quando o hint é o nome da empresa", () => {
+    assert.equal(resolveCompanyIdFromUser(user, "Precision Crédito", "consultor"), "co-uuid");
+  });
+
+  it("mantém um company_id já canónico", () => {
+    assert.equal(resolveCompanyIdFromUser(user, "co-uuid", "consultor"), "co-uuid");
+  });
+
+  it("não devolve o nome da empresa quando não há UCR", () => {
+    assert.equal(
+      resolveCompanyIdFromUser({ role: "consultor", company: "Precision Crédito" }, "Precision Crédito", "consultor"),
+      null,
+    );
   });
 });

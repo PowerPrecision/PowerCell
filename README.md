@@ -50,6 +50,10 @@ PowerCell/
 │   │   ├── storage_service.py  # Factory Pattern: Local/S3/OneDrive adapters
 │   │   ├── document_*.py      # Documents: resolve, portal, upload, move, OCR, auto-cat…
 │   │   ├── process_*.py       # Processes: list, kanban, update, assignment, DSTI…
+│   │   ├── process_list_filters.py  # Query MongoDB da listagem de processos (assigned_user_ids AND/OR)
+│   │   ├── client_list_filters.py   # Filtros da entidade Cliente (fonte / tipo / status ficha)
+│   │   ├── client_list_search.py    # GET /clients + GET /clients/search
+│   │   ├── db_indexes.py            # Índices de query + TTL nativo (expireAfterSeconds)
 │   │   ├── ai_document_analyzer.py  # Análise de documentos com confiança
 │   │   └── ...
 │   ├── models/                # Esquemas Pydantic + modelos de dados
@@ -73,6 +77,11 @@ PowerCell/
 │   │   │       ├── ProcessAssignDialog.jsx
 │   │   │       ├── ProcessPersonalTab.jsx
 │   │   │       └── …
+│   │   ├── lib/
+│   │   │   └── queryClient.js            # QueryClient + factory queryKeys (orgAdmin, users.forAssignment, …)
+│   │   ├── components/filters/
+│   │   │   ├── ClientFilters.jsx         # Filtros da entidade Cliente (fonte / tipo / status ficha)
+│   │   │   └── ProcessFilters.jsx        # Filtros de Processo (fase / tipo / atribuído a AND/OR)
 │   │   ├── pages/             # ~50 páginas (lazy loaded)
 │   │   │   ├── PublicClientForm.js       # Formulário público dinâmico
 │   │   │   ├── AdminDashboard.js         # Dashboard admin
@@ -82,7 +91,9 @@ PowerCell/
 │   │   │   │   ├── processFormCleaners.js
 │   │   │   │   └── processUpdatePayload.js  # Bloqueia arrays vazios / documents wipe
 │   │   │   ├── StaffDashboard.js         # Dashboard staff (consultor)
-│   │   │   ├── MyClientsPage.js          # Os Meus Processos (filtros)
+│   │   │   ├── ProcessesPage.js          # Os Meus Processos (/processos) + visão global
+│   │   │   ├── ClientsPage.js            # Listagem de clientes (/clientes) — filtros de entidade
+│   │   │   ├── MyClientsPage.js          # Os Meus Clientes (/meus-clientes)
 │   │   │   ├── FinanceDashboard.js       # Dashboard financeiro
 │   │   │   ├── KanbanPage.js             # Quadro Kanban
 │   │   │   ├── ProfileSettingsPage.js    # Gestão permissões
@@ -94,17 +105,18 @@ PowerCell/
 │   │   │   └── ...
 │   │   ├── hooks/             # Custom hooks
 │   │   │   ├── useWebSocket.js  # WebSocket singleton + backoff
-│   │   │   ├── queries/         # TanStack Query (ex.: useProcessFullData)
+│   │   │   ├── queries/         # TanStack Query (ex.: useProcessFullData, useAssignmentUsersQuery)
 │   │   │   └── mutations/       # TanStack Mutations (ex.: useProcessMutations)
 │   │   ├── contexts/          # React Context providers
-│   │   │   ├── AuthContext.js   # JWT + multi-perfil (effectiveRole / X-Active-Role)
+│   │   │   ├── AuthContext.js   # JWT + UCR (effectiveRole / company_id canónico)
 │   │   │   ├── TasksContext.js  # BG jobs: sticky toasts + circuit breaker
 │   │   │   ├── UploadProgressContext.js
 │   │   │   └── ThemeContext.js  # Light/Dark mode
 │   │   ├── services/
-│   │   │   └── api.js          # Axios + interceptors (429 retry)
+│   │   │   └── api.js          # Axios + interceptors (429, X-Active-Role / X-Company-Id)
 │   │   ├── utils/
 │   │   │   ├── roleUtils.js          # Helpers de roles/permissões
+│   │   │   ├── userProfiles.js       # UCR → company_id canónico (não o nome)
 │   │   │   └── workflowStatuses.js   # KNOWN_PROCESS_STATUSES + buildStatusOptions (baseline estático + fallback p/ dropdown de estado)
 │   │   └── layouts/
 │   │       └── DashboardLayout.js # Sidebar + header
@@ -124,6 +136,7 @@ PowerCell/
 ### Core
 - Gestão de Processos de Crédito (CRUD completo com paginação)
 - Gestão de Clientes e Leads com cursor pagination
+- **Listagens com contextos separados** (Pacotes FK/FL): filtros de **Cliente** (`fonte`, `tipo`, `status` da ficha) nunca misturam fase/atribuição de processo; filtros de **Processo** incluem `assigned_user_ids` com lógica AND/OR. Ver `ARCHITECTURE.md`.
 - Upload e Gestão de Documentação (Storage agnóstico: S3 / Local / OneDrive via Factory Pattern)
 - Quadro Kanban com drag-drop (@dnd-kit) e filtros (data, urgência)
 - **Calendário de precisão** (`/calendario`): eventos com hora exacta (início/fim), edição e eliminação; vista mensal/semanal
@@ -180,12 +193,27 @@ PowerCell/
 - Quando o processo é criado manualmente no CRM, usa a **1ª fase real do `workflow_statuses`**
 - Link S3 automático ao criar processo: `s3://…/Documentação Clientes/Nome_Do_Cliente/`
 
-### Os Meus Processos (`/meus-clientes`)
-- Vista personalizada por utilizador (apenas processos atribuídos)
-- **Filtros por defeito**: Exclui status terminais (concluído, arquivo, perdido, desistências, cancelado)
-- **Toggle "Mostrar Concluídos"**: Botão para incluir/excluir processos inativos
-- 3 cards de estatísticas (Total, Com Tarefas Pendentes, Com Imóvel)
+### Os Meus Processos (`/processos`) e Todos os Processos (`/lista-processos`)
+- **Mesmo componente** (`ProcessesPage.js`); o âmbito vem da rota:
+  - `/processos` → `GET /processes/me` — sempre processos atribuídos ao utilizador **e** à empresa activa (`mine_only`), mesmo para director/admin/ceo
+  - `/lista-processos` → `GET /processes?show_all=true` — visão global (RBAC)
+- Isolamento por empresa: `X-Company-Id` é o **id** do UCR; o backend também aceita o nome de exibição (UCRs legados). Headers vêm do AuthContext (`syncAuthContextHeaders`), não de sentinels escritos pela página
+- **Filtros de processo** (`ProcessFilters.jsx`, persistidos na query string): `status` (fase), `process_type`, `assigned_user_ids` (multi-select) + `assigned_logic` (`OR` = qualquer um / `AND` = todos), `view_mode`, `is_indexed`, `search`
+- `assigned_user_ids` em `/processos` é **intersecção** com «os meus» — não substitui o âmbito pessoal
+- Staff do dropdown: `GET /users?for_assignment=true` (exclui admin; inclui indexação)
+- **Filtros por defeito**: `view_mode=active_only` (exclui arquivo / terminais); toggle para incluir concluídos
 - Pesquisa com normalização de acentos (NFD)
+
+### Os Meus Clientes (`/meus-clientes`)
+- `MyClientsPage` — clientes associados ao utilizador autenticado
+- **Filtros por defeito**: exclui status terminais nos processos do cliente
+- **Toggle "Mostrar Concluídos"**: incluir processos inativos do portefólio
+
+### Clientes (`/clientes`)
+- Lista unificada de fichas (sem tabs de fase de processo). Coluna útil: número de processos associados
+- **Filtros de entidade** (`ClientFilters.jsx`): `fonte`, `tipo` (`particular` / `dois_titulares` / `empresa`), `status` da ficha (`active` / `inactive` / `deleted`)
+- Backend: `client_list_filters.build_client_entity_query` sobre a colecção `clients` — independente de `process.status` / atribuição / indexação
+- Params legados de processo no `GET /clients` existem por compatibilidade mas **não** estão na UI
 
 ### Dashboard
 - **StaffDashboard**: Vista do consultor com processos sem atualização
@@ -423,6 +451,18 @@ flowchart TD
 | GET | `/api/download/{token}` | Download de documentos via link temporário |
 | GET | `/api/health` | Health check |
 
+### Listagens autenticadas (Pacotes FK/FL)
+
+Query params de **contexto**. Não reutilizar filtros de processo em `/clients` na UI.
+
+| Método | Endpoint | Query params relevantes |
+|--------|----------|-------------------------|
+| GET | `/api/clients` | `search`, `fonte`, `tipo` (`particular` \| `dois_titulares` \| `empresa`), `status` (`active` \| `inactive` \| `deleted`). Legado (não usar na UI de clientes): `status_filter`, `assignment_filter`, `indexacao_filter` |
+| GET | `/api/processes` | `search`, `status`, `process_type`, `assigned_user_id` (legado), `assigned_user_ids`, `assigned_logic` (`OR` \| `AND`), `view_mode`, `is_indexed`, `show_all` |
+| GET | `/api/processes/me` | iguais aos de `/processes`, **excepto** `show_all`. Sempre `mine_only` + `company_id` da empresa activa; `assigned_user_ids` faz **AND** com esse âmbito |
+| GET | `/api/processes/paginated` | mesmos filtros de atribuição/tipo (cursor) |
+| GET | `/api/users?for_assignment=true` | Staff para dropdowns de atribuição (exclui `admin`; inclui indexação) |
+
 ### Admin (autenticação + role admin/ceo)
 | Método | Endpoint | Descrição |
 |--------|----------|-----------|
@@ -441,6 +481,14 @@ flowchart TD
 | GET/PUT | `/api/system-config/*` | Configurações do sistema |
 | GET | `/api/admin/ai-training/stats` | Estatísticas de chamadas IA |
 
+### Processos (autenticação + staff)
+| Método | Endpoint | Descrição |
+|--------|----------|-----------|
+| GET | `/api/processes/me` | Os Meus Processos — atribuição ao user + empresa activa (`company_id` **ou** nome) |
+| GET | `/api/processes` | Lista (visão global com `show_all=true` em `/lista-processos`) |
+
+Headers obrigatórios de contexto UCR em todos os pedidos autenticados: `X-Active-Role`, `X-Company-Id` (id canónico; o backend aceita também o nome de exibição).
+
 ## Rotas Principais (Frontend)
 
 | Rota | Componente | Descrição |
@@ -450,16 +498,17 @@ flowchart TD
 | `/admin/organizacao` | OrganizationAdminPage | **Configuração de plataforma** (admin/CEO) — Empresas + Utilizadores/UCR |
 | `/system-admin` | SystemAdminPanel | Configuração técnica do sistema (admin/CEO; tabs técnicas só admin) |
 | `/kanban` | KanbanPage | Quadro Kanban com drag-drop |
-| `/processos` | MyClientsPage | Lista de processos |
-| `/processos/:id` | ProcessDetails | Detalhes do processo |
-| `/clientes` | ClientsPage | Gestão de clientes |
+| `/processos` | ProcessesPage | Os Meus Processos — `GET /processes/me` (atribuídos a mim + empresa activa) |
+| `/lista-processos` | ProcessesPage | Todos os Processos — `GET /processes?show_all=true` |
+| `/processo/:id` | ProcessDetails | Detalhes do processo |
+| `/clientes` | ClientsPage | Gestão de clientes (filtros de entidade: fonte / tipo / status ficha) |
 | `/docs` | DocumentsPage | Documentação |
 | `/calendario` | CalendarPage | Calendário de precisão (hora exacta, editar/eliminar eventos) |
 | `/notificacoes` | NotificationsPage | Notificações |
 | `/imoveis` | PropertiesPage | Imóveis |
 | `/minutas` | DraftsPage | Minutas |
 | `/leads` | LeadsPage | Leads |
-| `/meus-clientes` | MyClientsPage | Os Meus Processos |
+| `/meus-clientes` | MyClientsPage | Os Meus Clientes |
 | `/financeiro` | FinanceDashboard | Dashboard financeiro |
 | `/calculadoras` | CalculatorsPage | Calculadoras (Prestação de Crédito Habitação, DSTI, Risco) |
 | `/automation` | AutomationPage | Motor de automação No-Code |
@@ -701,6 +750,17 @@ O sistema distingue DEV de PROD através da variável `ENVIRONMENT`. Em DEV (Ren
 - **Explorador de Ficheiros vazio**: Quando o S3 está configurado mas o `Base Path` ou as credenciais estão incorretos, o explorador mostra "Nenhum ficheiro encontrado" em vez de uma mensagem de erro detalhada. Verificar as configurações de armazenamento nas Configurações do Sistema (`/configuracoes`).
 
 ## Histórico de Correções Recentes (dev)
+
+### 2026-08-23 — Pacote FN: `/processes/me` e UCR
+- **Os Meus Processos** deixou de entrar em loop de `GET /processes/me` (filtro `assigned_user_ids` memoizado; a página já não escreve `"all"` no `sessionStorage`).
+- `AuthContext` / `api.js` enviam `X-Company-Id` como **id** do UCR (nunca o nome de exibição) e `X-Active-Role` do perfil seleccionado.
+- Backend: match UCR por `company_id` **ou** `company_name`; se o JWT já tem o cargo e o user pertence à empresa, o header é honrado. `/processes/me` filtra por atribuição + empresa (id ou nome).
+
+### 2026-08 — Pacote FM (documentação) + listagens FK/FL
+- **Contextos de listagem separados**: `/clientes` filtra só a ficha (`fonte`, `tipo`, `status`); `/processos` e `/lista-processos` filtram o processo (`status` de fase, `process_type`, `assigned_user_ids` AND/OR).
+- **`GET /processes/me`**: âmbito pessoal + `company_id` da empresa activa; `assigned_user_ids` é intersecção, não substitui `mine_only`.
+- **Query keys**: factory `queryKeys` em `frontend/src/lib/queryClient.js` — namespace `queryKeys.orgAdmin` (empresas, users, UCRs) e `queryKeys.users.forAssignment()`.
+- **TTL MongoDB nativo**: `expireAfterSeconds` em `refresh_tokens`, `system_error_logs`, rascunhos `emails` e `oauth_states` (campos BSON Date `*_dt`). Página obsoleta `CompaniesManagementPage.jsx` removida.
 
 ### 2026-08 — v2.0 em Produção (Pacote FC — documentação)
 - **UCR multi-cargo**: vários papéis por empresa (ex. Diretor e Consultor em simultâneo); proteção contra a eliminação do último acesso; cargos oficiais Parceiro e Indexação; `Company.is_active` (soft-delete).
