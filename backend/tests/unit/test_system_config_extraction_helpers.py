@@ -107,3 +107,13 @@ def test_system_config_thinning_no_name_collision():
     assert "system_config_connections.py" in syscfg_files
     assert "system_config_admin_ops.py" in syscfg_files
     assert "system_config_system_emails.py" in syscfg_files
+
+
+def test_auto_backup_enabled_is_settings_boolean_field():
+    from services.system_config_api import CONFIG_FIELDS
+
+    settings = CONFIG_FIELDS["settings"]
+    keys = [field.key for field in settings["fields"]]
+    assert "auto_backup_enabled" in keys
+    field = next(f for f in settings["fields"] if f.key == "auto_backup_enabled")
+    assert field.type == "boolean"

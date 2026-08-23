@@ -73,3 +73,37 @@ def test_backup_no_collision_with_core_backup_service():
     # Core file should remain substantial (not overwritten by a thin stub)
     core_lines = (services_dir / "backup.py").read_text().count("\n")
     assert core_lines > 400
+
+
+def test_scheduled_backup_job_skips_when_disabled():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from services import backup
+
+    async def _run():
+        with patch.object(
+            backup, "is_auto_backup_enabled", AsyncMock(return_value=False)
+        ), patch.object(
+            backup, "full_backup_workflow", AsyncMock()
+        ) as workflow:
+            await backup.scheduled_backup_job()
+            workflow.assert_not_called()
+
+    asyncio.run(_run())
+
+
+def test_is_auto_backup_enabled_defaults_false_on_error():
+    import asyncio
+    from unittest.mock import AsyncMock, patch
+
+    from services import backup
+
+    async def _run():
+        with patch(
+            "services.system_config.get_system_config",
+            AsyncMock(side_effect=RuntimeError("db down")),
+        ):
+            assert await backup.is_auto_backup_enabled() is False
+
+    asyncio.run(_run())

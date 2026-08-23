@@ -34,8 +34,8 @@ async def get_users(
     role: str = None,
     for_assignment: bool = Query(
         False,
-        description="Se true, devolve só staff elegível para atribuições "
-        "(exclui admin e indexação).",
+        description="Se true, devolve staff elegível para atribuições "
+        "(exclui admin; inclui indexação).",
     ),
     user: dict = Depends(require_staff()),
 ):
@@ -138,7 +138,7 @@ async def set_primary_email_account(
 
 @router.get("/staff", response_model=List[UserResponse])
 async def get_staff_users(user: dict = Depends(require_staff())):
-    """Staff para dropdowns de atribuição (sem admin/indexação)."""
+    """Staff para dropdowns de atribuição (sem admin; inclui indexação)."""
     return await run_get_staff_users(user)
 
 

@@ -311,7 +311,7 @@ async def test_run_get_users_includes_admin_index_and_inactive():
 
 
 @pytest.mark.asyncio
-async def test_run_get_staff_users_excludes_admin_and_index():
+async def test_run_get_staff_users_excludes_admin_includes_indexacao():
     from unittest.mock import MagicMock, patch
 
     from services import users_api_list as ual
@@ -333,7 +333,7 @@ async def test_run_get_staff_users_excludes_admin_and_index():
         result = await ual.run_get_staff_users({"id": "caller", "role": "admin"})
 
     ids = [u["id"] for u in result]
-    assert ids == ["u-con"]
+    assert ids == ["u-index", "u-con"]
 
 
 def test_publicize_caixa_geral_account_strips_password():

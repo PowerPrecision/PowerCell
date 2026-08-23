@@ -443,6 +443,17 @@ CONFIG_FIELDS = {
                 type="boolean",
                 help_text="Quando desativado, os botões de exportação para Excel ficam ocultos para todos os utilizadores excepto Admin e CEO",
             ),
+            ConfigField(
+                key="_divider_backup",
+                label="Backups Automáticos",
+                type="divider",
+            ),
+            ConfigField(
+                key="auto_backup_enabled",
+                label="Backup automático diário (03:00 UTC)",
+                type="boolean",
+                help_text="Quando desactivado, a tarefa das 03:00 não corre e não escreve nada em /tmp.",
+            ),
         ]
     },
     "document_recipients": {

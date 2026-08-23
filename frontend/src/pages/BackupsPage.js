@@ -23,19 +23,27 @@ import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
 import {
   Database,
-  RefreshCw,
   CheckCircle,
   XCircle,
   Clock,
   HardDrive,
-  Cloud,
   Shield,
-  AlertTriangle,
-  Loader2,
-  FileArchive,
+  RefreshCw,
   Calendar,
   User,
+  Server,
+  Archive,
+  AlertTriangle,
+  Play,
+  Download,
+  FileText,
+  FolderOpen,
+  Info,
+  Cloud,
+  Loader2,
 } from "lucide-react";
+import { Switch } from "../components/ui/switch";
+import { Label } from "../components/ui/label";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -49,6 +57,7 @@ const BackupsPage = ({ embedded = false }) => {
   const [verificationResult, setVerificationResult] = useState(null);
   // PACOTE CE — Estado de restauro de emergência (swap atómico)
   const [restoring, setRestoring] = useState(false);
+  const [autoBackupSaving, setAutoBackupSaving] = useState(false);
 
   const fetchData = useCallback(async () => {
     try {
@@ -89,6 +98,42 @@ const BackupsPage = ({ embedded = false }) => {
   useEffect(() => {
     fetchData();
   }, [fetchData]);
+
+  const toggleAutoBackup = async (enabled) => {
+    setAutoBackupSaving(true);
+    try {
+      const token = localStorage.getItem("token");
+      const response = await fetch(`${API_URL}/api/system-config/settings`, {
+        method: "PATCH",
+        headers: {
+          "Content-Type": "application/json",
+          Authorization: `Bearer ${token}`,
+        },
+        body: JSON.stringify({ auto_backup_enabled: enabled }),
+      });
+      if (!response.ok) {
+        throw new Error("Falha ao actualizar a configuração");
+      }
+      setConfig((prev) => ({
+        ...(prev || {}),
+        auto_backup_enabled: enabled,
+        scheduled_backup: {
+          ...(prev?.scheduled_backup || {}),
+          enabled,
+        },
+      }));
+      toast.success(
+        enabled
+          ? "Backup automático diário (03:00 UTC) ligado"
+          : "Backup automático diário desligado",
+      );
+    } catch (error) {
+      console.error("Erro ao actualizar auto_backup_enabled:", error);
+      toast.error("Não foi possível actualizar o backup automático");
+    } finally {
+      setAutoBackupSaving(false);
+    }
+  };
 
   const triggerBackup = async () => {
     setBackupInProgress(true);
@@ -484,6 +529,23 @@ const BackupsPage = ({ embedded = false }) => {
               </CardTitle>
             </CardHeader>
             <CardContent>
+              <div className="flex items-center justify-between gap-4 rounded-lg border border-border p-4 mb-4">
+                <div className="space-y-1">
+                  <Label htmlFor="auto-backup-enabled" className="text-sm font-medium">
+                    Backup automático diário (03:00 UTC)
+                  </Label>
+                  <p className="text-sm text-muted-foreground">
+                    Quando desligado, a tarefa das 03:00 não corre e não escreve nada em /tmp.
+                  </p>
+                </div>
+                <Switch
+                  id="auto-backup-enabled"
+                  checked={Boolean(config.auto_backup_enabled)}
+                  disabled={autoBackupSaving}
+                  onCheckedChange={toggleAutoBackup}
+                  data-testid="auto-backup-toggle"
+                />
+              </div>
               <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
                 <div>
                   <p className="text-sm font-medium">Directorio Local</p>

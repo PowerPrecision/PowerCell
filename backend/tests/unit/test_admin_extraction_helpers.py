@@ -84,8 +84,8 @@ async def test_admin_get_users_includes_admin_index_and_inactive():
 
 
 @pytest.mark.asyncio
-async def test_admin_get_users_for_assignment_excludes_admin_and_index():
-    """Pacote DT: for_assignment=True continua a excluir admin/indexação."""
+async def test_admin_get_users_for_assignment_excludes_admin_includes_index():
+    """Pacote FL: for_assignment=True exclui admin e inclui indexação."""
     from unittest.mock import MagicMock, patch
 
     from services import admin_users as au
@@ -107,7 +107,7 @@ async def test_admin_get_users_for_assignment_excludes_admin_and_index():
     assert query != {}
     ids = [u.id for u in result]
     assert "u-admin" not in ids
-    assert "u-index" not in ids
+    assert "u-index" in ids
     assert "u-ceo" in ids
     assert "u-dir" in ids
     assert "u-off" in ids

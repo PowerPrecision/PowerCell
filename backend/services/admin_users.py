@@ -78,9 +78,9 @@ async def run_get_users(
     estes roles precisam de ver informações de utilizadores para
     atribuição de processos e colaboração.
 
-    Pacote DT: `for_assignment=True` exclui admin e indexação — usar nas
-    dropdowns de responsáveis. A gestão de utilizadores chama sem este
-    flag para continuar a listar todos os cargos.
+    Pacote DT / FL: `for_assignment=True` exclui admin (e cliente/parceiro)
+    das dropdowns de responsáveis; inclui indexação. A gestão de
+    utilizadores chama sem este flag para continuar a listar todos os cargos.
 
     Pacote EB: por defeito NÃO filtra `is_active` nem cargos de staff —
     devolve admin, indexação, inativos e restantes, até
@@ -89,7 +89,7 @@ async def run_get_users(
     Args:
         role: Filtro opcional por role (ex: "consultor", "admin").
         user: Utilizador autenticado com role permitido (injetado).
-        for_assignment: Se True, só devolve consultor/intermediario/diretor/ceo.
+        for_assignment: Se True, só devolve staff atribuível (inclui indexação).
 
     Returns:
         List[UserResponse]: Lista de utilizadores (sem password).
