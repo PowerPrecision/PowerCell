@@ -36,8 +36,7 @@ import { ChevronDown, Shield, Building2 } from "lucide-react";
 import { ROLE_LABELS, ROLE_ICONS } from "../../utils/roleUtils";
 import {
   buildUserProfileItems,
-  getUserCompanyRecords,
-  normalizeCompanyRecord,
+  getDistinctCompanies,
 } from "../../utils/userProfiles";
 
 const ContextSwitcher = () => {
@@ -46,9 +45,9 @@ const ContextSwitcher = () => {
     switchActiveCompany, effectiveCompanyId,
   } = useAuth();
 
-  const companies = getUserCompanyRecords(user)
-    .map((c) => normalizeCompanyRecord(c))
-    .filter(Boolean);
+  // Lista limpa e sem duplicados — apenas empresas reais (company_id
+  // válido), uma única entrada por company_id.
+  const companies = getDistinctCompanies(user);
   const profileItems = buildUserProfileItems(user, { effectiveCompanyId });
 
   // Encontrar o nome da empresa ativa

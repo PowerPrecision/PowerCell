@@ -8,6 +8,7 @@ import {
   buildProfileRoleTabs,
   buildUserProfileItems,
   collectUserRoles,
+  getDistinctCompanies,
   getUserCompanyRecords,
   resolveCompanyIdFromUser,
 } from "./userProfiles.js";
@@ -91,6 +92,50 @@ describe("buildProfileRoleTabs", () => {
     assert.equal(tabs[0].roleData.professional_phone, "910000000");
     assert.equal(tabs[0].roleData.job_title, "Consultora");
     assert.equal(tabs[0].roleData.signature, "<p>Ana</p>");
+  });
+});
+
+describe("getDistinctCompanies", () => {
+  it("devolve uma entrada por company_id, mesmo com vários cargos na mesma empresa", () => {
+    const companies = getDistinctCompanies({
+      role: "diretor",
+      companies: [
+        { role: "diretor", company_id: "c1", company_name: "Power Real Estate" },
+        { role: "consultor", company_id: "c1", company_name: "Power Real Estate" },
+        { role: "intermediario", company_id: "c2", company_name: "Precision Crédito" },
+      ],
+    });
+    assert.equal(companies.length, 2);
+    assert.deepEqual(companies.map((c) => c.company_id), ["c1", "c2"]);
+    // Nomes intactos — nunca concatenados entre entradas
+    assert.equal(companies[0].company_name, "Power Real Estate");
+    assert.equal(companies[1].company_name, "Precision Crédito");
+  });
+
+  it("ignora UCRs sem company_id real (não itera por 'default')", () => {
+    const companies = getDistinctCompanies({
+      role: "consultor",
+      companies: [
+        { role: "consultor" }, // sem company_id / company_name — inválido
+        { role: "intermediario", company_id: "c2", company_name: "Precision Crédito" },
+      ],
+    });
+    assert.equal(companies.length, 1);
+    assert.equal(companies[0].company_id, "c2");
+  });
+
+  it("usa company_id como fallback de nome em vez de deixar vazio", () => {
+    const companies = getDistinctCompanies({
+      role: "consultor",
+      companies: [{ role: "consultor", company_id: "c3" }],
+    });
+    assert.equal(companies.length, 1);
+    assert.equal(companies[0].company_name, "c3");
+  });
+
+  it("devolve lista vazia sem empresas associadas", () => {
+    assert.deepEqual(getDistinctCompanies({ role: "consultor" }), []);
+    assert.deepEqual(getDistinctCompanies(null), []);
   });
 });
 

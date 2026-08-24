@@ -36,6 +36,37 @@ function stripBlindIndexes(obj) {
 }
 
 /**
+ * Resolve os nomes de exibição para o cartão de Atribuição (AssignmentContextCard).
+ *
+ * PACOTE FQ-2 — o backend guarda a atribuição em formas diferentes segundo o
+ * fluxo (dialog de atribuição vs auto-atribuição na criação): arrays
+ * `consultor_names` / `mediador_names` (canónico), campos singulares
+ * legados (`consultor_name` / `mediador_name`), ou apenas arrays/strings de
+ * IDs (`assigned_consultor_ids` / `assigned_mediador_ids` / singular). Esta
+ * função tenta os nomes já resolvidos primeiro e só recorre a resolver por
+ * ID (via `usersById`) quando não há nenhum nome disponível — evita mostrar
+ * "Não atribuído" quando existem utilizadores atribuídos.
+ *
+ * @param {string[]|null} names - ex: process.consultor_names
+ * @param {string[]|string|null} ids - ex: process.assigned_consultor_ids (array) ou assigned_consultor_id (string)
+ * @param {Map<string, {name?: string}>} [usersById] - lookup opcional (id → utilizador)
+ * @returns {string[]}
+ */
+export function resolveAssignedNames(names, ids, usersById) {
+  const cleanNames = (Array.isArray(names) ? names : [])
+    .map((n) => (typeof n === "string" ? n.trim() : ""))
+    .filter(Boolean);
+  if (cleanNames.length > 0) return cleanNames;
+
+  const idList = Array.isArray(ids) ? ids : (ids ? [ids] : []);
+  if (idList.length === 0 || !usersById) return [];
+
+  return idList
+    .map((uid) => usersById.get?.(uid)?.name)
+    .filter((name) => typeof name === "string" && name.trim().length > 0);
+}
+
+/**
  * Constrói personalData a partir do cliente (fonte de verdade) ou fallback do processo.
  */
 export function buildPersonalData(processData, clientData) {
@@ -120,6 +151,27 @@ export function normalizeFormSlices(processData, personalData, financialData, re
   }
   if ((pd.phone || pd.telefone) && !processData.client_phone) {
     processPatch.client_phone = pd.phone || pd.telefone;
+  }
+
+  // PACOTE FQ-2 — Bugfix: alguns fluxos de atribuição (ex.: auto-atribuição
+  // na criação do processo) só gravam os campos singulares legados
+  // (consultor_name / mediador_name) e nunca chegam a popular os arrays
+  // consultor_names / mediador_names que o cartão de resumo (Atribuição) e
+  // o cabeçalho leem. Sem este fallback, o processo aparece como "Não
+  // atribuído" mesmo tendo consultor/intermediário definidos.
+  const hasConsultorNames = Array.isArray(processData.consultor_names) && processData.consultor_names.length > 0;
+  if (!hasConsultorNames) {
+    const fallbackConsultorName = processData.consultor_name || processData.assigned_consultor_name;
+    if (fallbackConsultorName) {
+      processPatch.consultor_names = [fallbackConsultorName];
+    }
+  }
+  const hasMediadorNames = Array.isArray(processData.mediador_names) && processData.mediador_names.length > 0;
+  if (!hasMediadorNames) {
+    const fallbackMediadorName = processData.mediador_name || processData.assigned_mediador_name;
+    if (fallbackMediadorName) {
+      processPatch.mediador_names = [fallbackMediadorName];
+    }
   }
 
   // unused in maps but kept for parity with original t2/rd reads
