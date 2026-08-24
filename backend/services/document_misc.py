@@ -19,6 +19,7 @@ from services.document_constants import (
     ERROR_S3_FILE_NOT_FOUND,
 )
 from services.document_process_resolve import (
+    assert_path_within_document_root,
     assert_s3_file_belongs_to_process,
     extract_second_client_name,
     resolve_process_from_flexible_id,
@@ -115,6 +116,10 @@ async def run_get_download_url(client_id: str, file_path: str) -> dict[str, Any]
 
 
 async def run_get_download_url_by_path(file_path: str) -> dict[str, Any]:
+    # SEGURANÇA (IDOR/path-scope): impede gerar pre-signed URLs para chaves
+    # S3 fora da árvore de documentos de clientes (ex.: backups/*.zip).
+    assert_path_within_document_root(file_path)
+
     loop = asyncio.get_event_loop()
     for path in s3_path_variations(file_path):
         exists = await loop.run_in_executor(
