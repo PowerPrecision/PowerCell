@@ -100,6 +100,16 @@ export function useKanbanRealtime(options = {}) {
   const handleProcessStatusChanged = useCallback((payload) => {
     if (!payload || !payload.process_id) return;
 
+    // Ignorar eventos disparados pelo próprio utilizador atual — o update
+    // otimista do drag-and-drop (useMoveProcessMutation) já reflete esta
+    // mudança localmente; reaplicá-la duplicaria o cartão.
+    if (payload.user_id && payload.user_id === userId) return;
+
+    // Enquanto o movimento deste processo ainda estiver pendente
+    // localmente (entre o update otimista e o assentamento da mutation),
+    // ignorar o broadcast para não duplicar o cartão.
+    if (pendingMovesRef.current.has(payload.process_id)) return;
+
     const currentFilters = filtersRef.current;
     const queryKey = queryKeys.processes.kanban(currentFilters);
 
@@ -155,7 +165,7 @@ export function useKanbanRealtime(options = {}) {
     queryClient.invalidateQueries({
       queryKey: queryKeys.processes.detail(payload.process_id),
     });
-  }, [queryClient]);
+  }, [queryClient, userId]);
 
   /**
    * Actualiza o cache do Kanban quando um processo é actualizado

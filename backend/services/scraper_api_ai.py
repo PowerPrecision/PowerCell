@@ -40,10 +40,20 @@ async def run_get_supported_sites(user: dict):
 async def run_analyze_page_with_ai(request: ScrapeRequest, user: dict):
     """Analisa uma página usando IA configurada (Gemini por defeito)."""
     try:
-        from services.scraper import analyze_page_with_ai
+        from services.scraper import (
+            analyze_page_with_ai,
+            SSRFBlockedURLError,
+            _ensure_public_url,
+        )
         from services.ai_page_analyzer import get_ai_config
 
         logger.info(f"Análise IA solicitada para: {request.url}")
+
+        try:
+            await _ensure_public_url(request.url)
+        except SSRFBlockedURLError as e:
+            logger.warning(f"[SCRAPER_AI] URL recusado por validação SSRF: {e}")
+            raise HTTPException(status_code=400, detail="URL não permitido") from e
 
         config = await get_ai_config()
         model = config.get("scraper_extraction", "gemini-1.5-flash")
@@ -79,6 +89,8 @@ async def run_analyze_page_with_ai(request: ScrapeRequest, user: dict):
             "data": result,
         }
 
+    except HTTPException:
+        raise
     except Exception as e:
         logger.error(f"Erro na análise IA: {e}")
         raise HTTPException(status_code=500, detail=str(e))

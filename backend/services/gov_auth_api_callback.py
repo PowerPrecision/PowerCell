@@ -16,6 +16,7 @@ from services.gov_auth_api_helpers import (
     IS_MOCK,
     MOCK_CITIZEN,
     create_gov_jwt,
+    resolve_safe_redirect_base,
 )
 
 logger = logging.getLogger(__name__)
@@ -26,9 +27,20 @@ async def run_gov_auth_callback(code: str, state: Optional[str] = None):
     frontend_base = FRONTEND_URL
     if state:
         try:
-            frontend_base = base64.urlsafe_b64decode(state.encode()).decode()
+            decoded_state = base64.urlsafe_b64decode(state.encode()).decode()
         except Exception:
-            pass
+            decoded_state = None
+
+        # Mitigação Open Redirect: só aceita o destino decodificado do
+        # `state` se pertencer a um domínio permitido (evita reenviar o
+        # gov_token, ainda que mock, para um domínio arbitrário).
+        if decoded_state:
+            frontend_base = resolve_safe_redirect_base(decoded_state)
+            if frontend_base != decoded_state:
+                logger.warning(
+                    "[GOV_AUTH] 'state' recusado (domínio de redirecionamento "
+                    f"não permitido): {decoded_state!r}"
+                )
 
     if IS_MOCK or code == "mock123":
         logger.info(
