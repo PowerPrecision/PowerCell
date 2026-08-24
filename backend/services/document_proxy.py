@@ -17,6 +17,7 @@ from services.document_constants import (
     ERROR_S3_FILE_NOT_FOUND,
     ERROR_S3_NOT_CONFIGURED,
 )
+from services.document_process_resolve import assert_path_within_document_root
 from services.document_s3_paths import s3_path_variations
 from services.s3_storage import s3_service
 
@@ -30,6 +31,12 @@ def _get_s3_object(key: str):
 async def run_proxy_s3_file(file_path: str) -> StreamingResponse:
     """Stream ficheiro S3 através do backend (tenta variações de path)."""
     logger.info(f"[PROXY] Acesso a ficheiro: {file_path}")
+
+    # SEGURANÇA (IDOR/path-scope): antes de tocar em S3, garantir que o path
+    # está dentro da raiz "Documentação Clientes/" — caso contrário qualquer
+    # utilizador autenticado poderia servir-se deste proxy para descarregar
+    # ficheiros fora do âmbito de documentos (ex.: backups/*.zip).
+    assert_path_within_document_root(file_path)
 
     if not s3_service.is_configured():
         logger.error("[PROXY] S3 não configurado")

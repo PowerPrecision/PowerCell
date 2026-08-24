@@ -25,6 +25,7 @@ from services.document_portal_request import (
 from services.document_process_resolve import (
     build_s3_valid_prefixes,
     assert_s3_file_belongs_to_process,
+    assert_path_within_document_root,
 )
 from services.document_auto_categorize import (
     should_run_ocr_for_category,
@@ -157,6 +158,31 @@ class TestS3AccessHelpers:
         with pytest.raises(HTTPException) as exc:
             assert_s3_file_belongs_to_process("other/a.pdf", process)
         assert exc.value.status_code == 403
+
+    def test_assert_path_within_document_root_allows_client_docs(self):
+        # Não deve levantar exceção para paths dentro da raiz de documentos.
+        assert_path_within_document_root(
+            "Documentação Clientes/Joao Silva/Identificação/cc.pdf"
+        )
+        # Também tolera uma barra inicial acidental.
+        assert_path_within_document_root(
+            "/Documentação Clientes/Joao Silva/Identificação/cc.pdf"
+        )
+
+    def test_assert_path_within_document_root_blocks_backup_exfiltration(self):
+        # Regressão de segurança (IDOR): antes desta validação, qualquer
+        # utilizador autenticado conseguia usar /documents/proxy ou
+        # /documents/download-url/{path} para descarregar backups completos
+        # da base de dados (mesmo bucket S3, prefixo "backups/").
+        with pytest.raises(HTTPException) as exc:
+            assert_path_within_document_root("backups/backup_20260101_030000.zip")
+        assert exc.value.status_code == 403
+
+    def test_assert_path_within_document_root_blocks_other_prefixes(self):
+        for path in ("companies/abc/logo.png", "Emails/xyz/attachment.pdf", "../etc/passwd"):
+            with pytest.raises(HTTPException) as exc:
+                assert_path_within_document_root(path)
+            assert exc.value.status_code == 403
 
 
 class TestAutoCategorizeHelpers:

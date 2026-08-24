@@ -21,6 +21,7 @@ from services.document_constants import (
     ERROR_PROCESS_NOT_FOUND,
     ERROR_S3_NOT_CONFIGURED,
 )
+from services.document_process_resolve import DOCUMENT_S3_ROOT_PREFIX
 from services.document_s3_paths import s3_path_variations
 from services.history import log_history
 from services.s3_storage import s3_service
@@ -87,6 +88,21 @@ async def run_bulk_download_documents(data: dict, *, user: dict) -> StreamingRes
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for doc_path in document_ids:
             try:
+                # SEGURANÇA (IDOR/path-scope): ignorar silenciosamente qualquer
+                # path fora da raiz de documentos de clientes (ex.: backups/*.zip,
+                # companies/*) em vez de o incluir no ZIP.
+                if not (doc_path or "").lstrip("/").startswith(
+                    DOCUMENT_S3_ROOT_PREFIX
+                ):
+                    logger.warning(
+                        "[SECURITY][BULK-DOWNLOAD] Path fora do âmbito ignorado: %s",
+                        doc_path,
+                    )
+                    errors.append(
+                        {"path": doc_path, "error": "Fora do âmbito de documentos"}
+                    )
+                    continue
+
                 content = None
                 used_path = None
                 for try_path in s3_path_variations(doc_path):

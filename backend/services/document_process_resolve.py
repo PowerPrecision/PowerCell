@@ -105,6 +105,38 @@ def extract_second_client_name(process: dict) -> Optional[str]:
     )
 
 
+# Raiz S3 canónica de todos os documentos de clientes/processos
+# (mesma constante usada pelo Explorador de Ficheiros — `admin_s3_explorer.S3_EXPLORER_BASE_PATH`).
+# Qualquer outro prefixo do bucket (ex.: "backups/", "companies/") é fora do
+# âmbito destes endpoints e NUNCA deve ser servido por eles.
+DOCUMENT_S3_ROOT_PREFIX = "Documentação Clientes/"
+
+
+def assert_path_within_document_root(file_path: str) -> None:
+    """
+    Garante que `file_path` está contido na árvore de documentos de clientes.
+
+    Os endpoints genéricos de download/proxy (`/documents/proxy/{file_path}`,
+    `/documents/download-url/{file_path}`, `/documents/bulk-download`) recebem
+    um path S3 arbitrário vindo do cliente e, historicamente, não validavam
+    o prefixo — permitindo aceder a QUALQUER chave do bucket S3, incluindo
+    backups completos da base de dados (`backups/*.zip`) ou logótipos de
+    empresas (`companies/*`), que vivem no MESMO bucket sob outros prefixos.
+
+    Raises:
+        HTTPException(403) se o path estiver fora da raiz de documentos.
+    """
+    from services.document_constants import ERROR_FILE_ACCESS_DENIED
+
+    normalized = (file_path or "").lstrip("/")
+    if not normalized.startswith(DOCUMENT_S3_ROOT_PREFIX):
+        logger.warning(
+            "[SECURITY] Tentativa de acesso fora do âmbito de documentos: %s",
+            file_path,
+        )
+        raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+
+
 def assert_s3_file_belongs_to_process(file_path: str, process: dict) -> None:
     """
     Garante que `file_path` pertence ao prefixo S3 do processo.
