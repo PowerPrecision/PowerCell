@@ -83,7 +83,7 @@ describe("useWebSocket Pacote FP", () => {
     assert.match(body, /this\.connect\(newToken\)/);
   });
 
-  it("keeps the option-callback event subscriptions on a stable \[\] effect", () => {
+  it("keeps the option-callback event subscriptions on a stable [] effect", () => {
     assert.match(source, /wsManager\.on\(WSEventType\.PROCESS_CREATED/);
     assert.match(source, /wsManager\.on\(WSEventType\.NEW_NOTIFICATION/);
     assert.match(source, /wsManager\.on\(WSEventType\.NEW_CHAT_MESSAGE/);
