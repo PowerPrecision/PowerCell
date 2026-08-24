@@ -73,7 +73,7 @@ import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
 // PACOTE DJ — Modal de revisão Human-in-the-Loop de sugestões IA por documento
 import DocumentReviewModal from "./DocumentReviewModal";
-import { hasRole, hasAnyRole, MANAGEMENT_ROLES } from "../utils/roleUtils";
+import { hasRole, MANAGEMENT_ROLES, canAccessByEffectiveRole } from "../utils/roleUtils";
 import {
   FileText,
   Upload,
@@ -299,7 +299,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Os restantes roles (consultor, intermediário, administrativo, etc.) não
   // veem estes documentos na UI — são filtrados em getAllFiles(),
   // getFilteredCategoryFiles() e na lista de categorias da sidebar.
-  const canSeeIndexCategory = hasAnyRole(user, INDEX_CATEGORY_ALLOWED_ROLES);
+  // Pacote FO — usa o cargo efetivo (effectiveRole / perfil ativo do UCR),
+  // não hasAnyRole(user, ...) que lê role/additional_roles em bruto do
+  // JWT e ignoraria a troca de perfil multi-empresa.
+  const canSeeIndexCategory = canAccessByEffectiveRole(effectiveRole, INDEX_CATEGORY_ALLOWED_ROLES);
 
   // PACOTE BL — Lista de categorias visíveis na sidebar (exclui "Index" para
   // roles não autorizados). Usada em todos os CATEGORIES.map da UI.

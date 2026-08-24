@@ -92,7 +92,7 @@ export function UploadProgressProvider({ children }) {
     if (success) {
       setTimeout(() => {
         setActiveUploads(prev => {
-          const { ...rest } = prev;
+          const { [jobId]: _removed, ...rest } = prev;
           return rest;
         });
       }, 5000);
@@ -100,9 +100,9 @@ export function UploadProgressProvider({ children }) {
   }, []);
   
   // Remover um upload job manualmente
-  const dismissUpload = useCallback(() => {
+  const dismissUpload = useCallback((jobId) => {
     setActiveUploads(prev => {
-      const { ...rest } = prev;
+      const { [jobId]: _removed, ...rest } = prev;
       return rest;
     });
   }, []);

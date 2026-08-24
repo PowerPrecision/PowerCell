@@ -25,6 +25,8 @@ import re
 import json
 import random
 import hashlib
+import ipaddress
+import socket
 from bs4 import BeautifulSoup
 from typing import Optional, Dict, Any, List
 from fake_useragent import UserAgent
@@ -175,6 +177,94 @@ MAX_RETRIES = 3
 RETRY_DELAY = 1.5
 
 
+# ================================================================
+# MITIGAÇÃO SSRF (Server-Side Request Forgery)
+# ================================================================
+# O scraper aceita URLs fornecidos por utilizadores (links de imóveis).
+# Sem validação, um utilizador malicioso poderia usar o scraper para
+# sondar a rede interna (10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16,
+# 127.0.0.1) ou o endpoint de metadata cloud (169.254.169.254), que
+# em muitos providers expõe credenciais IAM sem autenticação.
+# ================================================================
+
+class SSRFBlockedURLError(ValueError):
+    """URL recusado por resolver para um endereço IP privado/reservado."""
+
+
+def _is_blocked_ip_address(ip_str: str) -> bool:
+    """
+    True se o endereço IP for privado, reservado, loopback, link-local
+    (inclui 169.254.169.254 — metadata cloud AWS/GCP/Azure) ou multicast.
+    """
+    try:
+        ip_obj = ipaddress.ip_address(ip_str)
+    except ValueError:
+        # Não foi possível interpretar o IP — recusar por segurança
+        return True
+
+    return (
+        ip_obj.is_private
+        or ip_obj.is_loopback
+        or ip_obj.is_link_local
+        or ip_obj.is_reserved
+        or ip_obj.is_multicast
+        or ip_obj.is_unspecified
+    )
+
+
+async def _ensure_public_url(url: str) -> None:
+    """
+    Valida que `url` não aponta para um endereço IP privado/reservado
+    nem para o IP de metadata cloud, resolvendo o hostname via DNS.
+
+    Levanta `SSRFBlockedURLError` se o URL for recusado.
+    """
+    if not url or not isinstance(url, str):
+        raise SSRFBlockedURLError("URL vazio ou inválido")
+
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise SSRFBlockedURLError(f"Esquema de URL não permitido: {parsed.scheme!r}")
+
+    hostname = parsed.hostname
+    if not hostname:
+        raise SSRFBlockedURLError("URL sem hostname válido")
+
+    # Se o hostname já for um literal de IP, valida directamente (evita uma
+    # resolução DNS desnecessária). `getaddrinfo` também resolveria estes
+    # literais para o mesmo endereço, mas isto poupa uma chamada assíncrona.
+    try:
+        literal_ip = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal_ip = None
+
+    if literal_ip is not None:
+        if _is_blocked_ip_address(hostname):
+            raise SSRFBlockedURLError(
+                f"URL recusado: '{hostname}' é um endereço IP privado/reservado"
+            )
+        return
+
+    try:
+        loop = asyncio.get_running_loop()
+        addr_infos = await loop.getaddrinfo(hostname, None)
+    except (socket.gaierror, OSError) as e:
+        raise SSRFBlockedURLError(
+            f"Não foi possível resolver o hostname '{hostname}': {e}"
+        ) from e
+
+    if not addr_infos:
+        raise SSRFBlockedURLError(f"Não foi possível resolver o hostname '{hostname}'")
+
+    for _family, _type, _proto, _canonname, sockaddr in addr_infos:
+        ip_str = sockaddr[0]
+        if _is_blocked_ip_address(ip_str):
+            raise SSRFBlockedURLError(
+                f"URL recusado: '{hostname}' resolve para endereço IP "
+                f"privado/reservado não permitido ({ip_str})"
+            )
+
+
 class PropertyScraper:
     """
     Scraper de propriedades com bypass anti-bot e deep scraping.
@@ -267,6 +357,12 @@ class PropertyScraper:
         Returns:
             HTML content ou None se falhar
         """
+        try:
+            await _ensure_public_url(url)
+        except SSRFBlockedURLError as e:
+            logger.warning(f"[SCRAPER] URL recusado por validação SSRF: {e}")
+            return None
+
         last_error = None
         got_403 = False
         
@@ -1610,6 +1706,12 @@ class PropertyScraper:
         Returns:
             Conteúdo HTML ou None se falhar
         """
+        try:
+            await _ensure_public_url(url)
+        except SSRFBlockedURLError as e:
+            logger.warning(f"[SCRAPER] URL recusado por validação SSRF: {e}")
+            return None
+
         proxy = self._get_next_proxy() if use_proxy else None
         
         for verify_ssl in [True, False]:
