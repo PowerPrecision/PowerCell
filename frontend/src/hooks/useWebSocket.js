@@ -11,12 +11,17 @@
  *   independentemente de quantos componentes chamem useWebSocket(). Usa reference
  *   counting para ligar no 1º subscriber e desligar no último.
  * - Exponential backoff na reconexão: começa a 1s, duplica até 30s máximo.
+ *   O backoff NÃO é resetado no `onopen` — só após a ligação ficar estável
+ *   (evita churn quando o servidor aceita e fecha de imediato com JWT expirado).
+ * - Limite de tentativas consecutivas: após MAX_RECONNECT_ATTEMPTS falhas, para
+ *   o loop WS e fica em polling até o token mudar.
  * - Heartbeat a cada 30s para manter a ligação activa e detectar desconexões silenciosas.
  * - Polling fallback: quando o WebSocket falha 3 vezes consecutivas, comuta para
  *   polling via REST (/api/alerts/notifications) até a ligação ser restabelecida.
- * - Refresh de token automático: quando o servidor fecha com código 4001 (token expirado),
- *   tenta renovar via /api/auth/refresh e reconectar. Com código 4002 / HTTP 403
- *   (token inválido), para reconexão e força logout (sem polling).
+ * - Token expirado (Pacote FP): close 4001/4001, reason, ou JWT `exp` local.
+ *   Aborta reconexão com o mesmo token, tenta um refresh silencioso, e espera
+ *   que o AuthContext entregue um token novo. Código 4002/4002 / HTTP 403
+ *   (token inválido) força logout (sem polling).
  * - Proteção contra React StrictMode double-mount via verificação de estado.
  * - Tipos de eventos tipados (WSEventType) para processos, documentos, notificações,
  *   prazos e presença de utilizadores.
@@ -53,10 +58,12 @@ import { useAuth } from '../contexts/AuthContext';
 import {
   forceSessionExpired,
   isAuthWebSocketClose,
+  isExpiredTokenWebSocketClose,
+  isJwtExpired,
   isSessionInvalid,
   registerSessionCleanup,
-  WS_CLOSE_TOKEN_EXPIRED,
   WS_CLOSE_TOKEN_INVALID,
+  WS_CLOSE_TOKEN_INVALID_LEGACY,
 } from '../services/sessionExpiry';
 
 // Tipos de eventos WebSocket
@@ -106,6 +113,8 @@ export const WSEventType = {
 
 const INITIAL_RECONNECT_INTERVAL = 1000;
 const MAX_RECONNECT_INTERVAL = 30000;
+const MAX_RECONNECT_ATTEMPTS = 8;
+const STABLE_CONNECTION_MS = 3000;
 const HEARTBEAT_INTERVAL = 30000;
 const POLLING_INTERVAL = 30000;
 const MAX_WS_FAILS = 3;
@@ -132,6 +141,9 @@ class WebSocketManager {
     this._reconnectTimeout = null;
     this._reconnectAttempts = 0;
     this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
+    this._waitingForFreshToken = false;
+    this._rejectedToken = null;
+    this._stableTimer = null;
 
     // Heartbeat
     this._heartbeatInterval = null;
@@ -251,6 +263,66 @@ class WebSocketManager {
     }
   }
 
+  _clearReconnectTimer() {
+    if (this._reconnectTimeout) {
+      clearTimeout(this._reconnectTimeout);
+      this._reconnectTimeout = null;
+    }
+  }
+
+  _clearStableTimer() {
+    if (this._stableTimer) {
+      clearTimeout(this._stableTimer);
+      this._stableTimer = null;
+    }
+  }
+
+  _markConnectionStable() {
+    this._reconnectAttempts = 0;
+    this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
+    this._waitingForFreshToken = false;
+    this._rejectedToken = null;
+  }
+
+  /**
+   * Access token expired: do NOT reconnect with the same JWT (that is the
+   * production churn loop). Try one silent refresh; otherwise wait for
+   * AuthContext to deliver a new token via updateToken().
+   */
+  _handleExpiredToken() {
+    if (this._authFailed || isSessionInvalid()) return;
+    this._waitingForFreshToken = true;
+    this._rejectedToken = this.token;
+    this._clearReconnectTimer();
+    console.warn('WebSocket: Token expirado — a abortar reconexão automática com o mesmo JWT');
+    this._refreshAndReconnect();
+  }
+
+  _scheduleReconnect() {
+    if (this._waitingForFreshToken || this._authFailed || isSessionInvalid()) return;
+    if (this._subscriberCount <= 0) return;
+    if (isJwtExpired(this.token)) {
+      this._handleExpiredToken();
+      return;
+    }
+    if (this._reconnectAttempts >= MAX_RECONNECT_ATTEMPTS) {
+      console.warn(`WebSocket: Limite de ${MAX_RECONNECT_ATTEMPTS} reconexões atingido; a usar polling`);
+      this.connectionError = 'Reconexão WebSocket suspensa após demasiadas falhas';
+      this._startPolling();
+      this._notifyStateListeners();
+      return;
+    }
+
+    this._clearReconnectTimer();
+    const delay = this._reconnectInterval;
+    this._reconnectAttempts += 1;
+    this._reconnectInterval = Math.min(this._reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
+    this._reconnectTimeout = setTimeout(() => {
+      this._reconnectTimeout = null;
+      this.connect(this.token);
+    }, delay);
+  }
+
   /**
    * Attempt to refresh the JWT token and reconnect.
    * Returns true if refresh succeeded, false otherwise.
@@ -278,6 +350,7 @@ class WebSocketManager {
         if (response.status === 401 || response.status === 403) {
           this._handleAuthFailure();
         }
+        // Keep _waitingForFreshToken: do not reconnect with the expired JWT.
         return false;
       }
 
@@ -288,8 +361,13 @@ class WebSocketManager {
       localStorage.setItem('refreshToken', data.refresh_token);
       this.token = data.access_token;
 
+      if (isJwtExpired(this.token)) {
+        this._handleAuthFailure();
+        return false;
+      }
 
-      // Reset reconnect state and reconnect with new token
+      this._waitingForFreshToken = false;
+      this._rejectedToken = null;
       this._reconnectAttempts = 0;
       this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
       this.connect(this.token);
@@ -304,22 +382,34 @@ class WebSocketManager {
   }
 
   /**
-   * Update the stored token (called when AuthContext refreshes)
+   * Update the stored token (called when AuthContext refreshes).
+   * Reconnects even when the socket is down — that is how we resume after
+   * aborting reconnect on an expired JWT.
    */
   updateToken(newToken) {
     if (!newToken || newToken === this.token) return;
+    if (isJwtExpired(newToken) && this.token && !isJwtExpired(this.token)) return;
 
     this.token = newToken;
+    this._waitingForFreshToken = false;
+    this._rejectedToken = null;
+    this._reconnectAttempts = 0;
+    this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
 
-    // If currently connected, reconnect with new token
-    if (this.ws && this.ws.readyState === WebSocket.OPEN) {
-      this.ws.onclose = null; // Prevent auto-reconnect with old token
-      this.ws.close(1000, 'Token atualizado');
+    if (this._subscriberCount <= 0 || this._authFailed || isSessionInvalid()) return;
+
+    this._clearReconnectTimer();
+
+    if (this.ws) {
+      this.ws.onclose = null;
+      if (this.ws.readyState === WebSocket.OPEN || this.ws.readyState === WebSocket.CONNECTING) {
+        this.ws.close(1000, 'Token atualizado');
+      }
       this.ws = null;
       this.isConnected = false;
       this._stopHeartbeat();
-      this.connect(newToken);
     }
+    this.connect(newToken);
   }
 
   /**
@@ -364,7 +454,18 @@ class WebSocketManager {
   connect(token) {
     if (!token || this._authFailed || isSessionInvalid()) return;
 
+    if (this._waitingForFreshToken && token === this._rejectedToken) return;
+
+    if (isJwtExpired(token)) {
+      this.token = token;
+      if (!this._isRefreshing) this._handleExpiredToken();
+      return;
+    }
+
     this.token = token;
+    this._waitingForFreshToken = false;
+    this._rejectedToken = null;
+    this._clearReconnectTimer();
 
     // Already connected or connecting
     if (this._isConnecting) return;
@@ -392,8 +493,6 @@ class WebSocketManager {
 
       this.ws.onopen = () => {
         this._isConnecting = false;
-        this._reconnectAttempts = 0;
-        this._reconnectInterval = INITIAL_RECONNECT_INTERVAL;
         this.isConnected = true;
         this.connectionError = null;
         this._wsFailCount = 0;
@@ -405,6 +504,13 @@ class WebSocketManager {
           status: 'connected',
           user_id: null,
         });
+        // Do NOT reset backoff here: the server may accept() and immediately
+        // close an expired JWT. Only reset after the socket stays open.
+        this._clearStableTimer();
+        this._stableTimer = setTimeout(() => {
+          this._stableTimer = null;
+          if (this.isConnected) this._markConnectionStable();
+        }, STABLE_CONNECTION_MS);
       };
 
       this.ws.onmessage = (event) => this._handleMessage(event);
@@ -413,16 +519,21 @@ class WebSocketManager {
         this._isConnecting = false;
         this.isConnected = false;
         this._stopHeartbeat();
+        this._clearStableTimer();
         this._notifyStateListeners();
 
-        // Token expired (4001): try a single silent refresh before giving up
-        if (event.code === WS_CLOSE_TOKEN_EXPIRED && this._subscriberCount > 0) {
-          this._refreshAndReconnect();
+        const tokenExpired = isExpiredTokenWebSocketClose(event) || isJwtExpired(this.token);
+        if (tokenExpired && this._subscriberCount > 0) {
+          this._handleExpiredToken();
           return;
         }
 
         // Invalid token / HTTP 403 handshake: stop reconnect and force logout
-        if (event.code === WS_CLOSE_TOKEN_INVALID || isAuthWebSocketClose(event)) {
+        if (
+          event.code === WS_CLOSE_TOKEN_INVALID
+          || event.code === WS_CLOSE_TOKEN_INVALID_LEGACY
+          || isAuthWebSocketClose(event)
+        ) {
           console.warn(`WebSocket: Falha de autenticação (code=${event.code}), sem reconexão`);
           this._handleAuthFailure();
           return;
@@ -430,10 +541,7 @@ class WebSocketManager {
 
         // Auto-reconnect unless intentional close or session already invalid
         if (event.code !== 1000 && this._subscriberCount > 0 && !this._authFailed && !isSessionInvalid()) {
-          const delay = this._reconnectInterval;
-          this._reconnectAttempts++;
-          this._reconnectInterval = Math.min(this._reconnectInterval * 2, MAX_RECONNECT_INTERVAL);
-          this._reconnectTimeout = setTimeout(() => this.connect(this.token), delay);
+          this._scheduleReconnect();
         }
       };
 
@@ -455,10 +563,10 @@ class WebSocketManager {
   }
 
   disconnect() {
-    if (this._reconnectTimeout) {
-      clearTimeout(this._reconnectTimeout);
-      this._reconnectTimeout = null;
-    }
+    this._clearReconnectTimer();
+    this._clearStableTimer();
+    this._waitingForFreshToken = false;
+    this._rejectedToken = null;
 
     this._isConnecting = false;
     this._reconnectAttempts = 0;

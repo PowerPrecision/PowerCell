@@ -6,6 +6,8 @@ import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import {
   isAuthWebSocketClose,
+  isExpiredTokenWebSocketClose,
+  isJwtExpired,
   isAuthExemptUrl,
   isStaffApiUrl,
   isSessionInvalid,
@@ -17,7 +19,15 @@ import {
   requestUsedStaffToken,
   WS_CLOSE_TOKEN_EXPIRED,
   WS_CLOSE_TOKEN_INVALID,
+  WS_CLOSE_TOKEN_EXPIRED_LEGACY,
+  WS_CLOSE_TOKEN_INVALID_LEGACY,
 } from "./sessionExpiry.js";
+
+function makeJwt(exp) {
+  const header = Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url");
+  const payload = Buffer.from(JSON.stringify({ exp })).toString("base64url");
+  return `${header}.${payload}.sig`;
+}
 
 function mockStorage() {
   const store = {};
@@ -36,9 +46,13 @@ function mockStorage() {
 }
 
 describe("isAuthWebSocketClose", () => {
-  it("detects custom JWT close codes 4001/4002", () => {
+  it("detects backend JWT close codes 4001/4002 and legacy 4001/4002", () => {
     assert.equal(isAuthWebSocketClose({ code: WS_CLOSE_TOKEN_EXPIRED, reason: "" }), true);
     assert.equal(isAuthWebSocketClose({ code: WS_CLOSE_TOKEN_INVALID, reason: "" }), true);
+    assert.equal(isAuthWebSocketClose({ code: WS_CLOSE_TOKEN_EXPIRED_LEGACY, reason: "" }), true);
+    assert.equal(isAuthWebSocketClose({ code: WS_CLOSE_TOKEN_INVALID_LEGACY, reason: "" }), true);
+    assert.equal(WS_CLOSE_TOKEN_EXPIRED, 4001);
+    assert.equal(WS_CLOSE_TOKEN_INVALID, 4002);
   });
 
   it("detects HTTP 403/401 reasons from handshake rejection", () => {
@@ -50,6 +64,25 @@ describe("isAuthWebSocketClose", () => {
   it("does not treat a normal network drop as auth failure", () => {
     assert.equal(isAuthWebSocketClose({ code: 1006, reason: "" }), false);
     assert.equal(isAuthWebSocketClose({ code: 1001, reason: "Going away" }), false);
+  });
+});
+
+describe("isExpiredTokenWebSocketClose / isJwtExpired (Pacote FP)", () => {
+  it("treats backend 4001, legacy 4001 and expiry reasons as expired-token closes", () => {
+    assert.equal(isExpiredTokenWebSocketClose({ code: 4001, reason: "" }), true);
+    assert.equal(isExpiredTokenWebSocketClose({ code: 4001, reason: "" }), true);
+    assert.equal(isExpiredTokenWebSocketClose({ code: 1006, reason: "Token expirado" }), true);
+    assert.equal(isExpiredTokenWebSocketClose({ code: 4002, reason: "" }), false);
+    assert.equal(isExpiredTokenWebSocketClose({ code: 1006, reason: "" }), false);
+  });
+
+  it("detects JWT exp locally so reconnect can abort before opening a socket", () => {
+    const past = Math.floor(Date.now() / 1000) - 60;
+    const future = Math.floor(Date.now() / 1000) + 3600;
+    assert.equal(isJwtExpired(makeJwt(past)), true);
+    assert.equal(isJwtExpired(makeJwt(future)), false);
+    assert.equal(isJwtExpired("not-a-jwt"), false);
+    assert.equal(isJwtExpired(""), false);
   });
 });
 

@@ -17,10 +17,24 @@
 import { toast } from "sonner";
 import { isPublicRoute } from "../utils/publicRoutes.js";
 
+// Backend (websocket_api_notifications.py) uses 4001/4002. Keep 4001/4002
+// as aliases so older clients/tests still match.
 export const WS_CLOSE_TOKEN_EXPIRED = 4001;
 export const WS_CLOSE_TOKEN_INVALID = 4002;
+export const WS_CLOSE_TOKEN_EXPIRED_LEGACY = 4001;
+export const WS_CLOSE_TOKEN_INVALID_LEGACY = 4002;
 export const WS_CLOSE_POLICY_VIOLATION = 1008;
 export const WS_CLOSE_HTTP_FORBIDDEN = 4403;
+
+const EXPIRED_TOKEN_CLOSE_CODES = new Set([
+  WS_CLOSE_TOKEN_EXPIRED,
+  WS_CLOSE_TOKEN_EXPIRED_LEGACY,
+]);
+const INVALID_TOKEN_CLOSE_CODES = new Set([
+  WS_CLOSE_TOKEN_INVALID,
+  WS_CLOSE_TOKEN_INVALID_LEGACY,
+]);
+const EXPIRED_TOKEN_REASON_RE = /token expir|jwt expired|sess[aã]o expir/i;
 
 const AUTH_LOCAL_KEYS = [
   "token",
@@ -73,6 +87,35 @@ export function clearStaffAuthStorage() {
 }
 
 /**
+ * JWT `exp` já passou (com 5s de margem). Tokens opacos/malformados → false.
+ */
+export function isJwtExpired(token, nowMs = Date.now()) {
+  if (!token || typeof token !== "string") return false;
+  const parts = token.split(".");
+  if (parts.length < 2) return false;
+  try {
+    let base64 = parts[1].replace(/-/g, "+").replace(/_/g, "/");
+    const pad = base64.length % 4;
+    if (pad) base64 += "=".repeat(4 - pad);
+    const payload = JSON.parse(atob(base64));
+    if (typeof payload.exp !== "number") return false;
+    return payload.exp * 1000 <= nowMs + 5000;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * Fecho por access token expirado (4001/4001 ou reason). Não implica logout:
+ * o refresh token pode ainda ser válido — o WS deve esperar por um token novo.
+ */
+export function isExpiredTokenWebSocketClose(event) {
+  if (!event) return false;
+  if (EXPIRED_TOKEN_CLOSE_CODES.has(Number(event.code))) return true;
+  return EXPIRED_TOKEN_REASON_RE.test(String(event.reason || ""));
+}
+
+/**
  * Detecta fecho WebSocket por falha de autenticação (códigos custom 4001/4002
  * ou handshake HTTP 403, que os browsers reportam como 1006 + reason).
  */
@@ -80,8 +123,8 @@ export function isAuthWebSocketClose(event) {
   if (!event) return false;
   const code = Number(event.code);
   if (
-    code === WS_CLOSE_TOKEN_EXPIRED
-    || code === WS_CLOSE_TOKEN_INVALID
+    EXPIRED_TOKEN_CLOSE_CODES.has(code)
+    || INVALID_TOKEN_CLOSE_CODES.has(code)
     || code === WS_CLOSE_POLICY_VIOLATION
     || code === WS_CLOSE_HTTP_FORBIDDEN
     || code === 403

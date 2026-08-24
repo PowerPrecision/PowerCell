@@ -49,3 +49,44 @@ describe("useWebSocket Pacote FG / A2", () => {
     );
   });
 });
+
+describe("useWebSocket Pacote FP", () => {
+  it("aborts reconnect on expired JWT and waits for a fresh token", () => {
+    assert.match(source, /_waitingForFreshToken/);
+    assert.match(source, /_handleExpiredToken/);
+    assert.match(source, /isExpiredTokenWebSocketClose/);
+    assert.match(source, /isJwtExpired/);
+    assert.match(source, /Token expirado — a abortar reconexão automática com o mesmo JWT/);
+    assert.match(source, /do not reconnect with the expired JWT/);
+  });
+
+  it("uses exponential backoff with a hard cap of consecutive reconnects", () => {
+    assert.match(source, /MAX_RECONNECT_ATTEMPTS = 8/);
+    assert.match(source, /INITIAL_RECONNECT_INTERVAL = 1000/);
+    assert.match(source, /MAX_RECONNECT_INTERVAL = 30000/);
+    assert.match(source, /_scheduleReconnect/);
+    assert.match(source, /Limite de \$\{MAX_RECONNECT_ATTEMPTS\} reconexões atingido/);
+  });
+
+  it("does not reset backoff on onopen until the connection stays stable", () => {
+    assert.match(source, /STABLE_CONNECTION_MS = 3000/);
+    assert.match(source, /Do NOT reset backoff here/);
+    assert.match(source, /_markConnectionStable/);
+    const onopen = source.slice(source.indexOf("this.ws.onopen"), source.indexOf("this.ws.onmessage"));
+    assert.ok(onopen.includes("this.ws.onopen"));
+    assert.doesNotMatch(onopen, /this\._reconnectAttempts = 0/);
+  });
+
+  it("reconnects from updateToken even when the socket is down", () => {
+    const start = source.indexOf("updateToken(newToken)");
+    const body = source.slice(start, source.indexOf("_handleMessage(event)"));
+    assert.match(body, /this\.connect\(newToken\)/);
+  });
+
+  it("keeps the option-callback event subscriptions on a stable \[\] effect", () => {
+    assert.match(source, /wsManager\.on\(WSEventType\.PROCESS_CREATED/);
+    assert.match(source, /wsManager\.on\(WSEventType\.NEW_NOTIFICATION/);
+    assert.match(source, /wsManager\.on\(WSEventType\.NEW_CHAT_MESSAGE/);
+    assert.match(source, /return \(\) => unsubs\.forEach/);
+  });
+});
