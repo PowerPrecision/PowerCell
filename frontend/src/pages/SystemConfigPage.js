@@ -36,7 +36,6 @@ import { Button } from "../components/ui/button";
 // Tabs removed — replaced with vertical master-detail layout
 import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
 import MaintenanceSection from "./systemConfig/MaintenanceSection";
-import RGPDTab from "./systemConfig/RGPDTab";
 import IntegrationsConfigSection from "./systemConfig/IntegrationsConfigSection";
 import SystemEmailsSection from "./systemConfig/SystemEmailsSection";
 import { ConfigSection, SECTION_ICONS } from "./systemConfig/configFormHelpers";
@@ -59,7 +58,6 @@ import {
   RefreshCw,
   Wrench,
   FileEdit,
-  FileSignature,
   MessageSquare,
   Megaphone,
 } from "lucide-react";
@@ -304,20 +302,8 @@ const SystemConfigPage = ({ embedded = false }) => {
                       );
                     })}
                     <div className="my-1.5 border-t border-border" />
-                    <button
-                      type="button"
-                      onClick={() => setActiveTab("rgpd")}
-                      className={`w-full flex items-center gap-2.5 rounded-lg px-2.5 py-2 text-left text-sm transition-all ${
-                        activeTab === "rgpd"
-                          ? "bg-primary/10 text-primary font-medium"
-                          : "text-muted-foreground hover:bg-muted hover:text-foreground"
-                      }`}
-                    >
-                      <FileSignature className={`h-4 w-4 shrink-0 ${activeTab === "rgpd" ? "text-primary" : ""}`} />
-                      <span className="truncate">RGPD</span>
-                      {activeTab === "rgpd" && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
-                    </button>
-                    {/* Nota: "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
+                    {/* Nota: "RGPD" foi removido daqui — vive apenas no tab Compliance do Painel de Administração (evita duplicação).
+                        "Integrações" e "Emails Sistema" foram movidos para o tab Comunicações no Painel de Administração */}
                     <button
                       type="button"
                       onClick={() => setActiveTab("maintenance")}
@@ -394,13 +380,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       </SelectItem>
                     );
                   })}
-                  <SelectItem value="rgpd">
-                    <span className="flex items-center gap-2">
-                      <FileSignature className="h-4 w-4" />
-                      RGPD
-                    </span>
-                  </SelectItem>
-                  {/* Nota: Integrações e Emails Sistema movidos para Comunicações */}
+                  {/* Nota: RGPD removido (vive só em Compliance); Integrações e Emails Sistema movidos para Comunicações */}
                   <SelectItem value="maintenance">
                     <span className="flex items-center gap-2">
                       <Wrench className="h-4 w-4" />
@@ -448,10 +428,10 @@ const SystemConfigPage = ({ embedded = false }) => {
                     </button>
                   );
                 })}
-                {["rgpd", "maintenance", "portal", "mandatory_documents", "changelog"].map((key) => {
-                  const Icon = key === "rgpd" ? FileSignature : key === "portal" ? MessageSquare : key === "mandatory_documents" ? FileEdit : key === "changelog" ? Megaphone : Wrench;
+                {["maintenance", "portal", "mandatory_documents", "changelog"].map((key) => {
+                  const Icon = key === "portal" ? MessageSquare : key === "mandatory_documents" ? FileEdit : key === "changelog" ? Megaphone : Wrench;
                   const isActive = activeTab === key;
-                  const label = key === "rgpd" ? "RGPD" : key === "portal" ? "Portal" : key === "mandatory_documents" ? "Docs Obrigatórios" : key === "changelog" ? "Atualizações" : "Manutenção";
+                  const label = key === "portal" ? "Portal" : key === "mandatory_documents" ? "Docs Obrigatórios" : key === "changelog" ? "Atualizações" : "Manutenção";
                   return (
                     <button
                       key={key}
@@ -479,7 +459,7 @@ const SystemConfigPage = ({ embedded = false }) => {
             {activeTab === "system_emails" && <SystemEmailsSection token={token} />}
             {activeTab === "portal" && <PortalSettingsSection token={token} />}
             {activeTab === "mandatory_documents" && <MandatoryDocumentsSection token={token} />}
-            {activeTab !== "document_recipients" && activeTab !== "rgpd" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && activeTab !== "mandatory_documents" && activeTab !== "changelog" && (
+            {activeTab !== "document_recipients" && activeTab !== "maintenance" && activeTab !== "integrations" && activeTab !== "system_emails" && activeTab !== "portal" && activeTab !== "mandatory_documents" && activeTab !== "changelog" && (
               <ConfigSection
                 section={fields[activeTab]}
                 sectionKey={activeTab}
@@ -489,7 +469,6 @@ const SystemConfigPage = ({ embedded = false }) => {
                 onTest={handleTest}
               />
             )}
-            {activeTab === "rgpd" && <RGPDTab token={token} user={user} />}
             {activeTab === "maintenance" && <MaintenanceSection token={token} user={user} />}
             {activeTab === "changelog" && <ChangelogSection token={token} />}
           </main>
