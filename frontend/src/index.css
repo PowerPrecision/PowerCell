@@ -47,10 +47,14 @@ body {
     -moz-osx-font-smoothing: grayscale;
 }
 
-/* Tipografia - Cabeçalhos */
+/* Tipografia - Cabeçalhos
+ * line-height >= 1.3 evita que descendentes de caracteres acentuados
+ * (ç, ã, õ) fiquem visualmente cortados quando o título está dentro de
+ * um contentor com overflow: hidden (ex.: cabeçalho da Administração). */
 h1, h2, h3, h4, h5, h6 {
     font-family: 'Manrope', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
     letter-spacing: -0.02em;
+    line-height: 1.3;
 }
 
 /* Fonte monoespaçada */
@@ -592,8 +596,14 @@ select:focus {
     }
 }
 
-/* Correção para títulos não serem cortados */
-h1, .title-truncate {
+/* Truncar título com "..." apenas onde for explicitamente pedido (opt-in via
+ * .title-truncate). Antes esta regra aplicava-se a TODOS os <h1> do site —
+ * incluindo os cabeçalhos de página (ex.: "Painel de Administração do
+ * Sistema") — o que forçava uma única linha e cortava o texto em ecrãs
+ * estreitos. Os títulos de página devem poder quebrar linha normalmente;
+ * o cabeçalho fixo do DashboardLayout já aplica truncate localmente (classe
+ * Tailwind) quando necessário. */
+.title-truncate {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
