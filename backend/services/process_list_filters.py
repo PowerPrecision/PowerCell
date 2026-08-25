@@ -140,21 +140,44 @@ ASSIGNMENT_ID_FIELDS: tuple[str, ...] = (
 
 _SENTINEL_IDS = frozenset({"", "all", "undefined", "null"})
 
+# Campos legados/canónicos que guardam o(s) ID(s) do utilizador numa array.
+# Nestes, a comparação usa ``$in`` explicitamente (em vez de igualdade
+# simples) para garantir o match robusto mesmo que o valor guardado não
+# seja uma array "pura" do Mongo.
+_ARRAY_ASSIGNMENT_FIELDS: frozenset[str] = frozenset({
+    "assigned_consultor_ids",
+    "assigned_consultant_ids",
+    "assigned_mediador_ids",
+    "assigned_users",
+    "assigned_user_ids",
+})
+
 
 def _assignment_clauses_for_id(user_id: str) -> list[dict]:
-    return [{field: user_id} for field in ASSIGNMENT_ID_FIELDS]
+    clauses: list[dict] = []
+    for field in ASSIGNMENT_ID_FIELDS:
+        if field in _ARRAY_ASSIGNMENT_FIELDS:
+            clauses.append({field: {"$in": [user_id]}})
+        else:
+            clauses.append({field: user_id})
+    return clauses
 
 
 def build_assigned_to_me_condition(user_id: str) -> dict:
     """
-    PACOTE DU / DV / FL — processos directamente atribuídos ao utilizador.
+    PACOTE DU / DV / FL / FQ-3 — processos directamente atribuídos ao utilizador.
 
     GET /processes/me filtra SEMPRE por esta condição, inclusive quando a
     role activa é diretor/admin/ceo (esses roles só vêem tudo em show_all).
 
-    Inclui campos canónicos (``assigned_*``) e aliases legados
-    (``consultant_id``, ``manager_id``, ``assigned_users``, ``mediador_id``)
-    para o filtro base não devolver lista vazia em dados antigos.
+    Operador ``$or`` robusto: cobre tanto o ID directo do utilizador nos
+    campos escalares canónicos e legados (ex.: ``consultant_id``,
+    ``consultor_id``, ``manager_id``, ``assigned_to``) como a presença do
+    ID na(s) array(s) de atribuição (``assigned_user_ids``,
+    ``assigned_consultor_ids``, ``assigned_mediador_ids``, ``assigned_users``,
+    via ``$in``). Sem isto, Consultores com processos atribuídos apenas via
+    ``assigned_user_ids`` (ou apenas via ``consultant_id``/``manager_id``
+    legados) ficavam sem resultados em "Os Meus Processos".
     """
     return {"$or": _assignment_clauses_for_id(user_id)}
 
