@@ -31,11 +31,16 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
         // Backend returns { messages: [...], total: N, process_id: "..." }
         const msgs = Array.isArray(data) ? data : (data.messages || []);
         setMessages(msgs);
+      } else if (response.status === 404) {
+        // Portal inativo / sem mensagens ainda — estado neutro, sem erro na UI.
+        setMessages([]);
       } else {
         console.error(`[PortalMessages] API returned ${response.status}`);
       }
-    } catch (error) {
-      console.error("Erro ao carregar mensagens do portal:", error);
+    } catch {
+      // Falha de rede ao carregar mensagens do portal — falha silenciosa,
+      // mantém a lista atual em vez de quebrar a UI.
+      setMessages((prev) => prev || []);
     } finally {
       setLoading(false);
     }

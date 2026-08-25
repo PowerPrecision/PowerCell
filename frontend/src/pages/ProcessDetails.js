@@ -377,9 +377,13 @@ const ProcessDetails = () => {
       if (response.ok) {
         const data = await response.json();
         setRgpdStatus(data);
+      } else if (response.status === 404) {
+        // Processo sem pedido RGPD ainda — estado neutro, sem erro na UI.
+        setRgpdStatus(null);
       }
     } catch {
       // RGPD status check failed silently — not critical
+      setRgpdStatus(null);
     } finally {
       setRgpdLoading(false);
     }
