@@ -27,7 +27,7 @@
  * <SystemConfigPage />
  * // Acesso via rota protegida: /admin/config?tab=storage
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
@@ -38,7 +38,7 @@ import DocumentRecipientsManager from "../components/DocumentRecipientsManager";
 import MaintenanceSection from "./systemConfig/MaintenanceSection";
 import IntegrationsConfigSection from "./systemConfig/IntegrationsConfigSection";
 import SystemEmailsSection from "./systemConfig/SystemEmailsSection";
-import { ConfigSection, SECTION_ICONS } from "./systemConfig/configFormHelpers";
+import { ConfigSection, SECTION_ICONS, getSectionNavLabel } from "./systemConfig/configFormHelpers";
 import PortalSettingsSection from "./systemConfig/PortalSettingsSection";
 import MandatoryDocumentsSection from "./systemConfig/MandatoryDocumentsSection";
 import ChangelogSection from "./systemConfig/ChangelogSection";
@@ -53,7 +53,6 @@ import { hasAnyRole } from "../utils/roleUtils";
 import { toast } from "sonner";
 import {
   Settings,
-  Building2,
   XCircle,
   RefreshCw,
   Wrench,
@@ -65,34 +64,17 @@ import {
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 const SystemConfigPage = ({ embedded = false }) => {
-  const { token, user } = useAuth();
+  const { token, user, effectiveCompanyId } = useAuth();
   const [searchParams] = useSearchParams();
   const [config, setConfig] = useState(null);
   const [fields, setFields] = useState({});
   const [loading, setLoading] = useState(true);
   const [activeTab, setActiveTab] = useState(() => searchParams.get("tab") || "storage");
 
-  // MULTI-EMPRESA: seletor de empresa no topo
-  const [selectedCompanyId, setSelectedCompanyId] = useState("default");
-  const [availableCompanies, setAvailableCompanies] = useState([]);
-
-  // Carregar lista de empresas disponíveis
-  useEffect(() => {
-    const fetchCompanies = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/system-config/companies`, {
-          headers: { Authorization: `Bearer ${token}` },
-        });
-        if (res.ok) {
-          const data = await res.json();
-          setAvailableCompanies(data.companies || []);
-        }
-      } catch (err) {
-        console.error("Erro ao carregar empresas:", err);
-      }
-    };
-    fetchCompanies();
-  }, [token]);
+  // MULTI-EMPRESA: a empresa activa vem do selector global (ContextSwitcher
+  // no header principal), não deve existir um segundo selector aqui — só
+  // reagimos à empresa activa escolhida globalmente.
+  const selectedCompanyId = effectiveCompanyId || "default";
 
   const fetchConfig = useCallback(async () => {
     try {
@@ -126,12 +108,16 @@ const SystemConfigPage = ({ embedded = false }) => {
     fetchConfig();
   }, [fetchConfig]);
 
-  // Recarregar config quando a empresa selecionada mudar
+  // Recarregar config quando a empresa activa (global) mudar — ignora a
+  // primeira execução (montagem) para não sobrepor o tab pedido via ?tab=
+  const previousCompanyIdRef = useRef(selectedCompanyId);
   useEffect(() => {
-    if (selectedCompanyId) {
-      setLoading(true);
-      fetchConfig();
-    }
+    if (previousCompanyIdRef.current === selectedCompanyId) return;
+    previousCompanyIdRef.current = selectedCompanyId;
+    setLoading(true);
+    setActiveTab("settings");
+    fetchConfig();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [selectedCompanyId]);
 
   const handleSave = async (section, data) => {
@@ -240,30 +226,8 @@ const SystemConfigPage = ({ embedded = false }) => {
             </p>
           </div>
           <div className="flex items-center gap-3">
-            {/* MULTI-EMPRESA: Seletor de Empresa */}
-            {availableCompanies.length > 0 && (
-              <div className="flex items-center gap-2">
-                <Building2 className="h-4 w-4 text-muted-foreground shrink-0" />
-                <Select
-                  value={selectedCompanyId}
-                  onValueChange={(v) => {
-                    setSelectedCompanyId(v);
-                    setActiveTab("settings"); // Reset to settings when company changes
-                  }}
-                >
-                  <SelectTrigger className="w-56">
-                    <SelectValue placeholder="Selecionar empresa..." />
-                  </SelectTrigger>
-                  <SelectContent>
-                    {availableCompanies.map((c) => (
-                      <SelectItem key={c.company_id} value={c.company_id}>
-                        {c.company_name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            )}
+            {/* O seletor de empresa vive apenas no header global principal
+                (ContextSwitcher) — esta página apenas reage à empresa activa. */}
             <Button variant="outline" onClick={fetchConfig}>
               <RefreshCw className="h-4 w-4 mr-2" />
               Recarregar
@@ -296,7 +260,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                           }`}
                         >
                           <Icon className={`h-4 w-4 shrink-0 ${isActive ? "text-primary" : ""}`} />
-                          <span className="truncate">{fields[key]?.title?.split(" ")[0] || key}</span>
+                          <span className="truncate">{getSectionNavLabel(key, fields)}</span>
                           {isActive && <div className="ml-auto h-1.5 w-1.5 rounded-full bg-primary" />}
                         </button>
                       );
@@ -375,7 +339,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       <SelectItem key={key} value={key}>
                         <span className="flex items-center gap-2">
                           <Icon className="h-4 w-4" />
-                          {fields[key]?.title?.split(" ")[0] || key}
+                          {getSectionNavLabel(key, fields)}
                         </span>
                       </SelectItem>
                     );
@@ -424,7 +388,7 @@ const SystemConfigPage = ({ embedded = false }) => {
                       }`}
                     >
                       <Icon className="h-3.5 w-3.5" />
-                      {fields[key]?.title?.split(" ")[0] || key}
+                      {getSectionNavLabel(key, fields)}
                     </button>
                   );
                 })}

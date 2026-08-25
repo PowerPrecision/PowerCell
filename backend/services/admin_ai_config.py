@@ -62,11 +62,29 @@ async def run_get_ai_configuration(user: dict) -> dict:
 
 
 async def run_update_ai_configuration(config: dict, user: dict) -> dict:
-    """Actualiza a configuração de IA."""
-    from services.system_config import update_config_section
+    """Actualiza a configuração de IA (mapeamento tarefa → modelo).
 
+    NOTA: `run_get_ai_configuration` lê este mapeamento via `get_ai_config()`
+    (services/ai_page_analyzer.py), que procura o documento
+    `system_config` com `{"key": "ai_config"}`. Este endpoint tem de
+    persistir exactamente nesse mesmo local — usar `update_config_section
+    ("ai", ...)` (secção `SystemConfig.ai` com campos `provider`/`api_key`/
+    `model`) escrevia noutro sítio e fazia o botão "Guardar" parecer que
+    não persistia nada (o GET seguinte devolvia sempre os valores antigos).
+    """
     try:
-        await update_config_section("ai", config)
+        await db.system_config.update_one(
+            {"key": "ai_config"},
+            {
+                "$set": {
+                    "key": "ai_config",
+                    "value": config,
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                    "updated_by": user.get("id"),
+                }
+            },
+            upsert=True,
+        )
         return {
             "success": True,
             "message": "Configuração de IA actualizada com sucesso",
