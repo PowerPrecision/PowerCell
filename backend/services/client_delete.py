@@ -183,6 +183,18 @@ async def run_delete_client(
             }}
         )
 
+        # Pacote FQ-4 — marcar pedidos RGPD associados como eliminados
+        # (soft delete), em espelho com documentos/tarefas, para que
+        # desapareçam de listagens ativas enquanto o cliente está no lixo.
+        await db.rgpd_requests.update_many(
+            {"process_id": client_id},
+            {"$set": {
+                "is_deleted": True,
+                "deleted_at": now,
+                "deleted_by": user["id"]
+            }}
+        )
+
         logger.info(
             f"Processo/Cliente {client_id} ({process.get('client_name')}) movido para lixo "
             f"por {user.get('email')} | 2º titular desligado de {second_titular_unlinks} "
@@ -263,6 +275,16 @@ async def run_delete_client(
                 {"process_id": proc["id"]},
                 {"$set": {
                     "deleted": True,
+                    "is_deleted": True,
+                    "deleted_at": now,
+                    "deleted_by": user["id"],
+                }},
+            )
+            # Pacote FQ-4 — cascata de soft-delete inclui também os
+            # pedidos RGPD associados a este processo.
+            await db.rgpd_requests.update_many(
+                {"process_id": proc["id"]},
+                {"$set": {
                     "is_deleted": True,
                     "deleted_at": now,
                     "deleted_by": user["id"],

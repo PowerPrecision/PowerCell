@@ -30,6 +30,8 @@ from services.rgpd_helpers import _add_process_activity
 from services.rgpd_templates import (
     RGPD_TEMPLATE_VERSIONS_COLLECTION,
     RGPD_DEFAULT_TEMPLATE,
+    RGPD_ISSUER_NAME,
+    RGPD_ISSUER_NIF,
     _get_active_rgpd_template,
 )
 from services.rgpd_minutas import (
@@ -193,6 +195,7 @@ async def run_get_rgpd_form_data(token: str):
         rendered = rendered.replace("{{NOME_CLIENTE}}", str(request.get("client_name") or ""))
         rendered = rendered.replace("{{NOME}}", str(request.get("client_name") or ""))
         rendered = rendered.replace("{{NOME_EMPRESA}}", str(empresa_nome or ""))
+        rendered = rendered.replace("{{NIF_EMPRESA}}", str(empresa_nif or ""))
         rendered = rendered.replace("{{CONTRIBUINTE}}", str(response_data.get("nif") or ""))
         rendered = rendered.replace("{{MORADA}}", str(response_data.get("morada") or ""))
         rendered = rendered.replace("{{LOCALIDADE}}", str(response_data.get("localidade") or ""))
@@ -205,8 +208,13 @@ async def run_get_rgpd_form_data(token: str):
         rendered = rendered.replace("{{CONTACTO_EMPRESA}}", str(empresa_contacto or ""))
         return rendered
 
-    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
-    empresa_nome = "Precision Crédito"
+    # Pacote FQ-4 — emissor/responsável do RGPD é SEMPRE a Precision
+    # Crédito, Lda. (NIF 515657514): a Power não emite pedidos de RGPD,
+    # pelo que {{NOME_EMPRESA}} / {{NIF_EMPRESA}} não podem depender de
+    # system_config (que pode estar configurado para a Power). Morada e
+    # Contacto continuam a vir de system_config (dados de correio).
+    empresa_nome = RGPD_ISSUER_NAME
+    empresa_nif = RGPD_ISSUER_NIF
     empresa_morada = ""
     empresa_contacto = ""
     try:
@@ -214,18 +222,12 @@ async def run_get_rgpd_form_data(token: str):
             {"_id": "main"},
             {
                 "_id": 0,
-                "settings.empresa_nome": 1,
                 "settings.company_address": 1,
                 "settings.company_phone": 1,
-                "settings.company_name": 1,
             },
         )
         if config:
             settings = config.get("settings", {})
-            if settings.get("empresa_nome"):
-                empresa_nome = settings["empresa_nome"]
-            if settings.get("company_name"):
-                empresa_nome = settings["company_name"]
             if settings.get("company_address"):
                 empresa_morada = settings["company_address"]
             if settings.get("company_phone"):

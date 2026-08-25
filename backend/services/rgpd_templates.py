@@ -18,13 +18,20 @@ logger = logging.getLogger(__name__)
 
 RGPD_TEMPLATE_VERSIONS_COLLECTION = "rgpd_template_versions"
 
+# Pacote FQ-4 — a Precision Crédito, Lda. é a única entidade que emite
+# pedidos de RGPD (a Power Real Estate, Lda. não emite pedidos de RGPD).
+# Este emissor/responsável pelo tratamento é FIXO e não deve depender de
+# configuração dinâmica (system_config / empresa activa do utilizador).
+RGPD_ISSUER_NAME = "Precision Crédito, Lda."
+RGPD_ISSUER_NIF = "515657514"
+
 RGPD_DEFAULT_TEMPLATE = """AUTORIZAÇÃO PARA TRATAMENTO DE DADOS PESSOAIS – RGPD
 
 Nos termos do Regulamento (UE) 2016/679 do Parlamento Europeu e do Conselho (Regulamento Geral sobre a Proteção de Dados – "RGPD"), o titular dos dados abaixo identificado autoriza expressamente o tratamento dos seus dados pessoais pela entidade responsável pelo tratamento, nos seguintes termos:
 
 1. RESPONSÁVEL PELO TRATAMENTO
-Empresa: Power Real Estate, Lda.
-NIF: 516 123 456
+Empresa: Precision Crédito, Lda.
+NIF: 515657514
 Morada: {{MORADA_EMPRESA}}
 Contacto: {{CONTACTO_EMPRESA}}
 
