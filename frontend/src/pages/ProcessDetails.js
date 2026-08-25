@@ -157,7 +157,7 @@ import { useProcessPortalMessages } from "../hooks/useProcessPortalMessages";
 import { useQueryClient } from "@tanstack/react-query";
 import { invalidateProcessDetailsQueries } from "../lib/queryClient";
 import { useProcessFullData } from "../hooks/queries/useProcessQuery";
-import { deriveProcessDetailsViewModel } from "./processDetails/processDetailsHydration";
+import { deriveProcessDetailsViewModel, resolveAssignedNames } from "./processDetails/processDetailsHydration";
 // Sub-componentes das abas — cada um é responsável apenas pelo seu domínio
 // (SRP); ProcessDetails.js fica como orquestrador do layout + estado.
 import PersonalInfoTab from "../components/processDetails/tabs/PersonalInfoTab";
@@ -1385,6 +1385,17 @@ const ProcessDetails = () => {
     [workflowStatuses, status]
   );
 
+  // PACOTE FQ-2 — lookup id → utilizador para resolver nomes de atribuição
+  // quando só existem IDs (assigned_consultor_ids / assigned_mediador_ids)
+  // sem os arrays de nomes correspondentes ainda carregados.
+  const appUsersById = useMemo(() => {
+    const map = new Map();
+    appUsers.forEach((u) => {
+      if (u?.id) map.set(u.id, u);
+    });
+    return map;
+  }, [appUsers]);
+
   // Normalizar role para comparação case-insensitive
   const userRole = user?.role?.toLowerCase() || "";
   const roleLabels = ROLE_LABELS; // Rótulos legíveis para exibição no banner retroativo
@@ -2424,8 +2435,16 @@ const ProcessDetails = () => {
 
             <AssignmentContextCard
               process={process}
-              consultorNames={safeStringArray(process.consultor_names)}
-              mediadorNames={safeStringArray(process.mediador_names)}
+              consultorNames={resolveAssignedNames(
+                process.consultor_names,
+                process.assigned_consultor_ids?.length ? process.assigned_consultor_ids : process.assigned_consultor_id,
+                appUsersById,
+              )}
+              mediadorNames={resolveAssignedNames(
+                process.mediador_names,
+                process.assigned_mediador_ids?.length ? process.assigned_mediador_ids : process.assigned_mediador_id,
+                appUsersById,
+              )}
               deadlines={deadlines}
               onManageAssignment={openAssignDialog}
               canManageAssignment={userRole !== "cliente"}

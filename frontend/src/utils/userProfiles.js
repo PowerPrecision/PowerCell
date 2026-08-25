@@ -86,6 +86,37 @@ export function normalizeCompanyRecord(raw, fallbacks = {}) {
 }
 
 /**
+ * Lista de empresas distintas e válidas para o selector de Empresa no
+ * Header (ContextSwitcher).
+ *
+ * PACOTE FQ-2 — bugfix: o selector iterava directamente sobre os UCRs
+ * crus (um por role), o que podia mostrar a mesma empresa repetida quando
+ * o utilizador tem vários cargos na mesma empresa, e nunca garantia que
+ * cada entrada tinha um `company_id` real (entradas sem id colidiam todas
+ * sob a mesma key, e o nome em falta renderizava como texto vazio,
+ * aparentando concatenação com o item vizinho). Esta função é a fonte
+ * única de verdade: filtra para `company_id` válido, remove duplicados
+ * por `company_id` e garante sempre um `company_name` não vazio.
+ *
+ * @returns {{ role: string, company_id: string, company_name: string, is_default: boolean }[]}
+ */
+export function getDistinctCompanies(user) {
+  const records = getUserCompanyRecords(user)
+    .map((c) => normalizeCompanyRecord(c))
+    .filter((c) => c && c.company_id);
+
+  const byCompanyId = new Map();
+  for (const record of records) {
+    if (byCompanyId.has(record.company_id)) continue;
+    byCompanyId.set(record.company_id, {
+      ...record,
+      company_name: record.company_name || record.company_id,
+    });
+  }
+  return [...byCompanyId.values()];
+}
+
+/**
  * Perfis seleccionáveis (header + Área Pessoal), alinhados com o ContextSwitcher.
  *
  * 1. UCRs reais (`companies` / `company_roles`)

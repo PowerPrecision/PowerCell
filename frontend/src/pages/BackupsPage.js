@@ -36,6 +36,7 @@ import {
   AlertTriangle,
   Play,
   Download,
+  FileArchive,
   FileText,
   FolderOpen,
   Info,

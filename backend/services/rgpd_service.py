@@ -12,6 +12,7 @@ import uuid
 import io
 import base64
 import logging
+import smtplib
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from database import db
@@ -397,7 +398,8 @@ async def send_rgpd_email(
     request_id: str,
     user_email: str,
     custom_message: str = None,
-    base_url: str = None
+    base_url: str = None,
+    raise_on_error: bool = False
 ) -> bool:
     """
     Envia email de RGPD para o cliente.
@@ -410,6 +412,13 @@ async def send_rgpd_email(
         user_email: Email do utilizador que solicitou
         custom_message: Mensagem personalizada a incluir no email
         base_url: URL base para o link (default: variável de ambiente ou www.powercell.pt)
+        raise_on_error: Pacote FQ-4 — se True, propaga smtplib.SMTPAuthenticationError
+            (ou smtplib.SMTPException genérico) em vez de engolir o erro e devolver
+            False. Usado pelo endpoint de reenvio (`/admin/{id}/resend`) para poder
+            distinguir uma falha de credenciais SMTP (400) de um erro genérico (500).
+            O comportamento por omissão (False) mantém-se inalterado para não afetar
+            o fluxo de criação de pedidos RGPD (`run_request_rgpd`), que tolera envio
+            de email falhado sem bloquear a criação do pedido.
     
     Returns:
         True se enviado com sucesso
@@ -500,11 +509,26 @@ Equipa Precision Crédito
             system_purpose="RGPD"
         )
         
-        logger.info(f"RGPD email sent to {client_email}")
-        return result.get("success", False)
+        if not result.get("success", False):
+            error_msg = result.get("error") or "Erro ao enviar email RGPD"
+            logger.error(f"Failed to send RGPD email: {error_msg}")
+            if raise_on_error:
+                if "autenticação" in error_msg.lower() or "authentication" in error_msg.lower():
+                    raise smtplib.SMTPAuthenticationError(535, error_msg)
+                raise smtplib.SMTPException(error_msg)
+            return False
         
+        logger.info(f"RGPD email sent to {client_email}")
+        return True
+        
+    except smtplib.SMTPException:
+        # Pacote FQ-4 — propagar tal como está para o chamador poder
+        # devolver um erro 400 elegante em vez de um 500 genérico.
+        raise
     except Exception as e:
         logger.error(f"Failed to send RGPD email: {e}")
+        if raise_on_error:
+            raise smtplib.SMTPException(str(e))
         return False
 
 
@@ -720,28 +744,23 @@ async def _get_rendered_rgpd_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # PACOTE DG — Obter dados da empresa a partir de system_config
-    # (paridade com `_get_rendered_minuta_text`). Usado para substituir
-    # {{NOME_EMPRESA}}, {{MORADA_EMPRESA}} e {{CONTACTO_EMPRESA}} que
-    # estão presentes no RGPD_DEFAULT_TEMPLATE (secção 1. RESPONSÁVEL).
-    # Anteriormente estes placeholders NÃO eram substituídos no RGPD
-    # (só na minuta), ficando literais no texto.
-    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
-    empresa_nome = "Precision Crédito"
+    # Pacote FQ-4 — o emissor/responsável pelo tratamento do RGPD é SEMPRE
+    # a Precision Crédito, Lda. (NIF 515657514): a Power não emite pedidos
+    # de RGPD, pelo que {{NOME_EMPRESA}} / {{NIF_EMPRESA}} NÃO podem
+    # depender de system_config (que pode estar configurado para a Power).
+    # Morada/Contacto continuam a vir de system_config (dados de correio).
+    from services.rgpd_templates import RGPD_ISSUER_NAME, RGPD_ISSUER_NIF
+    empresa_nome = RGPD_ISSUER_NAME
+    empresa_nif = RGPD_ISSUER_NIF
     empresa_morada = ""
     empresa_contacto = ""
     try:
         config = await db.system_config.find_one(
             {"_id": "main"},
-            {"_id": 0, "settings.empresa_nome": 1, "settings.company_name": 1,
-             "settings.company_address": 1, "settings.company_phone": 1}
+            {"_id": 0, "settings.company_address": 1, "settings.company_phone": 1}
         )
         if config:
             settings = config.get("settings", {})
-            if settings.get("empresa_nome"):
-                empresa_nome = settings["empresa_nome"]
-            if settings.get("company_name"):
-                empresa_nome = settings["company_name"]
             if settings.get("company_address"):
                 empresa_morada = settings["company_address"]
             if settings.get("company_phone"):
@@ -754,6 +773,7 @@ async def _get_rendered_rgpd_text(
     # PACOTE DG — NOME_EMPRESA / MORADA_EMPRESA / CONTACTO_EMPRESA agora
     # substituídos (antes ficavam literais no template RGPD).
     rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
+    rendered = rendered.replace("{{NIF_EMPRESA}}", empresa_nif)
     rendered = rendered.replace("{{MORADA_EMPRESA}}", empresa_morada)
     rendered = rendered.replace("{{CONTACTO_EMPRESA}}", empresa_contacto)
     rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
@@ -792,21 +812,22 @@ async def _get_rendered_minuta_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # PACOTE DI — fallback client-facing actualizado para "Precision Crédito".
-    empresa_nome = "Precision Crédito"
+    # Pacote FQ-4 — emissor/responsável fixo (ver `_get_rendered_rgpd_text`):
+    # a Precision Crédito, Lda. é a única entidade que emite pedidos de RGPD
+    # (a Power não emite), pelo que {{NOME_EMPRESA}} / {{NIF_EMPRESA}} nunca
+    # dependem de system_config. Morada/Contacto continuam configuráveis.
+    from services.rgpd_templates import RGPD_ISSUER_NAME, RGPD_ISSUER_NIF
+    empresa_nome = RGPD_ISSUER_NAME
+    empresa_nif = RGPD_ISSUER_NIF
     empresa_morada = ""
     empresa_contacto = ""
     try:
         config = await db.system_config.find_one(
             {"_id": "main"},
-            {"_id": 0, "settings.empresa_nome": 1, "settings.company_name": 1, "settings.company_address": 1, "settings.company_phone": 1}
+            {"_id": 0, "settings.company_address": 1, "settings.company_phone": 1}
         )
         if config:
             settings = config.get("settings", {})
-            if settings.get("empresa_nome"):
-                empresa_nome = settings["empresa_nome"]
-            if settings.get("company_name"):
-                empresa_nome = settings["company_name"]
             if settings.get("company_address"):
                 empresa_morada = settings["company_address"]
             if settings.get("company_phone"):
@@ -817,6 +838,7 @@ async def _get_rendered_minuta_text(
     rendered = rendered.replace("{{NOME_CLIENTE}}", client_name)
     rendered = rendered.replace("{{NOME}}", client_name)
     rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
+    rendered = rendered.replace("{{NIF_EMPRESA}}", empresa_nif)
     rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
     rendered = rendered.replace("{{MORADA}}", consent_data.get("morada", personal_data.get("morada_fiscal", "")))
     rendered = rendered.replace("{{LOCALIDADE}}", localidade)

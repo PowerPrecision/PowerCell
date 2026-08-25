@@ -6,6 +6,7 @@ from existing `services/rgpd_service.py` (do not duplicate).
 from __future__ import annotations
 
 import logging
+import smtplib
 import uuid
 from datetime import datetime, timezone, timedelta
 
@@ -138,14 +139,27 @@ async def run_resend_rgpd_email(request_id: str, request, user: dict):
 
     frontend_base_url = _frontend_base_url_from_request(request, log_prefix="[RGPD-RESEND]")
 
-    email_sent = await send_rgpd_email(
-        client_email=rgpd["client_email"],
-        client_name=rgpd["client_name"],
-        token=new_token,
-        request_id=request_id,
-        user_email=user["email"],
-        base_url=frontend_base_url,
-    )
+    # Pacote FQ-4 — envolver o envio de email num try/except dedicado para
+    # devolver um erro elegante (400) quando as credenciais SMTP do sistema
+    # estão inválidas, em vez de rebentar com um Erro 500 genérico.
+    try:
+        email_sent = await send_rgpd_email(
+            client_email=rgpd["client_email"],
+            client_name=rgpd["client_name"],
+            token=new_token,
+            request_id=request_id,
+            user_email=user["email"],
+            base_url=frontend_base_url,
+            raise_on_error=True,
+        )
+    except (smtplib.SMTPAuthenticationError, smtplib.SMTPException) as smtp_err:
+        logger.error(
+            f"[RGPD-RESEND] Falha SMTP ao reenviar email para {rgpd.get('client_email')}: {smtp_err}"
+        )
+        raise HTTPException(
+            status_code=400,
+            detail="Falha de autenticação SMTP no email do sistema. Verifique as credenciais.",
+        )
 
     if not email_sent:
         raise HTTPException(status_code=500, detail="Erro ao enviar email")

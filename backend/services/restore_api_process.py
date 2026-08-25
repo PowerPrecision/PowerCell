@@ -72,6 +72,18 @@ async def run_restore_process(process_id: str, user: dict):
         }}
     )
 
+    # Pacote FQ-4 — restaurar também os pedidos RGPD associados ao
+    # processo (a cascata de soft-delete marca `is_deleted=True` em
+    # `rgpd_requests` juntamente com documentos/tarefas; o restore tem de
+    # ser simétrico para os pedidos RGPD voltarem a aparecer no processo).
+    await db.rgpd_requests.update_many(
+        {"process_id": process_id, "is_deleted": True},
+        {"$set": {
+            "is_deleted": False,
+            "deleted_at": None,
+        }}
+    )
+
     # Log de atividade (simétrico ao process_deleted do delete endpoint)
     await db.process_activities.insert_one({
         "id": str(uuid.uuid4()),
