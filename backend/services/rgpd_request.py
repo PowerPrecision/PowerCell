@@ -84,6 +84,8 @@ async def run_request_rgpd(data: RGPDCreate, request, user: dict):
             user_email=user["email"],
             custom_message=data.custom_message,
             base_url=frontend_base_url,
+            process_id=data.process_id,
+            user_id=user.get("id"),
         )
 
         if not email_sent:
@@ -151,6 +153,8 @@ async def run_resend_rgpd_email(request_id: str, request, user: dict):
             user_email=user["email"],
             base_url=frontend_base_url,
             raise_on_error=True,
+            process_id=rgpd.get("process_id"),
+            user_id=user.get("id"),
         )
     except (smtplib.SMTPAuthenticationError, smtplib.SMTPException) as smtp_err:
         logger.error(
