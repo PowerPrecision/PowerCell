@@ -39,6 +39,10 @@ async def run_create_company(data: CompanyCreate):
         "logo_url": data.logo_url,
         "email_sync_enabled": data.email_sync_enabled,
         "is_active": data.is_active,
+        "smtp_email": data.smtp_email,
+        "smtp_password": data.smtp_password,
+        "smtp_host": data.smtp_host,
+        "smtp_port": data.smtp_port,
         "created_at": now,
         "updated_at": now,
     }

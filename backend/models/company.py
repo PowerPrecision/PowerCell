@@ -40,6 +40,10 @@ class CompanyCreate(BaseModel):
     logo_url: Optional[str] = Field(None, description="URL do logótipo (S3)")
     email_sync_enabled: bool = Field(False, description="Ativar sincronização de e-mail")
     is_active: bool = Field(True, description="Estado da empresa (activa / inactiva)")
+    smtp_email: Optional[str] = Field(None, max_length=200, description="Email SMTP da empresa (envio em nome da empresa)")
+    smtp_password: Optional[str] = Field(None, max_length=500, description="Password SMTP da empresa")
+    smtp_host: Optional[str] = Field(None, max_length=200, description="Servidor SMTP da empresa")
+    smtp_port: Optional[int] = Field(None, description="Porto SMTP da empresa")
 
     @field_validator("nif")
     @classmethod
@@ -58,6 +62,10 @@ class CompanyUpdate(BaseModel):
     logo_url: Optional[str] = None
     email_sync_enabled: Optional[bool] = None
     is_active: Optional[bool] = None
+    smtp_email: Optional[str] = Field(None, max_length=200, description="Email SMTP da empresa (envio em nome da empresa)")
+    smtp_password: Optional[str] = Field(None, max_length=500, description="Password SMTP da empresa")
+    smtp_host: Optional[str] = Field(None, max_length=200, description="Servidor SMTP da empresa")
+    smtp_port: Optional[int] = Field(None, description="Porto SMTP da empresa")
 
     @field_validator("nif")
     @classmethod
