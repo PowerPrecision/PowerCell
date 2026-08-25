@@ -249,6 +249,47 @@ async def run_create_client(
     logger.info(f"Cliente criado: {client.id} - {client.nome} por {user.get('email')}")
 
     # ============================================================
+    # PACOTE FQ-3 — Garantir mapeamento de pasta S3 logo na criação
+    # ============================================================
+    # Antes, a pasta S3 do cliente só era criada de forma "lazy" no
+    # primeiro upload via Portal (ver `services/portal_upload_ops.py`).
+    # Isto deixava o cliente sem `s3_folder` até esse momento, o que
+    # atrasava/quebrava fluxos que dependem do mapeamento logo após a
+    # criação (Explorer S3 admin, checklist de documentos, etc.).
+    # Chamamos `ensure_client_folder_mapping` já aqui, imediatamente a
+    # seguir à inserção do cliente na BD, e persistimos o resultado via
+    # `$set` estrito apenas na chave `s3_folder`.
+    try:
+        s3_mapping = await asyncio.to_thread(
+            s3_service.ensure_client_folder_mapping,
+            client.id,
+            sanitized_nome,
+            None,
+            None,
+        )
+        if s3_mapping.get("success") and s3_mapping.get("s3_folder"):
+            await db.clients.update_one(
+                {"id": client.id},
+                {"$set": {"s3_folder": s3_mapping["s3_folder"]}}
+            )
+            client_dict["s3_folder"] = s3_mapping["s3_folder"]
+            logger.info(
+                f"[CLIENT-CREATE][S3-MAPPING] Mapeamento S3 "
+                f"{'criado' if s3_mapping.get('created') else 'recuperado'} "
+                f"para cliente {client.id}: {s3_mapping['s3_folder']}"
+            )
+        else:
+            logger.warning(
+                f"[CLIENT-CREATE][S3-MAPPING] Não foi possível criar/recuperar "
+                f"mapeamento S3 para cliente {client.id} ({client.nome})"
+            )
+    except Exception as e:
+        logger.warning(
+            f"[CLIENT-CREATE][S3-MAPPING] Erro ao criar mapeamento S3 "
+            f"para cliente {client.id}: {e}"
+        )
+
+    # ============================================================
     # PACOTE CY — Enviar email de boas-vindas do Portal em background
     # ============================================================
     # Antes o email NÃO era enviado na criação do cliente (só gerava o
