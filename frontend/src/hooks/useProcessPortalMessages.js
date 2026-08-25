@@ -18,14 +18,28 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
   const [sending, setSending] = useState(false);
   const [unreadCount, setUnreadCount] = useState(0);
   const unreadAvailableRef = useRef(true);
+  // Cleanup (Congelamento ao Voltar): guarda para evitar setState em fetches
+  // assíncronos que resolvem depois do desmonte do componente (ex: o
+  // utilizador saiu do ecrã antes da resposta chegar). Sem isto, o React
+  // acumula avisos de "setState em componente desmontado" e, em navegações
+  // rápidas de entrada/saída de ProcessDetails, pode deixar o estado de uma
+  // instância antiga a "vazar" para renders seguintes.
+  const isMountedRef = useRef(true);
+  useEffect(() => {
+    isMountedRef.current = true;
+    return () => {
+      isMountedRef.current = false;
+    };
+  }, []);
 
   const fetchMessages = useCallback(async () => {
     if (!processId) return;
-    setLoading(true);
+    if (isMountedRef.current) setLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/processes/${processId}/portal-messages`, {
         headers: { Authorization: `Bearer ${token}` },
       });
+      if (!isMountedRef.current) return;
       if (response.ok) {
         const data = await response.json();
         // Backend returns { messages: [...], total: N, process_id: "..." }
@@ -40,9 +54,9 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
     } catch {
       // Falha de rede ao carregar mensagens do portal — falha silenciosa,
       // mantém a lista atual em vez de quebrar a UI.
-      setMessages((prev) => prev || []);
+      if (isMountedRef.current) setMessages((prev) => prev || []);
     } finally {
-      setLoading(false);
+      if (isMountedRef.current) setLoading(false);
     }
   }, [processId, token]);
 
@@ -53,6 +67,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
         `${API_URL}/api/processes/${processId}/portal-messages/unread`,
         { headers: { Authorization: `Bearer ${token}` } },
       );
+      if (!isMountedRef.current) return;
       if (response.ok) {
         const data = await response.json();
         setUnreadCount(data.unread_count || 0);
@@ -84,7 +99,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
         body: JSON.stringify({ content: newMessage.trim() }),
       });
       if (response.ok) {
-        setNewMessage("");
+        if (isMountedRef.current) setNewMessage("");
         fetchMessages();
         toast.success("Mensagem enviada");
       } else {
@@ -93,7 +108,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
     } catch {
       toast.error("Erro ao enviar mensagem");
     } finally {
-      setSending(false);
+      if (isMountedRef.current) setSending(false);
     }
   }, [processId, token, newMessage, fetchMessages]);
 
