@@ -55,11 +55,12 @@ class TestRoleVisibility:
         from services.process_list_filters import build_assigned_to_me_condition
         cond = build_assigned_to_me_condition("u9")
         assert {"assigned_to": "u9"} in cond["$or"]
-        assert {"assigned_consultor_ids": "u9"} in cond["$or"]
+        # Pacote FQ-3 — campos-array usam $in explícito para match robusto.
+        assert {"assigned_consultor_ids": {"$in": ["u9"]}} in cond["$or"]
         assert {"assigned_mediador_id": "u9"} in cond["$or"]
         assert {"consultant_id": "u9"} in cond["$or"]
         assert {"manager_id": "u9"} in cond["$or"]
-        assert {"assigned_users": "u9"} in cond["$or"]
+        assert {"assigned_users": {"$in": ["u9"]}} in cond["$or"]
 
     def test_show_all_ignores_role(self):
         user = {"id": "u1"}
@@ -238,14 +239,15 @@ class TestAssignedUserFilter:
         from services.process_list_filters import build_assigned_user_filter
         cond = build_assigned_user_filter("u-42")
         assert "$or" in cond
-        assert {"assigned_consultor_ids": "u-42"} in cond["$or"]
+        # Pacote FQ-3 — campos-array usam $in explícito para match robusto.
+        assert {"assigned_consultor_ids": {"$in": ["u-42"]}} in cond["$or"]
         assert {"assigned_consultor_id": "u-42"} in cond["$or"]
-        assert {"assigned_mediador_ids": "u-42"} in cond["$or"]
+        assert {"assigned_mediador_ids": {"$in": ["u-42"]}} in cond["$or"]
         assert {"assigned_mediador_id": "u-42"} in cond["$or"]
         assert {"assigned_indexacao_id": "u-42"} in cond["$or"]
         assert {"assigned_parceiro_id": "u-42"} in cond["$or"]
         assert {"assigned_to": "u-42"} in cond["$or"]
-        assert {"assigned_users": "u-42"} in cond["$or"]
+        assert {"assigned_users": {"$in": ["u-42"]}} in cond["$or"]
         assert {"consultant_id": "u-42"} in cond["$or"]
         assert {"manager_id": "u-42"} in cond["$or"]
 
