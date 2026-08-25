@@ -697,6 +697,7 @@ const RGPDPedidosTab = () => {
   const [viewModal, setViewModal] = useState({ open: false, rgpd: null, process: null });
   const [deleteModal, setDeleteModal] = useState({ open: false, rgpd: null });
   const [actionLoading, setActionLoading] = useState(false);
+  const [resendLoading, setResendLoading] = useState({});
 
   const fetchData = useCallback(async () => {
     setLoading(true);
@@ -817,7 +818,7 @@ const RGPDPedidosTab = () => {
   };
 
   const handleResend = async (rgpd) => {
-    setActionLoading(true);
+    setResendLoading((prev) => ({ ...prev, [rgpd.id]: true }));
     try {
       const response = await fetch(`${API_URL}/api/rgpd/admin/${rgpd.id}/resend`, {
         method: "POST",
@@ -834,7 +835,7 @@ const RGPDPedidosTab = () => {
     } catch {
       toast.error("Erro ao reenviar email");
     } finally {
-      setActionLoading(false);
+      setResendLoading((prev) => ({ ...prev, [rgpd.id]: false }));
     }
   };
 
@@ -913,7 +914,7 @@ const RGPDPedidosTab = () => {
                       </Button>
                     )}
                     {rgpd.status === "pending" && (
-                      <Button variant="ghost" size="sm" onClick={() => handleResend(rgpd)} disabled={actionLoading} title="Reenviar email">
+                      <Button variant="ghost" size="sm" onClick={() => handleResend(rgpd)} disabled={!!resendLoading[rgpd.id]} title="Reenviar email">
                         <Send className="h-4 w-4" />
                       </Button>
                     )}

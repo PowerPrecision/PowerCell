@@ -19,6 +19,18 @@ PACOTE DG — novo builder `_build_prefilled_rgpd_pdf` baseado em
 - Checkboxes A/B/C/D → quadrados vazios ☐ (Unicode U+2610), NÃO
   pré-marcados como "Não Autorizo".
 - Regista TTF font (DejaVuSans) para suporte Unicode (acentos PT + ☐).
+
+PACOTE FR-2 — Estética do PDF RGPD:
+- Cabeçalho HTML com CSS embutido (`_RGPD_PDF_HTML_STYLE`) como fonte
+  única de verdade para margens laterais, `text-align: justify` e
+  `line-height` legível — lido via `_parse_css_margin_cm` /
+  `_parse_css_line_height` e aplicado aos estilos reportlab.
+- Texto simples (ex.: `RGPD_DEFAULT_TEMPLATE`) é convertido em HTML real
+  (`_wrap_plain_text_as_html`) com `<p>`/`<br>` respeitados, em vez do
+  antigo fallback linha-a-linha.
+- Títulos de secção / termos-chave RGPD (ex.: "RESPONSÁVEL PELO
+  TRATAMENTO", "TITULAR DOS DADOS") são sempre convertidos em `<strong>`/
+  `<b>` (negrito), mesmo quando o template de origem não os marca.
 """
 from __future__ import annotations
 
@@ -137,6 +149,144 @@ def _escape_xml(text) -> str:
 
 
 # ---------------------------------------------------------------------------
+# PACOTE FR-2 — Estética do PDF RGPD.
+#
+# O PDF saía com aspeto de "texto bruto": o template por defeito
+# (`RGPD_DEFAULT_TEMPLATE`, em `rgpd_service.py`) é texto simples (sem
+# markup HTML), pelo que cada linha era convertida num parágrafo isolado
+# sem qualquer negrito nos títulos de secção ("1. RESPONSÁVEL PELO
+# TRATAMENTO", "2. TITULAR DOS DADOS", ...).
+#
+# `_RGPD_PDF_HTML_STYLE` é o cabeçalho HTML com CSS embutido que define a
+# estética do documento (margens laterais decentes, texto justificado e
+# "line-height" legível). Não é injetado como texto no PDF — é a fonte
+# única de verdade: `_parse_css_margin_cm` / `_parse_css_line_height` leem
+# estes valores e aplicam-nos aos estilos/margens reais do reportlab, para
+# que CSS e layout nunca fiquem dessincronizados.
+#
+# O conteúdo (HTML rico do SmartRichEditor OU texto simples) passa sempre
+# pela mesma pipeline `_html_to_flowables`: texto simples é primeiro
+# convertido em HTML real (`_wrap_plain_text_as_html`) com `<p>`/`<br>`
+# verdadeiros e títulos de secção / termos-chave RGPD marcados
+# `<strong>`, garantindo negrito consistente em ambos os casos.
+# ---------------------------------------------------------------------------
+_RGPD_PDF_HTML_STYLE = """
+<style>
+  body {
+    margin: 2cm;
+    text-align: justify;
+    line-height: 1.5;
+  }
+  h1, h2, h3, h4, h5, h6, .section-title, strong, b {
+    font-weight: bold;
+  }
+</style>
+""".strip()
+
+# Títulos / termos-chave RGPD que devem sair sempre a negrito no PDF, ainda
+# que o template de origem seja texto simples (sem `<strong>`/`<b>`).
+_RGPD_PDF_BOLD_KEYWORDS = [
+    "RESPONSÁVEL PELO TRATAMENTO",
+    "TITULAR DOS DADOS",
+    "FINALIDADE DO TRATAMENTO",
+    "BASE LEGAL",
+    "DESTINATÁRIOS DOS DADOS",
+    "PRAZO DE CONSERVAÇÃO",
+    "DIREITOS DO TITULAR",
+    "PARTILHA DE DADOS",
+    "TRANSFERÊNCIA INTERNACIONAL",
+    "DECISÕES AUTOMATIZADAS",
+    "DECLARAÇÃO FINAL",
+    "CONSENTIMENTO",
+]
+
+
+def _parse_css_margin_cm(css: str, default_cm: float = 2.0) -> float:
+    """Lê o valor de `margin` do cabeçalho `<style>` (px/cm/mm/in) e
+    devolve-o em centímetros, para usar como margem lateral do PDF."""
+    match = re.search(
+        r"margin\s*:\s*(\d+(?:\.\d+)?)\s*(px|cm|mm|in)?", css, re.IGNORECASE
+    )
+    if not match:
+        return default_cm
+    value = float(match.group(1))
+    unit = (match.group(2) or "px").lower()
+    if unit == "cm":
+        return value
+    if unit == "mm":
+        return round(value / 10.0, 2)
+    if unit == "in":
+        return round(value * 2.54, 2)
+    # px assumindo 96 DPI
+    return round((value / 96.0) * 2.54, 2)
+
+
+def _parse_css_line_height(css: str, default: float = 1.5) -> float:
+    """Lê o valor de `line-height` do cabeçalho `<style>` (rácio, ex.:
+    `1.5`) para calcular o "leading" (interlinha) dos parágrafos."""
+    match = re.search(r"line-height\s*:\s*(\d+(?:\.\d+)?)", css, re.IGNORECASE)
+    if not match:
+        return default
+    return float(match.group(1))
+
+
+def _is_section_heading(line: str) -> bool:
+    """Deteta se uma linha de texto simples é um título de secção RGPD
+    (ex.: '1. RESPONSÁVEL PELO TRATAMENTO') ou um termo-chave legal
+    conhecido — para ser convertida em `<strong>` (negrito) no PDF."""
+    stripped = line.strip()
+    if not stripped:
+        return False
+    upper = stripped.upper()
+    if any(keyword in upper for keyword in _RGPD_PDF_BOLD_KEYWORDS):
+        return True
+    if not any(ch.isalpha() for ch in stripped):
+        return False
+    # Título numerado em maiúsculas: "1. RESPONSÁVEL PELO TRATAMENTO"
+    is_numbered_title = bool(re.match(r"^\d+\.\s+[A-ZÀ-Ü]", stripped))
+    # Linha curta totalmente em maiúsculas SEM ser um par "Label: valor"
+    # (ex.: "DECLARAÇÃO FINAL:" sim; "NIF: 515657514" não).
+    is_short_caps_title = (
+        stripped.isupper()
+        and len(stripped) < 80
+        and (":" not in stripped or stripped.endswith(":"))
+    )
+    return is_numbered_title or is_short_caps_title
+
+
+def _wrap_plain_text_as_html(text: str) -> str:
+    """PACOTE FR-2 — Converte texto simples (ex.: `RGPD_DEFAULT_TEMPLATE`)
+    num fragmento HTML real, para que passe pela MESMA pipeline
+    HTML→Flowables usada para o conteúdo rico do SmartRichEditor:
+
+    - Parágrafos separados por linha vazia → `<p>`.
+    - Quebras de linha dentro de um parágrafo → `<br/>` reais.
+    - Títulos de secção / termos-chave RGPD (ver `_is_section_heading`)
+      → `<strong>`.
+
+    Substitui o antigo fallback que tratava cada linha como um parágrafo
+    isolado, sem qualquer negrito nos títulos.
+    """
+    if not text:
+        return ""
+    paragraphs = re.split(r"\n\s*\n", text.strip())
+    html_paragraphs = []
+    for para in paragraphs:
+        rendered_lines = []
+        for raw_line in para.split("\n"):
+            stripped = raw_line.strip()
+            if not stripped:
+                continue
+            escaped = _escape_xml(stripped)
+            if _is_section_heading(stripped):
+                escaped = f"<strong>{escaped}</strong>"
+            rendered_lines.append(escaped)
+        if rendered_lines:
+            html_paragraphs.append(f"<p>{'<br/>'.join(rendered_lines)}</p>")
+    return "".join(html_paragraphs)
+
+
+# ---------------------------------------------------------------------------
 # PACOTE DG — Consenso A/B/C/D — descrições (sem pré-marcar).
 # Adaptado das descrições hardcoded em `_build_rgpd_pdf` (rgpd_service.py
 # linhas 911-925) mas com acentos PT correctos (a fonte DejaVuSans suporta).
@@ -183,9 +333,12 @@ CONSENT_OPTIONS_DG = [
 #   - `<div>`/`<span>` → recurse into children
 #   - texto nu (sem wrapper) → Paragraph com body style
 # Sanitiza com `bleach.clean` (defesa em profundidade — remove `<script>`,
-# `on*` attributes, etc). Faz fallback a plain-text split (`\n`) quando o
-# texto NÃO contém tags HTML — backward-compat com `RGPD_DEFAULT_TEMPLATE`
-# que é plain-text.
+# `on*` attributes, etc). PACOTE FR-2 — quando o texto NÃO contém tags
+# HTML (ex.: `RGPD_DEFAULT_TEMPLATE`, que é plain-text), é primeiro
+# convertido em HTML real via `_wrap_plain_text_as_html` (ver
+# `_html_to_flowables`) para passar pela mesma pipeline; `_pacote_di_
+# plain_text_to_flowables` fica apenas como fallback de última linha se o
+# parse `lxml` falhar.
 # ---------------------------------------------------------------------------
 def _pacote_di_serialize_inline(el) -> str:
     """Serializa o conteúdo inline de um elemento lxml para uma string
@@ -254,10 +407,21 @@ def _pacote_di_process_node(
         text = _pacote_di_serialize_inline(el)
         if text.strip():
             style = header_styles.get(tag, section_style)
+            # PACOTE FR-2 — títulos de secção (<h1>-<h6>) saem SEMPRE a
+            # negrito, mesmo que o HTML de origem não tenha <strong>/<b>
+            # explícito.
+            if "<b>" not in text:
+                text = f"<b>{text}</b>"
             flowables.append(Paragraph(text, style))
     elif tag == "p":
         text = _pacote_di_serialize_inline(el)
         if text.strip():
+            # PACOTE FR-2 — parágrafos cujo texto completo corresponde a um
+            # título de secção / termo-chave RGPD (ex.: "RESPONSÁVEL PELO
+            # TRATAMENTO") saem a negrito mesmo sem `<strong>` explícito.
+            plain_text = re.sub(r"<[^>]+>", "", text).strip()
+            if "<b>" not in text and _is_section_heading(plain_text):
+                text = f"<b>{text}</b>"
             flowables.append(Paragraph(text, body_style))
         else:
             flowables.append(Spacer(1, 0.15 * cm))
@@ -356,7 +520,7 @@ def _pacote_di_plain_text_to_flowables(text, body_style, section_style):
     return flowables
 
 
-def _html_to_flowables(html_text, styles, font_name):
+def _html_to_flowables(html_text, styles, font_name, line_height_ratio=1.5):
     """PACOTE DI — Converte HTML (SmartRichEditor) em Flowables reportlab.
 
     Args:
@@ -365,12 +529,14 @@ def _html_to_flowables(html_text, styles, font_name):
             (dict ``{h1: style, ...}``).
         font_name: Nome da fonte registada (ex.: ``DejaVuSans``) para
             criar header styles em falta.
+        line_height_ratio: PACOTE FR-2 — rácio "line-height" (lido do
+            cabeçalho `<style>` via `_parse_css_line_height`) usado para
+            calcular o "leading" dos títulos `<h1>`-`<h6>` criados aqui.
 
     Returns:
         Lista de Flowables do reportlab.
     """
     from reportlab.lib.styles import ParagraphStyle
-    from reportlab.lib.units import cm
 
     if not html_text:
         return []
@@ -389,16 +555,19 @@ def _html_to_flowables(html_text, styles, font_name):
             parent=body_style,
             fontName=font_name,
             fontSize=size,
-            leading=size + 4,
+            leading=round(size * line_height_ratio, 1),
             spaceBefore=8,
             spaceAfter=4,
         )
 
-    # Detetar se contém tags HTML — se não, fallback plain-text
+    # PACOTE FR-2 — Detetar se contém tags HTML. Se não, converte o texto
+    # simples num fragmento HTML real (`<p>`/`<br>`/`<strong>`) para que
+    # passe pela MESMA pipeline de conversão do HTML rico — em vez do
+    # antigo fallback linha-a-linha sem negrito nos títulos de secção.
     if "<" not in text_str or ">" not in text_str:
-        return _pacote_di_plain_text_to_flowables(
-            text_str, body_style, section_style
-        )
+        text_str = _wrap_plain_text_as_html(text_str)
+        if not text_str:
+            return []
 
     # PACOTE DI — Sanitizar com bleach (defesa em profundidade)
     try:
@@ -481,14 +650,22 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
     _ensure_font()
     font_name = "DejaVuSans" if _FONT_REGISTERED else "Helvetica"
 
+    # PACOTE FR-2 — margens e "line-height" vêm do cabeçalho HTML/CSS
+    # `_RGPD_PDF_HTML_STYLE` (fonte única de verdade), em vez de valores
+    # hardcoded duplicados aqui e no CSS.
+    margin_cm = _parse_css_margin_cm(_RGPD_PDF_HTML_STYLE)
+    line_height_ratio = _parse_css_line_height(_RGPD_PDF_HTML_STYLE)
+    body_font_size = 9
+    body_leading = round(body_font_size * line_height_ratio, 1)
+
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
         buffer,
         pagesize=A4,
-        leftMargin=2 * cm,
-        rightMargin=2 * cm,
-        topMargin=2 * cm,
-        bottomMargin=2 * cm,
+        leftMargin=margin_cm * cm,
+        rightMargin=margin_cm * cm,
+        topMargin=margin_cm * cm,
+        bottomMargin=margin_cm * cm,
         title="RGPD — Autorização para Tratamento de Dados Pessoais",
     )
 
@@ -505,8 +682,8 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         "Body",
         parent=styles["Normal"],
         fontName=font_name,
-        fontSize=9,
-        leading=13,
+        fontSize=body_font_size,
+        leading=body_leading,
         alignment=TA_JUSTIFY,
         spaceAfter=4,
     )
@@ -514,8 +691,8 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         "Section",
         parent=body_style,
         fontName=font_name,
-        fontSize=9,
-        leading=13,
+        fontSize=body_font_size,
+        leading=body_leading,
         spaceBefore=6,
         spaceAfter=2,
     )
@@ -523,8 +700,8 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         "ConsentTitle",
         parent=body_style,
         fontName=font_name,
-        fontSize=9,
-        leading=13,
+        fontSize=body_font_size,
+        leading=body_leading,
         spaceBefore=8,
         spaceAfter=2,
     )
@@ -532,8 +709,8 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         "Checkbox",
         parent=body_style,
         fontName=font_name,
-        fontSize=9,
-        leading=13,
+        fontSize=body_font_size,
+        leading=body_leading,
         leftIndent=20,
         spaceAfter=2,
     )
@@ -541,8 +718,8 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         "Sig",
         parent=body_style,
         fontName=font_name,
-        fontSize=9,
-        leading=13,
+        fontSize=body_font_size,
+        leading=body_leading,
         spaceBefore=10,
     )
 
@@ -569,18 +746,22 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
 
     # 2. Renderizar o template dinâmico (respeita edição do admin)
     # O `rgpd_text` já tem placeholders substituídos por `_get_rendered_rgpd_text`.
-    # PACOTE DI — agora o conteúdo é HTML (vindo do SmartRichEditor/ReactQuill).
+    # PACOTE DI — o conteúdo é HTML (vindo do SmartRichEditor/ReactQuill).
     # O helper `_html_to_flowables` faz parse com `lxml.html` + sanitiza com
     # `bleach.clean` e converte `<p>`/`<ul>`/`<strong>`/etc. em Flowables.
-    # Se o texto NÃO contiver tags HTML (ex.: `RGPD_DEFAULT_TEMPLATE` que é
-    # plain-text), faz fallback ao split por `\n` (backward-compat).
+    # PACOTE FR-2 — se o texto NÃO contiver tags HTML (ex.:
+    # `RGPD_DEFAULT_TEMPLATE`, que é plain-text), é primeiro convertido em
+    # HTML real (`<p>`/`<br>`/`<strong>`) pelo próprio `_html_to_flowables`,
+    # garantindo negrito consistente nos títulos de secção.
     if rgpd_text:
         rgpd_styles = {
             "body": body_style,
             "section": section_style,
             "headers": {},  # _html_to_flowables cria header styles via font_name
         }
-        rgpd_flowables = _html_to_flowables(rgpd_text, rgpd_styles, font_name)
+        rgpd_flowables = _html_to_flowables(
+            rgpd_text, rgpd_styles, font_name, line_height_ratio
+        )
         story.extend(rgpd_flowables)
 
     story.append(Spacer(1, 0.6 * cm))
@@ -665,7 +846,7 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
             "headers": {},
         }
         minuta_flowables = _html_to_flowables(
-            minuta_text, minuta_styles, font_name
+            minuta_text, minuta_styles, font_name, line_height_ratio
         )
         story.extend(minuta_flowables)
         # Secção de assinatura da Minuta

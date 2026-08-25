@@ -8,6 +8,7 @@ Este módulo implementa:
 - Geração de PDF do RGPD assinado
 - Envio de emails
 """
+import re
 import uuid
 import io
 import base64
@@ -16,7 +17,7 @@ import smtplib
 from datetime import datetime, timezone, timedelta
 from typing import Optional, Dict, Any
 from database import db
-from services.email_service import send_email
+from services.email_service import send_email, EmailAccount
 from services.history import log_history
 
 logger = logging.getLogger(__name__)
@@ -51,6 +52,129 @@ def get_tipo_documento_label(tipo_documento: str) -> str:
     if not tipo_documento:
         return ""
     return TIPOS_DOCUMENTO_LABELS.get(tipo_documento, tipo_documento)
+
+
+# ====================================================================
+# PACOTE FR-4 — Empresa real associada ao pedido de RGPD (emissão + envio)
+# ====================================================================
+
+async def _resolve_rgpd_company(
+    process_id: Optional[str] = None,
+    user: Optional[dict] = None,
+    user_id: Optional[str] = None,
+) -> Optional[Dict[str, Any]]:
+    """
+    Resolve a Company (``db.companies``) real associada a um pedido de RGPD.
+
+    Substitui o emissor fixo ("Precision Crédito, Lda.") por uma resolução
+    dinâmica que respeita a Empresa efetivamente associada ao processo ou
+    ao utilizador que iniciou o pedido — usado tanto na emissão do PDF
+    (nome/NIF da empresa) como no envio de email (credenciais SMTP).
+
+    Prioridade de resolução:
+        1. ``company_id`` / ``company_name`` / ``company`` do processo
+           (``process_id``).
+        2. ``active_company_id`` / ``company_id`` / ``company`` do
+           utilizador que solicitou o RGPD (``user`` — dict completo, ou
+           ``user_id`` para consultar ``db.users`` quando só temos o id,
+           ex.: a partir de ``rgpd_request["created_by"]``).
+
+    Cada candidato pode ser um ``id`` (UUID) ou o ``name`` da empresa
+    (case-insensitive) — o mesmo padrão de correspondência usado por
+    ``_find_ucr`` (``services/auth.py``).
+
+    Devolve ``None`` (nunca levanta excepção) se não encontrar nenhuma
+    empresa correspondente — os chamadores devem manter o fallback fixo
+    (``RGPD_ISSUER_NAME``/``RGPD_ISSUER_NIF``, ou a config SMTP default
+    do sistema).
+    """
+    candidates: list = []
+
+    if process_id:
+        try:
+            process = await db.processes.find_one(
+                {"id": process_id},
+                {"_id": 0, "company_id": 1, "company_name": 1, "company": 1},
+            )
+        except Exception as e:
+            logger.warning(f"[RGPD] Erro ao buscar processo {process_id} para resolver empresa: {e}")
+            process = None
+        if process:
+            for key in ("company_id", "company_name", "company"):
+                value = process.get(key)
+                if value:
+                    candidates.append(str(value))
+
+    resolved_user = user
+    if resolved_user is None and user_id:
+        try:
+            resolved_user = await db.users.find_one(
+                {"id": user_id},
+                {"_id": 0, "company": 1, "active_company_id": 1, "company_id": 1},
+            )
+        except Exception as e:
+            logger.warning(f"[RGPD] Erro ao buscar utilizador {user_id} para resolver empresa: {e}")
+            resolved_user = None
+
+    if resolved_user:
+        for key in ("active_company_id", "company_id", "company"):
+            value = resolved_user.get(key)
+            if value:
+                candidates.append(str(value))
+
+    for candidate in candidates:
+        candidate = candidate.strip()
+        if not candidate or candidate.lower() == "default":
+            continue
+        try:
+            company = await db.companies.find_one({"id": candidate}, {"_id": 0})
+            if not company:
+                company = await db.companies.find_one(
+                    {"name": {"$regex": f"^{re.escape(candidate)}$", "$options": "i"}},
+                    {"_id": 0},
+                )
+        except Exception as e:
+            logger.warning(f"[RGPD] Erro ao buscar empresa '{candidate}': {e}")
+            company = None
+        if company:
+            return company
+
+    return None
+
+
+def _build_company_smtp_account(company: Optional[Dict[str, Any]]) -> Optional[EmailAccount]:
+    """
+    Constrói um ``EmailAccount`` a partir das credenciais SMTP da Empresa
+    (``smtp_email``/``smtp_password``/``smtp_host``/``smtp_port``), para
+    ser usado como ``account_override`` em ``send_email`` — a conta SMTP
+    da empresa tem prioridade sobre a configuração SMTP default do sistema.
+
+    Devolve ``None`` se a empresa não existir ou não tiver as 4
+    credenciais SMTP preenchidas — nesse caso, o chamador mantém o
+    comportamento anterior (fallback silencioso para ``system_purpose="RGPD"``).
+    """
+    if not company:
+        return None
+    smtp_email = company.get("smtp_email")
+    smtp_password = company.get("smtp_password")
+    smtp_host = company.get("smtp_host")
+    smtp_port = company.get("smtp_port")
+    if not (smtp_email and smtp_password and smtp_host and smtp_port):
+        return None
+    try:
+        smtp_port = int(smtp_port)
+    except (TypeError, ValueError):
+        logger.warning(f"[RGPD] smtp_port inválido na empresa '{company.get('name')}': {smtp_port!r}")
+        return None
+    return EmailAccount(
+        name=f"company_{company.get('id') or company.get('name') or 'smtp'}",
+        imap_server=smtp_host,
+        imap_port=smtp_port,
+        smtp_server=smtp_host,
+        smtp_port=smtp_port,
+        email=smtp_email,
+        password=smtp_password,
+    )
 
 
 async def create_rgpd_request(
@@ -399,7 +523,9 @@ async def send_rgpd_email(
     user_email: str,
     custom_message: str = None,
     base_url: str = None,
-    raise_on_error: bool = False
+    raise_on_error: bool = False,
+    process_id: str = None,
+    user_id: str = None,
 ) -> bool:
     """
     Envia email de RGPD para o cliente.
@@ -419,6 +545,12 @@ async def send_rgpd_email(
             O comportamento por omissão (False) mantém-se inalterado para não afetar
             o fluxo de criação de pedidos RGPD (`run_request_rgpd`), que tolera envio
             de email falhado sem bloquear a criação do pedido.
+        process_id: Pacote FR-4 — ID do processo, usado para resolver a Empresa
+            real (``db.companies``) e, se tiver SMTP configurado, enviar através
+            dessa conta em vez da configuração SMTP default do sistema.
+        user_id: Pacote FR-4 — ID do utilizador que solicitou o RGPD, usado como
+            fallback de resolução da Empresa quando o processo não tem
+            ``company_id``/``company`` associado.
     
     Returns:
         True se enviado com sucesso
@@ -497,7 +629,15 @@ Equipa Precision Crédito
     try:
         # Determinar conta de email (precision ou power)
         account = "precision"  # Default
-        
+
+        # Pacote FR-4 — a conta SMTP a usar respeita a Empresa real associada
+        # ao processo (ou, em fallback, ao utilizador que solicitou o RGPD).
+        # Se a empresa tiver as 4 credenciais SMTP preenchidas
+        # (smtp_email/smtp_password/smtp_host/smtp_port), usa-as em vez da
+        # configuração SMTP default do sistema (system_purpose="RGPD").
+        company = await _resolve_rgpd_company(process_id=process_id, user_id=user_id)
+        account_override = _build_company_smtp_account(company)
+
         result = await send_email(
             account_name=account,
             to_emails=[client_email],
@@ -506,7 +646,8 @@ Equipa Precision Crédito
             body_html=body_html,
             created_by=user_email,
             force_system=True,
-            system_purpose="RGPD"
+            system_purpose="RGPD",
+            account_override=account_override,
         )
         
         if not result.get("success", False):
@@ -632,6 +773,11 @@ Sistema CRM
 """
     
     try:
+        # Pacote FR-4 — usar a conta SMTP da Empresa real do processo, se
+        # configurada (ver `send_rgpd_email` para detalhes da prioridade).
+        company = await _resolve_rgpd_company(process_id=process_id)
+        account_override = _build_company_smtp_account(company)
+
         result = await send_email(
             account_name="precision",
             to_emails=[to_email],
@@ -640,7 +786,8 @@ Sistema CRM
             body_html=body_html,
             attachments=attachments if attachments else None,
             force_system=True,
-            system_purpose="RGPD"
+            system_purpose="RGPD",
+            account_override=account_override,
         )
         
         logger.info(f"RGPD signed notification sent to {to_email}")
@@ -744,16 +891,32 @@ async def _get_rendered_rgpd_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # Pacote FQ-4 — o emissor/responsável pelo tratamento do RGPD é SEMPRE
-    # a Precision Crédito, Lda. (NIF 515657514): a Power não emite pedidos
-    # de RGPD, pelo que {{NOME_EMPRESA}} / {{NIF_EMPRESA}} NÃO podem
-    # depender de system_config (que pode estar configurado para a Power).
-    # Morada/Contacto continuam a vir de system_config (dados de correio).
+    # Pacote FR-4 — o emissor/responsável pelo tratamento do RGPD passa a
+    # respeitar a Empresa real associada ao processo (ou, em fallback, ao
+    # utilizador que solicitou o RGPD), em vez de estar sempre fixo na
+    # Precision Crédito (Pacote FQ-4). RGPD_ISSUER_NAME/NIF mantêm-se como
+    # fallback quando não é possível resolver nenhuma Company.
     from services.rgpd_templates import RGPD_ISSUER_NAME, RGPD_ISSUER_NIF
     empresa_nome = RGPD_ISSUER_NAME
     empresa_nif = RGPD_ISSUER_NIF
     empresa_morada = ""
     empresa_contacto = ""
+
+    company = await _resolve_rgpd_company(
+        process_id=process_id, user_id=rgpd_request.get("created_by")
+    )
+    if company:
+        if company.get("name"):
+            empresa_nome = company["name"]
+        if company.get("nif"):
+            empresa_nif = company["nif"]
+        if company.get("address"):
+            empresa_morada = company["address"]
+        if company.get("phone"):
+            empresa_contacto = company["phone"]
+
+    # Morada/Contacto continuam a ter fallback em system_config (dados de
+    # correio) quando a Company resolvida não os tiver preenchidos.
     try:
         config = await db.system_config.find_one(
             {"_id": "main"},
@@ -761,9 +924,9 @@ async def _get_rendered_rgpd_text(
         )
         if config:
             settings = config.get("settings", {})
-            if settings.get("company_address"):
+            if not empresa_morada and settings.get("company_address"):
                 empresa_morada = settings["company_address"]
-            if settings.get("company_phone"):
+            if not empresa_contacto and settings.get("company_phone"):
                 empresa_contacto = settings["company_phone"]
     except Exception:
         pass
@@ -812,15 +975,29 @@ async def _get_rendered_minuta_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # Pacote FQ-4 — emissor/responsável fixo (ver `_get_rendered_rgpd_text`):
-    # a Precision Crédito, Lda. é a única entidade que emite pedidos de RGPD
-    # (a Power não emite), pelo que {{NOME_EMPRESA}} / {{NIF_EMPRESA}} nunca
-    # dependem de system_config. Morada/Contacto continuam configuráveis.
+    # Pacote FR-4 — emissor/responsável passa a respeitar a Empresa real
+    # associada ao processo (ou ao utilizador solicitante), tal como em
+    # `_get_rendered_rgpd_text`. RGPD_ISSUER_NAME/NIF mantêm-se como
+    # fallback quando não é possível resolver nenhuma Company.
     from services.rgpd_templates import RGPD_ISSUER_NAME, RGPD_ISSUER_NIF
     empresa_nome = RGPD_ISSUER_NAME
     empresa_nif = RGPD_ISSUER_NIF
     empresa_morada = ""
     empresa_contacto = ""
+
+    company = await _resolve_rgpd_company(
+        process_id=process_id, user_id=rgpd_request.get("created_by")
+    )
+    if company:
+        if company.get("name"):
+            empresa_nome = company["name"]
+        if company.get("nif"):
+            empresa_nif = company["nif"]
+        if company.get("address"):
+            empresa_morada = company["address"]
+        if company.get("phone"):
+            empresa_contacto = company["phone"]
+
     try:
         config = await db.system_config.find_one(
             {"_id": "main"},
@@ -828,9 +1005,9 @@ async def _get_rendered_minuta_text(
         )
         if config:
             settings = config.get("settings", {})
-            if settings.get("company_address"):
+            if not empresa_morada and settings.get("company_address"):
                 empresa_morada = settings["company_address"]
-            if settings.get("company_phone"):
+            if not empresa_contacto and settings.get("company_phone"):
                 empresa_contacto = settings["company_phone"]
     except Exception:
         pass
@@ -1330,6 +1507,11 @@ Mais uma vez, obrigado(a) pela sua colaboração."""
     except Exception:
         pass
     
+    # Pacote FR-4 — usar a conta SMTP da Empresa real do processo, se
+    # configurada (ver `send_rgpd_email` para detalhes da prioridade).
+    company = await _resolve_rgpd_company(process_id=process_id)
+    account_override = _build_company_smtp_account(company)
+
     result = await send_email(
         account_name="precision",
         to_emails=[client_email],
@@ -1340,6 +1522,7 @@ Mais uma vez, obrigado(a) pela sua colaboração."""
         force_system=True,
         created_by="rgpd_system",
         system_purpose="RGPD",
+        account_override=account_override,
     )
     
     if result.get("success"):

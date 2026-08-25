@@ -45,7 +45,7 @@ export function PageHeader({
         ) : null}
       </div>
       {(actions || onRefresh) && (
-        <div className="flex items-center gap-2 shrink-0 self-start">
+        <div className="flex flex-wrap items-center gap-2 self-start">
           {actions}
           {onRefresh && (
             <Button variant="outline" onClick={onRefresh}>

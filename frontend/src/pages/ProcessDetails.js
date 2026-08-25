@@ -377,9 +377,13 @@ const ProcessDetails = () => {
       if (response.ok) {
         const data = await response.json();
         setRgpdStatus(data);
+      } else if (response.status === 404) {
+        // Processo sem pedido RGPD ainda — estado neutro, sem erro na UI.
+        setRgpdStatus(null);
       }
     } catch {
       // RGPD status check failed silently — not critical
+      setRgpdStatus(null);
     } finally {
       setRgpdLoading(false);
     }
@@ -1430,6 +1434,22 @@ const ProcessDetails = () => {
   const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !['admin', 'ceo'].includes(userRole);
   const isViewMode = (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) || isProcessLocked;
 
+  // Processos Inativos (Read-Only): estados finais onde as ações principais
+  // (RGPD, CPCV, Enviar Balcões, Portal do Cliente, Eliminar) devem ficar
+  // visíveis mas desabilitadas — o workflow já terminou, pelo que estas ações
+  // deixam de fazer sentido independentemente do role de quem vê o ecrã.
+  // Inclui "eliminado" (singular, valor real gravado pelo soft-delete do
+  // processo — ver backend/services/process_delete.py) e as suas variantes
+  // legacy/plural para cobrir dados antigos.
+  const INACTIVE_PROCESS_STATUSES = [
+    "concluido", "concluidos",
+    "desistencias", "desistido",
+    "cancelado",
+    "eliminado", "eliminados",
+    "perdido", "arquivo",
+  ];
+  const isInactiveProcess = !!(process && INACTIVE_PROCESS_STATUSES.includes(process.status));
+
   // Função para eliminar o PROCESSO (soft-delete). O cliente NÃO é tocado —
   // para eliminar um cliente há-de usar-se a página de detalhe do cliente.
   // O backend (DELETE /processes/{id}) faz cascade de documentos/tarefas.
@@ -1778,7 +1798,7 @@ const ProcessDetails = () => {
                         ? 'text-yellow-600 border-yellow-200 hover:bg-yellow-50'
                         : 'text-red-600 border-red-200 hover:bg-red-50'
                     }`}
-                    disabled={rgpdSending || rgpdLoading}
+                    disabled={rgpdSending || rgpdLoading || isInactiveProcess}
                     title="RGPD"
                   >
                     {rgpdSending || rgpdLoading ? (
@@ -1826,6 +1846,7 @@ const ProcessDetails = () => {
                 size="sm"
                 className="text-indigo-600 border-indigo-200 hover:bg-indigo-50 h-8 px-2 sm:px-3"
                 onClick={() => setShowCPCVModal(true)}
+                disabled={isInactiveProcess}
                 title="Gerar Contrato Promessa Compra e Venda"
               >
                 <FileSignature className="h-3.5 w-3.5 sm:mr-1" />
@@ -1840,6 +1861,7 @@ const ProcessDetails = () => {
                 size="sm"
                 className="text-teal-600 border-teal-200 hover:bg-teal-50 h-8 px-2 sm:px-3"
                 onClick={() => setShowSendDocsModal(true)}
+                disabled={isInactiveProcess}
                 title="Enviar documentação para balcões/bancos"
               >
                 <Mail className="h-3.5 w-3.5 sm:mr-1" />
@@ -1869,6 +1891,7 @@ const ProcessDetails = () => {
                       variant="outline"
                       size="sm"
                       className="text-teal-600 border-teal-200 hover:bg-teal-50 h-8 px-2 sm:px-3"
+                      disabled={isInactiveProcess}
                       title="Portal do Cliente"
                     >
                       <ExternalLink className="h-3.5 w-3.5 sm:mr-1" />
@@ -2008,8 +2031,9 @@ const ProcessDetails = () => {
                 size="sm"
                 className="text-red-600 border-red-200 hover:bg-red-50 h-8 px-2 sm:px-3"
                 onClick={handleDeleteProcess}
+                disabled={isInactiveProcess}
                 data-testid="delete-process-btn"
-                title="Eliminar este processo (o cliente não é eliminado)"
+                title={isInactiveProcess ? "Processo em estado terminal — ação desativada" : "Eliminar este processo (o cliente não é eliminado)"}
               >
                 <Trash2 className="h-3.5 w-3.5 sm:mr-1" />
                 <span className="hidden sm:inline">Eliminar</span>

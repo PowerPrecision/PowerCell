@@ -23,6 +23,30 @@ from utils.search_filters import (
 )
 
 
+def normalize_id_for_match(value: Any) -> Optional[str]:
+    """
+    Normaliza um ID de utilizador para comparação robusta com o Mongo.
+
+    O ID do consultor/intermediário extraído do token JWT (``user["id"]``)
+    chega sempre como ``str`` quando vem de um payload JSON válido, mas
+    documentos legados/seed podem ter o campo equivalente guardado com
+    outro tipo Python (``ObjectId``, ``UUID``, ``int``) ou com espaços em
+    branco acidentais. Uma comparação directa (``==`` / ``$in``) no Mongo
+    falha SILENCIOSAMENTE quando os tipos BSON não coincidem — não há
+    erro, apenas zero resultados — o que é exactamente o sintoma de
+    "Os Meus Processos" a devolver vazio para Consultores.
+
+    Converte sempre para ``str`` e remove espaços, para garantir que o
+    valor usado nas cláusulas ``$or`` / ``$in`` é uma string Mongo pura,
+    igual à forma como os IDs são persistidos em ``assigned_*`` pelos
+    fluxos de atribuição (``str(uuid.uuid4())``).
+    """
+    if value is None:
+        return None
+    normalized = str(value).strip()
+    return normalized or None
+
+
 def combine_and_conditions(and_conditions: list[dict]) -> dict:
     """Monta a query final a partir de condições $and."""
     if len(and_conditions) == 1:
@@ -64,23 +88,27 @@ def build_role_visibility_conditions(
     if show_all:
         return []
 
+    # Normaliza sempre para str — evita que um tipo BSON inesperado no
+    # user["id"] (ObjectId/UUID/int) falhe silenciosamente o match.
+    user_id = normalize_id_for_match(user.get("id")) or ""
+
     if role == "__all_roles__":
         roles = all_roles or []
         role_conditions: list[dict] = []
         for r in roles:
             if r == UserRole.CONSULTOR:
                 role_conditions.extend([
-                    {"assigned_consultor_ids": user["id"]},
-                    {"assigned_consultor_id": user["id"]},
+                    {"assigned_consultor_ids": user_id},
+                    {"assigned_consultor_id": user_id},
                 ])
             elif r == UserRole.INTERMEDIARIO:
                 role_conditions.extend([
-                    {"assigned_mediador_ids": user["id"]},
-                    {"assigned_mediador_id": user["id"]},
+                    {"assigned_mediador_ids": user_id},
+                    {"assigned_mediador_id": user_id},
                 ])
             elif r == UserRole.INDEXACAO:
                 role_conditions.extend([
-                    {"assigned_indexacao_id": user["id"]},
+                    {"assigned_indexacao_id": user_id},
                     {"created_by": user.get("email", "")},
                 ])
             elif r in [UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR]:
@@ -90,12 +118,12 @@ def build_role_visibility_conditions(
         return []
 
     if role == UserRole.CLIENTE:
-        return [{"client_id": user["id"]}]
+        return [{"client_id": user_id}]
 
     if role == UserRole.INDEXACAO:
         # PACOTE BQ — scoped global: atribuídos + criados + fila_espera
         return [{"$or": [
-            {"assigned_indexacao_id": user["id"]},
+            {"assigned_indexacao_id": user_id},
             {"created_by": user.get("email", "")},
             {"status": "fila_espera"},
         ]}]
@@ -105,14 +133,14 @@ def build_role_visibility_conditions(
 
     if role == UserRole.CONSULTOR:
         return [{"$or": [
-            {"assigned_consultor_ids": user["id"]},
-            {"assigned_consultor_id": user["id"]},
+            {"assigned_consultor_ids": user_id},
+            {"assigned_consultor_id": user_id},
         ]}]
 
     if role == UserRole.INTERMEDIARIO:
         return [{"$or": [
-            {"assigned_mediador_ids": user["id"]},
-            {"assigned_mediador_id": user["id"]},
+            {"assigned_mediador_ids": user_id},
+            {"assigned_mediador_id": user_id},
         ]}]
 
     return []
@@ -154,12 +182,17 @@ _ARRAY_ASSIGNMENT_FIELDS: frozenset[str] = frozenset({
 
 
 def _assignment_clauses_for_id(user_id: str) -> list[dict]:
+    # Normaliza sempre para str antes de montar as cláusulas — o ID pode
+    # chegar como ObjectId/UUID/int em documentos legados/seed e uma
+    # comparação Mongo entre tipos BSON diferentes falha silenciosamente
+    # (zero resultados, sem erro).
+    normalized_id = normalize_id_for_match(user_id) or ""
     clauses: list[dict] = []
     for field in ASSIGNMENT_ID_FIELDS:
         if field in _ARRAY_ASSIGNMENT_FIELDS:
-            clauses.append({field: {"$in": [user_id]}})
+            clauses.append({field: {"$in": [normalized_id]}})
         else:
-            clauses.append({field: user_id})
+            clauses.append({field: normalized_id})
     return clauses
 
 
@@ -178,6 +211,11 @@ def build_assigned_to_me_condition(user_id: str) -> dict:
     via ``$in``). Sem isto, Consultores com processos atribuídos apenas via
     ``assigned_user_ids`` (ou apenas via ``consultant_id``/``manager_id``
     legados) ficavam sem resultados em "Os Meus Processos".
+
+    O ID é normalizado explicitamente para ``str`` (ver
+    ``normalize_id_for_match``) — a causa nº1 de "Os Meus Processos"
+    devolver vazio para Consultores é o ID do token não coincidir em
+    tipo BSON com o valor persistido em ``assigned_*``.
     """
     return {"$or": _assignment_clauses_for_id(user_id)}
 
@@ -390,7 +428,12 @@ def build_process_list_query(
 
     and_conditions.append(build_is_deleted_filter(status=status, view_mode=view_mode))
     if mine_only:
-        user_id = user.get("id") or user.get("user_id") or ""
+        # Normaliza explicitamente para str — a causa nº1 de "Os Meus
+        # Processos" devolver vazio para Consultores é o ID extraído do
+        # token (``user["id"]``) não coincidir em tipo BSON com o valor
+        # persistido nos campos ``assigned_*`` (comparação Mongo entre
+        # tipos diferentes falha silenciosamente, sem erro).
+        user_id = normalize_id_for_match(user.get("id") or user.get("user_id")) or ""
         and_conditions.append(build_assigned_to_me_condition(user_id))
         company_cond = build_company_scope_condition(
             company_id if company_id is not None else user.get("active_company_id") or user.get("company")
@@ -459,7 +502,7 @@ def build_kanban_role_base_query(
     show_all=True — é o âmbito natural de trabalho da Indexação.
     """
     query: dict[str, Any] = {"is_deleted": {"$ne": True}}
-    user_id = user["id"]
+    user_id = normalize_id_for_match(user.get("id")) or ""
 
     if role == UserRole.INDEXACAO:
         query["$or"] = [
@@ -665,6 +708,10 @@ def build_my_clients_process_query(
     """
     if not role_has_client_portfolio(role):
         return EMPTY_PORTFOLIO_QUERY
+
+    # Mesma normalização defensiva usada em "Os Meus Processos" — garante
+    # que o ID é sempre uma string Mongo pura.
+    user_id = normalize_id_for_match(user_id) or user_id
 
     if role == UserRole.CONSULTOR:
         query: dict[str, Any] = {

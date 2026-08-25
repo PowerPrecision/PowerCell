@@ -49,7 +49,7 @@ import {
   // Compliance
   ShieldCheck, Scale, ClipboardList,
   // Técnico
-  Shield, AlertTriangle, Database, Brain, Activity, ArrowRightLeft,
+  Shield, AlertTriangle, Database, Brain, Activity,
   // Finanças
   Landmark,
   // Gestão de Empresas
@@ -80,7 +80,6 @@ const UnifiedLogsPage = lazy(() => import("./UnifiedLogsPage"));
 const DiagnosticsPage = lazy(() => import("./DiagnosticsPage"));
 const AIConfigPage = lazy(() => import("./AIConfigPage"));
 const BackgroundJobsPage = lazy(() => import("./BackgroundJobsPage"));
-const ProcessMigrationTab = lazy(() => import("../components/admin/ProcessMigrationTab"));
 const FinanceTab = lazy(() => import("../components/admin/FinanceTab"));
 
 // PACOTE BG: SystemEmailsSectionWrapper e IntegrationsConfigSectionWrapper
@@ -409,11 +408,6 @@ const SystemAdminPanel = () => {
                       <span className="hidden sm:inline">Processos BG</span>
                       <span className="sm:hidden">BG Jobs</span>
                     </TabsTrigger>
-                    <TabsTrigger value="migration" className="gap-1.5 text-xs sm:text-sm whitespace-nowrap">
-                      <ArrowRightLeft className="h-4 w-4" />
-                      <span className="hidden sm:inline">Migração</span>
-                      <span className="sm:hidden">Migr</span>
-                    </TabsTrigger>
                   </TabsList>
                 </div>
 
@@ -452,11 +446,6 @@ const SystemAdminPanel = () => {
                 {/* Processos BG — BackgroundJobsPage em modo embedded */}
                 <TabsContent value="bg-jobs" className="mt-4">
                   <Suspense fallback={<TabLoader />}><BackgroundJobsPage embedded={true} /></Suspense>
-                </TabsContent>
-
-                {/* Migração Fase 1 — Separação Cliente ↔ Processo */}
-                <TabsContent value="migration" className="mt-4">
-                  <ProcessMigrationTab embedded={true} />
                 </TabsContent>
               </Tabs>
             </TabsContent>

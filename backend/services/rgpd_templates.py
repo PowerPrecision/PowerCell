@@ -18,10 +18,13 @@ logger = logging.getLogger(__name__)
 
 RGPD_TEMPLATE_VERSIONS_COLLECTION = "rgpd_template_versions"
 
-# Pacote FQ-4 — a Precision Crédito, Lda. é a única entidade que emite
-# pedidos de RGPD (a Power Real Estate, Lda. não emite pedidos de RGPD).
-# Este emissor/responsável pelo tratamento é FIXO e não deve depender de
-# configuração dinâmica (system_config / empresa activa do utilizador).
+# Pacote FQ-4 (histórico) — a Precision Crédito, Lda. era o único emissor
+# fixo de pedidos de RGPD.
+# Pacote FR-4 — a emissão do RGPD passou a respeitar a Empresa real
+# (``db.companies``) associada ao processo ou ao utilizador solicitante
+# (ver `services/rgpd_service._resolve_rgpd_company`). Estas constantes
+# mantêm-se apenas como FALLBACK quando não é possível resolver nenhuma
+# Company (ex.: processo sem empresa associada).
 RGPD_ISSUER_NAME = "Precision Crédito, Lda."
 RGPD_ISSUER_NIF = "515657514"
 

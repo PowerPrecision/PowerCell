@@ -54,6 +54,25 @@ export const SECTION_ICONS = {
   shared_email: MailCheck,
 };
 
+/**
+ * Labels curtos para a navegação lateral do system-config.
+ *
+ * Por defeito a navegação mostra apenas a primeira palavra do título da
+ * secção (`title.split(" ")[0]`) para caber no espaço compacto. Algumas
+ * secções precisam de um rótulo mais descritivo do que essa primeira
+ * palavra — por exemplo "document_recipients" (título completo
+ * "Destinatários de Documentação") ficava truncado para "Destinatários",
+ * que não deixa claro que se trata do envio de documentação para
+ * balcões/bancos. Este mapa permite sobrepor esse truncamento por secção.
+ */
+export const SECTION_LABELS = {
+  document_recipients: "Envio para Balcões",
+};
+
+/** Obtém o rótulo a mostrar na navegação lateral para uma secção. */
+export const getSectionNavLabel = (key, fields) =>
+  SECTION_LABELS[key] || fields[key]?.title?.split(" ")[0] || key;
+
 export const ConfigFieldInput = ({ field, value, onChange, allValues, sectionName }) => {
   const [showPassword, setShowPassword] = useState(false);
   const [revealedValue, setRevealedValue] = useState(null);
@@ -272,9 +291,20 @@ export const ConfigSection = ({ section, sectionKey, config, fields, onSave, onT
 
   const handleSave = async () => {
     setSaving(true);
+    // Snapshot dos dados efectivamente enviados neste guardar. Só fechamos
+    // o estado de "alterações por guardar" (isDirty) se o utilizador não
+    // tiver editado mais nada enquanto o pedido estava em curso — caso
+    // contrário, essa edição posterior ficaria incorretamente marcada como
+    // guardada e a mensagem desapareceria sem os dados terem sido persistidos.
+    const submittedConfig = localConfig;
     try {
-      await onSave(sectionKey, localConfig);
-      setHasChanges(false);
+      await onSave(sectionKey, submittedConfig);
+      setLocalConfig((current) => {
+        if (current === submittedConfig) {
+          setHasChanges(false);
+        }
+        return current;
+      });
       toast.success("Configuração guardada", { id: "config-save" });
     } catch {
       toast.error("Erro ao guardar", { id: "config-save" });
