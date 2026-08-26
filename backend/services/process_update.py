@@ -13,6 +13,7 @@ from typing import Any, Optional
 from database import db
 from models.auth import UserRole
 from services.encryption import generate_nif_hash, generate_email_hash
+from services.process_status import INACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -339,7 +340,11 @@ def merge_field_metadata(existing: Optional[dict], incoming: dict) -> dict:
     return {**base, **incoming}
 
 
-TERMINAL_PROCESS_STATUSES = ("eliminados", "desistencias", "concluidos")
+# Fix: Normalize process status filters — inclui todas as variações
+# legadas singular/plural (ver services/process_status.py), para que um
+# processo com status="concluido" (singular legado) fique bloqueado para
+# edição tal como "concluidos".
+TERMINAL_PROCESS_STATUSES = tuple(INACTIVE_STATUSES)
 FINANCE_RELEVANT_STATUSES = ("concluidos", "escritura", "escritura_agendada")
 VALID_PRIORIDADES = ("baixa", "media", "alta")
 

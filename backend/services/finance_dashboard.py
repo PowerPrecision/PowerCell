@@ -11,6 +11,7 @@ from typing import Optional
 from fastapi import HTTPException
 
 from database import db
+from services.process_status import STATUS_VALUE_ALIASES
 from services.finance_helpers import (
     DEFAULT_CONFIG,
     FINANCE_CONFIG_KEY,
@@ -178,7 +179,9 @@ async def run_get_finance_monthly(
 
     processes = await db.processes.find(
         {
-            "status": {"$in": ["concluidos"]},
+            # Fix: Normalize process status filters — inclui a variação
+            # legada singular "concluido".
+            "status": {"$in": STATUS_VALUE_ALIASES["concluidos"]},
             "updated_at": {"$gte": start_of_year, "$lte": end_of_year}
         },
         {

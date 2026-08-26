@@ -18,6 +18,7 @@ from services.document_process_resolve import (
     build_s3_valid_prefixes,
     resolve_process_from_flexible_id,
 )
+from services.process_status import INACTIVE_STATUSES
 from services.history import log_history
 from services.s3_storage import s3_service
 
@@ -85,7 +86,9 @@ async def _assert_no_cross_process_refs(
             "client_id": effective_client_id,
             "id": {"$ne": client_id},
             "is_deleted": {"$ne": True},
-            "status": {"$nin": ["eliminados", "desistencias"]},
+            # Fix: Normalize process status filters — inclui as variações
+            # legadas singular/plural em vez de apenas a forma plural.
+            "status": {"$nin": INACTIVE_STATUSES},
         },
         {
             "_id": 0,

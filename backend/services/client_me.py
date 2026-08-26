@@ -35,6 +35,7 @@ from services.encryption import (
     generate_telefone_hash,
 )
 from services.process_service import get_next_process_number
+from services.process_status import INACTIVE_STATUSES
 from services.s3_storage import s3_service
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
@@ -90,8 +91,10 @@ async def run_get_my_assigned_clients(
             ]
         }
     elif user_role in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]:
+        # Fix: Normalize process status filters — inclui as variações
+        # legadas singular/plural (ver services/process_status.py).
         query = {
-            "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+            "status": {"$nin": INACTIVE_STATUSES},
             "is_active": {"$ne": False}
         }
     else:

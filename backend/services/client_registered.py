@@ -35,6 +35,7 @@ from services.encryption import (
     generate_telefone_hash,
 )
 from services.process_service import get_next_process_number
+from services.process_status import DELETED_STATUS_VALUES
 from services.s3_storage import s3_service
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
@@ -348,7 +349,11 @@ async def run_list_registered_clients(
                 # PACOTE CK — REGRA estrita: Se tem um processo que já passou
                 # da fase inicial, desaparece dos Registos (Leads)
                 # PACOTE DB — None (Lead) também conta como fase inicial.
-                if p.get("status") not in ["pre_registo", None, "clientes_espera", "eliminado"]:
+                # Fix: Normalize process status filters — reconhece também
+                # a variação plural legada "eliminados".
+                if p.get("status") not in (
+                    ["pre_registo", None, "clientes_espera"] + DELETED_STATUS_VALUES
+                ):
                     should_exclude = True
                     break
                 processes_info.append(p)

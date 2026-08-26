@@ -19,6 +19,7 @@ from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, Workflow
 from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles, get_current_user
 from services.admin_helpers import _safe_float, _audit_log
+from services.process_status import DELETED_STATUS_VALUES
 from services.permissions import (
     get_default_permissions_for_role,
     get_all_available_permissions,
@@ -281,7 +282,9 @@ async def run_sync_process_emails(user: dict):
 
     pipeline = [
         {"$match": {
-            "status": {"$ne": "eliminado"},
+            # Fix: Normalize process status filters — exclui também a
+            # variação plural legada "eliminados".
+            "status": {"$nin": list(DELETED_STATUS_VALUES)},
             "$or": [
                 {"personal_data.email": {"$exists": True, "$ne": "", "$ne": None}},
                 {"personal_data.email_hash": {"$exists": True, "$ne": None}},

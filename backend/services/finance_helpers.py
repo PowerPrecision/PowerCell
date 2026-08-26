@@ -12,6 +12,7 @@ from pydantic import BaseModel, Field
 
 from database import db
 from models.auth import UserRole
+from services.process_status import STATUS_VALUE_ALIASES
 
 logger = logging.getLogger(__name__)
 
@@ -102,7 +103,9 @@ async def _get_pct(config: dict, area: str, field: str) -> float:
 
 async def _get_processes(year: Optional[int] = None) -> list:
     """Busca processos concluídos, opcionalmente filtrados por ano."""
-    won_statuses = ["concluidos"]
+    # Fix: Normalize process status filters — inclui a variação legada
+    # singular "concluido" para não sub-contar comissões.
+    won_statuses = STATUS_VALUE_ALIASES["concluidos"]
     query = {"status": {"$in": won_statuses}}
 
     if year:

@@ -9,6 +9,7 @@ from typing import Optional
 from database import db
 from models.auth import UserRole
 from models.deadline import DeadlineResponse
+from services.process_status import INACTIVE_STATUSES
 
 
 async def run_get_deadlines(process_id: Optional[str], user: dict):
@@ -54,7 +55,11 @@ async def run_get_deadlines(process_id: Optional[str], user: dict):
 
 async def run_get_my_deadlines(user: dict):
     """Obter prazos onde o utilizador tem acesso ao processo."""
-    FINISHED_STATUS = ["concluido", "desistido", "cancelado", "arquivado"]
+    # Fix: Normalize process status filters — reutiliza a constante central
+    # (todas as variações legadas singular/plural), preservando também o
+    # typo legado "arquivado" (vs. o valor canónico "arquivo") por
+    # compatibilidade com documentos antigos.
+    FINISHED_STATUS = INACTIVE_STATUSES + ["arquivado"]
 
     if user["role"] in [
         UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,

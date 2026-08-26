@@ -35,11 +35,16 @@ def test_my_clients_api_modules_exist():
 def test_my_clients_api_export_run_entrypoints():
     from services import my_clients_api_list, my_clients_api_stats, my_clients_api_helpers
 
+    from services.process_status import INACTIVE_STATUSES
+
     assert callable(my_clients_api_list.run_get_my_clients)
     assert callable(my_clients_api_stats.run_get_my_clients_stats)
-    assert my_clients_api_helpers.INACTIVE_STATUSES == [
-        "concluidos", "desistencias", "eliminados",
-    ]
+    # Fix: Normalize process status filters — my_clients_api_helpers agora
+    # reutiliza a constante central (com todas as variações legadas), em
+    # vez de manter uma cópia local desactualizada.
+    assert my_clients_api_helpers.INACTIVE_STATUSES == INACTIVE_STATUSES
+    assert "eliminado" in my_clients_api_helpers.INACTIVE_STATUSES
+    assert "concluido" in my_clients_api_helpers.INACTIVE_STATUSES
     assert None in my_clients_api_helpers.LEAD_STATUS_VALUES
 
 

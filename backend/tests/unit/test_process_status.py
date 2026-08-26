@@ -5,7 +5,10 @@ from services.process_status import (
     PRE_REGISTO_STATUS,
     INACTIVE_STATUSES,
     ARCHIVED_STATUSES,
+    DELETED_STATUS_VALUES,
+    STATUS_VALUE_ALIASES,
     LEAD_STATUS_VALUES,
+    expand_status_values,
 )
 
 
@@ -40,6 +43,42 @@ class TestShouldHidePreRegisto:
 
 class TestStatusConstants:
     def test_constants_values(self):
-        assert INACTIVE_STATUSES == ["concluidos", "desistencias", "eliminados"]
-        assert ARCHIVED_STATUSES == ["concluidos", "desistencias"]
+        # Fix: Normalize process status filters to handle legacy singular
+        # and plural values — INACTIVE_STATUSES/ARCHIVED_STATUSES têm de
+        # incluir TODAS as variações documentadas, não apenas a forma
+        # canónica (plural).
+        assert INACTIVE_STATUSES == [
+            "eliminado", "eliminados",
+            "concluido", "concluidos",
+            "desistencia", "desistencias", "desistido",
+            "cancelado",
+            "perdido",
+            "arquivo",
+        ]
+        assert ARCHIVED_STATUSES == [
+            "concluido", "concluidos",
+            "desistencia", "desistencias", "desistido",
+        ]
+        assert DELETED_STATUS_VALUES == ["eliminado", "eliminados"]
         assert None in LEAD_STATUS_VALUES and PRE_REGISTO_STATUS in LEAD_STATUS_VALUES
+
+
+class TestStatusValueAliases:
+    def test_deleted_variations_are_symmetric(self):
+        assert STATUS_VALUE_ALIASES["eliminado"] == STATUS_VALUE_ALIASES["eliminados"]
+
+    def test_expand_status_values_returns_all_variations(self):
+        assert expand_status_values("eliminados") == ["eliminado", "eliminados"]
+        assert expand_status_values("concluido") == ["concluido", "concluidos"]
+        assert set(expand_status_values("desistido")) == {
+            "desistencia", "desistencias", "desistido",
+        }
+
+    def test_expand_status_values_falls_back_to_itself(self):
+        # Estados sem variações legadas documentadas (fases activas do
+        # Kanban) devolvem-se a si próprios — equivalente a uma igualdade.
+        assert expand_status_values("escritura") == ["escritura"]
+
+    def test_expand_status_values_handles_empty(self):
+        assert expand_status_values(None) == []
+        assert expand_status_values("") == []

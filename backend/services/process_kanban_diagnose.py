@@ -10,9 +10,13 @@ import traceback
 from typing import Any
 
 from database import db
+from services.process_status import INACTIVE_STATUSES
 
 WORKFLOW_REQUIRED_FIELDS = ["name", "id", "label", "color", "order"]
-INACTIVE_STATUS_NAMES = ["concluidos", "desistencias", "eliminados"]
+# Fix: Normalize process status filters — reutiliza a constante central
+# (com todas as variações legadas singular/plural) em vez de uma cópia
+# local desactualizada.
+INACTIVE_STATUS_NAMES = INACTIVE_STATUSES
 
 
 async def check_workflow_statuses(report: dict[str, Any]) -> None:

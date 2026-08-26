@@ -12,6 +12,7 @@ from typing import List, Optional
 from fastapi import HTTPException
 
 from database import db
+from services.process_status import ARCHIVED_STATUSES, DELETED_STATUS_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -37,17 +38,21 @@ async def run_get_process_s3_mappings(
     query = {}
 
     # Por defeito, excluir processos concluídos e desistências
+    # Fix: Normalize process status filters — inclui as variações legadas
+    # singular/plural (ver services/process_status.py).
     if not include_closed:
-        query["status"] = {"$nin": ["concluidos", "desistencias"]}
+        query["status"] = {"$nin": list(ARCHIVED_STATUSES)}
 
     # Por defeito, excluir processos eliminados (soft delete)
     if not include_deleted:
         query["is_active"] = {"$ne": False}
-        # Também excluir por status "eliminado" para compatibilidade
+        # Também excluir por status "eliminado"/"eliminados" para compatibilidade
         if "status" in query:
-            query["status"]["$nin"] = list(set(query["status"].get("$nin", []) + ["eliminado"]))
+            query["status"]["$nin"] = list(
+                set(query["status"].get("$nin", [])) | set(DELETED_STATUS_VALUES)
+            )
         else:
-            query["status"] = {"$ne": "eliminado"}
+            query["status"] = {"$nin": list(DELETED_STATUS_VALUES)}
 
     if search:
         query["$or"] = [

@@ -18,6 +18,7 @@ from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles, get_current_user
+from services.process_status import INACTIVE_STATUSES
 from services.admin_helpers import _safe_float, _audit_log
 from services.permissions import (
     get_default_permissions_for_role,
@@ -551,11 +552,13 @@ async def run_get_stale_processes(user: dict, days: int = 14):
     Retorna processos agrupados por nível de urgência.
     """
     now = datetime.now(timezone.utc)
-    final_statuses = [
-        "concluido", "concluidos", "cancelado", "recusado", 
-        "desistiu", "desistencia", "desistencias", "desistência",
-        "escritura_feita", "arquivado", "perdido", "eliminado"
-    ]
+    # Fix: Normalize process status filters — combina a constante central
+    # (todas as variações legadas singular/plural) com os termos extra
+    # específicos deste relatório (recusado, escritura_feita, etc.).
+    final_statuses = list(set(INACTIVE_STATUSES) | {
+        "recusado", "desistiu", "desistência",
+        "escritura_feita", "arquivado",
+    })
     
     cutoff = (now - timedelta(days=days)).isoformat()
     

@@ -11,12 +11,15 @@ import logging
 from typing import Any, Optional
 
 from database import db
+from services.process_status import STATUS_VALUE_ALIASES
 
 logger = logging.getLogger(__name__)
 
 PRIORITY_WEIGHT = {"alta": 3, "media": 2, "baixa": 1}
-CONCLUDED_STATUSES = ["concluidos"]
-DROPPED_STATUSES = ["desistencias"]
+# Fix: Normalize process status filters — inclui as variações legadas
+# singular/plural (ver services/process_status.py).
+CONCLUDED_STATUSES = STATUS_VALUE_ALIASES["concluidos"]
+DROPPED_STATUSES = STATUS_VALUE_ALIASES["desistencias"]
 
 
 def group_processes_by_status(processes: list[dict]) -> dict[str, list[dict]]:
