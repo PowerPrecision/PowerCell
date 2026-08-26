@@ -10,6 +10,9 @@ from __future__ import annotations
 import re
 from typing import Any, Iterable, Optional, Sequence, Union
 
+from bson import ObjectId
+from bson.errors import InvalidId
+
 from models.auth import UserRole
 from services.process_status import (
     INACTIVE_STATUSES,
@@ -45,6 +48,27 @@ def normalize_id_for_match(value: Any) -> Optional[str]:
         return None
     normalized = str(value).strip()
     return normalized or None
+
+
+def _safe_object_id(value: Optional[str]) -> Optional[ObjectId]:
+    """
+    Tenta converter ``value`` num ``bson.ObjectId`` de forma segura.
+
+    A base de dados guarda alguns IDs de atribuição como ``ObjectId``
+    nativo (seed/migrações antigas), enquanto o ID extraído do token JWT
+    chega sempre como ``str``. Uma comparação Mongo entre tipos BSON
+    diferentes falha SILENCIOSAMENTE (zero resultados, sem erro) — daí a
+    lista "Os Meus Processos" aparecer vazia mesmo com processos
+    atribuídos. Fazemos sempre o cast num bloco try/except para nunca
+    deixar a query rebentar quando o valor não é um ObjectId válido
+    (ex.: UUID legado gerado por ``str(uuid.uuid4())``).
+    """
+    if not value:
+        return None
+    try:
+        return ObjectId(value)
+    except (InvalidId, TypeError, ValueError):
+        return None
 
 
 def combine_and_conditions(and_conditions: list[dict]) -> dict:
@@ -185,12 +209,20 @@ def _assignment_clauses_for_id(user_id: str) -> list[dict]:
     # Normaliza sempre para str antes de montar as cláusulas — o ID pode
     # chegar como ObjectId/UUID/int em documentos legados/seed e uma
     # comparação Mongo entre tipos BSON diferentes falha silenciosamente
-    # (zero resultados, sem erro).
+    # (zero resultados, sem erro). Tentamos SEMPRE o cast seguro para
+    # ObjectId (try/except bson.errors.InvalidId) e procuramos TANTO pela
+    # string original COMO pelo ObjectId (quando válido), porque a BD tem
+    # documentos com o ID guardado em ambos os formatos.
     normalized_id = normalize_id_for_match(user_id) or ""
+    object_id = _safe_object_id(normalized_id)
+    match_values: list[Any] = [normalized_id]
+    if object_id is not None:
+        match_values.append(object_id)
+
     clauses: list[dict] = []
     for field in ASSIGNMENT_ID_FIELDS:
-        if field in _ARRAY_ASSIGNMENT_FIELDS:
-            clauses.append({field: {"$in": [normalized_id]}})
+        if field in _ARRAY_ASSIGNMENT_FIELDS or len(match_values) > 1:
+            clauses.append({field: {"$in": match_values}})
         else:
             clauses.append({field: normalized_id})
     return clauses
@@ -213,9 +245,12 @@ def build_assigned_to_me_condition(user_id: str) -> dict:
     legados) ficavam sem resultados em "Os Meus Processos".
 
     O ID é normalizado explicitamente para ``str`` (ver
-    ``normalize_id_for_match``) — a causa nº1 de "Os Meus Processos"
-    devolver vazio para Consultores é o ID do token não coincidir em
-    tipo BSON com o valor persistido em ``assigned_*``.
+    ``normalize_id_for_match``) e as cláusulas geradas por
+    ``_assignment_clauses_for_id`` procuram tanto pela string como pelo
+    ``ObjectId`` equivalente (quando válido) — a causa nº1 de "Os Meus
+    Processos" devolver vazio para Consultores é o ID do token não
+    coincidir em tipo BSON (``str`` vs ``ObjectId``) com o valor
+    persistido em ``assigned_*``.
     """
     return {"$or": _assignment_clauses_for_id(user_id)}
 
