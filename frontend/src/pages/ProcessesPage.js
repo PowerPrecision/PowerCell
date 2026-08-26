@@ -765,7 +765,7 @@ const ProcessesPage = () => {
             {!showCompleted && (
               <div className="mb-4 p-2 bg-blue-50 dark:bg-blue-900/20 rounded border border-blue-200 dark:border-blue-800">
                 <p className="text-xs text-blue-700 dark:text-blue-300">
-                  📋 Mostrando apenas processos ativos. Ative "Mostrar arquivo" para ver também concluídos e desistências.
+                  📋 Mostrando apenas processos ativos. Utilize o seletor no topo direito da página para ver todos os processos ou o arquivo.
                 </p>
               </div>
             )}

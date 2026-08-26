@@ -227,6 +227,21 @@ class TestBuildProcessListQuery:
         assert build_company_scope_condition("") is None
         assert build_company_scope_condition(None) is None
 
+    def test_company_scope_never_hides_legacy_tenantless_processes(self):
+        """
+        Processos antigos sem company_id/company (null ou campo ausente)
+        têm de continuar visíveis em "Os Meus Processos", mesmo quando o
+        consultor tem uma empresa activa concreta (não "default"). A
+        condição de atribuição (mine_only) já garante que só processos do
+        próprio utilizador entram nesta query.
+        """
+        from services.process_list_filters import build_company_scope_condition
+        scoped = build_company_scope_condition("acme")
+        assert {"company_id": {"$in": [None, "", "default"]}} in scoped["$or"]
+        assert {"company_id": {"$exists": False}} in scoped["$or"]
+        assert {"company": {"$in": [None, "", "default"]}} in scoped["$or"]
+        assert {"company": {"$exists": False}} in scoped["$or"]
+
 
 class TestAssignedUserFilter:
     def test_empty_returns_none(self):

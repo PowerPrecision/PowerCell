@@ -339,27 +339,36 @@ def build_company_scope_condition(company_id: Optional[str]) -> Optional[dict]:
     """
     PACOTE DV — isolamento por empresa activa.
 
-    GET /processes/me exige ``company_id == active_company_id`` (com fallback
-    para o campo legado ``company``). Processos sem empresa só entram no
-    sentinel ``default``.
+    GET /processes/me prefere ``company_id == active_company_id`` (com
+    fallback para os campos legados ``company``/``company_name``), mas
+    **nunca** pode esconder processos legados que não têm o campo de
+    empresa preenchido (``company_id``/``company`` ``null`` ou ausente).
+
+    Antes desta correcção, o fallback "sem empresa" só era incluído quando
+    ``company_id == "default"`` — qualquer outra empresa activa (o caso
+    normal) filtrava estritamente por igualdade e excluía silenciosamente
+    todos os processos antigos sem tenant atribuído, mesmo já estando
+    atribuídos ao consultor via ``mine_only``/``build_assigned_to_me_condition``.
+    Como essa condição de atribuição já restringe a query aos processos do
+    próprio utilizador, é seguro incluir sempre o fallback "sem empresa"
+    (não é uma fuga de isolamento multi-tenant — só amplia o que já é
+    "meu").
     """
     cid = (company_id or "").strip()
     if not cid:
         return None
 
-    clauses: list[dict] = [
+    return {"$or": [
         {"company_id": cid},
         {"company": cid},
         {"company_name": cid},
-    ]
-    if cid == "default":
-        clauses.extend([
-            {"company_id": {"$in": [None, "", "default"]}},
-            {"company_id": {"$exists": False}},
-            {"company": {"$in": [None, "", "default"]}},
-            {"company": {"$exists": False}},
-        ])
-    return {"$or": clauses}
+        # Fallback para processos legados sem tenant atribuído — nunca
+        # escondê-los, independentemente de qual seja a empresa activa.
+        {"company_id": {"$in": [None, "", "default"]}},
+        {"company_id": {"$exists": False}},
+        {"company": {"$in": [None, "", "default"]}},
+        {"company": {"$exists": False}},
+    ]}
 
 
 def build_view_mode_status_conditions(
