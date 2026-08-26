@@ -48,7 +48,7 @@ const ProcessesPage = () => {
   const navigate = useNavigate();
   const location = useLocation();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, effectiveRole, activeRole, activeCompanyId } = useAuth();
+  const { user, effectiveRole, activeRole, activeCompanyId, effectiveCompanyId } = useAuth();
   const [processes, setProcesses] = useState([]);
   const [loading, setLoading] = useState(true);
   
@@ -186,6 +186,10 @@ const ProcessesPage = () => {
         view_mode: showCompleted ? 'all' : 'active_only',
         sort_field: sortField,
         sort_order: sortOrder,
+        // PACOTE FN — Sync do Cabeçalho com a Lista: enviar sempre a empresa
+        // ativa seleccionada no ContextSwitcher como query param explícito,
+        // para que a exportação reflita a mesma empresa da tabela.
+        ...(effectiveCompanyId ? { company_id: effectiveCompanyId } : {}),
         ...(isGlobalView ? { show_all: true } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
@@ -278,7 +282,7 @@ const ProcessesPage = () => {
     } finally {
       setExporting(false);
     }
-  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter]);
+  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter, effectiveCompanyId]);
 
   const handleMarkIndexed = useCallback(async (e, processId) => {
     e.stopPropagation();
@@ -369,6 +373,15 @@ const ProcessesPage = () => {
         view_mode: viewMode,
         sort_field: sortField,
         sort_order: sortOrder,
+        // PACOTE FN — Sync do Cabeçalho com a Lista: quando o utilizador tem
+        // múltiplos perfis/empresas e troca a empresa activa no
+        // ContextSwitcher (Header), a tabela tem de respeitar essa selecção
+        // de imediato. Envia-se sempre o company_id activo (AuthContext) como
+        // query param explícito em GET /processes/me e GET /processes — o
+        // backend usa-o em build_company_scope_condition para restringir a
+        // query à empresa seleccionada, em vez de depender apenas do header
+        // X-Company-Id (que também é enviado pelo interceptor Axios).
+        ...(effectiveCompanyId ? { company_id: effectiveCompanyId } : {}),
         ...(isGlobalView ? { show_all: true } : {}),
         // PACOTE BZ: passar indexStatusFilter como query param is_indexed ao backend
         // (antes era filtrado localmente com .filter(), causando tamanhos de página irregulares)
@@ -412,7 +425,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter]);
   
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
   const handleViewModeChange = (newMode) => {
