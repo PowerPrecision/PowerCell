@@ -1,6 +1,8 @@
 """
 Testes unitários para services.process_list_filters.
 """
+from bson import ObjectId
+
 from models.auth import UserRole
 from services.process_list_filters import (
     combine_and_conditions,
@@ -10,6 +12,9 @@ from services.process_list_filters import (
     build_is_indexed_conditions,
     build_process_search_condition,
     build_process_list_query,
+    _assignment_clauses_for_id,
+    ASSIGNMENT_ID_FIELDS,
+    _ARRAY_ASSIGNMENT_FIELDS,
 )
 from services.process_status import INACTIVE_STATUSES, ARCHIVED_STATUSES, LEAD_STATUS_VALUES
 
@@ -278,6 +283,58 @@ class TestBuildProcessListQuery:
         assert {"company_id": {"$exists": False}} in scoped["$or"]
         assert {"company": {"$in": [None, "", "default"]}} in scoped["$or"]
         assert {"company": {"$exists": False}} in scoped["$or"]
+
+
+class TestAssignmentClausesForId:
+    """
+    Escudo de Testes Unitários — casting BSON seguro em
+    ``_assignment_clauses_for_id``.
+
+    A causa nº1 de "Os Meus Processos" devolver vazio para Consultores é o
+    ID do token (sempre ``str``) não coincidir em tipo BSON com o valor
+    persistido em ``assigned_*`` (alguns documentos legados/seed guardam
+    ``ObjectId`` nativo). ``_assignment_clauses_for_id`` tem de pesquisar
+    SEMPRE por ambos os formatos quando o ID é um ObjectId hexadecimal
+    válido, e nunca deve rebentar (``bson.errors.InvalidId``) quando o ID
+    não o é (ex.: UUIDs legados, IDs sintéticos "consultor-123").
+    """
+
+    def test_assignment_clauses_safe_objectid(self):
+        valid_hex_id = "507f1f77bcf86cd799439011"
+        expected_object_id = ObjectId(valid_hex_id)
+
+        clauses = _assignment_clauses_for_id(valid_hex_id)
+
+        assert len(clauses) == len(ASSIGNMENT_ID_FIELDS)
+        for clause in clauses:
+            (field, condition), = clause.items()
+            assert field in ASSIGNMENT_ID_FIELDS
+            # Quando o cast para ObjectId é válido, a cláusula usa sempre
+            # $in com AMBOS os formatos (string original + ObjectId),
+            # mesmo para campos escalares (não apenas os de array).
+            assert "$in" in condition
+            assert valid_hex_id in condition["$in"]
+            assert expected_object_id in condition["$in"]
+
+    def test_assignment_clauses_non_objectid_string_no_crash(self):
+        non_object_id = "consultor-123"
+
+        # Não pode levantar bson.errors.InvalidId nem qualquer outra excepção.
+        clauses = _assignment_clauses_for_id(non_object_id)
+
+        assert len(clauses) == len(ASSIGNMENT_ID_FIELDS)
+        for clause in clauses:
+            (field, condition), = clause.items()
+            assert field in ASSIGNMENT_ID_FIELDS
+            if field in _ARRAY_ASSIGNMENT_FIELDS:
+                # Campos-array continuam a usar $in, mas apenas com a string.
+                assert condition == {"$in": [non_object_id]}
+            else:
+                # Campos escalares comparam directamente pela string — sem
+                # ObjectId nenhum, porque o cast falhou (InvalidId).
+                assert condition == non_object_id
+            if isinstance(condition, dict) and "$in" in condition:
+                assert all(not isinstance(v, ObjectId) for v in condition["$in"])
 
 
 class TestAssignedUserFilter:
