@@ -310,7 +310,11 @@ const CreateEventDialog = ({
               <Label htmlFor="event-process">Processo (opcional)</Label>
               <Select
                 value={formData.process_id || "none"}
-                onValueChange={(value) => setFormData({ ...formData, process_id: value === "none" ? "" : value })}
+                onValueChange={(value) => setFormData((prev) => ({
+                  ...prev,
+                  process_id: value === "none" ? "" : value,
+                  visible_to_client: value === "none" ? false : prev.visible_to_client,
+                }))}
               >
                 <SelectTrigger id="event-process">
                   <SelectValue placeholder="Selecionar processo..." />
@@ -324,6 +328,28 @@ const CreateEventDialog = ({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {/* Sync de Perfil e Agenda — sem este toggle, reuniões/marcações
+              criadas aqui (fluxo principal do calendário) ficavam sempre
+              ocultas na Agenda do Portal do Cliente (visible_to_client
+              nunca podia ser ativado nesta dialog). */}
+          {!isAbsence && formData.process_id && (
+            <div className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30">
+              <Switch
+                id="event-visible-to-client"
+                checked={!!formData.visible_to_client}
+                onCheckedChange={(checked) => setFormData({ ...formData, visible_to_client: checked })}
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="event-visible-to-client" className="text-sm cursor-pointer">
+                  Visível no Portal do Cliente
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  O cliente verá esta marcação na sua Agenda do Portal.
+                </p>
+              </div>
             </div>
           )}
 

@@ -235,9 +235,16 @@ async def run_get_client_profile(client_data: dict):
                     "desistencia", "desistencias", "desistido",
                 ] + DELETED_STATUS_VALUES}
             },
-            {"_id": 0, "id": 1}
+            {"_id": 0, "id": 1, "is_data_confirmed": 1}
         )
         has_process = active_process is not None
+        # Fix: Sync Portal Profile with core CRM data — `is_data_confirmed`
+        # vive no Processo (marcado True pela Indexação), mas este endpoint
+        # devolvia sempre False. Sem isto, o Portal nunca mostrava o alerta
+        # "Dados Bloqueados para Análise" mesmo depois dos dados terem sido
+        # confirmados pela equipa de Indexação.
+        if active_process:
+            is_data_confirmed = active_process.get("is_data_confirmed") is True
 
     # Preparar dados pessoais (desencriptar campos encriptados + ocultar sensíveis)
     dados_pessoais = client.get("dados_pessoais", {}) or {}
