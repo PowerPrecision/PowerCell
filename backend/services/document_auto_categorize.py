@@ -271,6 +271,7 @@ async def auto_categorize_document_background(
                 filename=filename,
                 s3_path=s3_path,
                 user={"id": "system_auto_cat", "name": "Categorização IA"},
+                linked_document_id=doc_id,
             )
         except Exception as fulfill_err:
             logger.warning(

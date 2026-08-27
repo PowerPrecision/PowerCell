@@ -37,6 +37,52 @@ from services.s3_storage import s3_service
 logger = logging.getLogger(__name__)
 
 
+async def _auto_fulfill_portal_request(
+    process_id: str,
+    document: dict[str, Any],
+    *,
+    user: Optional[dict] = None,
+) -> dict[str, Any]:
+    """
+    Auto-Match: assim que um documento interno é gravado (upload feito pela
+    equipa no CRM), procura no processo um pedido do Portal do Cliente
+    (`documents` com `status` REQUESTED/PENDING) cuja categoria ou tipo
+    corresponda ao documento acabado de carregar.
+
+    Quando há correspondência, actualiza esse pedido para o estado de
+    sucesso equivalente ("RECEIVED" — o "submetido" do lado do cliente) e
+    associa-lhe o `document_id` do ficheiro carregado, para que o Portal do
+    Cliente deixe de mostrar o pedido como "Pendente".
+
+    `document` deve conter: category, filename, s3_path, content_type,
+    file_size e, opcionalmente, document_id (id do pedido específico a
+    satisfazer directamente).
+
+    Nunca propaga excepções — falha de matching não pode bloquear o upload.
+    """
+    try:
+        from services.document_portal_fulfill import (
+            fulfill_portal_requests_on_staff_upload,
+        )
+
+        return await fulfill_portal_requests_on_staff_upload(
+            process_id,
+            category=document.get("category"),
+            filename=document.get("filename"),
+            s3_path=document.get("s3_path"),
+            content_type=document.get("content_type"),
+            file_size=document.get("file_size"),
+            user=user,
+            document_id=document.get("document_id"),
+            linked_document_id=document.get("linked_document_id"),
+        )
+    except Exception as e:
+        logger.warning(
+            f"[UPLOAD] Erro ao marcar pedido portal como recebido: {e}"
+        )
+        return {"fulfilled": 0, "document_ids": []}
+
+
 async def _validate_and_maybe_convert(
     file_content: bytes,
     original_filename: str,
@@ -319,23 +365,19 @@ async def run_upload_file_s3(
     except Exception as e:
         logger.warning(f"[UPLOAD] Erro ao registar histórico: {e}")
 
-    portal_fulfill: dict[str, Any] = {"fulfilled": 0}
-    try:
-        from services.document_portal_fulfill import (
-            fulfill_portal_requests_on_staff_upload,
-        )
-
-        portal_fulfill = await fulfill_portal_requests_on_staff_upload(
-            client_id,
-            category=category,
-            filename=normalized_filename,
-            s3_path=s3_path,
-            content_type=content_type,
-            file_size=len(file_content) if file_content else None,
-            user=user,
-        )
-    except Exception as e:
-        logger.warning(f"[UPLOAD] Erro ao marcar pedido portal como recebido: {e}")
+    # Auto-Match — o documento acabou de ser gravado (S3 + categoria); tenta
+    # imediatamente satisfazer um pedido pendente do Portal do Cliente.
+    portal_fulfill = await _auto_fulfill_portal_request(
+        client_id,
+        {
+            "category": category,
+            "filename": normalized_filename,
+            "s3_path": s3_path,
+            "content_type": content_type,
+            "file_size": len(file_content) if file_content else None,
+        },
+        user=user,
+    )
 
     logger.info(f"[UPLOAD] Upload concluído com sucesso: {normalized_filename}")
 
