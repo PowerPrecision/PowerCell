@@ -1775,6 +1775,21 @@ export default function ClientPortal() {
   const [data, setData] = useState(null);
   const [refreshKey, setRefreshKey] = useState(0);
 
+  // ── Portal do Cliente: sem suporte a Dark Mode ──
+  // O Portal é sempre apresentado em Light Mode, independentemente da
+  // preferência de tema guardada para o CRM (ThemeContext) ou do SO do
+  // utilizador. Removemos a classe "dark" do <html> enquanto o Portal está
+  // montado e restauramos o estado anterior ao sair (ex: staff a navegar
+  // de volta para o CRM em modo escuro).
+  useEffect(() => {
+    const root = document.documentElement;
+    const hadDarkClass = root.classList.contains('dark');
+    root.classList.remove('dark');
+    return () => {
+      if (hadDarkClass) root.classList.add('dark');
+    };
+  }, []);
+
   // ── Login obrigatório ──
   const [isVerified, setIsVerified] = useState(false);
   const [autoLoginAttempted, setAutoLoginAttempted] = useState(false);
