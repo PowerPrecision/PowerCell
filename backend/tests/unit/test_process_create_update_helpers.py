@@ -514,6 +514,7 @@ class TestKanbanEnrichment:
             build_kanban_board_payload,
             safe_build_kanban_columns,
         )
+        from services.process_status import ARCHIVED_STATUSES
         assert client_contact_summary({
             "nome": "Ana",
             "contacto": {"email": "a@x.com", "telefone": "91"},
@@ -534,8 +535,8 @@ class TestKanbanEnrichment:
         assert "client_name" not in procs[2]
 
         active, inactive = build_active_inactive_count_queries({"is_deleted": {"$ne": True}})
-        assert active["status"]["$nin"] == ["concluidos", "desistencias"]
-        assert inactive["status"]["$in"] == ["concluidos", "desistencias"]
+        assert active["status"]["$nin"] == ARCHIVED_STATUSES
+        assert inactive["status"]["$in"] == ARCHIVED_STATUSES
 
         payload = build_kanban_board_payload(
             columns=[],
