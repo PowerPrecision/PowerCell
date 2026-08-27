@@ -13,9 +13,10 @@ from services.process_list_filters import (
     EMPTY_PORTFOLIO_QUERY,
     role_has_client_portfolio,
 )
-
-# Mesmos status inactivos que processes.py / process_status.py
-INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
+from services.process_status import (
+    DELETED_STATUS_VALUES,
+    INACTIVE_STATUSES,
+)
 
 # PACOTE BK — Estado pré_registo (cliente ainda a preencher no portal).
 PRE_REGISTO_STATUS = "pre_registo"
@@ -64,10 +65,10 @@ LEADS_PROJECTION = {
 
 
 def wants_deleted_view(request: Request) -> bool:
-    """PACOTE CP — view_mode=deleted / status=eliminado."""
+    """PACOTE CP — view_mode=deleted / status=eliminado(s)."""
     view_mode = request.query_params.get("view_mode", "active_only")
     status_filter = request.query_params.get("status")
-    return status_filter == "eliminado" or view_mode == "deleted"
+    return status_filter in DELETED_STATUS_VALUES or view_mode == "deleted"
 
 
 def build_my_clients_process_query(
@@ -107,7 +108,10 @@ def build_my_clients_process_query(
             UserRole.DIRETOR,
             UserRole.ADMINISTRATIVO,
         ]:
-            return {"is_deleted": True}
+            return {"$or": [
+                {"is_deleted": True},
+                {"status": {"$in": DELETED_STATUS_VALUES}},
+            ]}
         return EMPTY_PORTFOLIO_QUERY
 
     if role == UserRole.CONSULTOR:
@@ -140,7 +144,7 @@ def build_my_clients_process_query(
         UserRole.ADMINISTRATIVO,
     ]:
         return {
-            "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+            "status": {"$nin": INACTIVE_STATUSES},
             "is_active": {"$ne": False},
         }
     return EMPTY_PORTFOLIO_QUERY
@@ -198,7 +202,7 @@ def build_my_clients_stats_query(
         UserRole.ADMINISTRATIVO,
     ]:
         return {
-            "status": {"$nin": ["concluidos", "desistencias", "eliminado"]},
+            "status": {"$nin": INACTIVE_STATUSES},
             "is_active": {"$ne": False},
         }
     return EMPTY_PORTFOLIO_QUERY

@@ -6,6 +6,7 @@ Do **not** overwrite services/backup_restore.py.
 from __future__ import annotations
 
 from database import db
+from services.process_status import DELETED_STATUS_VALUES
 
 
 async def run_list_deleted_items(item_type: str, limit: int, user: dict):
@@ -14,8 +15,10 @@ async def run_list_deleted_items(item_type: str, limit: int, user: dict):
 
     if item_type in ["all", "processes"]:
         # Processos eliminados
+        # Fix: Normalize process status filters — reconhece tanto o
+        # singular ("eliminado") como o plural legado ("eliminados").
         deleted_processes = await db.processes.find(
-            {"status": "eliminado", "is_active": False},
+            {"status": {"$in": DELETED_STATUS_VALUES}, "is_active": False},
             {"_id": 0}
         ).sort("updated_at", -1).limit(limit).to_list(limit)
 

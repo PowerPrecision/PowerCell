@@ -9,6 +9,7 @@ import logging
 
 from database import db
 from models.auth import UserRole
+from services.process_status import DELETED_STATUS_VALUES, STATUS_VALUE_ALIASES
 from services.redis_cache import (
     cache_get, cache_set,
     build_user_kpi_key,
@@ -56,13 +57,16 @@ async def run_get_stats(user: dict):
     
     # Process status breakdown
     # NOTA: Estatísticas DEVEM incluir concluídos e desistências para métricas precisas
-    concluded_statuses = ["concluidos"]
-    dropped_statuses = ["desistencias"]  # NOTA: "eliminados" não conta como desistência para estatísticas
+    # Fix: Normalize process status filters — inclui as variações legadas
+    # singular/plural (ver services/process_status.py) para não sub-contar
+    # processos concluídos/desistidos gravados no singular.
+    concluded_statuses = STATUS_VALUE_ALIASES["concluidos"]
+    dropped_statuses = STATUS_VALUE_ALIASES["desistencias"]  # NOTA: "eliminados" não conta como desistência para estatísticas
 
     # Queries para contagens separadas (todas excluem is_deleted via process_query base)
     concluded_query = {**process_query, "status": {"$in": concluded_statuses}}
     dropped_query = {**process_query, "status": {"$in": dropped_statuses}}
-    active_query = {**process_query, "status": {"$nin": concluded_statuses + dropped_statuses + ["eliminados"]}}
+    active_query = {**process_query, "status": {"$nin": concluded_statuses + dropped_statuses + DELETED_STATUS_VALUES}}
     no_indexacao_query = {**active_query, "assigned_indexacao_id": None}
     
     # ── BUSCA PARALELA: 4 contagens de processos + 1 contagem de tarefas ──

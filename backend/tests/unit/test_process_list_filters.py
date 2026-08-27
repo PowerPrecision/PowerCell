@@ -28,17 +28,34 @@ class TestCombineAndConditions:
 class TestIsDeletedFilter:
     def test_normal_excludes_deleted(self):
         assert build_is_deleted_filter(status=None, view_mode="active_only") == {
-            "is_deleted": {"$ne": True}
+            "is_deleted": {"$ne": True},
+            "status": {"$nin": ["eliminado", "eliminados"]},
         }
 
     def test_eliminados_status(self):
         assert build_is_deleted_filter(status="eliminados", view_mode="active_only") == {
-            "is_deleted": True
+            "$or": [
+                {"is_deleted": True},
+                {"status": {"$in": ["eliminado", "eliminados"]}},
+            ]
+        }
+
+    def test_eliminado_singular_status_is_also_recognized(self):
+        # Fix: Normalize process status filters — o singular legado
+        # ("eliminado") deve activar o mesmo caminho que o plural.
+        assert build_is_deleted_filter(status="eliminado", view_mode="active_only") == {
+            "$or": [
+                {"is_deleted": True},
+                {"status": {"$in": ["eliminado", "eliminados"]}},
+            ]
         }
 
     def test_deleted_view_mode(self):
         assert build_is_deleted_filter(status=None, view_mode="deleted") == {
-            "is_deleted": True
+            "$or": [
+                {"is_deleted": True},
+                {"status": {"$in": ["eliminado", "eliminados"]}},
+            ]
         }
 
 
@@ -101,11 +118,25 @@ class TestViewModeStatus:
             status="escritura", view_mode="active_only"
         )
         assert {"status": {"$nin": INACTIVE_STATUSES}} in conds
-        assert {"status": "escritura"} in conds
+        assert {"status": {"$in": ["escritura"]}} in conds
+
+    def test_explicit_status_expands_legacy_variations(self):
+        # Fix: Normalize process status filters — status="concluidos" tem de
+        # procurar também pela variação legada singular "concluido".
+        conds = build_view_mode_status_conditions(
+            status="concluidos", view_mode="active_only"
+        )
+        assert {"status": {"$in": ["concluido", "concluidos"]}} in conds
 
     def test_eliminados_skips_view_mode(self):
         conds = build_view_mode_status_conditions(
             status="eliminados", view_mode="active_only"
+        )
+        assert conds == []
+
+    def test_eliminado_singular_skips_view_mode(self):
+        conds = build_view_mode_status_conditions(
+            status="eliminado", view_mode="active_only"
         )
         assert conds == []
 
@@ -144,7 +175,13 @@ class TestBuildProcessListQuery:
         assert "$and" in q or "status" in q
         flat = q.get("$and", [q])
         assert {"status": {"$nin": LEAD_STATUS_VALUES}} in flat
-        assert {"is_deleted": {"$ne": True}} in flat
+        # Fix: Normalize process status filters — build_is_deleted_filter
+        # agora também exclui "eliminado"/"eliminados" via `status` (defesa
+        # em profundidade a par de `is_deleted`).
+        assert {
+            "is_deleted": {"$ne": True},
+            "status": {"$nin": ["eliminado", "eliminados"]},
+        } in flat
         assert {"status": {"$nin": INACTIVE_STATUSES}} in flat
 
     def test_consultor_with_search(self):

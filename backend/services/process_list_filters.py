@@ -17,7 +17,9 @@ from models.auth import UserRole
 from services.process_status import (
     INACTIVE_STATUSES,
     ARCHIVED_STATUSES,
+    DELETED_STATUS_VALUES,
     LEAD_STATUS_VALUES,
+    expand_status_values,
     _should_hide_pre_registo,
 )
 from utils.search_filters import (
@@ -88,13 +90,29 @@ def build_is_deleted_filter(
     """
     Filtro de integridade is_deleted.
 
-    status="eliminados" ou view_mode="deleted" → apenas eliminados.
+    status="eliminado"/"eliminados" ou view_mode="deleted" → apenas eliminados.
     Caso contrário → excluir eliminados.
+
+    Fix: Normalize process status filters to handle legacy singular and
+    plural values. Alguns documentos legados foram marcados como eliminados
+    apenas através do campo `status` (singular OU plural), sem a flag
+    `is_deleted` correspondente — daí o filtro "Eliminados" (que só olhava
+    para `is_deleted`) não devolver nada para esses registos, e o filtro
+    "Ativos" (que só excluía o `status` plural) deixar passar os que têm o
+    `status` no singular. A query usa sempre `DELETED_STATUS_VALUES`
+    (`["eliminado", "eliminados"]`) em conjunto com `is_deleted` para
+    cobrir ambas as fontes de verdade.
     """
-    wants_deleted = status == "eliminados" or view_mode == "deleted"
+    wants_deleted = status in DELETED_STATUS_VALUES or view_mode == "deleted"
     if wants_deleted:
-        return {"is_deleted": True}
-    return {"is_deleted": {"$ne": True}}
+        return {"$or": [
+            {"is_deleted": True},
+            {"status": {"$in": DELETED_STATUS_VALUES}},
+        ]}
+    return {
+        "is_deleted": {"$ne": True},
+        "status": {"$nin": DELETED_STATUS_VALUES},
+    }
 
 
 def build_role_visibility_conditions(
@@ -376,18 +394,28 @@ def build_view_mode_status_conditions(
     status: Optional[str],
     view_mode: Optional[str],
 ) -> list[dict]:
-    """Filtros de view_mode + status explícito (exceto eliminados)."""
-    conditions: list[dict] = []
+    """
+    Filtros de view_mode + status explícito (exceto eliminado/eliminados).
 
-    if status == "eliminados":
+    Fix: Normalize process status filters to handle legacy singular and
+    plural values. Um filtro de status explícito (ex.: status="concluidos")
+    usa `expand_status_values` para procurar por `$in` em TODAS as
+    variações legadas documentadas (`["concluido", "concluidos"]`) em vez
+    de uma igualdade estrita que ignoraria os documentos gravados no
+    singular.
+    """
+    conditions: list[dict] = []
+    is_deleted_status = status in DELETED_STATUS_VALUES
+
+    if is_deleted_status:
         pass
     elif view_mode == "active_only":
         conditions.append({"status": {"$nin": INACTIVE_STATUSES}})
     elif view_mode == "historical":
         conditions.append({"status": {"$in": ARCHIVED_STATUSES}})
 
-    if status and status != "eliminados":
-        conditions.append({"status": status})
+    if status and not is_deleted_status:
+        conditions.append({"status": {"$in": expand_status_values(status)}})
 
     return conditions
 
@@ -490,6 +518,17 @@ def build_process_list_query(
                 user, role, show_all=show_all, all_roles=all_roles,
             )
         )
+        # PACOTE FN — Sync do Cabeçalho com a Lista: quando o ContextSwitcher
+        # (Header) tem uma empresa activa seleccionada explicitamente e o
+        # frontend a envia como query param ``company_id`` (GET /processes,
+        # visão global/"Lista de Processos"), a query respeita a mesma
+        # restrição de isolamento por empresa usada em "Os Meus Processos".
+        # Sem ``company_id`` explícito (chamadas legadas/sem contexto de
+        # empresa), o comportamento mantém-se inalterado (sem filtro extra).
+        if company_id:
+            company_cond = build_company_scope_condition(company_id)
+            if company_cond:
+                and_conditions.append(company_cond)
     and_conditions.extend(
         build_view_mode_status_conditions(status=status, view_mode=view_mode)
     )

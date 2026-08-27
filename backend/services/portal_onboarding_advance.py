@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database import db
+from services.process_status import INACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -136,11 +137,11 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     # ── 2. Calcular a 1ª fase REAL do Kanban ──
     # Excluir pre_registo (Lead), fila_espera e terminais — queremos a 1ª fase
     # ativa do Kanban onde o processo deve aparecer após submeter os docs.
-    EXCLUDED_FROM_KANBAN_START = {
-        "pre_registo", "fila_espera",
-        "concluido", "arquivo", "perdido", "desistencias",
-        # variants legacy
-        "concluidos", "desistido", "cancelado", "recusado",
+    # Fix: Normalize process status filters — reutiliza a constante central
+    # (todas as variações legadas singular/plural) em vez de uma lista
+    # local parcial.
+    EXCLUDED_FROM_KANBAN_START = set(INACTIVE_STATUSES) | {
+        "pre_registo", "fila_espera", "recusado",
     }
     all_statuses = await db.workflow_statuses.find({}, {"_id": 0}).sort("order", 1).to_list(100)
 

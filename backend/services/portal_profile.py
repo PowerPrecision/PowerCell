@@ -12,6 +12,7 @@ from fastapi import HTTPException
 from pydantic import BaseModel
 
 from database import db
+from services.process_status import DELETED_STATUS_VALUES
 
 logger = logging.getLogger(__name__)
 
@@ -223,11 +224,16 @@ async def run_get_client_profile(client_data: dict):
         # da fase de recolha de documentos. Avalia diretamente as Fases do
         # Kanban (Status) em vez da flag is_indexed (que pode não estar
         # atualizada atempadamente na BD).
+        # Fix: Normalize process status filters — inclui ambas as
+        # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
             {
                 "id": {"$in": process_ids},
                 "is_deleted": {"$ne": True},
-                "status": {"$nin": ["pre_registo", None, "clientes_espera", "documentacao", "eliminado", "desistencias"]}
+                "status": {"$nin": [
+                    "pre_registo", None, "clientes_espera", "documentacao",
+                    "desistencia", "desistencias", "desistido",
+                ] + DELETED_STATUS_VALUES}
             },
             {"_id": 0, "id": 1}
         )
@@ -309,11 +315,16 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
         # PACOTE CQ — O perfil é trancado se o processo avançar para além
         # da fase de recolha de documentos. Avalia diretamente as Fases do
         # Kanban (Status) em vez da flag is_indexed.
+        # Fix: Normalize process status filters — inclui ambas as
+        # variações (singular/plural) de "eliminado" e "desistência".
         active_process = await db.processes.find_one(
             {
                 "id": {"$in": process_ids},
                 "is_deleted": {"$ne": True},
-                "status": {"$nin": ["pre_registo", None, "clientes_espera", "documentacao", "eliminado", "desistencias"]}
+                "status": {"$nin": [
+                    "pre_registo", None, "clientes_espera", "documentacao",
+                    "desistencia", "desistencias", "desistido",
+                ] + DELETED_STATUS_VALUES}
             },
             {"_id": 0, "id": 1}
         )

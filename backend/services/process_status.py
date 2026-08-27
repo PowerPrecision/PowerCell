@@ -11,10 +11,75 @@ from models.auth import UserRole
 # ====================================================================
 # CONSTANTES DE FILTRO DE ESTADO ATIVO
 # ====================================================================
-# Status que representam processos terminados (não ativos)
-INACTIVE_STATUSES = ["concluidos", "desistencias", "eliminados"]
-# Status de processos arquivados (para histórico)
-ARCHIVED_STATUSES = ["concluidos", "desistencias"]
+# Fix: Normalize process status filters to handle legacy singular and
+# plural values.
+#
+# O schema de `status` evoluiu ao longo do tempo sem migração retroactiva,
+# pelo que a BD tem uma mistura de valores singular/plural para o mesmo
+# estado "lógico" (ex.: "eliminado" vs "eliminados", "concluido" vs
+# "concluidos"). Uma comparação de igualdade estrita ou uma lista `$nin`/`$in`
+# com apenas UMA das variações falha SILENCIOSAMENTE para documentos legados
+# — não há erro, apenas processos a aparecer/desaparecer do filtro errado
+# (ex.: "Processos Ativos" a mostrar processos "eliminado" (singular) porque
+# só "eliminados" (plural) estava excluído; "Eliminados" a não mostrar nada
+# porque a query só procurava "eliminados" (plural) e os documentos tinham
+# "eliminado" (singular), ou vice-versa).
+#
+# `STATUS_VALUE_ALIASES` documenta TODAS as variações legadas conhecidas
+# para cada estado terminal e é a fonte única de verdade para qualquer
+# filtro `$in`/`$nin` sobre estes estados — nunca hard-code apenas uma
+# variação num novo filtro.
+STATUS_VALUE_ALIASES: dict[str, list[str]] = {
+    "eliminado": ["eliminado", "eliminados"],
+    "eliminados": ["eliminado", "eliminados"],
+    "concluido": ["concluido", "concluidos"],
+    "concluidos": ["concluido", "concluidos"],
+    "desistencia": ["desistencia", "desistencias", "desistido"],
+    "desistencias": ["desistencia", "desistencias", "desistido"],
+    "desistido": ["desistencia", "desistencias", "desistido"],
+    "cancelado": ["cancelado"],
+    "perdido": ["perdido"],
+    "arquivo": ["arquivo"],
+}
+
+# Todas as variações (singular + plural) do estado "eliminado". Usado por
+# qualquer filtro que precise de reconhecer processos soft-deleted através
+# do campo `status` (defesa em profundidade a par da flag `is_deleted`).
+DELETED_STATUS_VALUES = STATUS_VALUE_ALIASES["eliminados"]
+
+
+def expand_status_values(status: Optional[str]) -> list[str]:
+    """
+    Devolve todas as variações legadas conhecidas para um valor de status.
+
+    Se `status` não tiver variações documentadas (ex.: fases activas do
+    Kanban como "escritura"), devolve `[status]` — um filtro `$in` com uma
+    única entrada é equivalente a uma comparação de igualdade.
+    """
+    if not status:
+        return []
+    return STATUS_VALUE_ALIASES.get(status, [status])
+
+
+# Status que representam processos terminados (não ativos). Inclui TODAS
+# as variações singular/plural documentadas em `STATUS_VALUE_ALIASES` para
+# cada estado terminal — o filtro "Ativos" (`$nin`) tem de excluir qualquer
+# uma delas, nunca apenas a forma canónica.
+INACTIVE_STATUSES = [
+    "eliminado", "eliminados",
+    "concluido", "concluidos",
+    "desistencia", "desistencias", "desistido",
+    "cancelado",
+    "perdido",
+    "arquivo",
+]
+# Status de processos arquivados (para histórico) — concluídos/desistências,
+# incluindo variações singular/plural. Não inclui "eliminado(s)": esse é um
+# estado de soft-delete gerido separadamente pela flag `is_deleted`.
+ARCHIVED_STATUSES = [
+    "concluido", "concluidos",
+    "desistencia", "desistencias", "desistido",
+]
 
 # ====================================================================
 # PACOTE BK — EXCLUSÃO DO ESTADO pré_registo DOS QUADROS DE TRABALHO

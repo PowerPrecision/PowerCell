@@ -20,6 +20,7 @@ from services.portal_status_helpers import (
     _get_rgpd_status,
     _get_team_info,
 )
+from services.process_status import INACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -126,7 +127,9 @@ async def run_get_portal_status(client_data: dict):
             break
 
     # Excluir statuses terminais E ocultos no portal
-    terminal_statuses = ["concluidos", "desistencias", "eliminados", "perdido", "arquivo"]
+    # Fix: Normalize process status filters — reutiliza a constante central
+    # (com variações singular/plural) em vez de uma lista local.
+    terminal_statuses = INACTIVE_STATUSES
     active_steps = [
         s for s in all_statuses
         if s.get("name") not in terminal_statuses

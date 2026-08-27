@@ -35,6 +35,7 @@ from services.encryption import (
     generate_telefone_hash,
 )
 from services.process_service import get_next_process_number
+from services.process_status import DELETED_STATUS_VALUES, INACTIVE_STATUSES
 from services.s3_storage import s3_service
 from utils.input_sanitization import (
     sanitize_email, sanitize_name, sanitize_phone, sanitize_nif,
@@ -348,10 +349,20 @@ async def run_list_clients(
         
         # Filtro de eliminados (soft delete)
         # PACOTE DG — usar is_deleted como filtro principal (defesa em
-        # profundidade: manter também o filtro de status="eliminado" para
+        # profundidade: manter também o filtro de status="eliminado(s)" para
         # documentos legados com inconsistência de campos).
+        # Fix: Normalize process status filters — a query anterior exigia
+        # is_deleted=True E status=="eliminado" (singular) em simultâneo
+        # (AND), pelo que um documento legado com status="eliminados"
+        # (plural) nunca aparecia no filtro "Eliminados"; e o filtro
+        # "Ativos" só excluía o singular, deixando passar o plural. Usa-se
+        # agora $or para o caso "deleted" (basta UMA das duas fontes de
+        # verdade) e $nin com ambas as variações para o caso "excluir".
         if deleted_only:
-            deleted_query = {"is_deleted": True, "status": "eliminado"}
+            deleted_query = {"$or": [
+                {"is_deleted": True},
+                {"status": {"$in": DELETED_STATUS_VALUES}},
+            ]}
             if process_query:
                 if "$and" in process_query:
                     process_query["$and"].append(deleted_query)
@@ -360,7 +371,10 @@ async def run_list_clients(
             else:
                 process_query = deleted_query
         elif exclude_deleted:
-            deleted_query = {"is_deleted": {"$ne": True}, "status": {"$ne": "eliminado"}}
+            deleted_query = {
+                "is_deleted": {"$ne": True},
+                "status": {"$nin": DELETED_STATUS_VALUES},
+            }
             if process_query:
                 if "$and" in process_query:
                     process_query["$and"].append(deleted_query)
@@ -453,8 +467,9 @@ async def run_list_clients(
             # (anteriormente usava a flag is_active desnormalizada + lista de status
             # com typos "concluidos"/"arquivado"). Um processo conta como ativo se
             # NÃO estiver eliminado (is_deleted) e o status NÃO for terminal.
-            # Estados terminais: concluido, desistencia, desistencias, eliminado.
-            INACTIVE_STATUSES = ("concluido", "desistencia", "desistencias", "eliminado")
+            # Fix: Normalize process status filters — reutiliza a constante
+            # central `INACTIVE_STATUSES` (todas as variações singular/plural
+            # documentadas), em vez de uma tupla local incompleta.
             proc_is_active = (
                 not proc.get("is_deleted", False)
                 and proc.get("status") not in INACTIVE_STATUSES
@@ -555,16 +570,24 @@ async def run_list_clients(
     
     # Filtro de eliminados (soft delete) - non-show_all path
     # PACOTE DG — usar is_deleted como filtro principal (defesa em
-    # profundidade: manter também o filtro de status="eliminado" para
+    # profundidade: manter também o filtro de status="eliminado(s)" para
     # documentos legados com inconsistência de campos).
+    # Fix: Normalize process status filters — ver comentário equivalente
+    # acima (show_all path) sobre o bug do AND estrito singular/plural.
     if deleted_only:
-        deleted_query = {"is_deleted": True, "status": "eliminado"}
+        deleted_query = {"$or": [
+            {"is_deleted": True},
+            {"status": {"$in": DELETED_STATUS_VALUES}},
+        ]}
         if "$and" in process_query:
             process_query["$and"].append(deleted_query)
         else:
             process_query = {"$and": [process_query, deleted_query]}
     elif exclude_deleted:
-        deleted_query = {"is_deleted": {"$ne": True}, "status": {"$ne": "eliminado"}}
+        deleted_query = {
+            "is_deleted": {"$ne": True},
+            "status": {"$nin": DELETED_STATUS_VALUES},
+        }
         if "$and" in process_query:
             process_query["$and"].append(deleted_query)
         else:
@@ -624,8 +647,9 @@ async def run_list_clients(
         
         # FIX (Pacote K): Cálculo de "processo ativo" baseado em status + is_deleted
         # (anteriormente usava lista de status com typos e sem desistencias).
-        # Estados terminais: concluido, desistencia, desistencias, eliminado.
-        INACTIVE_STATUSES = ("concluido", "desistencia", "desistencias", "eliminado")
+        # Fix: Normalize process status filters — reutiliza a constante
+        # central `INACTIVE_STATUSES` (todas as variações singular/plural
+        # documentadas), em vez de uma tupla local incompleta.
         proc_is_active = (
             not proc.get("is_deleted", False)
             and proc.get("status") not in INACTIVE_STATUSES

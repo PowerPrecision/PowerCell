@@ -12,6 +12,7 @@ from datetime import datetime, timezone
 from typing import Optional, Tuple, Dict, List
 
 from database import db
+from services.process_status import INACTIVE_STATUSES
 
 logger = logging.getLogger(__name__)
 
@@ -22,12 +23,11 @@ MAX_ACTIVE_PROCESSES_PER_INDEXER = 15
 
 # Status que NÃO contam como processos ativos para o indexador
 # (processos concluídos, arquivados, perdidos ou desistidos)
-INDEXER_INACTIVE_STATUSES = {
-    "concluidos",
-    "arquivo",
-    "perdido",
-    "desistencias",
-    "eliminados",
+# Fix: Normalize process status filters — reutiliza a constante central
+# (todas as variações legadas singular/plural) em vez de apenas as formas
+# plurais, para não sobrecarregar indexadores com processos legados cujo
+# `status` foi gravado no singular.
+INDEXER_INACTIVE_STATUSES = set(INACTIVE_STATUSES) | {
     "pre_registo",  # pré-registo não conta como carga real do indexador
 }
 
@@ -727,13 +727,9 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
 # ==== AUTO-ATRIBUIÇÃO DE CONSULTOR/INTERMEDIÁRIO (FALLBACK) ====
 
 # Status que NÃO contam como processos ativos para o consultor/intermediário
-CONSULTANT_INACTIVE_STATUSES = {
-    "concluidos",
-    "arquivo",
-    "perdido",
-    "desistencias",
-    "eliminados",
-}
+# Fix: Normalize process status filters — reutiliza a constante central
+# (todas as variações legadas singular/plural).
+CONSULTANT_INACTIVE_STATUSES = set(INACTIVE_STATUSES)
 
 
 async def _count_active_processes_for_consultant(consultant_id: str) -> int:
