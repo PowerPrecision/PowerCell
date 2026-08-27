@@ -494,9 +494,16 @@ async def get_current_client(
 
     # Buscar processo e validar
     # PACOTE DK — log diagnóstico para identificar onde a query falha
+    # Fix: `client_id` não estava definido nesta branch (só existia dentro
+    # do bloco "no_process" acima, que retorna antecipadamente) — referenciar
+    # a variável aqui causava NameError e um 500 em TODAS as rotas do Portal
+    # que dependem de `get_current_client` (magic_link / verified_session /
+    # access_code_session com processo real). Resolve sempre a partir do
+    # payload do token, que pode ser None para tokens sem este claim.
+    diagnostic_client_id = payload.get("client_id")
     logger.info(
         f"[PORTAL-AUTH] A procurar processo: process_id={process_id}, "
-        f"token_type={payload.get('type')}, client_id={client_id}"
+        f"token_type={payload.get('type')}, client_id={diagnostic_client_id}"
     )
     process = await db.processes.find_one(
         {"id": process_id, "is_deleted": {"$ne": True}},
@@ -507,7 +514,7 @@ async def get_current_client(
         # PACOTE DK — log detalhado para diagnóstico
         logger.warning(
             f"[PORTAL-AUTH] Processo NÃO encontrado: process_id={process_id}, "
-            f"token_type={payload.get('type')}, client_id={client_id}. "
+            f"token_type={payload.get('type')}, client_id={diagnostic_client_id}. "
             f"Verificar se o processo foi hard-deleted ou se is_deleted=True."
         )
         raise HTTPException(
