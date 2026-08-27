@@ -518,6 +518,17 @@ def build_process_list_query(
                 user, role, show_all=show_all, all_roles=all_roles,
             )
         )
+        # PACOTE FN — Sync do Cabeçalho com a Lista: quando o ContextSwitcher
+        # (Header) tem uma empresa activa seleccionada explicitamente e o
+        # frontend a envia como query param ``company_id`` (GET /processes,
+        # visão global/"Lista de Processos"), a query respeita a mesma
+        # restrição de isolamento por empresa usada em "Os Meus Processos".
+        # Sem ``company_id`` explícito (chamadas legadas/sem contexto de
+        # empresa), o comportamento mantém-se inalterado (sem filtro extra).
+        if company_id:
+            company_cond = build_company_scope_condition(company_id)
+            if company_cond:
+                and_conditions.append(company_cond)
     and_conditions.extend(
         build_view_mode_status_conditions(status=status, view_mode=view_mode)
     )

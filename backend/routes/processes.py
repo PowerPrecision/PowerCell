@@ -255,6 +255,7 @@ async def get_processes(
     assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
     assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
+    company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); limita a Lista Global à empresa explicitamente enviada"),
     user: dict = Depends(get_current_user)
 ):
     """Listar processos com paginação, projeção e enriquecimento."""
@@ -274,6 +275,7 @@ async def get_processes(
         all_roles=get_all_user_roles(user) if role == "__all_roles__" else None,
         decrypt_list_fn=decrypt_processes_list,
         list_projection=PROCESS_LIST_PROJECTION,
+        company_id=company_id,
         assigned_user_id=assigned_user_id,
         assigned_user_ids=assigned_user_ids,
         assigned_logic=assigned_logic,
@@ -296,6 +298,7 @@ async def get_my_processes(
     assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
     assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
+    company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); tem prioridade sobre o header X-Company-Id quando enviada explicitamente"),
     user: dict = Depends(get_current_user),
 ):
     """
@@ -305,12 +308,20 @@ async def get_my_processes(
     company_id == active_company_id, mesmo quando a role activa é
     diretor (ou admin/ceo). A visão global continua em
     GET /processes?show_all=true.
+
+    PACOTE FN — Sync do Cabeçalho com a Lista: o frontend envia o
+    company_id activo (ContextSwitcher/AuthContext) explicitamente como
+    query param, em complemento ao header X-Company-Id. O query param
+    tem prioridade (é o valor mais recente conhecido pelo componente que
+    disparou o pedido); se omitido, mantém-se o fallback existente via
+    header/UCR (get_active_company_id_async).
     """
     role = get_effective_role(request, user)
     try:
         active_company_id = await get_active_company_id_async(request, user)
     except Exception:
         active_company_id = user.get("company")
+    resolved_company_id = company_id or active_company_id
     return await run_get_processes(
         user=user,
         role=role,
@@ -327,7 +338,7 @@ async def get_my_processes(
         decrypt_list_fn=decrypt_processes_list,
         list_projection=PROCESS_LIST_PROJECTION,
         mine_only=True,
-        company_id=active_company_id,
+        company_id=resolved_company_id,
         assigned_user_id=assigned_user_id,
         assigned_user_ids=assigned_user_ids,
         assigned_logic=assigned_logic,
