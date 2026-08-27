@@ -45,7 +45,25 @@ const EMPTY_FORM = {
   nif: "",
   email: "",
   is_active: true,
+  smtp_email: "",
+  smtp_password: "",
+  smtp_host: "",
+  smtp_port: "",
 };
+
+function parseOptionalSmtpPort(value) {
+  if (value === "" || value == null) return null;
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function smtpFieldsFromForm(form) {
+  const smtp_email = form.smtp_email.trim() || null;
+  const smtp_password = form.smtp_password || null;
+  const smtp_host = form.smtp_host.trim() || null;
+  const smtp_port = parseOptionalSmtpPort(form.smtp_port);
+  return { smtp_email, smtp_password, smtp_host, smtp_port };
+}
 
 export default function CompaniesAdminTab() {
   const queryClient = useQueryClient();
@@ -90,6 +108,10 @@ export default function CompaniesAdminTab() {
       nif: company.nif || "",
       email: company.email || company.contact_email || "",
       is_active: isCompanyActive(company),
+      smtp_email: company.smtp_email || "",
+      smtp_password: "",
+      smtp_host: company.smtp_host || "",
+      smtp_port: company.smtp_port ?? "",
     });
     setDialogOpen(true);
   };
@@ -115,7 +137,11 @@ export default function CompaniesAdminTab() {
         nif: form.nif.trim() || null,
         email: form.email.trim() || null,
         is_active: form.is_active,
+        ...smtpFieldsFromForm(form),
       };
+      if (editing?.id && !payload.smtp_password) {
+        delete payload.smtp_password;
+      }
       if (editing?.id) {
         await updateCompany(editing.id, payload);
         toast.success("Empresa atualizada.");
@@ -269,6 +295,63 @@ export default function CompaniesAdminTab() {
                   placeholder="geral@empresa.pt"
                   data-testid="company-email-input"
                 />
+              </div>
+              <div className="space-y-4 pt-2 border-t border-border">
+                <p className="text-sm font-medium text-foreground">SMTP (opcional)</p>
+                <div className="space-y-2">
+                  <Label htmlFor="company-smtp-email">Email SMTP</Label>
+                  <Input
+                    id="company-smtp-email"
+                    type="email"
+                    value={form.smtp_email}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, smtp_email: e.target.value }))
+                    }
+                    placeholder="smtp@empresa.pt"
+                    data-testid="company-smtp-email-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-smtp-password">Password SMTP</Label>
+                  <Input
+                    id="company-smtp-password"
+                    type="password"
+                    value={form.smtp_password}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, smtp_password: e.target.value }))
+                    }
+                    placeholder={
+                      editing ? "Deixe em branco para manter" : "Password SMTP"
+                    }
+                    autoComplete="new-password"
+                    data-testid="company-smtp-password-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-smtp-host">Host SMTP</Label>
+                  <Input
+                    id="company-smtp-host"
+                    value={form.smtp_host}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, smtp_host: e.target.value }))
+                    }
+                    placeholder="smtp.empresa.pt"
+                    data-testid="company-smtp-host-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-smtp-port">Porta SMTP</Label>
+                  <Input
+                    id="company-smtp-port"
+                    type="number"
+                    value={form.smtp_port}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, smtp_port: e.target.value }))
+                    }
+                    placeholder="465"
+                    data-testid="company-smtp-port-input"
+                  />
+                </div>
               </div>
               <div className="flex items-center justify-between rounded-md border border-border p-3">
                 <div className="space-y-0.5">
