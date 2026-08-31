@@ -65,7 +65,7 @@ async def _auto_fulfill_portal_request(
             fulfill_portal_requests_on_staff_upload,
         )
 
-        return await fulfill_portal_requests_on_staff_upload(
+        result = await fulfill_portal_requests_on_staff_upload(
             process_id,
             category=document.get("category"),
             filename=document.get("filename"),
@@ -76,6 +76,23 @@ async def _auto_fulfill_portal_request(
             document_id=document.get("document_id"),
             linked_document_id=document.get("linked_document_id"),
         )
+
+        # Observabilidade: o motor de auto-match falhou silenciosamente em
+        # encontrar um pedido portal correspondente (sem excepção — é um
+        # comportamento normal quando não há pedido pendente). Registamos um
+        # aviso estruturado para dar visibilidade aos admins sobre estas
+        # falhas de correspondência, sem bloquear o upload.
+        reason = result.get("reason")
+        if reason in ("weak_match", "no_match"):
+            logger.warning(
+                "[PORTAL-FULFILL] Falha de correspondência automática "
+                f"reason={reason} process_id={process_id} "
+                f"category={document.get('category')!r} "
+                f"filename={sanitize_for_log(document.get('filename') or '')!r} "
+                f"user={(user or {}).get('id') or 'staff'}"
+            )
+
+        return result
     except Exception as e:
         logger.warning(
             f"[UPLOAD] Erro ao marcar pedido portal como recebido: {e}"

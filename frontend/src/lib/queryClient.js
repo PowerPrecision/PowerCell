@@ -125,6 +125,12 @@ export const queryKeys = {
     expiries: (processId) => [...queryKeys.documents.all, 'expiries', processId],
     upcomingExpiries: (days) => [...queryKeys.documents.all, 'upcoming', days],
   },
+
+  // Pedidos de Documentos do Portal do Cliente
+  portalRequests: {
+    all: ['portalRequests'],
+    byProcess: (processId) => [...queryKeys.portalRequests.all, processId],
+  },
   
   // Notificações
   notifications: {
