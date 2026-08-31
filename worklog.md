@@ -3727,3 +3727,36 @@ Stage Summary:
 - Ficheiros `.env` recriados localmente (não commitados — `.gitignore`).
 - Resultado: (1) Backend e frontend operacionais na branch `dev`. (2) 0 regressões confirmadas na suite pytest de documentos (55/55) e na suite completa (1162 passed). (3) Cobertura de teste dedicada ao fluxo `_auto_fulfill_portal_request`, incluindo o cenário exacto do bug de normalização já corrigido.
 
+
+
+
+---
+Task ID: Pacote de Reatividade UI + Observabilidade de Falhas de Correspondência (Auto-Fulfill Portal)
+Agent: Main Agent (Emergent E1)
+Task: Fechar o épico do auto-match staff-upload→portal garantindo (1) reatividade em tempo real na UI via React Query e (2) observabilidade estruturada no backend para falhas silenciosas de correspondência (weak_match/no_match).
+
+Work Log:
+- **Backend — Observabilidade**: `services/document_upload.py::_auto_fulfill_portal_request` agora inspeciona `result.get("reason")` devolvido por `fulfill_portal_requests_on_staff_upload` e emite `logger.warning("[PORTAL-FULFILL] Falha de correspondência automática reason=... process_id=... category=... filename=... user=...")` sempre que `reason in ("weak_match", "no_match")`. Fluxos de sucesso e `index_skip` não geram warning (confirmado por teste).
+- Criado `backend/tests/unit/test_portal_fulfill_observability.py` (via testing agent) — 4 testes: warning em `no_match`, warning em `weak_match`, ausência de warning em match bem-sucedido, ausência de warning em `index_skip`.
+- **Frontend — Reatividade React Query**:
+  - Adicionado `queryKeys.portalRequests = { all: ['portalRequests'], byProcess: (processId) => [...all, processId] }` em `lib/queryClient.js`.
+  - Novo hook `hooks/queries/usePortalRequestsQuery.js` (staleTime 30s) que substitui o fetch local (`useState`/`useEffect`/`fetchDocuments`) em `PortalDocumentRequests.js`.
+  - `PortalDocumentRequests.js` refatorizado: usa `usePortalRequestsQuery(processId)` para os dados e `queryClient.invalidateQueries({queryKey: queryKeys.portalRequests.byProcess(processId)})` em todas as suas próprias mutações (criar pedido, marcar recebido, reativar, recusar/remover) — em vez de `fetchDocuments()` local.
+  - `S3FileManager.js`: `executeUpload()` e `executeUploadWithResolutions()` (os dois pontos de entrada reais do upload interno da equipa) invalidam agora `queryKeys.portalRequests.byProcess(processId)` a seguir a `fetchFiles()`, sempre que `successCount > 0`. Isto garante que qualquer auto-fulfill do backend (`_auto_fulfill_portal_request`) é refletido no `PortalDocumentRequests` sem F5.
+  - Adicionados `data-testid` em falta no `PortalDocumentRequests.js`: `portal-request-add-button`, `portal-request-submit-button`, `portal-request-category-checkbox-<value>`, `portal-request-status-<id>`.
+- **Ambiente**: seed executado (`backend/seed.py` + `scripts/seed_realistic_data.py`) para popular utilizadores (incl. `geral@powerealestate.pt`) e 30 clientes/20 processos de teste. `memory/test_credentials.md` criado.
+- **Testing agent**: validação via `testing_agent_v3_fork` — código de invalidação revisto e confirmado coerente (mesma queryKey em ambos os lados); fluxo de criação de pedido + badge "Pendente" confirmado via UI real; warning de observabilidade confirmado com 4/4 testes novos passed. A transição automática "Pendente"→"Recebido" em live upload NÃO pôde ser validada end-to-end porque o armazenamento S3 não está configurado neste ambiente de preview (`AWS_*` ausente de `backend/.env` → upload devolve 503) — limitação ambiental, não defeito de código; revisão de código confirma a wiring correta.
+- Suite pytest completa (unit+integration): 1135 passed, 0 falhas.
+- Pedido de teste de exemplo criado pelo testing agent foi removido da BD após validação.
+- Commit `58f0496f` na branch `dev`: "Feat: Invalidate portal requests query on upload and add weak match observability".
+
+Stage Summary:
+- 7 ficheiros (4 modificados + 3 novos):
+  - backend/services/document_upload.py (warning log)
+  - backend/tests/unit/test_portal_fulfill_observability.py (NOVO)
+  - frontend/src/lib/queryClient.js (queryKeys.portalRequests)
+  - frontend/src/hooks/queries/usePortalRequestsQuery.js (NOVO)
+  - frontend/src/components/PortalDocumentRequests.js (react-query + invalidation)
+  - frontend/src/components/S3FileManager.js (invalidation pós-upload)
+  - memory/test_credentials.md (NOVO)
+- Resultado: (1) Observabilidade backend confirmada e testada (4/4). (2) Wiring de reatividade frontend implementada e revista, coerente end-to-end por inspeção de código; validação visual completa da transição automática bloqueada apenas por falta de credenciais AWS/S3 no preview (não é bug).

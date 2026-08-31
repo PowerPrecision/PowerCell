@@ -119,6 +119,13 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 **Nota**: `/configuracoes` e `/definicoes` são rotas DIFERENTES. A primeira é para admin configurar o sistema (SMTP, storage, RGPD, etc.), a segunda é para o utilizador gerir as suas definições pessoais.
 
+## Correções 2026-08-31 (2) — Reatividade UI (React Query) + Observabilidade Auto-Fulfill
+
+- **Backend**: `_auto_fulfill_portal_request` (`services/document_upload.py`) regista `logger.warning` estruturado quando `fulfill_portal_requests_on_staff_upload` devolve `reason=weak_match` ou `reason=no_match` (visibilidade sobre falhas silenciosas do motor de correspondência automática). 4 testes novos em `test_portal_fulfill_observability.py`.
+- **Frontend**: `queryKeys.portalRequests.byProcess(processId)` (novo em `lib/queryClient.js`) + `usePortalRequestsQuery` hook. `PortalDocumentRequests.js` migrado de fetch local para React Query; `S3FileManager.js` (`executeUpload`/`executeUploadWithResolutions`) invalida essa query após upload bem-sucedido — o consultor vê o estado mudar para "Recebido" sem F5.
+- **Limitação conhecida**: validação end-to-end completa da transição automática bloqueada em preview por falta de credenciais AWS/S3 (upload devolve 503); wiring confirmada correta por revisão de código e pelos testes de observabilidade.
+- Suite completa: 1135 passed. Commit `58f0496f`.
+
 ## Correções 2026-08-31 — Estabilização de Ambiente + Testes Documentos
 
 - **Ambiente do pod (fork) estava sem `.env` (backend/frontend) e com dezenas de dependências de `requirements.txt` não instaladas** — `pip install -r requirements.txt` anterior tinha abortado em `numpy==2.5.1` (exige Python ≥3.12; pod usa 3.11). Corrigido: `numpy==2.4.6` em `requirements.txt`, instaladas todas as dependências em falta (thefuzz, bleach, sentry-sdk, slowapi, python-magic+libmagic1, playwright, pandas, etc.), `.env` reconstruídos (DB local estava vazia, sem risco de dados PII órfãos). Backend/frontend confirmados operacionais (`/api/health` 200).
