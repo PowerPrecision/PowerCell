@@ -44,7 +44,7 @@ async def run_get_conversion_stats(user: dict):
                 days = (updated - created).days
                 if days >= 0:
                     conversion_times.append(days)
-            except:
+            except Exception:
                 pass
     
     avg_conversion_days = sum(conversion_times) / len(conversion_times) if conversion_times else 0

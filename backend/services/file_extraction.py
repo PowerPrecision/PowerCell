@@ -19,7 +19,7 @@ Isto resolve casos onde:
 import logging
 import re
 import base64
-from typing import Tuple, Optional, Tuple
+from typing import Tuple, Optional
 
 logger = logging.getLogger(__name__)
 

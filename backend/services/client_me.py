@@ -60,8 +60,6 @@ async def run_get_my_assigned_clients(
     
     Permissões: Qualquer utilizador autenticado com role de staff.
     """
-    from models.auth import UserRole
-    
     user_id = user.get("id", "")
     user_email = user.get("email", "")
     user_role = get_effective_role(request, user)

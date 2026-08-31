@@ -29,12 +29,12 @@ async def find_matching_properties_for_client(process_id: str) -> List[Dict[str,
             try:
                 max_price = float(str(financial[field]).replace("€", "").replace(" ", "").replace(",", ".").replace(".", ""))
                 break
-            except:
+            except Exception:
                 pass
     if not max_price and real_estate.get("valor_imovel"):
         try:
             max_price = float(str(real_estate["valor_imovel"]).replace("€", "").replace(" ", "").replace(",", "."))
-        except:
+        except Exception:
             pass
     
     desired_district_raw = real_estate.get("distrito") or real_estate.get("localizacao") or ""
@@ -49,7 +49,7 @@ async def find_matching_properties_for_client(process_id: str) -> List[Dict[str,
     if desired_typology:
         try:
             desired_bedrooms = int(desired_typology.upper().replace("T", "").replace("+", ""))
-        except:
+        except Exception:
             pass
     
     # Buscar imóveis disponíveis
@@ -151,12 +151,12 @@ async def find_matching_leads_for_client(process_id: str) -> List[Dict[str, Any]
     if financial.get("valor_pretendido"):
         try:
             max_price = float(str(financial["valor_pretendido"]).replace("€", "").replace(" ", "").replace(",", "."))
-        except:
+        except Exception:
             pass
     if not max_price and real_estate.get("valor_imovel"):
         try:
             max_price = float(str(real_estate["valor_imovel"]).replace("€", "").replace(" ", "").replace(",", "."))
-        except:
+        except Exception:
             pass
     
     desired_location_raw = real_estate.get("localizacao", "")
@@ -221,7 +221,7 @@ async def find_matching_leads_for_client(process_id: str) -> List[Dict[str, Any]
                     if abs(desired_num - lead_num) == 1:
                         score += 10
                         match_reasons.append(f"Tipologia próxima ({lead_typology})")
-                except:
+                except Exception:
                     pass
         
         if score > 0:
@@ -297,7 +297,7 @@ async def find_matching_clients_for_property(property_id: str) -> List[Dict[str,
                 try:
                     client_budget = float(str(financial[field]).replace("€", "").replace(" ", "").replace(",", ".").replace(".", ""))
                     break
-                except:
+                except Exception:
                     pass
         
         client_district_raw = real_estate.get("distrito") or real_estate.get("localizacao") or ""
@@ -307,7 +307,7 @@ async def find_matching_clients_for_property(property_id: str) -> List[Dict[str,
         if client_typology:
             try:
                 client_bedrooms = int(client_typology.upper().replace("T", "").replace("+", ""))
-            except:
+            except Exception:
                 pass
         
         # Match por preço
@@ -391,12 +391,12 @@ async def find_matching_clients_for_lead(lead_id: str) -> List[Dict[str, Any]]:
         if financial and financial.get("valor_pretendido"):
             try:
                 client_budget = float(str(financial["valor_pretendido"]).replace("€", "").replace(" ", "").replace(",", "."))
-            except:
+            except Exception:
                 pass
         if not client_budget and real_estate and real_estate.get("valor_imovel"):
             try:
                 client_budget = float(str(real_estate["valor_imovel"]).replace("€", "").replace(" ", "").replace(",", "."))
-            except:
+            except Exception:
                 pass
         
         client_location_raw = (real_estate.get("localizacao") if real_estate else "") or ""

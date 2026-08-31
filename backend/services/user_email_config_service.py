@@ -539,7 +539,7 @@ async def migrate_embedded_to_collection() -> Dict[str, int]:
     from services.email_config_resolver import _is_nested_email_config
 
     users = await db.users.find(
-        {"email_config": {"$exists": True, "$ne": None, "$ne": ""}},
+        {"email_config": {"$exists": True, "$nin": [None, ""]}},
         {"_id": 0, "id": 1, "company": 1, "email_config": 1}
     ).to_list(500)
 

@@ -46,7 +46,7 @@ class TestIteration26IdxLocationFix:
         for prop_id in self.created_property_ids:
             try:
                 self.session.delete(f"{BASE_URL}/api/properties/{prop_id}")
-            except:
+            except Exception:
                 pass
     
     def test_01_admin_login(self):

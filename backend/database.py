@@ -34,7 +34,7 @@ def reset_db_connection():
     if _client is not None:
         try:
             _client.close()
-        except:
+        except Exception:
             pass
     _client = None
     _db = None

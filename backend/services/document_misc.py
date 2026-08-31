@@ -144,15 +144,17 @@ async def run_check_employer_nif(nif: str) -> dict[str, Any]:
             detail="NIF inválido. Deve conter exatamente 9 dígitos.",
         )
 
+    # Se o NIF fornecido tiver o prefixo de pessoa colectiva ("5"), também
+    # procurar processos onde esse NIF esteja guardado como personal_data.nif
+    # (caso de erro de preenchimento comum: NIF da entidade empregadora
+    # colocado no campo do próprio titular).
+    or_conditions = [{"personal_data.employer_nif": nif}]
+    if re.match(r"^5", nif):
+        or_conditions.append({"personal_data.nif": nif})
+
     processes = await db.processes.find(
         {
-            "$or": [
-                {"personal_data.employer_nif": nif},
-                {
-                    "personal_data.nif": nif,
-                    "personal_data.nif": {"$regex": "^5"},
-                },
-            ]
+            "$or": or_conditions
         },
         {
             "_id": 0,

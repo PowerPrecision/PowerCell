@@ -114,7 +114,7 @@ async def run_get_leads_by_status(
                 days_old = (datetime.now(timezone.utc) - created).days
                 lead["days_old"] = days_old
                 lead["is_stale"] = days_old > 7 and lead.get("status") == LeadStatus.NOVO.value
-            except:
+            except Exception:
                 lead["days_old"] = 0
                 lead["is_stale"] = False
 

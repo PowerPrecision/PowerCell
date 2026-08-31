@@ -306,7 +306,7 @@ async def run_s3_cors_diagnostic(user: dict, force_fix: bool = False, request: R
 
     O browser bloqueia uploads diretos ao S3 se não houver CORS configurado.
     """
-    from services.s3_storage import s3_service, AWS_BUCKET_NAME, AWS_REGION
+    from services.s3_storage import AWS_BUCKET_NAME, AWS_REGION
     from botocore.exceptions import ClientError
 
     result = {

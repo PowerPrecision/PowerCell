@@ -280,7 +280,7 @@ class TestDateTimeHandling:
             try:
                 date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                 return date < reference
-            except:
+            except Exception:
                 return False
         
         now = datetime.now(timezone.utc)
@@ -301,7 +301,7 @@ class TestDateTimeHandling:
                 date = datetime.fromisoformat(date_str.replace("Z", "+00:00"))
                 age = datetime.now(timezone.utc) - date
                 return age.days
-            except:
+            except Exception:
                 return 0
         
         week_ago = (datetime.now(timezone.utc) - timedelta(days=7)).isoformat()

@@ -86,7 +86,7 @@ def _get_rate_limit_key(request: Request) -> str:
             user_id = payload.get("sub")
             if user_id:
                 return f"user:{user_id}"
-        except:
+        except Exception:
             pass
     
     # Fallback: usar IP para utilizadores não autenticados
