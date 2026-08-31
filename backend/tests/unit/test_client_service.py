@@ -296,7 +296,7 @@ class TestClientExport:
                     return dt.strftime("%Y-%m-%d")
                 
                 return iso_date
-            except:
+            except Exception:
                 return iso_date
         
         assert format_date_for_export("2024-01-15T10:00:00Z") == "15/01/2024"

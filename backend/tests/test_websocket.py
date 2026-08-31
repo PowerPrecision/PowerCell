@@ -166,7 +166,7 @@ class TestWebSocketIntegration:
             }, timeout=5)
             if response.status_code == 200:
                 return response.json()["access_token"]
-        except:
+        except Exception:
             pass
         pytest.skip("Server not available or authentication failed")
     

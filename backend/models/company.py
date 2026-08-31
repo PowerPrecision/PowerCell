@@ -87,6 +87,9 @@ class CompanyResponse(BaseModel):
     logo_url: Optional[str] = None
     email_sync_enabled: bool = False
     is_active: bool = True
+    smtp_email: Optional[str] = None
+    smtp_host: Optional[str] = None
+    smtp_port: Optional[int] = None
     total_users: int = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

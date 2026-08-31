@@ -320,7 +320,7 @@ async def run_create_lead_from_url(
         raise HTTPException(status_code=400, detail="URL inválido")
 
     # Verificar duplicados
-    existing = await db.property_leads.find_one({"url": url})
+    existing = await db.property_leads.find_one({"url": url}, {"_id": 0})
     if existing:
         return {
             "success": False,

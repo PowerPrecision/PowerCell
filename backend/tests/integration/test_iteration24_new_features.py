@@ -20,7 +20,7 @@ import os
 import uuid
 
 # Use environment variable BASE_URL
-BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://auto-doc-fetch.preview.emergentagent.com').rstrip('/')
+BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', 'https://powercell-crm.preview.emergentagent.com').rstrip('/')
 
 class TestMinutasAPI:
     """Test CRUD operations for Minutas"""

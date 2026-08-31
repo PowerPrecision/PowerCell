@@ -209,7 +209,7 @@ class TestHealthCheck:
             data = response.json()
             assert "status" in data
             print(f"Health check: {data}")
-        except:
+        except Exception:
             # If not JSON, just check the text
             print(f"Health check response: {response.text}")
 

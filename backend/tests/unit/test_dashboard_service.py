@@ -340,7 +340,7 @@ class TestReportGeneration:
             try:
                 hour, minute = map(int, time.split(":"))
                 return 0 <= hour <= 23 and 0 <= minute <= 59
-            except:
+            except Exception:
                 return False
         
         assert validate_schedule(config["schedule"])

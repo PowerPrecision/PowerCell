@@ -286,7 +286,7 @@ async def run_sync_process_emails(user: dict):
             # variação plural legada "eliminados".
             "status": {"$nin": list(DELETED_STATUS_VALUES)},
             "$or": [
-                {"personal_data.email": {"$exists": True, "$ne": "", "$ne": None}},
+                {"personal_data.email": {"$exists": True, "$nin": ["", None]}},
                 {"personal_data.email_hash": {"$exists": True, "$ne": None}},
             ]
         }},

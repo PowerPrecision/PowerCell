@@ -9,7 +9,10 @@
  *
  * Integra-se na página de detalhes do processo (ProcessDetails.js).
  */
-import { useState, useEffect, useCallback } from "react";
+import { useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../lib/queryClient";
+import { usePortalRequestsQuery } from "../hooks/queries/usePortalRequestsQuery";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -46,7 +49,6 @@ import {
 import { toast } from "sonner";
 import { formatDateTime } from "../lib/utils";
 import {
-  getPortalDocRequests,
   createPortalDocRequest,
   updatePortalDocRequest,
   deletePortalDocRequest,
@@ -113,29 +115,17 @@ const STATUS_CONFIG = {
 };
 
 export default function PortalDocumentRequests({ processId, processNumber, clientName, onDocumentsChange }) {
-  const [documents, setDocuments] = useState([]);
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
+  const { documents, isLoading: loading } = usePortalRequestsQuery(processId);
   const [actionLoading, setActionLoading] = useState(null); // track which action is loading
   const [showAddDialog, setShowAddDialog] = useState(false);
   const [newDoc, setNewDoc] = useState({ categories: [], notes: "", custom_label: "" });
   const [detailsDoc, setDetailsDoc] = useState(null);
 
-  const fetchDocuments = useCallback(async () => {
-    if (!processId) return;
-    setLoading(true);
-    try {
-      const res = await getPortalDocRequests(processId);
-      setDocuments(res.data?.documents || []);
-    } catch (err) {
-      console.error("Erro ao carregar pedidos:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [processId]);
-
-  useEffect(() => {
-    fetchDocuments();
-  }, [fetchDocuments]);
+  // Invalida a query dos pedidos do portal — refletido em tempo real em
+  // qualquer componente que a consuma (ex: após upload no S3FileManager).
+  const invalidatePortalRequests = () =>
+    queryClient.invalidateQueries({ queryKey: queryKeys.portalRequests.byProcess(processId) });
 
   // Compute already-requested categories to filter from dropdown
   // Include RECEIVED — if a doc was already received, no need to request it again
@@ -173,7 +163,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
       );
       setNewDoc({ categories: [], notes: "", custom_label: "" });
       setShowAddDialog(false);
-      fetchDocuments();
+      invalidatePortalRequests();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
     } catch (err) {
@@ -189,7 +179,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
       await updatePortalDocRequest(processId, docId, { status: "RECEIVED" });
       toast.success("Documento marcado como recebido!");
       setDetailsDoc(null);
-      fetchDocuments();
+      invalidatePortalRequests();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
     } catch {
@@ -205,7 +195,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
       await updatePortalDocRequest(processId, docId, { status: "REQUESTED" });
       toast.success("Pedido reativado com sucesso!");
       setDetailsDoc(null);
-      fetchDocuments();
+      invalidatePortalRequests();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
     } catch {
@@ -222,7 +212,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
       await deletePortalDocRequest(processId, docId);
       toast.success("Pedido recusado e removido");
       setDetailsDoc(null);
-      fetchDocuments();
+      invalidatePortalRequests();
       // PACOTE BV (Fix 1): notificar o parent para refrescar a checklist/documentos
       if (onDocumentsChange) onDocumentsChange();
     } catch {
@@ -292,6 +282,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
             <Button
               size="sm"
               className="w-full bg-teal-600 hover:bg-teal-700 text-white gap-2"
+              data-testid="portal-request-add-button"
             >
               <Plus className="h-4 w-4" />
               Solicitar Documento ao Cliente
@@ -325,6 +316,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
                           <input
                             type="checkbox"
                             checked={isSelected}
+                            data-testid={`portal-request-category-checkbox-${cat.value}`}
                             onChange={(e) => {
                               setNewDoc(prev => ({
                                 ...prev,
@@ -376,6 +368,7 @@ export default function PortalDocumentRequests({ processId, processNumber, clien
                 onClick={handleAddDocument}
                 disabled={newDoc.categories.length === 0 || actionLoading === "add"}
                 className="bg-teal-600 hover:bg-teal-700 text-white"
+                data-testid="portal-request-submit-button"
               >
                 {actionLoading === "add" ? (
                   <><Loader2 className="h-4 w-4 mr-1 animate-spin" /> A criar...</>
@@ -516,7 +509,10 @@ function DocItem({ doc, loading, onViewDetails, onMarkReceived, onMarkPending, o
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-foreground truncate">{displayName}</p>
         <div className="flex items-center gap-2 mt-0.5">
-          <span className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${statusCfg.color}`}>
+          <span
+            className={`inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-medium ${statusCfg.color}`}
+            data-testid={`portal-request-status-${doc.id}`}
+          >
             <StatusIcon className="h-2.5 w-2.5" />
             {statusCfg.label}
           </span>

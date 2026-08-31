@@ -1497,7 +1497,7 @@ Mais uma vez, obrigado(a) pela sua colaboração."""
         # Fallback 2: UCR de qualquer empresa
         if not sig and sender_user:
             ucr_any = await db.user_company_roles.find_one(
-                {"user_id": sender_user.get("id"), "signature": {"$exists": True, "$ne": None, "$ne": ""}},
+                {"user_id": sender_user.get("id"), "signature": {"$exists": True, "$nin": [None, ""]}},
                 {"signature": 1, "_id": 0}
             )
             if ucr_any and ucr_any.get("signature"):

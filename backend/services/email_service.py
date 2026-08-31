@@ -179,7 +179,7 @@ def decode_email_header(header: str) -> str:
         if isinstance(content, bytes):
             try:
                 result.append(content.decode(charset or 'utf-8', errors='replace'))
-            except:
+            except Exception:
                 result.append(content.decode('utf-8', errors='replace'))
         else:
             result.append(content)
@@ -780,7 +780,7 @@ async def send_email(
             # Prioridade 4: UCR de qualquer empresa
             if not resolved_signature:
                 ucr_any = await db.user_company_roles.find_one(
-                    {"user_id": created_by, "signature": {"$exists": True, "$ne": None, "$ne": ""}},
+                    {"user_id": created_by, "signature": {"$exists": True, "$nin": [None, ""]}},
                     {"signature": 1, "_id": 0}
                 )
                 if ucr_any and ucr_any.get("signature"):

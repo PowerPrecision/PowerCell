@@ -659,7 +659,7 @@ async def delete_document_expiry(doc_id: str, user: dict = Depends(require_roles
 
 
 
-DOCUMENT_TYPES = [
+SUPPORTED_DOCUMENT_TYPES = [
     {"type": "cc", "name": "Cartão de Cidadão", "validity_years": 5},
     {"type": "irs", "name": "Declaração de IRS", "validity_years": 1},
     {"type": "recibo", "name": "Recibo Vencimento", "validity_months": 3},
@@ -669,7 +669,7 @@ DOCUMENT_TYPES = [
 @router.get("/types", responses={500: HTTP_500_RESPONSE})
 async def get_document_types(user: dict = Depends(get_current_user)):
     """Retorna a lista de tipos de documentos suportados com prazos de validade."""
-    return DOCUMENT_TYPES
+    return SUPPORTED_DOCUMENT_TYPES
 
 
 

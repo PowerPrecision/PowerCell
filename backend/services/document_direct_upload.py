@@ -20,6 +20,7 @@ from services.document_constants import (
 )
 from services.document_filenames import normalize_filename, sanitize_for_log
 from services.document_process_resolve import extract_second_client_name
+from services.document_upload import _auto_fulfill_portal_request
 from services.history import log_history
 from services.s3_storage import s3_service
 
@@ -231,25 +232,19 @@ async def run_confirm_upload(
     except Exception as e:
         logger.warning(f"[CONFIRM-UPLOAD] Erro ao registar histórico: {e}")
 
-    portal_fulfill: dict[str, Any] = {"fulfilled": 0}
-    try:
-        from services.document_portal_fulfill import (
-            fulfill_portal_requests_on_staff_upload,
-        )
-
-        portal_fulfill = await fulfill_portal_requests_on_staff_upload(
-            process_id,
-            category=category,
-            filename=normalized_filename or original_filename,
-            s3_path=file_key,
-            content_type=content_type,
-            file_size=file_size,
-            user=user,
-        )
-    except Exception as e:
-        logger.warning(
-            f"[CONFIRM-UPLOAD] Erro ao marcar pedido portal como recebido: {e}"
-        )
+    # Auto-Match — o documento acabou de ser gravado (S3 + categoria); tenta
+    # imediatamente satisfazer um pedido pendente do Portal do Cliente.
+    portal_fulfill = await _auto_fulfill_portal_request(
+        process_id,
+        {
+            "category": category,
+            "filename": normalized_filename or original_filename,
+            "s3_path": file_key,
+            "content_type": content_type,
+            "file_size": file_size,
+        },
+        user=user,
+    )
 
     logger.info(f"[CONFIRM-UPLOAD] Upload confirmado: {normalized_filename}")
 

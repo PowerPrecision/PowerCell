@@ -81,7 +81,7 @@ async def run_get_process_s3_mappings(
     # Contar processos com e sem mapeamento S3
     mapped_count = await db.processes.count_documents({
         **query,
-        "s3_folder": {"$exists": True, "$ne": None, "$ne": ""}
+        "s3_folder": {"$exists": True, "$nin": [None, ""]}
     })
     unmapped_count = total - mapped_count
 

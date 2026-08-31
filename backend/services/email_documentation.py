@@ -50,8 +50,6 @@ async def run_get_document_recipients(current_user: dict):
             "default_to_emails": []
         }
     
-    import json
-    
     # Parse recipients JSON (balcões globais do sistema)
     recipients = []
     if doc_config.recipients:

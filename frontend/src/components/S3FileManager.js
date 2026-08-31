@@ -36,6 +36,8 @@
  * />
  */
 import { useState, useEffect, useCallback, useRef } from "react";
+import { useQueryClient } from "@tanstack/react-query";
+import { queryKeys } from "../lib/queryClient";
 import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
@@ -182,6 +184,7 @@ const FileIcon = ({ filename }) => {
 
 const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const { token, user, effectiveRole } = useAuth();
+  const queryClient = useQueryClient();
   const [files, setFiles] = useState({});
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
@@ -590,6 +593,11 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
           : `${successCount}/${totalFiles} ficheiros enviados`
       );
       fetchFiles();
+      // Reatividade: um upload interno pode ter sido auto-associado a um
+      // pedido pendente do Portal do Cliente (_auto_fulfill_portal_request
+      // no backend). Invalidar a query garante que o consultor vê o
+      // estado "Recebido" no PortalDocumentRequests sem refresh manual.
+      queryClient.invalidateQueries({ queryKey: queryKeys.portalRequests.byProcess(processId) });
     }
     
     if (errorCount > 0 && successCount === 0) {
@@ -814,6 +822,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         : `${successCount} ficheiro(s) enviado(s) com sucesso`;
       toast.success(message);
       fetchFiles();
+      // Reatividade: ver comentário equivalente em executeUpload().
+      queryClient.invalidateQueries({ queryKey: queryKeys.portalRequests.byProcess(processId) });
     }
     
     if (errorCount > 0 && successCount === 0) {

@@ -856,7 +856,6 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
         await db.temp_attachments.delete_many({"id": {"$in": [r["id"] for r in temp_attachment_records]}})
 
         # Clean up temp files from S3 (for any that weren't moved)
-        from services.s3_storage import s3_service
         for temp_key in temp_keys_to_cleanup:
             try:
                 loop = asyncio.get_running_loop()
@@ -925,7 +924,6 @@ async def run_get_email(email_id: str, request: Request, current_user: dict):
     Usa o effective_role (X-Active-Role) para determinar can_see_all.
     """
     from models.auth import UserRole
-    from services.auth import get_effective_role
 
     email = await db.emails.find_one({"id": email_id}, {"_id": 0})
 

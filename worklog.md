@@ -3699,3 +3699,64 @@ Stage Summary:
   - backend/services/portal_auth.py (fallback stale process_ids[0] → "no_process" + logs)
   - backend/services/rgpd_pdf.py (_ensure_font expandido + ☐ bullet + fallback ASCII [ ] para checkboxes)
 - Resultado: (DK) Portal do Cliente já não falha com "Processo não encontrado" quando o processo foi hard-deleted — usa "no_process" no JWT. Logs diagnósticos permitem identificar exactamente onde a query falha. (DL) Checkboxes do PDF RGPD renderizam como quadrados vazios ☐ quando DejaVuSans está disponível, ou [ ] como fallback ASCII quando não está — nunca mais quadrados pretos.
+
+
+---
+Task ID: Pacote de Estabilização — Testes do Módulo de Documentos (Auto-Fulfill Portal)
+Agent: Main Agent (Emergent E1)
+Task: Garantir estabilidade da branch dev após a refatorização e correção do bug de normalização — correr a suite pytest dos módulos de documentos e criar teste dedicado para `_auto_fulfill_portal_request`.
+
+Work Log:
+- Diagnóstico de ambiente: o pod (fork) tinha `backend/.env` e `frontend/.env` completamente ausentes (variáveis protegidas), e o venv `/root/.venv` estava com dezenas de dependências de `requirements.txt` por instalar (falha silenciosa de um `pip install -r requirements.txt` anterior, interrompido em `numpy==2.5.1` — versão que exige Python ≥3.12, incompatível com o Python 3.11 do pod). Isto fazia o backend (uvicorn) e a suite pytest falharem no arranque (`ModuleNotFoundError`, `JWT_SECRET não definida`).
+- Reconstruídos `backend/.env` (MONGO_URL, DB_NAME, JWT_SECRET, ENCRYPTION_KEY, CORS_ORIGINS com o preview URL) e `frontend/.env` (REACT_APP_BACKEND_URL) — base de dados local estava vazia (`test_db_ci` apenas), sem risco de dados PII órfãos.
+- Corrigido `backend/requirements.txt`: `numpy==2.5.1` → `numpy==2.4.6` (única versão instalável em Python 3.11). Instaladas todas as dependências em falta (thefuzz, bleach, sentry-sdk, slowapi, python-magic + libmagic1 via apt, playwright, pandas, etc.).
+- Backend e frontend confirmados `RUNNING` e `/api/health` a responder 200 local e externamente.
+- Suite pytest focada em documentos corrida com sucesso: `tests/integration/test_documents.py`, `test_documents_integration.py`, `tests/unit/test_document_extraction_helpers.py`, `test_document_portal_fulfill.py`, `test_document_titular_match.py` → 55/55 passed, sem regressões.
+- Suite completa (`tests/unit` + `tests/integration` + `tests/*.py` de raiz, conforme `pytest.ini`) corrida como validação adicional: 1071 + 60 + 31 passed (6 skipped) — 0 falhas.
+- Criados 3 testes novos em `tests/unit/test_document_portal_fulfill.py` (classe `TestAutoFulfillPortalRequest`), mockando `services.document_portal_fulfill.db`:
+  · `test_success_flow_updates_status_and_document_id` — fluxo de sucesso via `document_id` directo: valida `status→RECEIVED` e associação do `document_id` no `$set` do `update_one`.
+  · `test_filename_normalization_fallback_matches_pending_request` — fallback de matching por nome de ficheiro (`cartao_cidadao_joao.pdf` → pedido pendente `Cartao_Cidadao`), reproduzindo exactamente a regressão do bug de normalização de alias (underscores/acentos) já corrigido em `_score_pending_doc`.
+  · `test_no_pending_requests_returns_zero_fulfilled` — sem pedidos pendentes, `update_one` nunca é chamado.
+- Nenhum teste falhou relativo à lógica de negócio de `_auto_fulfill_portal_request` — não foi necessário nenhum fix de código applicativo (apenas ambiente/infra).
+- Commit `d6c94a48` na branch `dev`: "Test: Add unit tests for _auto_fulfill_portal_request (success flow + filename normalization fallback); fix numpy pin incompatible with Python 3.11".
+
+Stage Summary:
+- 2 ficheiros modificados:
+  - backend/requirements.txt (numpy 2.5.1 → 2.4.6)
+  - backend/tests/unit/test_document_portal_fulfill.py (+3 testes, classe TestAutoFulfillPortalRequest)
+- Ficheiros `.env` recriados localmente (não commitados — `.gitignore`).
+- Resultado: (1) Backend e frontend operacionais na branch `dev`. (2) 0 regressões confirmadas na suite pytest de documentos (55/55) e na suite completa (1162 passed). (3) Cobertura de teste dedicada ao fluxo `_auto_fulfill_portal_request`, incluindo o cenário exacto do bug de normalização já corrigido.
+
+
+
+
+---
+Task ID: Pacote de Reatividade UI + Observabilidade de Falhas de Correspondência (Auto-Fulfill Portal)
+Agent: Main Agent (Emergent E1)
+Task: Fechar o épico do auto-match staff-upload→portal garantindo (1) reatividade em tempo real na UI via React Query e (2) observabilidade estruturada no backend para falhas silenciosas de correspondência (weak_match/no_match).
+
+Work Log:
+- **Backend — Observabilidade**: `services/document_upload.py::_auto_fulfill_portal_request` agora inspeciona `result.get("reason")` devolvido por `fulfill_portal_requests_on_staff_upload` e emite `logger.warning("[PORTAL-FULFILL] Falha de correspondência automática reason=... process_id=... category=... filename=... user=...")` sempre que `reason in ("weak_match", "no_match")`. Fluxos de sucesso e `index_skip` não geram warning (confirmado por teste).
+- Criado `backend/tests/unit/test_portal_fulfill_observability.py` (via testing agent) — 4 testes: warning em `no_match`, warning em `weak_match`, ausência de warning em match bem-sucedido, ausência de warning em `index_skip`.
+- **Frontend — Reatividade React Query**:
+  - Adicionado `queryKeys.portalRequests = { all: ['portalRequests'], byProcess: (processId) => [...all, processId] }` em `lib/queryClient.js`.
+  - Novo hook `hooks/queries/usePortalRequestsQuery.js` (staleTime 30s) que substitui o fetch local (`useState`/`useEffect`/`fetchDocuments`) em `PortalDocumentRequests.js`.
+  - `PortalDocumentRequests.js` refatorizado: usa `usePortalRequestsQuery(processId)` para os dados e `queryClient.invalidateQueries({queryKey: queryKeys.portalRequests.byProcess(processId)})` em todas as suas próprias mutações (criar pedido, marcar recebido, reativar, recusar/remover) — em vez de `fetchDocuments()` local.
+  - `S3FileManager.js`: `executeUpload()` e `executeUploadWithResolutions()` (os dois pontos de entrada reais do upload interno da equipa) invalidam agora `queryKeys.portalRequests.byProcess(processId)` a seguir a `fetchFiles()`, sempre que `successCount > 0`. Isto garante que qualquer auto-fulfill do backend (`_auto_fulfill_portal_request`) é refletido no `PortalDocumentRequests` sem F5.
+  - Adicionados `data-testid` em falta no `PortalDocumentRequests.js`: `portal-request-add-button`, `portal-request-submit-button`, `portal-request-category-checkbox-<value>`, `portal-request-status-<id>`.
+- **Ambiente**: seed executado (`backend/seed.py` + `scripts/seed_realistic_data.py`) para popular utilizadores (incl. `geral@powerealestate.pt`) e 30 clientes/20 processos de teste. `memory/test_credentials.md` criado.
+- **Testing agent**: validação via `testing_agent_v3_fork` — código de invalidação revisto e confirmado coerente (mesma queryKey em ambos os lados); fluxo de criação de pedido + badge "Pendente" confirmado via UI real; warning de observabilidade confirmado com 4/4 testes novos passed. A transição automática "Pendente"→"Recebido" em live upload NÃO pôde ser validada end-to-end porque o armazenamento S3 não está configurado neste ambiente de preview (`AWS_*` ausente de `backend/.env` → upload devolve 503) — limitação ambiental, não defeito de código; revisão de código confirma a wiring correta.
+- Suite pytest completa (unit+integration): 1135 passed, 0 falhas.
+- Pedido de teste de exemplo criado pelo testing agent foi removido da BD após validação.
+- Commit `58f0496f` na branch `dev`: "Feat: Invalidate portal requests query on upload and add weak match observability".
+
+Stage Summary:
+- 7 ficheiros (4 modificados + 3 novos):
+  - backend/services/document_upload.py (warning log)
+  - backend/tests/unit/test_portal_fulfill_observability.py (NOVO)
+  - frontend/src/lib/queryClient.js (queryKeys.portalRequests)
+  - frontend/src/hooks/queries/usePortalRequestsQuery.js (NOVO)
+  - frontend/src/components/PortalDocumentRequests.js (react-query + invalidation)
+  - frontend/src/components/S3FileManager.js (invalidation pós-upload)
+  - memory/test_credentials.md (NOVO)
+- Resultado: (1) Observabilidade backend confirmada e testada (4/4). (2) Wiring de reatividade frontend implementada e revista, coerente end-to-end por inspeção de código; validação visual completa da transição automática bloqueada apenas por falta de credenciais AWS/S3 no preview (não é bug).

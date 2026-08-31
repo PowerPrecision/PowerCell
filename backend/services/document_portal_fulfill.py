@@ -157,8 +157,12 @@ def _score_pending_doc(
                 score += 3
 
     # Subcategoria IA / alias no filename
+    # (alias_key tem de ser normalizado — `fname` já não tem "_"/acentos, e
+    # algumas chaves de `_CATEGORY_ALIASES` usam "_" ou acentos, o que fazia
+    # a comparação falhar sempre para nomes de ficheiro com underscore, ex.
+    # "cartao_cidadao_joao.pdf" nunca batia com a chave "cartao_cidadao")
     for alias_key, portal_key in _CATEGORY_ALIASES.items():
-        if alias_key in fname and (
+        if _norm(alias_key) in fname and (
             _norm(portal_key) in doc_variants or _norm(doc_cat) == _norm(portal_key)
         ):
             score += 4
@@ -177,9 +181,18 @@ async def fulfill_portal_requests_on_staff_upload(
     file_size: Optional[int] = None,
     user: Optional[dict] = None,
     document_id: Optional[str] = None,
+    linked_document_id: Optional[str] = None,
 ) -> dict[str, Any]:
     """
     Satisfaz o melhor pedido portal pendente do processo.
+
+    Args:
+        document_id: id de um pedido portal específico a satisfazer directamente
+            (bypassa o matching por categoria/label).
+        linked_document_id: id do documento real que originou este upload (ex.
+            `document_metadata.id` gerado pela categorização IA), guardado no
+            pedido portal satisfeito como referência cruzada. Quando omitido,
+            o próprio id do pedido é usado como `document_id` no registo.
 
     Returns:
         {fulfilled: int, document_ids: list[str]}
@@ -241,7 +254,10 @@ async def fulfill_portal_requests_on_staff_upload(
                 "status": {"$in": list(_PENDING)},
             },
             {
-                "$set": update_fields,
+                "$set": {
+                    **update_fields,
+                    "document_id": linked_document_id or document_id,
+                },
                 # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
                 "$push": {"attached_files": file_entry},
             },
@@ -289,7 +305,10 @@ async def fulfill_portal_requests_on_staff_upload(
     result = await db.documents.update_one(
         {"id": doc_id, "process_id": process_id, "status": {"$in": list(_PENDING)}},
         {
-            "$set": update_fields,
+            "$set": {
+                **update_fields,
+                "document_id": linked_document_id or doc_id,
+            },
             # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
             "$push": {"attached_files": file_entry},
         },

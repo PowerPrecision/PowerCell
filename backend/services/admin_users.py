@@ -371,11 +371,7 @@ async def run_update_user(user_id: str, data: UserUpdate, user: dict):
         HTTPException(400): Se email já existe noutro utilizador,
             role inválido, ou tentativa de desativar um admin.
     """
-    from services.permissions import (
-        get_default_permissions_for_role, 
-        should_sync_permissions,
-        validate_permissions
-    )
+    from services.permissions import should_sync_permissions
     
     target_user = await db.users.find_one({"id": user_id}, {"_id": 0})
     if not target_user:

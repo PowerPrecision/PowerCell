@@ -82,10 +82,10 @@ async def run_find_or_create_client(
         nif_hash = generate_nif_hash(sanitized_nif)
         existing = None
         if nif_hash:
-            existing = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash})
+            existing = await db.clients.find_one({"dados_pessoais.nif_hash": nif_hash}, {"_id": 0})
         # Fallback para dados antigos não migrados
         if not existing:
-            existing = await db.clients.find_one({"dados_pessoais.nif": sanitized_nif})
+            existing = await db.clients.find_one({"dados_pessoais.nif": sanitized_nif}, {"_id": 0})
         if existing:
             return {
                 "found": True,
@@ -98,10 +98,10 @@ async def run_find_or_create_client(
         email_hash = generate_email_hash(sanitized_email)
         existing = None
         if email_hash:
-            existing = await db.clients.find_one({"contacto.email_hash": email_hash})
+            existing = await db.clients.find_one({"contacto.email_hash": email_hash}, {"_id": 0})
         # Fallback para dados antigos não migrados
         if not existing:
-            existing = await db.clients.find_one({"contacto.email": sanitized_email.lower()})
+            existing = await db.clients.find_one({"contacto.email": sanitized_email.lower()}, {"_id": 0})
         if existing:
             return {
                 "found": True,

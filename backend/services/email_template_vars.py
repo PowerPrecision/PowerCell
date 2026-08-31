@@ -107,7 +107,7 @@ def _extract_email_variables(process: dict, user: dict, documents_list: str) -> 
             if len(parts) == 3:
                 return f"{parts[2]}/{parts[1]}/{parts[0]}"
             return date_str
-        except:
+        except Exception:
             return date_str
     
     # 1º Proponente
@@ -392,7 +392,7 @@ def _build_professional_email_html(process: dict, user: dict, documents_list: st
             if len(parts) == 3:
                 return f"{parts[2]}/{parts[1]}/{parts[0]}"
             return date_str
-        except:
+        except Exception:
             return date_str
     
     # ==== 1º PROPONENTE ====

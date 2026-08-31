@@ -266,7 +266,7 @@ class TestTemplatePreviewCleanup:
         for template_id in _created_templates:
             try:
                 self.session.delete(f"{BASE_URL}/api/admin/form-config/templates/{template_id}")
-            except:
+            except Exception:
                 pass
         
         _created_templates = []
@@ -279,7 +279,7 @@ class TestTemplatePreviewCleanup:
                 if tpl.get("name", "").startswith("TEST_"):
                     try:
                         self.session.delete(f"{BASE_URL}/api/admin/form-config/templates/{tpl['id']}")
-                    except:
+                    except Exception:
                         pass
 
 
