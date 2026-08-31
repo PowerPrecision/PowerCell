@@ -11,7 +11,7 @@ import os
 
 BASE_URL = os.environ.get('REACT_APP_BACKEND_URL', '').rstrip('/')
 if not BASE_URL:
-    BASE_URL = "https://auto-doc-fetch.preview.emergentagent.com"
+    BASE_URL = "https://powercell-crm.preview.emergentagent.com"
 
 
 class TestIteration29:
