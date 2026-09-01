@@ -44,6 +44,10 @@ class CompanyCreate(BaseModel):
     smtp_password: Optional[str] = Field(None, max_length=500, description="Password SMTP da empresa")
     smtp_host: Optional[str] = Field(None, max_length=200, description="Servidor SMTP da empresa")
     smtp_port: Optional[int] = Field(None, description="Porto SMTP da empresa")
+    imap_email: Optional[str] = Field(None, max_length=200, description="Email IMAP da empresa (leitura de Webmail)")
+    imap_password: Optional[str] = Field(None, max_length=500, description="Password IMAP da empresa")
+    imap_host: Optional[str] = Field(None, max_length=200, description="Servidor IMAP da empresa")
+    imap_port: Optional[int] = Field(None, description="Porto IMAP da empresa")
 
     @field_validator("nif")
     @classmethod
@@ -66,6 +70,10 @@ class CompanyUpdate(BaseModel):
     smtp_password: Optional[str] = Field(None, max_length=500, description="Password SMTP da empresa")
     smtp_host: Optional[str] = Field(None, max_length=200, description="Servidor SMTP da empresa")
     smtp_port: Optional[int] = Field(None, description="Porto SMTP da empresa")
+    imap_email: Optional[str] = Field(None, max_length=200, description="Email IMAP da empresa (leitura de Webmail)")
+    imap_password: Optional[str] = Field(None, max_length=500, description="Password IMAP da empresa")
+    imap_host: Optional[str] = Field(None, max_length=200, description="Servidor IMAP da empresa")
+    imap_port: Optional[int] = Field(None, description="Porto IMAP da empresa")
 
     @field_validator("nif")
     @classmethod
@@ -90,6 +98,9 @@ class CompanyResponse(BaseModel):
     smtp_email: Optional[str] = None
     smtp_host: Optional[str] = None
     smtp_port: Optional[int] = None
+    imap_email: Optional[str] = None
+    imap_host: Optional[str] = None
+    imap_port: Optional[int] = None
     total_users: int = 0
     created_at: Optional[str] = None
     updated_at: Optional[str] = None

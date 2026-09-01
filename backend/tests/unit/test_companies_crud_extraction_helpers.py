@@ -76,6 +76,43 @@ def test_company_models_include_is_active():
     assert response.is_active is True
 
 
+def test_company_models_include_imap_fields():
+    """PACOTE — Webmail: schemas de Company devem suportar IMAP, não só SMTP."""
+    from models.company import CompanyCreate, CompanyUpdate, CompanyResponse
+
+    created = CompanyCreate(
+        name="Precision Crédito",
+        imap_host="imap.exemplo.pt",
+        imap_port=993,
+        imap_email="geral@exemplo.pt",
+        imap_password="segredo",
+    )
+    assert created.imap_host == "imap.exemplo.pt"
+    assert created.imap_port == 993
+
+    updated = CompanyUpdate(imap_host="imap2.exemplo.pt", imap_port=143)
+    assert updated.imap_host == "imap2.exemplo.pt"
+    assert updated.imap_port == 143
+
+    response = CompanyResponse(id="1", name="Precision Crédito", imap_host="imap.exemplo.pt", imap_port=993)
+    assert response.imap_host == "imap.exemplo.pt"
+    assert response.imap_port == 993
+
+
+def test_create_company_persists_imap_fields():
+    from pathlib import Path
+
+    text = (
+        Path(__file__).resolve().parents[2]
+        / "services"
+        / "companies_crud_api_mutate.py"
+    ).read_text()
+    assert '"imap_host": data.imap_host' in text
+    assert '"imap_port": data.imap_port' in text
+    assert '"imap_email": data.imap_email' in text
+    assert '"imap_password": data.imap_password' in text
+
+
 def test_list_companies_escapes_regex_search():
     """Pacote FF — pesquisa de empresas não injeta $regex cru."""
     import asyncio

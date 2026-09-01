@@ -4,9 +4,9 @@
 CLEANUP DE DADOS DE TESTE EM PRODUCAO
 ====================================================================
 
-Procura e apaga em CASCATA todos os registos cujo email contenha
-"test" ou "teste" (case-insensitive - "teste" ja e apanhado pela
-substring "test"), nas seguintes coleccoes:
+Procura e apaga em CASCATA todos os registos cujo email OU nome
+contenha "test" ou "teste" (case-insensitive - "teste" ja e apanhado
+pela substring "test"), nas seguintes coleccoes:
 
     Leads / Clientes  -> collection `clients`
                         ("Leads" e "Clientes" sao o MESMO documento
@@ -23,10 +23,12 @@ registos orfaos a meio da execucao caso o script seja interrompido):
        `client_email` a corresponder directamente)
     3. Clientes/Leads cujo email corresponde ao filtro
 
-Campos de email considerados (cobre variacoes legadas do schema):
+Campos considerados (cobre variacoes legadas do schema):
     clients.contacto.email
     clients.email
+    clients.nome
     processes.client_email
+    processes.client_name
 
 Utilizacao:
     cd backend && python -m scripts.cleanup_prod_test_data
@@ -59,17 +61,18 @@ async def cleanup_prod_test_data(dry_run: bool = True):
 
     print("=" * 70)
     print("LIMPEZA DE DADOS DE TESTE (Leads, Clientes, Processos, Documentos)")
-    print("Filtro: email contem 'test' ou 'teste' (case-insensitive)")
+    print("Filtro: email ou nome contem 'test' ou 'teste' (case-insensitive)")
     print(f"Modo: {'SIMULACAO (dry-run)' if dry_run else 'EXECUCAO REAL'}")
     print("=" * 70)
 
     empty_in = {"id_placeholder_never_matches": True}
 
-    # -- 1) Identificar Leads/Clientes por email --------------------------
+    # -- 1) Identificar Leads/Clientes por email OU nome ------------------
     client_query = {
         "$or": [
             {"contacto.email": EMAIL_PATTERN},
             {"email": EMAIL_PATTERN},
+            {"nome": EMAIL_PATTERN},
         ]
     }
     clients = await db.clients.find(
@@ -84,12 +87,13 @@ async def cleanup_prod_test_data(dry_run: bool = True):
     if len(clients) > 10:
         print(f"   ... e mais {len(clients) - 10}")
 
-    # -- 2) Identificar Processos (por client_id OU client_email directo) --
+    # -- 2) Identificar Processos (por client_id OU client_email/client_name directo) --
     process_id_filter = {"client_id": {"$in": client_ids}} if client_ids else empty_in
     process_query = {
         "$or": [
             process_id_filter,
             {"client_email": EMAIL_PATTERN},
+            {"client_name": EMAIL_PATTERN},
         ]
     }
     processes = await db.processes.find(
@@ -144,7 +148,7 @@ async def cleanup_prod_test_data(dry_run: bool = True):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(
-        description="Apaga em cascata Leads/Clientes/Processos/Documentos cujo email contenha 'test' ou 'teste'"
+        description="Apaga em cascata Leads/Clientes/Processos/Documentos cujo email ou nome contenha 'test' ou 'teste'"
     )
     parser.add_argument("--execute", action="store_true", help="Executar a limpeza real (sem isto e simulacao)")
     args = parser.parse_args()

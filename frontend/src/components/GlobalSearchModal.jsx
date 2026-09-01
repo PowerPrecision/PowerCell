@@ -105,13 +105,13 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
         navigate(`/processo/${item.data.id}`);
         break;
       case "client":
-        if (item.data.first_process_id) {
-          navigate(`/processo/${item.data.first_process_id}`);
-        } else if (item.data.has_process && item.data.id) {
-          navigate(`/clientes?cliente=${item.data.id}`);
-        } else {
-          navigate(`/clientes?cliente=${item.data.id}`);
-        }
+        // Bug fix: uma entidade "Cliente" deve navegar SEMPRE para os
+        // detalhes do cliente (/cliente/:id) — nunca para o processo,
+        // mesmo que o cliente já tenha um processo associado. A rota
+        // "/clientes?cliente=" estava errada (aponta para a lista, o
+        // query param nunca era lido) e o redirect condicional para
+        // first_process_id misturava as duas entidades.
+        navigate(`/cliente/${item.data.id}`);
         break;
       case "task":
         navigate(`/pendentes`);
@@ -129,6 +129,7 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
 
     return (
       <div
+        data-testid={`global-search-result-${type}-${data.id}`}
         className={`flex items-center gap-3 px-3 py-2 rounded-md cursor-pointer transition-colors ${
           isSelected ? "bg-accent" : "hover:bg-accent/50"
         } ${inactive ? "opacity-70" : ""}`}
@@ -204,6 +205,7 @@ const GlobalSearchModal = ({ open, onOpenChange }) => {
         <div className="px-4 pb-2">
           <div className="relative">
             <Input
+              data-testid="global-search-input"
               placeholder="Pesquisar processos, clientes, tarefas..."
               value={query}
               onChange={(e) => setQuery(e.target.value)}
