@@ -3833,3 +3833,13 @@ Pedido do utilizador: 5 ajustes cirúrgicos após testes em produção, sem toca
 5. `models/company.py`: campos IMAP (`imap_email/password/host/port`) espelhando SMTP, para suportar Webmail. Wired em `run_create_company`.
 
 Validação: pytest completo (1178 unit + 67 integration, 0 falhas) + testing_agent_v3_fork (iteration_3.json) confirmou os 2 bugs reportados — routing corrigido, email trigger já funcional (sem regressão). Dados de teste criados pelo testing agent (Rita Mendonça, João Marques) foram removidos da BD após validação. Commit `ba9ad1c7`.
+
+## 2026-09-01 (3) — Config UIs (Checklist/IMAP) + Motor de Tarefas Automáticas
+
+Pedido: 3 pontos cirúrgicos, sem ecrãs novos, sem refactor de lint.
+
+1. `MandatoryDocumentsSection.js`: duas listas (Obrigatórios/Opcionais) com sub-componente reutilizável `DocumentChecklist`. Backend já suportava `optional_documents` (sessão anterior) — sem alterações backend.
+2. IMAP UI: `CompanyEmailConfigSection.js`/`SharedEmailConfigSection.js` (nomes dados pelo utilizador) confirmados como CÓDIGO MORTO via testing_agent (iteration_4, Features 2a/2b falharam por apontarem a componentes nunca importados). Localizada a UI real: `CompaniesAdminTab.jsx` (Organização > Empresas, modelo Company) e `EmailAccountsPage.js` (/contas-email, SharedEmailCard). Portados os campos IMAP (host/porta/user/password) para estes dois ficheiros reais, imediatamente a seguir aos campos SMTP. Backend: `company_email_config.py` ganhou imap_user/imap_password (encriptado); `shared_email_config.py` Response passou a expor imap_server/port/smtp_server/port para pre-fill.
+3. `_create_post_indexing_tasks` em `process_assignment.py`: cria 2 Tasks (Analisar documentação inicial/Alta, Agendar contacto inicial/Média) por cada consultor/mediador recém-atribuído pós-indexação. `models/task.py` ganhou campo `priority` opcional.
+
+Validação: pytest completo (1183 passed, 6 skipped, 0 falhas) incluindo novos testes unit (companies/shared_email imap) + integration (TestPostIndexingAutoTasks) + `tests/test_iteration4_features.py` E2E live. testing_agent_v3_fork: iteration_4 (Features 1 e 3 PASS; 2a/2b FAIL — componentes mortos identificados) → corrigido → iteration_5 (2a/2b PASS 100%). Dados de teste (empresa QA, shared-email role=suporte) limpos pelo próprio testing agent. Commit `32a1663a`.
