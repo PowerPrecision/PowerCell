@@ -3760,3 +3760,32 @@ Stage Summary:
   - frontend/src/components/S3FileManager.js (invalidation pós-upload)
   - memory/test_credentials.md (NOVO)
 - Resultado: (1) Observabilidade backend confirmada e testada (4/4). (2) Wiring de reatividade frontend implementada e revista, coerente end-to-end por inspeção de código; validação visual completa da transição automática bloqueada apenas por falta de credenciais AWS/S3 no preview (não é bug).
+
+
+---
+Task ID: Auditoria do Fluxo de Onboarding (Registo → Pré-Registo → Índice → Atribuição)
+Agent: Main Agent (Emergent E1)
+Task: Analisar o fluxo real de negócio (registo do cliente até atribuição a consultor/intermediário) descrito pelo Product Owner e compará-lo com o código actual. Pedido explícito: apenas análise/documentação, sem implementação nesta ronda.
+
+Work Log:
+- Auditados os ficheiros: `services/onboarding_service.py` (motor legado, CONFIRMADO como código morto — nunca chamado por nenhuma rota), `services/onboarding_mandatory_config.py` (motor activo, checklist via `SystemConfig.mandatory_documents`), `services/portal_onboarding_advance.py` (auto-avanço pré-registo → 1ª fase, padrão stealth já existente), `services/process_assignment.py` (`assign_to_indexer`, `dual_auto_assign_on_pre_registo_transition`, `_find_least_busy_user`), `services/process_indexing.py` (`run_mark_process_indexed`, histórico da indexação), `services/client_registered.py` (Sala de Triagem / Registos de Clientes), `services/portal_profile.py` + `ClientPortal.jsx` (bloqueio de "Meu Perfil" via `is_data_confirmed`), `models/system_config.py::MandatoryDocumentsConfig`.
+- Confirmado via MongoDB (`system_config` collection) que a checklist activa em produção/preview corresponde ao default hardcoded (nunca foi customizada): CC, IRS, Recibos, Comprovativo de Morada, Extratos — todos tratados como obrigatórios, sem conceito de "opcional" no sistema.
+- Identificados 5 gaps entre o fluxo desejado e o código actual (detalhados em `ARCHITECTURE.md` → secção "Fluxo de Onboarding: Registo → Pré-Registo → Índice → Atribuição (Auditoria 2026-08-31)"):
+  1. Checklist obrigatória não coincide com a lista confirmada (falta "Mapa de Responsabilidades"; sem distinção obrigatório/opcional).
+  2. Motor de onboarding legado morto (`onboarding_service.py`).
+  3. Ações do Índice (`mark_process_indexed`) ficam no histórico — deveria ser silencioso (mesmo padrão `stealth_system_user` já usado no auto-avanço pré-registo).
+  4. Sem notificação ao intermediário/consultor recém-atribuído após dupla auto-atribuição.
+  5. Sem tarefas automáticas para consultor/intermediário (backlog, regras ainda por definir pelo PO).
+- Decisões confirmadas com o PO (via ask_human):
+  - Obrigatórios: CC, Extratos (3 últimos), Mapa de Responsabilidades. Opcionais: Recibos, IRS, Declaração Patronal.
+  - Histórico do Índice: silenciar completamente.
+  - Notificação ao intermediário: email + in-app.
+  - **Requisito explícito**: nada hardcoded — o admin deve poder configurar livremente a checklist obrigatória/opcional (extensão a `MandatoryDocumentsConfig`, não uma lista fixa no motor).
+  - Âmbito confirmado: só análise/documentação nesta ronda — implementação fica para pacote seguinte, sob ordem explícita do PO.
+- Pedido de "Security Audit" feito no início da conversa foi cancelado pelo próprio utilizador ("foi engano, ignora").
+- Nenhuma alteração de código nesta ronda (só documentação em `ARCHITECTURE.md`).
+
+Stage Summary:
+- 1 ficheiro alterado: `ARCHITECTURE.md` (nova secção de auditoria + backlog confirmado).
+- Resultado: análise completa e documentada, decisões de negócio confirmadas e registadas para implementação no próximo pacote de trabalho.
+
