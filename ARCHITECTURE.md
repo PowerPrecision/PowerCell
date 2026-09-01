@@ -1948,8 +1948,9 @@ A auto-categorização em background (`document_auto_categorize.py`) continua a 
 > **Nota**: Esta secção documenta o resultado de uma auditoria ao fluxo real de
 > negócio (registo do cliente até atribuição a consultor/intermediário),
 > comparando o **código existente** com o **fluxo desejado** validado com o
-> Product Owner. É um documento de análise — as correções descritas em
-> "Decisões Confirmadas" ainda **não foram implementadas** (backlog).
+> Product Owner. As correções descritas em "Decisões Confirmadas" foram
+> **implementadas em 2026-09-01** (commit `245cc4a5`, ver detalhe no fim da
+> secção "Próximos passos").
 
 ### Fluxo desejado (confirmado com o Product Owner)
 
@@ -2011,4 +2012,18 @@ A auto-categorização em background (`document_auto_categorize.py`) continua a 
 - Aplicar `stealth_system_user` (track_history=False) em `log_mark_indexed_history`.
 - Adicionar notificação (email + in-app) ao consultor/intermediário recém-atribuído dentro de `dual_auto_assign_on_pre_registo_transition`.
 - Confirmar e remover `services/onboarding_service.py` (motor morto) se não houver dependências ocultas.
+
+### Implementação (2026-09-01, commit `245cc4a5`) — Fase 1 + Fase 2 (backend)
+
+Todos os 5 gaps foram corrigidos nesta ronda (sem construir UI de administração, conforme âmbito acordado):
+
+1. **Checklist obrigatório/opcional**: `MandatoryDocumentsConfig` ganhou o campo `optional_documents` (além de `documents`). Novo default: Obrigatórios = `identificacao` (CC), `extrato_bancario`, `mapa_responsabilidades`. Opcionais = `recibo_vencimento`, `irs`, `declaracao_patronal`. `generate_mandatory_document_requests` (em `services/portal_documents_notify.py`) gera as duas listas com `source` distinto (`mandatory_checklist` vs `mandatory_checklist_optional`) e `is_optional` explícito na API — os opcionais nunca bloqueiam `is_mandatory_checklist_complete` nem `check_and_notify_documents_complete`. Continua **totalmente configurável** via `SystemConfig` (sem hardcode no motor de decisão), apenas sem UI dedicada ainda.
+2. **Motor morto removido**: `services/onboarding_service.py` apagado (confirmado sem imports).
+3. **Auditoria Stealth**: `log_mark_indexed_history` e `dual_auto_assign_on_pre_registo_transition` propagam agora `track_history=False` para os registos sintéticos de "Sistema" quando o actor real tem role `indexacao` — nenhuma acção do Índice (incl. salto de estado, limpeza do indexador, dupla auto-atribuição) fica no histórico. Actores admin/ceo continuam a gerar histórico normal (sem regressão).
+4. **Notificação de atribuição**: `dual_auto_assign_on_pre_registo_transition` chama `_notify_newly_assigned_users` (novo, em `process_assignment.py`) — email via `send_notification_with_preference_check` + in-app via `send_realtime_notification`, disparado só para quem foi atribuído NAQUELA chamada (não repete para quem já estava atribuído).
+5. **Bug bónus corrigido (reportado pelo utilizador)**: `GET /api/processes/{id}` devolvia 500 (`ResponseValidationError`) quando `updated_at`/`created_at` estava gravado como BSON Date nativo (raiz: `soft_delete_process` grava `datetime.now(timezone.utc)` sem `.isoformat()`). Fix: `ProcessResponse` agora usa `Optional[datetime]` + `@field_serializer` (aceita datetime OU string, serializa sempre ISO). Também corrigido `GET /portal-messages/unread` 404 — causa raiz era `CORS_ORIGINS` desatualizado em `backend/.env` (preview URL antigo) enquanto `frontend/.env` já usava o domínio estável `powercell-crm.preview.emergentagent.com`.
+
+Testado via `testing_agent_v3_fork` (iteration_2.json): 1176 passed, 0 falhas. Ficheiros novos: `tests/unit/test_process_response_datetime_fix.py`, `tests/integration/test_onboarding_checklist_split.py`, `tests/integration/test_index_stealth_and_notification.py`.
+
+**Ainda por fazer** (fora do âmbito desta ronda, backlog): UI de administração da checklist obrigatória/opcional no SystemConfigPage; tarefas automáticas para consultor/intermediário (regras ainda por definir pelo PO).
 

@@ -119,6 +119,14 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 **Nota**: `/configuracoes` e `/definicoes` são rotas DIFERENTES. A primeira é para admin configurar o sistema (SMTP, storage, RGPD, etc.), a segunda é para o utilizador gerir as suas definições pessoais.
 
+## Correções 2026-09-01 — Hotfixes (500/404) + Implementação Backend do Onboarding
+
+- **Bug 500**: `GET /processes/{id}` falhava com `ResponseValidationError` quando `updated_at`/`created_at` era um BSON Date nativo (raiz: `soft_delete_process` sem `.isoformat()`). Fix: `ProcessResponse` usa `Optional[datetime]` + `@field_serializer`.
+- **Bug 404**: `portal-messages/unread` — causa raiz era CORS desatualizado em `backend/.env` (preview URL antigo) vs. domínio novo em `frontend/.env`. Corrigido.
+- **Onboarding backend**: `onboarding_service.py` (morto) removido; Auditoria Stealth propagada a `dual_auto_assign_on_pre_registo_transition`; notificação (email+in-app) ao consultor/mediador recém-atribuído; checklist dividida em Obrigatórios (CC, Extratos, Mapa de Responsabilidades) e Opcionais (Recibos, IRS, Declaração Patronal) via `SystemConfig.mandatory_documents.optional_documents` (configurável, sem hardcode). Sem UI de administração nesta ronda (backlog).
+- Testado por `testing_agent_v3_fork`: 1176 passed, 0 falhas, 0 action items. Commit `245cc4a5`.
+- **Backlog remanescente**: UI de administração da checklist no SystemConfigPage; tarefas automáticas para consultor/intermediário (regras por definir).
+
 ## Correções 2026-08-31 (2) — Reatividade UI (React Query) + Observabilidade Auto-Fulfill
 
 - **Backend**: `_auto_fulfill_portal_request` (`services/document_upload.py`) regista `logger.warning` estruturado quando `fulfill_portal_requests_on_staff_upload` devolve `reason=weak_match` ou `reason=no_match` (visibilidade sobre falhas silenciosas do motor de correspondência automática). 4 testes novos em `test_portal_fulfill_observability.py`.

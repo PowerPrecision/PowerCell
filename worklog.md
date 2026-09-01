@@ -3789,3 +3789,35 @@ Stage Summary:
 - 1 ficheiro alterado: `ARCHITECTURE.md` (nova secção de auditoria + backlog confirmado).
 - Resultado: análise completa e documentada, decisões de negócio confirmadas e registadas para implementação no próximo pacote de trabalho.
 
+
+
+---
+Task ID: Hotfixes Críticos + Implementação Backend do Fluxo de Onboarding (Fase 1 + Fase 2)
+Agent: Main Agent (Emergent E1)
+Task: Corrigir 2 bugs reportados (500 no GET /processes/{id}, 404 no portal-messages/unread) e implementar 4 itens de backend do fluxo de onboarding auditado anteriormente (código morto, auditoria stealth, notificação de atribuição, checklist obrigatório/opcional), sem construir UI de administração nesta ronda.
+
+Work Log:
+- **BUG 1 (500 Pydantic)**: `models/process.py::ProcessResponse` tinha `created_at`/`updated_at: Optional[str]`. Causa raiz encontrada: `services/process_delete.py::soft_delete_process` grava `datetime.now(timezone.utc)` sem `.isoformat()` → BSON Date nativo no Mongo → Pydantic v2 não coage datetime para str → `ResponseValidationError` (500). Fix: campos passaram a `Optional[datetime]` + `@field_serializer("created_at","updated_at")` que aceita ambos os tipos e serializa sempre para ISO string. Reproduzido manualmente via mongosh (injecção de BSON Date num processo real) antes e depois do fix para confirmar.
+- **BUG 2 (404 portal-messages/unread)**: endpoint já existia correctamente no backend (`routes/processes.py`). Causa raiz real: `backend/.env` tinha `CORS_ORIGINS` a apontar para um preview URL antigo (`db7a9bf4-...`), enquanto `frontend/.env` já tinha migrado para o domínio estável `https://powercell-crm.preview.emergentagent.com` — o browser bloqueava o pedido por CORS, surgindo como erro de rede/404 na UI. Corrigido `CORS_ORIGINS` em `backend/.env` (ficheiro não versionado em git — nota operacional para redeploy).
+- **Item 3 — Código morto removido**: `services/onboarding_service.py` apagado (confirmado sem imports em nenhuma rota/serviço, só uma referência em comentário).
+- **Item 4 — Auditoria Stealth**: `process_indexing.py::log_mark_indexed_history` e `process_assignment.py::dual_auto_assign_on_pre_registo_transition` — os `system_user` sintéticos usados para os registos de "salto de estado"/"limpeza do indexador"/"dupla auto-atribuição" passaram a ter `track_history=(actor.role != "indexacao")`, propagando o silêncio já existente para TODAS as acções desencadeadas pela marcação de indexação. Validado: actor `indexacao` → 0 entradas de histórico; actor `admin` → histórico normal (regressão OK).
+- **Item 5 — Notificação de atribuição**: nova função `_notify_newly_assigned_users` em `process_assignment.py`, chamada por `dual_auto_assign_on_pre_registo_transition` só para consultor/mediador que ACABARAM de ser atribuídos (não repete para quem já estava atribuído). Usa `send_notification_with_preference_check` (email, preparado/simulado neste ambiente) + `send_realtime_notification` (in-app, via infra já existente).
+- **Item 6 — Checklist Obrigatórios/Opcionais**: `models/system_config.py::MandatoryDocumentsConfig` ganhou `optional_documents` (novo campo). Novo default: Obrigatórios = CC (`identificacao`), Extratos (`extrato_bancario`), Mapa de Responsabilidades (`mapa_responsabilidades`). Opcionais = Recibos (`recibo_vencimento`), IRS (`irs`), Declaração Patronal (`declaracao_patronal`). `services/portal_documents_notify.py::generate_mandatory_document_requests` refactorizado com helper `_generate_document_requests_for_list` — gera as duas listas com `source` distinto (`mandatory_checklist` / `mandatory_checklist_optional`) e `is_optional` explícito; idempotência por lista. `check_and_notify_documents_complete` e `is_mandatory_checklist_complete` continuam a só considerar os obrigatórios (`source="mandatory_checklist"`) — opcionais nunca bloqueiam. `services/portal_status.py` expõe `is_optional` na resposta da API para o Portal distinguir. Migrados os documentos `system_config` persistidos em `powercell_dev` e `test_db_ci` (o novo default de classe só afecta instalações de raiz — o registo já existente tinha de ser actualizado explicitamente).
+- Testes novos criados e todos passam: `tests/unit/test_process_response_datetime_fix.py` (3), `tests/integration/test_onboarding_checklist_split.py` (3), `tests/integration/test_index_stealth_and_notification.py` (4).
+- Suite completa: 1145 passed localmente antes do testing agent; testing agent confirmou 1176 passed (inclui os seus próprios testes adicionais), 0 falhas.
+- **Testing agent** (`iteration_2.json`): validou os 6 itens contra o preview real (não apenas inspecção de código) — reproduziu BUG1 via injecção de BSON Date, confirmou BUG2 via CORS real, confirmou stealth/notificação/checklist via os testes novos. Nenhum action item, `retest_needed: false`.
+- Commit `245cc4a5` na branch `dev`: "Fix: Resolve process 500/404 errors and implement core onboarding backend logic" (mensagem exacta pedida pelo utilizador).
+- `ARCHITECTURE.md` actualizado: secção da auditoria marcada como implementada, com detalhe de cada correcção.
+
+Stage Summary:
+- 7 ficheiros de código alterados/apagados + 3 ficheiros de teste novos:
+  - backend/models/process.py, backend/models/system_config.py
+  - backend/services/onboarding_service.py (APAGADO)
+  - backend/services/portal_documents_notify.py, backend/services/portal_status.py
+  - backend/services/process_assignment.py, backend/services/process_indexing.py
+  - backend/tests/unit/test_process_response_datetime_fix.py (NOVO)
+  - backend/tests/integration/test_onboarding_checklist_split.py (NOVO)
+  - backend/tests/integration/test_index_stealth_and_notification.py (NOVO)
+  - backend/.env (CORS_ORIGINS corrigido — não versionado)
+- Resultado: 2 bugs reportados resolvidos e verificados end-to-end pelo testing agent; 4 itens do fluxo de onboarding implementados sem UI, mantendo tudo configurável via SystemConfig (nada hardcoded no motor de decisão).
+
