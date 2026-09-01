@@ -146,7 +146,18 @@ async def log_mark_indexed_history(
 
     if next_status and next_status != current_status:
         try:
-            system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+            # PACOTE: Auditoria Stealth — se o ACTOR real (quem marcou a
+            # indexação) tem role "indexacao", este registo sintético de
+            # sistema também deve ficar silencioso (track_history=False),
+            # senão o salto de estado "vazava" para o histórico mesmo
+            # quando as duas entradas anteriores (INDEXACAO_CONCLUIDA,
+            # DADOS_CONFIRMADOS_INDEXACAO) já tinham sido silenciadas.
+            system_user = {
+                "id": "system",
+                "name": "Sistema",
+                "role": "admin",
+                "track_history": user.get("role") != "indexacao",
+            }
             await log_history(
                 process_id,
                 user=system_user,
@@ -163,7 +174,12 @@ async def log_mark_indexed_history(
 
     if process.get("assigned_indexacao_id"):
         try:
-            system_user = {"id": "system", "name": "Sistema", "role": "admin"}
+            system_user = {
+                "id": "system",
+                "name": "Sistema",
+                "role": "admin",
+                "track_history": user.get("role") != "indexacao",
+            }
             await log_history(
                 process_id,
                 user=system_user,
@@ -275,6 +291,7 @@ async def auto_assign_after_indexacao(
             process_id=process_id,
             company_id=process.get("company_id") or process.get("company"),
             indexador_user_id=user.get("id"),
+            actor_role=user.get("role"),
         )
         consultant_result = dual_result
         logger.info(

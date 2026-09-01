@@ -1941,3 +1941,89 @@ O campo `ai_review_status` controla o estado: `auto_approved` | `pending_review`
 ### Fluxo paralelo — auto-categorização em background
 
 A auto-categorização em background (`document_auto_categorize.py`) continua a escrever **diretamente** em `ai_*` (sem HITL) para uploads novos. O fluxo HITL é **paralelo** — accionado on-demand pelo consultor quando quer rever/refinar os metadados de um documento específico.
+
+
+## Fluxo de Onboarding: Registo → Pré-Registo → Índice → Atribuição (Auditoria 2026-08-31)
+
+> **Nota**: Esta secção documenta o resultado de uma auditoria ao fluxo real de
+> negócio (registo do cliente até atribuição a consultor/intermediário),
+> comparando o **código existente** com o **fluxo desejado** validado com o
+> Product Owner. As correções descritas em "Decisões Confirmadas" foram
+> **implementadas em 2026-09-01** (commit `245cc4a5`, ver detalhe no fim da
+> secção "Próximos passos").
+
+### Fluxo desejado (confirmado com o Product Owner)
+
+1. Cliente registado (formulário público OU criado por um user).
+2. Cliente recebe email com acessos ao Portal.
+3. Cliente fica em **pré-registo**: sem fase, não conta para quadros/gráficos/contas. Aparece em "Registos de Clientes".
+4. Cliente carrega documentos e preenche "Meu Perfil":
+   - **Obrigatórios**: Cartão de Cidadão, Extratos (3 últimos), Mapa de Responsabilidades.
+   - **Opcionais**: Recibos (3 últimos), IRS, Declaração Patronal.
+5. Ao completar os obrigatórios → processo é criado e atribuído automaticamente ao **Índice** (regras de carga/fila).
+6. Documentação do cliente cai sempre na pasta/categoria **Índice** do CRM — só acessível a Índice e perfis de alto nível.
+7. Índice trata a documentação, categoriza-a (deixa de estar em "Índice", fica acessível a todos). **As ações do Índice não devem ficar no histórico do processo.**
+8. Após indexado → atribuição automática a consultor **e** intermediário (least-busy); campos de "Meu Perfil" no Portal ficam bloqueados à edição.
+9. Notificação (email + in-app) ao intermediário a avisar que o cliente está pronto para avançar.
+10. Tarefas automáticas para consultor/intermediário (**ainda por definir** quais — backlog futuro, fora desta auditoria).
+11. Processo segue o pipeline normal.
+
+### Estado actual do código — mapeamento ficheiro a ficheiro
+
+| Passo | Implementação actual | Ficheiro/função |
+|---|---|---|
+| Registo público | Cria `client` + pedidos `REQUESTED` (source=`mandatory_checklist`) | `services/public_registration.py` |
+| Pré-registo (sem fase) | Processo só é criado quando checklist completa (não existe "processo pré-registo" antes disso — o cliente fica em `lead_status=new` sem processo) | `services/onboarding_mandatory_config.py` |
+| Exclusão de quadros/contas | `apply_pre_registo_exclusion`, `INDEXER_INACTIVE_STATUSES` inclui `pre_registo` | `services/my_clients_api_helpers.py`, `services/process_assignment.py` |
+| Menu "Registos de Clientes" / Sala de Triagem | Lista leads + processos em `pre_registo`/sem indexador | `services/client_registered.py::run_list_registered_clients` |
+| Checklist de documentos obrigatórios | **Lista única, hardcoded como default, editável em SystemConfig, mas SEM conceito de "opcional"** | `models/system_config.py::MandatoryDocumentsConfig` (default: CC, IRS, Recibos, Comprovativo Morada, Extratos) |
+| Criação automática do processo | Quando `is_mandatory_checklist_complete()` → `create_process_from_client_onboarding()` | `services/onboarding_mandatory_config.py` |
+| Auto-avanço pré-registo → 1ª fase Kanban (silencioso) | `_auto_advance_from_pre_registo` usa `stealth_system_user` (track_history=False) — **já está silencioso**, serve de referência para o Índice (ver gap #3) | `services/portal_onboarding_advance.py` |
+| Atribuição automática ao Índice | `assign_to_indexer()` — menor carga, limite `MAX_ACTIVE_PROCESSES_PER_INDEXER=15`, fila de espera | `services/process_assignment.py` |
+| Pasta/categoria Índice (acesso restrito) | Categoria `Index` nos documentos; ver regras de acesso em ProcessDetails/S3FileManager | `routes/documents.py`, ACLs de categoria |
+| Índice marca como concluído | `run_mark_process_indexed` → grava `is_indexed`, `is_data_confirmed`, salto de estado | `services/process_indexing.py::run_mark_process_indexed` |
+| Histórico das ações do Índice | **Regista no histórico** (`INDEXACAO_CONCLUIDA`, `DADOS_CONFIRMADOS_INDEXACAO`, salto de estado, limpeza do indexador) — ver gap #3 | `services/process_indexing.py::log_mark_indexed_history` |
+| Atribuição automática a consultor + intermediário | `dual_auto_assign_on_pre_registo_transition()` — least-busy para ambos, só se campo vazio | `services/process_assignment.py` |
+| Bloqueio de "Meu Perfil" após indexado | `is_data_confirmed=True` lido pelo Portal | `services/portal_profile.py`, `frontend/src/pages/ClientPortal.jsx` |
+| Notificação ao intermediário recém-atribuído | **Não existe** — ver gap #4 | — |
+| Tarefas automáticas | **Não existe** (backlog, ainda por definir pelo PO) | — |
+
+### Gaps identificados vs. fluxo desejado
+
+1. **Checklist obrigatória não corresponde à lista confirmada e não distingue obrigatório/opcional.**
+   `MandatoryDocumentsConfig` tem apenas uma lista (`documents`), toda ela bloqueante, com o default `[CC, IRS, Recibos, Comprovativo_Morada, Extratos]`. Falta "Mapa de Responsabilidades" e o sistema não tem forma de marcar Recibos/IRS/Declaração Patronal como **opcionais** (visíveis no Portal mas não bloqueantes para a criação do processo).
+   **Decisão confirmada**: Obrigatórios = CC + Extratos + Mapa de Responsabilidades. Opcionais = Recibos + IRS + Declaração Patronal.
+   **Requisito explícito do PO**: nada hardcoded — o admin deve poder configurar livremente quais documentos são obrigatórios vs. opcionais (extensão a `MandatoryDocumentsConfig`, não uma lista fixa no código).
+
+2. **Motor de onboarding legado morto.** `services/onboarding_service.py::check_onboarding_completion` (com `REQUIREMENTS_BY_CONTRACT_TYPE` hardcoded por tipo de contrato) não é chamado por nenhuma rota — foi substituído por `onboarding_mandatory_config.py`. Candidato a remoção segura (a confirmar antes de apagar, por precaução).
+
+3. **Ações do Índice ficam no histórico do processo** (contradiz o requisito "as ações do Índice não ficam guardadas no histórico"). O padrão correto já existe no próprio código — `_auto_advance_from_pre_registo` usa um `stealth_system_user` com `track_history=False` para o avanço pré-registo → 1ª fase. O mesmo padrão deve ser aplicado a `log_mark_indexed_history` (INDEXACAO_CONCLUIDA, DADOS_CONFIRMADOS_INDEXACAO, salto de estado, limpeza do indexador).
+   **Decisão confirmada**: silenciar completamente (mesmo padrão stealth).
+
+4. **Sem notificação ao intermediário recém-atribuído.** `notify_assigned_users_indexing_complete` notifica os utilizadores já atribuídos ao processo **antes** da dupla auto-atribuição correr — o intermediário/consultor recém-atribuídos não recebem aviso.
+   **Decisão confirmada**: notificar via email **e** in-app (infra já existe: `notification_service.send_notification_with_preference_check` + `realtime_notifications.send_realtime_notification`), disparado a partir de `dual_auto_assign_on_pre_registo_transition` para os IDs recém-atribuídos.
+
+5. **Tarefas automáticas para consultor/intermediário**: não implementado. Backlog — regras ainda por definir pelo PO (fora do âmbito desta auditoria).
+
+### Próximos passos (backlog, aguarda ordem de implementação)
+
+- Estender `MandatoryDocumentsConfig` com dois campos configuráveis (`mandatory_documents` / `optional_documents`) em vez de uma lista única — gerido no `SystemConfigPage`, sem defaults hardcoded no motor de decisão.
+- Ajustar `onboarding_mandatory_config.py` para só bloquear criação do processo pelos documentos marcados como obrigatórios na config activa.
+- Aplicar `stealth_system_user` (track_history=False) em `log_mark_indexed_history`.
+- Adicionar notificação (email + in-app) ao consultor/intermediário recém-atribuído dentro de `dual_auto_assign_on_pre_registo_transition`.
+- Confirmar e remover `services/onboarding_service.py` (motor morto) se não houver dependências ocultas.
+
+### Implementação (2026-09-01, commit `245cc4a5`) — Fase 1 + Fase 2 (backend)
+
+Todos os 5 gaps foram corrigidos nesta ronda (sem construir UI de administração, conforme âmbito acordado):
+
+1. **Checklist obrigatório/opcional**: `MandatoryDocumentsConfig` ganhou o campo `optional_documents` (além de `documents`). Novo default: Obrigatórios = `identificacao` (CC), `extrato_bancario`, `mapa_responsabilidades`. Opcionais = `recibo_vencimento`, `irs`, `declaracao_patronal`. `generate_mandatory_document_requests` (em `services/portal_documents_notify.py`) gera as duas listas com `source` distinto (`mandatory_checklist` vs `mandatory_checklist_optional`) e `is_optional` explícito na API — os opcionais nunca bloqueiam `is_mandatory_checklist_complete` nem `check_and_notify_documents_complete`. Continua **totalmente configurável** via `SystemConfig` (sem hardcode no motor de decisão), apenas sem UI dedicada ainda.
+2. **Motor morto removido**: `services/onboarding_service.py` apagado (confirmado sem imports).
+3. **Auditoria Stealth**: `log_mark_indexed_history` e `dual_auto_assign_on_pre_registo_transition` propagam agora `track_history=False` para os registos sintéticos de "Sistema" quando o actor real tem role `indexacao` — nenhuma acção do Índice (incl. salto de estado, limpeza do indexador, dupla auto-atribuição) fica no histórico. Actores admin/ceo continuam a gerar histórico normal (sem regressão).
+4. **Notificação de atribuição**: `dual_auto_assign_on_pre_registo_transition` chama `_notify_newly_assigned_users` (novo, em `process_assignment.py`) — email via `send_notification_with_preference_check` + in-app via `send_realtime_notification`, disparado só para quem foi atribuído NAQUELA chamada (não repete para quem já estava atribuído).
+5. **Bug bónus corrigido (reportado pelo utilizador)**: `GET /api/processes/{id}` devolvia 500 (`ResponseValidationError`) quando `updated_at`/`created_at` estava gravado como BSON Date nativo (raiz: `soft_delete_process` grava `datetime.now(timezone.utc)` sem `.isoformat()`). Fix: `ProcessResponse` agora usa `Optional[datetime]` + `@field_serializer` (aceita datetime OU string, serializa sempre ISO). Também corrigido `GET /portal-messages/unread` 404 — causa raiz era `CORS_ORIGINS` desatualizado em `backend/.env` (preview URL antigo) enquanto `frontend/.env` já usava o domínio estável `powercell-crm.preview.emergentagent.com`.
+
+Testado via `testing_agent_v3_fork` (iteration_2.json): 1176 passed, 0 falhas. Ficheiros novos: `tests/unit/test_process_response_datetime_fix.py`, `tests/integration/test_onboarding_checklist_split.py`, `tests/integration/test_index_stealth_and_notification.py`.
+
+**Ainda por fazer** (fora do âmbito desta ronda, backlog): UI de administração da checklist obrigatória/opcional no SystemConfigPage; tarefas automáticas para consultor/intermediário (regras ainda por definir pelo PO).
+

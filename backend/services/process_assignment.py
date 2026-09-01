@@ -1224,7 +1224,8 @@ async def _find_least_busy_user(
 async def dual_auto_assign_on_pre_registo_transition(
     process_id: str,
     company_id: Optional[str] = None,
-    indexador_user_id: Optional[str] = None
+    indexador_user_id: Optional[str] = None,
+    actor_role: Optional[str] = None,
 ) -> Dict:
     """
     🔥 DUPLA AUTO-ATRIBUIÇÃO — Conversão Mágica
@@ -1239,11 +1240,19 @@ async def dual_auto_assign_on_pre_registo_transition(
     - mediador_id  → menos ocupado
     
     Se os campos já estiverem preenchidos, NÃO sobrescreve.
+
+    Ao atribuir um consultor/mediador NOVO, envia de imediato uma notificação
+    (in-app + email, via gateway centralizado) a avisar que o processo lhe
+    foi atribuído e está pronto para avançar.
     
     Args:
         process_id: ID do processo que transitou de pre_registo
         company_id: Empresa activa (Multi-Tenant)
         indexador_user_id: O indexador que executou a validação
+        actor_role: Role do utilizador que despoletou esta transição (o
+            mesmo que marcou a indexação como concluída). Usado apenas para
+            decidir se o registo de histórico desta auto-atribuição deve
+            ficar silencioso (Auditoria Stealth — role "indexacao").
     
     Returns:
         Dict com consultor_id, consultor_name, mediador_id, mediador_name
@@ -1262,6 +1271,7 @@ async def dual_auto_assign_on_pre_registo_transition(
 
     update_data = {"updated_at": datetime.now(timezone.utc).isoformat()}
     result_data = {}
+    newly_assigned = []  # PACOTE: Notificação — só avisa quem ACABOU de ser atribuído
 
     # ── Consultor: só atribui se campo vazio ─────────────────────
     existing_consultant = process.get("consultant_id")
@@ -1278,6 +1288,7 @@ async def dual_auto_assign_on_pre_registo_transition(
             update_data["consultant_id"] = consultor["id"]
             result_data["consultant_id"] = consultor["id"]
             result_data["consultant_name"] = consultor["name"]
+            newly_assigned.append(consultor)
 
     # ── Intermediário: só atribui se campo vazio ─────────────────
     existing_mediador = process.get("mediador_id")
@@ -1294,6 +1305,7 @@ async def dual_auto_assign_on_pre_registo_transition(
             update_data["mediador_id"] = intermediario["id"]
             result_data["mediador_id"] = intermediario["id"]
             result_data["mediador_name"] = intermediario["name"]
+            newly_assigned.append(intermediario)
 
     # ── Actualização ATÓMICA: ambos os papéis em simultâneo ──────
     if len(update_data) > 1:  # Mais do que apenas updated_at
@@ -1303,7 +1315,16 @@ async def dual_auto_assign_on_pre_registo_transition(
         )
 
     # ── Registar no histórico ────────────────────────────────────
-    system_user = {"id": indexador_user_id or "system", "name": "Sistema", "role": "admin"}
+    # Auditoria Stealth: se quem despoletou esta transição (o Índice) tem
+    # role "indexacao", este registo de sistema também fica silencioso —
+    # senão a dupla-atribuição "vazava" para o histórico do cliente mesmo
+    # quando toda a restante ação do Índice foi silenciada.
+    system_user = {
+        "id": indexador_user_id or "system",
+        "name": "Sistema",
+        "role": "admin",
+        "track_history": actor_role != "indexacao",
+    }
     assigned_parts = []
     if "consultant_name" in result_data and not existing_consultant:
         assigned_parts.append(f"Consultor: {result_data['consultant_name']}")
@@ -1320,6 +1341,10 @@ async def dual_auto_assign_on_pre_registo_transition(
             new_value=", ".join(assigned_parts),
         )
 
+    # ── Notificar quem foi ATRIBUÍDO agora (email + in-app) ───────
+    if newly_assigned:
+        await _notify_newly_assigned_users(process, process_id, newly_assigned)
+
     logger.info(
         f"[DUAL-AUTO] ✅ Dupla auto-atribuição concluída "
         f"consultor={result_data.get('consultant_name', 'N/A')} "
@@ -1327,3 +1352,52 @@ async def dual_auto_assign_on_pre_registo_transition(
     )
 
     return result_data
+
+
+async def _notify_newly_assigned_users(
+    process: dict,
+    process_id: str,
+    newly_assigned: List[Dict],
+) -> None:
+    """
+    Notifica (in-app + email) o(s) utilizador(es) que ACABARAM de ser
+    atribuídos a um processo pós-indexação, avisando que o cliente já
+    está pronto para avançar no processo.
+    """
+    from services.notification_service import send_notification_with_preference_check
+
+    client_name = process.get("client_name", "Cliente")
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process_id[:8]
+    title = "Novo Processo Atribuído"
+    message = (
+        f"O processo {process_ref} — {client_name} foi-lhe atribuído. "
+        f"A documentação já foi validada pelo Índice e o cliente está "
+        f"pronto para avançar."
+    )
+
+    for assignee in newly_assigned:
+        uid = assignee.get("id")
+        if not uid:
+            continue
+        try:
+            await send_notification_with_preference_check(
+                assignee.get("email"),
+                title,
+                message,
+                notification_type="process_assigned",
+            )
+        except Exception as e:
+            logger.warning(f"[DUAL-AUTO] Erro ao enviar email a {uid}: {e}")
+        try:
+            from services.realtime_notifications import send_realtime_notification
+            await send_realtime_notification(
+                user_id=uid,
+                title=title,
+                message=message,
+                notification_type="process_assigned",
+                link=f"/process/{process_id}",
+                process_id=process_id,
+            )
+        except Exception as e:
+            logger.debug(f"[DUAL-AUTO] Erro ao enviar notificação in-app a {uid}: {e}")
