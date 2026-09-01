@@ -119,6 +119,15 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 **Nota**: `/configuracoes` e `/definicoes` são rotas DIFERENTES. A primeira é para admin configurar o sistema (SMTP, storage, RGPD, etc.), a segunda é para o utilizador gerir as suas definições pessoais.
 
+## Correções 2026-09-01 (2) — Ajustes cirúrgicos pós-produção (5 pontos)
+
+- **Bug Frontend (Pesquisa Rápida)**: `GlobalSearchModal.jsx::handleSelect` — resultados do tipo "Cliente" navegavam incorretamente para `/clientes?cliente=id` (rota morta, query param nunca lido) ou para o processo associado. Corrigido para navegar sempre para `/cliente/{id}` (rota real, `ClientDetailPage.js`). Adicionados `data-testid="global-search-input"` e `data-testid="global-search-result-{type}-{id}"`.
+- **Bug Backend (email de acesso ao portal "perdido")**: investigação aprofundada (reprodução real via `POST /api/public/client-registration` e `POST /api/clients`, com inspeção de `backend.out.log`) mostrou que o trigger **já existe e dispara correctamente** em ambos os fluxos de criação de cliente — `client_crud.py::run_create_client` (Pacote CY, `_send_portal_welcome_email_safe`) e `public_registration.py::run_public_client_registration` (magic-link + fallback de confirmação). A remoção de `onboarding_service.py` (sessão anterior) não continha nenhuma lógica de email. Nenhuma alteração de código foi necessária; confirmado independentemente por `testing_agent_v3_fork` (ver `test_reports/iteration_3.json`). Os emails aparecem como `[EMAIL SIMULATED]` neste ambiente por falta de fornecedor SMTP real configurado (limitação de ambiente já documentada, não é bug).
+- **Script de limpeza**: `cleanup_prod_test_data.py` — query expandida com `$or` para também considerar `clients.nome` e `processes.client_name` (antes só e-mail).
+- **Novo script**: `backend/scripts/delete_process_by_id.py` — apaga em cascata um processo específico (por `id`, via CLI) e os documentos anexados. Modo `dry-run` por defeito, `--execute` para eliminação real.
+- **Schemas IMAP**: `models/company.py` (`CompanyCreate`/`CompanyUpdate`/`CompanyResponse`) ganharam `imap_email`, `imap_password` (só create/update), `imap_host`, `imap_port` — espelhando os campos SMTP já existentes, para suportar Webmail do CRM. `run_create_company` actualizado para persistir os novos campos (update já era genérico via `model_dump`). Sem UI de administração nesta ronda (fora de âmbito, pedido explícito do utilizador).
+- Testado: suite completa 1178 passed / 6 skipped (unit) + 67 passed (integration); `testing_agent_v3_fork` confirmou os 2 bugs (routing OK, email trigger já funcional) com 100%/100% de sucesso, 0 action items. Commit `ba9ad1c7`.
+
 ## Correções 2026-09-01 — Hotfixes (500/404) + Implementação Backend do Onboarding
 
 - **Bug 500**: `GET /processes/{id}` falhava com `ResponseValidationError` quando `updated_at`/`created_at` era um BSON Date nativo (raiz: `soft_delete_process` sem `.isoformat()`). Fix: `ProcessResponse` usa `Optional[datetime]` + `@field_serializer`.

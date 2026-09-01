@@ -3821,3 +3821,15 @@ Stage Summary:
   - backend/.env (CORS_ORIGINS corrigido — não versionado)
 - Resultado: 2 bugs reportados resolvidos e verificados end-to-end pelo testing agent; 4 itens do fluxo de onboarding implementados sem UI, mantendo tudo configurável via SystemConfig (nada hardcoded no motor de decisão).
 
+
+## 2026-09-01 (2) — Ajustes cirúrgicos pós-produção (5 pontos)
+
+Pedido do utilizador: 5 ajustes cirúrgicos após testes em produção, sem tocar em mais nenhum ficheiro de negócio, commit único.
+
+1. **Search routing bug**: `GlobalSearchModal.jsx` navegava clientes para `/clientes?cliente=id` (rota morta) ou para o processo associado quando existia. Corrigido para navegar sempre para `/cliente/{id}` (ClientDetailPage).
+2. **Email de onboarding "perdido"**: investigação (não assumida) mostrou que o trigger já existe e funciona em ambos os fluxos (`client_crud.py::run_create_client` via Pacote CY, e `public_registration.py::run_public_client_registration`). Confirmado com reprodução real (curl + logs) e depois por `testing_agent_v3_fork`. `onboarding_service.py` nunca teve lógica de email — a causa apontada pelo utilizador não correspondia ao código. Nenhuma alteração necessária.
+3. `cleanup_prod_test_data.py`: query agora cobre também `nome`/`client_name`, não só email.
+4. Novo `delete_process_by_id.py`: CLI, apaga processo + documentos em cascata, dry-run por defeito.
+5. `models/company.py`: campos IMAP (`imap_email/password/host/port`) espelhando SMTP, para suportar Webmail. Wired em `run_create_company`.
+
+Validação: pytest completo (1178 unit + 67 integration, 0 falhas) + testing_agent_v3_fork (iteration_3.json) confirmou os 2 bugs reportados — routing corrigido, email trigger já funcional (sem regressão). Dados de teste criados pelo testing agent (Rita Mendonça, João Marques) foram removidos da BD após validação. Commit `ba9ad1c7`.
