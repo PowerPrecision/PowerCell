@@ -70,9 +70,12 @@ async def check_and_notify_documents_complete(
 
     # ─── 2) VERIFICAÇÃO: ainda há documentos pedidos pendentes? ─────────────
     #       Se SIM → não faz nada. Se NÃO (todos uploaded/validated) → dispara.
+    #       Documentos OPCIONAIS (is_optional=True) nunca bloqueiam esta
+    #       notificação — só os obrigatórios/pedidos normais contam.
     pending_count = await db.documents.count_documents({
         "process_id": process_id,
         "status": {"$in": ["REQUESTED", "PENDING", "requested", "pending"]},
+        "is_optional": {"$ne": True},
     })
     if pending_count > 0:
         return {"success": False, "reason": "pending_documents", "pending": pending_count}
@@ -262,39 +265,24 @@ def _build_documents_complete_html(client_name: str) -> str:
 # ─────────────────────────────────────────────────────────────────────
 # Geração automática de pedidos de documento (Pacote G — ponto 1)
 # ─────────────────────────────────────────────────────────────────────
-async def generate_mandatory_document_requests(
-    process_id: Optional[str] = None,
-    company_id: Optional[str] = None,
-    requested_by: Optional[str] = None,
-    requested_by_name: str = "Sistema",
-    client_id: Optional[str] = None,
+async def _generate_document_requests_for_list(
+    items: list,
+    *,
+    source: str,
+    is_optional: bool,
+    process_id: Optional[str],
+    client_id: Optional[str],
+    requested_by: Optional[str],
+    requested_by_name: str,
 ) -> dict:
-    """
-    Gera pedidos de documento (status=REQUESTED) com base na checklist
-    SystemConfig (`mandatory_documents`).
+    """Gera pedidos REQUESTED para uma lista de documentos (obrigatórios OU
+    opcionais), com idempotência própria por `source`. Documentos opcionais
+    NUNCA bloqueiam `is_mandatory_checklist_complete` (que só conta
+    source="mandatory_checklist") — apenas ficam disponíveis no Portal."""
+    if not items:
+        return {"created": 0, "skipped": 0, "total": 0, "reason": "empty_list"}
 
-    Pode ser ligado a um processo (fluxo legado/staff) OU a um cliente
-    ainda sem processo (registo público — process_id=None, client_id set).
-
-    Idempotente por process_id ou client_id + source=mandatory_checklist.
-    """
-    from services.system_config import get_system_config
-
-    if not process_id and not client_id:
-        return {"created": 0, "skipped": 0, "total": 0, "reason": "missing_scope"}
-
-    try:
-        config = await get_system_config(company_id or "default")
-    except Exception as e:
-        logger.warning(f"[MandatoryDocs] Erro ao carregar config: {e}")
-        return {"created": 0, "skipped": 0, "total": 0, "reason": "config_error"}
-
-    md = config.mandatory_documents
-    if not md or not md.enabled or not md.documents:
-        return {"created": 0, "skipped": 0, "total": 0, "reason": "disabled_or_empty"}
-
-    # Idempotência
-    idem_query: dict = {"source": "mandatory_checklist"}
+    idem_query: dict = {"source": source}
     if process_id:
         idem_query["process_id"] = process_id
     else:
@@ -310,13 +298,13 @@ async def generate_mandatory_document_requests(
         return {
             "created": 0,
             "skipped": existing,
-            "total": len(md.documents),
+            "total": len(items),
             "reason": "already_generated",
         }
 
     now_iso = datetime.now(timezone.utc).isoformat()
     docs_to_insert = []
-    for item in md.documents:
+    for item in items:
         if not isinstance(item, dict):
             continue
         name = (item.get("name") or "").strip()
@@ -330,11 +318,12 @@ async def generate_mandatory_document_requests(
             "filename": None,
             "original_filename": None,
             "status": "REQUESTED",
-            "notes": f"Documento obrigatório: {name}",
+            "notes": f"Documento {'opcional' if is_optional else 'obrigatório'}: {name}",
             "custom_label": name,
+            "is_optional": is_optional,
             "requested_by": requested_by or "system",
             "requested_by_name": requested_by_name,
-            "source": "mandatory_checklist",
+            "source": source,
             "file_size": None,
             "content_type": None,
             "uploaded_at": None,
@@ -350,15 +339,78 @@ async def generate_mandatory_document_requests(
             await db.documents.insert_many(docs_to_insert, ordered=False)
             scope = process_id or f"client:{client_id}"
             logger.info(
-                f"[MandatoryDocs] {len(docs_to_insert)} pedidos gerados para {scope}"
+                f"[MandatoryDocs] {len(docs_to_insert)} pedidos "
+                f"({'opcionais' if is_optional else 'obrigatórios'}) gerados para {scope}"
             )
         except Exception as e:
-            logger.error(f"[MandatoryDocs] Erro ao inserir pedidos: {e}")
-            return {"created": 0, "skipped": 0, "total": len(md.documents), "reason": "insert_error"}
+            logger.error(f"[MandatoryDocs] Erro ao inserir pedidos ({source}): {e}")
+            return {"created": 0, "skipped": 0, "total": len(items), "reason": "insert_error"}
+
+    return {"created": len(docs_to_insert), "skipped": 0, "total": len(items), "reason": "ok"}
+
+
+async def generate_mandatory_document_requests(
+    process_id: Optional[str] = None,
+    company_id: Optional[str] = None,
+    requested_by: Optional[str] = None,
+    requested_by_name: str = "Sistema",
+    client_id: Optional[str] = None,
+) -> dict:
+    """
+    Gera pedidos de documento (status=REQUESTED) com base na checklist
+    SystemConfig (`mandatory_documents`) — Obrigatórios (`documents`) e
+    Opcionais (`optional_documents`).
+
+    Pode ser ligado a um processo (fluxo legado/staff) OU a um cliente
+    ainda sem processo (registo público — process_id=None, client_id set).
+
+    Idempotente por process_id ou client_id + source (mandatory_checklist /
+    mandatory_checklist_optional).
+
+    Os pedidos Obrigatórios (source="mandatory_checklist") são os únicos
+    considerados por `is_mandatory_checklist_complete` — os Opcionais
+    (source="mandatory_checklist_optional", is_optional=True) nunca
+    bloqueiam a criação do processo.
+    """
+    from services.system_config import get_system_config
+
+    if not process_id and not client_id:
+        return {"created": 0, "skipped": 0, "total": 0, "reason": "missing_scope"}
+
+    try:
+        config = await get_system_config(company_id or "default")
+    except Exception as e:
+        logger.warning(f"[MandatoryDocs] Erro ao carregar config: {e}")
+        return {"created": 0, "skipped": 0, "total": 0, "reason": "config_error"}
+
+    md = config.mandatory_documents
+    if not md or not md.enabled or (not md.documents and not md.optional_documents):
+        return {"created": 0, "skipped": 0, "total": 0, "reason": "disabled_or_empty"}
+
+    mandatory_result = await _generate_document_requests_for_list(
+        md.documents,
+        source="mandatory_checklist",
+        is_optional=False,
+        process_id=process_id,
+        client_id=client_id,
+        requested_by=requested_by,
+        requested_by_name=requested_by_name,
+    )
+    optional_result = await _generate_document_requests_for_list(
+        md.optional_documents,
+        source="mandatory_checklist_optional",
+        is_optional=True,
+        process_id=process_id,
+        client_id=client_id,
+        requested_by=requested_by,
+        requested_by_name=requested_by_name,
+    )
 
     return {
-        "created": len(docs_to_insert),
-        "skipped": 0,
-        "total": len(md.documents),
+        "created": mandatory_result["created"] + optional_result["created"],
+        "skipped": mandatory_result["skipped"] + optional_result["skipped"],
+        "total": mandatory_result["total"] + optional_result["total"],
+        "mandatory": mandatory_result,
+        "optional": optional_result,
         "reason": "ok",
     }

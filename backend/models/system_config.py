@@ -260,24 +260,34 @@ class SystemWebmailConfig(BaseModel):
 
 
 class MandatoryDocumentsConfig(BaseModel):
-    """Configuração da checklist de Documentos Obrigatórios (Pacote G).
+    """Configuração da checklist de Documentos Obrigatórios e Opcionais.
 
-    Lista de documentos que são automaticamente pedidos ao cliente quando um
-    processo é criado (via formulário público → pre_registo, ou via endpoint
-    de automação). O CEO/Diretor gere esta lista no SystemConfigPage.
+    Duas listas independentes, ambas geridas pelo CEO/Diretor no
+    SystemConfigPage (via API genérica de configuração — sem UI dedicada
+    nesta fase):
 
-    Quando todos os pedidos gerados a partir desta lista são satisfeitos
-    (status RECEIVED/UPLOADED/VALIDATED), o gatilho
-    `check_and_notify_documents_complete` envia um email automático ao
-    cliente em nome do intermediário atribuído.
+    - `documents` (Obrigatórios): pedidos automaticamente ao cliente quando
+      um processo é criado (via formulário público → pré-registo). Enquanto
+      houver pedidos pendentes desta lista, o processo NÃO é criado
+      (`is_mandatory_checklist_complete`).
+    - `optional_documents` (Opcionais): pedidos também gerados no registo,
+      mas NUNCA bloqueiam a criação do processo — ficam disponíveis para
+      o cliente carregar no Portal caso os tenha, sem obrigatoriedade.
+
+    Quando todos os pedidos obrigatórios são satisfeitos (status
+    RECEIVED/UPLOADED/VALIDATED), o gatilho `check_and_notify_documents_complete`
+    envia um email automático ao cliente em nome do intermediário atribuído.
     """
     enabled: bool = True
     documents: List[Dict[str, Any]] = [
         {"name": "Bilhete de Identidade / Cartão de Cidadão", "category": "identificacao"},
-        {"name": "Comprovativo de IRS do ano anterior", "category": "irs"},
-        {"name": "Últimos 3 recibos de vencimento", "category": "recibo_vencimento"},
-        {"name": "Comprovativo de Morada", "category": "comprovativo_morada"},
         {"name": "Extrato bancário dos últimos 3 meses", "category": "extrato_bancario"},
+        {"name": "Mapa de Responsabilidades de Crédito", "category": "mapa_responsabilidades"},
+    ]
+    optional_documents: List[Dict[str, Any]] = [
+        {"name": "Últimos 3 recibos de vencimento", "category": "recibo_vencimento"},
+        {"name": "Comprovativo de IRS do ano anterior", "category": "irs"},
+        {"name": "Declaração Patronal", "category": "declaracao_patronal"},
     ]
 
 

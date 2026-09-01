@@ -72,6 +72,7 @@ async def run_get_portal_status(client_data: dict):
                     "filename": d.get("filename") or d.get("original_filename"),
                     "status": d.get("status"),
                     "source": d.get("source"),
+                    "is_optional": bool(d.get("is_optional", False)),
                 }
                 if status in ("REQUESTED", "PENDING"):
                     requested_docs.append(entry)
@@ -213,6 +214,7 @@ async def run_get_portal_status(client_data: dict):
             "icon": cat_info["icon"],
             "notes": notes_str,
             "requested_at": doc.get("created_at", doc.get("uploaded_at", "")),
+            "is_optional": bool(doc.get("is_optional", False)),
         })
 
     # ── Documentos submetidos (UPLOADED/SUBMITTED) ──

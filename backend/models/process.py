@@ -21,8 +21,9 @@ Validadores de NIF removidos → pertencem ao modelo de Cliente.
 Um cliente pode ter múltiplos processos de compra/financiamento.
 """
 
-from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator
+from pydantic import BaseModel, ConfigDict, EmailStr, Field, field_validator, field_serializer
 from typing import Optional, List, Any
+from datetime import datetime
 from enum import Enum
 
 class ServiceTypeEnum(str, Enum):
@@ -264,8 +265,8 @@ class ProcessResponse(BaseModel):
     assigned_parceiro_id: Optional[str] = None  
     parceiro_name: Optional[str] = None  
     
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
+    created_at: Optional[datetime] = None
+    updated_at: Optional[datetime] = None
     notes: Optional[str] = None
     observations: Optional[str] = Field(
         None,
@@ -287,6 +288,13 @@ class ProcessResponse(BaseModel):
     vendedor: Optional[dict] = None  
     mediador: Optional[dict] = None
     is_indexed: Optional[bool] = None  # Indica se a indexação documental está concluída
+
+    @field_serializer("created_at", "updated_at")
+    def _serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:
+        """Corrige ResponseValidationError: aceita datetime OU str na origem
+        (documentos legados no Mongo gravaram datetime nativo em vez de ISO
+        string) e serializa sempre para ISO string na resposta da API."""
+        return value.isoformat() if value else None
 
 
 class PublicClientRegistration(BaseModel):
