@@ -20,6 +20,10 @@ import {
   Info,
   RotateCcw,
   MailCheck,
+  Save,
+  Server,
+  ChevronDown,
+  ChevronUp,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
@@ -31,12 +35,26 @@ const SHARED_EMAIL_ROLES = [
   { role: "admin", label: "Administração", description: "Email partilhado da administração" },
 ];
 
+const EMPTY_MANUAL_FORM = {
+  email_address: "",
+  display_name: "",
+  smtp_server: "",
+  smtp_port: 465,
+  imap_server: "",
+  imap_port: 993,
+  imap_user: "",
+  imap_password: "",
+};
+
 export default function SharedEmailConfigSection() {
   const { token } = useAuth();
   const [configs, setConfigs] = useState([]);
   const [loading, setLoading] = useState(true);
   const [authenticating, setAuthenticating] = useState(null);
   const [syncing, setSyncing] = useState(null);
+  const [manualOpenRole, setManualOpenRole] = useState(null);
+  const [manualForm, setManualForm] = useState(EMPTY_MANUAL_FORM);
+  const [savingManual, setSavingManual] = useState(false);
 
   const fetchConfigs = async () => {
     setLoading(true);
@@ -153,6 +171,70 @@ export default function SharedEmailConfigSection() {
   };
 
   const getConfig = (role) => configs.find((c) => c.role === role);
+
+  // ===================================================================
+  // PACOTE — Webmail: configuração manual IMAP/SMTP por departamento
+  // (alternativa ao Google OAuth). Usa PUT /api/admin/shared-email/{role}
+  // (SharedEmailConfigCreate), que já suporta imap_server/imap_port/
+  // smtp_server/smtp_port/encrypted_password.
+  // ===================================================================
+  const toggleManualForm = (role) => {
+    if (manualOpenRole === role) {
+      setManualOpenRole(null);
+      return;
+    }
+    const cfg = getConfig(role);
+    setManualForm({
+      email_address: cfg?.email_address || "",
+      display_name: cfg?.display_name || "",
+      smtp_server: cfg?.smtp_server || "",
+      smtp_port: cfg?.smtp_port || 465,
+      imap_server: cfg?.imap_server || "",
+      imap_port: cfg?.imap_port || 993,
+      imap_user: cfg?.email_address || "",
+      imap_password: "",
+    });
+    setManualOpenRole(role);
+  };
+
+  const handleSaveManual = async (role) => {
+    if (!manualForm.email_address || !manualForm.imap_server || !manualForm.smtp_server) {
+      toast.error("Preencha o email, o servidor SMTP e o servidor IMAP");
+      return;
+    }
+    setSavingManual(true);
+    try {
+      const res = await fetch(`${API_URL}/api/admin/shared-email/${role}`, {
+        method: "PUT",
+        headers: {
+          Authorization: `Bearer ${token}`,
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify({
+          role,
+          email_address: manualForm.email_address,
+          display_name: manualForm.display_name,
+          smtp_server: manualForm.smtp_server,
+          smtp_port: manualForm.smtp_port,
+          imap_server: manualForm.imap_server,
+          imap_port: manualForm.imap_port,
+          encrypted_password: manualForm.imap_password,
+        }),
+      });
+      if (res.ok) {
+        toast.success("Configuração IMAP/SMTP guardada");
+        setManualOpenRole(null);
+        fetchConfigs();
+      } else {
+        const data = await res.json();
+        toast.error(extractErrorMessage(data.detail, "Erro ao guardar configuração"));
+      }
+    } catch {
+      toast.error("Erro de conexão");
+    } finally {
+      setSavingManual(false);
+    }
+  };
 
   if (loading) {
     return (
@@ -298,6 +380,128 @@ export default function SharedEmailConfigSection() {
                     )}
                     Autenticar com o Google
                   </Button>
+                )}
+              </div>
+
+              {/* PACOTE — Webmail: alternativa manual (IMAP/SMTP) ao Google OAuth */}
+              <div className="pt-3 border-t">
+                <button
+                  type="button"
+                  data-testid={`shared-email-manual-toggle-${role}`}
+                  onClick={() => toggleManualForm(role)}
+                  className="flex items-center gap-2 text-sm text-muted-foreground hover:text-foreground transition-colors"
+                >
+                  <Server className="h-4 w-4" />
+                  Configuração manual IMAP/SMTP (alternativa ao Google)
+                  {manualOpenRole === role ? <ChevronUp className="h-3.5 w-3.5" /> : <ChevronDown className="h-3.5 w-3.5" />}
+                </button>
+
+                {manualOpenRole === role && (
+                  <div className="mt-3 border rounded-lg p-4 bg-muted/30 space-y-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_email_${role}`}>Email da caixa partilhada</Label>
+                        <Input
+                          id={`se_email_${role}`}
+                          data-testid={`shared-email-manual-email-${role}`}
+                          value={manualForm.email_address}
+                          onChange={(e) => setManualForm({ ...manualForm, email_address: e.target.value })}
+                          placeholder={`${role}@empresa.pt`}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_display_${role}`}>Nome visível</Label>
+                        <Input
+                          id={`se_display_${role}`}
+                          value={manualForm.display_name}
+                          onChange={(e) => setManualForm({ ...manualForm, display_name: e.target.value })}
+                          placeholder={`Email de ${label}`}
+                        />
+                      </div>
+
+                      {/* SMTP primeiro */}
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_smtp_server_${role}`}>Servidor SMTP</Label>
+                        <Input
+                          id={`se_smtp_server_${role}`}
+                          data-testid={`shared-email-manual-smtp-host-${role}`}
+                          value={manualForm.smtp_server}
+                          onChange={(e) => setManualForm({ ...manualForm, smtp_server: e.target.value })}
+                          placeholder="smtp.empresa.pt"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_smtp_port_${role}`}>Porta SMTP</Label>
+                        <Input
+                          id={`se_smtp_port_${role}`}
+                          type="number"
+                          value={manualForm.smtp_port}
+                          onChange={(e) => setManualForm({ ...manualForm, smtp_port: parseInt(e.target.value) || 465 })}
+                          placeholder="465"
+                        />
+                      </div>
+
+                      {/* IMAP imediatamente a seguir ao SMTP */}
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_imap_host_${role}`}>Servidor IMAP</Label>
+                        <Input
+                          id={`se_imap_host_${role}`}
+                          data-testid={`shared-email-manual-imap-host-${role}`}
+                          value={manualForm.imap_server}
+                          onChange={(e) => setManualForm({ ...manualForm, imap_server: e.target.value })}
+                          placeholder="imap.empresa.pt"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_imap_port_${role}`}>Porta IMAP</Label>
+                        <Input
+                          id={`se_imap_port_${role}`}
+                          data-testid={`shared-email-manual-imap-port-${role}`}
+                          type="number"
+                          value={manualForm.imap_port}
+                          onChange={(e) => setManualForm({ ...manualForm, imap_port: parseInt(e.target.value) || 993 })}
+                          placeholder="993"
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_imap_user_${role}`}>Utilizador IMAP</Label>
+                        <Input
+                          id={`se_imap_user_${role}`}
+                          data-testid={`shared-email-manual-imap-user-${role}`}
+                          value={manualForm.imap_user}
+                          onChange={(e) => setManualForm({ ...manualForm, imap_user: e.target.value, email_address: e.target.value })}
+                          placeholder={`${role}@empresa.pt`}
+                        />
+                        <p className="text-xs text-muted-foreground">Usado também como utilizador SMTP</p>
+                      </div>
+                      <div className="space-y-2">
+                        <Label htmlFor={`se_imap_password_${role}`}>Password IMAP</Label>
+                        <Input
+                          id={`se_imap_password_${role}`}
+                          data-testid={`shared-email-manual-imap-password-${role}`}
+                          type="password"
+                          value={manualForm.imap_password}
+                          onChange={(e) => setManualForm({ ...manualForm, imap_password: e.target.value })}
+                          placeholder={cfg?.has_imap_password ? "•••••••• (deixe vazio para manter)" : "Password"}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex justify-end gap-2 pt-2 border-t">
+                      <Button variant="outline" size="sm" onClick={() => setManualOpenRole(null)}>
+                        Cancelar
+                      </Button>
+                      <Button
+                        size="sm"
+                        data-testid={`shared-email-manual-save-${role}`}
+                        onClick={() => handleSaveManual(role)}
+                        disabled={savingManual}
+                        className="gap-2"
+                      >
+                        {savingManual ? <Loader2 className="h-3 w-3 animate-spin" /> : <Save className="h-3 w-3" />}
+                        Guardar
+                      </Button>
+                    </div>
+                  </div>
                 )}
               </div>
             </CardContent>

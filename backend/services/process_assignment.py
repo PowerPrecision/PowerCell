@@ -1344,6 +1344,8 @@ async def dual_auto_assign_on_pre_registo_transition(
     # ── Notificar quem foi ATRIBUÍDO agora (email + in-app) ───────
     if newly_assigned:
         await _notify_newly_assigned_users(process, process_id, newly_assigned)
+        # ── Motor de Tarefas Automáticas: criar tarefas de arranque ──
+        await _create_post_indexing_tasks(process_id, newly_assigned)
 
     logger.info(
         f"[DUAL-AUTO] ✅ Dupla auto-atribuição concluída "
@@ -1401,3 +1403,69 @@ async def _notify_newly_assigned_users(
             )
         except Exception as e:
             logger.debug(f"[DUAL-AUTO] Erro ao enviar notificação in-app a {uid}: {e}")
+
+
+# ==== MOTOR DE TAREFAS AUTOMÁTICAS (Pós-Indexação) ====
+
+# Tarefas de arranque criadas automaticamente para cada consultor/mediador
+# que é atribuído a um processo assim que este sai de pré-registo.
+POST_INDEXING_AUTO_TASKS = [
+    {"title": "Analisar documentação inicial", "priority": "Alta"},
+    {"title": "Agendar contacto inicial com o cliente", "priority": "Média"},
+]
+
+
+async def _create_post_indexing_tasks(
+    process_id: str,
+    newly_assigned: List[Dict],
+) -> None:
+    """
+    Cria automaticamente as tarefas de arranque para cada consultor/
+    intermediário que ACABOU de ser atribuído a um processo pós-indexação
+    (chamada a partir de `dual_auto_assign_on_pre_registo_transition`).
+
+    Tarefas criadas por cada utilizador recém-atribuído:
+    - "Analisar documentação inicial" (Prioridade: Alta)
+    - "Agendar contacto inicial com o cliente" (Prioridade: Média)
+
+    Não gera entradas no histórico do processo (as tarefas em si já
+    aparecem na lista de tarefas do utilizador — evita duplicar ruído
+    junto do registo de auto-atribuição, que já cobre esta transição).
+    """
+    import uuid
+
+    for assignee in newly_assigned:
+        uid = assignee.get("id")
+        if not uid:
+            continue
+
+        for template in POST_INDEXING_AUTO_TASKS:
+            now = datetime.now(timezone.utc).isoformat()
+            task = {
+                "id": str(uuid.uuid4()),
+                "title": template["title"],
+                "description": None,
+                "assigned_to": [uid],
+                "process_id": process_id,
+                "due_date": None,
+                "priority": template["priority"],
+                "created_by": "system",
+                "completed": False,
+                "completed_at": None,
+                "completed_by": None,
+                "created_at": now,
+                "updated_at": now,
+            }
+            try:
+                await db.tasks.insert_one(task)
+            except Exception as e:
+                logger.warning(
+                    f"[DUAL-AUTO] Erro ao criar tarefa automática "
+                    f"'{template['title']}' para {uid}: {e}"
+                )
+
+    logger.info(
+        f"[DUAL-AUTO] Tarefas automáticas de arranque criadas para "
+        f"{len(newly_assigned)} utilizador(es) recém-atribuídos ao processo {process_id}"
+    )
+

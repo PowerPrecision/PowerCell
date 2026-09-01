@@ -79,6 +79,7 @@ async def run_create_task(task_data: TaskCreate, current_user: dict):
         "assigned_to": task_data.assigned_to,
         "process_id": task_data.process_id,
         "due_date": task_data.due_date,  # Data de vencimento (opcional)
+        "priority": task_data.priority,  # "Alta"/"Média"/"Baixa" (opcional)
         "created_by": current_user["id"],
         "completed": False,
         "completed_at": None,

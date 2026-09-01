@@ -49,6 +49,10 @@ const EMPTY_FORM = {
   smtp_password: "",
   smtp_host: "",
   smtp_port: "",
+  imap_email: "",
+  imap_password: "",
+  imap_host: "",
+  imap_port: "",
 };
 
 function parseOptionalSmtpPort(value) {
@@ -63,6 +67,14 @@ function smtpFieldsFromForm(form) {
   const smtp_host = form.smtp_host.trim() || null;
   const smtp_port = parseOptionalSmtpPort(form.smtp_port);
   return { smtp_email, smtp_password, smtp_host, smtp_port };
+}
+
+function imapFieldsFromForm(form) {
+  const imap_email = form.imap_email.trim() || null;
+  const imap_password = form.imap_password || null;
+  const imap_host = form.imap_host.trim() || null;
+  const imap_port = parseOptionalSmtpPort(form.imap_port);
+  return { imap_email, imap_password, imap_host, imap_port };
 }
 
 export default function CompaniesAdminTab() {
@@ -112,6 +124,10 @@ export default function CompaniesAdminTab() {
       smtp_password: "",
       smtp_host: company.smtp_host || "",
       smtp_port: company.smtp_port ?? "",
+      imap_email: company.imap_email || "",
+      imap_password: "",
+      imap_host: company.imap_host || "",
+      imap_port: company.imap_port ?? "",
     });
     setDialogOpen(true);
   };
@@ -138,9 +154,13 @@ export default function CompaniesAdminTab() {
         email: form.email.trim() || null,
         is_active: form.is_active,
         ...smtpFieldsFromForm(form),
+        ...imapFieldsFromForm(form),
       };
       if (editing?.id && !payload.smtp_password) {
         delete payload.smtp_password;
+      }
+      if (editing?.id && !payload.imap_password) {
+        delete payload.imap_password;
       }
       if (editing?.id) {
         await updateCompany(editing.id, payload);
@@ -350,6 +370,63 @@ export default function CompaniesAdminTab() {
                     }
                     placeholder="465"
                     data-testid="company-smtp-port-input"
+                  />
+                </div>
+              </div>
+              <div className="space-y-4 pt-2 border-t border-border">
+                <p className="text-sm font-medium text-foreground">IMAP (opcional — Webmail)</p>
+                <div className="space-y-2">
+                  <Label htmlFor="company-imap-email">Email IMAP</Label>
+                  <Input
+                    id="company-imap-email"
+                    type="email"
+                    value={form.imap_email}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, imap_email: e.target.value }))
+                    }
+                    placeholder="imap@empresa.pt"
+                    data-testid="company-imap-email-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-imap-password">Password IMAP</Label>
+                  <Input
+                    id="company-imap-password"
+                    type="password"
+                    value={form.imap_password}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, imap_password: e.target.value }))
+                    }
+                    placeholder={
+                      editing ? "Deixe em branco para manter" : "Password IMAP"
+                    }
+                    autoComplete="new-password"
+                    data-testid="company-imap-password-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-imap-host">Host IMAP</Label>
+                  <Input
+                    id="company-imap-host"
+                    value={form.imap_host}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, imap_host: e.target.value }))
+                    }
+                    placeholder="imap.empresa.pt"
+                    data-testid="company-imap-host-input"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label htmlFor="company-imap-port">Porta IMAP</Label>
+                  <Input
+                    id="company-imap-port"
+                    type="number"
+                    value={form.imap_port}
+                    onChange={(e) =>
+                      setForm((p) => ({ ...p, imap_port: e.target.value }))
+                    }
+                    placeholder="993"
+                    data-testid="company-imap-port-input"
                   />
                 </div>
               </div>
