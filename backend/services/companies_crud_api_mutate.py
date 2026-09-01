@@ -43,6 +43,10 @@ async def run_create_company(data: CompanyCreate):
         "smtp_password": data.smtp_password,
         "smtp_host": data.smtp_host,
         "smtp_port": data.smtp_port,
+        "imap_email": data.imap_email,
+        "imap_password": data.imap_password,
+        "imap_host": data.imap_host,
+        "imap_port": data.imap_port,
         "created_at": now,
         "updated_at": now,
     }
