@@ -3844,6 +3844,14 @@ Pedido: 3 pontos cirúrgicos, sem ecrãs novos, sem refactor de lint.
 
 Validação: pytest completo (1183 passed, 6 skipped, 0 falhas) incluindo novos testes unit (companies/shared_email imap) + integration (TestPostIndexingAutoTasks) + `tests/test_iteration4_features.py` E2E live. testing_agent_v3_fork: iteration_4 (Features 1 e 3 PASS; 2a/2b FAIL — componentes mortos identificados) → corrigido → iteration_5 (2a/2b PASS 100%). Dados de teste (empresa QA, shared-email role=suporte) limpos pelo próprio testing agent. Commit `32a1663a`.
 
+## 2026-09-01 (4) — Scripts CLI: password de segurança + cascata total
+
+Pedido: reforçar os 2 scripts de manutenção com cascata total (tasks/task_logs/activities/history) e proteção por password (getpass + CLEANUP_SCRIPT_PASSWORD, fallback POWERCELL_CLEANUP_2026), sem ficheiros de log, sem tocar em mais nada.
+
+- `cleanup_prod_test_data.py`: cascata agora cobre 7 coleções (clients/leads, processes, documents, tasks, task_logs, activities, history). task_logs casados por process_id OU task_id (cobre logs sem process_id preenchido).
+- `delete_process_by_id.py`: mesma cascata total para um processo específico.
+- Password pedida só no momento da eliminação real (depois de mostrar o resumo do que seria apagado), nunca em dry-run. Testado: dry-run, password errada (aborta, exit 1, nada apagado), password default correta, password custom via env var, idempotência — tudo confirmado manualmente com dados seed reais nas 7 coleções. Sem `logging.basicConfig`/ficheiro — só `print()`.
+- Suite pytest completa inalterada (1183 passed, 6 skipped) — só os 2 scripts foram alterados. Commit `8e55d165`.
 
 ---
 Task ID: Pacote de Correcção CI — testes unitários sem MongoDB (job backend-fast)

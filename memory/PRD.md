@@ -119,6 +119,13 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 **Nota**: `/configuracoes` e `/definicoes` são rotas DIFERENTES. A primeira é para admin configurar o sistema (SMTP, storage, RGPD, etc.), a segunda é para o utilizador gerir as suas definições pessoais.
 
+## Correções 2026-09-01 (4) — Scripts CLI de manutenção: password + cascata total
+
+- **`cleanup_prod_test_data.py`**: filtro expandido para também considerar o nome/título de processo (`processes.client_name`, já existia) — mantido; cascata expandida para incluir `tasks`, `task_logs` (por `process_id` OU `task_id`), `activities` e `history`, além de `documents`/`processes`/`clients` já existentes. Ordem: task_logs → tasks → activities → history → documents → processes → clients.
+- **`delete_process_by_id.py`**: mesma expansão de cascata total (tasks/task_logs/activities/history) para um único processo por id.
+- **Password de segurança (ambos)**: `--execute` pede password via `getpass` (carateres ocultos), comparada com `os.environ["CLEANUP_SCRIPT_PASSWORD"]` (fallback `"POWERCELL_CLEANUP_2026"` se a env var não estiver definida). Password errada → aborta com exit code 1, sem apagar nada. Nenhum ficheiro de log é criado (apenas `print()` na consola, sem `logging.basicConfig`/ficheiro).
+- Testado manualmente (dry-run + password errada [aborta] + password default correta + password custom via env var + idempotência) para ambos os scripts, com dados de teste cobrindo as 7 coleções. Suite completa (1183 passed, 6 skipped) inalterada — só ficheiros de scripts foram tocados. Commit `8e55d165`.
+
 ## Correções 2026-09-01 (3) — Config UIs (Checklist/IMAP) + Motor de Tarefas Automáticas
 
 - **Checklist UI**: `MandatoryDocumentsSection.js` reescrito com sub-componente reutilizável `DocumentChecklist`, gerindo duas listas independentes — **Obrigatórios** (badge vermelho) e **Opcionais** (badge âmbar) — cada uma com o seu próprio formulário de adicionar/remover. Um único botão "Guardar Checklist" grava ambas via `PATCH /api/system-config/mandatory_documents` (`{enabled, documents, optional_documents}`); backend já suportava a estrutura (sessão anterior), sem necessidade de alterações.
