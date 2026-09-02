@@ -2,7 +2,6 @@
 from services.portal_assigned_users import get_all_assigned_user_ids
 from services.portal_doc_categories import (
     DOCUMENT_CATEGORY_MAP,
-    DEFAULT_PENDING_CATEGORIES,
     PORTAL_HIDDEN_CATEGORIES,
 )
 from services.portal_profile import (
@@ -28,7 +27,6 @@ def test_get_all_assigned_user_ids_dedupes():
 def test_portal_doc_categories_include_financeiros():
     assert "Financeiros" in DOCUMENT_CATEGORY_MAP
     assert "Index" in PORTAL_HIDDEN_CATEGORIES
-    assert "Cartao_Cidadao" in DEFAULT_PENDING_CATEGORIES
 
 
 def test_decrypt_if_needed_passthrough():

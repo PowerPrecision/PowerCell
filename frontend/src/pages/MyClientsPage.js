@@ -672,6 +672,7 @@ const MyClientsPage = () => {
           open={showCreateModal}
           onOpenChange={setShowCreateModal}
           onSuccess={handleCreateSuccess}
+          clientOnly
         />
       </div>
 

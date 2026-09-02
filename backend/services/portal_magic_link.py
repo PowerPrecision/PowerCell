@@ -263,7 +263,7 @@ async def send_magic_link_to_client(
     )
 
     try:
-        await send_email(
+        send_result = await send_email(
             account_name="power",
             to_emails=[client_email],
             subject=f"Portal do Cliente — Acompanhe o seu processo ({client_name})",
@@ -277,6 +277,19 @@ async def send_magic_link_to_client(
         raise HTTPException(
             status_code=500,
             detail="Erro ao enviar email. Tente copiar o link manualmente.",
+        )
+
+    # BUGFIX (onboarding — Bug 3, Fev 2026): `send_email` NÃO levanta excepção
+    # quando o envio falha (ex: SMTP mal configurado, autenticação inválida) —
+    # devolve {"success": False, "error": ...}. Sem esta verificação, o
+    # endpoint reportava sempre sucesso ao frontend mesmo quando o email
+    # nunca chegou a ser enviado.
+    if not send_result or not send_result.get("success"):
+        error_detail = (send_result or {}).get("error") or "Falha desconhecida ao enviar o email."
+        logger.error(f"Erro ao enviar magic link email para {client_email}: {error_detail}")
+        raise HTTPException(
+            status_code=500,
+            detail=f"Erro ao enviar email: {error_detail}",
         )
 
     logger.info(

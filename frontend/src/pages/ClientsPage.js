@@ -826,6 +826,7 @@ export default function ClientsPage() {
           open={showCreateModal}
           onOpenChange={setShowCreateModal}
           onSuccess={handleCreateModalSuccess}
+          clientOnly
         />
 
         {/* Create Process Modal — reutiliza CreateProcessModal com cliente pré-selecionado */}

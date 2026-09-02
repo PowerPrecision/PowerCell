@@ -53,13 +53,21 @@ const CreateClientModal = memo(({
   open,
   onOpenChange,
   onSuccess,
+  // BUGFIX (onboarding): quando true, este modal cria APENAS o Cliente/Lead
+  // (pré-registo, sem Processo, sem envio para o Índice). O Processo só pode
+  // ser criado depois de o cliente carregar os documentos obrigatórios no
+  // Portal. Usado pelo botão "Novo Cliente" (ClientsPage/MyClientsPage) —
+  // distinto do botão "Novo Processo" (Kanban), que continua a criar ambos.
+  clientOnly = false,
 }) => {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
 
   // ── Novo Cliente ──────────────────────────────────────────────────
-  const [clientMode, setClientMode] = useState(null); // 'existing' | 'new' | null
+  // Em modo `clientOnly`, salta-se sempre para o formulário de criação
+  // (não faz sentido "associar cliente existente" quando não há processo).
+  const [clientMode, setClientMode] = useState(clientOnly ? 'new' : null); // 'existing' | 'new' | null
   const [newClientData, setNewClientData] = useState({
     nome: '',
     email: '',
@@ -77,12 +85,12 @@ const CreateClientModal = memo(({
     onOpenChange?.(false);
     setFormData(INITIAL_FORM_STATE);
     setSelectedClient(null);
-    setClientMode(null);
+    setClientMode(clientOnly ? 'new' : null);
     setNewClientData({ nome: '', email: '', telefone: '', nif: '' });
     setSearchQuery('');
     setSearchResults([]);
     setShowDropdown(false);
-  }, [onOpenChange]);
+  }, [onOpenChange, clientOnly]);
 
   // ── Pesquisa de Clientes ──────────────────────────────────────────
   const searchForClients = useCallback(async (query) => {
@@ -152,18 +160,20 @@ const CreateClientModal = memo(({
     if (!open) {
       setFormData(INITIAL_FORM_STATE);
       setSelectedClient(null);
-      setClientMode(null);
+      setClientMode(clientOnly ? 'new' : null);
       setNewClientData({ nome: '', email: '', telefone: '', nif: '' });
       setSearchQuery('');
       setSearchResults([]);
       setShowDropdown(false);
     }
-  }, [open]);
+  }, [open, clientOnly]);
 
   // ── Validação do formulário ───────────────────────────────────────
   const isExistingClientReady = clientMode === 'existing' && selectedClient?.id;
   const isNewClientReady = clientMode === 'new' && newClientData.nome.trim().length >= 2 && newClientData.email.trim().length >= 3;
-  const canSubmit = (isExistingClientReady || isNewClientReady) && formData.process_type && !isCreating;
+  const canSubmit = clientOnly
+    ? (isNewClientReady && !isCreating)
+    : ((isExistingClientReady || isNewClientReady) && formData.process_type && !isCreating);
 
   // ── Submissão ─────────────────────────────────────────────────────
   const handleCreate = useCallback(async () => {
@@ -171,6 +181,23 @@ const CreateClientModal = memo(({
 
     setIsCreating(true);
     try {
+      // ── Modo clientOnly: cria APENAS o Cliente/Lead (pré-registo) ──
+      // Sem Processo, sem envio para o Índice. O Processo só é criado
+      // depois de o cliente carregar os documentos obrigatórios no Portal.
+      if (clientOnly) {
+        const newClientRes = await createClient({
+          nome: newClientData.nome.trim(),
+          email: newClientData.email.trim() || undefined,
+          telefone: newClientData.telefone.trim() || undefined,
+          nif: newClientData.nif.trim() || undefined,
+          fonte: 'staff_created',
+        });
+        toast.success(`Cliente "${newClientData.nome}" criado com sucesso! Fica em pré-registo até carregar os documentos no Portal.`);
+        handleClose();
+        onSuccess?.(newClientRes.data);
+        return;
+      }
+
       let clientId = selectedClient?.id;
 
       // ── PASSO 1: Se é novo cliente, criar primeiro na BD ──────────
@@ -219,7 +246,7 @@ const CreateClientModal = memo(({
     } finally {
       setIsCreating(false);
     }
-  }, [canSubmit, clientMode, selectedClient, newClientData, formData, handleClose, onSuccess]);
+  }, [canSubmit, clientOnly, clientMode, selectedClient, newClientData, formData, handleClose, onSuccess]);
 
   // ── Render ────────────────────────────────────────────────────────
   return (
@@ -228,16 +255,18 @@ const CreateClientModal = memo(({
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Plus className="h-5 w-5" />
-            Novo Processo
+            {clientOnly ? 'Novo Cliente' : 'Novo Processo'}
           </DialogTitle>
           <DialogDescription id="create-client-description">
-            Associe um cliente existente ou crie um novo. O processo será vinculado ao cliente selecionado.
+            {clientOnly
+              ? 'Cria apenas o Cliente/Lead (pré-registo). O processo só é criado depois de o cliente carregar os documentos obrigatórios no Portal.'
+              : 'Associe um cliente existente ou crie um novo. O processo será vinculado ao cliente selecionado.'}
           </DialogDescription>
         </DialogHeader>
         
         <div className="space-y-4 py-4">
-          {/* ── Seleção de Modo: Cliente Existente vs Novo ──────────── */}
-          {!selectedClient && clientMode === null && (
+          {/* ── Seleção de Modo: Cliente Existente vs Novo (oculto em clientOnly) ──────────── */}
+          {!clientOnly && !selectedClient && clientMode === null && (
             <div className="space-y-2">
               <Label className="text-sm font-medium">Associar a:</Label>
               <div className="grid grid-cols-2 gap-3">
@@ -350,17 +379,21 @@ const CreateClientModal = memo(({
                   <UserPlus className="h-4 w-4 text-teal-600" />
                   Dados do Novo Cliente
                 </Label>
-                <button
-                  type="button"
-                  onClick={() => { setClientMode(null); setNewClientData({ nome: '', email: '', telefone: '', nif: '' }); }}
-                  className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                >
-                  ← Voltar
-                </button>
+                {!clientOnly && (
+                  <button
+                    type="button"
+                    onClick={() => { setClientMode(null); setNewClientData({ nome: '', email: '', telefone: '', nif: '' }); }}
+                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
+                  >
+                    ← Voltar
+                  </button>
+                )}
               </div>
               <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
                 <p className="text-xs text-muted-foreground">
-                  Estes dados serão guardados na ficha do Cliente. O processo será criado automaticamente após guardar o cliente.
+                  {clientOnly
+                    ? 'Estes dados serão guardados na ficha do Cliente, que fica em pré-registo (sem processo).'
+                    : 'Estes dados serão guardados na ficha do Cliente. O processo será criado automaticamente após guardar o cliente.'}
                 </p>
                 <Input
                   placeholder="Nome completo *"
@@ -435,30 +468,34 @@ const CreateClientModal = memo(({
             <div className="flex items-start gap-2 p-2.5 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
               <Users className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
               <p className="text-xs text-blue-700 dark:text-blue-300">
-                Os dados pessoais são guardados na ficha do Cliente. O Processo fica automaticamente associado via <code className="font-mono text-[10px] bg-blue-100 dark:bg-blue-900/40 px-1 rounded">client_id</code>.
+                {clientOnly
+                  ? 'O cliente fica em pré-registo (sem processo). O processo só é criado depois de carregar os documentos obrigatórios no Portal.'
+                  : (<>Os dados pessoais são guardados na ficha do Cliente. O Processo fica automaticamente associado via <code className="font-mono text-[10px] bg-blue-100 dark:bg-blue-900/40 px-1 rounded">client_id</code>.</>)}
               </p>
             </div>
           )}
 
-          {/* ── Tipo de Processo ────────────────────────────────────── */}
-          <div className="space-y-2">
-            <Label htmlFor="process_type">Tipo de Processo</Label>
-            <Select 
-              value={formData.process_type} 
-              onValueChange={(v) => setFormData(prev => ({ ...prev, process_type: v }))}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                {Object.entries(PROCESS_TYPE_LABELS).map(([key, label]) => (
-                  <SelectItem key={key} value={key}>
-                    {label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {/* ── Tipo de Processo (oculto em clientOnly — não se cria processo) ────── */}
+          {!clientOnly && (
+            <div className="space-y-2">
+              <Label htmlFor="process_type">Tipo de Processo</Label>
+              <Select 
+                value={formData.process_type} 
+                onValueChange={(v) => setFormData(prev => ({ ...prev, process_type: v }))}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {Object.entries(PROCESS_TYPE_LABELS).map(([key, label]) => (
+                    <SelectItem key={key} value={key}>
+                      {label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          )}
         </div>
         
         <DialogFooter>
@@ -469,6 +506,7 @@ const CreateClientModal = memo(({
             onClick={handleCreate} 
             disabled={!canSubmit}
             className="bg-teal-600 hover:bg-teal-700"
+            data-testid="create-client-modal-submit-btn"
           >
             {isCreating ? (
               <>
@@ -478,7 +516,7 @@ const CreateClientModal = memo(({
             ) : (
               <>
                 <Plus className="h-4 w-4 mr-2" />
-                Criar Processo
+                {clientOnly ? 'Criar Cliente' : 'Criar Processo'}
               </>
             )}
           </Button>
