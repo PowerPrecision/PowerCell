@@ -13,6 +13,7 @@ from fastapi import HTTPException
 
 from database import db
 from models.company_email_config import CompanyEmailConfigCreate
+from services.encryption import encryption_service
 
 logger = logging.getLogger(__name__)
 
@@ -37,10 +38,11 @@ async def run_create_company_config(payload: CompanyEmailConfigCreate):
         "company_name": payload.company_name.strip(),
         "imap_server": payload.imap_server.strip(),
         "imap_port": payload.imap_port,
+        "imap_user": payload.imap_user.strip(),
         "smtp_server": payload.smtp_server.strip(),
         "smtp_port": payload.smtp_port,
         "require_ssl": payload.require_ssl,
-        "encrypted_password": "",
+        "encrypted_password": encryption_service.encrypt(payload.imap_password) if payload.imap_password else "",
         "created_at": now,
         "updated_at": now,
     }
@@ -76,11 +78,16 @@ async def run_update_company_config(company_name: str, payload: CompanyEmailConf
     update_data = {
         "imap_server": payload.imap_server.strip(),
         "imap_port": payload.imap_port,
+        "imap_user": payload.imap_user.strip(),
         "smtp_server": payload.smtp_server.strip(),
         "smtp_port": payload.smtp_port,
         "require_ssl": payload.require_ssl,
         "updated_at": now,
     }
+
+    # Encriptar password se fornecida (não apaga a existente se vazio)
+    if payload.imap_password:
+        update_data["encrypted_password"] = encryption_service.encrypt(payload.imap_password)
 
     if payload.company_name != company_name:
         update_data["company_name"] = payload.company_name.strip()

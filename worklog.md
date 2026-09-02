@@ -3833,3 +3833,40 @@ Pedido do utilizador: 5 ajustes cirúrgicos após testes em produção, sem toca
 5. `models/company.py`: campos IMAP (`imap_email/password/host/port`) espelhando SMTP, para suportar Webmail. Wired em `run_create_company`.
 
 Validação: pytest completo (1178 unit + 67 integration, 0 falhas) + testing_agent_v3_fork (iteration_3.json) confirmou os 2 bugs reportados — routing corrigido, email trigger já funcional (sem regressão). Dados de teste criados pelo testing agent (Rita Mendonça, João Marques) foram removidos da BD após validação. Commit `ba9ad1c7`.
+
+## 2026-09-01 (3) — Config UIs (Checklist/IMAP) + Motor de Tarefas Automáticas
+
+Pedido: 3 pontos cirúrgicos, sem ecrãs novos, sem refactor de lint.
+
+1. `MandatoryDocumentsSection.js`: duas listas (Obrigatórios/Opcionais) com sub-componente reutilizável `DocumentChecklist`. Backend já suportava `optional_documents` (sessão anterior) — sem alterações backend.
+2. IMAP UI: `CompanyEmailConfigSection.js`/`SharedEmailConfigSection.js` (nomes dados pelo utilizador) confirmados como CÓDIGO MORTO via testing_agent (iteration_4, Features 2a/2b falharam por apontarem a componentes nunca importados). Localizada a UI real: `CompaniesAdminTab.jsx` (Organização > Empresas, modelo Company) e `EmailAccountsPage.js` (/contas-email, SharedEmailCard). Portados os campos IMAP (host/porta/user/password) para estes dois ficheiros reais, imediatamente a seguir aos campos SMTP. Backend: `company_email_config.py` ganhou imap_user/imap_password (encriptado); `shared_email_config.py` Response passou a expor imap_server/port/smtp_server/port para pre-fill.
+3. `_create_post_indexing_tasks` em `process_assignment.py`: cria 2 Tasks (Analisar documentação inicial/Alta, Agendar contacto inicial/Média) por cada consultor/mediador recém-atribuído pós-indexação. `models/task.py` ganhou campo `priority` opcional.
+
+Validação: pytest completo (1183 passed, 6 skipped, 0 falhas) incluindo novos testes unit (companies/shared_email imap) + integration (TestPostIndexingAutoTasks) + `tests/test_iteration4_features.py` E2E live. testing_agent_v3_fork: iteration_4 (Features 1 e 3 PASS; 2a/2b FAIL — componentes mortos identificados) → corrigido → iteration_5 (2a/2b PASS 100%). Dados de teste (empresa QA, shared-email role=suporte) limpos pelo próprio testing agent. Commit `32a1663a`.
+
+
+---
+Task ID: Pacote de Correcção CI — testes unitários sem MongoDB (job backend-fast)
+Agent: Main Agent (Senior Full-Stack Tech Lead / AI Architect)
+Task: Corrigir as 2 falhas de CI na branch dev: `test_create_and_update_company_config_encrypts_imap_password` e `test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields` rebentavam com `pymongo.errors.ServerSelectionTimeoutError` (Connection refused, localhost:27017) no job `backend-fast`.
+
+Work Log:
+- Diagnóstico da causa raiz: os 2 testes (criados no pacote anterior "Config UIs IMAP/Docs + Motor de Tarefas Automáticas") faziam I/O real contra MongoDB vivo (`db.company_email_configs` / `db.shared_role_email_configs` — `find_one`/`insert_one`/`update_one`/`delete_one` com cleanup em `finally`). Passavam localmente (com Mongo a correr), mas o job `backend-fast` do CI corre `pytest tests/unit/` SEM serviço de MongoDB — por design (é o job rápido; só `backend-full` e `e2e-smoke` têm Mongo). Cada operação esperava o timeout de seleção de servidor (30s) e falhava.
+- Confirmação de que a convenção do repo já previa isto: `pytest.ini` declara o marcador `integration` ("requerem MongoDB"); o padrão de mock da camada `db` já existia (`tests/unit/test_document_portal_fulfill.py`, referenciado em worklogs anteriores).
+- Criado `backend/tests/unit/conftest.py` com fakes partilhadas: `FakeAsyncCollection` (find_one com igualdade + `$ne`, insert_one, update_one com `$set`/upsert, delete_one, count_documents — determinística, zero I/O) e `FakeAsyncDatabase` (acesso por atributo cacheando uma coleção por nome — o mesmo padrão do `DatabaseProxy` real, para os serviços poderem ser patchados sem alterações). Fixture `fake_async_db` nova por teste.
+- `test_create_and_update_company_config_encrypts_imap_password` reescrito: `patch.object(companies_api_mutate, "db", fake_async_db)` — CREATE encripta a password IMAP (asserção reforçada com o prefixo `ENC:` do Fernet, além da clássica "!= texto claro"); UPDATE com password vazia preserva a encriptada. Sem `reset_db_connection()`, sem cleanup de BD.
+- `test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields` reescrito: `patch.object(shared_email_crud, "db", fake_async_db)` — upsert IMAP/SMTP encripta a password (`ENC:`), `auth_method == "imap_smtp"`, audit log verificado (1 registo em `audit_logs` com o user_id), GET devolve SMTP server/port; password nunca devolvida em claro na resposta.
+- Extraído o código órfão que vivia dentro da função de teste (após o bloco `finally` — asserções de thinning `shared_email_*` vs cores `email_*`) para um teste próprio e nomeado: `test_shared_email_thinning_did_not_overwrite_email_cores`. Cobertura idêntica, agora isolada e legível.
+- Removido `import uuid` não usado no ficheiro de testes de companies.
+- Ambiente de validação: venv dedicado Python 3.12.14 (`backend/.venv`, `requirements.txt` instalado) — mesma versão de Python do CI.
+- Validação replicando o ambiente de falha do CI (SEM MongoDB, mesmas env vars do job backend-fast): os 2 ficheiros → 20/20 passed (~4s); suite `tests/unit/` completa → 1084 passed, 0 falhas (1081 do CI + 2 corrigidos + 1 extraído). flake8 (select E9,F63,F7,F82, bloqueante no CI; e max-line-length=127) → 0 problemas nos 3 ficheiros.
+- Nota técnica confirmada: a encriptação funciona no CI sem `ENCRYPTION_KEY` porque `EncryptionService` faz fallback para `JWT_SECRET` (definido no job) — ver `services/encryption.py::_initialize_key`.
+
+Stage Summary:
+- 3 ficheiros alterados/criados:
+  - backend/tests/unit/conftest.py (NOVO — `FakeAsyncDatabase`/`FakeAsyncCollection` + fixture `fake_async_db`)
+  - backend/tests/unit/test_companies_crud_extraction_helpers.py (teste IMAP reescrito com mock; uuid import removido)
+  - backend/tests/unit/test_shared_email_extraction_helpers.py (teste IMAP reescrito com mock + teste de thinning extraído do código órfão)
+  - AGENTS.md (novo gotcha: "tests/unit = SEM MongoDB vivo")
+- Resultado: o job `backend-fast` do CI deixa de falhar — `tests/unit/` é agora 100% independente de MongoDB vivo (1084 passed localmente sem Mongo, flake8 limpo). Nenhuma alteração a código de produto.
+- Convenção consolidada: testes unitários que exercitem persistência mockam a camada `db` (`fake_async_db` de `tests/unit/conftest.py`); testes que precisem de I/O real de Mongo vivem em `tests/integration/`.

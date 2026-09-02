@@ -45,6 +45,7 @@ async def qa_process():
     yield process_id
     await db.processes.delete_one({"id": process_id})
     await db.history.delete_many({"process_id": process_id})
+    await db.tasks.delete_many({"process_id": process_id})
 
 
 class TestIndexStealthHistory:
@@ -133,3 +134,88 @@ class TestDualAssignNotification:
             )
         history_count = await db.history.count_documents({"process_id": qa_process})
         assert history_count == 1
+
+
+class TestPostIndexingAutoTasks:
+    """Motor de Tarefas Automáticas — pós-indexação (Feat: Update Config UIs
+    for IMAP/Docs and implement auto-task generation)."""
+
+    @pytest.fixture
+    async def qa_users(self):
+        company_id = "qa-company-" + uuid.uuid4().hex[:8]
+        consultor_id, mediador_id = str(uuid.uuid4()), str(uuid.uuid4())
+        await db.users.insert_many([
+            {"id": consultor_id, "name": "Consultor QA", "email": "consultor.qa@test.pt",
+             "role": "consultor", "is_active": True, "company_id": company_id},
+            {"id": mediador_id, "name": "Mediador QA", "email": "mediador.qa@test.pt",
+             "role": "intermediario", "is_active": True, "company_id": company_id},
+        ])
+        yield company_id, consultor_id, mediador_id
+        await db.users.delete_many({"id": {"$in": [consultor_id, mediador_id]}})
+        await db.tasks.delete_many({"assigned_to": {"$in": [consultor_id, mediador_id]}})
+
+    @pytest.mark.asyncio
+    async def test_creates_two_tasks_per_newly_assigned_user(self, qa_process, qa_users):
+        company_id, consultor_id, mediador_id = qa_users
+        with patch(
+            "services.notification_service.send_notification_with_preference_check",
+            new_callable=AsyncMock,
+        ), patch(
+            "services.realtime_notifications.send_realtime_notification",
+            new_callable=AsyncMock,
+        ):
+            result = await dual_auto_assign_on_pre_registo_transition(
+                process_id=qa_process,
+                company_id=company_id,
+                indexador_user_id="idx-qa",
+                actor_role="indexacao",
+            )
+
+        assigned_consultant_id = result["consultant_id"]
+        assigned_mediador_id = result["mediador_id"]
+
+        consultor_tasks = await db.tasks.find(
+            {"process_id": qa_process, "assigned_to": [assigned_consultant_id]}, {"_id": 0}
+        ).to_list(10)
+        mediador_tasks = await db.tasks.find(
+            {"process_id": qa_process, "assigned_to": [assigned_mediador_id]}, {"_id": 0}
+        ).to_list(10)
+
+        assert len(consultor_tasks) == 2
+        assert len(mediador_tasks) == 2
+
+        for tasks in (consultor_tasks, mediador_tasks):
+            titles_by_priority = {t["title"]: t["priority"] for t in tasks}
+            assert titles_by_priority == {
+                "Analisar documentação inicial": "Alta",
+                "Agendar contacto inicial com o cliente": "Média",
+            }
+            for t in tasks:
+                assert t["process_id"] == qa_process
+                assert t["completed"] is False
+
+    @pytest.mark.asyncio
+    async def test_no_tasks_created_when_already_assigned(self, qa_process, qa_users):
+        """Se consultor/mediador já estavam atribuídos, não há newly_assigned
+        e por isso nenhuma tarefa automática deve ser criada de novo."""
+        company_id, consultor_id, mediador_id = qa_users
+        await db.processes.update_one(
+            {"id": qa_process},
+            {"$set": {"consultant_id": consultor_id, "mediador_id": mediador_id}},
+        )
+        with patch(
+            "services.notification_service.send_notification_with_preference_check",
+            new_callable=AsyncMock,
+        ) as mock_email, patch(
+            "services.realtime_notifications.send_realtime_notification",
+            new_callable=AsyncMock,
+        ):
+            await dual_auto_assign_on_pre_registo_transition(
+                process_id=qa_process,
+                company_id=company_id,
+                indexador_user_id="idx-qa",
+                actor_role="indexacao",
+            )
+        assert mock_email.await_count == 0
+        total_tasks = await db.tasks.count_documents({"process_id": qa_process})
+        assert total_tasks == 0

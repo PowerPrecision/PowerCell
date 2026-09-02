@@ -18,6 +18,7 @@ class TaskCreate(BaseModel):
     assigned_to: List[str]  # Lista de user_ids
     process_id: Optional[str] = None  # Se associada a um processo
     due_date: Optional[str] = None  # Data de vencimento (opcional) - formato ISO
+    priority: Optional[str] = None  # "Alta", "Média", "Baixa" (opcional)
 
 
 class TaskUpdate(BaseModel):
@@ -27,6 +28,7 @@ class TaskUpdate(BaseModel):
     assigned_to: Optional[List[str]] = None
     completed: Optional[bool] = None
     due_date: Optional[str] = None  # Data de vencimento (opcional)
+    priority: Optional[str] = None  # "Alta", "Média", "Baixa" (opcional)
 
 
 class TaskResponse(BaseModel):
@@ -44,6 +46,7 @@ class TaskResponse(BaseModel):
     completed_at: Optional[str] = None
     completed_by: Optional[str] = None
     due_date: Optional[str] = None  # Data de vencimento (opcional)
+    priority: Optional[str] = None  # "Alta", "Média", "Baixa" (opcional)
     is_overdue: Optional[bool] = None  # Se está atrasada
     days_until_due: Optional[int] = None  # Dias até vencer (negativo se atrasada)
     created_at: str

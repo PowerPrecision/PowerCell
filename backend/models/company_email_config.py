@@ -5,9 +5,10 @@ MODELO: CompanyEmailConfig
 Configuração padrão de IMAP/SMTP por empresa.
 
 Quando um utilizador não tem config individual, o sistema herda os
-servidores (IMAP/SMTP) da empresa a que pertence. A password e o
-email_address continuam a ser individuais — apenas os *servidores*
-são partilhados.
+servidores (IMAP/SMTP) da empresa a que pertence. O email do utilizador
+continua a ser individual. Para IMAP (Webmail), a empresa pode também
+definir uma credencial partilhada (imap_user/imap_password) usada como
+fallback quando o utilizador não tem a sua própria password configurada.
 
 COLEÇÃO MONGODB: company_email_configs
 INDEX: { company_name: 1 } (unique)
@@ -29,6 +30,8 @@ class CompanyEmailConfigCreate(BaseModel):
     company_name: str
     imap_server: str = ""
     imap_port: int = 993
+    imap_user: str = ""
+    imap_password: str = ""  # Texto simples no payload — encriptado antes de gravar em BD
     smtp_server: str = ""
     smtp_port: int = 465
     require_ssl: bool = True
@@ -40,6 +43,7 @@ class CompanyEmailConfigResponse(BaseModel):
     company_name: str
     imap_server: Optional[str] = None
     imap_port: Optional[int] = None
+    imap_user: Optional[str] = None
     smtp_server: Optional[str] = None
     smtp_port: Optional[int] = None
     require_ssl: bool = True

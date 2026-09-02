@@ -57,6 +57,10 @@ class SharedEmailConfigResponse(BaseModel):
     role: str
     email_address: Optional[str] = None
     display_name: Optional[str] = None
+    imap_server: Optional[str] = None
+    imap_port: Optional[int] = None
+    smtp_server: Optional[str] = None
+    smtp_port: Optional[int] = None
     is_configured: bool = False
     auth_method: str = SharedEmailAuthMethod.NONE.value
     has_google_oauth: bool = False

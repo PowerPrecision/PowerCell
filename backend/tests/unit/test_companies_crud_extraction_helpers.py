@@ -113,6 +113,82 @@ def test_create_company_persists_imap_fields():
     assert '"imap_password": data.imap_password' in text
 
 
+def test_company_email_config_create_supports_imap_credentials():
+    """CompanyEmailConfigSection.js — imap_user/imap_password (Feat: Update
+    Config UIs for IMAP/Docs and implement auto-task generation)."""
+    from models.company_email_config import CompanyEmailConfigCreate, CompanyEmailConfigResponse
+
+    payload = CompanyEmailConfigCreate(
+        company_name="Precision Crédito",
+        imap_server="imap.exemplo.pt",
+        imap_port=993,
+        imap_user="geral@exemplo.pt",
+        imap_password="segredo123",
+        smtp_server="smtp.exemplo.pt",
+        smtp_port=465,
+    )
+    assert payload.imap_user == "geral@exemplo.pt"
+    assert payload.imap_password == "segredo123"
+
+    response = CompanyEmailConfigResponse(
+        id="1", company_name="Precision Crédito", imap_user="geral@exemplo.pt",
+    )
+    assert response.imap_user == "geral@exemplo.pt"
+    # A password nunca é devolvida em claro — só a flag has_encrypted_password
+    assert not hasattr(response, "imap_password")
+
+
+@pytest.mark.asyncio
+async def test_create_and_update_company_config_encrypts_imap_password(fake_async_db):
+    """CREATE + UPDATE da config de email por empresa encriptam a password
+    IMAP; UPDATE com password vazia preserva a encriptada.
+
+    CI (backend-fast, sem MongoDB): mock da camada `db` com coleções em
+    memória (padrão de test_document_portal_fulfill.py) — nunca I/O real.
+    """
+    from unittest.mock import patch
+
+    from models.company_email_config import CompanyEmailConfigCreate
+    from services import companies_api_mutate as mutate
+
+    company_name = "QA Test Company (unit)"
+
+    with patch.object(mutate, "db", fake_async_db):
+        await mutate.run_create_company_config(CompanyEmailConfigCreate(
+            company_name=company_name,
+            imap_server="imap.exemplo.pt",
+            imap_port=993,
+            imap_user="geral@exemplo.pt",
+            imap_password="segredo123",
+            smtp_server="smtp.exemplo.pt",
+            smtp_port=465,
+        ))
+        stored = await fake_async_db.company_email_configs.find_one(
+            {"company_name": company_name}
+        )
+        assert stored is not None
+        assert stored["imap_user"] == "geral@exemplo.pt"
+        # Fernet aplicado (prefixo ENC:) e nunca em claro na BD
+        assert stored["encrypted_password"].startswith("ENC:")
+        assert stored["encrypted_password"] != "segredo123"
+
+        await mutate.run_update_company_config(company_name, CompanyEmailConfigCreate(
+            company_name=company_name,
+            imap_server="imap2.exemplo.pt",
+            imap_port=993,
+            imap_user="geral2@exemplo.pt",
+            imap_password="",  # vazio -> não apaga a password existente
+            smtp_server="smtp.exemplo.pt",
+            smtp_port=465,
+        ))
+        updated = await fake_async_db.company_email_configs.find_one(
+            {"company_name": company_name}
+        )
+        assert updated["imap_user"] == "geral2@exemplo.pt"
+        assert updated["imap_server"] == "imap2.exemplo.pt"
+        assert updated["encrypted_password"] == stored["encrypted_password"]
+
+
 def test_list_companies_escapes_regex_search():
     """Pacote FF — pesquisa de empresas não injeta $regex cru."""
     import asyncio

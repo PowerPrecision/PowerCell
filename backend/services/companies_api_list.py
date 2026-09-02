@@ -27,6 +27,7 @@ async def run_list_company_configs():
             company_name=config.get("company_name", ""),
             imap_server=config.get("imap_server"),
             imap_port=config.get("imap_port", 993),
+            imap_user=config.get("imap_user"),
             smtp_server=config.get("smtp_server"),
             smtp_port=config.get("smtp_port", 465),
             require_ssl=config.get("require_ssl", True),

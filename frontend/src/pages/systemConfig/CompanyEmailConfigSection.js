@@ -47,10 +47,12 @@ export default function CompanyEmailConfigSection() {
   const [selectedCompany, setSelectedCompany] = useState("");
   const [formData, setFormData] = useState({
     company_name: "",
-    imap_server: "",
-    imap_port: 993,
     smtp_server: "",
     smtp_port: 465,
+    imap_server: "",
+    imap_port: 993,
+    imap_user: "",
+    imap_password: "",
     require_ssl: true,
   });
   const [deletingCompany, setDeletingCompany] = useState(null);
@@ -95,10 +97,12 @@ export default function CompanyEmailConfigSection() {
     setEditingCompany(config.company_name);
     setFormData({
       company_name: config.company_name,
-      imap_server: config.imap_server || "",
-      imap_port: config.imap_port || 993,
       smtp_server: config.smtp_server || "",
       smtp_port: config.smtp_port || 465,
+      imap_server: config.imap_server || "",
+      imap_port: config.imap_port || 993,
+      imap_user: config.imap_user || "",
+      imap_password: "",
       require_ssl: config.require_ssl !== false,
     });
   };
@@ -110,10 +114,12 @@ export default function CompanyEmailConfigSection() {
     }
     setFormData({
       company_name: selectedCompany,
-      imap_server: "",
-      imap_port: 993,
       smtp_server: "",
       smtp_port: 465,
+      imap_server: "",
+      imap_port: 993,
+      imap_user: "",
+      imap_password: "",
       require_ssl: true,
     });
     setShowCreateDialog(true);
@@ -264,25 +270,6 @@ export default function CompanyEmailConfigSection() {
               </div>
               <div className="space-y-2" />
               <div className="space-y-2">
-                <Label htmlFor="ce_imap_server">Servidor IMAP</Label>
-                <Input
-                  id="ce_imap_server"
-                  value={formData.imap_server}
-                  onChange={(e) => setFormData({ ...formData, imap_server: e.target.value })}
-                  placeholder="imap.empresa.pt"
-                />
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="ce_imap_port">Porta IMAP</Label>
-                <Input
-                  id="ce_imap_port"
-                  type="number"
-                  value={formData.imap_port}
-                  onChange={(e) => setFormData({ ...formData, imap_port: parseInt(e.target.value) || 993 })}
-                  placeholder="993"
-                />
-              </div>
-              <div className="space-y-2">
                 <Label htmlFor="ce_smtp_server">Servidor SMTP</Label>
                 <Input
                   id="ce_smtp_server"
@@ -299,6 +286,51 @@ export default function CompanyEmailConfigSection() {
                   value={formData.smtp_port}
                   onChange={(e) => setFormData({ ...formData, smtp_port: parseInt(e.target.value) || 465 })}
                   placeholder="465"
+                />
+              </div>
+              {/* PACOTE — Webmail: campos IMAP completos (host/porta/user/password),
+                  logo a seguir aos campos de SMTP, para permitir a gravação total
+                  da configuração de email partilhada da empresa. */}
+              <div className="space-y-2">
+                <Label htmlFor="ce_imap_host">Servidor IMAP</Label>
+                <Input
+                  id="ce_imap_host"
+                  data-testid="company-email-imap-host-input"
+                  value={formData.imap_server}
+                  onChange={(e) => setFormData({ ...formData, imap_server: e.target.value })}
+                  placeholder="imap.empresa.pt"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ce_imap_port">Porta IMAP</Label>
+                <Input
+                  id="ce_imap_port"
+                  data-testid="company-email-imap-port-input"
+                  type="number"
+                  value={formData.imap_port}
+                  onChange={(e) => setFormData({ ...formData, imap_port: parseInt(e.target.value) || 993 })}
+                  placeholder="993"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ce_imap_user">Utilizador IMAP</Label>
+                <Input
+                  id="ce_imap_user"
+                  data-testid="company-email-imap-user-input"
+                  value={formData.imap_user}
+                  onChange={(e) => setFormData({ ...formData, imap_user: e.target.value })}
+                  placeholder="geral@empresa.pt"
+                />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="ce_imap_password">Password IMAP</Label>
+                <Input
+                  id="ce_imap_password"
+                  data-testid="company-email-imap-password-input"
+                  type="password"
+                  value={formData.imap_password}
+                  onChange={(e) => setFormData({ ...formData, imap_password: e.target.value })}
+                  placeholder={editingCompany ? "•••••••• (deixe vazio para manter)" : "Password"}
                 />
               </div>
               <div className="space-y-2">
@@ -344,6 +376,7 @@ export default function CompanyEmailConfigSection() {
                       <div>
                         <span className="text-xs uppercase tracking-wider">IMAP</span>
                         <p>{cfg.imap_server}:{cfg.imap_port}</p>
+                        {cfg.imap_user && <p className="text-xs">{cfg.imap_user}{cfg.has_encrypted_password ? " · com password" : ""}</p>}
                       </div>
                       <div>
                         <span className="text-xs uppercase tracking-wider">SMTP</span>
