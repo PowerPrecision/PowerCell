@@ -1,6 +1,4 @@
 """Unit tests for companies_crud route thinning helpers (companies_crud_api_*)."""
-import uuid
-
 import pytest
 
 
@@ -141,15 +139,22 @@ def test_company_email_config_create_supports_imap_credentials():
 
 
 @pytest.mark.asyncio
-async def test_create_and_update_company_config_encrypts_imap_password():
-    from database import db, reset_db_connection
-    from models.company_email_config import CompanyEmailConfigCreate
-    from services.companies_api_mutate import run_create_company_config, run_update_company_config
+async def test_create_and_update_company_config_encrypts_imap_password(fake_async_db):
+    """CREATE + UPDATE da config de email por empresa encriptam a password
+    IMAP; UPDATE com password vazia preserva a encriptada.
 
-    reset_db_connection()
-    company_name = "QA Test Company " + str(uuid.uuid4())[:8]
-    try:
-        await run_create_company_config(CompanyEmailConfigCreate(
+    CI (backend-fast, sem MongoDB): mock da camada `db` com coleções em
+    memória (padrão de test_document_portal_fulfill.py) — nunca I/O real.
+    """
+    from unittest.mock import patch
+
+    from models.company_email_config import CompanyEmailConfigCreate
+    from services import companies_api_mutate as mutate
+
+    company_name = "QA Test Company (unit)"
+
+    with patch.object(mutate, "db", fake_async_db):
+        await mutate.run_create_company_config(CompanyEmailConfigCreate(
             company_name=company_name,
             imap_server="imap.exemplo.pt",
             imap_port=993,
@@ -158,12 +163,16 @@ async def test_create_and_update_company_config_encrypts_imap_password():
             smtp_server="smtp.exemplo.pt",
             smtp_port=465,
         ))
-        stored = await db.company_email_configs.find_one({"company_name": company_name}, {"_id": 0})
+        stored = await fake_async_db.company_email_configs.find_one(
+            {"company_name": company_name}
+        )
+        assert stored is not None
         assert stored["imap_user"] == "geral@exemplo.pt"
-        assert stored["encrypted_password"]
-        assert stored["encrypted_password"] != "segredo123"  # nunca em claro na BD
+        # Fernet aplicado (prefixo ENC:) e nunca em claro na BD
+        assert stored["encrypted_password"].startswith("ENC:")
+        assert stored["encrypted_password"] != "segredo123"
 
-        await run_update_company_config(company_name, CompanyEmailConfigCreate(
+        await mutate.run_update_company_config(company_name, CompanyEmailConfigCreate(
             company_name=company_name,
             imap_server="imap2.exemplo.pt",
             imap_port=993,
@@ -172,11 +181,12 @@ async def test_create_and_update_company_config_encrypts_imap_password():
             smtp_server="smtp.exemplo.pt",
             smtp_port=465,
         ))
-        updated = await db.company_email_configs.find_one({"company_name": company_name}, {"_id": 0})
+        updated = await fake_async_db.company_email_configs.find_one(
+            {"company_name": company_name}
+        )
         assert updated["imap_user"] == "geral2@exemplo.pt"
+        assert updated["imap_server"] == "imap2.exemplo.pt"
         assert updated["encrypted_password"] == stored["encrypted_password"]
-    finally:
-        await db.company_email_configs.delete_one({"company_name": company_name})
 
 
 def test_list_companies_escapes_regex_search():
