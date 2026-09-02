@@ -5,9 +5,9 @@
  */
 import { useEffect, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
-import { Building2, Pencil, Plus, Search } from "lucide-react";
+import { Building2, Loader2, Pencil, Plug, Plus, Search } from "lucide-react";
 import { toast } from "sonner";
-import { createCompany, getCompanies, updateCompany } from "../../services/api";
+import { createCompany, getCompanies, testCompanyEmailConnection, updateCompany } from "../../services/api";
 import { queryKeys } from "../../lib/queryClient";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { validateNIF } from "../../utils/validateNIF";
@@ -85,6 +85,7 @@ export default function CompaniesAdminTab() {
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState({ ...EMPTY_FORM });
   const [saving, setSaving] = useState(false);
+  const [testingConnection, setTestingConnection] = useState(false);
 
   const {
     data: companies = [],
@@ -130,6 +131,32 @@ export default function CompaniesAdminTab() {
       imap_port: company.imap_port ?? "",
     });
     setDialogOpen(true);
+  };
+
+  // Testa a ligação SMTP/IMAP com os valores atuais do formulário, sem gravar.
+  const handleTestConnection = async () => {
+    const smtp = smtpFieldsFromForm(form);
+    const imap = imapFieldsFromForm(form);
+    const hasSmtp = Boolean(smtp.smtp_host && smtp.smtp_email && smtp.smtp_password);
+    const hasImap = Boolean(imap.imap_host && imap.imap_email && imap.imap_password);
+    if (!hasSmtp && !hasImap) {
+      toast.error(
+        "Preencha o email, a password e o servidor de SMTP e/ou IMAP para testar a ligação.",
+      );
+      return;
+    }
+    setTestingConnection(true);
+    try {
+      const res = await testCompanyEmailConnection({ ...smtp, ...imap });
+      const messages = Object.values(res.data?.results || {}).map((r) => r.message);
+      toast.success(messages.join(" | ") || "Ligação validada com sucesso.");
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(err.response?.data?.detail, "Falha ao testar a ligação."),
+      );
+    } finally {
+      setTestingConnection(false);
+    }
   };
 
   const handleSave = async (e) => {
@@ -459,6 +486,21 @@ export default function CompaniesAdminTab() {
                 onClick={() => setDialogOpen(false)}
               >
                 Cancelar
+              </Button>
+              <Button
+                type="button"
+                variant="secondary"
+                onClick={handleTestConnection}
+                disabled={testingConnection}
+                className="gap-1.5"
+                data-testid="btn-test-email-connection"
+              >
+                {testingConnection ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Plug className="h-4 w-4" />
+                )}
+                Testar Ligação
               </Button>
               <Button type="submit" disabled={saving} data-testid="btn-save-company">
                 {saving ? "A guardar..." : editing ? "Guardar" : "Criar Empresa"}

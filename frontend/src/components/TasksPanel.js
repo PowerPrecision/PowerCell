@@ -323,25 +323,55 @@ const TasksPanel = ({
     }));
   };
 
-  // Helper para exibir badge de prioridade derivada
+  // Mapeamento de estilos por nível de prioridade explícita da tarefa
+  // (campo `priority`, definido manualmente ou pelo motor de atribuição automática)
+  const PRIORITY_STYLES = {
+    alta: { label: "ALTA", variant: "destructive", className: "" },
+    high: { label: "ALTA", variant: "destructive", className: "" },
+    média: { label: "MÉDIA", variant: "outline", className: "bg-yellow-100 text-yellow-700 border-yellow-300" },
+    media: { label: "MÉDIA", variant: "outline", className: "bg-yellow-100 text-yellow-700 border-yellow-300" },
+    medium: { label: "MÉDIA", variant: "outline", className: "bg-yellow-100 text-yellow-700 border-yellow-300" },
+    baixa: { label: "BAIXA", variant: "outline", className: "bg-slate-100 text-slate-600 border-slate-300" },
+    low: { label: "BAIXA", variant: "outline", className: "bg-slate-100 text-slate-600 border-slate-300" },
+  };
+
+  // Helper para exibir badge de prioridade.
+  // Prioriza o campo explícito `task.priority` (definido manualmente ou pelo
+  // motor de atribuição automática); caso não exista, usa a heurística
+  // derivada do prazo (comportamento anterior, mantido como fallback).
   const getPriorityBadge = (task) => {
     if (task.completed) return null;
+
+    const explicitPriority = task.priority ? String(task.priority).toLowerCase() : null;
+    const style = explicitPriority ? PRIORITY_STYLES[explicitPriority] : null;
+    if (style) {
+      return (
+        <Badge
+          variant={style.variant}
+          className={`text-[10px] sm:text-xs h-4 sm:h-5 ${style.className}`}
+          data-testid={`task-priority-badge-${task.id}`}
+        >
+          {style.label}
+        </Badge>
+      );
+    }
+
     if (task.is_overdue) {
       return (
-        <Badge className="text-[10px] sm:text-xs h-4 sm:h-5 bg-red-100 text-red-700 border-red-200">
+        <Badge className="text-[10px] sm:text-xs h-4 sm:h-5 bg-red-100 text-red-700 border-red-200" data-testid={`task-priority-badge-${task.id}`}>
           ALTA
         </Badge>
       );
     }
     if (task.days_until_due !== null && task.days_until_due !== undefined && task.days_until_due <= 3) {
       return (
-        <Badge className="text-[10px] sm:text-xs h-4 sm:h-5 bg-yellow-100 text-yellow-700 border-yellow-200">
+        <Badge className="text-[10px] sm:text-xs h-4 sm:h-5 bg-yellow-100 text-yellow-700 border-yellow-200" data-testid={`task-priority-badge-${task.id}`}>
           MÉDIA
         </Badge>
       );
     }
     return (
-      <Badge variant="outline" className="text-[10px] sm:text-xs h-4 sm:h-5 text-gray-500 border-gray-300">
+      <Badge variant="outline" className="text-[10px] sm:text-xs h-4 sm:h-5 text-gray-500 border-gray-300" data-testid={`task-priority-badge-${task.id}`}>
         NORMAL
       </Badge>
     );

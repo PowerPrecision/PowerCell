@@ -11,6 +11,7 @@ def test_companies_crud_api_modules_exist():
         "companies_crud_api_list.py",
         "companies_crud_api_logo.py",
         "companies_crud_api_mutate.py",
+        "companies_crud_api_test_connection.py",
     ]
     for name in expected:
         assert (services_dir / name).exists(), f"missing {name}"

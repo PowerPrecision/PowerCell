@@ -110,3 +110,19 @@ class CompanyListResponse(BaseModel):
     """Lista de empresas com total."""
     companies: List[CompanyResponse]
     total: int
+
+
+class CompanyEmailConnectionTest(BaseModel):
+    """
+    Payload para testar a ligação SMTP e/ou IMAP com os valores atuais do
+    formulário de configuração de email de uma Empresa, sem gravar nada.
+    SMTP e IMAP são testados de forma independente (podem ter contas diferentes).
+    """
+    smtp_email: Optional[str] = Field(None, max_length=200)
+    smtp_password: Optional[str] = Field(None, max_length=500)
+    smtp_host: Optional[str] = Field(None, max_length=200)
+    smtp_port: Optional[int] = None
+    imap_email: Optional[str] = Field(None, max_length=200)
+    imap_password: Optional[str] = Field(None, max_length=500)
+    imap_host: Optional[str] = Field(None, max_length=200)
+    imap_port: Optional[int] = None

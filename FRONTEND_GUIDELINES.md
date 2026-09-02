@@ -236,6 +236,19 @@ As settings de cada perfil (assinatura, webmail, preferências) são lidas do ba
 - Invalidar Kanban com `queryKeys.processes.kanbanAll()`, nunca `['processes']` inteiro (apagaria detalhe/listas/`my-clients`).
 - Código novo de cor: tokens Shadcn (`bg-primary`, `text-muted-foreground`, …), não classes Tailwind cruas.
 
+---
+
+## 12. Extração de cartões de páginas densas — pasta `components/<pagina>/` (Refactor UX — Fev 2026)
+
+**Regra**: quando uma página composta por múltiplos cartões independentes (cada um com o seu próprio fetch/estado) ultrapassa ~400-500 linhas, extrair cada cartão para um componente próprio numa pasta `components/<nomeDaPagina>/`, mantendo a página original apenas como wrapper (guarda de permissões + layout + import dos cartões). Cada cartão extraído deve continuar autossuficiente (o seu próprio `useQuery`/`useState`), sem introduzir estado partilhado global que não existia antes. Helpers usados por mais de um cartão (ex: um `fetch` comum) vivem num ficheiro utilitário na mesma pasta (`<pagina>Api.js`), nunca duplicados.
+
+**Exemplo aplicado**: `pages/EmailAccountsPage.js` (950 linhas, 3 cartões de configuração de email) foi dividido em `components/emailAccounts/{SystemSmtpCard,IndexationImapCard,SharedEmailCard}.jsx` + `emailAccountsApi.js` (helper `fetchSystemConfig` partilhado pelos dois primeiros cartões). A página ficou com ~75 linhas (guarda de role admin/ceo + grid de layout), sem qualquer alteração de lógica ou comportamento.
+
+## 13. Badges de prioridade — campo explícito vence heurística derivada
+
+Quando uma entidade tem um campo de prioridade explícito (`task.priority`, definido manualmente ou por um motor automático) **e** uma heurística derivada de outro campo (ex: prazo/`due_date`), o badge deve dar sempre prioridade ao valor explícito; a heurística só serve de *fallback* quando o campo explícito está vazio. Cores fixas por nível: Alta/High → vermelho (`variant="destructive"`), Média/Medium → amarelo/`outline` com classes `bg-yellow-100 text-yellow-700`, Baixa/Low → cinzento/`outline` com `bg-slate-100 text-slate-600`. Ver `getPriorityBadge` em `components/TasksPanel.js`.
+
+
 
 
 
