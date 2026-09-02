@@ -1152,6 +1152,7 @@ export const getCompanies = (search) =>
 export const getCompany = (id) => api.get(`/admin/companies/${id}`);
 export const createCompany = (data) => api.post("/admin/companies", data);
 export const updateCompany = (id, data) => api.put(`/admin/companies/${id}`, data);
+export const testCompanyEmailConnection = (data) => api.post("/admin/companies/test-email-connection", data);
 export const deleteCompany = (id) => api.delete(`/admin/companies/${id}`);
 export const uploadCompanyLogo = (id, file) => {
   const formData = new FormData();

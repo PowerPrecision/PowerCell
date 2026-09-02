@@ -17,6 +17,7 @@ from models.company import (
     CompanyUpdate,
     CompanyResponse,
     CompanyListResponse,
+    CompanyEmailConnectionTest,
 )
 from services.auth import require_admin
 from services.companies_crud_api_list import (
@@ -30,6 +31,7 @@ from services.companies_crud_api_mutate import (
     run_delete_company,
 )
 from services.companies_crud_api_logo import run_upload_company_logo
+from services.companies_crud_api_test_connection import run_test_email_connection
 
 router = APIRouter(
     prefix="/admin/companies",
@@ -62,6 +64,12 @@ async def get_company(company_id: str):
 async def create_company(data: CompanyCreate):
     """Cria uma nova empresa."""
     return await run_create_company(data)
+
+
+@router.post("/test-email-connection")
+async def test_email_connection(data: CompanyEmailConnectionTest):
+    """Testa a ligação SMTP e/ou IMAP com os valores atuais do formulário, sem gravar."""
+    return await run_test_email_connection(data)
 
 
 @router.put("/{company_id}", response_model=CompanyResponse)

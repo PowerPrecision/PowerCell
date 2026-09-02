@@ -119,6 +119,14 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 
 **Nota**: `/configuracoes` e `/definicoes` são rotas DIFERENTES. A primeira é para admin configurar o sistema (SMTP, storage, RGPD, etc.), a segunda é para o utilizador gerir as suas definições pessoais.
 
+## Correções 2026-02 (Fev) — Refactor: Split EmailAccountsPage + Badges de Prioridade + Testar Ligação
+
+- **Refactor `EmailAccountsPage.js`**: 950 linhas → wrapper (~75 linhas). Os 3 cartões ativos extraídos para `frontend/src/components/emailAccounts/{SystemSmtpCard,IndexationImapCard,SharedEmailCard}.jsx` + helper `emailAccountsApi.js`. Sem alteração de lógica/comportamento (ver `FRONTEND_GUIDELINES.md §12`).
+- **Badges de prioridade**: `TasksPanel.js::getPriorityBadge` lê primeiro `task.priority` explícito (Alta/High→vermelho, Média/Medium→amarelo, Baixa/Low→cinzento), com fallback para a heurística de prazo anterior (ver `FRONTEND_GUIDELINES.md §13`).
+- **Botão "Testar Ligação" (SMTP/IMAP)**: `CompaniesAdminTab.jsx` — botão no `DialogFooter`, sem submeter o formulário. Novo endpoint `POST /api/admin/companies/test-email-connection` (`services/companies_crud_api_test_connection.py`) testa SMTP e IMAP de forma independente via `smtplib`/`imaplib` reais, devolve 200 (sucesso) ou 400 (razão amigável em PT).
+- Testado: 11 novos testes unitários + suite completa (1194 passed, 6 skipped, 1 falha pré-existente não relacionada) + `testing_agent_v3_fork` (iteration_6.json, sem regressão). Detalhe completo em `ARCHITECTURE.md` e `worklog.md`.
+
+
 ## Correções 2026-09-01 (4) — Scripts CLI de manutenção: password + cascata total
 
 - **`cleanup_prod_test_data.py`**: filtro expandido para também considerar o nome/título de processo (`processes.client_name`, já existia) — mantido; cascata expandida para incluir `tasks`, `task_logs` (por `process_id` OU `task_id`), `activities` e `history`, além de `documents`/`processes`/`clients` já existentes. Ordem: task_logs → tasks → activities → history → documents → processes → clients.
