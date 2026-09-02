@@ -13,8 +13,9 @@ import { Label } from "../ui/label";
 import { Badge } from "../ui/badge";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
-import { Globe, Save, Loader2 } from "lucide-react";
+import { Globe, Save, Loader2, Plug } from "lucide-react";
 import { API_URL, fetchSystemConfig } from "./emailAccountsApi";
+import { testCompanyEmailConnection } from "../../services/api";
 
 export const IndexationImapCard = () => {
   const { token } = useAuth();
@@ -25,6 +26,7 @@ export const IndexationImapCard = () => {
     app_password: "",
   });
   const [saving, setSaving] = useState(false);
+  const [testing, setTesting] = useState(false);
   const hydratedRef = useRef(false);
 
   const { data: systemConfig, isLoading: loading } = useQuery({
@@ -66,6 +68,34 @@ export const IndexationImapCard = () => {
       toast.error("Erro ao guardar configuração IMAP");
     } finally {
       setSaving(false);
+    }
+  };
+
+  // BUGFIX (Bug 4, Fev 2026): botão "Testar Ligação" — testa a ligação IMAP
+  // real com os valores atuais do formulário (sem gravar), via o endpoint
+  // genérico de teste SMTP/IMAP já usado em Empresas/Admin.
+  const handleTestConnection = async () => {
+    if (!systemWebmail.imap_host || !systemWebmail.email_user || !systemWebmail.app_password) {
+      toast.error("Preencha o Host, o Email e a App Password para testar a ligação.");
+      return;
+    }
+    if (systemWebmail.app_password === "••••••••") {
+      toast.error("Introduza novamente a password para testar a ligação (o campo mostra apenas um indicador).");
+      return;
+    }
+    setTesting(true);
+    try {
+      const res = await testCompanyEmailConnection({
+        imap_host: systemWebmail.imap_host,
+        imap_port: parseInt(systemWebmail.imap_port) || 993,
+        imap_email: systemWebmail.email_user,
+        imap_password: systemWebmail.app_password,
+      });
+      toast.success(res.data?.results?.imap?.message || "Ligação IMAP validada com sucesso.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err.response?.data?.detail, "Falha ao testar a ligação IMAP."));
+    } finally {
+      setTesting(false);
     }
   };
 
@@ -129,6 +159,10 @@ export const IndexationImapCard = () => {
           <Button onClick={handleSave} disabled={saving} data-testid="indexation-imap-save-btn">
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
             Guardar
+          </Button>
+          <Button variant="outline" onClick={handleTestConnection} disabled={testing} data-testid="indexation-imap-test-btn">
+            {testing ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Plug className="h-4 w-4 mr-2" />}
+            Testar Ligação
           </Button>
         </div>
       </CardContent>

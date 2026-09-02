@@ -290,6 +290,25 @@ async def run_create_client(
         )
 
     # ============================================================
+    # BUGFIX (onboarding — Bug 2, Fev 2026): gerar pedidos de documento
+    # obrigatórios/opcionais a partir do SystemConfig (mandatory_documents)
+    # logo na criação do cliente, tal como já acontecia no registo público
+    # (services/public_registration.py). Sem isto, um cliente criado
+    # manualmente pelo staff ficava sem nenhum pedido gerado e o Portal
+    # acabava a recorrer a uma lista antiga fixa (DEFAULT_PENDING_CATEGORIES).
+    # ============================================================
+    from services.portal_documents_notify import generate_mandatory_document_requests
+    asyncio.create_task(
+        generate_mandatory_document_requests(
+            process_id=None,
+            client_id=client.id,
+            company_id=None,
+            requested_by=user.get("id") or user.get("email"),
+            requested_by_name=user.get("name") or user.get("email") or "Staff",
+        )
+    )
+
+    # ============================================================
     # PACOTE CY — Enviar email de boas-vindas do Portal em background
     # ============================================================
     # Antes o email NÃO era enviado na criação do cliente (só gerava o

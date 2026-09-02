@@ -307,7 +307,30 @@ Cumprimentos,
 """
     
     html_body = get_base_template(content, "Pedido Recebido")
-    return await send_email_notification(client_email, subject, body, html_body)
+
+    # BUGFIX (onboarding — Bug 3, Fev 2026): usar o serviço de email ligado
+    # ao SystemConfig (Resend/SMTP configurados em /contas-email), em vez de
+    # `send_email_notification` (email_v2.py) — que depende de variáveis de
+    # ambiente (EMAIL_PROVIDER/EMAIL_API_KEY/SMTP_*) nunca definidas neste
+    # ambiente, fazendo este email cair sempre em modo simulado (sem chegar
+    # ao cliente) e sem qualquer erro reportado.
+    from services.email_service import send_email as _send_system_email
+
+    result = await _send_system_email(
+        account_name="power",
+        to_emails=[client_email],
+        subject=subject,
+        body=body,
+        body_html=html_body,
+        force_system=True,
+        system_purpose="NOTIFICATIONS",
+    )
+    if not result.get("success"):
+        logger.error(
+            f"[EMAIL] Falha ao enviar confirmação de registo para {client_email}: "
+            f"{result.get('error')}"
+        )
+    return bool(result.get("success"))
 
 
 async def send_documents_checklist(client_email: str, client_name: str, documents: List[str] = None) -> bool:

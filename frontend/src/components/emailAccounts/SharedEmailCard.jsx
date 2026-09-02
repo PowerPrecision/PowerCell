@@ -24,8 +24,10 @@ import {
   RotateCcw,
   MailCheck,
   Info,
+  Plug,
 } from "lucide-react";
 import { API_URL } from "./emailAccountsApi";
+import { testCompanyEmailConnection } from "../../services/api";
 
 const SHARED_EMAIL_ROLES = [
   { role: "indexacao", label: "Indexação", description: "Email partilhado do departamento de indexação" },
@@ -53,6 +55,7 @@ export const SharedEmailCard = () => {
   const [manualOpenRole, setManualOpenRole] = useState(null);
   const [manualForm, setManualForm] = useState(EMPTY_SHARED_MANUAL_FORM);
   const [savingManual, setSavingManual] = useState(null);
+  const [testingManual, setTestingManual] = useState(null);
 
   const {
     data: configs = [],
@@ -236,6 +239,40 @@ export const SharedEmailCard = () => {
       toast.error("Erro de conexão");
     } finally {
       setSavingManual(null);
+    }
+  };
+
+  // BUGFIX (Bug 4, Fev 2026): botão "Testar Ligação" no formulário manual —
+  // testa SMTP e IMAP reais com os valores atuais do formulário (sem gravar),
+  // via o endpoint genérico de teste já usado em Empresas/Admin. O utilizador
+  // IMAP é reutilizado como utilizador SMTP (mesmo padrão do handleSaveManual).
+  const handleTestManualConnection = async (role) => {
+    if (!manualForm.imap_server && !manualForm.smtp_server) {
+      toast.error("Preencha o servidor SMTP e/ou IMAP para testar a ligação");
+      return;
+    }
+    if (!manualForm.imap_password) {
+      toast.error("Introduza a password para testar a ligação");
+      return;
+    }
+    setTestingManual(role);
+    try {
+      const res = await testCompanyEmailConnection({
+        smtp_host: manualForm.smtp_server,
+        smtp_port: manualForm.smtp_port,
+        smtp_email: manualForm.imap_user,
+        smtp_password: manualForm.imap_password,
+        imap_host: manualForm.imap_server,
+        imap_port: manualForm.imap_port,
+        imap_email: manualForm.imap_user,
+        imap_password: manualForm.imap_password,
+      });
+      const messages = Object.values(res.data?.results || {}).map((r) => r.message);
+      toast.success(messages.join(" | ") || "Ligação validada com sucesso.");
+    } catch (err) {
+      toast.error(extractErrorMessage(err.response?.data?.detail, "Falha ao testar a ligação."));
+    } finally {
+      setTestingManual(null);
     }
   };
 
@@ -483,6 +520,17 @@ export const SharedEmailCard = () => {
                       <div className="flex justify-end gap-2 pt-2 border-t">
                         <Button variant="outline" size="sm" onClick={() => setManualOpenRole(null)} data-testid={`shared-email-manual-cancel-${role}`}>
                           Cancelar
+                        </Button>
+                        <Button
+                          variant="secondary"
+                          size="sm"
+                          data-testid={`shared-email-manual-test-${role}`}
+                          onClick={() => handleTestManualConnection(role)}
+                          disabled={testingManual === role}
+                          className="gap-2"
+                        >
+                          {testingManual === role ? <Loader2 className="h-3 w-3 animate-spin" /> : <Plug className="h-3 w-3" />}
+                          Testar Ligação
                         </Button>
                         <Button
                           size="sm"

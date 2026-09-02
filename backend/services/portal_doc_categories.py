@@ -23,10 +23,3 @@ DOCUMENT_CATEGORY_MAP = {
 }
 
 PORTAL_HIDDEN_CATEGORIES = {"Index"}
-
-DEFAULT_PENDING_CATEGORIES = [
-    "Cartao_Cidadao",
-    "IRS",
-    "Recibo_Vencimento",
-    "Comprovativo_IBAN",
-]

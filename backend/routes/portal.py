@@ -19,7 +19,6 @@ from services.auth import get_current_user, require_staff
 from services.portal_doc_categories import (
     DOCUMENT_CATEGORY_MAP,
     PORTAL_HIDDEN_CATEGORIES,
-    DEFAULT_PENDING_CATEGORIES,
 )
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.portal_profile import (

@@ -166,35 +166,25 @@ async def attach_second_client_on_create(
 
 
 async def create_default_portal_documents(process_id: str, requested_by: dict) -> int:
-    """Cria pedidos de documentos padrão do portal. Returns count inserted."""
-    try:
-        from services.portal_doc_categories import DEFAULT_PENDING_CATEGORIES, DOCUMENT_CATEGORY_MAP
-        now_iso = datetime.now(timezone.utc).isoformat()
-        default_docs = []
-        for cat_key in DEFAULT_PENDING_CATEGORIES:
-            default_docs.append({
-                "id": str(uuid.uuid4()),
-                "process_id": process_id,
-                "category": cat_key,
-                "label": DOCUMENT_CATEGORY_MAP.get(cat_key, {}).get("label", cat_key),
-                "filename": None,
-                "original_filename": None,
-                "s3_key": None,
-                "status": "REQUESTED",
-                "notes": "",
-                "source": "auto_default",
-                "requested_by": requested_by["id"],
-                "requested_by_name": requested_by.get("name", "Sistema"),
-                "created_at": now_iso,
-                "updated_at": now_iso,
-            })
-        if default_docs:
-            await db.documents.insert_many(default_docs)
-            logger.info(f"Criados {len(default_docs)} documentos padrão para processo {process_id}")
-            return len(default_docs)
-    except Exception as e:
-        logger.warning(f"Erro ao criar documentos padrão para processo {process_id}: {e}")
-    return 0
+    """
+    Cria pedidos de documento (obrigatórios/opcionais) para o processo,
+    lidos dinamicamente da checklist configurável em SystemConfig
+    (`mandatory_documents`) — nunca uma lista estática.
+
+    BUGFIX (onboarding — Bug 2, Fev 2026): antes usava a constante fixa
+    `DEFAULT_PENDING_CATEGORIES` (4 categorias hardcoded), completamente
+    desligada da checklist que o CEO configura no SystemConfigPage.
+    Passa a delegar em `generate_mandatory_document_requests`, o mesmo
+    gerador dinâmico já usado no registo público de clientes.
+    """
+    from services.portal_documents_notify import generate_mandatory_document_requests
+
+    result = await generate_mandatory_document_requests(
+        process_id=process_id,
+        requested_by=requested_by.get("id"),
+        requested_by_name=requested_by.get("name", "Sistema"),
+    )
+    return result.get("created", 0)
 
 
 async def link_clients_after_process_create(

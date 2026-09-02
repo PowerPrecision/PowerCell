@@ -13,7 +13,6 @@ from database import db
 from services.portal_doc_categories import (
     DOCUMENT_CATEGORY_MAP,
     PORTAL_HIDDEN_CATEGORIES,
-    DEFAULT_PENDING_CATEGORIES,
 )
 from services.portal_status_helpers import (
     _get_user_contact_info,
@@ -194,18 +193,20 @@ async def run_get_portal_status(client_data: dict):
             raw_notes = raw_notes.get("label", raw_notes.get("value", str(raw_notes)))
         notes_str = str(raw_notes) if raw_notes is not None else ""
 
-        # PACOTE AN: Para categoria "Outros", usar custom_label/description/custom_name
-        # se existir (permite vários "Outros Documentos" com nomes diferentes).
-        # Fallback para o label genérico "Outro Documento".
-        display_label = cat_info["label"]
-        if cat == "Outros" or cat.lower() in ("outro", "other", "outros"):
-            display_label = (
-                doc.get("custom_label")
-                or doc.get("custom_name")
-                or doc.get("description")
-                or doc.get("title")
-                or cat_info["label"]
-            )
+        # PACOTE AN / BUGFIX (Bug 2, Fev 2026): preferir custom_label (nome
+        # específico definido no pedido — ex: vindo da checklist dinâmica do
+        # SystemConfig, ou de "Outros Documentos" com nomes diferentes) sobre
+        # o label genérico da categoria. Antes só se aplicava a "Outros",
+        # o que fazia os pedidos gerados pela checklist do SystemConfig
+        # (categorias livres como "identificacao") mostrarem o slug da
+        # categoria em vez do nome legível.
+        display_label = (
+            doc.get("custom_label")
+            or doc.get("custom_name")
+            or doc.get("description")
+            or doc.get("title")
+            or cat_info["label"]
+        )
 
         requested_docs.append({
             "id": doc.get("id"),
@@ -280,37 +281,65 @@ async def run_get_portal_status(client_data: dict):
             "attached_files": doc.get("attached_files") or [],
         })
 
-    # ── Fallback: se não há docs REQUESTED, calcular pendentes por categoria ──
+    # ── Fallback: se não há docs REQUESTED, calcular pendentes a partir do
+    #    SystemConfig (mandatory_documents) — NUNCA uma lista estática ──
+    #    BUGFIX (onboarding — Bug 2, Fev 2026): antes usava-se a constante
+    #    fixa DEFAULT_PENDING_CATEGORIES (4 categorias hardcoded), desligada
+    #    da checklist configurável em SystemConfig. Passa agora a refletir
+    #    exatamente os documentos Obrigatórios/Opcionais definidos pelo CEO.
     has_pending = len(requested_docs) > 0
     if not has_pending:
-        # Buscar TODOS os docs para saber quais categorias já foram submetidas
+        from services.system_config import get_system_config
+
+        # Buscar TODOS os docs para saber quais já foram submetidos
+        # (por categoria e por rótulo, já que a checklist do SystemConfig
+        # não usa as chaves fixas de DOCUMENT_CATEGORY_MAP).
         all_docs_cursor = db.documents.find(
             {"process_id": process_id},
-            {"_id": 0, "category": 1}
+            {"_id": 0, "category": 1, "custom_label": 1, "notes": 1}
         )
         submitted_categories = set()
+        submitted_labels = set()
         async for doc in all_docs_cursor:
             if doc.get("category"):
                 submitted_categories.add(doc["category"])
+            for label_field in (doc.get("custom_label"), doc.get("notes")):
+                if label_field:
+                    submitted_labels.add(str(label_field))
 
         # Cross-category mapping: se "Financeiros" foi submetido pelo scraper,
         # considerar "IRS" como satisfeita (o scraper Finanças guarda como "Financeiros")
         if "Financeiros" in submitted_categories:
             submitted_categories.add("IRS")
 
-        for cat_key in DEFAULT_PENDING_CATEGORIES:
-            if cat_key not in submitted_categories:
-                cat_info = DOCUMENT_CATEGORY_MAP.get(cat_key, {"label": cat_key, "icon": "📎"})
-                requested_docs.append({
-                    "id": None,
-                    "category": cat_key,
-                    "label": cat_info["label"],
-                    "icon": cat_info["icon"],
-                    "notes": "",
-                    "requested_at": None,
-                })
+        try:
+            company_id_for_config = process.get("company") or process.get("company_id")
+            config = await get_system_config(company_id_for_config or "default")
+            md = config.mandatory_documents
+        except Exception as e:
+            logger.warning(f"[PORTAL] Erro ao carregar SystemConfig p/ fallback de docs: {type(e).__name__}")
+            md = None
 
-        has_pending = len(requested_docs) > 0
+        if md and md.enabled:
+            for is_optional, items in ((False, md.documents or []), (True, md.optional_documents or [])):
+                for item in items:
+                    if not isinstance(item, dict):
+                        continue
+                    name = (item.get("name") or "").strip()
+                    category = (item.get("category") or "Outros").strip() or "Outros"
+                    if not name or category in submitted_categories or name in submitted_labels:
+                        continue
+                    requested_docs.append({
+                        "id": None,
+                        "category": category,
+                        "label": name,
+                        "icon": "📎",
+                        "notes": "",
+                        "requested_at": None,
+                        "is_optional": is_optional,
+                    })
+
+        has_pending = any(not d.get("is_optional") for d in requested_docs)
 
     # ── Equipa atribuída (consultores + mediadores) ──
     team_info = await _get_team_info(process)

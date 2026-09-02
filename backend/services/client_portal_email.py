@@ -32,12 +32,18 @@ async def _send_portal_welcome_email_safe(
         if not job_id:
             logger.info(f"[PORTAL-EMAIL] A enviar email diretamente para {client_email} (client_id={client_id})")
             try:
-                await send_registration_confirmation(
+                sent = await send_registration_confirmation(
                     client_email=client_email,
                     client_name=client_name,
                     portal_access_code=portal_access_code,
                 )
-                logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
+                if sent:
+                    logger.info(f"[PORTAL-EMAIL] Email enviado com sucesso para {client_email} (client_id={client_id})")
+                else:
+                    logger.error(
+                        f"[PORTAL-EMAIL] Falha ao enviar email de boas-vindas para {client_email} "
+                        f"(client_id={client_id}) — ver logs de [EMAIL] acima para a razão."
+                    )
             except Exception as direct_err:
                 logger.error(f"[PORTAL-EMAIL] Falha ao enviar email diretamente para {client_email} "
                              f"(client_id={client_id}): {direct_err}", exc_info=True)
