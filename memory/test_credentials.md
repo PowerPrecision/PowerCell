@@ -26,3 +26,10 @@ Password (todas as contas): `PowerCell_Dev_2026!`
 ## MongoDB local
 - `MONGO_URL=mongodb://localhost:27017`
 - `DB_NAME=powercell_dev`
+
+## Scripts de manutenção CLI (backend/scripts/)
+- `cleanup_prod_test_data.py` e `delete_process_by_id.py` correm em dry-run por omissão.
+- Com `--execute`, pedem password via `getpass` (terminal). Compara com env var
+  `CLEANUP_SCRIPT_PASSWORD` (não definida neste ambiente) → usa o fallback
+  `POWERCELL_CLEANUP_2026`. Não criam ficheiros de log.
+
