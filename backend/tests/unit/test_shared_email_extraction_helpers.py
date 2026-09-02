@@ -93,16 +93,25 @@ def test_shared_email_response_exposes_imap_smtp_server_fields():
 
 
 @pytest.mark.asyncio
-async def test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields():
-    from database import db, reset_db_connection
-    from models.shared_email_config import SharedEmailConfigCreate
-    from services.shared_email_crud import run_upsert_shared_email_config, run_get_shared_email_config
+async def test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields(
+    fake_async_db,
+):
+    """Upsert IMAP/SMTP persiste os campos, encripta a password e regista
+    audit log; GET devolve os campos SMTP.
 
-    reset_db_connection()
+    CI (backend-fast, sem MongoDB): mock da camada `db` com coleções em
+    memória (padrão de test_document_portal_fulfill.py) — nunca I/O real.
+    """
+    from unittest.mock import patch
+
+    from models.shared_email_config import SharedEmailConfigCreate
+    from services import shared_email_crud as crud
+
     admin_user = {"id": "qa-admin", "role": "admin"}
     role = "suporte"
-    try:
-        response = await run_upsert_shared_email_config(
+
+    with patch.object(crud, "db", fake_async_db):
+        response = await crud.run_upsert_shared_email_config(
             role,
             SharedEmailConfigCreate(
                 role=role,
@@ -119,17 +128,30 @@ async def test_upsert_shared_email_config_persists_and_returns_imap_smtp_fields(
         assert response.auth_method == "imap_smtp"
         assert response.has_imap_password is True
         assert response.imap_server == "imap.exemplo.pt"
+        # A password nunca é devolvida em claro na resposta
+        assert not hasattr(response, "encrypted_password")
 
-        stored = await db.shared_role_email_configs.find_one({"role": role}, {"_id": 0})
+        stored = await fake_async_db.shared_role_email_configs.find_one({"role": role})
+        assert stored is not None
+        assert stored["smtp_server"] == "smtp.exemplo.pt"
+        # Fernet aplicado (prefixo ENC:) e nunca em claro na BD
+        assert stored["encrypted_password"].startswith("ENC:")
         assert stored["encrypted_password"] != "segredo123"
 
-        fetched = await run_get_shared_email_config(role, admin_user)
+        # Audit log registado (observabilidade da configuração)
+        assert await fake_async_db.audit_logs.count_documents(
+            {"action": "shared_email_config_updated", "user_id": "qa-admin"}
+        ) == 1
+
+        fetched = await crud.run_get_shared_email_config(role, admin_user)
         assert fetched.smtp_server == "smtp.exemplo.pt"
         assert fetched.smtp_port == 465
-    finally:
-        await db.shared_role_email_configs.delete_one({"role": role})
+
+
+def test_shared_email_thinning_did_not_overwrite_email_cores():
     """Ensure thinning used shared_email_* and did not overwrite email_* cores."""
     from pathlib import Path
+
     from services import email_service, email_draft_service, gmail_oauth
 
     services_dir = Path(__file__).resolve().parents[2] / "services"
