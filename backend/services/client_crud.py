@@ -237,7 +237,12 @@ async def run_create_client(
         notas=sanitized_notas,
         created_at=now,
         updated_at=now,
-        created_by=user.get("email")
+        created_by=user.get("email"),
+        # BUGFIX (UX Fix #3, Fev 2026): sem isto, o cliente nunca aparecia na
+        # lista "Registos de Clientes" (a query dessa página filtra sempre
+        # por registration_completed=True — antes só era definido pelo
+        # registo público).
+        registration_completed=True,
     )
     
     # Encriptar campos sensíveis antes de guardar
@@ -290,23 +295,15 @@ async def run_create_client(
         )
 
     # ============================================================
-    # BUGFIX (onboarding — Bug 2, Fev 2026): gerar pedidos de documento
-    # obrigatórios/opcionais a partir do SystemConfig (mandatory_documents)
-    # logo na criação do cliente, tal como já acontecia no registo público
-    # (services/public_registration.py). Sem isto, um cliente criado
-    # manualmente pelo staff ficava sem nenhum pedido gerado e o Portal
-    # acabava a recorrer a uma lista antiga fixa (DEFAULT_PENDING_CATEGORIES).
+    # BUGFIX (Ajuste Arquitetural, Fev 2026): a geração de pedidos de
+    # documento e o email de boas-vindas passaram a ser responsabilidade
+    # exclusiva da criação do Processo (services/process_create.py —
+    # create_default_portal_documents / send_portal_welcome_email_from_process),
+    # já que agora todo o Cliente criado manualmente ("Novo Cliente") tem
+    # sempre um Processo associado (estado PRE_REGISTO). Manter a geração
+    # também aqui, ao nível do Cliente, criava pedidos "orfãos" (sem
+    # process_id) que nunca chegavam a ser mostrados no Portal.
     # ============================================================
-    from services.portal_documents_notify import generate_mandatory_document_requests
-    asyncio.create_task(
-        generate_mandatory_document_requests(
-            process_id=None,
-            client_id=client.id,
-            company_id=None,
-            requested_by=user.get("id") or user.get("email"),
-            requested_by_name=user.get("name") or user.get("email") or "Staff",
-        )
-    )
 
     # ============================================================
     # PACOTE CY — Enviar email de boas-vindas do Portal em background
@@ -315,8 +312,12 @@ async def run_create_client(
     # portal_access_code). Agora dispara em background via asyncio.create_task
     # para não atrasar a resposta da API. Falhas são logadas mas não
     # rebentam o fluxo de criação.
+    #
+    # `skip_welcome_email=True` quando o chamador vai criar um Processo
+    # imediatamente a seguir (evita duplicar o email — nesse caso o email
+    # dispara em `send_portal_welcome_email_from_process`).
     # ============================================================
-    if sanitized_email:
+    if sanitized_email and not client_data.skip_welcome_email:
         asyncio.create_task(_send_portal_welcome_email_safe(
             client_email=sanitized_email,
             client_name=sanitized_nome,

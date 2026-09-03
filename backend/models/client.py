@@ -104,6 +104,11 @@ class Client(BaseModel):
     fonte: Optional[str] = None  # origem do cliente (trello, manual, website, etc)
     tags: List[str] = Field(default_factory=list)
     notas: Optional[str] = None
+    # BUGFIX (UX Fix #3, Fev 2026): a lista "Registos de Clientes" filtra
+    # sempre por registration_completed=True — precisa de estar disponível
+    # já na criação (antes só existia em ClientResponse, nunca em Client,
+    # pelo que era sempre descartado no model_dump() e nunca persistido).
+    registration_completed: Optional[bool] = None
 
     # Timestamps
     created_at: str = Field(default_factory=lambda: datetime.now(timezone.utc).isoformat())
@@ -127,6 +132,11 @@ class ClientCreate(BaseModel):
     profissao: Optional[str] = None
     morada_fiscal: Optional[str] = None
     data_nascimento: Optional[str] = None
+    # BUGFIX (Fev 2026 — Ajuste Arquitetural): quando o chamador vai criar um
+    # Processo imediatamente a seguir (ex: "Novo Cliente" no CRM), o email de
+    # boas-vindas/acesso ao Portal deve disparar apenas nesse momento
+    # (`send_portal_welcome_email_from_process`), evitando duplicar o envio.
+    skip_welcome_email: Optional[bool] = False
 
     @field_validator('nif', mode='before')
     @classmethod

@@ -134,6 +134,17 @@ CRM para gestão de processos de crédito imobiliário com formulário público 
 - **Bug 4 (Botão "Testar Ligação" ausente)**: adicionado a `IndexationImapCard.jsx` (`indexation-imap-test-btn`, testa IMAP) e `SharedEmailCard.jsx` (`shared-email-manual-test-{role}`, testa SMTP+IMAP do formulário manual), reutilizando o endpoint genérico `POST /api/admin/companies/test-email-connection` já existente.
 - Testado: 5 novos testes de integração (`tests/test_onboarding_bugs_fev2026.py`, contra o preview real) + suite completa (1194 passed, 6 skipped, 1 falha pré-existente não relacionada) + `testing_agent_v3_fork` (iteration_7.json, 100% sucesso, sem regressões). Confirmado manualmente via curl/scripts: cliente criado sem processo, 6 documentos dinâmicos gerados com nomes PT corretos, `resend-portal-access` devolve HTTP 500 com razão real.
 
+## Correções 2026-02 (Fev) — Ajuste Arquitetural: reversão do Pré-Registo (iteração 8)
+
+> ⚠️ **Este bloco SUBSTITUI o "Bug 1" da secção anterior.** Testes E2E em produção mostraram que "cliente sem Processo" quebrava o acesso ao Portal (`resend-portal-access` exige sempre um Processo). Decisão confirmada pelo utilizador: o Processo volta a ser criado sempre, mas em estado `pre_registo` (já suportado por `LEAD_STATUS_VALUES`, exclusão do Kanban, auto-avanço e auto-atribuição — só faltava ser atribuído).
+
+- **`CreateClientModal.jsx` (`clientOnly`)**: mantém o formulário simplificado, mas agora encadeia `POST /clients` (`skip_welcome_email=true`) + `POST /processes/create-client` (`is_lead=true`, `process_type="outro"`).
+- **`resolve_initial_workflow_status(is_lead=True)`** corrigido para devolver `"pre_registo"` (antes `None`) — processo passa a existir, com o estado certo, excluído do Kanban e visível em "Registos de Clientes".
+- **`registration_completed`** adicionado ao modelo `Client` (só existia em `ClientResponse`, era descartado em silêncio) e definido `True` em `run_create_client` — corrige clientes staff que não apareciam em "Registos de Clientes".
+- **"Testar Ligação" com password vazia**: `CompanyEmailConnectionTest.company_id` (novo) permite ao backend ler a password já guardada em `db.companies` quando o formulário a deixa em branco ("editar sem alterar password").
+- **UI `/contas-email`**: `IndexationImapCard.jsx` grid `sm:grid-cols-2` sempre + espaçamento reduzido; `SharedEmailCard.jsx` envolvido num `Accordion` fechado por defeito.
+- Testado: `testing_agent_v3_fork` (iteration_8.json, 0 críticos) + testes obsoletos da iteração 7 atualizados + suite completa **1203 passed, 6 skipped, 0 falhas** (corrigido também um teste instável pré-existente, `test_get_workflow_statuses`). Detalhe completo em `ARCHITECTURE.md` e `worklog.md`.
+
 
 
 ## Correções 2026-09-01 (4) — Scripts CLI de manutenção: password + cascata total

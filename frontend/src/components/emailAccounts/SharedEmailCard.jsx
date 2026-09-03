@@ -11,6 +11,7 @@ import { Button } from "../ui/button";
 import { Input } from "../ui/input";
 import { Label } from "../ui/label";
 import { Badge } from "../ui/badge";
+import { Accordion, AccordionItem, AccordionTrigger, AccordionContent } from "../ui/accordion";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../../utils/extractErrorMessage";
 import { formatDate } from "../../lib/utils";
@@ -308,7 +309,22 @@ export const SharedEmailCard = () => {
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
+      <CardContent>
+        {/* PACOTE: colapsável fechado por defeito — funcionalidade pouco usada,
+            mantém o ecrã de /contas-email limpo. Expande sob pedido. */}
+        <Accordion type="single" collapsible className="w-full">
+          <AccordionItem value="shared-email-departments" className="border-none">
+            <AccordionTrigger className="py-2 hover:no-underline" data-testid="shared-email-accordion-trigger">
+              <span className="text-sm text-muted-foreground">
+                Ver departamentos configurados
+                {configs.some((c) => c.has_google_oauth) && (
+                  <span className="ml-2 text-emerald-600 dark:text-emerald-400 font-medium">
+                    ({configs.filter((c) => c.has_google_oauth).length} conectadas)
+                  </span>
+                )}
+              </span>
+            </AccordionTrigger>
+            <AccordionContent className="space-y-4 pt-2">
         {/* Info banner */}
         <div className="flex items-start gap-3 p-3 bg-blue-50 dark:bg-blue-950/20 border border-blue-200 dark:border-blue-800 rounded-lg">
           <Info className="h-4 w-4 text-blue-500 mt-0.5 shrink-0" />
@@ -550,6 +566,9 @@ export const SharedEmailCard = () => {
             );
           })}
         </div>
+            </AccordionContent>
+          </AccordionItem>
+        </Accordion>
       </CardContent>
     </Card>
   );

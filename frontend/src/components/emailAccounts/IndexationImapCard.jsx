@@ -111,7 +111,7 @@ export const IndexationImapCard = () => {
 
   return (
     <Card data-testid="indexation-imap-card">
-      <CardHeader className="pb-4">
+      <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <div className="p-2 rounded-lg bg-amber-100 dark:bg-amber-900/30">
@@ -131,31 +131,32 @@ export const IndexationImapCard = () => {
           )}
         </div>
       </CardHeader>
-      <CardContent className="space-y-4">
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label htmlFor="wm_imap_host">IMAP Host</Label>
+      <CardContent className="space-y-3">
+        {/* PACOTE: layout em grid 2 colunas (sm:+) para reduzir a altura vertical do cartão */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          <div className="space-y-1">
+            <Label htmlFor="wm_imap_host" className="text-xs">IMAP Host</Label>
             <Input id="wm_imap_host" placeholder="imap.gmail.com" value={systemWebmail.imap_host}
-              onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_host: e.target.value }))} data-testid="indexation-imap-host-input" />
+              onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_host: e.target.value }))} className="h-9" data-testid="indexation-imap-host-input" />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="wm_imap_port">IMAP Port</Label>
+          <div className="space-y-1">
+            <Label htmlFor="wm_imap_port" className="text-xs">IMAP Port</Label>
             <Input id="wm_imap_port" type="number" placeholder="993" value={systemWebmail.imap_port}
-              onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_port: e.target.value }))} data-testid="indexation-imap-port-input" />
+              onChange={(e) => setSystemWebmail((p) => ({ ...p, imap_port: e.target.value }))} className="h-9" data-testid="indexation-imap-port-input" />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="wm_email">Email / User</Label>
+          <div className="space-y-1">
+            <Label htmlFor="wm_email" className="text-xs">Email / User</Label>
             <Input id="wm_email" placeholder="indexacao@empresa.pt" value={systemWebmail.email_user}
-              onChange={(e) => setSystemWebmail((p) => ({ ...p, email_user: e.target.value }))} data-testid="indexation-imap-email-input" />
+              onChange={(e) => setSystemWebmail((p) => ({ ...p, email_user: e.target.value }))} className="h-9" data-testid="indexation-imap-email-input" />
           </div>
-          <div className="space-y-2">
-            <Label htmlFor="wm_pass">App Password</Label>
+          <div className="space-y-1">
+            <Label htmlFor="wm_pass" className="text-xs">App Password</Label>
             <Input id="wm_pass" type="password" placeholder="••••••••" value={systemWebmail.app_password}
-              onChange={(e) => setSystemWebmail((p) => ({ ...p, app_password: e.target.value }))} data-testid="indexation-imap-password-input" />
-            <p className="text-xs text-muted-foreground">Password de aplicação (não a password da conta)</p>
+              onChange={(e) => setSystemWebmail((p) => ({ ...p, app_password: e.target.value }))} className="h-9" data-testid="indexation-imap-password-input" />
           </div>
         </div>
-        <div className="flex items-center gap-3 pt-2">
+        <p className="text-xs text-muted-foreground">App Password = password de aplicação (não a password da conta).</p>
+        <div className="flex items-center gap-3 pt-1">
           <Button onClick={handleSave} disabled={saving} data-testid="indexation-imap-save-btn">
             {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
             Guardar

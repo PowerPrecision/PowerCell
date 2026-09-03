@@ -34,7 +34,15 @@ async def _create_client(client, admin_token, prefix: str) -> dict:
 
 class TestBug1ClientOnly:
     async def test_create_client_no_process(self, client, admin_token):
-        """POST /api/clients não deve criar nenhum Processo (pré-registo)."""
+        """
+        Contrato do endpoint POST /api/clients (isolado): não cria nenhum
+        Processo por si só. Isto continua verdade após o Ajuste Arquitetural
+        de Fev 2026 (iteração 8) — a criação de Processo em simultâneo com
+        o Cliente passou a ser responsabilidade do FRONTEND (CreateClientModal
+        encadeia 2 chamadas: POST /clients seguido de POST /processes/create-client
+        com is_lead=True). Este teste garante que o endpoint em si permanece
+        "puro" (não é ele quem decide criar o processo).
+        """
         data = await _create_client(client, admin_token, "Bug1")
         client_id = data.get("id")
         assert client_id, f"No id in response: {data}"
@@ -46,16 +54,27 @@ class TestBug1ClientOnly:
         process_ids = rg.json().get("process_ids") or []
         assert process_ids == [], f"Cliente não devia ter processos: {process_ids}"
 
+        from database import db
+        await db.clients.delete_one({"id": client_id})
+
 
 class TestBug2DynamicDocs:
-    async def test_created_client_generates_document_requests_from_system_config(
+    async def test_created_process_generates_document_requests_from_system_config(
         self, client, admin_token
     ):
         """
-        Ao criar um cliente, os pedidos de documento devem ser gerados
-        dinamicamente a partir de SystemConfig.mandatory_documents — nunca
-        a lista estática antiga (Cartao_Cidadao/IRS/Recibo_Vencimento/
-        Comprovativo_IBAN).
+        Ao criar um Processo (POST /processes/create-client), os pedidos de
+        documento devem ser gerados dinamicamente a partir de
+        SystemConfig.mandatory_documents — nunca a lista estática antiga
+        (Cartao_Cidadao/IRS/Recibo_Vencimento/Comprovativo_IBAN).
+
+        NOTA (Ajuste Arquitetural, Fev 2026 — iteração 8): a geração deixou
+        de ocorrer em POST /clients isolado (esse endpoint já não gera
+        documentos, evitando pedidos duplicados/órfãos quando o frontend
+        encadeia a criação do Processo a seguir). Passou a ocorrer apenas
+        em create_default_portal_documents (process_create.py), acionada
+        pela criação do Processo — quer seja is_lead=True (pré-registo)
+        quer seja um processo ativo normal.
         """
         from database import db
 
@@ -63,11 +82,20 @@ class TestBug2DynamicDocs:
         client_id = data.get("id")
         assert client_id
 
-        # generate_mandatory_document_requests corre em background (asyncio.create_task)
+        rp = await client.post(
+            "/processes/create-client",
+            json={"client_id": client_id, "process_type": "outro", "is_lead": True},
+            headers={"Authorization": f"Bearer {admin_token}"},
+        )
+        assert rp.status_code in (200, 201), f"Create process failed: {rp.text}"
+        process_id = rp.json().get("id")
+        assert rp.json().get("status") == "pre_registo", f"Status inesperado: {rp.json().get('status')}"
+
+        # create_default_portal_documents corre em background (asyncio.create_task)
         await asyncio.sleep(0.5)
 
         docs = await db.documents.find(
-            {"client_id": client_id}, {"_id": 0, "custom_label": 1, "category": 1, "is_optional": 1}
+            {"process_id": process_id}, {"_id": 0, "custom_label": 1, "category": 1, "is_optional": 1}
         ).to_list(20)
 
         assert len(docs) > 0, "Nenhum documento gerado — checklist dinâmica não foi acionada"
@@ -80,7 +108,8 @@ class TestBug2DynamicDocs:
             )
 
         # Limpeza
-        await db.documents.delete_many({"client_id": client_id})
+        await db.documents.delete_many({"process_id": process_id})
+        await db.processes.delete_one({"id": process_id})
         await db.clients.delete_one({"id": client_id})
 
 
