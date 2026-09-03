@@ -3928,3 +3928,32 @@ Stage Summary:
 - Ficheiro novo: `backend/tests/test_onboarding_bugs_fev2026.py`.
 - Resultado: os 4 bugs críticos resolvidos e verificados end-to-end (backend real + testing agent). Nenhuma regressão no fluxo "Novo Processo" do Kanban nem nos badges/refactor da sessão anterior.
 
+## Iteração 8 (Fev 2026) — Ajuste Arquitetural: reversão do Pré-Registo + 3 fixes de UX
+
+Task: testes E2E em produção revelaram que o Bug 1 da iteração 7 (cliente manual sem Processo) quebrou o acesso ao Portal — `resend-portal-access` exige sempre `process_ids` não vazio. Reportados mais 3 problemas: password mascarada bloqueia "Testar Ligação" em Empresas; novo cliente não aparece em "Registos de Clientes"; `/contas-email` pouco compacto.
+
+Reprodução e Causa Raiz:
+1. `models/enums.py::ProcessStatus.PRE_REGISTO` e `services/process_list_filters.py::LEAD_STATUS_VALUES = ["pre_registo", None]` já existiam, e toda a lógica de exclusão do Kanban/auto-avanço/auto-atribuição já estava desenhada em torno deste estado — mas `process_create.py::resolve_initial_workflow_status(is_lead=True)` devolvia `None` em vez de `"pre_registo"`. Sem Processo (iteração 7) nem estado correto, `run_resend_portal_access` bloqueava sempre com 400.
+2. `run_test_email_connection` bloqueava sempre que a password chegava vazia (comportamento normal do formulário ao editar — "Deixe em branco para manter"), sem tentar ler a password já guardada em `db.companies`.
+3. `models.Client` nunca teve o campo `registration_completed` (só existia em `ClientResponse`) — `run_create_client` definia-o no construtor, mas era descartado em silêncio pelo `model_dump()`. `run_list_registered_clients` filtra sempre por `registration_completed=True`, logo nunca listava clientes criados por staff.
+4. `IndexationImapCard.jsx`/`SharedEmailCard.jsx` sem grid consistente e sem forma de colapsar a secção pouco usada.
+
+Correções Aplicadas:
+1. `CreateClientModal.jsx` (modo `clientOnly`) passou a encadear `POST /clients` (`skip_welcome_email=true`) + `POST /processes/create-client` (`is_lead=true`, `process_type="outro"`), mantendo o formulário simplificado. `resolve_initial_workflow_status(is_lead=True)` corrigido para devolver `ProcessStatus.PRE_REGISTO.value`. `ClientCreate.skip_welcome_email` novo campo evita duplicar o email de boas-vindas (o único disparo passa a ser `send_portal_welcome_email_from_process`).
+2. `CompanyEmailConnectionTest.company_id` (novo, opcional). `run_test_email_connection` resolve a password vazia lendo `db.companies` quando `company_id` está presente. `CompaniesAdminTab.jsx` envia `company_id` e relaxa a validação client-side quando `editing?.id` existe.
+3. `registration_completed: Optional[bool] = None` adicionado ao modelo `Client`; `run_create_client` define `True`.
+4. `IndexationImapCard.jsx` — grid `sm:grid-cols-2` sempre, espaçamento reduzido. `SharedEmailCard.jsx` — envolvido num `Accordion` do Shadcn, fechado por defeito.
+
+Validação:
+- Reprodução backend via curl/scripts Python confirmou o fluxo completo: cliente + processo `pre_registo` criados, excluído do Kanban, presente em "Registos de Clientes", 6 documentos dinâmicos gerados no processo (não duplicados no cliente), email de boas-vindas tentado exatamente 1x (falha esperada por falta de SMTP real, sem bloquear a resposta HTTP). "Testar Ligação" com password vazia + `company_id` confirmado a usar a password guardada (erro de DNS no domínio fictício de teste, provando que tentou ligar com os valores certos).
+- `testing_agent_v3_fork` (iteration_8.json): 0 problemas críticos, cadeia de 2 chamadas validada em BD e UI, sem regressões.
+- Testes obsoletos da iteração 7 atualizados (`TestBug1ClientOnly` reformulado como contrato do endpoint isolado; `TestBug2DynamicDocs` movido para validar a criação do Processo). Novo ficheiro `tests/test_novo_cliente_reverted_flow.py` (4 testes, criado pelo testing agent).
+- Corrigido teste pré-existente instável `test_admin.py::test_get_workflow_statuses` (`ensure_workflow_statuses_exist` passou a fazer `upsert` por `name` em vez de `count() > 0`).
+- Suite completa: **1203 passed, 6 skipped, 0 falhas**. Lint frontend: 0 erros (29 warnings pré-existentes, cores Tailwind cruas).
+
+Stage Summary:
+- Ficheiros alterados: `frontend/src/components/kanban/CreateClientModal.jsx`, `frontend/src/components/admin/CompaniesAdminTab.jsx`, `frontend/src/components/emailAccounts/IndexationImapCard.jsx`, `frontend/src/components/emailAccounts/SharedEmailCard.jsx`, `backend/models/client.py`, `backend/models/company.py`, `backend/services/client_crud.py`, `backend/services/process_create.py`, `backend/services/companies_crud_api_test_connection.py`, `backend/tests/conftest.py`, `backend/tests/test_onboarding_bugs_fev2026.py`.
+- Ficheiro novo: `backend/tests/test_novo_cliente_reverted_flow.py`.
+- Resultado: os 4 pontos pedidos resolvidos e verificados end-to-end. Commit: `Fix: Refactor onboarding to use PRE_REGISTO process state, fix email test password resolution, and improve UI compactness`.
+
+

@@ -16,6 +16,7 @@ from fastapi import HTTPException
 
 from database import db
 from models.auth import UserRole
+from models.enums import ProcessStatus
 from services.encryption import decrypt_client_data
 
 logger = logging.getLogger(__name__)
@@ -25,14 +26,21 @@ async def resolve_initial_workflow_status(*, is_lead: bool) -> tuple[Optional[st
     """
     Devolve (initial_status, default_status).
 
-    Lead → (None, default). Caso contrário → (1ª fase do workflow, default).
+    Lead → (PRE_REGISTO, default). Caso contrário → (1ª fase do workflow, default).
+
+    BUGFIX (Fev 2026 — Ajuste Arquitetural): antes devolvia `None` para leads,
+    o que deixava o processo sem nenhum status atribuído. Passa a devolver o
+    status real `PRE_REGISTO` ("pre_registo"), já previsto em
+    `LEAD_STATUS_VALUES` (excluído do Kanban) e necessário para que o
+    Processo exista de facto (Portal do Cliente, reenvio de acesso e email
+    de boas-vindas dependem de existir um Processo associado ao Cliente).
     """
     first_status = await db.workflow_statuses.find_one({}, {"_id": 0}, sort=[("order", 1)])
     default_status = first_status["name"] if first_status else None
 
     if is_lead:
-        logger.info("[CREATE-PROCESS] is_lead=True → status vazio (Lead / Registos de Clientes)")
-        return None, default_status
+        logger.info("[CREATE-PROCESS] is_lead=True → status = PRE_REGISTO (Lead / Registos de Clientes)")
+        return ProcessStatus.PRE_REGISTO.value, default_status
 
     if default_status:
         logger.info(f"[CREATE-PROCESS] status inicial = 1ª fase real do workflow: {default_status}")
@@ -431,15 +439,21 @@ async def send_portal_welcome_email_from_process(
                 f"{client_email} (client_id={client_id})"
             )
             try:
-                await send_registration_confirmation(
+                sent = await send_registration_confirmation(
                     client_email=client_email,
                     client_name=client_name,
                     portal_access_code=portal_access_code,
                 )
-                logger.info(
-                    f"[PORTAL-EMAIL] Email enviado com sucesso para "
-                    f"{client_email} (client_id={client_id})"
-                )
+                if sent:
+                    logger.info(
+                        f"[PORTAL-EMAIL] Email enviado com sucesso para "
+                        f"{client_email} (client_id={client_id})"
+                    )
+                else:
+                    logger.error(
+                        f"[PORTAL-EMAIL] Falha ao enviar email de boas-vindas para "
+                        f"{client_email} (client_id={client_id}) — ver logs de [EMAIL] acima."
+                    )
             except Exception as direct_err:
                 logger.error(
                     f"[PORTAL-EMAIL] Falha ao enviar email diretamente para "

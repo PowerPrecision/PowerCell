@@ -118,6 +118,7 @@ class CompanyEmailConnectionTest(BaseModel):
     formulário de configuração de email de uma Empresa, sem gravar nada.
     SMTP e IMAP são testados de forma independente (podem ter contas diferentes).
     """
+    company_id: Optional[str] = None  # BUGFIX (Fev 2026): resolve password guardada quando o formulário a deixa em branco
     smtp_email: Optional[str] = Field(None, max_length=200)
     smtp_password: Optional[str] = Field(None, max_length=500)
     smtp_host: Optional[str] = Field(None, max_length=200)

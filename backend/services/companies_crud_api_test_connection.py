@@ -12,10 +12,12 @@ import asyncio
 import imaplib
 import smtplib
 import ssl
+from typing import Optional
 
 import certifi
 from fastapi import HTTPException
 
+from database import db
 from models.company import CompanyEmailConnectionTest
 
 _TEST_TIMEOUT_SECONDS = 15.0
@@ -73,17 +75,40 @@ def _test_imap_sync(host: str, port: int, email: str, password: str) -> None:
             pass
 
 
+async def _resolve_password(company_id: Optional[str], provided_password: Optional[str], field: str) -> Optional[str]:
+    """
+    Resolve a password a usar no teste: se o formulário enviou uma password
+    (não vazia), usa-a. Caso contrário, e se houver `company_id`, procura a
+    password já guardada na Empresa (o formulário deixa-a em branco de
+    propósito, para "manter" o valor existente — o frontend nunca expõe a
+    password guardada, por segurança).
+    """
+    if provided_password:
+        return provided_password
+    if not company_id:
+        return None
+    company = await db.companies.find_one({"id": company_id}, {"_id": 0, field: 1})
+    return (company or {}).get(field) or None
+
+
 async def run_test_email_connection(data: CompanyEmailConnectionTest) -> dict:
     """Testa SMTP e/ou IMAP com os dados atuais do formulário, cada um de forma independente."""
     results = {}
     failures = []
     tested_any = False
 
-    if data.smtp_host and data.smtp_email and data.smtp_password:
+    # BUGFIX (Fev 2026): quando a Empresa já existe (company_id) e o
+    # formulário deixou a password em branco (comportamento normal ao
+    # editar — "Deixe em branco para manter"), usar a password já
+    # guardada na BD em vez de bloquear o teste.
+    smtp_password = await _resolve_password(data.company_id, data.smtp_password, "smtp_password")
+    imap_password = await _resolve_password(data.company_id, data.imap_password, "imap_password")
+
+    if data.smtp_host and data.smtp_email and smtp_password:
         tested_any = True
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(_test_smtp_sync, data.smtp_host, data.smtp_port, data.smtp_email, data.smtp_password),
+                asyncio.to_thread(_test_smtp_sync, data.smtp_host, data.smtp_port, data.smtp_email, smtp_password),
                 timeout=_TEST_TIMEOUT_SECONDS + 5,
             )
             results["smtp"] = {"success": True, "message": "Ligação SMTP validada com sucesso."}
@@ -96,11 +121,11 @@ async def run_test_email_connection(data: CompanyEmailConnectionTest) -> dict:
             results["smtp"] = {"success": False, "message": msg}
             failures.append(msg)
 
-    if data.imap_host and data.imap_email and data.imap_password:
+    if data.imap_host and data.imap_email and imap_password:
         tested_any = True
         try:
             await asyncio.wait_for(
-                asyncio.to_thread(_test_imap_sync, data.imap_host, data.imap_port, data.imap_email, data.imap_password),
+                asyncio.to_thread(_test_imap_sync, data.imap_host, data.imap_port, data.imap_email, imap_password),
                 timeout=_TEST_TIMEOUT_SECONDS + 5,
             )
             results["imap"] = {"success": True, "message": "Ligação IMAP validada com sucesso."}

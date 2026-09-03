@@ -145,14 +145,21 @@ async def ensure_test_users_exist():
 
 
 async def ensure_workflow_statuses_exist():
-    """Garante que os workflow statuses padrão existem na base de dados de teste."""
+    """
+    Garante que os workflow statuses padrão existem na base de dados de teste.
+
+    BUGFIX (Fev 2026): esta fixture corre contra a BD de dev partilhada
+    (get_db() usa o MONGO_URL/DB_NAME reais, não uma BD de teste isolada).
+    Se outro teste tiver criado um único workflow_status manualmente (sem
+    limpar), a verificação antiga `existing > 0` saltava a seed dos 14
+    status por omissão, deixando a BD com menos do que o esperado e
+    fazendo `test_get_workflow_statuses` falhar de forma instável (flaky)
+    dependendo da ordem/histórico de execuções. Usa `upsert` por `name`
+    para ser sempre idempotente, sem depender da contagem total.
+    """
     try:
         from database import get_db
         db = get_db()
-
-        existing = await db.workflow_statuses.count_documents({})
-        if existing > 0:
-            return  # Já existem
 
         default_statuses = [
             {"id": str(uuid.uuid4()), "name": "clientes_espera", "label": "Clientes em Espera", "order": 1, "color": "yellow", "is_default": True},
@@ -171,8 +178,10 @@ async def ensure_workflow_statuses_exist():
             {"id": str(uuid.uuid4()), "name": "desistencias", "label": "Desistências", "order": 14, "color": "red", "is_default": True},
         ]
 
-        await db.workflow_statuses.insert_many(default_statuses)
-        print(f"Created {len(default_statuses)} default workflow statuses for tests")
+        for status in default_statuses:
+            existing = await db.workflow_statuses.find_one({"name": status["name"]})
+            if not existing:
+                await db.workflow_statuses.insert_one(status)
     except Exception as e:
         print(f"Warning: Could not ensure workflow statuses exist: {e}")
 

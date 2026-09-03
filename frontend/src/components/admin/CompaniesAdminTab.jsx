@@ -134,11 +134,15 @@ export default function CompaniesAdminTab() {
   };
 
   // Testa a ligação SMTP/IMAP com os valores atuais do formulário, sem gravar.
+  // BUGFIX (Fev 2026): ao editar, a password fica vazia de propósito ("Deixe
+  // em branco para manter") — nesse caso o backend usa a password já
+  // guardada na Empresa, por isso o pedido de teste é válido mesmo sem
+  // password explícita, desde que a empresa já exista (editing?.id).
   const handleTestConnection = async () => {
     const smtp = smtpFieldsFromForm(form);
     const imap = imapFieldsFromForm(form);
-    const hasSmtp = Boolean(smtp.smtp_host && smtp.smtp_email && smtp.smtp_password);
-    const hasImap = Boolean(imap.imap_host && imap.imap_email && imap.imap_password);
+    const hasSmtp = Boolean(smtp.smtp_host && smtp.smtp_email && (smtp.smtp_password || editing?.id));
+    const hasImap = Boolean(imap.imap_host && imap.imap_email && (imap.imap_password || editing?.id));
     if (!hasSmtp && !hasImap) {
       toast.error(
         "Preencha o email, a password e o servidor de SMTP e/ou IMAP para testar a ligação.",
@@ -147,7 +151,7 @@ export default function CompaniesAdminTab() {
     }
     setTestingConnection(true);
     try {
-      const res = await testCompanyEmailConnection({ ...smtp, ...imap });
+      const res = await testCompanyEmailConnection({ ...smtp, ...imap, company_id: editing?.id || null });
       const messages = Object.values(res.data?.results || {}).map((r) => r.message);
       toast.success(messages.join(" | ") || "Ligação validada com sucesso.");
     } catch (err) {

@@ -53,11 +53,14 @@ const CreateClientModal = memo(({
   open,
   onOpenChange,
   onSuccess,
-  // BUGFIX (onboarding): quando true, este modal cria APENAS o Cliente/Lead
-  // (pré-registo, sem Processo, sem envio para o Índice). O Processo só pode
-  // ser criado depois de o cliente carregar os documentos obrigatórios no
-  // Portal. Usado pelo botão "Novo Cliente" (ClientsPage/MyClientsPage) —
-  // distinto do botão "Novo Processo" (Kanban), que continua a criar ambos.
+  // AJUSTE ARQUITETURAL (Fev 2026): quando true, este modal cria o
+  // Cliente + um Processo em estado PRE_REGISTO (is_lead=true) na mesma
+  // operação, sem pedir "Tipo de Processo" nem "Cliente Existente/Novo"
+  // (o Processo fica escondido do Kanban/Índice — LEAD_STATUS_VALUES — e
+  // só aparece em "Registos de Clientes", até ser qualificado). Usado pelo
+  // botão "Novo Cliente" (ClientsPage/MyClientsPage) — distinto do botão
+  // "Novo Processo" (Kanban), que continua a pedir o tipo e cria um
+  // Processo ativo desde logo.
   clientOnly = false,
 }) => {
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
@@ -181,9 +184,12 @@ const CreateClientModal = memo(({
 
     setIsCreating(true);
     try {
-      // ── Modo clientOnly: cria APENAS o Cliente/Lead (pré-registo) ──
-      // Sem Processo, sem envio para o Índice. O Processo só é criado
-      // depois de o cliente carregar os documentos obrigatórios no Portal.
+      // ── Modo clientOnly ("Novo Cliente"): cria o Cliente + um Processo
+      // em estado PRE_REGISTO (is_lead=true) na mesma operação. O Processo
+      // é obrigatório para o Portal do Cliente e o email de boas-vindas
+      // funcionarem (reenvio de acesso, etc.) — fica escondido do Kanban/
+      // Índice (LEAD_STATUS_VALUES) e só aparece em "Registos de Clientes",
+      // até ser qualificado (documentos carregados no Portal).
       if (clientOnly) {
         const newClientRes = await createClient({
           nome: newClientData.nome.trim(),
@@ -191,7 +197,23 @@ const CreateClientModal = memo(({
           telefone: newClientData.telefone.trim() || undefined,
           nif: newClientData.nif.trim() || undefined,
           fonte: 'staff_created',
+          skip_welcome_email: true, // o email dispara na criação do processo, abaixo (evita duplicar)
         });
+        const newClientId = newClientRes.data?.id;
+        if (!newClientId) {
+          toast.error('Erro ao criar cliente: resposta sem ID');
+          return;
+        }
+        try {
+          await createClientProcess({
+            client_id: newClientId,
+            process_type: 'outro',
+            is_lead: true,
+          });
+        } catch (procErr) {
+          console.error('Erro ao criar processo de pré-registo:', procErr);
+          toast.error(extractErrorMessage(procErr.response?.data?.detail, 'Cliente criado, mas houve um erro ao preparar o pré-registo.'));
+        }
         toast.success(`Cliente "${newClientData.nome}" criado com sucesso! Fica em pré-registo até carregar os documentos no Portal.`);
         handleClose();
         onSuccess?.(newClientRes.data);
@@ -259,7 +281,7 @@ const CreateClientModal = memo(({
           </DialogTitle>
           <DialogDescription id="create-client-description">
             {clientOnly
-              ? 'Cria apenas o Cliente/Lead (pré-registo). O processo só é criado depois de o cliente carregar os documentos obrigatórios no Portal.'
+              ? 'Cria o Cliente em pré-registo. Assim que carregar os documentos obrigatórios no Portal, o processo é qualificado e passa para o Índice.'
               : 'Associe um cliente existente ou crie um novo. O processo será vinculado ao cliente selecionado.'}
           </DialogDescription>
         </DialogHeader>
@@ -392,7 +414,7 @@ const CreateClientModal = memo(({
               <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
                 <p className="text-xs text-muted-foreground">
                   {clientOnly
-                    ? 'Estes dados serão guardados na ficha do Cliente, que fica em pré-registo (sem processo).'
+                    ? 'Estes dados serão guardados na ficha do Cliente. Um processo em pré-registo é criado automaticamente (fica fora do Índice até os documentos serem carregados).'
                     : 'Estes dados serão guardados na ficha do Cliente. O processo será criado automaticamente após guardar o cliente.'}
                 </p>
                 <Input
@@ -469,7 +491,7 @@ const CreateClientModal = memo(({
               <Users className="h-4 w-4 text-blue-600 mt-0.5 shrink-0" />
               <p className="text-xs text-blue-700 dark:text-blue-300">
                 {clientOnly
-                  ? 'O cliente fica em pré-registo (sem processo). O processo só é criado depois de carregar os documentos obrigatórios no Portal.'
+                  ? 'O cliente fica em pré-registo (processo criado mas escondido do Índice) até carregar os documentos obrigatórios no Portal.'
                   : (<>Os dados pessoais são guardados na ficha do Cliente. O Processo fica automaticamente associado via <code className="font-mono text-[10px] bg-blue-100 dark:bg-blue-900/40 px-1 rounded">client_id</code>.</>)}
               </p>
             </div>
