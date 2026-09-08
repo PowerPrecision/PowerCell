@@ -298,10 +298,23 @@ flowchart TD
     subgraph Refresh["Refresh Token Flow"]
         RefreshReq["POST /api/auth/refresh"]
         RefreshReq --> ValidateRT["Validar refresh token no MongoDB"]
-        ValidateRT -->|Válido| NewTokens["Gerar novo JWT + refresh token"]
-        ValidateRT -->|Inválido| ClearTokens["Limpar tokens"]
+        ValidateRT -->|Válido| NewTokens["Rotação single-use:<br/>novo JWT + refresh token<br/>(antigo revogado)"]
+        ValidateRT -->|Inválido| ClearTokens["401 → Limpar tokens"]
     end
 ```
+
+**Single-flight do refresh no frontend (fix Set 2026)**: o refresh token é
+**single-use** (`rotate_refresh_token` revoga o token antigo). O frontend
+tem três mecanismos que podem disparar um refresh — o timer preventivo do
+`AuthContext` (2 min antes de expirar), o interceptor Axios (reativo a 401)
+e o fetch-guard (`sessionExpiry.js`). Todos convergem **numa única promessa
+partilhada** — `getRefreshedToken()` exportada por `services/api.js` —
+garantindo um único pedido de refresh por token. Antes do fix, o timer do
+`AuthContext` fazia um fetch próprio: dois refreshes concorrentes (timer +
+interceptor reativo a um 401 de polling em background) rodavam o mesmo
+token, o segundo recebia 401 e disparava `forceSessionExpired()` — logout
+inesperado ("Sessão Expirada") com a sessão ainda válida, e 401 visíveis na
+consola durante a navegação.
 
 ---
 
@@ -1120,6 +1133,47 @@ sequenceDiagram
     API-->>WP: Email enviado
 ```
 
+### Cadeia de Resolução de Credenciais de Envio (fix Set 2026)
+
+**Regra canónica**: os serviços de envio de email do sistema leem as
+credenciais **exactamente do mesmo local onde a UI de administração grava**.
+A UI canónica de envio é `/contas-email` — cartão "Email do Sistema
+(Transacional)" (Bloco A), que persiste em **`SystemConfig.system_smtp`**
+(`PATCH /api/system-config/system_smtp`; Resend API recomendado ou SMTP
+legado).
+
+Ordem de resolução de `send_email(force_system=True)` (emails
+transacionais: magic links, boas-vindas, notificações, RGPD):
+
+```text
+1. SystemConfig.system_smtp (Bloco A — /contas-email)   ← prioridade
+   ├─ resend_api_key  → envio via Resend HTTP API (porta 443)
+   └─ smtp_host+username → SMTP directo legado
+2. system_email_configs por purpose (get_system_transporter)  — fallback
+   (UI separada "System Emails" — mantida para purposes dedicados)
+3. Contas globais de ambiente (POWER_EMAIL / PRECISION_EMAIL)  — legado
+```
+
+Antes do fix, a ordem era 2 → 3 → 1: o admin configurava as credenciais
+no `/contas-email` e o fluxo tentava enviar com a config de outra UI ou
+com env vars legadas; quando nada existia, o `POST /processes/{id}/generate-magic-link/send`
+rebentava com **500** ("Conta de sistema 'power' não configurada. System
+SMTP (Bloco A) também não configurado.").
+
+**Gestão de erros**: quando nada está configurado, `send_email` devolve
+`{"success": False, "error_code": "SMTP_NOT_CONFIGURED", ...}` (não
+levanta excepção). `portal_magic_link.send_magic_link_to_client` mapeia
+esse código para **HTTP 400** com detalhe "SMTP não está configurado.
+Configure o Email do Sistema (Bloco A) em Contas de Email..." — erro
+tratado no frontend, em vez de 500. Falhas de envio reais
+(credenciais/rede) continuam a ser 500 com a razão real. `ValueError`
+(ex: purpose inválido no transporter) também é 400.
+
+Helper de leitura canónica do Bloco A:
+`services/email_service.py::_resolve_system_smtp_account()` — devolve
+`EmailAccount(name="system_smtp", ...)` ou `None` (para o caller continuar
+nos fallbacks). Testes: `tests/unit/test_email_config_lookup_mismatch.py`.
+
 ### Motor Real-Time do Webmail (v2.0 — Pacote EC)
 
 O sync IMAP **já não corre no ARQ Worker a cada 15 minutos**. O `ConnectionManager` WebSocket vive **em memória no processo da API** (`uvicorn`); um worker separado não consegue emitir eventos para os clientes ligados. Por isso o loop de auto-sync passou a correr **no próprio processo da API**.
@@ -1458,12 +1512,12 @@ flowchart LR
     Service -->|"fetch + decrypt_sensitive_data"| Process["process.personal_data<br/>{nif, morada_fiscal, documento_id}"]
     Service -->|"build consent_data"| Consent["{nome, contribuinte,<br/>morada, ...}"]
     Consent --> Render["_get_rendered_rgpd_text<br/>(template + placeholders)"]
-    Render --> PDF["_generate_rgpd_pdf_bytes<br/>(reportlab Canvas A4)"]
+    Render --> PDF["_build_prefilled_rgpd_pdf<br/>(reportlab platypus A4<br/>3 páginas + rodapé)"]
     PDF --> Response["StreamingResponse<br/>application/pdf"]
     Service -.->|"audit"| Activity["activities<br/>'RGPD descarregado'"]
 ```
 
-- **Reutilização**: usa `_get_rendered_rgpd_text` e `_generate_rgpd_pdf_bytes` de `services/rgpd_service.py` (mesma pipeline dos PDFs assinados digitalmente).
+- **Reutilização**: usa `_get_rendered_rgpd_text` e `_get_rendered_minuta_text` de `services/rgpd_service.py` (mesma pipeline de placeholders dos PDFs assinados digitalmente); o builder é o `_build_prefilled_rgpd_pdf` de `services/rgpd_pdf.py` (reportlab platypus).
 - **Dados**: `consent_data` é construído a partir de `process.personal_data` (desencriptado via `decrypt_sensitive_data`), com fallback para strings vazias quando campos não existem.
 - **Auth**: `require_staff()` — o PDF expõe PII do cliente.
 - **Filename**: `RGPD_{safe_client_name}.pdf` (normalizado, sem acentos/caracteres especiais).
@@ -1596,13 +1650,28 @@ O template do RGPD é **dinâmico** (editado pelo admin via `SmartRichEditor` em
 
 O PDF é gerado com `reportlab.platypus` (`SimpleDocTemplate` + `Paragraph` + `Spacer` + `HRFlowable`), que suporta **quebras de página automáticas** — quando um Flowable não cabe na página atual, uma nova página é criada. Isto é essencial porque o RGPD tem 11 secções e pode ocupar várias páginas.
 
+**Pacote DP — estrutura multi-página e design profissional**: o documento divide-se em **3 partes fundamentais, cada uma a começar sempre em página própria** (`PageBreak` — equivalente reportlab do CSS `page-break-after: always` declarado em `_RGPD_PDF_HTML_STYLE`):
+
+1. **Cabeçalho corporativo + Dados do Cliente** — título + subtítulo legal com régua dupla ("double rule"), seguido do texto legal RGPD (incluindo "2. TITULAR DOS DADOS" com os dados pré-preenchidos). Se o template legal for longo, esta parte flui naturalmente para páginas adicionais;
+2. **Consentimentos** — opções A/B/C/D com checkboxes `☐ Autorizo / ☐ Não Autorizo` + bloco de assinatura estruturado. Começa SEMPRE em página própria;
+3. **Minuta de Exclusividade** + bloco de assinatura. Começa SEMPRE em página própria.
+
+O cabeçalho CSS `_RGPD_PDF_HTML_STYLE` é a **fonte única de verdade** do layout — `font-family: Helvetica, Arial, sans-serif`, margens generosas de 2,5cm, `line-height: 1,5` e `margin-top: 40px` do bloco de assinatura — lido por `_parse_css_margin_cm` / `_parse_css_line_height` / `_parse_css_signature_margin_top_cm` e aplicado aos estilos reportlab (CSS e layout nunca dessincronizam). Todas as páginas têm rodapé corporativo com régua fina, identificação do documento e numeração "Página X de Y" (padrão NumberedCanvas em `_make_numbered_canvas_class`).
+
 ```python
-# services/rgpd_pdf.py — _build_prefilled_rgpd_pdf
-doc = SimpleDocTemplate(buffer, pagesize=A4, ...)
-story = []
-for line in rgpd_text.split("\n"):
-    story.append(Paragraph(line, body_style))  # auto-paginates
-doc.build(story)  # SimpleDocTemplate handles page breaks
+# services/rgpd_pdf.py — _build_prefilled_rgpd_pdf (estrutura da story)
+story = [  # PARTE 1 — cabeçalho corporativo + texto legal (auto-paginado)
+    Paragraph("AUTORIZAÇÃO PARA TRATAMENTO DE DADOS PESSOAIS", title_style),
+    Paragraph("RGPD — Regulamento (UE) 2016/679", subtitle_style),
+    HRFlowable(...), HRFlowable(...),   # régua dupla
+]
+story.extend(_html_to_flowables(rgpd_text, ...))
+story.append(PageBreak())                       # PARTE 2 — Consentimentos
+story.extend(_build_signature_block(...))       # bloco estruturado
+story.append(PageBreak())                       # PARTE 3 — Minuta
+story.extend(_html_to_flowables(minuta_text, ...))
+story.extend(_build_signature_block(...))
+doc.build(story, canvasmaker=_make_numbered_canvas_class(...))  # rodapé
 ```
 
 A fonte **DejaVuSans** (TTF) é registada para suportar acentos portugueses (ã, ç, é) e o caractere Unicode `☐` (U+2610, checkbox vazia). Fallback para Helvetica se a fonte não estiver disponível.
@@ -1628,6 +1697,15 @@ consent_data = {
 
 A data e o local de assinatura **não** são pré-preenchidos. O placeholder `{{DATA_ASSINATURA}}` é substituído por `___/___/______` e o local por `___________________` — o cliente preenche à caneta no momento da assinatura.
 
+### Bloco de assinatura estruturado (Pacote DP)
+
+`_build_signature_block` (helper partilhado pelas páginas de Consentimentos e Minuta) garante que a data e a assinatura **nunca ficam coladas na mesma linha**:
+
+1. **"Local" e "Data" numa linha isolada** — tabela de 2 colunas sem bordos (Local à esquerda, Data à direita);
+2. **"Assinatura do Cliente" num bloco abaixo** — etiqueta a negrito, margem superior de 40px (≈1,06cm, lida do CSS — espaço físico para assinar à caneta) e linha visível de underscores com a legenda "(Assinar à caneta)".
+
+O texto legal do template ("Data: ___" / "Assinatura: ___" no fim da DECLARAÇÃO FINAL) é preservado tal como está — o bloco estruturado é adicional, para a assinatura física.
+
 ### Checkboxes vazias
 
 Os 4 pontos de consentimento (A/B/C/D) usam checkboxes **vazias** (`☐`) para o cliente picar fisicamente:
@@ -1638,6 +1716,8 @@ A) Autorizo o tratamento dos meus dados pessoais...
 ```
 
 O caractere `☐` (U+2610) é suportado pela fonte DejaVuSans. No fluxo de assinatura digital (`sign_rgpd`), a checkbox escolhida torna-se `☑` (U+2611) — mas no PDF pré-preenchido para assinatura manual, ambas ficam vazias.
+
+**Pacote DP — negrito real com a TTF**: a variante `DejaVuSans-Bold` é registada juntamente com o mapeamento de família (`registerFontFamily`). Antes, o markup `<b>`/`<strong>` era silenciosamente ignorado com a TTF (`tt2ps` não resolvia "DejaVuSans-Bold") — os títulos de secção saíam sem negrito. Sem o ficheiro Bold disponível, o mapeamento degrada graciosamente para a regular (sem quebrar a geração).
 
 ---
 

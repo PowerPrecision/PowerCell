@@ -36,7 +36,7 @@
  * const { user, token, logout } = useAuth();
  */
 import { createContext, useState, useEffect, useCallback, useRef, useContext, useMemo } from "react";
-import api, { setAuthToken, clearAuthToken, syncAuthContextHeaders } from "../services/api";
+import api, { setAuthToken, clearAuthToken, syncAuthContextHeaders, getRefreshedToken } from "../services/api";
 import { hasRole } from "../utils/roleUtils";
 import { collectUserRoles, getUserCompanyRecords, resolveCompanyIdFromUser } from "../utils/userProfiles";
 // PACOTE DI — helper centralizado para rotas públicas (/portal, /rgpd, /upload, /download)
@@ -54,8 +54,6 @@ function applyBrandTheme(company) {
     document.documentElement.classList.add('theme-precision');
   }
 }
-
-const API_URL = process.env.REACT_APP_BACKEND_URL + "/api";
 
 // Constantes para refresh tokens
 const TOKEN_REFRESH_THRESHOLD = 2 * 60 * 1000; // 2 minutos antes de expirar
@@ -87,6 +85,15 @@ export function AuthProvider({ children }) {
   }, []);
 
   // Função para renovar tokens
+  // FIX (Set 2026 — secure token refresh): delega no single-flight partilhado
+  // do api.js (`getRefreshedToken`) em vez de fazer um fetch próprio a
+  // /auth/refresh. O backend roda o refresh_token (single-use), pelo que dois
+  // refreshes concorrentes (este timer preventivo + o interceptor reativo a
+  // um 401 de polling em background) rodavam o mesmo token: o segundo recebia
+  // 401 e disparava forceSessionExpired() — logout inesperado ("Sessão
+  // Expirada") e 401 visíveis na consola durante a navegação. Com o
+  // single-flight partilhado, todos os mecanismos (timer, interceptor Axios e
+  // fetch-guard) convergem num único pedido de refresh por token.
   const refreshTokens = useCallback(async () => {
     const currentRefreshToken = localStorage.getItem("refreshToken");
     if (!currentRefreshToken) {
@@ -94,33 +101,17 @@ export function AuthProvider({ children }) {
     }
 
     try {
-      // Incluir o token actual no Authorization header para que o backend
-      // possa preservar metadados de impersonate (se existirem)
-      const currentToken = localStorage.getItem("token");
-      const headers = { 'Content-Type': 'application/json' };
-      if (currentToken) {
-        headers['Authorization'] = `Bearer ${currentToken}`;
+      // getRefreshedToken() preserva os metadados de impersonate (envia o
+      // Authorization header com o token actual, semelhante ao fetch anterior)
+      // e actualiza token + refreshToken no localStorage em caso de sucesso.
+      const newToken = await getRefreshedToken();
+      if (!newToken) {
+        throw new Error("Refresh failed");
       }
 
-      const response = await fetch(`${API_URL}/auth/refresh`, {
-        method: 'POST',
-        headers,
-        body: JSON.stringify({ refresh_token: currentRefreshToken })
-      });
+      setToken(newToken);
+      setRefreshToken(localStorage.getItem("refreshToken"));
 
-      if (!response.ok) {
-        throw new Error('Refresh failed');
-      }
-
-      const data = await response.json();
-      
-      // Actualizar tokens
-      localStorage.setItem("token", data.access_token);
-      localStorage.setItem("refreshToken", data.refresh_token);
-      setAuthToken(data.access_token);
-      setToken(data.access_token);
-      setRefreshToken(data.refresh_token);
-      
       return true;
     } catch (error) {
       console.error("Token refresh failed:", error);
