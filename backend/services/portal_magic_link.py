@@ -272,6 +272,14 @@ async def send_magic_link_to_client(
             force_system=True,
             system_purpose="NOTIFICATIONS",
         )
+    except ValueError as e:
+        # ValueError (ex: purpose inválido no transporter) é erro de
+        # configuração, não de infraestrutura — 400 para o frontend tratar.
+        logger.error(f"Erro de configuração ao enviar magic link email: {e}")
+        raise HTTPException(
+            status_code=400,
+            detail=f"SMTP não está configurado: {e}",
+        )
     except Exception as e:
         logger.error(f"Erro ao enviar magic link email: {e}")
         raise HTTPException(
@@ -286,7 +294,17 @@ async def send_magic_link_to_client(
     # nunca chegou a ser enviado.
     if not send_result or not send_result.get("success"):
         error_detail = (send_result or {}).get("error") or "Falha desconhecida ao enviar o email."
+        error_code = (send_result or {}).get("error_code")
         logger.error(f"Erro ao enviar magic link email para {client_email}: {error_detail}")
+        # FIX (Set 2026): falha de CONFIGURAÇÃO (SMTP ausente) é erro do lado
+        # do cliente — 400 Bad Request com detalhe claro, em vez de 500
+        # Internal Server Error. O frontend exibe um erro tratado e o admin
+        # sabe exactamente onde configurar.
+        if error_code == "SMTP_NOT_CONFIGURED":
+            raise HTTPException(
+                status_code=400,
+                detail="SMTP não está configurado. Configure o Email do Sistema (Bloco A) em Contas de Email e tente novamente.",
+            )
         raise HTTPException(
             status_code=500,
             detail=f"Erro ao enviar email: {error_detail}",

@@ -264,8 +264,18 @@ async function performTokenRefresh() {
 /**
  * Retorna a promessa de refresh partilhada (single-flight).
  * Se já houver um refresh em curso, devolve a mesma promessa.
+ *
+ * FIX (Set 2026 — secure token refresh): exportada para o AuthContext.
+ * O backend roda o refresh_token (single-use: rotate_refresh_token revoga
+ * o token antigo). Antes desta exportação, o timer preventivo do
+ * AuthContext fazia um fetch próprio a /auth/refresh — dois refreshes
+ * concorrentes (timer + interceptor reativo a um 401 de polling em
+ * background) rodavam o MESMO token: o segundo recebia 401 e disparava
+ * `forceSessionExpired()` (logout + redirect) com a sessão ainda válida.
+ * Com a exportação, TODOS os mecanismos (timer, interceptor Axios e
+ * fetch-guard) partilham esta mesma promessa — um único refresh por token.
  */
-function getRefreshedToken() {
+export function getRefreshedToken() {
   if (!refreshPromise) {
     refreshPromise = performTokenRefresh().finally(() => {
       refreshPromise = null;

@@ -133,8 +133,9 @@ class TestBug3ResendPortalErrorPropagation:
 
     async def test_resend_with_process_reports_real_email_failure(self, client, admin_token):
         """
-        Cliente com processo ativo + SMTP não configurado → 500 com a razão
-        real (nunca 200 com sucesso falso quando o envio efetivamente falhou).
+        Cliente com processo ativo + SMTP não configurado → 400 "SMTP não está
+        configurado" (graceful — fix Set 2026; antes era 500) ou 200 se o
+        ambiente de testes tiver envio real configurado. Nunca sucesso falso.
         """
         data = await _create_client(client, admin_token, "Bug3Proc")
         client_id = data.get("id")
@@ -153,10 +154,15 @@ class TestBug3ResendPortalErrorPropagation:
             headers={"Authorization": f"Bearer {admin_token}"},
         )
         # Sem SMTP configurado no ambiente de testes, o envio falha de verdade.
-        assert rr.status_code in (200, 500, 502, 503), f"Status inesperado: {rr.status_code} {rr.text}"
+        # Fix Set 2026: falha de CONFIGURAÇÃO devolve 400 (não 500); falha de
+        # envio (rede/credenciais SMTP) pode devolver 500/502/503.
+        assert rr.status_code in (200, 400, 500, 502, 503), f"Status inesperado: {rr.status_code} {rr.text}"
         body = rr.json()
         if rr.status_code == 200:
             assert body.get("success") is True
+        elif rr.status_code == 400:
+            # Erro tratado de configuração — detalhe claro para o frontend.
+            assert "smtp" in (body.get("detail") or "").lower(), f"Mensagem 400 inesperada: {body}"
         else:
             assert body.get("detail"), f"Erro sem detail: {body}"
 

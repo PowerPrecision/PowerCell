@@ -86,6 +86,18 @@ Evitar reimplementar helpers que já existem centralizados — encontrar 2+ cóp
 | `validateNIF(nif, options)` | `utils/validateNIF.js` | Inclui checksum (módulo 11) — não validar NIF sem checksum em formulários novos; `allowCompanyNIF` para contra-partes que podem ser pessoa colectiva |
 | `simularCreditoHabitacao(...)` / `calcularPrestacaoMensal(...)` / `calcularTAEG(...)` | `utils/mortgageCalculations.js` | Motor de cálculo do sistema francês de amortização — extraído de `components/portal/SimulatorCH.jsx`, reutilizado em `components/calculators/MortgageSimulator.jsx` (Calculadoras do CRM) |
 
+### Refresh token — single-flight obrigatório (fix Set 2026)
+
+O backend roda o refresh token (**single-use**: `POST /auth/refresh` revoga
+o token antigo). **Nunca** fazer pedidos directos a `/auth/refresh` a partir
+de componentes ou contexts — usar sempre `getRefreshedToken()` (export de
+`services/api.js`), a promessa single-flight partilhada por todos os
+mecanismos (timer preventivo do `AuthContext`, interceptor Axios reativo a
+401, fetch-guard de `sessionExpiry.js`). Dois refreshes concorrentes com o
+mesmo token fazem o segundo receber 401 e disparar `forceSessionExpired()`
+(logout inesperado). Novos mecanismos de renovação devem converger nesta
+função, não criar a própria chamada.
+
 ---
 
 ## 7. Checklist antes de dar uma feature por terminada

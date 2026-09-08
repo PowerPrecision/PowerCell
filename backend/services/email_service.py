@@ -455,6 +455,59 @@ def _send_via_resend(
         raise Exception(error_msg)
 
 
+async def _resolve_system_smtp_account() -> Optional["EmailAccount"]:
+    """Resolve o ``EmailAccount`` do Bloco A (``SystemConfig.system_smtp``).
+
+    FIX (Set 2026 — mismatch de leitura de credenciais SMTP): a UI de
+    administração de email (``/contas-email`` — cartão "Email do Sistema
+    (Transacional)") grava as credenciais de envio transacional em
+    ``SystemConfig.system_smtp``. Este helper é a ÚNICA fonte canónica de
+    leitura desse bloco para o caminho de envio, garantindo que o serviço
+    lê exactamente do local onde a interface grava.
+
+    Suporta os dois modos do Bloco A:
+      1. Resend API (recomendado) — ``resend_api_key`` → smtp_server="resend"
+         (envio via HTTPS, imune ao bloqueio de portas SMTP em PaaS).
+      2. SMTP directo (legado) — ``smtp_host`` + ``smtp_username``.
+
+    Returns:
+        EmailAccount com name="system_smtp", ou None se o Bloco A não
+        estiver configurado (para o caller poder continuar nos fallbacks).
+    """
+    from services.system_config import get_system_config
+
+    try:
+        sys_config = await get_system_config()
+    except Exception as e:
+        logger.warning(f"[Send Email] Erro ao ler SystemConfig.system_smtp (Bloco A): {e}")
+        return None
+
+    sys_smtp = sys_config.system_smtp
+    if sys_smtp.resend_api_key:
+        from_email = sys_smtp.smtp_from_email or ""
+        return EmailAccount(
+            name="system_smtp",
+            imap_server="resend",
+            imap_port=0,
+            smtp_server="resend",
+            smtp_port=0,
+            email=from_email,
+            password=sys_smtp.resend_api_key,  # password transporta a API key
+        )
+    if sys_smtp.smtp_host and sys_smtp.smtp_username:
+        from_email = sys_smtp.smtp_from_email or sys_smtp.smtp_username
+        return EmailAccount(
+            name="system_smtp",
+            imap_server=sys_smtp.smtp_host,
+            imap_port=int(sys_smtp.smtp_port or 587),
+            smtp_server=sys_smtp.smtp_host,
+            smtp_port=int(sys_smtp.smtp_port or 587),
+            email=from_email,
+            password=sys_smtp.smtp_password or "",
+        )
+    return None
+
+
 async def send_email(
     account_name: str,
     to_emails: List[str],
@@ -530,13 +583,32 @@ async def send_email(
     Raises:
         smtplib.SMTPException: Se a autenticação ou o envio SMTP falharem.
     """
-    # === system_purpose: tentar config específica por propósito (zero downtime) ===
+    # === FIX (Set 2026 — email-config-lookup mismatch): o Bloco A tem prioridade ===
+    # Ordem de resolução para force_system=True (emails transacionais do sistema):
+    #   1. SystemConfig.system_smtp (Bloco A — onde /contas-email grava)  ← NOVO
+    #   2. system_email_configs por purpose (get_system_transporter)      — fallback
+    #   3. Contas globais de ambiente (POWER_EMAIL/PRECISION_EMAIL)       — legacy
+    # Antes desta correcção, a ordem era 2 → 3 → 1: o admin configurava as
+    # credenciais no /contas-email e o serviço tentava enviar com a config de
+    # outra UI (system_email_configs) ou com env vars legadas — falhando com
+    # "não configurado" quando nenhuma delas existia, mesmo com o Bloco A OK.
     account = account_override
     if account is not None:
         logger.info(
             "[Send Email] Usando account_override name=%s user=%s host=%s",
             account.name, account.email, account.smtp_server,
         )
+
+    if account is None and force_system:
+        account = await _resolve_system_smtp_account()
+        if account is not None:
+            logger.info(
+                "[Send Email] Usando System SMTP (Bloco A — /contas-email): mode=%s from=%s",
+                "resend" if account.smtp_server == "resend" else "smtp",
+                account.email,
+            )
+
+    # === system_purpose: tentar config específica por propósito (zero downtime) ===
     if account is None and force_system and system_purpose:
         try:
             from services.email import get_system_transporter
@@ -639,53 +711,32 @@ async def send_email(
             }
     
     if not account:
-        # === force_system: tentar contas globais, depois system_smtp (Bloco A) ===
         if force_system:
-            # Prioridade 1: Conta nomeada (power/precision)
+            # 3ª prioridade (após Bloco A e purpose): contas globais de ambiente
+            # (POWER_EMAIL / PRECISION_EMAIL — legado). Nunca cai na config
+            # pessoal do utilizador (isolamento de remetente de sistema).
             if accounts:
                 account = accounts[0]
             else:
-                # Prioridade 2: System SMTP config (Bloco A das Integrações)
-                from services.system_config import get_system_config
-                sys_config = await get_system_config()
-                sys_smtp = sys_config.system_smtp
-                system_email_signature = sys_smtp.email_signature or None
-                # Preferir Resend API; fallback para SMTP directo (legado)
-                if sys_smtp.resend_api_key:
-                    from_email = sys_smtp.smtp_from_email or ""
-                    account = EmailAccount(
-                        name="system_smtp",
-                        imap_server="resend",
-                        imap_port=0,
-                        smtp_server="resend",
-                        smtp_port=0,
-                        email=from_email,
-                        password=sys_smtp.resend_api_key,  # reuse password field for API key
-                    )
-                    logger.info(f"[Send Email] Usando System Resend API (Bloco A): from={from_email}")
-                elif sys_smtp.smtp_host and sys_smtp.smtp_username:
-                    from_email = sys_smtp.smtp_from_email or sys_smtp.smtp_username
-                    from_name = sys_smtp.smtp_from_name or ""
-                    account = EmailAccount(
-                        name="system_smtp",
-                        imap_server=sys_smtp.smtp_host,
-                        imap_port=int(sys_smtp.smtp_port or 587),
-                        smtp_server=sys_smtp.smtp_host,
-                        smtp_port=int(sys_smtp.smtp_port or 587),
-                        email=from_email,
-                        password=sys_smtp.smtp_password or "",
-                    )
-                    logger.info(f"[Send Email] Usando System SMTP legado (Bloco A): from={from_email}, name={from_name or '(none)'}")
-                else:
-                    available = [a.name for a in accounts]
-                    return {
-                        "success": False,
-                        "error": f"Conta de sistema '{account_name}' não configurada. System SMTP (Bloco A) também não configurado. Contas disponíveis: {available}"
-                    }
+                available = [a.name for a in accounts]
+                logger.error(
+                    "[Send Email] SMTP não configurado: Bloco A vazio, sem purpose "
+                    "'%s' activo e sem contas de ambiente (disponíveis: %s)",
+                    system_purpose or "-", available,
+                )
+                return {
+                    "success": False,
+                    "error": (
+                        "SMTP não está configurado. Configure o Email do Sistema "
+                        "(Bloco A) em Contas de Email, um purpose dedicado em "
+                        "System Emails, ou as contas de ambiente."
+                    ),
+                    "error_code": "SMTP_NOT_CONFIGURED",
+                }
         # Usar primeira conta disponível
-        if accounts:
+        if account is None and accounts:
             account = accounts[0]
-        else:
+        if account is None:
             # If no global account matches, try user's personal email config
             if created_by:
                 from services.encryption import encryption_service
@@ -712,7 +763,11 @@ async def send_email(
                         except Exception as e:
                             logger.warning(f"[Send Email] Erro ao desencriptar password pessoal: {e}")
             if not account:
-                return {"success": False, "error": "Nenhuma conta de email configurada"}
+                return {
+                    "success": False,
+                    "error": "Nenhuma conta de email configurada",
+                    "error_code": "SMTP_NOT_CONFIGURED",
+                }
     
     # Resolve from_name and email_signature for system_smtp (Bloco A) — used in From header and footer
     from_name = ""

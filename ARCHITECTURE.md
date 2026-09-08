@@ -298,10 +298,23 @@ flowchart TD
     subgraph Refresh["Refresh Token Flow"]
         RefreshReq["POST /api/auth/refresh"]
         RefreshReq --> ValidateRT["Validar refresh token no MongoDB"]
-        ValidateRT -->|Válido| NewTokens["Gerar novo JWT + refresh token"]
-        ValidateRT -->|Inválido| ClearTokens["Limpar tokens"]
+        ValidateRT -->|Válido| NewTokens["Rotação single-use:<br/>novo JWT + refresh token<br/>(antigo revogado)"]
+        ValidateRT -->|Inválido| ClearTokens["401 → Limpar tokens"]
     end
 ```
+
+**Single-flight do refresh no frontend (fix Set 2026)**: o refresh token é
+**single-use** (`rotate_refresh_token` revoga o token antigo). O frontend
+tem três mecanismos que podem disparar um refresh — o timer preventivo do
+`AuthContext` (2 min antes de expirar), o interceptor Axios (reativo a 401)
+e o fetch-guard (`sessionExpiry.js`). Todos convergem **numa única promessa
+partilhada** — `getRefreshedToken()` exportada por `services/api.js` —
+garantindo um único pedido de refresh por token. Antes do fix, o timer do
+`AuthContext` fazia um fetch próprio: dois refreshes concorrentes (timer +
+interceptor reativo a um 401 de polling em background) rodavam o mesmo
+token, o segundo recebia 401 e disparava `forceSessionExpired()` — logout
+inesperado ("Sessão Expirada") com a sessão ainda válida, e 401 visíveis na
+consola durante a navegação.
 
 ---
 
@@ -1119,6 +1132,47 @@ sequenceDiagram
     API->>SMTP: Enviar via SendGrid/Resend/SMTP
     API-->>WP: Email enviado
 ```
+
+### Cadeia de Resolução de Credenciais de Envio (fix Set 2026)
+
+**Regra canónica**: os serviços de envio de email do sistema leem as
+credenciais **exactamente do mesmo local onde a UI de administração grava**.
+A UI canónica de envio é `/contas-email` — cartão "Email do Sistema
+(Transacional)" (Bloco A), que persiste em **`SystemConfig.system_smtp`**
+(`PATCH /api/system-config/system_smtp`; Resend API recomendado ou SMTP
+legado).
+
+Ordem de resolução de `send_email(force_system=True)` (emails
+transacionais: magic links, boas-vindas, notificações, RGPD):
+
+```text
+1. SystemConfig.system_smtp (Bloco A — /contas-email)   ← prioridade
+   ├─ resend_api_key  → envio via Resend HTTP API (porta 443)
+   └─ smtp_host+username → SMTP directo legado
+2. system_email_configs por purpose (get_system_transporter)  — fallback
+   (UI separada "System Emails" — mantida para purposes dedicados)
+3. Contas globais de ambiente (POWER_EMAIL / PRECISION_EMAIL)  — legado
+```
+
+Antes do fix, a ordem era 2 → 3 → 1: o admin configurava as credenciais
+no `/contas-email` e o fluxo tentava enviar com a config de outra UI ou
+com env vars legadas; quando nada existia, o `POST /processes/{id}/generate-magic-link/send`
+rebentava com **500** ("Conta de sistema 'power' não configurada. System
+SMTP (Bloco A) também não configurado.").
+
+**Gestão de erros**: quando nada está configurado, `send_email` devolve
+`{"success": False, "error_code": "SMTP_NOT_CONFIGURED", ...}` (não
+levanta excepção). `portal_magic_link.send_magic_link_to_client` mapeia
+esse código para **HTTP 400** com detalhe "SMTP não está configurado.
+Configure o Email do Sistema (Bloco A) em Contas de Email..." — erro
+tratado no frontend, em vez de 500. Falhas de envio reais
+(credenciais/rede) continuam a ser 500 com a razão real. `ValueError`
+(ex: purpose inválido no transporter) também é 400.
+
+Helper de leitura canónica do Bloco A:
+`services/email_service.py::_resolve_system_smtp_account()` — devolve
+`EmailAccount(name="system_smtp", ...)` ou `None` (para o caller continuar
+nos fallbacks). Testes: `tests/unit/test_email_config_lookup_mismatch.py`.
 
 ### Motor Real-Time do Webmail (v2.0 — Pacote EC)
 
