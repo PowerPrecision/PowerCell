@@ -1522,6 +1522,36 @@ flowchart LR
 - **Auth**: `require_staff()` — o PDF expõe PII do cliente.
 - **Filename**: `RGPD_{safe_client_name}.pdf` (normalizado, sem acentos/caracteres especiais).
 
+### Dados Legais da Empresa — SystemConfig (Pacote DG-2)
+
+O RGPD e a Minuta de Exclusividade são documentos legais de intermediação de crédito: a empresa emissora (`{{NOME_EMPRESA}}`, `{{NIF_EMPRESA}}`, `{{MORADA_EMPRESA}}`, `{{CONTACTO_EMPRESA}}`, `{{EMAIL_EMPRESA}}`) é lida **estritamente** do SystemConfig global (`db.system_config`, `_id: "main"`, secção `settings`) pelo helper `_get_company_legal_data()` (`services/rgpd_service.py`) — a fonte oficial onde residem os dados da empresa.
+
+```mermaid
+flowchart LR
+    subgraph FonteOficial["SystemConfig (_id: main) — settings"]
+        CN["company_name"]
+        CNIF["company_nif"]
+        CA["company_address"]
+        CE["company_email"]
+        CP["company_phone"]
+    end
+    Helper["_get_company_legal_data()<br/>services/rgpd_service.py"]
+    Renders["_get_rendered_rgpd_text<br/>_get_rendered_minuta_text<br/>run_get_rgpd_form_data (fluxo público)"]
+    Fallback["Fallback legal: RGPD_ISSUER<br/>Precision Crédito, Lda. / NIF 515657514"]
+    CN --> Helper
+    CNIF --> Helper
+    CA --> Helper
+    CE --> Helper
+    CP --> Helper
+    Helper -->|"campos definidos"| Renders
+    Helper -->|"campo ausente / BD indisponível"| Fallback
+```
+
+- **Nunca `db.companies` nos documentos legais**: a resolução por empresa (Pacote FR-4) foi removida da compilação do RGPD/Minuta — injetava a empresa de mediação imobiliária associada ao processo/utilizador (ex.: "Power Real Estate", dados de teste) no documento legal de intermediação de crédito. `_resolve_rgpd_company()` mantém-se **apenas** para escolher as credenciais SMTP do envio dos emails de assinatura (multi-tenant de envio, não afecta o conteúdo do documento).
+- **Fallback legal**: `RGPD_ISSUER_NAME`/`RGPD_ISSUER_NIF` (Precision Crédito, Lda. / 515657514) quando o SystemConfig não define o campo — o documento é sempre emitido com um emissor válido, nunca com dados de teste.
+- **Contacto**: `company_phone` com prioridade; `company_email` como fallback (o documento apresenta um canal de contacto oficial).
+- **UI de administração**: os campos oficiais (`company_name`, `company_nif`, `company_address`, `company_email`, `company_phone`) são editáveis no formulário "Definições Gerais" do SystemConfigPage (`CONFIG_FIELDS["settings"]` em `services/system_config_api.py`).
+
 ---
 
 ## Separação Estrita: User (Global) vs Role/Perfil (Local) — Pacote DF
