@@ -24,14 +24,13 @@ from services.rgpd_service import (
     get_rgpd_by_process,
     sign_rgpd,
     get_tipo_documento_label,
+    _get_company_legal_data,
     RGPD_REQUESTS_COLLECTION,
 )
 from services.rgpd_helpers import _add_process_activity
 from services.rgpd_templates import (
     RGPD_TEMPLATE_VERSIONS_COLLECTION,
     RGPD_DEFAULT_TEMPLATE,
-    RGPD_ISSUER_NAME,
-    RGPD_ISSUER_NIF,
     _get_active_rgpd_template,
 )
 from services.rgpd_minutas import (
@@ -206,34 +205,24 @@ async def run_get_rgpd_form_data(token: str):
         rendered = rendered.replace("{{DATA_ASSINATURA}}", str(data_assinatura or ""))
         rendered = rendered.replace("{{MORADA_EMPRESA}}", str(empresa_morada or ""))
         rendered = rendered.replace("{{CONTACTO_EMPRESA}}", str(empresa_contacto or ""))
+        # PACOTE DG-2 — email oficial da empresa (para templates
+        # customizados do admin; o template por defeito não o usa).
+        rendered = rendered.replace("{{EMAIL_EMPRESA}}", str(empresa_email or ""))
         return rendered
 
-    # Pacote FQ-4 — emissor/responsável do RGPD é SEMPRE a Precision
-    # Crédito, Lda. (NIF 515657514): a Power não emite pedidos de RGPD,
-    # pelo que {{NOME_EMPRESA}} / {{NIF_EMPRESA}} não podem depender de
-    # system_config (que pode estar configurado para a Power). Morada e
-    # Contacto continuam a vir de system_config (dados de correio).
-    empresa_nome = RGPD_ISSUER_NAME
-    empresa_nif = RGPD_ISSUER_NIF
-    empresa_morada = ""
-    empresa_contacto = ""
-    try:
-        config = await db.system_config.find_one(
-            {"_id": "main"},
-            {
-                "_id": 0,
-                "settings.company_address": 1,
-                "settings.company_phone": 1,
-            },
-        )
-        if config:
-            settings = config.get("settings", {})
-            if settings.get("company_address"):
-                empresa_morada = settings["company_address"]
-            if settings.get("company_phone"):
-                empresa_contacto = settings["company_phone"]
-    except Exception:
-        pass
+    # PACOTE DG-2 — dados legais da empresa lidos ESTRITAMENTE do
+    # SystemConfig (fonte oficial; ver `_get_company_legal_data` em
+    # rgpd_service.py), com fallback legal RGPD_ISSUER (Precision Crédito,
+    # Lda. / NIF 515657514) para os campos não configurados — NUNCA a
+    # empresa de teste ("Power Real Estate"). O fluxo público de assinatura
+    # partilha a mesma fonte de dados do PDF interno: o mesmo documento
+    # legal tem sempre o mesmo emissor.
+    empresa = await _get_company_legal_data()
+    empresa_nome = empresa["nome"]
+    empresa_nif = empresa["nif"]
+    empresa_morada = empresa["morada"]
+    empresa_email = empresa["email"]
+    empresa_contacto = empresa["contacto"]
 
     data_assinatura = datetime.now(timezone.utc).strftime("%d/%m/%Y")
 

@@ -157,10 +157,21 @@ class CreditServicesConfig(BaseModel):
 
 
 class SystemSettings(BaseModel):
-    """Configurações gerais do sistema"""
-    company_name: str = "Power Real Estate"
-    company_subtitle: str = "& Precision Crédito"
+    """Configurações gerais do sistema
+
+    PACOTE DG-2 — os campos ``company_name`` / ``company_nif`` /
+    ``company_address`` / ``company_email`` / ``company_phone`` são a FONTE
+    OFICIAL dos dados legais da empresa de intermediação de crédito
+    (Precision Crédito) injetados no RGPD e na Minuta de Exclusividade
+    (ver `services/rgpd_service._get_company_legal_data`). O default do
+    ``company_name`` segue o emissor legal — nunca dados de teste
+    ("Power Real Estate").
+    """
+    company_name: str = "Precision Crédito, Lda."
+    company_subtitle: str = ""
+    company_nif: Optional[str] = None
     company_address: Optional[str] = None
+    company_email: Optional[str] = None
     company_phone: Optional[str] = None
     logo_url: Optional[str] = None
     primary_color: str = "#0F766E"

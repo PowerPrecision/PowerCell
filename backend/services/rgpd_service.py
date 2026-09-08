@@ -177,6 +177,78 @@ def _build_company_smtp_account(company: Optional[Dict[str, Any]]) -> Optional[E
     )
 
 
+# ====================================================================
+# PACOTE DG-2 — Dados legais da empresa do SystemConfig (RGPD + Minuta)
+# ====================================================================
+
+async def _get_company_legal_data() -> Dict[str, str]:
+    """
+    Lê ESTRITAMENTE os dados legais da empresa (emissor do RGPD e da Minuta
+    de Exclusividade — documentos de intermediação de crédito) a partir do
+    SystemConfig global (``db.system_config``, documento ``_id: "main"``,
+    secção ``settings``), a configuração do sistema onde residem os dados
+    oficiais da empresa.
+
+    Histórico:
+    - Pacote FQ-4: emissor fixo ("Precision Crédito, Lda.") — não lia config.
+    - Pacote FR-4: resolução via ``db.companies`` do processo/utilizador —
+      injetava a empresa ERRADA nos documentos legais (ex.: a empresa de
+      mediação imobiliária "Power Real Estate" associada ao processo, em
+      vez da empresa de intermediação de crédito).
+    - Pacote DG-2 (esta correção): leitura estrita do SystemConfig; quando
+      um campo não está definido usa o fallback legal (RGPD_ISSUER), NUNCA
+      dados de teste.
+
+    Devolve um dict com as chaves ``nome``, ``nif``, ``morada``, ``email``
+    e ``contacto``. Nenhuma falha de BD levanta excepção — os fallbacks
+    garantem sempre um emissor válido para o documento legal.
+    """
+    from services.rgpd_templates import RGPD_ISSUER_NAME, RGPD_ISSUER_NIF
+
+    empresa = {
+        "nome": RGPD_ISSUER_NAME,
+        "nif": RGPD_ISSUER_NIF,
+        "morada": "",
+        "email": "",
+        "contacto": "",
+    }
+
+    try:
+        config = await db.system_config.find_one(
+            {"_id": "main"},
+            {
+                "_id": 0,
+                "settings.company_name": 1,
+                "settings.company_nif": 1,
+                "settings.company_address": 1,
+                "settings.company_email": 1,
+                "settings.company_phone": 1,
+            },
+        )
+        settings = (config or {}).get("settings", {}) or {}
+        if settings.get("company_name"):
+            empresa["nome"] = str(settings["company_name"]).strip()
+        if settings.get("company_nif"):
+            empresa["nif"] = str(settings["company_nif"]).strip()
+        if settings.get("company_address"):
+            empresa["morada"] = str(settings["company_address"]).strip()
+        if settings.get("company_email"):
+            empresa["email"] = str(settings["company_email"]).strip()
+        # Contacto do documento: telefone OU email (o campo clássico do
+        # formulário de admin "Telefone/Email da Empresa" aceita ambos).
+        contacto = settings.get("company_phone") or settings.get("company_email")
+        if contacto:
+            empresa["contacto"] = str(contacto).strip()
+    except Exception as e:
+        logger.warning(
+            "[RGPD] Erro ao ler dados legais da empresa do SystemConfig "
+            "(a usar fallback legal RGPD_ISSUER): %s",
+            e,
+        )
+
+    return empresa
+
+
 async def create_rgpd_request(
     process_id: str,
     client_name: str,
@@ -891,45 +963,18 @@ async def _get_rendered_rgpd_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # Pacote FR-4 — o emissor/responsável pelo tratamento do RGPD passa a
-    # respeitar a Empresa real associada ao processo (ou, em fallback, ao
-    # utilizador que solicitou o RGPD), em vez de estar sempre fixo na
-    # Precision Crédito (Pacote FQ-4). RGPD_ISSUER_NAME/NIF mantêm-se como
-    # fallback quando não é possível resolver nenhuma Company.
-    from services.rgpd_templates import RGPD_ISSUER_NAME, RGPD_ISSUER_NIF
-    empresa_nome = RGPD_ISSUER_NAME
-    empresa_nif = RGPD_ISSUER_NIF
-    empresa_morada = ""
-    empresa_contacto = ""
-
-    company = await _resolve_rgpd_company(
-        process_id=process_id, user_id=rgpd_request.get("created_by")
-    )
-    if company:
-        if company.get("name"):
-            empresa_nome = company["name"]
-        if company.get("nif"):
-            empresa_nif = company["nif"]
-        if company.get("address"):
-            empresa_morada = company["address"]
-        if company.get("phone"):
-            empresa_contacto = company["phone"]
-
-    # Morada/Contacto continuam a ter fallback em system_config (dados de
-    # correio) quando a Company resolvida não os tiver preenchidos.
-    try:
-        config = await db.system_config.find_one(
-            {"_id": "main"},
-            {"_id": 0, "settings.company_address": 1, "settings.company_phone": 1}
-        )
-        if config:
-            settings = config.get("settings", {})
-            if not empresa_morada and settings.get("company_address"):
-                empresa_morada = settings["company_address"]
-            if not empresa_contacto and settings.get("company_phone"):
-                empresa_contacto = settings["company_phone"]
-    except Exception:
-        pass
+    # PACOTE DG-2 — dados legais da empresa lidos ESTRITAMENTE do
+    # SystemConfig (fonte oficial onde residem os dados da empresa de
+    # intermediação de crédito; ver `_get_company_legal_data`). Não há
+    # resolução via db.companies do processo/utilizador — isso injetava a
+    # empresa de mediação imobiliária de teste ("Power Real Estate") no
+    # documento legal. RGPD_ISSUER mantém-se como fallback.
+    empresa = await _get_company_legal_data()
+    empresa_nome = empresa["nome"]
+    empresa_nif = empresa["nif"]
+    empresa_morada = empresa["morada"]
+    empresa_email = empresa["email"]
+    empresa_contacto = empresa["contacto"]
 
     rendered = rendered.replace("{{NOME_CLIENTE}}", client_name)
     rendered = rendered.replace("{{NOME}}", client_name)
@@ -939,6 +984,9 @@ async def _get_rendered_rgpd_text(
     rendered = rendered.replace("{{NIF_EMPRESA}}", empresa_nif)
     rendered = rendered.replace("{{MORADA_EMPRESA}}", empresa_morada)
     rendered = rendered.replace("{{CONTACTO_EMPRESA}}", empresa_contacto)
+    # PACOTE DG-2 — email oficial da empresa (disponível para templates
+    # customizados do admin; o template por defeito não o usa).
+    rendered = rendered.replace("{{EMAIL_EMPRESA}}", empresa_email)
     rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
     rendered = rendered.replace("{{MORADA}}", consent_data.get("morada", personal_data.get("morada_fiscal", "")))
     rendered = rendered.replace("{{LOCALIDADE}}", localidade)
@@ -975,42 +1023,17 @@ async def _get_rendered_minuta_text(
     client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
     localidade = consent_data.get("localidade", "")
     
-    # Pacote FR-4 — emissor/responsável passa a respeitar a Empresa real
-    # associada ao processo (ou ao utilizador solicitante), tal como em
-    # `_get_rendered_rgpd_text`. RGPD_ISSUER_NAME/NIF mantêm-se como
-    # fallback quando não é possível resolver nenhuma Company.
-    from services.rgpd_templates import RGPD_ISSUER_NAME, RGPD_ISSUER_NIF
-    empresa_nome = RGPD_ISSUER_NAME
-    empresa_nif = RGPD_ISSUER_NIF
-    empresa_morada = ""
-    empresa_contacto = ""
-
-    company = await _resolve_rgpd_company(
-        process_id=process_id, user_id=rgpd_request.get("created_by")
-    )
-    if company:
-        if company.get("name"):
-            empresa_nome = company["name"]
-        if company.get("nif"):
-            empresa_nif = company["nif"]
-        if company.get("address"):
-            empresa_morada = company["address"]
-        if company.get("phone"):
-            empresa_contacto = company["phone"]
-
-    try:
-        config = await db.system_config.find_one(
-            {"_id": "main"},
-            {"_id": 0, "settings.company_address": 1, "settings.company_phone": 1}
-        )
-        if config:
-            settings = config.get("settings", {})
-            if not empresa_morada and settings.get("company_address"):
-                empresa_morada = settings["company_address"]
-            if not empresa_contacto and settings.get("company_phone"):
-                empresa_contacto = settings["company_phone"]
-    except Exception:
-        pass
+    # PACOTE DG-2 — emissor/responsável lido ESTRITAMENTE do SystemConfig
+    # (mesma fonte oficial do RGPD; ver `_get_company_legal_data`). A
+    # resolução via db.companies do processo/utilizador foi removida —
+    # injetava a empresa errada ("Power Real Estate") na Minuta.
+    # RGPD_ISSUER mantém-se como fallback.
+    empresa = await _get_company_legal_data()
+    empresa_nome = empresa["nome"]
+    empresa_nif = empresa["nif"]
+    empresa_morada = empresa["morada"]
+    empresa_email = empresa["email"]
+    empresa_contacto = empresa["contacto"]
 
     rendered = rendered.replace("{{NOME_CLIENTE}}", client_name)
     rendered = rendered.replace("{{NOME}}", client_name)
@@ -1026,6 +1049,9 @@ async def _get_rendered_minuta_text(
     rendered = rendered.replace("{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
     rendered = rendered.replace("{{MORADA_EMPRESA}}", empresa_morada)
     rendered = rendered.replace("{{CONTACTO_EMPRESA}}", empresa_contacto)
+    # PACOTE DG-2 — email oficial da empresa (disponível para templates
+    # customizados do admin; o template por defeito não o usa).
+    rendered = rendered.replace("{{EMAIL_EMPRESA}}", empresa_email)
     
     return rendered
 

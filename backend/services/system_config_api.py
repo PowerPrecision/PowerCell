@@ -388,6 +388,7 @@ CONFIG_FIELDS = {
                 label="Nome da Empresa",
                 type="text",
                 required=True,
+                help_text="Dados oficiais da empresa de intermediação de crédito — injetados no RGPD e na Minuta como {{NOME_EMPRESA}}",
             ),
             ConfigField(
                 key="company_subtitle",
@@ -395,16 +396,28 @@ CONFIG_FIELDS = {
                 type="text",
             ),
             ConfigField(
+                key="company_nif",
+                label="NIF da Empresa",
+                type="text",
+                help_text="NIF oficial da empresa — injetado no RGPD e na Minuta como {{NIF_EMPRESA}}",
+            ),
+            ConfigField(
                 key="company_address",
                 label="Morada da Empresa",
                 type="text",
-                help_text="Usada no template RGPD como {{MORADA_EMPRESA}}",
+                help_text="Morada oficial da empresa — injetada no RGPD e na Minuta como {{MORADA_EMPRESA}}",
+            ),
+            ConfigField(
+                key="company_email",
+                label="Email da Empresa",
+                type="text",
+                help_text="Email oficial da empresa — injetado no RGPD e na Minuta como {{EMAIL_EMPRESA}}",
             ),
             ConfigField(
                 key="company_phone",
-                label="Telefone/Email da Empresa",
+                label="Telefone da Empresa",
                 type="text",
-                help_text="Usada no template RGPD como {{CONTACTO_EMPRESA}}",
+                help_text="Telefone oficial da empresa — injetado no RGPD e na Minuta como {{CONTACTO_EMPRESA}}",
             ),
             ConfigField(
                 key="primary_color",
