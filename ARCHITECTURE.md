@@ -1512,12 +1512,12 @@ flowchart LR
     Service -->|"fetch + decrypt_sensitive_data"| Process["process.personal_data<br/>{nif, morada_fiscal, documento_id}"]
     Service -->|"build consent_data"| Consent["{nome, contribuinte,<br/>morada, ...}"]
     Consent --> Render["_get_rendered_rgpd_text<br/>(template + placeholders)"]
-    Render --> PDF["_generate_rgpd_pdf_bytes<br/>(reportlab Canvas A4)"]
+    Render --> PDF["_build_prefilled_rgpd_pdf<br/>(reportlab platypus A4<br/>3 páginas + rodapé)"]
     PDF --> Response["StreamingResponse<br/>application/pdf"]
     Service -.->|"audit"| Activity["activities<br/>'RGPD descarregado'"]
 ```
 
-- **Reutilização**: usa `_get_rendered_rgpd_text` e `_generate_rgpd_pdf_bytes` de `services/rgpd_service.py` (mesma pipeline dos PDFs assinados digitalmente).
+- **Reutilização**: usa `_get_rendered_rgpd_text` e `_get_rendered_minuta_text` de `services/rgpd_service.py` (mesma pipeline de placeholders dos PDFs assinados digitalmente); o builder é o `_build_prefilled_rgpd_pdf` de `services/rgpd_pdf.py` (reportlab platypus).
 - **Dados**: `consent_data` é construído a partir de `process.personal_data` (desencriptado via `decrypt_sensitive_data`), com fallback para strings vazias quando campos não existem.
 - **Auth**: `require_staff()` — o PDF expõe PII do cliente.
 - **Filename**: `RGPD_{safe_client_name}.pdf` (normalizado, sem acentos/caracteres especiais).
@@ -1650,13 +1650,28 @@ O template do RGPD é **dinâmico** (editado pelo admin via `SmartRichEditor` em
 
 O PDF é gerado com `reportlab.platypus` (`SimpleDocTemplate` + `Paragraph` + `Spacer` + `HRFlowable`), que suporta **quebras de página automáticas** — quando um Flowable não cabe na página atual, uma nova página é criada. Isto é essencial porque o RGPD tem 11 secções e pode ocupar várias páginas.
 
+**Pacote DP — estrutura multi-página e design profissional**: o documento divide-se em **3 partes fundamentais, cada uma a começar sempre em página própria** (`PageBreak` — equivalente reportlab do CSS `page-break-after: always` declarado em `_RGPD_PDF_HTML_STYLE`):
+
+1. **Cabeçalho corporativo + Dados do Cliente** — título + subtítulo legal com régua dupla ("double rule"), seguido do texto legal RGPD (incluindo "2. TITULAR DOS DADOS" com os dados pré-preenchidos). Se o template legal for longo, esta parte flui naturalmente para páginas adicionais;
+2. **Consentimentos** — opções A/B/C/D com checkboxes `☐ Autorizo / ☐ Não Autorizo` + bloco de assinatura estruturado. Começa SEMPRE em página própria;
+3. **Minuta de Exclusividade** + bloco de assinatura. Começa SEMPRE em página própria.
+
+O cabeçalho CSS `_RGPD_PDF_HTML_STYLE` é a **fonte única de verdade** do layout — `font-family: Helvetica, Arial, sans-serif`, margens generosas de 2,5cm, `line-height: 1,5` e `margin-top: 40px` do bloco de assinatura — lido por `_parse_css_margin_cm` / `_parse_css_line_height` / `_parse_css_signature_margin_top_cm` e aplicado aos estilos reportlab (CSS e layout nunca dessincronizam). Todas as páginas têm rodapé corporativo com régua fina, identificação do documento e numeração "Página X de Y" (padrão NumberedCanvas em `_make_numbered_canvas_class`).
+
 ```python
-# services/rgpd_pdf.py — _build_prefilled_rgpd_pdf
-doc = SimpleDocTemplate(buffer, pagesize=A4, ...)
-story = []
-for line in rgpd_text.split("\n"):
-    story.append(Paragraph(line, body_style))  # auto-paginates
-doc.build(story)  # SimpleDocTemplate handles page breaks
+# services/rgpd_pdf.py — _build_prefilled_rgpd_pdf (estrutura da story)
+story = [  # PARTE 1 — cabeçalho corporativo + texto legal (auto-paginado)
+    Paragraph("AUTORIZAÇÃO PARA TRATAMENTO DE DADOS PESSOAIS", title_style),
+    Paragraph("RGPD — Regulamento (UE) 2016/679", subtitle_style),
+    HRFlowable(...), HRFlowable(...),   # régua dupla
+]
+story.extend(_html_to_flowables(rgpd_text, ...))
+story.append(PageBreak())                       # PARTE 2 — Consentimentos
+story.extend(_build_signature_block(...))       # bloco estruturado
+story.append(PageBreak())                       # PARTE 3 — Minuta
+story.extend(_html_to_flowables(minuta_text, ...))
+story.extend(_build_signature_block(...))
+doc.build(story, canvasmaker=_make_numbered_canvas_class(...))  # rodapé
 ```
 
 A fonte **DejaVuSans** (TTF) é registada para suportar acentos portugueses (ã, ç, é) e o caractere Unicode `☐` (U+2610, checkbox vazia). Fallback para Helvetica se a fonte não estiver disponível.
@@ -1682,6 +1697,15 @@ consent_data = {
 
 A data e o local de assinatura **não** são pré-preenchidos. O placeholder `{{DATA_ASSINATURA}}` é substituído por `___/___/______` e o local por `___________________` — o cliente preenche à caneta no momento da assinatura.
 
+### Bloco de assinatura estruturado (Pacote DP)
+
+`_build_signature_block` (helper partilhado pelas páginas de Consentimentos e Minuta) garante que a data e a assinatura **nunca ficam coladas na mesma linha**:
+
+1. **"Local" e "Data" numa linha isolada** — tabela de 2 colunas sem bordos (Local à esquerda, Data à direita);
+2. **"Assinatura do Cliente" num bloco abaixo** — etiqueta a negrito, margem superior de 40px (≈1,06cm, lida do CSS — espaço físico para assinar à caneta) e linha visível de underscores com a legenda "(Assinar à caneta)".
+
+O texto legal do template ("Data: ___" / "Assinatura: ___" no fim da DECLARAÇÃO FINAL) é preservado tal como está — o bloco estruturado é adicional, para a assinatura física.
+
 ### Checkboxes vazias
 
 Os 4 pontos de consentimento (A/B/C/D) usam checkboxes **vazias** (`☐`) para o cliente picar fisicamente:
@@ -1692,6 +1716,8 @@ A) Autorizo o tratamento dos meus dados pessoais...
 ```
 
 O caractere `☐` (U+2610) é suportado pela fonte DejaVuSans. No fluxo de assinatura digital (`sign_rgpd`), a checkbox escolhida torna-se `☑` (U+2611) — mas no PDF pré-preenchido para assinatura manual, ambas ficam vazias.
+
+**Pacote DP — negrito real com a TTF**: a variante `DejaVuSans-Bold` é registada juntamente com o mapeamento de família (`registerFontFamily`). Antes, o markup `<b>`/`<strong>` era silenciosamente ignorado com a TTF (`tt2ps` não resolvia "DejaVuSans-Bold") — os títulos de secção saíam sem negrito. Sem o ficheiro Bold disponível, o mapeamento degrada graciosamente para a regular (sem quebrar a geração).
 
 ---
 

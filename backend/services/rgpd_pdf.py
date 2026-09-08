@@ -31,6 +31,26 @@ PACOTE FR-2 — Estética do PDF RGPD:
 - Títulos de secção / termos-chave RGPD (ex.: "RESPONSÁVEL PELO
   TRATAMENTO", "TITULAR DOS DADOS") são sempre convertidos em `<strong>`/
   `<b>` (negrito), mesmo quando o template de origem não os marca.
+
+PACOTE DP — Design profissional do PDF RGPD (estrutura multi-página):
+- CSS `_RGPD_PDF_HTML_STYLE` reforçado: font-family sans-serif limpa
+  (Helvetica/Arial), margens generosas de 2,5cm e line-height 1,5.
+- 3 partes fundamentais, cada uma a começar em página própria
+  (equivalente reportlab do CSS `page-break-after: always`):
+  1) Cabeçalho corporativo + texto legal RGPD (Dados do Cliente);
+  2) Consentimentos (Autorizo/Não Autorizo) + bloco de assinatura;
+  3) Minuta de Exclusividade + bloco de assinatura.
+  (Se o template legal for longo, a Parte 1 flui naturalmente para
+  páginas adicionais; as Partes 2 e 3 começam sempre em página própria.)
+- `_build_signature_block` (novo, partilhado RGPD+Minuta): "Local" e
+  "Data" numa linha isolada (tabela 2 colunas); "Assinatura do Cliente"
+  num bloco abaixo com linha visível e margem superior de 40px (lida do
+  CSS) para assinatura física à caneta.
+- Rodapé corporativo em todas as páginas: régua fina + título do
+  documento + numeração "Página X de Y" (padrão NumberedCanvas).
+- DejaVuSans-Bold registada com mapeamento de família — `<b>` passa a
+  renderizar negrito REAL (antes era silenciosamente ignorado com a
+  TTF, porque tt2ps não resolvia "DejaVuSans-Bold").
 """
 from __future__ import annotations
 
@@ -81,6 +101,56 @@ _PACOTE_DI_ALLOWED_TAGS = [
 _FONT_REGISTERED = False
 
 
+def _register_dejavu_bold_variant(pdfmetrics, regular_path: str) -> str:
+    """PACOTE DP — Regista a variante Bold e o mapeamento de família.
+
+    Sem isto, o markup `<b>`/`<strong>` era silenciosamente IGNORADO com
+    a TTF (tt2ps não resolvia "DejaVuSans-Bold") — os títulos de secção
+    e etiquetas saíam sem negrito. Sem Bold disponível, o mapeamento
+    degrada graciosamente para a regular (comportamento antigo).
+
+    Args:
+        pdfmetrics: módulo reportlab.pdfbase (já importado com sucesso).
+        regular_path: Caminho da DejaVuSans regular já registada.
+
+    Returns:
+        Nome da variante bold efectiva ("DejaVuSans-Bold" ou
+        "DejaVuSans" quando degrada para a regular).
+    """
+    from reportlab.pdfbase.ttfonts import TTFont
+
+    bold_name = "DejaVuSans"
+    bold_path = os.path.join(
+        os.path.dirname(regular_path), "DejaVuSans-Bold.ttf"
+    )
+    if os.path.exists(bold_path):
+        try:
+            pdfmetrics.registerFont(TTFont("DejaVuSans-Bold", bold_path))
+            bold_name = "DejaVuSans-Bold"
+        except Exception as bold_err:
+            logger.warning(
+                "PACOTE DP — Erro ao registar DejaVuSans-Bold %s: %s "
+                "(a usar só a regular)",
+                bold_path,
+                bold_err,
+            )
+    try:
+        pdfmetrics.registerFontFamily(
+            "DejaVuSans",
+            normal="DejaVuSans",
+            bold=bold_name,
+            italic="DejaVuSans",  # sem oblíqua no bundle padrão
+            boldItalic=bold_name,
+        )
+    except Exception as family_err:
+        logger.warning(
+            "PACOTE DP — Erro no mapeamento de família DejaVuSans: %s "
+            "(negrito/itálico podem não renderizar)",
+            family_err,
+        )
+    return bold_name
+
+
 def _ensure_font() -> None:
     """Regista DejaVuSans no reportlab (idempotente). Fallback Helvetica.
 
@@ -118,6 +188,9 @@ def _ensure_font() -> None:
             try:
                 pdfmetrics.registerFont(TTFont("DejaVuSans", path))
                 _FONT_REGISTERED = True
+                # PACOTE DP — variante Bold + mapeamento de família para
+                # `<b>` renderizar negrito REAL (ver helper).
+                _register_dejavu_bold_variant(pdfmetrics, path)
                 logger.info("PACOTE DL — DejaVuSans registada: %s", path)
                 return
             except Exception as e:
@@ -172,13 +245,28 @@ def _escape_xml(text) -> str:
 # ---------------------------------------------------------------------------
 _RGPD_PDF_HTML_STYLE = """
 <style>
+  /* PACOTE DP — Design profissional do PDF RGPD. Fonte única de verdade:
+     lido por _parse_css_margin_cm / _parse_css_line_height /
+     _parse_css_signature_margin_top_cm e aplicado aos estilos reportlab. */
   body {
-    margin: 2cm;
+    font-family: Helvetica, Arial, sans-serif;
+    margin: 2.5cm;             /* margens de página generosas */
     text-align: justify;
-    line-height: 1.5;
+    line-height: 1.5;          /* interlinha confortável */
+  }
+  /* 3 partes em páginas distintas — o builder insere PageBreak()
+     (equivalente reportlab) entre Dados do Cliente, Consentimentos e
+     Minuta de Exclusividade. */
+  .page {
+    page-break-after: always;
   }
   h1, h2, h3, h4, h5, h6, .section-title, strong, b {
     font-weight: bold;
+  }
+  /* Bloco de assinatura — linha visível com margem superior para o
+     cliente assinar fisicamente (40px ≈ 1,06cm). */
+  .signature-block .sig-line {
+    margin-top: 40px;
   }
 </style>
 """.strip()
@@ -202,10 +290,17 @@ _RGPD_PDF_BOLD_KEYWORDS = [
 
 
 def _parse_css_margin_cm(css: str, default_cm: float = 2.0) -> float:
-    """Lê o valor de `margin` do cabeçalho `<style>` (px/cm/mm/in) e
-    devolve-o em centímetros, para usar como margem lateral do PDF."""
+    r"""Lê o valor de `margin` do cabeçalho `<style>` (px/cm/mm/in) e
+    devolve-o em centímetros, para usar como margem lateral do PDF.
+
+    PACOTE DP — o lookahead negativo `(?![-\w])` exclui propriedades
+    compostas (`margin-top`, `margin-left`, ...) para que a margem da
+    página nunca seja lida da margem do bloco de assinatura.
+    """
     match = re.search(
-        r"margin\s*:\s*(\d+(?:\.\d+)?)\s*(px|cm|mm|in)?", css, re.IGNORECASE
+        r"margin(?![-\w])\s*:\s*(\d+(?:\.\d+)?)\s*(px|cm|mm|in)?",
+        css,
+        re.IGNORECASE,
     )
     if not match:
         return default_cm
@@ -228,6 +323,34 @@ def _parse_css_line_height(css: str, default: float = 1.5) -> float:
     if not match:
         return default
     return float(match.group(1))
+
+
+def _parse_css_signature_margin_top_cm(
+    css: str, default_px: float = 40.0
+) -> float:
+    """PACOTE DP — Lê o `margin-top` do bloco `.signature-block` do
+    cabeçalho `<style>` (px/cm/mm/in) e devolve-o em centímetros.
+
+    É o espaço físico reservado acima da linha de assinatura para o
+    cliente assinar à caneta (40px @ 96dpi ≈ 1,06cm).
+    """
+    match = re.search(
+        r"margin-top\s*:\s*(\d+(?:\.\d+)?)\s*(px|cm|mm|in)?",
+        css,
+        re.IGNORECASE,
+    )
+    if not match:
+        return round((default_px / 96.0) * 2.54, 2)
+    value = float(match.group(1))
+    unit = (match.group(2) or "px").lower()
+    if unit == "cm":
+        return value
+    if unit == "mm":
+        return round(value / 10.0, 2)
+    if unit == "in":
+        return round(value * 2.54, 2)
+    # px assumindo 96 DPI
+    return round((value / 96.0) * 2.54, 2)
 
 
 def _is_section_heading(line: str) -> bool:
@@ -609,11 +732,180 @@ def _html_to_flowables(html_text, styles, font_name, line_height_ratio=1.5):
     return flowables
 
 
+def _build_signature_block(
+    sig_style,
+    body_style,
+    avail_width_pt: float,
+    margin_top_cm: float,
+    sig_label: str = "Assinatura do Cliente",
+) -> list:
+    """PACOTE DP — Bloco de assinatura estruturado (reutilizável).
+
+    Equivalente reportlab de um bloco HTML `<table>`/flexbox (ver
+    `.signature-block` no CSS `_RGPD_PDF_HTML_STYLE`). Estrutura:
+
+    1. "Local" e "Data" numa LINHA ISOLADA — tabela de 2 colunas sem
+       bordos (Local à esquerda, Data à direita), nunca "coladas" à
+       assinatura nem a outro texto;
+    2. "Assinatura do Cliente" num BLOCO ABAIXO — etiqueta a negrito,
+       margem superior generosa (margin-top: 40px lido do CSS — espaço
+       físico para assinar à caneta) e linha visível de underscores.
+
+    Args:
+        sig_style: ParagraphStyle para Local/Data e etiqueta de assinatura.
+        body_style: ParagraphStyle base (para a legenda sob a linha).
+        avail_width_pt: Largura útil da página (pontos) para a tabela.
+        margin_top_cm: Margem superior do bloco (cm), lida do CSS.
+        sig_label: Etiqueta do bloco de assinatura.
+
+    Returns:
+        Lista de Flowables prontos a estender na story.
+    """
+    from reportlab.platypus import Paragraph, Spacer, Table, TableStyle
+    from reportlab.lib.units import cm
+    from reportlab.lib.enums import TA_RIGHT
+    from reportlab.lib.styles import ParagraphStyle
+    from reportlab.lib.colors import HexColor
+
+    flowables = []
+
+    # (1) "Local e Data" — linha isolada (tabela 2 colunas, sem bordos)
+    local_cell = Paragraph(f"Local: {_blank_line(35)}", sig_style)
+    data_style = ParagraphStyle(
+        "SigDateRight", parent=sig_style, alignment=TA_RIGHT
+    )
+    data_cell = Paragraph("Data: ___/___/______", data_style)
+    local_date_table = Table(
+        [[local_cell, data_cell]],
+        colWidths=[avail_width_pt * 0.62, avail_width_pt * 0.38],
+    )
+    local_date_table.setStyle(
+        TableStyle(
+            [
+                ("VALIGN", (0, 0), (-1, -1), "TOP"),
+                ("LEFTPADDING", (0, 0), (-1, -1), 0),
+                ("RIGHTPADDING", (0, 0), (-1, -1), 0),
+                ("TOPPADDING", (0, 0), (-1, -1), 0),
+                ("BOTTOMPADDING", (0, 0), (-1, -1), 0),
+            ]
+        )
+    )
+    flowables.append(local_date_table)
+
+    # (2) "Assinatura do Cliente" — bloco abaixo: margem superior
+    # (40px lida do CSS — espaço físico para assinar) + linha visível.
+    flowables.append(Spacer(1, 0.6 * cm))
+    flowables.append(Paragraph(f"<b>{_escape_xml(sig_label)}:</b>", sig_style))
+    flowables.append(Spacer(1, margin_top_cm * cm))
+    flowables.append(Paragraph(_blank_line(45), sig_style))
+    flowables.append(
+        Paragraph(
+            "(Assinar à caneta)",
+            ParagraphStyle(
+                "SigCaption",
+                parent=body_style,
+                fontSize=8,
+                textColor=HexColor("#666666"),
+                spaceBefore=2,
+            ),
+        )
+    )
+    return flowables
+
+
+def _make_numbered_canvas_class(
+    font_name: str,
+    x_left: float,
+    x_right: float,
+    y_footer: float,
+    doc_title: str,
+):
+    """PACOTE DP — Fábrica do canvas com rodapé corporativo numerado.
+
+    O total de páginas só é conhecido no fim — usa-se o padrão canónico
+    NumberedCanvas do reportlab: o estado de cada página é guardado em
+    showPage() e o rodapé é desenhado no save(), quando o total já é
+    conhecido. Régua fina + identificação do documento (esq.) +
+    numeração "Página X de Y" (dir.), abaixo da área de conteúdo
+    (margem inferior).
+
+    Args:
+        font_name: Nome da fonte registada (DejaVuSans ou Helvetica).
+        x_left: Coordenada x da margem esquerda (pontos).
+        x_right: Coordenada x da margem direita (pontos).
+        y_footer: Baseline do rodapé (pontos, a partir do fundo).
+        doc_title: Identificação do documento no rodapé (esquerda).
+
+    Returns:
+        Classe canvas a passar como `canvasmaker` ao `doc.build`.
+    """
+    from reportlab.pdfgen import canvas as pdfgen_canvas
+    from reportlab.lib.colors import HexColor
+
+    class _NumberedCanvas(pdfgen_canvas.Canvas):
+        """Canvas com rodapé corporativo e numeração de páginas."""
+
+        def __init__(self, *args, **kwargs):
+            pdfgen_canvas.Canvas.__init__(self, *args, **kwargs)
+            self._saved_page_states = []
+
+        def showPage(self):
+            self._saved_page_states.append(dict(self.__dict__))
+            self._startPage()
+
+        def save(self):
+            total = len(self._saved_page_states)
+            for state in self._saved_page_states:
+                self.__dict__.update(state)
+                self._draw_footer(total)
+                pdfgen_canvas.Canvas.showPage(self)
+            pdfgen_canvas.Canvas.save(self)
+
+        def _draw_footer(self, total: int):
+            self.saveState()
+            try:
+                self.setLineWidth(0.4)
+                self.setStrokeColor(HexColor("#BBBBBB"))
+                self.line(x_left, y_footer + 11, x_right, y_footer + 11)
+                self.setFont(font_name, 7)
+                self.setFillColor(HexColor("#777777"))
+                self.drawString(x_left, y_footer, doc_title)
+                self.drawRightString(
+                    x_right, y_footer, f"Página {self._pageNumber} de {total}"
+                )
+            finally:
+                self.restoreState()
+
+    return _NumberedCanvas
+
+
 def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: dict) -> bytes:
     """
-    PACOTE DG — Novo builder de PDF RGPD pré-preenchido para assinatura manual.
+    PACOTE DG — Builder de PDF RGPD pré-preenchido para assinatura manual.
 
     Usa `reportlab.platypus` (SimpleDocTemplate) para paginação automática.
+
+    PACOTE DP — Design profissional e estrutura multi-página:
+    - CSS embutido `_RGPD_PDF_HTML_STYLE` (fonte única de verdade):
+      margens generosas (2,5cm), line-height 1,5 e família sans-serif
+      limpa (Helvetica/Arial/DejaVuSans).
+    - 3 partes fundamentais, cada uma a começar em página própria
+      (equivalente reportlab de `page-break-after: always` — ver `.page`
+      no CSS):
+      * Parte 1 (pág. 1+) — Cabeçalho corporativo (título + subtítulo
+        legal + régua dupla) e texto legal RGPD com os Dados do Cliente
+        (secções "2. TITULAR DOS DADOS", "3. TIPO DE DOCUMENTO", etc.).
+        Se o template for longo, flui naturalmente para páginas extra.
+      * Parte 2 — Consentimentos (Autorizo/Não Autorizo) + bloco de
+        assinatura. Começa SEMPRE em página própria.
+      * Parte 3 — Minuta de Exclusividade + bloco de assinatura.
+        Começa SEMPRE em página própria.
+    - Bloco de assinatura estruturado (`_build_signature_block`):
+      "Local" e "Data" numa linha isolada; "Assinatura do Cliente" num
+      bloco abaixo com linha visível e margem superior de 40px (lida do
+      CSS) para assinatura física à caneta.
+    - Rodapé corporativo em todas as páginas (régua fina + título do
+      documento + "Página X de Y") via NumberedCanvas.
 
     - Template dinâmico (`rgpd_text`) é respeitado (11 secções do admin).
     - Campos em falta → linhas em branco "_____".
@@ -637,26 +929,35 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
             Paragraph,
             Spacer,
             HRFlowable,
+            PageBreak,
         )
         from reportlab.lib.styles import getSampleStyleSheet, ParagraphStyle
         from reportlab.lib.pagesizes import A4
         from reportlab.lib.units import cm
-        from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER, TA_LEFT
-        from reportlab.lib.colors import HexColor, black
+        from reportlab.lib.enums import TA_JUSTIFY, TA_CENTER
+        from reportlab.lib.colors import HexColor
     except ImportError:
         logger.error("PACOTE DG — reportlab não disponível")
         return b""
 
     _ensure_font()
+    # PACOTE DP — DejaVuSans (sans-serif limpa, com suporte Unicode para
+    # acentos PT + ☐ U+2610) é a fonte TTF efetivamente usada quando
+    # disponível; Helvetica é o fallback. Ambas honram a família
+    # "Helvetica, Arial, sans-serif" declarada no CSS.
     font_name = "DejaVuSans" if _FONT_REGISTERED else "Helvetica"
 
-    # PACOTE FR-2 — margens e "line-height" vêm do cabeçalho HTML/CSS
-    # `_RGPD_PDF_HTML_STYLE` (fonte única de verdade), em vez de valores
-    # hardcoded duplicados aqui e no CSS.
+    # PACOTE FR-2/DP — margens, "line-height" e a margem superior do bloco
+    # de assinatura vêm do cabeçalho HTML/CSS `_RGPD_PDF_HTML_STYLE` (fonte
+    # única de verdade), em vez de valores hardcoded duplicados no CSS.
     margin_cm = _parse_css_margin_cm(_RGPD_PDF_HTML_STYLE)
     line_height_ratio = _parse_css_line_height(_RGPD_PDF_HTML_STYLE)
+    sig_margin_top_cm = _parse_css_signature_margin_top_cm(_RGPD_PDF_HTML_STYLE)
     body_font_size = 9
     body_leading = round(body_font_size * line_height_ratio, 1)
+    # Largura útil da página (A4 − margens laterais) para a tabela do bloco
+    # de assinatura ("Local"/"Data").
+    avail_width_pt = A4[0] - 2 * margin_cm * cm
 
     buffer = io.BytesIO()
     doc = SimpleDocTemplate(
@@ -677,6 +978,15 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         fontSize=14,
         alignment=TA_CENTER,
         spaceAfter=6,
+    )
+    # PACOTE DP — subtítulo legal do cabeçalho corporativo (discreto,
+    # cinzento, centrado), logo abaixo do título principal.
+    subtitle_style = ParagraphStyle(
+        "Subtitle",
+        parent=title_style,
+        fontSize=10,
+        textColor=HexColor("#555555"),
+        spaceAfter=8,
     )
     body_style = ParagraphStyle(
         "Body",
@@ -700,10 +1010,10 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         "ConsentTitle",
         parent=body_style,
         fontName=font_name,
-        fontSize=body_font_size,
-        leading=body_leading,
-        spaceBefore=8,
-        spaceAfter=2,
+        fontSize=11,
+        leading=round(11 * line_height_ratio, 1),
+        spaceBefore=0,
+        spaceAfter=4,
     )
     checkbox_style = ParagraphStyle(
         "Checkbox",
@@ -725,24 +1035,30 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
 
     story = []
 
-    # 1. Título
+    # ==================================================================
+    # PACOTE DP — PARTE 1: CABEÇALHO CORPORATIVO + DADOS DO CLIENTE
+    # ==================================================================
+    # Cabeçalho corporativo: título centrado, subtítulo legal e régua
+    # dupla (grossa + fina) — o clássico "double rule" de documento
+    # corporativo. O texto legal RGPD (que contém os Dados do Cliente
+    # do titular — secções "2. TITULAR DOS DADOS" e
+    # "3. TIPO DE DOCUMENTO DE IDENTIFICAÇÃO") segue na mesma página.
     story.append(
         Paragraph(
             "AUTORIZAÇÃO PARA TRATAMENTO DE DADOS PESSOAIS", title_style
         )
     )
     story.append(
-        Paragraph(
-            "RGPD — Regulamento (UE) 2016/679",
-            ParagraphStyle(
-                "Subtitle", parent=title_style, fontSize=10, spaceAfter=8
-            ),
-        )
+        Paragraph("RGPD — Regulamento (UE) 2016/679", subtitle_style)
+    )
+    story.append(Spacer(1, 0.1 * cm))
+    story.append(
+        HRFlowable(width="100%", thickness=1.4, color=HexColor("#333333"))
     )
     story.append(
-        HRFlowable(width="100%", thickness=0.5, color=HexColor("#333333"))
+        HRFlowable(width="100%", thickness=0.4, color=HexColor("#333333"))
     )
-    story.append(Spacer(1, 0.4 * cm))
+    story.append(Spacer(1, 0.5 * cm))
 
     # 2. Renderizar o template dinâmico (respeita edição do admin)
     # O `rgpd_text` já tem placeholders substituídos por `_get_rendered_rgpd_text`.
@@ -764,15 +1080,26 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         )
         story.extend(rgpd_flowables)
 
-    story.append(Spacer(1, 0.6 * cm))
-    story.append(
-        HRFlowable(width="100%", thickness=0.5, color=HexColor("#333333"))
-    )
-    story.append(Spacer(1, 0.3 * cm))
+    # ==================================================================
+    # PACOTE DP — PARTE 2: CONSENTIMENTOS (página própria)
+    # ==================================================================
+    # Equivalente reportlab do CSS `page-break-after: always` (ver
+    # `.page` em `_RGPD_PDF_HTML_STYLE`): a secção de consentimentos
+    # NUNCA partilha página com o texto legal — começa sempre numa
+    # página nova, isolada.
+    story.append(PageBreak())
 
     # 3. Opções de consentimento A/B/C/D com checkboxes VAZIAS
     story.append(Paragraph("<b>CONSENTIMENTO</b>", consent_title_style))
-    story.append(Spacer(1, 0.2 * cm))
+    story.append(
+        HRFlowable(
+            width="30%",
+            thickness=0.5,
+            color=HexColor("#333333"),
+            hAlign="LEFT",
+        )
+    )
+    story.append(Spacer(1, 0.25 * cm))
 
     # PACOTE DL — ☐ = &#9744; (Unicode U+2610 BALLOT BOX). Vazio, NÃO pré-marcado.
     # PACOTE DL — se DejaVuSans não está registada, usar fallback ASCII [ ]
@@ -791,35 +1118,16 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
         story.append(Paragraph(checkbox_line, checkbox_style))
         story.append(Spacer(1, 0.3 * cm))
 
-    # 4. Secção de assinatura — LOCAL e DATA em branco (assinatura manual)
-    story.append(Spacer(1, 0.5 * cm))
-    story.append(
-        Paragraph(
-            f"Local: {_blank_line(35)} &nbsp;&nbsp;&nbsp; "
-            f"Data: ___/___/______",
-            sig_style,
-        )
-    )
-    story.append(Spacer(1, 1 * cm))
-
-    # Linha de assinatura
-    story.append(
-        Paragraph("Assinatura do Titular dos Dados:", sig_style)
-    )
-    story.append(Spacer(1, 0.8 * cm))
-    story.append(
-        HRFlowable(width="60%", thickness=0.5, color=black, hAlign="LEFT")
-    )
-    story.append(
-        Paragraph(
-            "(Assinar à caneta)",
-            ParagraphStyle(
-                "SigCaption",
-                parent=body_style,
-                fontSize=8,
-                textColor=HexColor("#666666"),
-                spaceBefore=2,
-            ),
+    # 4. PACOTE DP — Bloco de assinatura estruturado (ver
+    # `_build_signature_block`): "Local" e "Data" numa LINHA ISOLADA e
+    # "Assinatura do Cliente" num bloco abaixo, com linha visível e
+    # margem superior (margin-top: 40px do CSS) para assinatura física.
+    story.extend(
+        _build_signature_block(
+            sig_style=sig_style,
+            body_style=body_style,
+            avail_width_pt=avail_width_pt,
+            margin_top_cm=sig_margin_top_cm,
         )
     )
 
@@ -829,14 +1137,18 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
     # Após a assinatura do RGPD, insere-se uma quebra de página e a
     # Minuta de Exclusividade. O `minuta_text` é HTML (vindo do
     # SmartRichEditor/ReactQuill) — usa-se o mesmo helper `_html_to_flowables`.
+    # PACOTE DP — PARTE 3: começa sempre em página própria (page-break
+    # após os consentimentos) e usa o MESMO bloco de assinatura
+    # estruturado (`_build_signature_block`) — helper partilhado.
     # ------------------------------------------------------------------
     if minuta_text:
-        from reportlab.platypus import PageBreak
-        # PACOTE DI — Minuta de Exclusividade (nova página)
         story.append(PageBreak())
         story.append(Paragraph("MINUTA DE EXCLUSIVIDADE", title_style))
         story.append(
-            HRFlowable(width="100%", thickness=0.5, color=HexColor("#333333"))
+            HRFlowable(width="100%", thickness=1.4, color=HexColor("#333333"))
+        )
+        story.append(
+            HRFlowable(width="100%", thickness=0.4, color=HexColor("#333333"))
         )
         story.append(Spacer(1, 0.4 * cm))
         # Renderizar o texto da Minuta (mesma abordagem HTML→Flowables)
@@ -849,37 +1161,32 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
             minuta_text, minuta_styles, font_name, line_height_ratio
         )
         story.extend(minuta_flowables)
-        # Secção de assinatura da Minuta
-        story.append(Spacer(1, 0.5 * cm))
-        story.append(
-            Paragraph(
-                f"Local: {_blank_line(35)} &nbsp;&nbsp;&nbsp; "
-                f"Data: ___/___/______",
-                sig_style,
-            )
-        )
-        story.append(Spacer(1, 1 * cm))
-        story.append(
-            Paragraph("Assinatura do Titular dos Dados:", sig_style)
-        )
-        story.append(Spacer(1, 0.8 * cm))
-        story.append(
-            HRFlowable(width="60%", thickness=0.5, color=black, hAlign="LEFT")
-        )
-        story.append(
-            Paragraph(
-                "(Assinar à caneta)",
-                ParagraphStyle(
-                    "MinutaSigCaption",
-                    parent=body_style,
-                    fontSize=8,
-                    textColor=HexColor("#666666"),
-                    spaceBefore=2,
-                ),
+        # PACOTE DP — bloco de assinatura estruturado (mesma estrutura da
+        # página de consentimentos — helper partilhado).
+        story.extend(
+            _build_signature_block(
+                sig_style=sig_style,
+                body_style=body_style,
+                avail_width_pt=avail_width_pt,
+                margin_top_cm=sig_margin_top_cm,
             )
         )
 
-    doc.build(story)
+    # ------------------------------------------------------------------
+    # PACOTE DP — Rodapé corporativo com numeração ("Página X de Y")
+    # ------------------------------------------------------------------
+    # Fábrica de canvas (padrão NumberedCanvas — ver docstring do helper):
+    # régua fina + identificação do documento + numeração em todas as
+    # páginas, abaixo da área de conteúdo (margem inferior de 2,5cm).
+    numbered_canvas = _make_numbered_canvas_class(
+        font_name=font_name,
+        x_left=margin_cm * cm,
+        x_right=A4[0] - margin_cm * cm,
+        y_footer=1.3 * cm,
+        doc_title="RGPD — Autorização para Tratamento de Dados Pessoais",
+    )
+
+    doc.build(story, canvasmaker=numbered_canvas)
     return buffer.getvalue()
 
 
