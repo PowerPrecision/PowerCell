@@ -417,6 +417,67 @@ async def get_job_status(job_id: str) -> Optional[Dict[str, Any]]:
 
 
 # ====================================================================
+# PACOTE BH — TAREFAS DE EMAIL (registo no worker ARQ)
+# ====================================================================
+# BUGFIX (E2E, Set 2026 — email de boas-vindas ausente): o
+# `services/task_queue.py` enfileirava `send_registration_email_task` e
+# `send_email_task` no ARQ/Redis, mas NENHUMA das funções estava definida
+# ou registada em consumidor algum — os jobs ficavam eternamente na fila
+# (o `arq worker.config.WorkerSettings` não as tinha em `functions`, e o
+# worker de produção `python worker.py` processa a fila Mongo, não a ARQ).
+# Os fluxos críticos passaram a enviar DIRECTO primeiro
+# (`services/client_portal_email.py::deliver_registration_email`), mas a
+# fila ARQ continua a ser usada como retry — e agora passa a ter handler.
+
+async def send_registration_email_task(
+    ctx: Dict,
+    *,
+    client_email: str,
+    client_name: str,
+    portal_access_code: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Handler ARQ do email de boas-vindas/acesso ao Portal (retry de última
+    esperança após falha do envio directo). Assinatura compatível com
+    `task_queue.send_registration_email(**kwargs)`.
+    """
+    from services.client_portal_email import deliver_registration_email
+
+    sent = await deliver_registration_email(
+        client_email=client_email,
+        client_name=client_name,
+        portal_access_code=portal_access_code,
+        client_id=None,
+    )
+    return {"sent": bool(sent)}
+
+
+async def send_email_task(
+    ctx: Dict,
+    *,
+    to_email: str,
+    subject: str,
+    body: str,
+    html_body: Optional[str] = None,
+) -> Dict[str, Any]:
+    """
+    Handler ARQ do envio genérico de email (retry após falha do envio
+    directo). Assinatura compatível com `task_queue.send_email`.
+    """
+    from services.notification_service import send_notification_with_preference_check
+
+    sent = await send_notification_with_preference_check(
+        to_email=to_email,
+        subject=subject,
+        body=body,
+        html_body=html_body,
+        notification_type="urgent",
+        is_urgent=True,
+    )
+    return {"sent": bool(sent)}
+
+
+# ====================================================================
 # REGISTAR TAREFAS NO WORKER
 # ====================================================================
 
@@ -425,4 +486,6 @@ TASK_FUNCTIONS = [
     analyze_document_task,
     aggregate_and_save_task,
     cleanup_expired_sessions_task,
+    send_registration_email_task,
+    send_email_task,
 ]

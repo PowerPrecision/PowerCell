@@ -1465,8 +1465,10 @@ flowchart TD
     Client -->|"2. PUT direto para S3"| S3["AWS S3<br/>(pasta Index)"]
     Client -->|"3. POST /portal/confirm-upload<br/>{file_key, category, document_id}"| Backend2["run_confirm_portal_upload"]
     Backend2 -->|"verifica S3 file_exists"| S3
-    Backend2 -->|"$set: status=RECEIVED<br/>$push: attached_files[+file_entry]"| DB[(MongoDB<br/>documents)]
-    DB -->|"attached_files[]"| PortalStatus["GET /portal/status<br/>→ frontend mostra lista"]
+    Backend2 -->|"$push: attached_files[+file_entry]"| Counts["apply_portal_request_upload<br/>(document_portal_counts)"]
+    Counts -->|"len(attached_files) >= expected_count<br/>→ $set status=RECEIVED"| DB[(MongoDB<br/>documents)]
+    Counts -->|"incompleto → mantém REQUESTED<br/>+ uploaded_count"| DB
+    DB -->|"attached_files[] + uploaded_count/expected_count"| PortalStatus["GET /portal/status<br/>→ frontend mostra lista"]
 ```
 
 ### Lógica de Append (`attached_files`)
@@ -1474,7 +1476,8 @@ flowchart TD
 Cada documento pedido (REQUESTED) tem um array `attached_files` que acumula todos os ficheiros carregados pelo cliente para essa categoria:
 
 ```python
-# services/portal_upload_ops.py — run_confirm_portal_upload
+# services/document_portal_counts.py — apply_portal_request_upload
+# (chamado por portal_upload_ops e document_portal_fulfill)
 file_entry = {
     "file_id": str(uuid.uuid4()),
     "filename": original_filename,
@@ -1484,10 +1487,14 @@ file_entry = {
     "uploaded_at": now,
     "uploaded_by": "portal_client",
 }
+# 1) $push do ficheiro + $set dos campos neutros (SEM status)
 await db.documents.update_one(match_q, {
-    "$set": {"status": "RECEIVED", ...},  # status + top-level fields (backward compat)
+    "$set": {**neutral_fields, "updated_at": now},
     "$push": {"attached_files": file_entry},  # APPEND — nunca replace
 })
+# 2) Reconta e decide o status pela QUANTIDADE pedida
+#    uploaded_count >= expected_count → $set status=RECEIVED
+#    senão → mantém REQUESTED/PENDING (+ $set uploaded_count)
 ```
 
 Os campos top-level (`filename`, `s3_path`, `file_size`) são atualizados para refletir o upload mais recente (backward compat com serializers que leem estes campos), mas o array `attached_files` preserva o histórico completo de todos os uploads. O mesmo padrão aplica-se a `fulfill_portal_requests_on_staff_upload` (`document_portal_fulfill.py`) para uploads do staff.
@@ -2169,3 +2176,29 @@ Validação: `testing_agent_v3_fork` (iteration_8.json) — 0 problemas crítico
 
 
 
+
+## Regras de Negócio do Onboarding — Pacote BH (Set 2026, E2E fixes)
+
+Testes E2E revelaram 5 bugs críticos de regras de negócio e segurança. As regras canónicas (todas com testes em `tests/unit/test_e2e_business_logic_fixes.py`):
+
+### 1. Entrega do email de boas-vindas — envio DIRECTO prioritário
+
+`services/client_portal_email.py::deliver_registration_email` é a única porta de saída do email de boas-vindas/acesso ao Portal. Ordem canónica: (1) envio directo (`send_registration_confirmation`); (2) em falha real, enfileira na task queue ARQ para retry. **Nunca** confiar primeiro na fila ARQ: o worker de produção é `python worker.py` (loop próprio da fila Mongo por `task_type`) — o worker ARQ (`arq worker.config.WorkerSettings`) não é lançado pelo render.yaml e as funções `send_registration_email_task`/`send_email_task` (agora registadas em `worker/config.py` por segurança futura) eram enfileiradas sem consumidor — o `job_id` devolvido silenciava o fallback e o email perdia-se. Fluxos corrigidos: criação staff (`process_create.py`), `POST /clients` (`client_crud.py`) e registo público (`public_registration.py`).
+
+Background tasks fire-and-forget usam `services/background_tasks.py::spawn_background_task` (referência forte — `asyncio.create_task` puro pode ser recolhido pelo GC a meio da execução).
+
+### 2. Notificações de processo — estritamente para os atribuídos
+
+`realtime_notifications.py::_collect_process_assignee_ids` centraliza os destinatários: campos de atribuição de consultor/intermediário/indexador (singulares e plurais). `notify_process_status_change` e `notify_process_update(action="assigned")` enviam o payload apenas a esses user_ids (menos o autor) — **nunca** expandem para admin/CEO/diretor (era o broadcast indevido: todos os admins viam cada atribuição/mudança de fase). A visão global da gestão continua nos dashboards/Kanban; os emails de atribuição (`process_assignment.py`, `process_staff_assignment.py`) já eram dirigidos e mantêm-se.
+
+### 3. Quantidade por pedido do Portal — `expected_count` vs `uploaded_count`
+
+`services/document_portal_counts.py::apply_portal_request_upload` (usado pelo upload do cliente E pelo fulfil de uploads da equipa): um pedido só passa a `RECEIVED` quando `len(attached_files) >= expected_count`. A quantidade vem do campo opcional `quantity` do item da checklist SystemConfig (`mandatory_documents`/`optional_documents`), gravada como `expected_count` no pedido; pedidos legados sem o campo degradam para 1 (comportamento anterior preservado). Uploads parciais mantêm o pedido `REQUESTED/PENDING` (+ `uploaded_count`) — a checklist de onboarding (`is_mandatory_checklist_complete`) e o email de "documentação completa" (`check_and_notify_documents_complete`) só disparam quando TODOS os pedidos fecham a contagem. `serialize_portal_document` expõe `uploaded_count`/`expected_count` para progresso na UI.
+
+### 4. Transição dinâmica de fases — lida do workflow configurado
+
+`process_assignment.py::_resolve_dynamic_indexer_status`: `assign_to_indexer(update_status=True)` calcula a fase alvo consultando `workflow_statuses` (ordenado por `order`) — pre_registo/lead → 1ª fase real do Kanban; caso contrário → próxima fase sequencial (`compute_next_workflow_status` do `process_indexing`); última fase mantém-se. **Nunca** gravar strings de nomes de fases hardcoded (o antigo `status="fase_documental"` regredia processos avançados e quebrava ao renomear fases na configuração). O auto-avanço do Portal (`portal_onboarding_advance.py`) já era dinâmico e mantém-se. `fila_espera` (sem indexador disponível) é um estado de sistema da waitlist, não uma fase do workflow — mantém-se.
+
+### 5. Visibilidade de documentos pré-indexação — INDEX/ADMIN/atribuídos
+
+`services/document_visibility.py::assert_can_view_process_documents` (guarda aplicada em `routes/documents.py`): enquanto o processo não estiver `is_indexed=True`, os documentos SÓ são visíveis para perfis INDEX (`indexacao`/`index`) e ADMIN, ou para utilizadores atribuídos ao processo (consultor/intermediário/indexador) — os restantes perfis (ex.: consultores não atribuídos) recebem **403 Forbidden**. Endpoints protegidos: `GET /client/{id}/files`, `GET /client/{id}/download`, `GET /process/{id}`, `GET /metadata/{id}`, `GET /portal-requests/{id}`, `POST /search` (com `process_id`). Após `mark-indexed` (`process_indexing.py` define `is_indexed=True`), a visibilidade volta ao normal. Os downloads genéricos por path (`/download-url/{path}`, `/proxy/{path}`) mantêm `require_staff` + âmbito da raiz de documentos (controle IDOR/path-scope pré-existente).

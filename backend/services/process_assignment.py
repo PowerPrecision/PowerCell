@@ -32,6 +32,71 @@ INDEXER_INACTIVE_STATUSES = set(INACTIVE_STATUSES) | {
 }
 
 
+# ==== BUGFIX (E2E, Set 2026 — transição dinâmica do workflow) ====
+# Estados que NÃO são fases reais de trabalho do Kanban: o auto-avanço e a
+# atribuição de indexador devem saltá-los ao calcular a fase alvo dinâmica.
+_WORKFLOW_START_EXCLUDED = set(INACTIVE_STATUSES) | {
+    "pre_registo", "fila_espera", "recusado", "lead",
+}
+
+
+async def _resolve_dynamic_indexer_status(process: dict) -> Optional[str]:
+    """
+    Calcula a fase alvo do `assign_to_indexer(update_status=True)` consultando
+    o WORKFLOW configurado (coleção `workflow_statuses`, ordenada por `order`)
+    — nunca por strings hardcoded de nomes de fases.
+
+    BUGFIX (E2E — transição do Portal, Set 2026): antes, atribuir um
+    indexador forçava SEMPRE `status="fase_documental"` (string hardcoded) —
+    um processo numa fase avançada REGREDIA para a fase documental, e o
+    fluxo quebrava por completo se o nome da fase mudasse na configuração.
+
+    Regra dinâmica (espelha `compute_next_workflow_status` do
+    `process_indexing` e o auto-avanço do `portal_onboarding_advance`):
+    1. Processo em pre_registo/lead (status vazio) → 1ª fase REAL do Kanban
+       (1º workflow_status não excluído).
+    2. Caso contrário → PRÓXIMA fase sequencial do workflow a partir da
+       atual; se a atual é a última, mantém-se (não há salto).
+    3. Status atual fora da pipeline (config mudou) → 1ª fase real.
+
+    Returns:
+        Nome da fase alvo, ou None se não houver workflow configurado
+        (o processo mantém o status actual — nunca regressa a hardcoded).
+    """
+    from services.process_indexing import (
+        compute_next_workflow_status,
+        load_workflow_status_pipeline,
+    )
+
+    current_status = process.get("status")
+    pipeline = await load_workflow_status_pipeline()
+    if not pipeline:
+        logger.warning(
+            "[ASSIGN-INDEXER][DW] workflow_statuses vazio — processo mantém "
+            f"status actual ({current_status!r}) em vez de fase hardcoded."
+        )
+        return current_status
+
+    # 1) Lead / pré-registo / sem status → 1ª fase real do Kanban
+    if current_status in (None, "", "pre_registo", "lead"):
+        for name in pipeline:
+            if name and name not in _WORKFLOW_START_EXCLUDED:
+                return name
+        # Fallback: 1ª fase que não seja pre_registo
+        for name in pipeline:
+            if name and name != "pre_registo":
+                return name
+        return current_status
+
+    # 2) Próxima fase sequencial do workflow (a partir da actual)
+    next_status = compute_next_workflow_status(current_status, pipeline)
+    if next_status:
+        return next_status
+
+    # 3) Última fase da pipeline — mantém-se
+    return current_status
+
+
 # ==== VALIDAÇÃO DE ATRIBUIÇÃO ====
 
 async def validate_assignment_user(user_id: str) -> Tuple[bool, Optional[dict], str]:
@@ -413,8 +478,14 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
        - O status muda para 'fila_espera' (aguarda vaga).
 
     PACOTE DB — parâmetro `update_status`:
-    - Quando True (default, retrocompatível): o status é atualizado para
-      'fase_documental' (indexador disponível) ou 'fila_espera' (sem vaga).
+    - Quando True (default, retrocompatível): o status é atualizado para a
+      fase alvo calculada DINAMICAMENTE a partir do workflow configurado
+      (`_resolve_dynamic_indexer_status`: próxima fase sequencial, ou 1ª
+      fase real quando o processo vem de pre_registo/lead) — BUGFIX (E2E,
+      Set 2026): antes forçava sempre a string hardcoded 'fase_documental',
+      o que regredia processos avançados e quebrava se os nomes das fases
+      mudassem. Sem indexadores disponíveis mantém 'fila_espera' (estado
+      de sistema da fila — não é uma fase do workflow).
     - Quando False: o status do processo NÃO é alterado em NENHUM cenário.
       O indexador é atribuído se disponível (cenário 5), mas o processo
       mantém o status atual (ex.: 1ª fase real do Kanban definida na criação).
@@ -586,7 +657,13 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
         "updated_at": now,
     }
     if update_status:
-        update_data["status"] = "fase_documental"
+        # BUGFIX (E2E — transição dinâmica, Set 2026): fase alvo lida do
+        # workflow configurado (próxima fase sequencial / 1ª fase real)
+        # em vez da string hardcoded "fase_documental".
+        target_status = await _resolve_dynamic_indexer_status(process)
+        if target_status:
+            update_data["status"] = target_status
+            update_data["workflow_step"] = target_status
 
     result = await db.processes.update_one(
         {"id": process_id},
@@ -714,7 +791,9 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
     return True, {
         "assigned_indexacao_id": chosen["id"],
         "indexacao_name": chosen["name"],
-        "status": "fase_documental",
+        # BUGFIX (E2E — transição dinâmica): reporta a fase REAL aplicada
+        # (dinâmica do workflow) em vez da string hardcoded "fase_documental".
+        "status": update_data.get("status"),
         "assigned": True,
         "indexer_active_count": chosen["active_count"] + 1,
         "indexers_available": len(available_indexers),

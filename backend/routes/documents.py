@@ -127,6 +127,9 @@ from services.document_queries import (
     run_search_documents,
     run_get_all_categories,
 )
+# BUGFIX (E2E — segurança de visibilidade de documentos, Set 2026):
+# guarda de permissões de LEITURA enquanto o processo não está indexado.
+from services.document_visibility import assert_can_view_process_documents
 from services.document_expiry_crud import (
     EXPIRY_WARNING_DAYS,
     DOCUMENT_TYPES,
@@ -183,6 +186,9 @@ async def list_client_files(
     Suporta múltiplos tipos de ID:
     - ID de processo (procura em processes por "id")
     - ID de cliente (procura em clients por "id", depois em processes por "client_id")
+    
+    BUGFIX (E2E — segurança, Set 2026): documentos de processo NÃO indexado
+    só são visíveis para INDEX/ADMIN/utilizadores atribuídos ao processo.
     """
     process, effective_id = await resolve_process_from_flexible_id(
         client_id,
@@ -197,6 +203,8 @@ async def list_client_files(
             return {"files": {}, "categories": []}
         raise HTTPException(status_code=404, detail=ERROR_CLIENT_NOT_FOUND)
 
+    # ── Guarda de visibilidade (pré-indexação) ──
+    await assert_can_view_process_documents(user, process)
     client_name = process.get("client_name", DEFAULT_CLIENT_NAME)
     second_client_name = extract_second_client_name(process)
     s3_folder = process.get("s3_folder")
@@ -474,7 +482,20 @@ async def get_download_url(
     file_path: str,
     user: dict = Depends(get_current_user)
 ):
-    """Gera um URL temporário para download de um ficheiro."""
+    """Gera um URL temporário para download de um ficheiro.
+
+    BUGFIX (E2E — segurança, Set 2026): aplica a guarda de visibilidade
+    pré-indexação (INDEX/ADMIN/atribuídos) antes de gerar o URL.
+    """
+    process, _ = await resolve_process_from_flexible_id(
+        client_id,
+        log_prefix="[DOWNLOAD-GUARD]",
+        allow_client_without_process=True,
+        raise_on_client_without_process=False,
+    )
+    if process is not None:
+        await assert_can_view_process_documents(user, process)
+    # Cliente sem processo: o service lança o 404 com o detail próprio.
     return await run_get_download_url(client_id, file_path)
 
 
@@ -719,7 +740,7 @@ async def categorize_all_documents(
 
 
 
-@router.get("/process/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.get("/process/{process_id}", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def get_process_documents(
     process_id: str,
     user: dict = Depends(get_current_user)
@@ -727,12 +748,18 @@ async def get_process_documents(
     """
     Obter lista simples de documentos de um processo.
     Usado pelo modal de envio de documentação para balcões.
+
+    BUGFIX (E2E — segurança, Set 2026): documentos de processo NÃO indexado
+    só são visíveis para INDEX/ADMIN/utilizadores atribuídos ao processo.
     """
+    from services.document_visibility import assert_can_view_process_documents_by_id
+
+    await assert_can_view_process_documents_by_id(user, process_id)
     return await run_get_process_documents(process_id)
 
 
 
-@router.get("/metadata/{process_id}", responses={404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
+@router.get("/metadata/{process_id}", responses={403: HTTP_403_RESPONSE, 404: HTTP_404_RESPONSE, 500: HTTP_500_RESPONSE})
 async def get_document_metadata(
     process_id: str,
     user: dict = Depends(get_current_user)
@@ -740,17 +767,31 @@ async def get_document_metadata(
     """
     Obter metadados de todos os documentos de um processo.
     Inclui categorização IA se disponível.
+
+    BUGFIX (E2E — segurança, Set 2026): metadados (+ presigned URLs) de
+    processo NÃO indexado só são visíveis para INDEX/ADMIN/atribuídos.
     """
+    from services.document_visibility import assert_can_view_process_documents_by_id
+
+    await assert_can_view_process_documents_by_id(user, process_id)
     return await run_get_document_metadata(process_id)
 
 
 
-@router.post("/search", responses={500: HTTP_500_RESPONSE})
+@router.post("/search", responses={403: HTTP_403_RESPONSE, 500: HTTP_500_RESPONSE})
 async def search_documents(
     request: DocumentSearchRequest,
     user: dict = Depends(get_current_user)
 ):
-    """Pesquisar documentos por conteúdo."""
+    """Pesquisar documentos por conteúdo.
+
+    BUGFIX (E2E — segurança, Set 2026): quando a pesquisa é âmbito de um
+    processo ainda não indexado, aplica a mesma guarda de visibilidade.
+    """
+    if request.process_id:
+        from services.document_visibility import assert_can_view_process_documents_by_id
+
+        await assert_can_view_process_documents_by_id(user, request.process_id)
     return await run_search_documents(request)
 
 
@@ -1078,7 +1119,15 @@ async def get_portal_document_requests(
     """
     Lista todos os pedidos de documentos do portal para um processo.
     Inclui docs com status REQUESTED, PENDING, UPLOADED, RECEIVED.
+
+    BUGFIX (E2E — segurança de visibilidade, Set 2026): os pedidos expõem
+    os ficheiros submetidos pelo cliente (attached_files com filenames e
+    paths S3) — processo NÃO indexado fica restrito a INDEX/ADMIN/atribuídos
+    (403 para os restantes perfis, ex. consultores não atribuídos).
     """
+    from services.document_visibility import assert_can_view_process_documents_by_id
+
+    await assert_can_view_process_documents_by_id(user, process_id)
     return await run_get_portal_document_requests(process_id)
 
 

@@ -209,7 +209,6 @@ async def fulfill_portal_requests_on_staff_upload(
     user_name = (user or {}).get("name") or "Equipa"
 
     update_fields = {
-        "status": "RECEIVED",
         "filename": filename,
         "original_filename": filename,
         "uploaded_at": now,
@@ -247,27 +246,36 @@ async def fulfill_portal_requests_on_staff_upload(
 
     # Match directo por document_id (pedido específico)
     if document_id:
-        result = await db.documents.update_one(
+        # BUGFIX (E2E — lógica de quantidade, Set 2026): o status RECEIVED
+        # passa a ser decidido pela CONTAGEM (len(attached_files) >=
+        # expected_count) — ver `document_portal_counts`. Antes o 1º upload
+        # da equipa marcava logo o pedido como concluído, mesmo quando o
+        # sistema pedia N ficheiros (ex.: 3 recibos de vencimento).
+        from services.document_portal_counts import apply_portal_request_upload
+
+        progress = await apply_portal_request_upload(
             {
                 "id": document_id,
                 "process_id": process_id,
                 "status": {"$in": list(_PENDING)},
             },
-            {
-                "$set": {
-                    **update_fields,
-                    "document_id": linked_document_id or document_id,
-                },
-                # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
-                "$push": {"attached_files": file_entry},
-            },
+            set_fields={**update_fields, "document_id": linked_document_id or document_id},
+            file_entry=file_entry,
+            now=now,
         )
-        if result.modified_count:
+        if progress.get("matched"):
             logger.info(
-                f"[PORTAL-FULFILL] REQUESTED→RECEIVED (by id) {document_id} "
-                f"process={process_id}"
+                f"[PORTAL-FULFILL] REQUESTED→{'RECEIVED' if progress.get('completed') else 'PARCIAL'} "
+                f"(by id) {document_id} process={process_id} "
+                f"({progress.get('uploaded_count')}/{progress.get('expected_count')})"
             )
-            return {"fulfilled": 1, "document_ids": [document_id]}
+            return {
+                "fulfilled": 1 if progress.get("completed") else 0,
+                "document_ids": [document_id],
+                "partial": not progress.get("completed"),
+                "uploaded_count": progress.get("uploaded_count"),
+                "expected_count": progress.get("expected_count"),
+            }
 
     pending = await db.documents.find(
         {
@@ -302,22 +310,23 @@ async def fulfill_portal_requests_on_staff_upload(
     if not doc_id:
         return {"fulfilled": 0, "document_ids": []}
 
-    result = await db.documents.update_one(
+    # BUGFIX (E2E — lógica de quantidade, Set 2026): mesmo no matching por
+    # categoria/label, o pedido só fica RECEIVED quando a contagem de
+    # ficheiros anexados atingir a quantidade pedida (expected_count).
+    from services.document_portal_counts import apply_portal_request_upload
+
+    progress = await apply_portal_request_upload(
         {"id": doc_id, "process_id": process_id, "status": {"$in": list(_PENDING)}},
-        {
-            "$set": {
-                **update_fields,
-                "document_id": linked_document_id or doc_id,
-            },
-            # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
-            "$push": {"attached_files": file_entry},
-        },
+        set_fields={**update_fields, "document_id": linked_document_id or doc_id},
+        file_entry=file_entry,
+        now=now,
     )
-    if result.modified_count:
+    if progress.get("matched"):
         logger.info(
-            f"[PORTAL-FULFILL] REQUESTED→RECEIVED {doc_id} "
-            f"cat={category!r} file={filename!r} score={best_score} "
-            f"process={process_id}"
+            f"[PORTAL-FULFILL] REQUESTED→{'RECEIVED' if progress.get('completed') else 'PARCIAL'} "
+            f"{doc_id} cat={category!r} file={filename!r} score={best_score} "
+            f"process={process_id} "
+            f"({progress.get('uploaded_count')}/{progress.get('expected_count')})"
         )
         try:
             from services.portal_documents_notify import check_and_notify_documents_complete
@@ -327,6 +336,12 @@ async def fulfill_portal_requests_on_staff_upload(
             await check_and_notify_documents_complete(process_id, company_id)
         except Exception as e:
             logger.warning(f"[PORTAL-FULFILL] notify complete failed: {e}")
-        return {"fulfilled": 1, "document_ids": [doc_id]}
+        return {
+            "fulfilled": 1 if progress.get("completed") else 0,
+            "document_ids": [doc_id],
+            "partial": not progress.get("completed"),
+            "uploaded_count": progress.get("uploaded_count"),
+            "expected_count": progress.get("expected_count"),
+        }
 
     return {"fulfilled": 0, "document_ids": []}

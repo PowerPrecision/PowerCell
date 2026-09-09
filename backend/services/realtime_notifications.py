@@ -245,22 +245,13 @@ async def notify_process_update(
         message = f"O processo de {client_name} foi actualizado"
         event_type = WSEventType.PROCESS_UPDATED
     
-    # Notificar utilizadores atribuídos ao processo
-    users_to_notify = set()
-    
-    if process.get("consultor_id"):
-        users_to_notify.add(process["consultor_id"])
-    if process.get("mediador_id"):
-        users_to_notify.add(process["mediador_id"])
-    
-    from services.role_query import deep_role_in_filter
-    admins = await db.users.find(
-        {"$and": [deep_role_in_filter(["admin", "ceo"]), {"is_active": {"$ne": False}}]},
-        {"id": 1, "_id": 0}
-    ).to_list(100)
-    
-    for admin in admins:
-        users_to_notify.add(admin["id"])
+    # BUGFIX (E2E — privacidade das notificações, Set 2026): a notificação
+    # (in-app) é enviada ESTRITAMENTE para os utilizadores atribuídos ao
+    # processo. Antes expandia para TODOS os admin/CEO — a notificação de
+    # atribuição aparecia a todos os admins em vez de apenas a quem o
+    # processo foi atribuído. A sincronização do Kanban continua a ser
+    # feita pelo delta dedicado (broadcast_process_delta), não por aqui.
+    users_to_notify = _collect_process_assignee_ids(process)
     
     # Enviar notificações
     for user_id in users_to_notify:
@@ -273,7 +264,8 @@ async def notify_process_update(
             process_id=process_id
         )
     
-    # Broadcast evento WebSocket
+    # Broadcast evento WebSocket (sincronização de UI — payload leve, sem
+    # dados sensíveis; o sino/notificações continua estritamente dirigido)
     await manager.broadcast(create_ws_message(
         event_type,
         {
@@ -284,6 +276,30 @@ async def notify_process_update(
             "details": details
         }
     ))
+
+
+def _collect_process_assignee_ids(process: dict) -> set:
+    """
+    IDs únicos de TODOS os utilizadores atribuídos ao processo.
+
+    BUGFIX (E2E — privacidade das notificações, Set 2026): centraliza o
+    destinatário das notificações de processo — ESTRITAMENTE quem está
+    atribuído (consultor/intermediário/indexador, campos singulares e
+    plurais). Substitui a expansão indiscriminada para admin/CEO/diretor
+    que fazia a notificação de atribuição aparecer a todos os admins.
+    """
+    raw = []
+    # Consultor (singular legado + assign explícito + plural)
+    raw.append(process.get("consultor_id"))
+    raw.append(process.get("assigned_consultor_id"))
+    raw += (process.get("assigned_consultor_ids") or [])
+    # Intermediário/mediador (idem)
+    raw.append(process.get("mediador_id"))
+    raw.append(process.get("assigned_mediador_id"))
+    raw += (process.get("assigned_mediador_ids") or [])
+    # Indexador atribuído
+    raw.append(process.get("assigned_indexacao_id"))
+    return {uid for uid in raw if uid}
 
 
 async def notify_deadline_reminder(deadline: dict, minutes_before: int = 30):
@@ -354,26 +370,14 @@ async def notify_process_status_change(
     message = f"O processo de {client_name} avançou para {new_status_label}"
     
     # Determinar quem notificar
-    users_to_notify = set()
-    
-    # Consultor e Mediador atribuídos
-    if process.get("consultor_id"):
-        users_to_notify.add(process["consultor_id"])
-    if process.get("assigned_consultor_id"):
-        users_to_notify.add(process["assigned_consultor_id"])
-    if process.get("mediador_id"):
-        users_to_notify.add(process["mediador_id"])
-    if process.get("assigned_mediador_id"):
-        users_to_notify.add(process["assigned_mediador_id"])
-    
-    from services.role_query import deep_role_in_filter
-    admins = await db.users.find(
-        {"$and": [deep_role_in_filter(["admin", "ceo", "diretor"]), {"is_active": {"$ne": False}}]},
-        {"id": 1, "_id": 0}
-    ).to_list(100)
-    
-    for admin in admins:
-        users_to_notify.add(admin["id"])
+    # BUGFIX (E2E — privacidade das notificações, Set 2026): o payload é
+    # enviado ESTRITAMENTE para os user_ids atribuídos ao processo.
+    # Antes, além dos atribuídos, TODOS os admin/CEO/diretor recebiam a
+    # notificação a CADA mudança de fase — incluindo a notificação de
+    # atribuição quando o processo entrava no Index (o sintoma reportado:
+    # "a notificação de atribuição está a aparecer a todos os admins").
+    # A visão global da gestão continua garantida pelos dashboards/Kanban.
+    users_to_notify = _collect_process_assignee_ids(process)
     
     # Remover quem fez a mudança (não precisa de notificação)
     users_to_notify.discard(changed_by.get("id"))

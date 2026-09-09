@@ -275,12 +275,18 @@ _VALID_UPDATE_STATUSES = ["REQUESTED", "PENDING", "RECEIVED", "UPLOADED"]
 
 def serialize_portal_document(doc: dict) -> dict:
     """Normaliza um doc Mongo → payload de listagem portal."""
+    from services.document_portal_counts import parse_expected_count
+
     cat = doc.get("category") or "Outros"
     if isinstance(cat, dict):
         cat = cat.get("value", cat.get("label", "Outros"))
     if not isinstance(cat, str):
         cat = str(cat) if cat else "Outros"
     cat_info = DOCUMENT_CATEGORY_MAP.get(cat, {"label": cat, "icon": "📎"})
+    # BUGFIX (E2E — lógica de quantidade, Set 2026): progresso do pedido
+    # (ficheiros carregados vs quantidade pedida) para a UI mostrar "1/3".
+    expected_count = parse_expected_count(doc)
+    attached = doc.get("attached_files") or []
     return {
         "id": doc.get("id"),
         "process_id": doc.get("process_id"),
@@ -301,11 +307,13 @@ def serialize_portal_document(doc: dict) -> dict:
         "updated_at": doc.get("updated_at"),
         "uploaded_at": doc.get("uploaded_at"),
         "reviewed_at": doc.get("reviewed_at"),
+        "expected_count": expected_count,
+        "uploaded_count": len(attached) or doc.get("uploaded_count") or 0,
         # PACOTE DE — histórico completo de ficheiros anexados a este
         # pedido/categoria (cada upload acrescentado via $push no backend).
         # Permite ao staff ver todos os ficheiros já submetidos para a mesma
         # categoria, em vez de apenas o mais recente (campo `filename`/`s3_path`).
-        "attached_files": doc.get("attached_files") or [],
+        "attached_files": attached,
     }
 
 

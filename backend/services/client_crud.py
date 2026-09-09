@@ -318,12 +318,17 @@ async def run_create_client(
     # dispara em `send_portal_welcome_email_from_process`).
     # ============================================================
     if sanitized_email and not client_data.skip_welcome_email:
-        asyncio.create_task(_send_portal_welcome_email_safe(
+        # PACOTE BH — spawn com referência forte (services/background_tasks):
+        # `asyncio.create_task` puro mantém apenas referência fraca e a task
+        # podia ser recolhida pelo GC antes de enviar o email.
+        from services.background_tasks import spawn_background_task
+
+        spawn_background_task(_send_portal_welcome_email_safe(
             client_email=sanitized_email,
             client_name=sanitized_nome,
             portal_access_code=client.portal_access_code,
             client_id=client.id,
-        ))
+        ), name=f"portal-welcome-email:{client.id}")
 
     # Desencriptar para a resposta
     client_dict = decrypt_client_data(client_dict)
