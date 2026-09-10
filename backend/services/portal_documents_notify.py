@@ -38,6 +38,7 @@ from email.mime.text import MIMEText
 from typing import Optional
 
 from database import db
+from services.document_portal_counts import parse_expected_count
 
 logger = logging.getLogger(__name__)
 
@@ -311,6 +312,11 @@ async def _generate_document_requests_for_list(
         category = (item.get("category") or "outros").strip().lower() or "outros"
         if not name:
             continue
+        # BUGFIX (E2E — lógica de quantidade, Set 2026): grava a quantidade
+        # pedida (checklist SystemConfig, campo opcional `quantity`, int>=1)
+        # como `expected_count` — o pedido só fica RECEIVED quando o número
+        # de ficheiros carregados atingir esta quantidade.
+        expected_count = parse_expected_count(item)
         doc = {
             "id": str(uuid.uuid4()),
             "process_id": process_id,
@@ -321,6 +327,7 @@ async def _generate_document_requests_for_list(
             "notes": f"Documento {'opcional' if is_optional else 'obrigatório'}: {name}",
             "custom_label": name,
             "is_optional": is_optional,
+            "expected_count": expected_count,
             "requested_by": requested_by or "system",
             "requested_by_name": requested_by_name,
             "source": source,

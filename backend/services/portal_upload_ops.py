@@ -259,6 +259,13 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
         # campos directamente e devem continuar a reflectir o upload MAIS
         # RECENTE. O array `attached_files` preserva o histórico completo
         # (todos os ficheiros já submetidos para esta categoria).
+        #
+        # BUGFIX (E2E — lógica de quantidade, Set 2026): o status RECEIVED
+        # (concluído) passa a ser decidido pela CONTAGEM — o pedido só fica
+        # RECEIVED quando len(attached_files) >= expected_count (a quantidade
+        # pedida, ex.: 3 recibos de vencimento). Antes, o 1º upload marcava
+        # logo o pedido como concluído. Enquanto incompleto, mantém-se
+        # REQUESTED/PENDING (o Portal continua a pedi-lo ao cliente).
         file_entry = {
             "file_id": str(uuid.uuid4()),
             "filename": original_filename,
@@ -270,8 +277,7 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
             "uploaded_by": "portal_client",
         }
 
-        update_fields = {
-            "status": "RECEIVED",
+        set_fields = {
             "filename": original_filename,
             "original_filename": original_filename,
             "file_size": file_size,
@@ -283,25 +289,34 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
             "uploaded_by": "portal_client",
             "reviewed_by": "portal_client",
             "reviewed_at": now,
-            "updated_at": now,
         }
         if client_id:
-            update_fields["client_id"] = client_id
+            set_fields["client_id"] = client_id
         if process_id:
-            update_fields["process_id"] = process_id
+            set_fields["process_id"] = process_id
 
-        update_result = await db.documents.update_one(
+        from services.document_portal_counts import apply_portal_request_upload
+
+        progress = await apply_portal_request_upload(
             match_q,
-            {
-                "$set": update_fields,
-                # PACOTE DE — adiciona entrada ao histórico de ficheiros anexados
-                "$push": {"attached_files": file_entry},
-            },
+            set_fields=set_fields,
+            file_entry=file_entry,
+            now=now,
         )
 
-        if update_result.matched_count > 0:
+        if progress.get("matched"):
             doc_id = document_id
-            logger.info(f"[PORTAL] Doc REQUESTED → RECEIVED: {document_id}")
+            if progress.get("completed"):
+                logger.info(
+                    f"[PORTAL] Doc REQUESTED → RECEIVED: {document_id} "
+                    f"({progress.get('uploaded_count')}/{progress.get('expected_count')} ficheiros)"
+                )
+            else:
+                logger.info(
+                    f"[PORTAL] Upload parcial {document_id}: "
+                    f"{progress.get('uploaded_count')}/{progress.get('expected_count')} "
+                    f"— pedido mantém-se pendente"
+                )
         else:
             doc_id = str(uuid.uuid4())
             await _create_document_record(
@@ -339,15 +354,25 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
     # Gatilho onboarding (criar processo se checklist completa)
     try:
         if client_id:
-            asyncio.create_task(_trigger_onboarding_check(client_id))
+            from services.background_tasks import spawn_background_task
+
+            spawn_background_task(
+                _trigger_onboarding_check(client_id),
+                name=f"onboarding-check:{client_id}",
+            )
     except Exception as e:
         logger.warning(f"[PORTAL] Erro ao agendar verificação de onboarding: {e}")
 
     if process_id:
         try:
             from services.portal_documents_notify import check_and_notify_documents_complete
+            from services.background_tasks import spawn_background_task
+
             company_id = process.get("company") or process.get("company_id")
-            asyncio.create_task(check_and_notify_documents_complete(process_id, company_id))
+            spawn_background_task(
+                check_and_notify_documents_complete(process_id, company_id),
+                name=f"docs-complete-notify:{process_id}",
+            )
         except Exception as e:
             logger.warning(f"[PORTAL] Erro ao agendar gatilho de documentação completa: {e}")
 

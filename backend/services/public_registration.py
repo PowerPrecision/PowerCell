@@ -18,7 +18,7 @@ from database import db
 from services.s3_storage import s3_service
 from models.auth import UserRole
 from models.process import PublicClientRegistration
-from services.email import send_registration_confirmation, send_new_client_notification
+from services.email import send_new_client_notification
 from services.alerts import notify_new_client_registration
 from services.encryption import (
     encrypt_client_data,
@@ -432,19 +432,19 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         logger.warning(f"Erro ao obter/gerar portal_access_code para {client_id}: {e}")
     
     # Enviar email de confirmação ao cliente
-    from services.task_queue import task_queue
-    job_id = await task_queue.send_registration_email(
+    # BUGFIX (E2E, Set 2026 — PACOTE BH): antes tentava PRIMEIRO enfileirar
+    # no ARQ/Redis (`send_registration_email_task` — função sem consumidor:
+    # o worker de produção é `python worker.py`, loop próprio da fila Mongo;
+    # o worker ARQ nunca arranca nem tem a task registada). Com Redis UP, o
+    # job_id devolvido fazia o envio directo nunca executar. Ordem canónica:
+    # envio DIRECTO primeiro; fila ARQ apenas como retry de falha real.
+    from services.client_portal_email import deliver_registration_email
+    email_sent = await deliver_registration_email(
         client_email=clean_email,
         client_name=clean_name,
-        portal_access_code=portal_access_code
+        portal_access_code=portal_access_code,
+        client_id=client_id,
     )
-    if not job_id:
-        logger.info("Task Queue não disponível, enviando email directamente")
-        await send_registration_confirmation(
-            client_email=clean_email,
-            client_name=clean_name,
-            portal_access_code=portal_access_code
-        )
     
     # Criar alertas no sistema de notificações (passar dados do cliente — SEM processo)
     client_notification_data = {
@@ -495,14 +495,12 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
     
     if staff:
         first_admin = staff[0]
-        staff_job = await task_queue.send_email(
-            to=first_admin["email"],
-            subject=f"Novo Cliente Registado: {clean_name}",
-            body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\nTipo pretendido: {process_type}\n\nO registo aguarda triagem na página de Registos de Clientes."
-        )
-        
-        if not staff_job:
-            await send_new_client_notification(
+        # PACOTE BH — envio DIRECTO primeiro; fila ARQ (`send_email_task`)
+        # apenas como retry quando o envio directo falha (o job ARQ sem
+        # consumidor fazia o email do staff perder-se em silêncio).
+        staff_sent = False
+        try:
+            staff_sent = await send_new_client_notification(
                 client_name=clean_name,
                 client_email=clean_email,
                 client_phone=clean_phone or "N/A",
@@ -510,6 +508,18 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
                 staff_email=first_admin["email"],
                 staff_name=first_admin["name"]
             )
+        except Exception as staff_err:
+            logger.warning(f"[PUBLIC FORM] Falha no email directo ao staff: {staff_err}")
+        if not staff_sent:
+            try:
+                from services.task_queue import task_queue
+                await task_queue.send_email(
+                    to=first_admin["email"],
+                    subject=f"Novo Cliente Registado: {clean_name}",
+                    body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\nTipo pretendido: {process_type}\n\nO registo aguarda triagem na página de Registos de Clientes."
+                )
+            except Exception as tq_err:
+                logger.warning(f"[PUBLIC FORM] Task Queue indisponível para email ao staff: {tq_err}")
     
     is_new_client = existing_client is None
     
@@ -524,7 +534,9 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             "lead_status": "new",
             "is_new_client": is_new_client,
             "has_property": has_property,
-            "email_queued": bool(job_id)
+            # Retrocompat: True quando o email de boas-vindas partiu
+            # (envio directo — PACOTE BH; já não depende da fila ARQ).
+            "email_queued": bool(email_sent)
         }
     )
 

@@ -23,8 +23,9 @@ class FakeAsyncCollection:
 
     Implementa apenas o subconjunto de operações usado pelos serviços sob
     teste: `find_one` (igualdade e `$ne`), `insert_one`, `update_one`
-    (`$set`, com upsert), `delete_one` e `count_documents`. Não é um clone
-    do Motor — é determinística e não faz I/O de rede.
+    (`$set` + `$push` escalar/`$each`, com upsert), `delete_one` e
+    `count_documents`. Não é um clone do Motor — é determinística e não
+    faz I/O de rede.
     """
 
     def __init__(self):
@@ -37,6 +38,9 @@ class FakeAsyncCollection:
             value = doc.get(key)
             if isinstance(expected, dict) and "$ne" in expected:
                 if value == expected["$ne"]:
+                    return False
+            elif isinstance(expected, dict) and "$in" in expected:
+                if value not in expected["$in"]:
                     return False
             elif value != expected:
                 return False
@@ -52,18 +56,40 @@ class FakeAsyncCollection:
         self.docs.append(dict(doc))
         return MagicMock(inserted_id="fake-inserted-id")
 
+    @staticmethod
+    def _apply_push(doc: dict, push_ops: dict) -> None:
+        """Aplica `$push` (escalar ou {$each: [...]}) — fiel ao Mongo: permite duplicados."""
+        for field, value in push_ops.items():
+            values = value.get("$each", [value]) if isinstance(value, dict) else [value]
+            target = doc.get(field)
+            if not isinstance(target, list):
+                target = []
+                doc[field] = target
+            target.extend(values)
+
     async def update_one(self, query: dict, update: dict, upsert: bool = False):
         matched = [doc for doc in self.docs if self._matches(doc, query)]
         for doc in matched:
             doc.update(update.get("$set", {}))
+            push_ops = update.get("$push")
+            if push_ops:
+                self._apply_push(doc, push_ops)
         if matched:
             return MagicMock(matched_count=len(matched), modified_count=len(matched))
         if upsert:
             new_doc = dict(query)
             new_doc.update(update.get("$set", {}))
+            push_ops = update.get("$push")
+            if push_ops:
+                self._apply_push(new_doc, push_ops)
             self.docs.append(new_doc)
             return MagicMock(matched_count=0, modified_count=0, upserted_id="fake-upserted-id")
         return MagicMock(matched_count=0, modified_count=0)
+
+    async def insert_many(self, docs: list, ordered: bool = True):
+        for doc in docs:
+            self.docs.append(dict(doc))
+        return MagicMock(inserted_ids=["fake-inserted-id"] * len(docs))
 
     async def delete_one(self, query: dict):
         before = len(self.docs)

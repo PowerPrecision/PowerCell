@@ -95,6 +95,11 @@ from worker.tasks import (
     analyze_document_task,
     aggregate_and_save_task,
     cleanup_expired_sessions_task,
+    # PACOTE BH — handlers das tasks de email enfileiradas pelo
+    # task_queue (send_registration_email_task / send_email_task):
+    # antes não existiam em consumidor nenhum e os jobs morriam na fila.
+    send_registration_email_task,
+    send_email_task,
 )
 
 
@@ -113,6 +118,8 @@ class WorkerSettings:
         analyze_document_task,
         aggregate_and_save_task,
         cleanup_expired_sessions_task,
+        send_registration_email_task,
+        send_email_task,
     ]
     
     # Lifecycle hooks

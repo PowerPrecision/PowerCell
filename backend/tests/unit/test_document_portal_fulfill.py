@@ -65,14 +65,28 @@ class TestAutoFulfillPortalRequest:
     async def test_success_flow_updates_status_and_document_id(self):
         """
         Fluxo de sucesso: quando o upload indica directamente o `document_id`
-        do pedido portal a satisfazer, o pedido deve passar a `RECEIVED` e
-        ficar associado ao `document_id` do ficheiro carregado.
+        do pedido portal a satisfazer, o pedido passa a `RECEIVED` quando a
+        contagem de ficheiros atinge `expected_count` (BUGFIX Set 2026 —
+        lógica de quantidade: o 1º upload de um pedido de N só conclui quando
+        N ficheiros estiverem anexados; aqui N=1) e fica associado ao
+        `document_id` do ficheiro carregado.
         """
-        mock_update_result = MagicMock(modified_count=1)
+        # Pedido PÓS-push: 1 ficheiro anexado, expected_count=1 → completa
+        pedido_pos_push = {
+            "id": "doc-req-42",
+            "process_id": "proc-1",
+            "status": "REQUESTED",
+            "expected_count": 1,
+            "attached_files": [{"file_id": "f1"}],
+        }
+        mock_update_result = MagicMock(matched_count=1, modified_count=1)
         mock_db = MagicMock()
         mock_db.documents.update_one = AsyncMock(return_value=mock_update_result)
+        mock_db.documents.find_one = AsyncMock(return_value=dict(pedido_pos_push))
 
-        with patch("services.document_portal_fulfill.db", mock_db):
+        with patch("services.document_portal_fulfill.db", mock_db), \
+             patch("services.document_portal_counts.db", mock_db), \
+             patch("services.portal_documents_notify.db", mock_db):
             result = await _auto_fulfill_portal_request(
                 "proc-1",
                 {
@@ -86,15 +100,23 @@ class TestAutoFulfillPortalRequest:
                 user={"id": "user-1", "name": "Equipa"},
             )
 
-        assert result == {"fulfilled": 1, "document_ids": ["doc-req-42"]}
+        assert result["fulfilled"] == 1
+        assert result["document_ids"] == ["doc-req-42"]
 
-        mock_db.documents.update_one.assert_awaited_once()
-        call_args = mock_db.documents.update_one.call_args
-        query_filter, update = call_args.args
-        assert query_filter["id"] == "doc-req-42"
-        assert query_filter["process_id"] == "proc-1"
-        assert update["$set"]["status"] == "RECEIVED"
-        assert update["$set"]["document_id"] == "doc-req-42"
+        # 1º update: $push do ficheiro + $set neutro (SEM status);
+        # 2º update: $set status=RECEIVED (contagem 1/1 atingida)
+        assert mock_db.documents.update_one.await_count == 2
+        first_filter, first_update = mock_db.documents.update_one.await_args_list[0].args
+        assert first_filter["id"] == "doc-req-42"
+        assert first_filter["process_id"] == "proc-1"
+        assert "status" not in first_update["$set"]
+        assert first_update["$set"]["document_id"] == "doc-req-42"
+        assert first_update["$push"]["attached_files"]["filename"] == "irs_2024.pdf"
+
+        second_filter, second_update = mock_db.documents.update_one.await_args_list[1].args
+        assert second_filter["id"] == "doc-req-42"
+        assert second_update["$set"]["status"] == "RECEIVED"
+        assert second_update["$set"]["uploaded_count"] == 1
 
     @pytest.mark.asyncio
     async def test_filename_normalization_fallback_matches_pending_request(self):
@@ -112,17 +134,25 @@ class TestAutoFulfillPortalRequest:
             "category": "Cartao_Cidadao",
             "custom_label": None,
         }
+        # Pedido PÓS-push (1 ficheiro, sem expected_count → default 1 → completa)
+        pending_pos_push = {
+            **pending_doc,
+            "attached_files": [{"file_id": "f1"}],
+        }
 
         mock_cursor = MagicMock()
         mock_cursor.to_list = AsyncMock(return_value=[pending_doc])
-        mock_update_result = MagicMock(modified_count=1)
+        mock_update_result = MagicMock(matched_count=1, modified_count=1)
 
         mock_db = MagicMock()
         mock_db.documents.find = MagicMock(return_value=mock_cursor)
         mock_db.documents.update_one = AsyncMock(return_value=mock_update_result)
+        mock_db.documents.find_one = AsyncMock(return_value=dict(pending_pos_push))
         mock_db.processes.find_one = AsyncMock(return_value=None)
 
-        with patch("services.document_portal_fulfill.db", mock_db):
+        with patch("services.document_portal_fulfill.db", mock_db), \
+             patch("services.document_portal_counts.db", mock_db), \
+             patch("services.portal_documents_notify.db", mock_db):
             result = await _auto_fulfill_portal_request(
                 "proc-2",
                 {
@@ -135,15 +165,20 @@ class TestAutoFulfillPortalRequest:
                 user={"id": "user-1", "name": "Equipa"},
             )
 
-        assert result == {"fulfilled": 1, "document_ids": ["doc-req-99"]}
+        assert result["fulfilled"] == 1
+        assert result["document_ids"] == ["doc-req-99"]
 
-        mock_db.documents.update_one.assert_awaited_once()
-        call_args = mock_db.documents.update_one.call_args
-        query_filter, update = call_args.args
-        assert query_filter["id"] == "doc-req-99"
-        assert update["$set"]["status"] == "RECEIVED"
-        assert update["$set"]["document_id"] == "doc-req-99"
-        assert update["$set"]["filename"] == "cartao_cidadao_joao.pdf"
+        # 1º update: $push + $set neutro; 2º update: status RECEIVED
+        assert mock_db.documents.update_one.await_count == 2
+        first_filter, first_update = mock_db.documents.update_one.await_args_list[0].args
+        assert first_filter["id"] == "doc-req-99"
+        assert first_update["$set"]["document_id"] == "doc-req-99"
+        assert first_update["$set"]["filename"] == "cartao_cidadao_joao.pdf"
+        assert "status" not in first_update["$set"]
+
+        second_filter, second_update = mock_db.documents.update_one.await_args_list[1].args
+        assert second_filter["id"] == "doc-req-99"
+        assert second_update["$set"]["status"] == "RECEIVED"
 
     @pytest.mark.asyncio
     async def test_no_pending_requests_returns_zero_fulfilled(self):

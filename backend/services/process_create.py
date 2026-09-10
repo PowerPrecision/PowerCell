@@ -395,6 +395,15 @@ async def send_portal_welcome_email_from_process(
     """
     PACOTE CY — email de boas-vindas após create-client (fire-and-forget).
     Falhas são logadas, não propagadas.
+
+    BUGFIX (E2E, Set 2026 — PACOTE BH): antes tentava PRIMEIRO enfileirar no
+    ARQ/Redis (`send_registration_email_task` — função sem consumidor: o
+    worker de produção é `python worker.py`, loop próprio da fila Mongo, e
+    o worker ARQ nunca arranca). Com Redis UP, o job_id devolvido fazia o
+    fallback de envio directo nunca executar — o email de boas-vindas do
+    pré-registo perdia-se em silêncio na fila. Passa a delegar em
+    `deliver_registration_email` (envio DIRECTO prioritário; fila ARQ
+    apenas como retry de última esperância).
     """
     try:
         portal_access_code = None
@@ -417,49 +426,14 @@ async def send_portal_welcome_email_from_process(
                 f"para {client_id}: {e}"
             )
 
-        from services.task_queue import task_queue
-        from services.email import send_registration_confirmation
+        from services.client_portal_email import deliver_registration_email
 
-        job_id = None
-        try:
-            job_id = await task_queue.send_registration_email(
-                client_email=client_email,
-                client_name=client_name,
-                portal_access_code=portal_access_code,
-            )
-        except Exception as tq_err:
-            logger.warning(
-                f"[PORTAL-EMAIL] Task Queue indisponível para cliente "
-                f"{client_id}: {tq_err}"
-            )
-
-        if not job_id:
-            logger.info(
-                f"[PORTAL-EMAIL] A enviar email diretamente para "
-                f"{client_email} (client_id={client_id})"
-            )
-            try:
-                sent = await send_registration_confirmation(
-                    client_email=client_email,
-                    client_name=client_name,
-                    portal_access_code=portal_access_code,
-                )
-                if sent:
-                    logger.info(
-                        f"[PORTAL-EMAIL] Email enviado com sucesso para "
-                        f"{client_email} (client_id={client_id})"
-                    )
-                else:
-                    logger.error(
-                        f"[PORTAL-EMAIL] Falha ao enviar email de boas-vindas para "
-                        f"{client_email} (client_id={client_id}) — ver logs de [EMAIL] acima."
-                    )
-            except Exception as direct_err:
-                logger.error(
-                    f"[PORTAL-EMAIL] Falha ao enviar email diretamente para "
-                    f"{client_email} (client_id={client_id}): {direct_err}",
-                    exc_info=True,
-                )
+        await deliver_registration_email(
+            client_email=client_email,
+            client_name=client_name,
+            portal_access_code=portal_access_code,
+            client_id=client_id,
+        )
     except Exception as e:
         logger.error(
             f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "
@@ -578,11 +552,19 @@ async def persist_and_finalize_staff_create(
     asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
 
     if client_email:
-        asyncio.create_task(send_portal_welcome_email_from_process(
-            client_id=client_id,
-            client_email=client_email,
-            client_name=client_name,
-        ))
+        # PACOTE BH — spawn com referência forte (services/background_tasks):
+        # `asyncio.create_task` puro mantém apenas referência fraca e a task
+        # podia ser recolhida pelo GC antes de enviar o email.
+        from services.background_tasks import spawn_background_task
+
+        spawn_background_task(
+            send_portal_welcome_email_from_process(
+                client_id=client_id,
+                client_email=client_email,
+                client_name=client_name,
+            ),
+            name=f"portal-welcome-email:{client_id}",
+        )
 
     consultor_names, mediador_names = build_create_broadcast_names(user)
     await broadcast_fn(

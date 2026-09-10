@@ -288,6 +288,15 @@ class MandatoryDocumentsConfig(BaseModel):
     Quando todos os pedidos obrigatórios são satisfeitos (status
     RECEIVED/UPLOADED/VALIDATED), o gatilho `check_and_notify_documents_complete`
     envia um email automático ao cliente em nome do intermediário atribuído.
+
+    QUANTIDADE POR ITEM (Set 2026 — lógica de quantidade do Portal):
+    cada item aceita um campo opcional `quantity` (int >= 1, default 1)
+    com o número de ficheiros esperados, ex.:
+        {"name": "Últimos 3 recibos de vencimento",
+         "category": "recibo_vencimento", "quantity": 3}
+    O pedido gerado grava-o como `expected_count` e SÓ passa a
+    RECEIVED quando o número de ficheiros carregados (attached_files)
+    atingir essa quantidade (services/document_portal_counts.py).
     """
     enabled: bool = True
     documents: List[Dict[str, Any]] = [
@@ -296,7 +305,7 @@ class MandatoryDocumentsConfig(BaseModel):
         {"name": "Mapa de Responsabilidades de Crédito", "category": "mapa_responsabilidades"},
     ]
     optional_documents: List[Dict[str, Any]] = [
-        {"name": "Últimos 3 recibos de vencimento", "category": "recibo_vencimento"},
+        {"name": "Últimos 3 recibos de vencimento", "category": "recibo_vencimento", "quantity": 3},
         {"name": "Comprovativo de IRS do ano anterior", "category": "irs"},
         {"name": "Declaração Patronal", "category": "declaracao_patronal"},
     ]
