@@ -479,6 +479,12 @@ def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
         update_data["prioridade"] = data.prioridade
     if data.labels is not None:
         update_data["labels"] = data.labels
+    # PACOTE 5 (Fast-Track / Via Verde) — bypass à fase de Indexação:
+    # permite ativar/desativar o flag num processo existente (ex.: qualificar
+    # um Lead em pré-registo com Via Verde). None/omisso mantém o valor atual.
+    skip_index = getattr(data, "skip_index", None)
+    if skip_index is not None:
+        update_data["skip_index"] = bool(skip_index)
 
 
 async def apply_staff_business_updates(

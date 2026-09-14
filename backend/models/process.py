@@ -206,6 +206,18 @@ class ProcessCreate(BaseModel):
     # PACOTE CY — is_lead=True envia o processo para a caixa "Registos de Clientes"
     # (status pre_registo) em vez do Kanban ativo (clientes_espera).
     is_lead: Optional[bool] = Field(False, description="Se True, cria como Lead (pre_registo) em vez de processo ativo")
+    # PACOTE 5 (Fast-Track / Via Verde) — skip_index=True ignora a fase de
+    # Indexação: na transição de workflow o processo salta a mesa do
+    # Indexador, vai diretamente para a 1ª fase comercial/consultoria e é
+    # atribuído ao consultor com menor carga.
+    skip_index: Optional[bool] = Field(
+        False,
+        description=(
+            "Via Verde: se True, o processo ignora a fase de Indexação — salta "
+            "diretamente para a 1ª fase comercial/consultoria e é atribuído ao "
+            "consultor (em vez do indexador)."
+        ),
+    )
 
 class ProcessUpdate(BaseModel):
     real_estate_data: Optional[RealEstateData] = None
@@ -229,6 +241,17 @@ class ProcessUpdate(BaseModel):
     prioridade: Optional[str] = None  
     labels: Optional[List[str]] = None
     is_indexed: Optional[bool] = None  # Marcação de conclusão da indexação documental  
+    # PACOTE 5 (Fast-Track / Via Verde) — permite ativar/desativar o bypass
+    # à fase de Indexação num processo existente (ex.: qualificar um Lead em
+    # pré-registo com Via Verde antes de o cliente carregar os documentos).
+    skip_index: Optional[bool] = Field(
+        None,
+        description=(
+            "Via Verde: se True, a transição de workflow ignora a fase de "
+            "Indexação (o processo salta para a consultoria). Enviar null/"
+            "omitir para manter o valor atual."
+        ),
+    )
 
 class ProcessResponse(BaseModel):
     """Modelo de resposta para dados de processo.
@@ -288,6 +311,11 @@ class ProcessResponse(BaseModel):
     vendedor: Optional[dict] = None  
     mediador: Optional[dict] = None
     is_indexed: Optional[bool] = None  # Indica se a indexação documental está concluída
+    # PACOTE 5 (Fast-Track / Via Verde) — bypass à fase de Indexação
+    skip_index: Optional[bool] = Field(
+        None,
+        description="Via Verde: se True, o processo ignora a fase de Indexação na transição de workflow",
+    )
 
     @field_serializer("created_at", "updated_at")
     def _serialize_datetime(self, value: Optional[datetime]) -> Optional[str]:

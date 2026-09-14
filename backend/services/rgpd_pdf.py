@@ -1193,9 +1193,23 @@ def _build_prefilled_rgpd_pdf(rgpd_text: str, minuta_text: str, consent_data: di
 async def run_generate_prefilled_rgpd_pdf(
     process_id: str,
     user: dict,
+    titular: str = "first",
 ) -> tuple[bytes, str]:
     """
     Gera um PDF RGPD PRÉ-PREENCHIDO com os dados reais do cliente/processo.
+
+    PACOTE 5 (RGPD por titular): ``titular`` define o TITULAR ALVO do
+    documento — "first" (1º titular, default) ou "second" (2º titular).
+    O PDF é preenchido EXCLUSIVAMENTE com os dados dessa pessoa:
+
+      - titular="first": dados do cliente principal (fluxo clássico);
+      - titular="second": dados do 2º titular — resolvidos do cliente
+        ligado via `second_client_id` (desencriptado) com fallback para
+        `second_client_data` / `titular2_data` do processo. Se o processo
+        não tiver 2º titular com nome, devolve 404.
+
+    O design HTML/CSS, margens e quebras de página permanecem EXATAMENTE
+    os mesmos (o builder `_build_prefilled_rgpd_pdf` não é alterado).
 
     PACOTE DG — usa o novo builder `_build_prefilled_rgpd_pdf` (platypus)
     em vez do `_generate_rgpd_pdf_bytes` (Canvas low-level). Ver module
@@ -1204,12 +1218,12 @@ async def run_generate_prefilled_rgpd_pdf(
     Fluxo:
     1. Busca o processo em `db.processes` (404 se não existir / eliminado).
     2. Desencripta campos sensíveis via `decrypt_sensitive_data`.
-    3. Monta `consent_data` sintético com Nome, NIF, documento, morada —
-       faz fallback para linhas em branco "_____" quando os campos não
-       existem (para preenchimento manual). A `data_assinatura` fica como
-       `"___/___/______"` (não pré-preenchida).
+    3. Monta `consent_data` sintético com Nome, NIF, documento, morada do
+       TITULAR ALVO — faz fallback para linhas em branco "_____" quando os
+       campos não existem (para preenchimento manual). A `data_assinatura`
+       fica como `"___/___/______"` (não pré-preenchida).
     4. Renderiza o template RGPD ativo (`_get_rendered_rgpd_text`) — os
-       placeholders `{{...}}` são substituídos pelos valores do cliente
+       placeholders `{{...}}` são substituídos pelos dados do titular alvo
        (ou pelas linhas em branco).
     5. Gera o PDF A4 (`_build_prefilled_rgpd_pdf`) via platypus.
     6. Regista atividade de auditoria no processo (`_add_process_activity`).
@@ -1219,15 +1233,27 @@ async def run_generate_prefilled_rgpd_pdf(
     Args:
         process_id: ID do processo (string UUID).
         user: Dict do utilizador autenticado (com `id` e `name`).
+        titular: Titular alvo — "first" (1º titular) ou "second" (2º titular).
 
     Returns:
         Tuplo `(pdf_bytes, filename)` onde `pdf_bytes` é o PDF em bytes e
         `filename` é o nome seguro para o header `Content-Disposition`.
 
     Raises:
-        HTTPException: 404 se o processo não for encontrado; 500 se a geração
-        do PDF falhar.
+        HTTPException: 404 se o processo não for encontrado (ou não tiver
+        2º titular quando ``titular="second"``); 500 se a geração do PDF
+        falhar.
     """
+    from services.rgpd_service import (
+        TITULAR_FIRST,
+        TITULAR_SECOND,
+        resolve_second_titular_for_rgpd,
+        _titular_fallback_data,
+        _titular_name_from,
+    )
+
+    titular = titular if titular in (TITULAR_FIRST, TITULAR_SECOND) else TITULAR_FIRST
+
     # 1. Buscar o processo (exclui eliminados)
     process = await db.processes.find_one(
         {"id": process_id, "is_deleted": {"$ne": True}},
@@ -1239,8 +1265,24 @@ async def run_generate_prefilled_rgpd_pdf(
     # 2. Desencriptar campos sensíveis (NIF, morada, documento, etc.)
     process = decrypt_sensitive_data(process)
 
-    # 3. Montar consent_data sintético a partir dos dados do processo
-    personal = process.get("personal_data") or {}
+    # 3. Montar consent_data sintético a partir dos dados do TITULAR ALVO
+    if titular == TITULAR_SECOND:
+        second_titular = await resolve_second_titular_for_rgpd(process)
+        if not second_titular:
+            raise HTTPException(
+                status_code=404,
+                detail="Este processo não tem 2º titular com nome válido "
+                       "para gerar o documento.",
+            )
+
+    personal = await _titular_fallback_data(process, titular)
+    # O 2º titular pode estar guardado como cliente ligado — enriquecer o
+    # fallback com a estrutura plana que o consent_data espera.
+    if titular == TITULAR_SECOND:
+        second_flat = process.get("second_client_data") or {}
+        if second_flat:
+            personal = {**second_flat, **{k: v for k, v in personal.items() if v}}
+
     real_estate = process.get("real_estate_data") or {}
     doc_id = personal.get("documento_id") or {}
     if isinstance(doc_id, dict):
@@ -1250,13 +1292,19 @@ async def run_generate_prefilled_rgpd_pdf(
         doc_type, doc_number = "", str(doc_id or "")
 
     # PACOTE DG — campos em falta → linhas em branco (para caneta)
-    consent_data = {
-        "nome": (
+    # PACOTE 5 — para o 2º titular, o nome vem do próprio titular (nunca do
+    # 1º): personal já contém os dados dele (cliente ligado / titular2_data).
+    if titular == TITULAR_SECOND:
+        display_name = _titular_name_from(personal) or _blank_line(50)
+    else:
+        display_name = (
             process.get("client_name")
             or personal.get("nome")
             or personal.get("nome_completo")
             or _blank_line(50)
-        ),
+        )
+    consent_data = {
+        "nome": display_name,
         "contribuinte": personal.get("nif") or _blank_line(15),
         "tipo_documento": doc_type or "",
         "numero_documento": doc_number or _blank_line(20),
@@ -1279,9 +1327,11 @@ async def run_generate_prefilled_rgpd_pdf(
     # PACOTE DG — substitui `_generate_rgpd_pdf_bytes` (que chamava o
     # builder Canvas `_build_rgpd_pdf` com texto hardcoded) pelo novo
     # `_build_prefilled_rgpd_pdf` que respeita o `rgpd_text` dinâmico.
+    # PACOTE 5 — o titular alvo é propagado aos renderers (fallbacks de
+    # dados do titular certo).
     try:
         rgpd_text = await _get_rendered_rgpd_text(
-            process_id, {}, consent_data
+            process_id, {}, consent_data, titular=titular
         )
         # PACOTE DI — buscar Minuta de Exclusividade (mesmo padrão do
         # `_get_rendered_rgpd_text`). Se falhar, fallback a string vazia
@@ -1289,7 +1339,7 @@ async def run_generate_prefilled_rgpd_pdf(
         minuta_text = ""
         try:
             minuta_text = await _get_rendered_minuta_text(
-                process_id, {}, consent_data
+                process_id, {}, consent_data, titular=titular
             )
         except Exception as minuta_err:
             logger.warning(
@@ -1319,12 +1369,19 @@ async def run_generate_prefilled_rgpd_pdf(
         )
 
     # 6. Nome seguro do ficheiro (apenas [a-zA-Z0-9_-])
+    # PACOTE 5 — o nome identifica o titular alvo (2º titular distinto).
+    base_name = (
+        _titular_name_from(personal)
+        if titular == TITULAR_SECOND
+        else (process.get("client_name") or "cliente")
+    )
     safe_name = re.sub(
         r"[^a-zA-Z0-9_-]",
         "_",
-        process.get("client_name") or "cliente",
+        base_name,
     )[:50]
-    filename = f"RGPD_{safe_name}.pdf"
+    titular_suffix = "_2o_Titular" if titular == TITULAR_SECOND else ""
+    filename = f"RGPD_{safe_name}{titular_suffix}.pdf"
 
     # 7. Auditoria — não falha o download se o registo falhar
     try:
@@ -1332,9 +1389,13 @@ async def run_generate_prefilled_rgpd_pdf(
             process_id,
             user.get("id", "system"),
             user.get("name", "Sistema"),
-            "RGPD pré-preenchido descarregado pelo utilizador",
+            (
+                "RGPD pré-preenchido (2º titular) descarregado pelo utilizador"
+                if titular == TITULAR_SECOND
+                else "RGPD pré-preenchido descarregado pelo utilizador"
+            ),
             details=(
-                f"PDF gerado com dados do cliente "
+                f"PDF gerado com os dados do titular "
                 f"({consent_data.get('nome') or 'N/A'}). "
                 f"Destinado a impressão e assinatura manual."
             ),

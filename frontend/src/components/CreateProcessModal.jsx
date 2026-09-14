@@ -35,10 +35,11 @@ import {
   SelectTrigger,
   SelectValue,
 } from "./ui/select";
-import { Loader2, Search, FileText, X, UserPlus, CheckCircle, Users } from "lucide-react";
+import { Loader2, Search, FileText, X, UserPlus, CheckCircle, Users, Zap } from "lucide-react";
 import { createClientProcess, createClient, searchClients } from "../services/api";
 import { toast } from "sonner";
 import { PROCESS_TYPE_LABELS } from "./SmartClientSearch";
+import { Switch } from "./ui/switch";
 
 const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, isLead = false }) => {
   const navigate = useNavigate();
@@ -50,6 +51,9 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
   const [showDropdown, setShowDropdown] = useState(false);
   const [processType, setProcessType] = useState("credito_habitacao");
   const [submitting, setSubmitting] = useState(false);
+  // PACOTE 5 (Fast-Track / Via Verde) — ignorar a fase de Indexação: o
+  // processo salta a mesa do Indexador e é atribuído ao consultor.
+  const [skipIndex, setSkipIndex] = useState(false);
 
   // ── Novo Cliente (quando não há preSelectedClient) ───────────────
   const [clientMode, setClientMode] = useState(null); // 'existing' | 'new' | null
@@ -73,6 +77,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
       setShowDropdown(false);
       setClientMode(preSelectedClient ? 'existing' : null);
       setNewClientData({ nome: '', email: '', telefone: '', nif: '' });
+      setSkipIndex(false);
     }
   }, [open, preSelectedClient]);
 
@@ -169,10 +174,14 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
     try {
       // FASE 3: Enviar APENAS { client_id, process_type } — sem personal_data
       // PACOTE CY/DB: isLead=true → processo vai para Registos de Clientes (status vazio/Lead)
+      // PACOTE 5: skip_index=true → Via Verde (ignora a fase de Indexação
+      // na transição de workflow — aplica-se também a Leads, no auto-avanço
+      // pós-checklist do Portal)
       const payload = {
         client_id: clientId,
         process_type: processType,
         ...(isLead ? { is_lead: true } : {}),
+        ...(skipIndex ? { skip_index: true } : {}),
       };
 
       const res = await createClientProcess(payload);
@@ -484,6 +493,26 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
                 ))}
               </SelectContent>
             </Select>
+          </div>
+
+          {/* ── PACOTE 5 — Via Verde (Fast-Track): ignorar a fase de Indexação ── */}
+          <div className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30">
+            <Switch
+              id="cpm-skip-index-switch"
+              checked={skipIndex}
+              onCheckedChange={setSkipIndex}
+            />
+            <div className="space-y-0.5">
+              <Label htmlFor="cpm-skip-index-switch" className="text-sm cursor-pointer flex items-center gap-1.5">
+                <Zap className="h-3.5 w-3.5 text-emerald-600" />
+                Via Verde (Ignorar fase de Indexação)
+              </Label>
+              <p className="text-xs text-muted-foreground">
+                {isLead
+                  ? "Quando o registo for qualificado (documentos carregados no Portal), o processo salta a mesa do Indexador e é atribuído diretamente ao consultor."
+                  : "O processo salta a mesa do Indexador e é atribuído diretamente ao consultor na primeira fase comercial. Use quando o cliente já entrega a documentação organizada."}
+              </p>
+            </div>
           </div>
         </div>
 

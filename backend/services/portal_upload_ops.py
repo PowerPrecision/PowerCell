@@ -34,7 +34,18 @@ async def _create_document_record(
     custom_label: str = None,
     client_id: Optional[str] = None,
 ):
-    """Cria um registo de documento na BD com status RECEIVED."""
+    """Cria um registo de documento na BD com status RECEIVED.
+
+    PACOTE 5 (bug dos uploads órfãos): `process_id` e `client_id` são agora
+    sempre gravados quando conhecidos — um documento sem nenhum dos dois é
+    irrecuperável no CRM (não aparece no Processo nem na ficha do Cliente).
+    Se ambos faltarem, o upload é rejeitado (400) em vez de criar um órfão.
+    """
+    if not process_id and not client_id:
+        raise HTTPException(
+            status_code=400,
+            detail="Sem cliente/processo associado. Não é possível guardar o documento.",
+        )
     document = {
         "id": doc_id,
         "process_id": process_id,
@@ -56,6 +67,87 @@ async def _create_document_record(
     if custom_label:
         document["custom_label"] = custom_label
     await db.documents.insert_one(document)
+
+
+async def _resolve_portal_client_id(
+    client_data: dict,
+    process: Optional[dict],
+) -> Optional[str]:
+    """
+    Resolve o client_id do titular autenticado no Portal.
+
+    PACOTE 5 (bug dos uploads órfãos): os tokens `magic_link` NÃO transportam
+    `client_id` no payload e processos legados podem não ter `client_id`
+    preenchido — nessas alturas o documento era gravado SEM client_id e
+    ficava irrecuperável (órfão). Ordem de resolução:
+      1. client_id explícito do client_data (access_code/no_process);
+      2. claim client_id do token (verified_session / access_code_session);
+      3. campo `client` do client_data (fluxo sem processo);
+      4. `client_id` do processo;
+      5. primeiro `client_ids[]` do processo (processos legados);
+      6. mapeamento `portal_tokens` (client_id ↔ process_id).
+    """
+    token_payload = client_data.get("token_payload") or {}
+    client = client_data.get("client") or {}
+
+    client_id = (
+        client_data.get("client_id")
+        or token_payload.get("client_id")
+        or client.get("id")
+        or (process or {}).get("client_id")
+    )
+
+    if not client_id and process:
+        client_ids = process.get("client_ids") or []
+        if isinstance(client_ids, list) and client_ids:
+            client_id = client_ids[0]
+
+    if not client_id and process and process.get("id"):
+        try:
+            token_doc = await db.portal_tokens.find_one(
+                {"process_id": process["id"]}, {"_id": 0, "client_id": 1}
+            )
+            if token_doc and token_doc.get("client_id"):
+                client_id = token_doc["client_id"]
+        except Exception as e:
+            logger.warning(
+                f"[PORTAL][CLIENT-ID] Falha ao resolver client_id via "
+                f"portal_tokens para o processo {process.get('id')}: {e}"
+            )
+
+    return client_id
+
+
+async def _reanchor_orphan_documents(process_id: str, client_id: str, now: str) -> int:
+    """
+    Re-ancora ao processo os documentos órfãos do cliente.
+
+    PACOTE 5 (bug dos uploads órfãos): uploads feitos durante o onboarding
+    (antes de o processo existir) ficam ancorados apenas ao `client_id`. Se
+    por qualquer razão a âncora da criação do processo não os apanhou
+    (concorrência, erro parcial, processos legados), cada novo upload com
+    processo associado volta a tentar a re-âncora — garantindo que nenhum
+    documento submetido pelo cliente fica invisível no Processo.
+    """
+    orphan_filter = {
+        "client_id": client_id,
+        "$or": [
+            {"process_id": None},
+            {"process_id": ""},
+            {"process_id": {"$exists": False}},
+        ],
+    }
+    result = await db.documents.update_many(
+        orphan_filter,
+        {"$set": {"process_id": process_id, "updated_at": now}},
+    )
+    reanchored = result.modified_count if result else 0
+    if reanchored:
+        logger.info(
+            f"[PORTAL][RE-ANCHOR] {reanchored} documento(s) órfão(s) do cliente "
+            f"{client_id} re-ancorados ao processo {process_id}"
+        )
+    return reanchored
 
 
 async def _notify_assigned_team_upload(process: dict, filename: str, category: str):
@@ -200,15 +292,14 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
     # PACOTE DE — `uuid` já importado no topo do módulo; não re-importar aqui.
 
     process = client_data.get("process")
-    client = client_data.get("client") or {}
-    token_payload = client_data.get("token_payload", {})
-    client_id = (
-        client_data.get("client_id")
-        or token_payload.get("client_id")
-        or (process or {}).get("client_id")
-        or client.get("id")
-    )
     process_id = process["id"] if process else None
+    # PACOTE 5 (bug dos uploads órfãos) — resolução robusta do client_id:
+    # tokens magic_link não o transportam e processos legados podem não o
+    # ter gravado; sem este fallback o documento perdia a ligação ao cliente.
+    client_id = await _resolve_portal_client_id(client_data, process)
+    # Referência ao documento do cliente (fluxo sem processo / access_code):
+    # usada para o nome do cliente no histórico do upload.
+    client = client_data.get("client") or {}
 
     file_key = data.get("file_key")
     original_filename = data.get("original_filename")
@@ -245,11 +336,32 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
 
     # Satisfazer pedido REQUESTED (por process_id OU client_id)
     if document_id:
+        # PACOTE 5 (bug dos uploads órfãos): pedidos do checklist gerados no
+        # registo público/onboarding são ancorados APENAS ao `client_id`
+        # (sem process_id). O match estrito por process_id falhava nesses
+        # casos — o upload era registado como documento novo (duplicado) e o
+        # pedido continuava pendente no Portal. Estratégia de duas tentativas:
+        #   1. match estrito por process_id (comportamento clássico);
+        #   2. se não casar, match pelo client_id — apenas para pedidos SEM
+        #      process_id (nunca rouba pedidos de outro processo do mesmo
+        #      cliente); o `$set` re-ancora-o ao processo desta submissão.
         match_q = {"id": document_id}
         if process_id:
             match_q["process_id"] = process_id
         elif client_id:
             match_q["client_id"] = client_id
+
+        match_q_client_anchor = None
+        if process_id and client_id:
+            match_q_client_anchor = {
+                "id": document_id,
+                "client_id": client_id,
+                "$or": [
+                    {"process_id": None},
+                    {"process_id": ""},
+                    {"process_id": {"$exists": False}},
+                ],
+            }
 
         # PACOTE DE — APPEND logic: cada upload do portal é acrescentado ao
         # array `attached_files` (nunca substitui/apaga uploads anteriores).
@@ -304,6 +416,20 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
             now=now,
         )
 
+        # PACOTE 5 — 2ª tentativa: pedido ancorado só ao client_id (onboarding)
+        if not progress.get("matched") and match_q_client_anchor:
+            progress = await apply_portal_request_upload(
+                match_q_client_anchor,
+                set_fields=set_fields,
+                file_entry=file_entry,
+                now=now,
+            )
+            if progress.get("matched"):
+                logger.info(
+                    f"[PORTAL][RE-ANCHOR] Pedido {document_id} re-ancorado do "
+                    f"client_id {client_id} para o processo {process_id}"
+                )
+
         if progress.get("matched"):
             doc_id = document_id
             if progress.get("completed"):
@@ -321,7 +447,8 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
             doc_id = str(uuid.uuid4())
             await _create_document_record(
                 doc_id, process_id, file_key, original_filename,
-                category, file_size, content_type, now, client_id=client_id
+                category, file_size, content_type, now, custom_label,
+                client_id=client_id,
             )
     else:
         doc_id = str(uuid.uuid4())
@@ -329,6 +456,19 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
             doc_id, process_id, file_key, original_filename,
             category, file_size, content_type, now, custom_label, client_id=client_id
         )
+
+    # PACOTE 5 (bug dos uploads órfãos) — re-âncora defensiva: garante que
+    # qualquer documento anterior do cliente que tenha ficado sem process_id
+    # (uploads do onboarding anteriores à criação do processo) passa a
+    # aparecer no Processo a partir deste upload.
+    if process_id and client_id:
+        try:
+            await _reanchor_orphan_documents(process_id, client_id, now)
+        except Exception as e:
+            logger.warning(
+                f"[PORTAL] Erro na re-âncora de documentos órfãos "
+                f"(processo={process_id}, cliente={client_id}): {e}"
+            )
 
     await invalidate_stats_cache()
 
