@@ -6,7 +6,6 @@
  */
 import { useState, useMemo } from "react";
 import { Badge } from "./ui/badge";
-import { ScrollArea } from "./ui/scroll-area";
 import { Button } from "./ui/button";
 import {
   Table,
@@ -74,7 +73,7 @@ function detailsText(event) {
 const UnifiedAuditTrail = ({
   history = [],
   activities = [],
-  maxHeight = "500px",
+  maxHeight = "600px",
   currentUser = null,
   onDeleteComment = null,
 }) => {
@@ -132,7 +131,19 @@ const UnifiedAuditTrail = ({
         })}
       </div>
 
-      <ScrollArea style={{ maxHeight }}>
+      {/* BUGFIX (visual — tabela sem scroll): o Radix ScrollArea clipava o
+          conteúdo em ambas as direcções — verticalmente porque o Viewport
+          (`h-full`) resolve a altura para auto quando o Root só tem
+          `max-height` (o conteúdo cresce além do limite e o Root corta-o em
+          `overflow-hidden` sem nunca gerar scrollbar); horizontalmente porque
+          só existe uma ScrollBar vertical, pelo que colunas largas
+          (Utilizador/Data/Detalhes) eram cortadas à direita. Substituído por
+          um contentor nativo com scroll responsivo em ambas as direcções. */}
+      <div
+        className="overflow-x-auto overflow-y-auto"
+        style={{ maxHeight }}
+        data-testid="audit-trail-scroll-container"
+      >
         {filteredEvents.length === 0 ? (
           <EmptyState
             icon={Clock}
@@ -212,30 +223,32 @@ const UnifiedAuditTrail = ({
             </TableBody>
           </Table>
         )}
+      </div>
 
-        {!expanded && filteredEvents.length > 40 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full mt-2 text-xs"
-            onClick={() => setExpanded(true)}
-          >
-            <ChevronDown className="h-3.5 w-3.5 mr-1" />
-            Ver mais {filteredEvents.length - 40} eventos
-          </Button>
-        )}
-        {expanded && filteredEvents.length > 40 && (
-          <Button
-            variant="ghost"
-            size="sm"
-            className="w-full mt-2 text-xs"
-            onClick={() => setExpanded(false)}
-          >
-            <ChevronUp className="h-3.5 w-3.5 mr-1" />
-            Colapsar
-          </Button>
-        )}
-      </ScrollArea>
+      {/* Fora do contentor de scroll — ficam sempre visíveis abaixo da
+          tabela, em vez de escondidos no fim da lista rolável. */}
+      {!expanded && filteredEvents.length > 40 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full mt-2 text-xs"
+          onClick={() => setExpanded(true)}
+        >
+          <ChevronDown className="h-3.5 w-3.5 mr-1" />
+          Ver mais {filteredEvents.length - 40} eventos
+        </Button>
+      )}
+      {expanded && filteredEvents.length > 40 && (
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full mt-2 text-xs"
+          onClick={() => setExpanded(false)}
+        >
+          <ChevronUp className="h-3.5 w-3.5 mr-1" />
+          Colapsar
+        </Button>
+      )}
     </div>
   );
 };

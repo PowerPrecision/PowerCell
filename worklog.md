@@ -4100,3 +4100,27 @@ Validação:
 Stage Summary:
 - Ficheiros alterados (15): backend — `models/process.py`, `models/rgpd.py`, `routes/rgpd.py`, `services/document_visibility.py`, `services/portal_onboarding_advance.py`, `services/portal_upload_ops.py`, `services/process_create.py`, `services/process_update.py`, `services/rgpd_pdf.py`, `services/rgpd_request.py`, `services/rgpd_service.py`; frontend — `components/CreateProcessModal.jsx`, `components/kanban/CreateClientModal.jsx`, `pages/ProcessDetails.js`, `services/api.js`.
 - Resultado: uploads do Portal ficam sempre mapeados (process_id + client_id, com re-âncora defensiva e rejeição de órfãos), perfis de administração com bypass absoluto à regra is_indexed, RGPD/Minuta gerados por titular (2 pedidos + 2 emails + 2 PDFs independentes quando existe 2º titular válido; PDF pré-preenchido por titular via ?titular=), e Via Verde (skip_index) disponível na criação com salto direto à consultoria na transição de workflow. Commit: `Feat/Fix: Fix portal upload process mapping, add individual RGPD docs per titular, and add Fast-Track index bypass`.
+
+---
+Task ID: pacote-6
+Agent: Senior Full-Stack Tech Lead (Z.ai)
+Task: Bug visual reportado pelo utilizador: a tabela da tab "Histórico de Auditoria" (HistoryTab.jsx / UnifiedAuditTrail.js) cortava o conteúdo à direita e para baixo. Correção pedida: envolver a tabela (ou atualizar o contentor principal) com classes Tailwind para scroll responsivo — overflow-x-auto na horizontal e max-h-[600px] overflow-y-auto na vertical.
+
+Diagnóstico (causa raiz):
+O corte resultava do Radix ScrollArea (shadcn `ui/scroll-area.jsx`) usado como contentor da tabela no `UnifiedAuditTrail.js`, com `style={{ maxHeight }}` no Root:
+1. **Corte vertical (para baixo)**: bug clássico do Radix ScrollArea com `max-height` — o Viewport tem `h-full` (height: 100%), mas como o Root só tem `max-height` (height auto), a altura percentual do Viewport resolve para auto → o Viewport cresce até à altura total do conteúdo; o Root corta-o em `overflow-hidden` no limite, mas como o Viewport nunca fica menor que o conteúdo, a scrollbar do Radix calcula que não há overflow → conteúdo clipado sem scroll.
+2. **Corte horizontal (à direita)**: o componente shadcn só monta UMA `<ScrollBar />` vertical (sem orientação horizontal) e o Viewport do Radix aplica overflow-x escondido — as colunas de largura fixa (w-10 + w-[140px] + w-[150px] + w-[220px] + Ação) excediam a largura disponível e o excesso era cortado sem qualquer forma de rolar.
+
+Correções Aplicadas:
+1. `UnifiedAuditTrail.js`: substituído o `<ScrollArea style={{ maxHeight }}>` por um contentor nativo `<div className="overflow-x-auto overflow-y-auto" style={{ maxHeight }}>` (data-testid="audit-trail-scroll-container") — scroll nativo responsivo em ambas as direcções; default da prop `maxHeight` actualizado de "500px" para "600px"; botões "Ver mais N eventos"/"Colapsar" movidos para FORA do contentor de scroll (ficam sempre visíveis abaixo da tabela em vez de escondidos no fim da lista rolável); import do ScrollArea removido. Comentário de bugfix documenta a causa para futuro contexto.
+2. `HistoryTab.jsx`: `maxHeight` passado ao UnifiedAuditTrail alinhado para "600px" (antes "520px"), conforme o pedido.
+
+Validação:
+- `git pull origin dev` executado antes das alterações (Already up to date, base 16dc6fee).
+- Único consumidor do UnifiedAuditTrail é o HistoryTab (rg confirmado) — sem outros callers afectados.
+- Sintaxe validada com esbuild (loader jsx) nos 2 ficheiros — OK.
+- Sem testes unitários directos do componente (rg em *.test.* sem matches); alteração puramente presentacional (classes CSS + reestruturação do contentor), sem mudanças de lógica/props.
+
+Stage Summary:
+- Ficheiros alterados (2): `frontend/src/components/UnifiedAuditTrail.js`, `frontend/src/components/processDetails/tabs/HistoryTab.jsx`.
+- Resultado: a tabela de Histórico de Auditoria passa a ter scroll horizontal (overflow-x-auto) quando as colunas excedem a largura e scroll vertical com limite de 600px (max-h + overflow-y-auto) para listas longas; botões de expansão sempre visíveis. Commit: `Fix: Resolve audit history table clipping with responsive horizontal and vertical scrolling`.
