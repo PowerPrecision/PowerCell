@@ -4124,3 +4124,28 @@ Validação:
 Stage Summary:
 - Ficheiros alterados (2): `frontend/src/components/UnifiedAuditTrail.js`, `frontend/src/components/processDetails/tabs/HistoryTab.jsx`.
 - Resultado: a tabela de Histórico de Auditoria passa a ter scroll horizontal (overflow-x-auto) quando as colunas excedem a largura e scroll vertical com limite de 600px (max-h + overflow-y-auto) para listas longas; botões de expansão sempre visíveis. Commit: `Fix: Resolve audit history table clipping with responsive horizontal and vertical scrolling`.
+
+---
+Task ID: pacote-7
+Agent: Senior Full-Stack Tech Lead (Z.ai)
+Task: CI vermelho na dev: `TestBug5DocumentVisibility::test_roles_with_access_before_indexing` (`tests/unit/test_e2e_business_logic_fixes.py:517`) — `user_can_view_process_documents({'role': 'diretor'}, processo não indexado)` devolvia `True` onde o teste esperava `False`. CI: 1 failed, 1162 passed.
+
+Diagnóstico (causa raiz, por leitura de código + git blame antes de alterar):
+1. O teste foi escrito no commit `f7b02dcd` (Iteração 12/Pacote BH), quando `_PRE_INDEX_ALLOWED_ROLES` = {index, indexacao, admin} — a expectativa `diretor → False` era CORRECTA na altura.
+2. O Pacote 5 (commit `16dc6fee`) alterou deliberadamente a regra: `_ADMIN_BYPASS_ROLES` = SUPER_ADMIN_ROLES (admin, ceo) + diretor + administrativo + variantes legadas (system_admin, super_admin), com bypass ABSOLUTO verificado em PRIMEIRO LUGAR (antes mesmo de `is_indexed`) — pedido explícito do utilizador na auditoria de visibilidade dos perfis admin.
+3. A validação do Pacote 5 correu 108 testes de ficheiros seleccionados mas NÃO re-executou `test_e2e_business_logic_fixes.py` — o ficheiro que cobre exactamente o módulo alterado (`document_visibility.py`). A asserção obsoleta entrou na dev e só o CI a apanhou.
+4. Conclusão: o código está correcto (regra de negócio vigente, documentada no docstring do módulo); o TESTE é o artefacto desactualizado. Dívida adicional encontrada: o `ARCHITECTURE.md` (secção 5 das "Regras de Negócio do Onboarding — Pacote BH") ainda documentava a regra ANTIGA ("SÓ visíveis para perfis INDEX e ADMIN") — o Pacote 5 não tinha actualizado a documentação de segurança.
+
+Correções Aplicadas (PACOTE 7 — alinhamento teste/documentação com a regra do Pacote 5; zero alterações em código de produção):
+1. `tests/unit/test_e2e_business_logic_fixes.py::test_roles_with_access_before_indexing`: `diretor → is True` (bypass absoluto); acrescentadas asserções `administrativo → True` e variantes legadas `system_admin`/`super_admin → True`; acrescentados negativos reforçados `intermediario`/`parceiro` sem atribuição → `False` (o valor protector do teste mantém-se: consultor não atribuído continua bloqueado); docstring do módulo (item 5) actualizada.
+2. `ARCHITECTURE.md` (secção 5 — "Visibilidade de documentos pré-indexação"): regra reescrita por ordem de avaliação canónica — 1. bypass admin absoluto (admin, ceo, diretor, administrativo, system_admin, super_admin); 2. `is_indexed` → visibilidade normal; 3. perfis INDEX; 4. utilizadores atribuídos; 403 para consultor/intermediário/parceiro sem atribuição. A documentação de segurança passa a bater certo com o código.
+
+Validação:
+- `git pull origin dev` executado antes de qualquer alteração (Already up to date, base 79830826).
+- Falha reproduzida localmente primeiro (pytest do teste isolado — exactamente a mesma asserção do CI) antes de tocar em qualquer ficheiro.
+- Suite unitária completa (`pytest tests/unit -n 4`): **1163 passed, 0 falhas** — o mesmo total do CI com o teste corrigido, zero regressões.
+- flake8 (comando exacto do CI `--count --select=E9,F63,F7,F82 --show-source --statistics`, `.venv` local excluído): 0 problemas.
+
+Stage Summary:
+- Ficheiros alterados (2): `backend/tests/unit/test_e2e_business_logic_fixes.py`, `ARCHITECTURE.md`.
+- Resultado: CI volta ao verde; o teste de Bug 5 fica alinhado com a regra de visibilidade vigente (bypass absoluto dos perfis de administração, verificado em primeiro lugar) mantendo as asserções protectivas (consultor/intermediário/parceiro sem atribuição → 403), e o `ARCHITECTURE.md` documenta a regra correcta. Lição de processo registada: um pacote que altera um módulo coberto por testes tem de re-executar os ficheiros de teste desse módulo (não apenas os seleccionados ad-hoc) — foi exactamente o gap que deixou a asserção obsoleta entrar na dev. Commit: `Fix: Alinhar teste de visibilidade com o bypass absoluto dos perfis de administração e actualizar documentação`.
