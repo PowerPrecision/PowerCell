@@ -268,7 +268,12 @@ async def maybe_auto_assign_indexer_on_create(
     is_lead: bool,
     initial_status: Optional[str],
 ) -> None:
-    """Auto-atribui indexador (excepto leads). Mutação opcional de process_doc."""
+    """Auto-atribui indexador (excepto leads). Mutação opcional de process_doc.
+
+    PACOTE 5 (Fast-Track / Via Verde): quando ``process_doc['skip_index']`` é
+    True, o processo NÃO é atribuído ao Indexador — salta diretamente para a
+    equipa comercial via ``assign_to_least_busy_consultant`` (Via Verde).
+    """
     try:
         if is_lead:
             logger.info(
@@ -276,6 +281,34 @@ async def maybe_auto_assign_indexer_on_create(
                 f"indexador para processo {process_id} (Lead)"
             )
             return
+
+        # PACOTE 5 — Via Verde: ignorar a fase de Indexação e atribuir ao
+        # consultor com menor carga (equipa comercial) em vez do indexador.
+        if process_doc.get("skip_index"):
+            logger.info(
+                f"[CREATE-PROCESS][VIA-VERDE] skip_index=True — processo "
+                f"{process_id} salta a fase de Indexação; a atribuir consultor..."
+            )
+            from services.process_assignment import assign_to_least_busy_consultant
+
+            success, data, msg = await assign_to_least_busy_consultant(process_id)
+            if success and data.get("assigned"):
+                process_doc["assigned_consultor_id"] = data.get("assigned_consultor_id")
+                process_doc["consultant_id"] = data.get("consultant_id")
+                process_doc["consultor_name"] = data.get("consultor_name")
+                logger.info(
+                    f"[CREATE-PROCESS][VIA-VERDE] Consultor auto-atribuído: "
+                    f"{data.get('consultor_name')} para processo {process_id} "
+                    f"(status mantém: {initial_status})"
+                )
+            else:
+                logger.warning(
+                    f"[CREATE-PROCESS][VIA-VERDE] Sem consultor disponível para "
+                    f"processo {process_id}: {msg} (fica sem atribuição até "
+                    f"atribuição manual)"
+                )
+            return
+
         from services.process_assignment import assign_to_indexer
         assign_success, assign_data, assign_msg = await assign_to_indexer(
             process_id, update_status=False,
@@ -455,6 +488,10 @@ async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
     assert_client_id_required(getattr(data, "client_id", None))
 
     is_lead = bool(getattr(data, "is_lead", False))
+    # PACOTE 5 (Fast-Track / Via Verde) — flag persistido no documento do
+    # processo; consultado na transição de workflow (auto-avanço do
+    # pré-registo) e na auto-atribuição pós-criação.
+    skip_index = bool(getattr(data, "skip_index", False))
     initial_status, _ = await resolve_initial_workflow_status(is_lead=is_lead)
 
     process_id = str(uuid.uuid4())
@@ -482,11 +519,16 @@ async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
     )
     apply_creator_role_assignment(process_doc, user)
 
+    # PACOTE 5 (Fast-Track / Via Verde) — persistir o flag no processo
+    if skip_index:
+        process_doc["skip_index"] = True
+
     return {
         "process_id": process_id,
         "process_number": process_number,
         "now": now,
         "is_lead": is_lead,
+        "skip_index": skip_index,
         "initial_status": initial_status,
         "client_id": client_fields["client_id"],
         "client_name": client_fields["client_name"],

@@ -115,12 +115,20 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
        track_history=False para não gerar ruído no histórico do cliente.
        O assign_to_indexer gera os seus próprios logs de sistema (indexer
        assignment), que são ações de sistema legítimas, não do cliente.
+
+    PACOTE 5 (Fast-Track / Via Verde): quando o processo tem ``skip_index=True``
+    (marcado na criação via checkbox "Via Verde"), o passo 4 muda — o
+    processo NÃO vai para a mesa do Indexador: é atribuído ao CONSULTOR com
+    menor carga (``assign_to_least_busy_consultant``), saltando diretamente
+    para a fase comercial/consultoria.
     """
-    from services.process_assignment import assign_to_indexer
     from services.history import log_history
 
     # ── 1. Verificar que o processo está em pre_registo/Lead ──
-    process = await db.processes.find_one({"id": process_id}, {"_id": 0, "status": 1, "client_name": 1})
+    process = await db.processes.find_one(
+        {"id": process_id},
+        {"_id": 0, "status": 1, "client_name": 1, "skip_index": 1},
+    )
     if not process:
         logger.warning(f"[PACOTE-BO] Processo {process_id} não encontrado para auto-avanço.")
         return
@@ -200,15 +208,42 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
     client_name = process.get("client_name", "Cliente")
     logger.info(
         f"[PACOTE-BO] Processo {process_id} ({client_name}) avançado de "
-        f"{current_status or 'Lead'} → {target_status}. A invocar assign_to_indexer..."
+        f"{current_status or 'Lead'} → {target_status}. Via Verde="
+        f"{process.get('skip_index') is True}. A resolver atribuição..."
     )
 
-    # ── 4. Invocar assign_to_indexer (PACOTE DB: update_status=False) ──
-    # assign_to_indexer atribui o processo ao indexador com menor carga.
-    # PACOTE DB: passamos update_status=False para NÃO forçar fase_documental
-    # nem fila_espera — o processo fica na 1ª fase real (target_status) e o
-    # indexador é atribuído se disponível.
+    # ── 4. Atribuição: Via Verde (consultor) ou fluxo clássico (indexador) ──
+    # PACOTE 5 — skip_index=True (Via Verde): o processo não passa pela mesa
+    # do Indexador; é atribuído diretamente ao consultor com menor carga e
+    # segue na fase comercial/consultoria (target_status acima).
+    if process.get("skip_index") is True:
+        logger.info(
+            f"[PACOTE-BO][VIA-VERDE] Processo {process_id} ({client_name}) com "
+            f"skip_index=True — salta a fase de Indexação; a atribuir consultor..."
+        )
+        try:
+            from services.process_assignment import assign_to_least_busy_consultant
+
+            success, data, msg = await assign_to_least_busy_consultant(process_id)
+            logger.info(
+                f"[PACOTE-BO][VIA-VERDE] assign_to_least_busy_consultant para "
+                f"processo {process_id}: success={success}, data={data}, msg={msg}"
+            )
+        except Exception as e:
+            logger.warning(
+                f"[PACOTE-BO][VIA-VERDE] Erro ao atribuir consultor para o "
+                f"processo {process_id}: {e}. O processo ficou em "
+                f"{target_status} mas sem consultor atribuído."
+            )
+        return
+
+    # Fluxo clássico: assign_to_indexer atribui o processo ao indexador com
+    # menor carga. PACOTE DB: passamos update_status=False para NÃO forçar
+    # fase_documental nem fila_espera — o processo fica na 1ª fase real
+    # (target_status) e o indexador é atribuído se disponível.
     try:
+        from services.process_assignment import assign_to_indexer
+
         success, data, msg = await assign_to_indexer(process_id, update_status=False)
         logger.info(
             f"[PACOTE-BO] assign_to_indexer para processo {process_id}: "

@@ -15,7 +15,7 @@ import base64
 import logging
 import smtplib
 from datetime import datetime, timezone, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from database import db
 from services.email_service import send_email, EmailAccount
 from services.history import log_history
@@ -25,6 +25,131 @@ logger = logging.getLogger(__name__)
 # Configurações
 TOKEN_EXPIRY_HOURS = 24
 RGPD_REQUESTS_COLLECTION = "rgpd_requests"
+
+# PACOTE 5 — identificadores do titular alvo na geração de RGPD/Minuta
+TITULAR_FIRST = "first"   # 1º titular (cliente principal do processo)
+TITULAR_SECOND = "second" # 2º titular (co-titular / fiador)
+
+# Regex simples de validação de email para o disparo por titular (o
+# RGPDCreate já valida com EmailStr do Pydantic; isto valida os dados
+# vindos do documento do processo, que não passam por esse modelo).
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _is_valid_rgpd_email(value: Any) -> bool:
+    """True se o email do titular é utilizável para envio (não vazio/válido)."""
+    if not isinstance(value, str):
+        return False
+    cleaned = value.strip()
+    return bool(cleaned) and bool(_EMAIL_RE.match(cleaned))
+
+
+def _titular_name_from(titular_data: Optional[dict]) -> str:
+    """Nome de um dict de titular (aceita `nome` PT e `name` EN — legado)."""
+    data = titular_data or {}
+    return str(data.get("nome") or data.get("name") or "").strip()
+
+
+async def resolve_second_titular_for_rgpd(process: dict) -> Optional[Dict[str, str]]:
+    """
+    PACOTE 5 — resolve o 2º titular de um processo para efeitos de RGPD.
+
+    O texto legal do RGPD/Minuta é redigido no SINGULAR: cada titular tem de
+    assinar o SEU documento, preenchido exclusivamente com os SEUS dados.
+    Este helper verifica se o processo tem um 2º titular com NOME e EMAIL
+    válidos (pré-condição para gerar o 2º conjunto de documentos e enviar o
+    2º email independente).
+
+    Fontes (por ordem de fiabilidade):
+      1. `second_client_id` → cliente desencriptado em `db.clients`
+         (nome + contacto.email);
+      2. `second_client_data` (quando já populado no documento);
+      3. `titular2_data` inline (formulário público / sincronizado).
+
+    Returns:
+        {"nome": str, "email": str} do 2º titular, ou ``None`` se o processo
+        não tiver 2º titular com nome E email válidos.
+    """
+    if not process:
+        return None
+
+    nome = ""
+    email = ""
+
+    # 1. Cliente ligado via second_client_id (fonte relacional fiável)
+    second_client_id = process.get("second_client_id")
+    if second_client_id:
+        second_doc = await db.clients.find_one({"id": second_client_id})
+        if second_doc:
+            try:
+                from services.encryption import decrypt_client_data
+                second_doc = decrypt_client_data(second_doc)
+            except Exception as e:
+                logger.warning(
+                    f"[RGPD-TITULAR2] Erro ao desencriptar 2º titular "
+                    f"{second_client_id}: {e}"
+                )
+            nome = str(second_doc.get("nome") or "").strip()
+            contacto = second_doc.get("contacto") or {}
+            email = str(contacto.get("email") or "").strip()
+
+    # 2/3. Fallbacks inline do próprio processo
+    if not nome:
+        nome = _titular_name_from(process.get("second_client_data"))
+    if not nome:
+        nome = str(process.get("second_client_name") or "").strip()
+    if not nome:
+        nome = _titular_name_from(process.get("titular2_data"))
+    if not email:
+        email = str(
+            (process.get("second_client_data") or {}).get("email")
+            or (process.get("titular2_data") or {}).get("email")
+            or ""
+        ).strip()
+
+    # Pré-condição de negócio: nome e email válidos (sem email não há envio
+    # independente; sem nome o documento legal não identifica o titular)
+    if not nome or len(nome) < 2 or not _is_valid_rgpd_email(email):
+        return None
+
+    return {"nome": nome, "email": email}
+
+
+async def _titular_fallback_data(process: dict, titular: str) -> dict:
+    """
+    PACOTE 5 — dados pessoais (fallback) do TITULAR ALVO para os renderers
+    de RGPD/Minuta.
+
+    Os placeholders `{{CONTRIBUINTE}}` / `{{MORADA}}` / etc. usam o
+    `consent_data` submetido pelo titular no formulário; quando um campo
+    falta, o fallback vinha SEMPRE do `personal_data` do 1º titular. Com
+    titular="second", o fallback passa a ser os dados do 2º titular
+    (`second_client_id` desencriptado + `titular2_data` inline).
+    """
+    if titular != TITULAR_SECOND:
+        return process.get("personal_data") or {}
+
+    fallback: Dict[str, Any] = dict(process.get("titular2_data") or {})
+
+    second_client_id = process.get("second_client_id")
+    if second_client_id:
+        second_doc = await db.clients.find_one({"id": second_client_id})
+        if second_doc:
+            try:
+                from services.encryption import decrypt_client_data
+                second_doc = decrypt_client_data(second_doc)
+            except Exception:
+                pass
+            dados_pessoais = second_doc.get("dados_pessoais") or {}
+            fallback.setdefault("nif", dados_pessoais.get("nif"))
+            fallback.setdefault(
+                "morada_fiscal", dados_pessoais.get("morada_fiscal")
+            )
+            fallback.setdefault(
+                "documento_id", dados_pessoais.get("documento_id")
+            )
+
+    return fallback
 
 # Mapeamento de tipos de documento para exibição legível
 TIPOS_DOCUMENTO_LABELS = {
@@ -253,7 +378,8 @@ async def create_rgpd_request(
     process_id: str,
     client_name: str,
     client_email: str,
-    user: dict
+    user: dict,
+    titular: str = TITULAR_FIRST,
 ) -> Dict[str, Any]:
     """
     Cria um pedido de consentimento RGPD e envia email com link temporário ao cliente.
@@ -279,9 +405,12 @@ async def create_rgpd_request(
             - token (str): Token de assinatura (só se novo pedido).
             - expires_at (str): Data/hora de expiração ISO 8601.
     """
-    # Verificar se já existe um pedido ativo
+    # PACOTE 5 (RGPD por titular) — deduplicação por (process_id, client_email):
+    # cada titular tem o SEU pedido independente; um pedido pendente do 1º
+    # titular nunca bloqueia a criação do pedido do 2º (e vice-versa).
     existing = await db[RGPD_REQUESTS_COLLECTION].find_one({
         "process_id": process_id,
+        "client_email": client_email,
         "status": {"$in": ["pending", "signed"]}
     })
     
@@ -321,6 +450,9 @@ async def create_rgpd_request(
         "process_id": process_id,
         "client_name": client_name,
         "client_email": client_email,
+        # PACOTE 5 — titular alvo deste pedido ("first" | "second"); os
+        # geradores de PDF usam-no para os fallbacks de dados do titular.
+        "titular": titular if titular in (TITULAR_FIRST, TITULAR_SECOND) else TITULAR_FIRST,
         "token": token,
         "token_expires_at": expires_at.isoformat(),
         "status": "pending",
@@ -516,11 +648,18 @@ async def sign_rgpd(
     )
     
     # Gerar 2 PDFs (RGPD + Minuta) e guardar nos docs do cliente
+    # PACOTE 5 — o titular alvo vem do pedido ("first" | "second"): o PDF é
+    # preenchido exclusivamente com os dados da pessoa que assinou.
+    rgpd_titular = request.get("titular") or TITULAR_FIRST
     rgpd_pdf_bytes = None
     minuta_pdf_bytes = None
     try:
-        rgpd_pdf_bytes = await _generate_rgpd_pdf_bytes(request["process_id"], request, consent_data)
-        minuta_pdf_bytes = await _generate_minuta_pdf_bytes(request["process_id"], request, consent_data)
+        rgpd_pdf_bytes = await _generate_rgpd_pdf_bytes(
+            request["process_id"], request, consent_data, titular=rgpd_titular
+        )
+        minuta_pdf_bytes = await _generate_minuta_pdf_bytes(
+            request["process_id"], request, consent_data, titular=rgpd_titular
+        )
         
         # Upload para S3
         client_name = consent_data.get("nome", request.get("client_name", "Cliente"))
@@ -943,9 +1082,15 @@ async def _upload_pdf_to_s3(process_id: str, client_name: str, pdf_bytes: bytes,
 async def _get_rendered_rgpd_text(
     process_id: str,
     rgpd_request: dict,
-    consent_data: dict
+    consent_data: dict,
+    titular: str = TITULAR_FIRST,
 ) -> str:
-    """Obtém o template RGPD renderizado com as variáveis dinâmicas substituídas."""
+    """Obtém o template RGPD renderizado com as variáveis dinâmicas substituídas.
+
+    PACOTE 5 — ``titular`` identifica o titular alvo ("first" | "second");
+    os fallbacks de dados pessoais (NIF, morada, documento) vêm do titular
+    certo em vez de usarem sempre os dados do 1º titular.
+    """
     from services.rgpd_templates import _get_active_rgpd_template
     
     process = await db.processes.find_one({"id": process_id})
@@ -953,7 +1098,7 @@ async def _get_rendered_rgpd_text(
         from services.process_service import decrypt_sensitive_data
         process = decrypt_sensitive_data(process)
     
-    personal_data = process.get("personal_data", {}) if process else {}
+    personal_data = await _titular_fallback_data(process or {}, titular)
     
     template_text = await _get_active_rgpd_template()
     if not template_text:
@@ -1003,9 +1148,14 @@ async def _get_rendered_rgpd_text(
 async def _get_rendered_minuta_text(
     process_id: str,
     rgpd_request: dict,
-    consent_data: dict
+    consent_data: dict,
+    titular: str = TITULAR_FIRST,
 ) -> str:
-    """Obtém o template Minuta renderizado com as variáveis dinâmicas substituídas."""
+    """Obtém o template Minuta renderizado com as variáveis dinâmicas substituídas.
+
+    PACOTE 5 — ``titular`` identifica o titular alvo ("first" | "second");
+    os fallbacks de dados pessoais vêm do titular certo.
+    """
     from services.rgpd_minutas import _get_active_minuta_template
     
     process = await db.processes.find_one({"id": process_id})
@@ -1013,7 +1163,7 @@ async def _get_rendered_minuta_text(
         from services.process_service import decrypt_sensitive_data
         process = decrypt_sensitive_data(process)
     
-    personal_data = process.get("personal_data", {}) if process else {}
+    personal_data = await _titular_fallback_data(process or {}, titular)
     
     template_text = await _get_active_minuta_template()
     if not template_text:
@@ -1056,21 +1206,44 @@ async def _get_rendered_minuta_text(
     return rendered
 
 
-async def _generate_rgpd_pdf_bytes(process_id: str, rgpd_request: dict, consent_data: dict) -> bytes:
-    """Generate RGPD PDF bytes with professional A4 layout."""
+async def _generate_rgpd_pdf_bytes(
+    process_id: str,
+    rgpd_request: dict,
+    consent_data: dict,
+    titular: str = TITULAR_FIRST,
+) -> bytes:
+    """Generate RGPD PDF bytes with professional A4 layout.
+
+    PACOTE 5 — ``titular`` ("first" | "second") define o titular alvo do
+    documento: o PDF é preenchido exclusivamente com os dados dessa pessoa
+    (o design HTML/CSS, margens e quebras de página permanecem intactos).
+    """
     import asyncio
     
-    rgpd_text = await _get_rendered_rgpd_text(process_id, rgpd_request, consent_data)
+    rgpd_text = await _get_rendered_rgpd_text(
+        process_id, rgpd_request, consent_data, titular=titular
+    )
     
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _build_rgpd_pdf, rgpd_text, consent_data)
 
 
-async def _generate_minuta_pdf_bytes(process_id: str, rgpd_request: dict, consent_data: dict) -> bytes:
-    """Generate Minuta PDF bytes with professional A4 layout."""
+async def _generate_minuta_pdf_bytes(
+    process_id: str,
+    rgpd_request: dict,
+    consent_data: dict,
+    titular: str = TITULAR_FIRST,
+) -> bytes:
+    """Generate Minuta PDF bytes with professional A4 layout.
+
+    PACOTE 5 — ``titular`` ("first" | "second") define o titular alvo do
+    documento (mesma semântica de `_generate_rgpd_pdf_bytes`).
+    """
     import asyncio
     
-    minuta_text = await _get_rendered_minuta_text(process_id, rgpd_request, consent_data)
+    minuta_text = await _get_rendered_minuta_text(
+        process_id, rgpd_request, consent_data, titular=titular
+    )
     
     loop = asyncio.get_event_loop()
     return await loop.run_in_executor(None, _build_minuta_pdf, minuta_text, consent_data)

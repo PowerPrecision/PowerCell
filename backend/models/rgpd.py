@@ -128,7 +128,13 @@ class RGPDRequest(BaseModel):
 
 
 class RGPDResponse(BaseModel):
-    """Resposta do endpoint de RGPD."""
+    """Resposta do endpoint de RGPD.
+
+    PACOTE 5 (RGPD por titular): quando o processo tem um 2º titular com
+    nome e email válidos, o pedido dispara 2 emails independentes — a
+    resposta informa o frontend sobre o 2º envio (`second_titular_name` /
+    `second_email_sent`) para feedback claro ao utilizador.
+    """
     id: str
     process_id: str
     client_name: str
@@ -140,6 +146,9 @@ class RGPDResponse(BaseModel):
     created_by_name: str
     signed_at: Optional[str] = None
     pdf_url: Optional[str] = None
+    # PACOTE 5 — informação do 2º envio independente (quando aplicável)
+    second_titular_name: Optional[str] = None
+    second_email_sent: Optional[bool] = None
 
 
 class RGPDPublicView(BaseModel):

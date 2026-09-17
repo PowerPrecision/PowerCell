@@ -924,7 +924,13 @@ export const getRGPDTemplate = () => api.get("/rgpd/admin/template");
 export const updateRGPDTemplate = (content) => api.put("/rgpd/admin/template", { content });
 
 // PACOTE DE — Download RGPD pré-preenchido (PDF para assinatura manual)
-export const downloadRGPDF = (processId) => api.get(`/rgpd/pdf/${processId}`, { responseType: "blob" });
+// PACOTE 5 — `titular` define o titular alvo do PDF RGPD pré-preenchido:
+// "first" (1º titular, default) ou "second" (2º titular).
+export const downloadRGPDF = (processId, titular = "first") =>
+  api.get(`/rgpd/pdf/${processId}`, {
+    params: { titular },
+    responseType: "blob",
+  });
 
 // ===== MINUTA TEMPLATE =====
 export const getMinutaTemplate = () => api.get("/rgpd/admin/minuta-template");

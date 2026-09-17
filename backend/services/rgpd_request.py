@@ -17,6 +17,7 @@ from models.rgpd import RGPDCreate, RGPDResponse, RGPDStatusEnum
 from services.rgpd_service import (
     create_rgpd_request,
     send_rgpd_email,
+    resolve_second_titular_for_rgpd,
     RGPD_REQUESTS_COLLECTION,
     TOKEN_EXPIRY_HOURS,
 )
@@ -33,17 +34,28 @@ async def run_request_rgpd(data: RGPDCreate, request, user: dict):
     """
     Solicita consentimento RGPD para um processo, enviando um email
     com link temporário (24h) para o cliente assinar digitalmente.
+
+    PACOTE 5 (RGPD por titular — 2 documentos independentes): o texto legal
+    do RGPD/Minuta é redigido no SINGULAR — cada titular assina o SEU
+    documento. Se o processo tiver um 2º titular com NOME e EMAIL válidos
+    (`second_client_id` ligado, `second_client_data` ou `titular2_data`),
+    o sistema cria um pedido INDEPENDENTE para o 2º titular e envia 2
+    emails separados (um para cada titular, cada um com o seu token de
+    assinatura). Os PDFs gerados na assinatura de cada um são preenchidos
+    exclusivamente com os dados dessa pessoa.
     """
     try:
         process = await db.processes.find_one({"id": data.process_id})
         if not process:
             raise HTTPException(status_code=404, detail="Processo não encontrado")
 
+        # ── 1º titular (pedido principal — compatível com o fluxo clássico) ──
         result = await create_rgpd_request(
             process_id=data.process_id,
             client_name=data.client_name,
             client_email=data.client_email,
             user=user,
+            titular="first",
         )
 
         if not result.get("success"):
@@ -100,6 +112,77 @@ async def run_request_rgpd(data: RGPDCreate, request, user: dict):
             details=f"Link de assinatura enviado para o cliente. Expira em {TOKEN_EXPIRY_HOURS}h.",
         )
 
+        # ── PACOTE 5 — 2º titular: pedido + email INDEPENDENTES ──
+        # Verifica se existe um 2º titular com nome e email válidos no
+        # processo; se existir, cria o pedido dele e envia o 2º email.
+        second_titular = await resolve_second_titular_for_rgpd(process)
+        second_titular_name = None
+        second_email_sent = None
+
+        if second_titular:
+            second_titular_name = second_titular["nome"]
+            second_email_sent = False
+
+            # Evitar duplicar o envio quando o 2º titular partilha o email
+            # do 1º (mesma caixa) — nesse caso um único pedido chega.
+            same_email = (
+                second_titular["email"].strip().lower()
+                == str(data.client_email).strip().lower()
+            )
+
+            if not same_email:
+                result_second = await create_rgpd_request(
+                    process_id=data.process_id,
+                    client_name=second_titular["nome"],
+                    client_email=second_titular["email"],
+                    user=user,
+                    titular="second",
+                )
+
+                if result_second.get("success") and not result_second.get("existing"):
+                    second_email_sent = await send_rgpd_email(
+                        client_email=second_titular["email"],
+                        client_name=second_titular["nome"],
+                        token=result_second["token"],
+                        request_id=result_second["request_id"],
+                        user_email=user["email"],
+                        custom_message=data.custom_message,
+                        base_url=frontend_base_url,
+                        process_id=data.process_id,
+                        user_id=user.get("id"),
+                    )
+                    second_status_txt = "enviado" if second_email_sent else "falhou"
+                    await _add_process_activity(
+                        process_id=data.process_id,
+                        user_id=user.get("id", "system"),
+                        user_name=user.get("name", "Sistema"),
+                        action=(
+                            f"RGPD do 2º titular solicitado — email "
+                            f"{second_status_txt} para {second_titular['email']}"
+                        ),
+                        details=(
+                            "Link de assinatura independente para o 2º titular "
+                            f"({second_titular['nome']}). Expira em {TOKEN_EXPIRY_HOURS}h."
+                        ),
+                    )
+                    if not second_email_sent:
+                        logger.warning(
+                            f"RGPD 2º titular criado mas email falhou: "
+                            f"{second_titular['email']}"
+                        )
+                elif result_second.get("existing"):
+                    # Já existe pedido ativo para o 2º titular — não reenviar.
+                    second_email_sent = True
+                    logger.info(
+                        f"[RGPD-TITULAR2] Pedido já existente para "
+                        f"{second_titular['email']} (status={result_second.get('status')})"
+                    )
+            else:
+                logger.info(
+                    "[RGPD-TITULAR2] 2º titular partilha o email do 1º — "
+                    "um único pedido cobre ambos os titulares."
+                )
+
         return RGPDResponse(
             id=result["request_id"],
             process_id=data.process_id,
@@ -109,6 +192,8 @@ async def run_request_rgpd(data: RGPDCreate, request, user: dict):
             token_expires_at=result["expires_at"],
             created_at="",
             created_by_name=user.get("name", ""),
+            second_titular_name=second_titular_name,
+            second_email_sent=second_email_sent,
         )
 
     except HTTPException:

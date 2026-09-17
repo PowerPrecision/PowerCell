@@ -116,10 +116,12 @@ export default function HistoryTab({
           )}
         </CardHeader>
         <CardContent className="pt-0 pb-3">
+          {/* BUGFIX (visual): maxHeight alinhado com o contentor de scroll
+              nativo do UnifiedAuditTrail (overflow-x-auto + overflow-y-auto). */}
           <UnifiedAuditTrail
             history={history}
             activities={activities}
-            maxHeight="520px"
+            maxHeight="600px"
             currentUser={user}
             onDeleteComment={handleDeleteComment}
           />

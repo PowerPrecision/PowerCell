@@ -5,7 +5,7 @@ Logic in services/rgpd_*.py (do **not** collide with existing rgpd_service.py / 
 """
 from typing import Optional
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, Query, Request
 from fastapi.responses import StreamingResponse
 
 from models.rgpd import (
@@ -125,10 +125,16 @@ async def list_rgpd_requests(
 @router.get("/pdf/{process_id}")
 async def download_prefilled_rgpd_pdf(
     process_id: str,
+    titular: Optional[str] = Query(
+        "first",
+        description="PACOTE 5 — titular alvo do documento: 'first' (1º titular, default) ou 'second' (2º titular)",
+    ),
     user: dict = Depends(require_staff())
 ):
     import io
-    pdf_bytes, filename = await run_generate_prefilled_rgpd_pdf(process_id, user)
+    pdf_bytes, filename = await run_generate_prefilled_rgpd_pdf(
+        process_id, user, titular=titular or "first"
+    )
     return StreamingResponse(
         io.BytesIO(pdf_bytes),
         media_type="application/pdf",

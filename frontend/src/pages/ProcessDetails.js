@@ -410,21 +410,32 @@ const ProcessDetails = () => {
   // PACOTE DE — Download RGPD PDF pré-preenchido (assinatura manual)
   // Chama GET /api/rgpd/pdf/{process_id} (backend já implementa) e descarrega
   // o PDF com nome seguro baseado no nome do cliente (sem acentos/espaços).
-  const handleDownloadRgpdPdf = async () => {
+  // PACOTE 5 — `titular` define o titular alvo ("first" | "second"): o PDF
+  // do 2º titular é preenchido exclusivamente com os dados dessa pessoa.
+  const handleDownloadRgpdPdf = async (titular = "first") => {
     try {
-      const res = await downloadRGPDF(id);
+      const res = await downloadRGPDF(id, titular);
       const url = window.URL.createObjectURL(new Blob([res.data]));
       const link = document.createElement("a");
       link.href = url;
-      const safeName = (process?.client_name || "cliente")
+      const baseName =
+        titular === "second"
+          ? (titular2Data?.nome || titular2Data?.name || process?.second_client_data?.nome || "2o_Titular")
+          : (process?.client_name || "cliente");
+      const safeName = (baseName)
         .normalize("NFD").replace(/[\u0300-\u036f]/g, "")
         .replace(/[^a-zA-Z0-9_-]/g, "_").slice(0, 50);
-      link.setAttribute("download", `RGPD_${safeName}.pdf`);
+      const suffix = titular === "second" ? "_2o_Titular" : "";
+      link.setAttribute("download", `RGPD_${safeName}${suffix}.pdf`);
       document.body.appendChild(link);
       link.click();
       link.remove();
       window.URL.revokeObjectURL(url);
-      toast.success("RGPD pré-preenchido descarregado.");
+      toast.success(
+        titular === "second"
+          ? "RGPD pré-preenchido do 2º titular descarregado."
+          : "RGPD pré-preenchido descarregado."
+      );
     } catch (error) {
       // O endpoint devolve JSON de erro (não blob) quando falha — tentamos ler
       // como texto e fazer parse do detail. Se falhar o parse, fallback p/ message.
@@ -510,7 +521,23 @@ const ProcessDetails = () => {
         } else if (data.status === 'pending') {
           toast.info("Já existe um pedido pendente. Verifique o email do cliente.");
         } else {
-          toast.success("Email de RGPD enviado para o cliente!");
+          // PACOTE 5 — feedback do 2º envio independente (quando o processo
+          // tem 2º titular com nome e email válidos, o backend dispara 2
+          // emails, um por titular, cada um com o seu link de assinatura).
+          if (data.second_titular_name) {
+            if (data.second_email_sent) {
+              toast.success(
+                `Emails de RGPD enviados para o 1º titular e para ${data.second_titular_name} (2º titular) — cada um com o seu link de assinatura.`
+              );
+            } else {
+              toast.success("Email de RGPD enviado para o cliente!");
+              toast.warning(
+                `Não foi possível enviar o email para o 2º titular (${data.second_titular_name}). Verifique o email dele na ficha do processo.`
+              );
+            }
+          } else {
+            toast.success("Email de RGPD enviado para o cliente!");
+          }
         }
         fetchRgpdStatus();
       } else {
@@ -1450,6 +1477,17 @@ const ProcessDetails = () => {
   ];
   const isInactiveProcess = !!(process && INACTIVE_PROCESS_STATUSES.includes(process.status));
 
+  // PACOTE 5 (RGPD por titular) — True quando o processo tem 2º titular
+  // identificado (cliente ligado via second_client_id ou titular2_data com
+  // nome). Habilita o download do PDF do 2º titular no menu RGPD; o backend
+  // dispara também o pedido + email independentes dele na solicitação.
+  const hasSecondTitular = !!(
+    process?.second_client_id ||
+    process?.second_client_data?.nome ||
+    titular2Data?.nome ||
+    titular2Data?.name
+  );
+
   // Função para eliminar o PROCESSO (soft-delete). O cliente NÃO é tocado —
   // para eliminar um cliente há-de usar-se a página de detalhe do cliente.
   // O backend (DELETE /processes/{id}) faz cascade de documentos/tarefas.
@@ -1830,11 +1868,22 @@ const ProcessDetails = () => {
                   <DropdownMenuSeparator />
                   <DropdownMenuItem
                     className="gap-2 cursor-pointer"
-                    onClick={handleDownloadRgpdPdf}
+                    onClick={() => handleDownloadRgpdPdf("first")}
                   >
                     <FileDown className="h-4 w-4" />
                     Descarregar PDF (Assinatura Manual)
                   </DropdownMenuItem>
+                  {/* PACOTE 5 — PDF do 2º titular: documento independente,
+                      preenchido exclusivamente com os dados dessa pessoa. */}
+                  {hasSecondTitular && (
+                    <DropdownMenuItem
+                      className="gap-2 cursor-pointer"
+                      onClick={() => handleDownloadRgpdPdf("second")}
+                    >
+                      <FileDown className="h-4 w-4" />
+                      Descarregar PDF — 2º Titular
+                    </DropdownMenuItem>
+                  )}
                 </DropdownMenuContent>
               </DropdownMenu>
             )}

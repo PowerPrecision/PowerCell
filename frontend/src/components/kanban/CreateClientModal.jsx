@@ -40,10 +40,11 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '../ui/select';
-import { Loader2, Plus, UserPlus, Users, CheckCircle } from 'lucide-react';
+import { Loader2, Plus, UserPlus, Users, CheckCircle, Zap } from 'lucide-react';
 import { toast } from 'sonner';
 import { createClientProcess, createClient, searchClients } from '../../services/api';
 import { PROCESS_TYPE_LABELS } from '../SmartClientSearch';
+import { Switch } from '../ui/switch';
 
 const INITIAL_FORM_STATE = {
   process_type: 'credito_habitacao',
@@ -66,6 +67,9 @@ const CreateClientModal = memo(({
   const [formData, setFormData] = useState(INITIAL_FORM_STATE);
   const [isCreating, setIsCreating] = useState(false);
   const [selectedClient, setSelectedClient] = useState(null);
+  // PACOTE 5 (Fast-Track / Via Verde) — ignorar a fase de Indexação: o
+  // processo salta a mesa do Indexador e é atribuído ao consultor.
+  const [skipIndex, setSkipIndex] = useState(false);
 
   // ── Novo Cliente ──────────────────────────────────────────────────
   // Em modo `clientOnly`, salta-se sempre para o formulário de criação
@@ -93,6 +97,7 @@ const CreateClientModal = memo(({
     setSearchQuery('');
     setSearchResults([]);
     setShowDropdown(false);
+    setSkipIndex(false);
   }, [onOpenChange, clientOnly]);
 
   // ── Pesquisa de Clientes ──────────────────────────────────────────
@@ -168,6 +173,7 @@ const CreateClientModal = memo(({
       setSearchQuery('');
       setSearchResults([]);
       setShowDropdown(false);
+      setSkipIndex(false);
     }
   }, [open, clientOnly]);
 
@@ -253,6 +259,8 @@ const CreateClientModal = memo(({
       const payload = {
         client_id: clientId,
         process_type: formData.process_type,
+        // PACOTE 5 (Fast-Track / Via Verde) — ignora a fase de Indexação
+        ...(skipIndex ? { skip_index: true } : {}),
       };
 
       const processRes = await createClientProcess(payload);
@@ -268,7 +276,7 @@ const CreateClientModal = memo(({
     } finally {
       setIsCreating(false);
     }
-  }, [canSubmit, clientOnly, clientMode, selectedClient, newClientData, formData, handleClose, onSuccess]);
+  }, [canSubmit, clientOnly, clientMode, selectedClient, newClientData, formData, skipIndex, handleClose, onSuccess]);
 
   // ── Render ────────────────────────────────────────────────────────
   return (
@@ -516,6 +524,28 @@ const CreateClientModal = memo(({
                   ))}
                 </SelectContent>
               </Select>
+            </div>
+          )}
+
+          {/* ── PACOTE 5 — Via Verde (Fast-Track): ignorar a fase de Indexação ── */}
+          {!clientOnly && (
+            <div className="flex items-start gap-3 p-3 rounded-md border border-border bg-muted/30">
+              <Switch
+                id="skip-index-switch"
+                checked={skipIndex}
+                onCheckedChange={setSkipIndex}
+              />
+              <div className="space-y-0.5">
+                <Label htmlFor="skip-index-switch" className="text-sm cursor-pointer flex items-center gap-1.5">
+                  <Zap className="h-3.5 w-3.5 text-emerald-600" />
+                  Via Verde (Ignorar fase de Indexação)
+                </Label>
+                <p className="text-xs text-muted-foreground">
+                  O processo salta a mesa do Indexador e é atribuído diretamente ao
+                  consultor na primeira fase comercial. Use quando o cliente já entrega
+                  a documentação organizada.
+                </p>
+              </div>
             </div>
           )}
         </div>

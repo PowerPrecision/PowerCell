@@ -9,8 +9,9 @@ patches do `db` nos módulos do fluxo):
 3. Lógica de quantidade no Portal (completed só com uploaded_count >=
    expected_count).
 4. Transição dinâmica do workflow (sem strings hardcoded de fases).
-5. Segurança de visibilidade de documentos (pré-indexação: só
-   INDEX/ADMIN/atribuídos).
+5. Segurança de visibilidade de documentos (pré-indexação: perfis de
+   administração com bypass absoluto — Pacote 5 — INDEX/atribuídos;
+   consultores não atribuídos bloqueados).
 """
 from __future__ import annotations
 
@@ -514,9 +515,31 @@ class TestBug5DocumentVisibility:
         assert user_can_view_process_documents(
             {"id": "c-777", "role": "consultor"}, process
         ) is False
+        # Intermediário/parceiro sem atribuição → igualmente bloqueados
+        assert user_can_view_process_documents(
+            {"id": "m-777", "role": "intermediario"}, process
+        ) is False
+        assert user_can_view_process_documents(
+            {"id": "par-777", "role": "parceiro"}, process
+        ) is False
+        # PACOTE 5 — perfis de administração têm bypass ABSOLUTO à regra
+        # is_indexed (verificados em primeiro lugar, mesmo sem atribuição):
+        # diretor (gestão, DOCUMENT_VIEW_ALL=True) e administrativo deixaram
+        # de estar bloqueados na pré-indexação. A asserção anterior
+        # (diretor → False, Pacote BH) tornou-se obsoleta com o Pacote 5.
         assert user_can_view_process_documents(
             {"id": "d-1", "role": "diretor"}, process
-        ) is False
+        ) is True
+        assert user_can_view_process_documents(
+            {"id": "adm-1", "role": "administrativo"}, process
+        ) is True
+        # Variantes legadas defensivas (BDs com roles históricas não migradas)
+        assert user_can_view_process_documents(
+            {"id": "sa-1", "role": "system_admin"}, process
+        ) is True
+        assert user_can_view_process_documents(
+            {"id": "spa-1", "role": "super_admin"}, process
+        ) is True
 
     async def test_after_indexing_visibility_open(self):
         from services.document_visibility import user_can_view_process_documents
