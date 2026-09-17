@@ -260,6 +260,19 @@ As settings de cada perfil (assinatura, webmail, preferências) são lidas do ba
 
 Quando uma entidade tem um campo de prioridade explícito (`task.priority`, definido manualmente ou por um motor automático) **e** uma heurística derivada de outro campo (ex: prazo/`due_date`), o badge deve dar sempre prioridade ao valor explícito; a heurística só serve de *fallback* quando o campo explícito está vazio. Cores fixas por nível: Alta/High → vermelho (`variant="destructive"`), Média/Medium → amarelo/`outline` com classes `bg-yellow-100 text-yellow-700`, Baixa/Low → cinzento/`outline` com `bg-slate-100 text-slate-600`. Ver `getPriorityBadge` em `components/TasksPanel.js`.
 
+## 14. Perfis fantasma e Webmail unificado (Pacote 8)
+
+### Perfis do menu = UCRs reais, ponto final
+
+`buildUserProfileItems` (`utils/userProfiles.js`) devolve **exclusivamente** os UCRs reais (`user.companies`) quando existem — **nunca** mesclar `additional_roles` ou o role primário de login nesses casos: eram a causa dos "perfis fantasma" (2 perfis activos, 3 opções no menu). O fallback legado (role primário + `additional_roles`) só existe para utilizadores **sem qualquer UCR**. O backend já filtra `is_deleted`/`is_active` na origem (ver `ARCHITECTURE.md` — "Filtro estrito de UCRs válidos"), pelo que qualquer perfil recebido é válido por construção.
+
+### Webmail — seletor de caixas unificado, sem troca de perfil
+
+- O `WebmailPage` carrega as contas com `GET /users/me/email-accounts?scope=all` (todas as empresas) — a lista de caixas **não** depende de `companyId`/`effectiveRole`, nem refaz fetch quando o perfil global muda.
+- As opções do seletor vêm de `buildMailboxOptions` (`utils/webmailMailbox.js`): labels com sufixo da empresa (`Caixa Pessoal (a@x.pt · Empresa)`), Caixa Geral marcada pelo backend (`is_caixa_geral`) e Caixa de Indexação quando `has_shared_indexacao` (cargo indexacao em **qualquer** perfil). O valor seleccionado flui para o param `mailbox` da API — nunca filtrar caixas no frontend por role activo.
+- Abrir ficheiros/anexos: **sempre** novo separador — `window.open("", "_blank")` síncrono no gesto de clique (antes de qualquer `await`, senão o popup blocker come o pedido), navegação para o blob URL quando o fetch resolve, `URL.revokeObjectURL` adiado (~60s) para o separador ter tempo de renderizar. Ver `handleDownloadAttachment` no `WebmailPage`.
+- Abrir o email em novo separador: link nativo `/webmail?folder=<pasta>&mailbox=<caixa>&id=<id>` — a página honra `?mailbox=` (selecciona a caixa) e `?id=` (abre o painel de leitura; `?folder=drafts&id=` continua a abrir o compositor — Pacote DM).
+
 
 
 

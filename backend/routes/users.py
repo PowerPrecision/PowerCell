@@ -86,10 +86,14 @@ async def test_my_email_config(
 async def list_my_email_accounts(
     request: Request,
     company_id: Optional[str] = Query(None),
+    scope: Optional[str] = Query(
+        None,
+        description="PACOTE 8 — 'all' devolve a vista consolidada de todas as caixas (webmail unificado)",
+    ),
     current_user: dict = Depends(get_current_user),
 ):
-    """Listar contas de email do perfil activo (Pacote DN.4)."""
-    return await run_list_my_email_accounts(request, company_id, current_user)
+    """Listar contas de email do perfil activo (Pacote DN.4) ou de todos os perfis (scope=all)."""
+    return await run_list_my_email_accounts(request, company_id, current_user, scope=scope)
 
 
 @router.post("/me/email-accounts")

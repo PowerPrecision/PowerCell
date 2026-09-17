@@ -121,8 +121,19 @@ async def run_list_user_company_roles(
     user_id: Optional[str] = None,
     company_id: Optional[str] = None,
 ):
-    """Lista associações user-company-role."""
-    query = {}
+    """Lista associações user-company-role.
+
+    PACOTE 8 — perfis fantasma: exclui estritamente UCRs eliminados
+    logicamente (``is_deleted=True``) ou inactivos (``is_active=False``).
+    Docs legados sem estas flags continuam a ser listados — o filtro só
+    esconde o que foi explicitamente marcado. A gestão de acessos (admin)
+    e o ContextSwitcher só vêem perfis válidos.
+    """
+    query = {
+        # PACOTE 8 — só perfis válidos (não apagados, não inactivos)
+        "is_deleted": {"$ne": True},
+        "is_active": {"$ne": False},
+    }
     if user_id:
         query["user_id"] = user_id
     if company_id:
@@ -279,7 +290,13 @@ async def run_delete_user_company_role(
         raise HTTPException(status_code=404, detail="Associação não encontrada")
 
     remaining = await db.user_company_roles.count_documents(
-        {"user_id": owner_id}
+        {
+            "user_id": owner_id,
+            # PACOTE 8 — a protecção do último acesso conta apenas UCRs
+            # válidos (um perfil apagado/inactivo não é um "acesso").
+            "is_deleted": {"$ne": True},
+            "is_active": {"$ne": False},
+        }
     )
     if remaining <= 1:
         raise HTTPException(status_code=400, detail=LAST_UCR_DELETE_DETAIL)

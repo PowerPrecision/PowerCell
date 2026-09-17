@@ -939,6 +939,23 @@ async def run_get_email(email_id: str, request: Request, current_user: dict):
         user_id = current_user["id"]
         user_email = (current_user.get("email") or "").lower().strip()
 
+        # PACOTE 8 — desacoplamento login ↔ webmail: a conversa é avaliada
+        # contra as contas CONFIGURADAS no UserEmailConfig (IMAP/SMTP da
+        # área pessoal, todas as empresas) — um utilizador que faz login
+        # com user@x.pt mas gere geral@x.pt vê os emails da sua caixa
+        # configurada. O email de login só é fallback sem configs.
+        conversation_emails: List[str] = []
+        try:
+            from services.user_email_config_service import get_user_mailbox_addresses
+            conversation_emails = await get_user_mailbox_addresses(user_id)
+        except Exception as exc:
+            logger.warning(
+                "[Email Detail] Falha a resolver contas configuradas user=%s: %s",
+                user_id, exc,
+            )
+        if not conversation_emails:
+            conversation_emails = [user_email] if user_email else []
+
         # Verificar se o utilizador tem acesso a este email
         is_owner = (
             email.get("created_by") == user_id
@@ -949,12 +966,13 @@ async def run_get_email(email_id: str, request: Request, current_user: dict):
             and email.get("shared_role") == user_role
         )
         is_in_conversation = False
-        if user_email:
-            from_emails = email.get("from_email") or ""
+        if conversation_emails:
+            from_emails = (email.get("from_email") or "").lower()
             to_emails = email.get("to_emails") or []
-            is_in_conversation = (
-                user_email in from_emails.lower()
-                or any(user_email in addr.lower() for addr in to_emails)
+            is_in_conversation = any(
+                conv in from_emails
+                or any(conv in str(addr).lower() for addr in to_emails)
+                for conv in conversation_emails
             )
 
         if not (is_owner or is_shared_role or is_in_conversation):

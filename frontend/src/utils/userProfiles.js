@@ -119,10 +119,16 @@ export function getDistinctCompanies(user) {
 /**
  * Perfis seleccionáveis (header + Área Pessoal), alinhados com o ContextSwitcher.
  *
- * 1. UCRs reais (`companies` / `company_roles`)
- * 2. `additional_roles` não cobertos por nenhum UCR
- * 3. Role primário se ainda faltar
- * 4. Sem UCRs: role primário + additional_roles (company_id pode ser null)
+ * PACOTE 8 — perfis fantasma: quando o utilizador TEM UCRs reais
+ * (`companies`/`company_roles`), a lista devolve EXCLUSIVAMENTE esses
+ * perfis. O merge anterior com `additional_roles`/role primário criava
+ * perfis sintéticos sem UCR associado — a utilizadora com 2 perfis
+ * activos via 3 opções no menu de topo. O fallback legado
+ * (sem UCRs: role primário + additional_roles) mantém-se para
+ * utilizadores antigos sem user_company_roles.
+ *
+ * 1. UCRs reais (`companies` / `company_roles`) — fonte única
+ * 2. Sem UCRs: role primário + additional_roles (legado, company_id null)
  */
 export function buildUserProfileItems(user, options = {}) {
   if (!user) return [];
@@ -135,67 +141,35 @@ export function buildUserProfileItems(user, options = {}) {
     .map((c) => normalizeCompanyRecord(c, { companyId: fallbackCompanyId, companyName: fallbackName }))
     .filter(Boolean);
 
+  if (companies.length > 0) {
+    // PACOTE 8 — perfis 100% dinâmicos a partir dos UCRs reais
+    // (a regra documentada no FRONTEND_GUIDELINES). Sem perfis sintéticos.
+    const seen = new Set();
+    return companies.filter((p) => {
+      const key = `${p.role}__${p.company_id || ""}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+  }
+
   const additionalRoles = Array.isArray(user.additional_roles)
     ? user.additional_roles
     : [];
   const primaryRole = user.role;
 
-  const activeCompanyName =
-    companies.find((c) => c.company_id && c.company_id === effectiveCompanyId)?.company_name ||
-    fallbackName ||
-    "";
-
-  let profileItems = [];
-
-  if (companies.length > 0) {
-    profileItems = [...companies];
-    const companyRoles = new Set(companies.map((c) => c.role));
-
-    for (const role of additionalRoles) {
-      const normalized = normalizeRole(role);
-      if (!isSelectableRole(normalized) || companyRoles.has(normalized)) continue;
-      profileItems.push({
-        role: normalized,
-        company_id: fallbackCompanyId,
-        company_name: activeCompanyName || null,
-        is_default: false,
-        display_name: null,
-        professional_phone: null,
-        job_title: null,
-        signature: null,
-      });
-    }
-
-    if (isSelectableRole(primaryRole)) {
-      const normalized = normalizeRole(primaryRole);
-      const extraNormalized = additionalRoles.map((r) => normalizeRole(r));
-      if (!companyRoles.has(normalized) && !extraNormalized.includes(normalized)) {
-        profileItems.unshift({
-          role: normalized,
-          company_id: fallbackCompanyId,
-          company_name: activeCompanyName || null,
-          is_default: false,
-          display_name: null,
-          professional_phone: null,
-          job_title: null,
-          signature: null,
-        });
-      }
-    }
-  } else {
-    const allRoles = [
-      primaryRole,
-      ...additionalRoles.filter((r) => r !== primaryRole),
-    ];
-    profileItems = allRoles
-      .map((role) =>
-        normalizeCompanyRecord(role, {
-          companyId: fallbackCompanyId,
-          companyName: fallbackName,
-        })
-      )
-      .filter(Boolean);
-  }
+  const allRoles = [
+    primaryRole,
+    ...additionalRoles.filter((r) => r !== primaryRole),
+  ];
+  const profileItems = allRoles
+    .map((role) =>
+      normalizeCompanyRecord(role, {
+        companyId: fallbackCompanyId,
+        companyName: fallbackName,
+      })
+    )
+    .filter(Boolean);
 
   const seen = new Set();
   return profileItems.filter((p) => {

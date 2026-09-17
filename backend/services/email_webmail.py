@@ -51,6 +51,122 @@ def build_ucr_mailbox_filter(
     return {"$or": clauses}
 
 
+# ============================================================
+# PACOTE 8 — helpers de desacoplamento e vista unificada
+# ============================================================
+
+def _regex_any(field: str, emails: List[str]) -> List[dict]:
+    """Cláusulas ``$regex`` para o campo corresponder a qualquer dos emails.
+
+    Usado nos filtros de conversa (from/to) do Webmail: em vez de casar
+    APENAS o email de login, casa qualquer uma das contas configuradas
+    pelo utilizador (UserEmailConfig) — ver ``_resolve_conversation_emails``.
+    """
+    return [
+        {field: {"$regex": re.escape(email), "$options": "i"}}
+        for email in emails
+        if email
+    ]
+
+
+async def _resolve_conversation_emails(current_user: dict) -> List[str]:
+    """Emails que identificam a "conversa" do utilizador no Webmail.
+
+    PACOTE 8 (desacoplamento login ↔ webmail): baseia-se EXCLUSIVAMENTE
+    nas contas configuradas no ``UserEmailConfig`` (IMAP/SMTP da área
+    pessoal, todas as empresas). O email de login (``users.email``) só
+    é usado como fallback legado quando o utilizador não tem NENHUMA
+    config activa — para esses, o comportamento anterior mantém-se.
+    """
+    user_id = current_user.get("id") or ""
+    mailbox_addresses: List[str] = []
+    try:
+        from services.user_email_config_service import get_user_mailbox_addresses
+        mailbox_addresses = await get_user_mailbox_addresses(user_id)
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a resolver contas configuradas: %s", exc)
+    if mailbox_addresses:
+        return mailbox_addresses
+    login = (current_user.get("email") or "").lower().strip()
+    return [login] if login else []
+
+
+async def _user_ucr_roles(request: Request, current_user: dict) -> set:
+    """Cargos de TODOS os UCRs válidos do utilizador (não só o activo).
+
+    PACOTE 8 (webmail unificado): as permissões de caixa do Webmail
+    (Caixa Geral / Caixa de Indexação) passam a considerar qualquer
+    perfil válido do utilizador — não apenas o perfil activo no
+    cabeçalho do CRM. Degradação graciosa: falha → conjunto vazio.
+    """
+    user_id = current_user.get("id") or ""
+    if not user_id:
+        return set()
+    try:
+        docs = await db.user_company_roles.find(
+            {
+                "user_id": user_id,
+                "is_deleted": {"$ne": True},
+                "is_active": {"$ne": False},
+            },
+            {"_id": 0, "role": 1},
+        ).to_list(50)
+        return {
+            (doc.get("role") or "").strip().lower()
+            for doc in docs
+            if doc.get("role")
+        }
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a listar cargos UCR: %s", exc)
+        return set()
+
+
+async def _user_caixa_geral_emails(request: Request, current_user: dict) -> set:
+    """Emails das Caixas Gerais de TODAS as empresas do utilizador.
+
+    PACOTE 8: antes, a comparação ``mailbox == caixa geral`` usava apenas
+    a caixa da empresa ACTIVA — seleccionar a Caixa Geral de outra
+    empresa (webmail unificado) caía no filtro pessoal por ``account``
+    em vez do comportamento de caixa partilhada. Degrada graciosa.
+    """
+    user_id = current_user.get("id") or ""
+    if not user_id:
+        return set()
+    from services.email_config_resolver import (
+        CAIXA_GERAL_INJECT_ROLES,
+        load_caixa_geral_config,
+    )
+    emails: set = set()
+    try:
+        ucrs = await db.user_company_roles.find(
+            {
+                "user_id": user_id,
+                "is_deleted": {"$ne": True},
+                "is_active": {"$ne": False},
+            },
+            {"_id": 0, "company_id": 1, "role": 1},
+        ).to_list(20)
+        company_ids = {
+            ucr.get("company_id")
+            for ucr in ucrs
+            if ucr.get("company_id")
+            and (ucr.get("role") or "").strip().lower() in CAIXA_GERAL_INJECT_ROLES
+        }
+        for cid in list(company_ids)[:10]:
+            try:
+                caixa = await load_caixa_geral_config(cid)
+                caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
+                if caixa_email:
+                    emails.add(caixa_email)
+            except Exception as exc:
+                logger.warning(
+                    "[Webmail] Falha a carregar Caixa Geral company=%s: %s", cid, exc,
+                )
+    except Exception as exc:
+        logger.warning("[Webmail] Falha a listar caixas gerais do utilizador: %s", exc)
+    return emails
+
+
 async def resolve_ucr_mailbox_filter(
     request: Request,
     current_user: dict,
@@ -75,15 +191,13 @@ async def resolve_ucr_mailbox_filter(
 
     selected_mailbox = (mailbox or "").strip().lower() or None
     if selected_mailbox:
-        try:
-            from services.email_config_resolver import load_caixa_geral_config
-            caixa = await load_caixa_geral_config(active_company_id)
-            caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
-            if caixa_email and caixa_email == selected_mailbox:
-                # Diretor a ver a Caixa Geral injetada na lista de contas
-                return None
-        except Exception as exc:
-            logger.warning("[Webmail] Falha a comparar mailbox com Caixa Geral: %s", exc)
+        # PACOTE 8 — a comparação com a Caixa Geral considera TODAS as
+        # caixas gerais do utilizador (uma por empresa onde tem cargo de
+        # gestão), não apenas a da empresa activa.
+        caixa_geral_emails = await _user_caixa_geral_emails(request, current_user)
+        if selected_mailbox in caixa_geral_emails:
+            # Perfil de gestão a ver uma Caixa Geral (qualquer empresa)
+            return None
         # Conta pessoal específica — não misturar as outras do mesmo UCR
         return build_ucr_mailbox_filter(None, selected_mailbox)
 
@@ -123,16 +237,21 @@ async def rewrite_box_for_caixa_geral(
     box: Optional[str],
     mailbox: Optional[str],
 ):
-    """Se a mailbox seleccionada é a Caixa Geral, tratar como box=general."""
+    """Se a mailbox seleccionada é uma Caixa Geral, tratar como box=general.
+
+    PACOTE 8 — a comparação usa TODAS as Caixas Gerais do utilizador
+    (uma por empresa com cargo de gestão), não apenas a da empresa
+    activa: o seletor unificado permite chegar a qualquer uma delas
+    sem trocar de perfil no cabeçalho.
+    """
     if not mailbox:
         return box, mailbox
+    selected = mailbox.strip().lower()
+    if not selected:
+        return box, mailbox
     try:
-        from services.auth import get_active_company_id_async
-        from services.email_config_resolver import load_caixa_geral_config
-        cid = await get_active_company_id_async(request, current_user)
-        caixa = await load_caixa_geral_config(cid)
-        caixa_email = ((caixa or {}).get("email_address") or "").strip().lower()
-        if caixa_email and caixa_email == mailbox.strip().lower():
+        caixa_geral_emails = await _user_caixa_geral_emails(request, current_user)
+        if selected in caixa_geral_emails:
             return "general", None
     except Exception as exc:
         logger.warning("[Webmail] Falha a reescrever box para Caixa Geral: %s", exc)
@@ -193,6 +312,15 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
 
+    # PACOTE 8 — desacoplamento login ↔ webmail: os filtros de conversa
+    # (from/to) usam as contas CONFIGURADAS no UserEmailConfig (todas as
+    # empresas), não o email de login. Login só como fallback sem configs.
+    conversation_emails = await _resolve_conversation_emails(current_user)
+
+    # PACOTE 8 — webmail unificado: permissões de caixa consideram TODOS
+    # os cargos válidos do utilizador (UCRs), não apenas o perfil activo.
+    ucr_roles = await _user_ucr_roles(request, current_user)
+
     logger.debug(
         f"User {current_user.get('email')} (id={user_id}, "
         f"effective_role={effective_role}) querying box={box} folder={folder} account={account}"
@@ -200,14 +328,24 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
 
     # === BOX FILTER: permissões e isolamento por caixa (exclusivo UCR) ===
     if box == "general":
-        if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
+        # PACOTE 8 — permitido se o cargo ACTIVO permite (legado) OU se
+        # qualquer UCR válido tem cargo de gestão (webmail unificado).
+        legacy_general_ok = effective_role not in (
+            UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO,
+        )
+        ucr_general_ok = bool(ucr_roles & {"admin", "ceo", "diretor"})
+        if not (legacy_general_ok or ucr_general_ok):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
         logger.info(f"[Webmail List] box=general, user={user_email}, effective_role={effective_role}")
     elif box == "shared_indexacao":
-        if effective_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
+        # PACOTE 8 — permitido se o cargo ACTIVO é admin/indexacao (legado)
+        # OU se qualquer UCR válido tem o cargo indexacao.
+        legacy_index_ok = effective_role in (UserRole.ADMIN, UserRole.INDEXACAO)
+        ucr_index_ok = bool(ucr_roles & {"indexacao", "admin"})
+        if not (legacy_index_ok or ucr_index_ok):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{effective_role}'."
@@ -271,17 +409,20 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
                         {"synced_for_user": user_email},
                     ]
                 }
+                # PACOTE 8 — conversa avaliada contra as contas CONFIGURADAS
+                # (UserEmailConfig), não apenas o email de login.
+                to_clauses = _regex_any("to_emails", conversation_emails)
                 ownership_with_to = {
                     "$and": [
                         {"$or": [
                             {"created_by": user_id},
                         ]},
                         {"$or": [
-                            {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                            *to_clauses,
                         ]},
                     ]
                 }
-                if account_email and account_email != user_email:
+                if account_email and account_email not in conversation_emails:
                     ownership_with_to["$and"][1]["$or"].append(
                         {"to_emails": {"$regex": re.escape(account_email), "$options": "i"}}
                     )
@@ -297,12 +438,14 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
                         {"created_by": user_id},
                     ]
                 }
+                # PACOTE 8 — from avaliado contra as contas CONFIGURADAS
+                from_clauses = _regex_any("from_email", conversation_emails)
                 ownership_with_from = {
                     "$or": [
-                        {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                        *from_clauses,
                     ]
                 }
-                if account_email and account_email != user_email:
+                if account_email and account_email not in conversation_emails:
                     ownership_with_from["$or"].append(
                         {"from_email": {"$regex": re.escape(account_email), "$options": "i"}}
                     )
@@ -313,12 +456,13 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
                 and_conditions.append({"created_by": user_id})
             elif folder in ("starred", "trash", "custom"):
                 # For starred/trash/custom: show emails owned by user OR where user's email appears
+                # PACOTE 8 — from/to avaliados contra as contas CONFIGURADAS
                 shared_or = [
-                    {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
-                    {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                    *_regex_any("from_email", conversation_emails),
+                    *_regex_any("to_emails", conversation_emails),
                     {"created_by": user_id},
                 ]
-                if account_email and account_email != user_email:
+                if account_email and account_email not in conversation_emails:
                     shared_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
                     shared_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
                 and_conditions.append({
@@ -367,30 +511,31 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
             ownership_filter["$or"].append({"shared_role": user_role_isolation})
 
         if folder == "inbox":
-            inbox_or = [
-                {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
-            ]
+            # PACOTE 8 — conversa avaliada contra as contas CONFIGURADAS
+            inbox_or = _regex_any("to_emails", conversation_emails)
             # Se há conta selecionada, incluir também o email da conta partilhada
-            if account_email and account_email != user_email:
+            if account_email and account_email not in conversation_emails:
                 inbox_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
             and_conditions.append({"$and": [ownership_filter, {"$or": inbox_or}]})
         elif folder == "sent":
+            # PACOTE 8 — from avaliado contra as contas CONFIGURADAS
             sent_or = [
-                {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
+                *_regex_any("from_email", conversation_emails),
                 {"created_by": user_id_isolation},
             ]
-            if account_email and account_email != user_email:
+            if account_email and account_email not in conversation_emails:
                 sent_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
             and_conditions.append({"$or": [ownership_filter, {"$or": sent_or}]})
         elif folder == "drafts":
             # Rascunhos: criados pelo utilizador
             and_conditions.append({"created_by": user_id_isolation})
         elif folder in ("starred", "trash", "custom"):
+            # PACOTE 8 — from/to avaliados contra as contas CONFIGURADAS
             shared_or = [
-                {"from_email": {"$regex": re.escape(user_email), "$options": "i"}},
-                {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
+                *_regex_any("from_email", conversation_emails),
+                *_regex_any("to_emails", conversation_emails),
             ]
-            if account_email and account_email != user_email:
+            if account_email and account_email not in conversation_emails:
                 shared_or.append({"from_email": {"$regex": re.escape(account_email), "$options": "i"}})
                 shared_or.append({"to_emails": {"$regex": re.escape(account_email), "$options": "i"}})
             and_conditions.append({"$and": [ownership_filter, {"$or": shared_or}]})
@@ -501,6 +646,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
         elif not can_see_all and user_email:
             # Default isolation (backward compat)
             user_id_unread = current_user["id"]
+            # PACOTE 8 — conversa avaliada contra as contas CONFIGURADAS
             unread_and.append({
                 "$and": [
                     {"$or": [
@@ -508,9 +654,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
                         {"synced_for_user": user_id_unread},
                         {"synced_for_user": user_email},
                     ]},
-                    {"$or": [
-                        {"to_emails": {"$regex": re.escape(user_email), "$options": "i"}},
-                    ]},
+                    {"$or": _regex_any("to_emails", conversation_emails)},
                 ]
             })
         if account and box != "personal":
@@ -578,14 +722,26 @@ async def run_webmail_stats(
 
     # === BOX permission checks (exclusivo UCR) ===
     if box == "general":
-        if effective_role in (UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO):
+        # PACOTE 8 — permissão via cargo ACTIVO (legado) OU qualquer UCR
+        # válido com cargo de gestão (webmail unificado).
+        ucr_roles_stats = await _user_ucr_roles(request, current_user)
+        legacy_general_ok = effective_role not in (
+            UserRole.CONSULTOR, UserRole.INDEXACAO, UserRole.INTERMEDIARIO,
+        )
+        ucr_general_ok = bool(ucr_roles_stats & {"admin", "ceo", "diretor"})
+        if not (legacy_general_ok or ucr_general_ok):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'geral' não permitido para o role '{effective_role}'."
             )
         logger.info(f"[Webmail Stats] box=general, user={user_email}, effective_role={effective_role}")
     elif box == "shared_indexacao":
-        if effective_role not in (UserRole.ADMIN, UserRole.INDEXACAO):
+        # PACOTE 8 — permissão via cargo ACTIVO (legado) OU qualquer UCR
+        # válido com o cargo indexacao.
+        ucr_roles_stats = await _user_ucr_roles(request, current_user)
+        legacy_index_ok = effective_role in (UserRole.ADMIN, UserRole.INDEXACAO)
+        ucr_index_ok = bool(ucr_roles_stats & {"indexacao", "admin"})
+        if not (legacy_index_ok or ucr_index_ok):
             raise HTTPException(
                 status_code=403,
                 detail=f"Acesso à caixa 'shared_indexacao' não permitido para o role '{effective_role}'."
@@ -859,9 +1015,17 @@ async def run_webmail_sync_user(
             wants_caixa_geral = bool(caixa_email and caixa_email == selected_mailbox)
         except Exception:
             wants_caixa_geral = False
-    if wants_caixa_geral and user_role in CAIXA_GERAL_INJECT_ROLES:
+    # PACOTE 8 — webmail unificado: o sync da Caixa Geral é permitido se o
+    # cargo ACTIVO permite (legado) OU se qualquer UCR válido do utilizador
+    # tem cargo de gestão (o seletor consolidado chega a qualquer caixa).
+    _ucr_roles_sync = await _user_ucr_roles(request, current_user)
+    _can_sync_caixa_geral = (
+        user_role in CAIXA_GERAL_INJECT_ROLES
+        or bool(_ucr_roles_sync & set(CAIXA_GERAL_INJECT_ROLES))
+    )
+    if wants_caixa_geral and _can_sync_caixa_geral:
         logger.info(
-            "[Webmail Sync] Diretor a sincronizar Caixa Geral user=%s company=%s",
+            "[Webmail Sync] Perfil de gestão a sincronizar Caixa Geral user=%s company=%s",
             user_id, active_company_id,
         )
         return await run_webmail_sync(current_user)
@@ -928,8 +1092,11 @@ async def run_webmail_sync_user(
         account_id=account_id,
     )
     if mailbox and resolved and (resolved.get("email_address") or "").lower() != mailbox.strip().lower():
-        from services.user_email_config_service import list_company_email_configs
-        docs = await list_company_email_configs(user_id, active_company_id or "default")
+        # PACOTE 8 — webmail unificado: a mailbox seleccionada pode pertencer
+        # a OUTRA empresa que não a activa (o seletor consolidado lista todas).
+        # Procurar em TODAS as configs do utilizador, não só na empresa activa.
+        from services.user_email_config_service import list_user_email_configs_all_companies
+        docs = await list_user_email_configs_all_companies(user_id)
         match = next(
             (d for d in docs if (d.get("email_address") or "").lower() == mailbox.strip().lower()),
             None,
@@ -938,7 +1105,7 @@ async def run_webmail_sync_user(
             resolved = await resolve_email_config_for_sync(
                 user_id,
                 active_role=active_role,
-                active_company_id=active_company_id,
+                active_company_id=match.get("company_id") or active_company_id,
                 account_id=match.get("id"),
             )
     

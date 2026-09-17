@@ -388,11 +388,31 @@ async def run_list_my_email_accounts(
     request: Request,
     company_id: Optional[str],
     current_user: dict,
+    scope: Optional[str] = None,
 ):
-    """Listar contas de email do perfil activo (Pacote DN.4 + DO.3)."""
+    """Listar contas de email do perfil activo (Pacote DN.4 + DO.3).
+
+    PACOTE 8 — Webmail unificado: ``scope=all`` devolve uma vista
+    CONSOLIDADA com todas as caixas a que o utilizador tem acesso,
+    independentemente da empresa/perfil activo no cabeçalho do CRM:
+
+      - todas as configs ``user_email_configs`` do utilizador (todas as
+        empresas), enriquecidas com o nome da empresa;
+      - a Caixa Geral de CADA empresa em que o utilizador tem um UCR
+        válido com cargo de gestão (admin/ceo/diretor) — não apenas a
+        da empresa activa;
+      - ``has_shared_indexacao`` — True se algum UCR válido tem o cargo
+        ``indexacao`` (a Caixa de Indexação deixa de exigir troca de
+        perfil para ser visível).
+
+    Sem ``scope`` (ou ``scope=active``) mantém o comportamento anterior
+    (contas da empresa activa) — retrocompatível com os consumers
+    existentes.
+    """
     from services.auth import get_active_company_id_async, get_effective_role
     from services.user_email_config_service import (
         list_company_email_configs,
+        list_user_email_configs_all_companies,
         publicize_email_account,
     )
     from services.email_config_resolver import (
@@ -402,6 +422,90 @@ async def run_list_my_email_accounts(
     )
 
     effective_role = get_effective_role(request, current_user)
+
+    # ==== PACOTE 8 — vista consolidada (scope=all) ====
+    if scope == "all":
+        # UCRs válidos do utilizador (empresas + cargos + nomes)
+        try:
+            ucrs = await db.user_company_roles.find(
+                {
+                    "user_id": current_user["id"],
+                    "is_deleted": {"$ne": True},
+                    "is_active": {"$ne": False},
+                },
+                {"_id": 0},
+            ).to_list(50)
+        except Exception as exc:
+            logger.warning(
+                "[email-accounts] Falha a listar UCRs (scope=all) user=%s: %s",
+                current_user.get("id"), exc,
+            )
+            ucrs = []
+
+        company_names: dict = {}
+        user_ucr_roles: set = set()
+        for ucr in ucrs:
+            cid = ucr.get("company_id")
+            if cid:
+                company_names[cid] = ucr.get("company_name") or cid
+            role = (ucr.get("role") or "").strip().lower()
+            if role:
+                user_ucr_roles.add(role)
+
+        # Todas as configs do utilizador (todas as empresas)
+        docs = await list_user_email_configs_all_companies(current_user["id"])
+        accounts = []
+        seen_emails: set = set()
+        for doc in docs:
+            account = publicize_email_account(doc)
+            cid = account.get("company_id") or "default"
+            if account.get("email_address"):
+                account["company_name"] = company_names.get(cid) or ""
+                accounts.append(account)
+                seen_emails.add(account["email_address"].strip().lower())
+
+        # Caixa Geral de cada empresa onde o cargo (em qualquer UCR) permite
+        caixa_injected = False
+        if user_ucr_roles & set(CAIXA_GERAL_INJECT_ROLES):
+            for cid, cname in company_names.items():
+                try:
+                    caixa = await load_caixa_geral_config(cid)
+                except Exception as exc:
+                    logger.warning(
+                        "[email-accounts] Falha a carregar Caixa Geral "
+                        "company=%s: %s", cid, exc,
+                    )
+                    continue
+                caixa_email = ((caixa or {}).get("email_address") or "").strip()
+                if caixa and caixa_email and "@" in caixa_email:
+                    lowered = caixa_email.lower()
+                    if lowered in seen_emails:
+                        for account in accounts:
+                            if (account.get("email_address") or "").lower() == lowered:
+                                account["is_caixa_geral"] = True
+                                account["is_shared"] = True
+                                account["managed_centralized"] = True
+                                account["label"] = account.get("label") or "Caixa Geral"
+                                caixa_injected = True
+                                break
+                        continue
+                    publicized = publicize_caixa_geral_account(caixa, cid)
+                    publicized["company_name"] = cname or ""
+                    accounts.insert(0, publicized)
+                    seen_emails.add(lowered)
+                    caixa_injected = True
+
+        has_shared_indexacao = "indexacao" in user_ucr_roles
+
+        return {
+            "scope": "all",
+            "company_id": None,
+            "accounts": accounts,
+            "caixa_geral_injected": caixa_injected,
+            "has_shared_indexacao": has_shared_indexacao,
+        }
+
+    # ==== Comportamento anterior (scope=active / omisso) ====
     if effective_role in FORCED_SHARED_ROLES:
         return {"accounts": [], "managed_centralized": True}
 

@@ -767,9 +767,17 @@ async def get_active_company_id_async(request: Request, user: dict) -> Optional[
 
 async def get_user_companies(user_id: str) -> list:
     """
-    Retorna todas as associações user-company-role para um utilizador.
+    Retorna todas as associações user-company-role VÁLIDAS para um utilizador.
 
     Inclui a empresa padrão (is_default=True) e todas as outras.
+
+    PACOTE 8 — perfis fantasma no ContextSwitcher: a query filtra
+    estritamente UCRs eliminados logicamente (``is_deleted=True``) ou
+    inactivos (``is_active=False``). Docs legados sem estas flags
+    continuam válidos (``$ne`` aceita campo ausente) — o filtro só
+    exclui o que foi explicitamente marcado. É esta lista que alimenta
+    o ContextSwitcher (via /auth/login e /auth/me): o frontend só
+    recebe perfis válidos.
 
     Returns:
         list[dict]: [{ company_id, company_name, role, is_default }]
@@ -777,7 +785,12 @@ async def get_user_companies(user_id: str) -> list:
     from database import db as _db
 
     associations = await _db.user_company_roles.find(
-        {"user_id": user_id},
+        {
+            "user_id": user_id,
+            # PACOTE 8 — só perfis válidos (não apagados, não inactivos)
+            "is_deleted": {"$ne": True},
+            "is_active": {"$ne": False},
+        },
         {"_id": 0},
     ).sort("company_name", 1).to_list(50)
 

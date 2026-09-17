@@ -32,6 +32,10 @@ async def run_set_active_company(data: dict, user: dict):
         "user_id": user["id"],
         "company_id": company_id,
         "role": role,
+        # PACOTE 8 — não permitir activar um perfil apagado/inactivo
+        # (o ContextSwitcher nunca o mostra; o switch tem de recusá-lo).
+        "is_deleted": {"$ne": True},
+        "is_active": {"$ne": False},
     })
 
     if not association:

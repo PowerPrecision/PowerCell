@@ -1045,6 +1045,19 @@ A UI (`UsersAccessAdminTab` / `LAST_UCR_DELETE_MESSAGE`) mostra a mesma mensagem
 
 Novos acessos UCR só podem ser criados contra empresas com `is_active !== false`. Uma empresa inactivada deixa de ser oferecida no formulário de novo acesso, mas os UCRs já existentes **não** são apagados automaticamente (soft-delete da empresa, não cascade).
 
+### Filtro estrito de UCRs válidos (Pacote 8 — perfis fantasma)
+
+Todas as queries que alimentam perfis de utilizador filtram estritamente UCRs marcados como apagados ou inactivos: `{"is_deleted": {"$ne": True}, "is_active": {"$ne": False}}` (docs legados sem as flags continuam válidos — `$ne` aceita campo ausente). Aplicado em:
+
+| Onde | Efeito |
+|---|---|
+| `services/auth.py::get_user_companies` | `/auth/login` e `/auth/me` (`user.companies`) — a fonte do `ContextSwitcher` e das tabs da Área Pessoal. **O frontend só recebe perfis válidos.** |
+| `services/user_company_roles_api_crud.py::run_list_user_company_roles` | Lista admin (`/admin/user-company-roles`) — a gestão de acessos só vê perfis válidos. |
+| `services/user_company_roles_api_active.py::run_set_active_company` | Recusa (403) activar um UCR apagado/inactivo. |
+| `services/user_company_roles_api_crud.py::run_delete_user_company_role` | A protecção do último acesso conta apenas UCRs válidos. |
+
+No frontend, `utils/userProfiles.js::buildUserProfileItems` devolve **exclusivamente** os UCRs reais quando existem — nunca mescla `additional_roles`/role primário (perfis sintéticos = fantasmas no menu). O fallback legado (role primário + `additional_roles`) só se aplica a utilizadores sem qualquer UCR. Testes: `tests/unit/test_pacote8_ux_business_fixes.py`, `frontend/src/utils/userProfiles.test.js`.
+
 ### Resolução de cargo e empresa activos (Pacote FN)
 
 Alguns UCRs legados guardam o **nome** da empresa (`Precision Crédito`) em `company_id` / `company` em vez do id canónico. Um match estrito por id falhava: o backend fazia fallback silencioso para o cargo JWT e `GET /processes/me` devolvia lista vazia (o utilizador via o ContextSwitcher certo, mas a API filtrava outro contexto).
@@ -1173,6 +1186,27 @@ Helper de leitura canónica do Bloco A:
 `services/email_service.py::_resolve_system_smtp_account()` — devolve
 `EmailAccount(name="system_smtp", ...)` ou `None` (para o caller continuar
 nos fallbacks). Testes: `tests/unit/test_email_config_lookup_mismatch.py`.
+
+### Webmail Unificado e Desacoplamento Login↔IMAP (Pacote 8)
+
+O Webmail deixou de estar preso ao perfil/empresa activa no cabeçalho do CRM e o motor passou a consultar a caixa pela conta **configurada**, não pelo email de login.
+
+**Vista consolidada de caixas** — `GET /api/users/me/email-accounts?scope=all`
+(`services/users_api_email_config.py::run_list_my_email_accounts`):
+
+- todas as configs `user_email_configs` do utilizador (todas as empresas), cada uma com `company_id`/`company_name`;
+- a **Caixa Geral de CADA empresa** em que o utilizador tem um UCR válido com cargo de gestão (`CAIXA_GERAL_INJECT_ROLES`: admin/ceo/diretor) — não apenas a da empresa activa;
+- `has_shared_indexacao`: True quando algum UCR válido tem o cargo `indexacao` — a Caixa de Indexação fica visível no seletor sem trocar de perfil.
+
+Sem `scope` (ou `scope=active`) o comportamento anterior mantém-se (contas da empresa activa) — retrocompatível. O `WebmailPage` carrega sempre com `scope=all`; o seletor (`utils/webmailMailbox.js::buildMailboxOptions`) lista as caixas com o sufixo da empresa (`Caixa Pessoal (geral@x.pt · Empresa B)`) e o valor `personal:<email>` flui para o param `mailbox` dos endpoints.
+
+**Permissões de caixa por UCR (não só pelo perfil activo)** — `services/email_webmail.py`: `run_webmail_list`/`run_webmail_stats` permitem `box=general` quando o cargo activo permite (regra legada) **OU** qualquer UCR válido tem cargo admin/ceo/diretor; `box=shared_indexacao` idem com indexacao/admin (`_user_ucr_roles`). A comparação "mailbox == Caixa Geral" (`rewrite_box_for_caixa_geral` / `resolve_ucr_mailbox_filter`) considera TODAS as caixas gerais do utilizador (`_user_caixa_geral_emails`). O sync (`run_webmail_sync_user`) resolve a config da mailbox em TODAS as empresas (não só a activa) e permite sincronizar a Caixa Geral com cargo de gestão em qualquer UCR.
+
+**Desacoplamento email de login ↔ email configurado** — o utilizador faz login com `user@x.pt` mas gere `geral@x.pt` (UserEmailConfig da área pessoal). Os filtros de conversa (from/to) do Webmail, a leitura do detalhe (`run_get_email`) e o download de anexos (`_assert_email_readable`) avaliam a conversa contra as contas configuradas (`services/user_email_config_service.py::get_user_mailbox_addresses` — todas as empresas, `is_configured=True`); o email de login (``users.email``) é apenas **fallback legado** quando não existem configs. A propriedade continua garantida por `synced_for_user`/`created_by` (carimbo do sync — ver "Motor Real-Time").
+
+**UX de separadores** — os anexos abrem **sempre num novo separador** (`window.open` síncrono no gesto de clique + navegação para o blob URL após o fetch — imune a popup blockers, com fallback para download); o painel de leitura tem o botão "Novo Separador" que abre `/webmail?folder=<pasta>&mailbox=<caixa>&id=<email>` — a página honra `?mailbox=` para seleccionar a caixa certa e `?id=` para abrir o email no painel de leitura (`?folder=drafts` continua a abrir o compositor, Pacote DM).
+
+Testes: `tests/unit/test_pacote8_ux_business_fixes.py` (22 testes — filtros UCR, scope=all, permissões por UCR, desacoplamento) e `frontend/src/utils/webmailMailbox.test.js` + `userProfiles.test.js`.
 
 ### Motor Real-Time do Webmail (v2.0 — Pacote EC)
 

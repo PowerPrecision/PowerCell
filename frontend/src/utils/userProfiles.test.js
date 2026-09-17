@@ -50,6 +50,24 @@ describe("buildUserProfileItems", () => {
     );
     assert.ok(items.every((i) => i.company_id === "Power Real Estate"));
   });
+
+  it("PACOTE 8 — perfis fantasma: com UCRs reais NÃO mescla additional_roles/role primário", () => {
+    // Cenário do bug: utilizadora com 2 perfis activos via 3 opções no menu.
+    // O role global de login (ceo) e o additional_role sem UCR (intermediario)
+    // são perfis sintéticos — o menu só pode mostrar os 2 UCRs reais.
+    const items = buildUserProfileItems({
+      role: "ceo",
+      additional_roles: ["intermediario"],
+      companies: [
+        { role: "diretor", company_id: "c1", company_name: "Power" },
+        { role: "consultor", company_id: "c2", company_name: "Precision" },
+      ],
+    });
+    assert.equal(items.length, 2);
+    assert.deepEqual(items.map((i) => i.role), ["diretor", "consultor"]);
+    // company_id vem sempre do UCR real — nunca do fallback sintético
+    assert.deepEqual(items.map((i) => i.company_id), ["c1", "c2"]);
+  });
 });
 
 describe("buildProfileRoleTabs", () => {
