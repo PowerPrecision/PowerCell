@@ -4181,3 +4181,58 @@ Stage Summary:
 - Ficheiros novos (2): `backend/tests/unit/test_pacote8_ux_business_fixes.py`, `frontend/src/utils/webmailMailbox.test.js`.
 - Documentação: `ARCHITECTURE.md` (nova secção "Filtro estrito de UCRs válidos (Pacote 8)" + nova secção "Webmail Unificado e Desacoplamento Login↔IMAP (Pacote 8)"), `FRONTEND_GUIDELINES.md` (nova secção 14 — perfis=UCRs reais, seletor de caixas unificado, padrões de novo separador), `worklog.md` (esta iteração).
 - Resultado: o ContextSwitcher só mostra perfis válidos (2 UCRs = 2 opções), o Webmail mostra TODAS as caixas do utilizador num seletor interno sem trocar de perfil global (com Caixas Gerais por empresa e Caixa de Indexação quando aplicável), anexos e emails abrem em novos separadores, e o motor consulta a caixa pela conta do UserEmailConfig (geral@x.pt) ignorando o email de login para efeitos de conversa. Commit: `Feat/Fix: Clean ghost profiles, unify Webmail inbox with new tab UX, and decouple IMAP config from login email`.
+
+---
+
+# Pacote 9 — S3 na criação, guards de atribuição, Undo Send, toggle Indexado e manutenção
+
+**Data**: 2026-09-18 · **Branch**: `dev` · **Base**: `e08e1b1c` (Pacote 8)
+
+## Problemas reportados
+
+1. **Bug crítico**: clientes não ficavam mapeados com o S3.
+2. **Regras de atribuição**: auto-atribuição por cima de alguém já atribuído; criador consultor/intermediário não ficava atribuído a si próprio (cliente invisível em "Os Meus Clientes" durante o Pré-Registo).
+3. **UX Webmail**: necessidade de "Desfazer" no envio (janela de 10s).
+4. **Manutenção**: script de limpeza de dados de teste desactualizado (não transversal); backfill S3 não detectava clientes/processos sem pasta.
+5. **UX Detalhes do Processo**: toggle "Indexado" no header (visível só para perfis de gestão/indexação).
+
+## Diagnóstico (leitura de código)
+
+- O hook FQ-3 existia apenas em `run_create_client` (`POST /clients`). O `POST /processes/create-client` (fluxo principal do "Novo Cliente") inseria o processo **sem** `s3_folder`; o `POST /clients/{id}/assign` gravava apenas uma string de path (sem marcadores `.keep`, sem reutilização de pastas, sem backfill do cliente). O docstring de `initialize_client_folders` ("chamado automaticamente quando um novo processo é criado") não correspondia à realidade.
+- Guards de auto-atribuição cobriam apenas singulars (`consultant_id`/`assigned_consultor_id`) — processos atribuídos via multi-assign (`assigned_consultor_ids`) podiam receber um 2º consultor do motor "menos ocupado" e da dupla auto-atribuição da transição de pré-registo.
+- `apply_creator_role_assignment` usava a role PRIMÁRIA do JWT (multi-perfis ignorados); `run_create_client` grava `created_by` = email mas a query de leads órfãos filtrava `created_by == user_id` → leads invisíveis.
+- `run_send_email` enviava à rede SMTP imediatamente; sem qualquer estado de envio pendente.
+- Cleanup: substring "test" crua (falsos positivos: "atestado", "testamento", "latest"); cobertura só por cascata de clientes/processos; hard-delete único.
+- Backfill: só `clients`; filtro `is_active` (campo de Process) em clients; não apanhava `s3_folder` = "undefined"/"null"; sem cobertura de processos.
+
+## Implementação
+
+**Backend**
+- NOVO `services/s3_mapping_on_create.py`: `ensure_s3_mapping_for_entity` + `ensure_s3_mapping_on_process_create` (pasta real via `ensure_client_folder_mapping` em `asyncio.to_thread`; `$set` estrito; backfill do cliente; degradação graciosa). Hooks: `persist_and_finalize_staff_create`, `run_assign_client_to_user`. Fix extra: `id` na projecção do find_one de backfill (o Motor devolve `{}` — falsy — sem campos projectados).
+- Guards: `assign_to_least_busy_consultant` + `dual_auto_assign_on_pre_registo_transition` estendidos às listas multi-assignee; `run_assign_client_to_user` com guard 409 (assigned_to pré-existente, excepto admin/ceo/diretor) e cargo EFECTIVO; campos plurais preenchidos em `client_assign` e `apply_creator_role_assignment`.
+- Auto-atribuição ao criador: `run_create_client` grava `assigned_to`/`assigned_at` quando o cargo efectivo é consultor/intermediário; NOVA `build_orphan_leads_query` (created_by id OU email).
+- NOVO `services/email_send_queue.py` (Undo Send): colecção `pending_email_sends`; `run_send_email` passa a enfileirar (resposta `{queued, send_id, undo_window_seconds}`); execução via job ARQ `send_pending_webmail_email_task` (defer_by) + timer in-process com **claim atómico** Mongo (nunca envio duplicado); `POST /emails/{send_id}/cancel-send` devolve o draft; anexos descarregados apenas no momento do envio; `EMAIL_UNDO_SEND_WINDOW=0` = envio imediato legacy (mesmo executor); `recover_stale_pending_sends` como rede de segurança.
+- Toggle Indexado: `process_indexing.py::run_set_process_indexed_flag` (ON = fluxo canónico do mark-indexed; OFF = reversão sem mexer na fase + histórico `INDEXACAO_REVERTIDA` + broadcast WS) + rota `POST/PATCH /processes/{id}/set-indexed`.
+- Scripts: `cleanup_prod_test_data.py` reescrito (transversal: clients/processes/property_leads/activities/tasks por campos próprios + cascata; regex `(?<![a-zA-Z])test(e|es|ing)?(?![a-zA-Z])` sem falsos positivos PT/EN; `--mode soft|hard`, soft por defeito; logs descritivos); `backfill_s3_mappings.py` actualizado (clients+processes; filtros soft-delete + lixo; 2º titular por colecção).
+
+**Frontend**
+- NOVO `utils/webmailSendQueue.js` (parse da resposta, snapshot do composer, conversão do draft cancelado) + testes `node --test`.
+- `WebmailPage.jsx::handleSendEmail`: toast "Email a ser enviado..." com botão "Desfazer" (cancel-send + reposição do rascunho por snapshot); confirmação pós-janela + invalidação; caminho legacy preservado. `EmailViewerModal.js::sendReply`: mesmo padrão (reabre a caixa de resposta no undo).
+- `ProcessDetails.js`: Switch "Indexado" no header (`data-testid="indexed-toggle"`), gated por `effectiveRole`/`hasAnyRole` com `INDEX_TOGGLE_ROLES = [indexacao, admin, ceo]`; optimistic update + rollback + `fetchData()`; `api.js::setProcessIndexed`.
+
+**Testes/infra de testes**: `conftest.py` estendido de forma aditiva (`find_one` com `sort` — projecção continua ignorada por contrato histórico (dot-notation); `async for` no cursor). 37 novos testes backend (`tests/unit/test_pacote9_infra_ux_fixes.py`) + 5 frontend.
+
+## Lição de processo
+
+O primeiro `find_one` estendido do conftest aplicava projecções literalmente — quebrou 4 testes (rgpd + welcome email) porque serviços reais usam projecções dot-notation e o contrato histórico do fake é devolver o doc completo. Alterações a fixtures partilhadas exigem regressão imediata da suite completa, não só dos testes novos. (Mesma lição do Pacote 7: re-executar os ficheiros de teste dos módulos adjacentes.)
+
+## Validação
+
+- `pytest tests/unit -n 4` → **1222 passed, 0 falhas** (baseline 1185 + 37 novos; 4 falhas intermédias diagnosticadas e corrigidas — ver lição acima).
+- flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas; zero avisos novos nos ficheiros alterados.
+- Frontend: `node --test` (35 existentes + 5 novos) → 40 pass, 0 fail; eslint (ficheiros alterados) limpo; `vite build` verde.
+- Sandbox sem Mongo: os warnings de ligação (Connection refused) são comportamento conhecido e documentado (Pacote 5).
+
+## Commit
+
+`Feat/Fix: Fix client S3 mapping, add smart auto-assignment guards, Undo Send email feature, Index toggle, and broad test data cleanup`

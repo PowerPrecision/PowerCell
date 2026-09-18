@@ -42,7 +42,8 @@ import { Button } from "../components/ui/button";
 import { Badge } from "../components/ui/badge";
 import { Input } from "../components/ui/input";
 // PACOTE DD — Label deixou de ser usado após remover o cartão de Etiquetas (badges compactos no PageHeader)
-// import { Label } from "../components/ui/label";
+// PACOTE 9 — Label reactivado para o Toggle "Indexado" no header
+import { Label } from "../components/ui/label";
 import { Textarea } from "../components/ui/textarea";
 import {
   Select,
@@ -61,6 +62,8 @@ import {
 } from "../components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { Separator } from "../components/ui/separator";
+// PACOTE 9 — Toggle "Indexado" (Switch shadcn) no header do processo
+import { Switch } from "../components/ui/switch";
 // PACOTE DD — ScrollArea para limitar altura do painel de Tarefas
 import { ScrollArea } from "../components/ui/scroll-area";
 import {
@@ -87,6 +90,8 @@ import {
   getStaffUsers,
   getUsers,
   addProcessObservationNote,
+  // PACOTE 9 — Toggle "Indexado" no header (set-indexed true/false)
+  setProcessIndexed,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
@@ -184,7 +189,7 @@ const ProcessDetails = () => {
   const { id } = useParams();
   const navigate = useNavigate();
   const [searchParams, setSearchParams] = useSearchParams();
-  const { user, token } = useAuth();
+  const { user, token, effectiveRole } = useAuth();
   const queryClient = useQueryClient();
 
   // Live TanStack queries (process + client + side panels)
@@ -1450,6 +1455,47 @@ const ProcessDetails = () => {
     (userActions.length > 0 ? true : ["consultor", "intermediario", "admin", "ceo", "administrativo", "diretor"].includes(userRole));
   const canDeleteClient = ["admin", "ceo", "diretor", "administrativo"].includes(userRole);
   
+  // PACOTE 9 — Toggle "Indexado" no header: visível apenas para perfis de
+  // gestão/indexação (mesma regra do backend assert_mark_indexed_permission:
+  // indexacao/admin/ceo). Usa o perfil ACTIVO (effectiveRole) e, em fallback,
+  // hasAnyRole — o padrão já usado no Kanban para multi-perfis.
+  const INDEX_TOGGLE_ROLES = ["indexacao", "admin", "ceo"];
+  const canMarkIndexed =
+    INDEX_TOGGLE_ROLES.includes((effectiveRole || userRole || "").toLowerCase()) ||
+    hasAnyRole(user, INDEX_TOGGLE_ROLES);
+  const [indexToggleBusy, setIndexToggleBusy] = useState(false);
+  const handleToggleIndexed = async (checked) => {
+    if (!id || indexToggleBusy) return;
+    const previous = process?.is_indexed;
+    // Optimistic update + rollback em erro (o bundle TanStack refresca depois)
+    setProcess((prev) => (prev ? { ...prev, is_indexed: checked } : prev));
+    setIndexToggleBusy(true);
+    try {
+      const res = await setProcessIndexed(id, checked);
+      const nextValue =
+        res?.data && typeof res.data.is_indexed === "boolean"
+          ? res.data.is_indexed
+          : checked;
+      setProcess((prev) => (prev ? { ...prev, is_indexed: nextValue } : prev));
+      toast.success(
+        nextValue
+          ? "Indexação concluída! A equipa foi notificada."
+          : "Indexação revertida — o processo voltou a 'não indexado'."
+      );
+      await fetchData();
+    } catch (error) {
+      setProcess((prev) => (prev ? { ...prev, is_indexed: previous } : prev));
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao actualizar o estado de indexação"
+        )
+      );
+    } finally {
+      setIndexToggleBusy(false);
+    }
+  };
+  
   // Permissões específicas por action
   const canManageTasks = userActions.length > 0 
     ? userActions.includes("manage_tasks") 
@@ -2053,6 +2099,41 @@ const ProcessDetails = () => {
               </>
             )}
             
+            {/* PACOTE 9 — Toggle "Indexado": liga/desliga is_indexed directamente
+                via POST /processes/{id}/set-indexed. Visível apenas para perfis
+                de gestão/indexação (canMarkIndexed). ON delega no fluxo canónico
+                do mark-indexed (notificações + salto de workflow); OFF reverte o
+                flag sem mexer na fase (histórico INDEXACAO_REVERTIDA no backend). */}
+            {canMarkIndexed && (
+              <div
+                className="flex items-center gap-1.5 h-8 px-2 sm:px-3 rounded-md border bg-background"
+                title={
+                  process?.is_indexed
+                    ? "Processo indexado — clique para reverter (voltar a 'não indexado')"
+                    : "Marcar este processo como indexado (conclui a fase de indexação)"
+                }
+                data-testid="indexed-toggle"
+              >
+                <Switch
+                  id="process-indexed-toggle"
+                  checked={!!process?.is_indexed}
+                  onCheckedChange={handleToggleIndexed}
+                  disabled={indexToggleBusy || !process}
+                  aria-label="Indexado"
+                />
+                <Label
+                  htmlFor="process-indexed-toggle"
+                  className="text-xs sm:text-sm font-medium cursor-pointer select-none"
+                >
+                  {indexToggleBusy ? (
+                    <Loader2 className="h-3.5 w-3.5 animate-spin inline" />
+                  ) : (
+                    "Indexado"
+                  )}
+                </Label>
+              </div>
+            )}
+
             {canChangeStatus && (
               <Select value={status} onValueChange={setStatus}>
                 <SelectTrigger className="w-36 sm:w-44 h-8 text-xs sm:text-sm" data-testid="status-select">

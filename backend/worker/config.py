@@ -100,6 +100,8 @@ from worker.tasks import (
     # antes não existiam em consumidor nenhum e os jobs morriam na fila.
     send_registration_email_task,
     send_email_task,
+    # PACOTE 9 — Undo Send: envio webmail diferido (defer = janela de undo)
+    send_pending_webmail_email_task,
 )
 
 
@@ -120,6 +122,7 @@ class WorkerSettings:
         cleanup_expired_sessions_task,
         send_registration_email_task,
         send_email_task,
+        send_pending_webmail_email_task,
     ]
     
     # Lifecycle hooks

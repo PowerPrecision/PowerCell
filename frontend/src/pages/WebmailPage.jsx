@@ -88,6 +88,12 @@ import {
   buildMailboxOptions,
   resolveMailboxSelection,
 } from "../utils/webmailMailbox";
+// PACOTE 9 — Undo Send: helpers do fluxo de envio com janela de "Desfazer"
+import {
+  parseSendResponse,
+  buildComposerSnapshot,
+  draftToComposerFields,
+} from "../utils/webmailSendQueue";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -976,6 +982,14 @@ const WebmailPage = () => {
       // o backend em ramos de validação de contas globais.
       const effectiveAccount = canUseGlobalAccounts ? composerData.account : "personal";
 
+      // PACOTE 9 — UNDO SEND: snapshot do rascunho para repor a edição se o
+      // utilizador clicar em "Desfazer" durante a janela de envio (o composer
+      // fecha no clique de "Enviar", estilo Gmail; o undo devolve o estado).
+      const sendSnapshot = buildComposerSnapshot({
+        composerData,
+        uploadAttachments,
+      });
+
       const response = await fetch(
         `${API_URL}/api/emails/send?account=${effectiveAccount}`,
         {
@@ -998,13 +1012,75 @@ const WebmailPage = () => {
         }
         throw new Error(detail);
       }
+
+      // ============================================================
+      // PACOTE 9 — UNDO SEND (janela de "Desfazer", 10s por defeito)
+      // ============================================================
+      // O backend não envia à rede SMTP imediatamente: grava um registo
+      // pending e agenda o envio real para o fim da janela. Dentro dela o
+      // utilizador pode cancelar (POST /emails/{send_id}/cancel-send) e
+      // regressar ao modo de edição do rascunho.
+      const sendResult = parseSendResponse(await response.json().catch(() => null));
+
+      if (sendResult.queued && sendResult.sendId && sendResult.undoWindowMs > 0) {
+        setComposerOpen(false); // fecha o composer (estilo Gmail)
+
+        const cancelSend = async () => {
+          try {
+            const res = await fetch(
+              `${API_URL}/api/emails/${sendResult.sendId}/cancel-send`,
+              { method: "POST", headers: webmailHeaders() }
+            );
+            if (!res.ok) {
+              let detail = "Não foi possível cancelar o envio.";
+              try {
+                const errData = await res.json();
+                detail = errData.detail || detail;
+              } catch { /* sem corpo JSON */ }
+              toast.error(detail, { duration: 8000 });
+              return;
+            }
+            // Envio abortado no backend — regressar ao modo de edição do
+            // rascunho com o snapshot intacto (dados + anexos temporários,
+            // que o backend ainda não moveu porque nada foi enviado).
+            const cancelData = await res.json().catch(() => ({}));
+            setComposerData((prev) => ({
+              ...prev,
+              ...draftToComposerFields(cancelData.draft || sendSnapshot.composerData),
+            }));
+            setUploadAttachments(sendSnapshot.uploadAttachments);
+            setComposerOpen(true);
+            toast.success("Envio cancelado — pode continuar a editar o rascunho.");
+          } catch {
+            toast.error("Não foi possível cancelar o envio.", { duration: 8000 });
+          }
+        };
+
+        toast.success("Email a ser enviado...", {
+          duration: sendResult.undoWindowMs,
+          action: {
+            label: "Desfazer",
+            onClick: cancelSend,
+          },
+        });
+
+        // Após a janela (sem undo): confirmar visualmente e refrescar a lista
+        setTimeout(() => {
+          toast.success("Email enviado com sucesso");
+          setUploadAttachments([]);
+          handleRefresh();
+        }, sendResult.undoWindowMs + 250);
+        return;
+      }
+
+      // Caminho legacy (envio imediato — janela desligada no backend)
       toast.success("Email enviado com sucesso");
       setComposerOpen(false);
       setUploadAttachments([]);
       handleRefresh();
     } catch (error) {
       console.error("Erro ao enviar:", error);
-      // Mensagens de configuração (403) costumam ser longas e acionáveis —
+      // Mensagens de configuração (403) costumam ser longas e accionáveis —
       // dar mais tempo de leitura para o utilizador saber o que fazer.
       toast.error(error.message || "Erro ao enviar email", { duration: 8000 });
     } finally {

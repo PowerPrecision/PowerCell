@@ -9,6 +9,8 @@ from __future__ import annotations
 import logging
 from typing import Any, Optional  # Any used by side-effect helpers
 
+from database import db
+
 logger = logging.getLogger(__name__)
 
 
@@ -413,8 +415,6 @@ async def run_mark_process_indexed(
 
     from fastapi import HTTPException
 
-    from database import db
-
     assert_mark_indexed_permission(user_role, all_roles)
 
     process = await db.processes.find_one(
@@ -470,3 +470,132 @@ async def run_mark_process_indexed(
         now=now,
         broadcast_fn=broadcast_fn,
     )
+
+
+# ====================================================================
+# PACOTE 9 — TOGGLE "INDEXADO" (Detalhes do Processo)
+# ====================================================================
+# O cabeçalho do ecrã de Detalhes do Processo passa a ter um Switch
+# "Indexado" (visível apenas para perfis de gestão/indexação) que liga
+# E DESLIGA is_indexed directamente via API.
+#   - ON  → reutiliza o fluxo canónico `run_mark_process_indexed`
+#           (side-effects completos: notificações, salto de workflow,
+#           limpeza do indexador, histórico).
+#   - OFF → reversão deliberada do flag: SEM mexer no status do
+#           workflow (a reversão de fase é manual, por design),
+#           com histórico e broadcast WS para actualizar a UI em tempo
+#           real nos outros operadores.
+
+def build_unindex_update_set(user: dict, now: str) -> dict[str, Any]:
+    """Campos $set ao REVERTER o estado de indexação (toggle OFF)."""
+    return {
+        "is_indexed": False,
+        "unindexed_at": now,
+        "unindexed_by": user.get("id"),
+        "unindexed_by_name": user.get("name", ""),
+        "updated_at": now,
+    }
+
+
+async def run_set_process_indexed_flag(
+    process_id: str,
+    user: dict,
+    *,
+    is_indexed: bool,
+    user_role: str,
+    all_roles: list,
+    broadcast_fn,
+) -> dict[str, Any]:
+    """
+    Orquestra POST /processes/{id}/set-indexed {"is_indexed": bool}.
+
+    ON  → delega em run_mark_process_indexed (fluxo canónico completo).
+    OFF → reverte o flag is_indexed com histórico + broadcast WS.
+    """
+    from datetime import datetime, timezone
+
+    from fastapi import HTTPException
+
+    if is_indexed:
+        return await run_mark_process_indexed(
+            process_id,
+            user,
+            user_role=user_role,
+            all_roles=all_roles,
+            broadcast_fn=broadcast_fn,
+        )
+
+    # ── OFF: reversão do flag ────────────────────────────────────
+    assert_mark_indexed_permission(user_role, all_roles)
+
+    process = await db.processes.find_one(
+        {"id": process_id, "is_deleted": {"$ne": True}},
+        {"_id": 0},
+    )
+    if not process:
+        raise HTTPException(status_code=404, detail="Processo não encontrado")
+
+    if process.get("is_indexed") is not True:
+        return {
+            "success": True,
+            "message": "Este processo já estava marcado como não indexado.",
+            "process_id": process_id,
+            "is_indexed": False,
+        }
+
+    now = datetime.now(timezone.utc).isoformat()
+    result = await db.processes.update_one(
+        {"id": process_id, "is_indexed": True},
+        {"$set": build_unindex_update_set(user, now)},
+    )
+    if result.matched_count == 0:
+        # Race: outro operador desligou primeiro — idempotente.
+        return {
+            "success": True,
+            "message": "Este processo já estava marcado como não indexado.",
+            "process_id": process_id,
+            "is_indexed": False,
+        }
+
+    # Histórico (auditoria) — silencioso para o role indexacao (Stealth)
+    try:
+        from services.history import log_history
+
+        await log_history(
+            process_id,
+            user=user,
+            action="INDEXACAO_REVERTIDA",
+            field="is_indexed",
+            old_value="true",
+            new_value="false",
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao registar histórico de reversão de indexação: {e}")
+
+    try:
+        from services.websocket_manager import WSEventType
+
+        await broadcast_fn(
+            event_type=WSEventType.PROCESS_UPDATED,
+            process_id=process_id,
+            client_name=process.get("client_name", ""),
+            status=process.get("status"),
+            old_status=process.get("status"),
+            updated_at=now,
+        )
+    except Exception as ws_err:
+        logger.debug(f"Erro ao broadcast reversão de indexação via WS: {ws_err}")
+
+    process_number = process.get("process_number", "")
+    process_ref = f"#{process_number}" if process_number else process_id[:8]
+    logger.info(
+        f"[INDEXACAO] Reversão do flag de indexação do processo {process_ref} "
+        f"por {user.get('email')}."
+    )
+
+    return {
+        "success": True,
+        "message": f"Indexação do processo {process_ref} revertida (não indexado).",
+        "process_id": process_id,
+        "is_indexed": False,
+    }

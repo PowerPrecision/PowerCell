@@ -543,6 +543,23 @@ async def send_email_endpoint(
     return await run_send_email(payload, request, current_user, account=account)
 
 
+# ====================================================================
+# PACOTE 9 — UNDO SEND: cancelar um envio pendente dentro da janela
+# (POST /emails/send devolve {queued: true, send_id, undo_window_seconds};
+#  este endpoint aborta o envio antes de sair para a rede SMTP).
+# ====================================================================
+
+@router.post("/{send_id}/cancel-send")
+async def cancel_pending_send(
+    send_id: str,
+    current_user: dict = Depends(get_current_user)
+):
+    """Cancela o envio pendente (janela de 10s) e devolve o rascunho."""
+    from services.email_send_queue import run_cancel_pending_email_send
+
+    return await run_cancel_pending_email_send(send_id, current_user)
+
+
 # ==== RASCUNHOS AUTOMÁTICOS (Auto-Draft) ====
 
 @router.get("/drafts")

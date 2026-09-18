@@ -578,6 +578,11 @@ export const moveProcessKanban = (processId, newStatus) =>
 export const getMyClients = (params = {}) => api.get("/processes/my-clients", { params });
 export const markProcessIndexed = (processId) =>
   api.post(`/processes/${processId}/mark-indexed`);
+// PACOTE 9 — Toggle "Indexado" (header dos Detalhes do Processo): liga/desliga
+// is_indexed via endpoint dedicado (ON reutiliza o fluxo canónico do
+// mark-indexed; OFF reverte o flag com histórico + broadcast WS).
+export const setProcessIndexed = (processId, isIndexed) =>
+  api.post(`/processes/${processId}/set-indexed`, { is_indexed: !!isIndexed });
 // FIX (Pacote K): adicionar deleteProcess e restoreProcess para suportar o
 // botão "Restaurar" na lista de processos eliminados.
 export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);

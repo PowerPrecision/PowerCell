@@ -867,14 +867,21 @@ async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, 
         return False, {}, f"Processo {process_id} não encontrado"
 
     # Verificar se já tem consultor atribuído
+    # PACOTE 9 — GUARD REFORÇADO: além dos singulars (assigned_consultor_id /
+    # consultant_id), verifica também a LISTA multi-assignee. Um processo
+    # atribuído manualmente via build_staff_assign_update podia ter apenas
+    # assigned_consultor_ids preenchido — a auto-atribuição "menos ocupado"
+    # injectava então um SEGUNDO consultor por cima.
     existing_consultor = (
         process.get("assigned_consultor_id")
         or process.get("consultant_id")
+        or next(iter(process.get("assigned_consultor_ids") or []), None)
     )
     if existing_consultor:
         existing_name = (
             process.get("consultor_name")
-            or process.get("assigned_consultor_id")
+            or (process.get("consultor_names") or [None])[0]
+            or existing_consultor
         )
         return True, {
             "assigned_consultor_id": existing_consultor,
@@ -1353,7 +1360,16 @@ async def dual_auto_assign_on_pre_registo_transition(
     newly_assigned = []  # PACOTE: Notificação — só avisa quem ACABOU de ser atribuído
 
     # ── Consultor: só atribui se campo vazio ─────────────────────
-    existing_consultant = process.get("consultant_id")
+    # PACOTE 9 — GUARD REFORÇADO: além do singular consultant_id, verifica
+    # também assigned_consultor_id e a LISTA multi-assignee. Um processo
+    # atribuído manualmente (build_staff_assign_update) ou pelo criador
+    # (apply_creator_role_assignment) podia ter apenas estes campos — a
+    # dupla auto-atribuição injectava um SEGUNDO consultor por cima.
+    existing_consultant = (
+        process.get("consultant_id")
+        or process.get("assigned_consultor_id")
+        or next(iter(process.get("assigned_consultor_ids") or []), None)
+    )
     if existing_consultant:
         user = await db.users.find_one({"id": existing_consultant}, {"name": 1})
         result_data["consultant_id"] = existing_consultant
@@ -1370,7 +1386,13 @@ async def dual_auto_assign_on_pre_registo_transition(
             newly_assigned.append(consultor)
 
     # ── Intermediário: só atribui se campo vazio ─────────────────
-    existing_mediador = process.get("mediador_id")
+    # PACOTE 9 — GUARD REFORÇADO (simétrico ao consultor): mediador_id,
+    # assigned_mediador_id e a LISTA multi-assignee.
+    existing_mediador = (
+        process.get("mediador_id")
+        or process.get("assigned_mediador_id")
+        or next(iter(process.get("assigned_mediador_ids") or []), None)
+    )
     if existing_mediador:
         user = await db.users.find_one({"id": existing_mediador}, {"name": 1})
         result_data["mediador_id"] = existing_mediador

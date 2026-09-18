@@ -1,32 +1,49 @@
 #!/usr/bin/env python3
 """
 ====================================================================
-BACKFILL S3 MAPPINGS (clients) — PowerCell CRM
+BACKFILL S3 MAPPINGS (clients + processes) — PowerCell CRM
 ====================================================================
-Script de manutenção que percorre a coleção ``clients`` e garante que
-todo o cliente tem um mapeamento de pasta S3 (``s3_folder``) válido.
+Script de manutenção que percorre as coleções ``clients`` E
+``processes`` e garante que todo o documento tem um mapeamento de
+pasta S3 (``s3_folder``) válido — criando a estrutura real no bucket
+(marcadores ``.keep`` via boto3) quando necessário.
 
-CONTEXTO:
-- Clientes criados antes do fluxo de onboarding ter passado a gerar
-  o mapeamento S3 automaticamente (ou cujo campo foi perdido por um
-  overwrite anterior) ficam sem ``s3_folder``, impedindo o Portal do
-  Cliente e o CRM de listarem/mostrarem as pastas de documentos.
+PACOTE 9 — actualização face à versão anterior (só clients):
+1. COBERTURA DE PROCESSOS: os processos também têm hoje ``s3_folder``
+   (criado na criação pelo hook Pacote 9 ou lazy pelo Portal) e
+   ficavam de fora do backfill — a principal causa de "clientes não
+   mapeados com o S3" reportada em produção.
+2. FILTROS CORRIGIDOS:
+   - clients: o filtro antigo usava ``is_active`` (campo de PROCESS,
+     não de client) — agora exclui apenas soft-deleted
+     (``is_deleted``/status "eliminado"), que não precisam de pasta.
+   - processos: exclui soft-deleted (``is_deleted``) e inactivos.
+   - Valores "lixo" (``"undefined"``/``"null"``/``"None"``) no campo
+     ``s3_folder`` passam a contar como SEM mapeamento (antes só
+     missing/None/vazio eram apanhados — docs com lixo ficavam de fora
+     e quebravam o Explorer S3).
+3. 2º TITULAR: lido do sítio certo para cada coleção — processos:
+   ``second_client_name``; clients: legacy ``titular2_data``
+   (retrocompatibilidade).
 
 O QUE ESTE SCRIPT FAZ:
-1. Itera a coleção ``clients`` e seleciona apenas os documentos cujo
-   campo ``s3_folder`` seja ``None``/inexistente (ou vazio).
+1. Itera ``clients`` e ``processes`` e selecciona os documentos sem
+   ``s3_folder`` válido (None/inexistente/vazio/"undefined"/"null").
 2. Para cada um, invoca ``s3_service.ensure_client_folder_mapping``
    — a mesma função robusta usada nos fluxos normais de criação —
-   que reutiliza um mapeamento/pasta já existente sempre que possível
-   e só cria uma pasta nova quando realmente não existe nenhuma.
+   que reutiliza uma pasta já existente (match fuzzy por nome) sempre
+   que possível e só cria uma pasta nova quando não existe nenhuma
+   (marcadores ``.keep`` via boto3/put_object).
 3. Persiste o resultado com um ``$set`` estrito apenas na chave
    ``s3_folder`` (+ metadados de auditoria). Nunca substitui o
    documento inteiro nem toca noutros campos.
 
 REGRAS DE SEGURANÇA:
-- Idempotente: correr o script múltiplas vezes é seguro — clientes
+- Idempotente: correr o script múltiplas vezes é seguro — documentos
   que já têm ``s3_folder`` válido são ignorados.
-- Suporta --dry-run para simular sem escrever na BD.
+- Suporta --dry-run para simular sem escrever na BD nem no S3.
+- Degradação graciosa: falhas pontuais (S3/BD) são logadas e o script
+  continua para o documento seguinte.
 
 USO:
     cd backend
@@ -49,56 +66,97 @@ from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).parent.parent / ".env")
 
+# Valores de "lixo" que contam como SEM mapeamento (o admin S3 rejeita-os)
+GARBAGE_S3_FOLDERS = ("undefined", "null", "none", "")
+
 
 def _missing_s3_folder_query() -> dict:
-    """Query Mongo para clientes sem ``s3_folder`` válido (None ou inexistente)."""
+    """Query Mongo para docs sem ``s3_folder`` válido (missing/None/vazio)."""
     return {
         "$or": [
             {"s3_folder": {"$exists": False}},
             {"s3_folder": None},
             {"s3_folder": ""},
+            {"s3_folder": {"$in": list(GARBAGE_S3_FOLDERS)}},
         ]
     }
 
 
-async def backfill_clients(db, s3_service, dry_run: bool = False, limit: int = 0) -> dict:
-    """Preenche o mapeamento S3 em falta para clientes existentes."""
+def _not_deleted_query() -> dict:
+    """Exclui documentos soft-deleted (não precisam de pasta S3)."""
+    return {
+        "is_deleted": {"$ne": True},
+        "status": {"$ne": "eliminado"},
+    }
+
+
+def _has_garbage_s3_folder(folder) -> bool:
+    """True se o valor gravado é lixo ("undefined"/"null"/"None"/"")."""
+    if not folder or not isinstance(folder, str):
+        return True
+    return folder.strip().lower() in GARBAGE_S3_FOLDERS
+
+
+async def backfill_collection(
+    db,
+    s3_service,
+    collection_name: str,
+    *,
+    label: str,
+    dry_run: bool = False,
+    limit: int = 0,
+    backfill_by: str = "backfill_s3_mappings",
+) -> dict:
+    """
+    Preenche o mapeamento S3 em falta para UMA coleção (clients/processes).
+
+    A resolução do 2º titular adapta-se à coleção:
+    - processes: ``second_client_name`` (campo actual do modelo)
+    - clients: ``titular2_data`` (legacy — retrocompatibilidade)
+    """
     stats = {"total": 0, "restored": 0, "skipped_no_name": 0, "failed": 0}
 
-    query = {**_missing_s3_folder_query(), "is_active": {"$ne": False}}
-    cursor = db.clients.find(
-        query,
-        {"_id": 0, "id": 1, "nome": 1, "titular2_data": 1, "s3_folder": 1},
-    )
+    # getattr funciona com Motor, DatabaseProxy e fakes de teste (conftest)
+    collection = getattr(db, collection_name)
+    query = {"$and": [_missing_s3_folder_query(), _not_deleted_query()]}
 
-    async for client in cursor:
+    async for doc in collection.find(
+        query,
+        {"_id": 0, "id": 1, "nome": 1, "client_name": 1,
+         "second_client_name": 1, "titular2_data": 1, "s3_folder": 1},
+    ):
         stats["total"] += 1
         if limit and stats["total"] > limit:
             stats["total"] -= 1
             break
 
-        client_id = client.get("id")
-        if not client_id:
+        doc_id = doc.get("id")
+        if not doc_id:
             continue
 
-        client_name = (client.get("nome") or "").strip()
-        if not client_name:
+        # Nome principal: clients → nome; processes → client_name
+        primary_name = (doc.get("nome") or doc.get("client_name") or "").strip()
+        if not primary_name:
             stats["skipped_no_name"] += 1
-            print(f"  ⚠️  Cliente {client_id[:8]}... sem nome — ignorado.")
+            print(f"  ⚠️  {label} {doc_id[:8]}... sem nome — ignorado.")
             continue
 
-        titular2 = client.get("titular2_data") or {}
-        second_client_name = titular2.get("nome") or titular2.get("name")
+        # 2º titular: processes → second_client_name; clients → legacy
+        second_client_name = doc.get("second_client_name")
+        if not second_client_name:
+            titular2 = doc.get("titular2_data") or {}
+            second_client_name = titular2.get("nome") or titular2.get("name")
 
         result = await _backfill_one(
             s3_service=s3_service,
-            collection=db.clients,
-            doc_id=client_id,
-            client_name=client_name,
+            collection=collection,
+            doc_id=doc_id,
+            client_name=primary_name,
             second_client_name=second_client_name,
-            existing_s3_folder=client.get("s3_folder"),
+            existing_s3_folder=doc.get("s3_folder"),
             dry_run=dry_run,
-            label=f"Cliente {client_id[:8]}... ({client_name})",
+            backfill_by=backfill_by,
+            label=f"{label} {doc_id[:8]}... ({primary_name})",
         )
         if result:
             stats["restored"] += 1
@@ -116,22 +174,25 @@ async def _backfill_one(
     second_client_name,
     existing_s3_folder,
     dry_run: bool,
+    backfill_by: str,
     label: str,
 ) -> bool:
-    """Resolve/cria o mapeamento S3 para um único cliente e persiste-o."""
-    if existing_s3_folder:
+    """Resolve/cria o mapeamento S3 para um único documento e persiste-o."""
+    if existing_s3_folder and not _has_garbage_s3_folder(existing_s3_folder):
         # Defesa extra: nunca devia acontecer dado o filtro da query, mas
         # evita qualquer escrita se o campo já estiver preenchido.
         return True
 
     # ``ensure_client_folder_mapping`` usa boto3 (síncrono) — corre em thread
-    # para não bloquear o event loop.
+    # para não bloquear o event loop. Nota: valores de lixo no campo
+    # existente são passados como None — o ensure trata "undefined"/"null"
+    # como inválidos, mas enviamos já limpos para o caminho 1 (reutilização).
     mapping = await asyncio.to_thread(
         s3_service.ensure_client_folder_mapping,
         doc_id,
         client_name,
         second_client_name,
-        existing_s3_folder,
+        None,  # existing_s3_folder lixo → procurar/criar de novo
     )
 
     if not mapping.get("success") or not mapping.get("s3_folder"):
@@ -147,14 +208,14 @@ async def _backfill_one(
 
     now = datetime.now(timezone.utc).isoformat()
     # CRÍTICO: $set estrito apenas nestas chaves. Nunca substitui o
-    # documento inteiro nem qualquer outro campo do cliente.
+    # documento inteiro nem qualquer outro campo.
     await collection.update_one(
         {"id": doc_id},
         {
             "$set": {
                 "s3_folder": folder_path,
                 "s3_mapping_backfilled_at": now,
-                "s3_mapping_backfilled_by": "backfill_s3_mappings",
+                "s3_mapping_backfilled_by": backfill_by,
             }
         },
     )
@@ -162,17 +223,18 @@ async def _backfill_one(
     return True
 
 
-def print_summary(stats: dict, dry_run: bool):
+def print_summary(clients_stats: dict, processes_stats: dict, dry_run: bool):
     mode = "DRY RUN (simulação)" if dry_run else "EXECUÇÃO REAL"
     print("\n" + "=" * 70)
-    print(f"  BACKFILL S3 MAPPINGS (clients) — {mode}")
+    print(f"  BACKFILL S3 MAPPINGS (clients + processes) — {mode}")
     print("=" * 70)
 
-    print("\n📋 CLIENTES:")
-    print(f"   Total com mapeamento em falta: {stats['total']}")
-    print(f"   Preenchidos:                   {stats['restored']}")
-    print(f"   Ignorados (sem nome):          {stats['skipped_no_name']}")
-    print(f"   Falhados:                      {stats['failed']}")
+    for label, stats in (("CLIENTES", clients_stats), ("PROCESSOS", processes_stats)):
+        print(f"\n📋 {label}:")
+        print(f"   Total com mapeamento em falta: {stats['total']}")
+        print(f"   Preenchidos:                   {stats['restored']}")
+        print(f"   Ignorados (sem nome):          {stats['skipped_no_name']}")
+        print(f"   Falhados:                      {stats['failed']}")
 
     if dry_run:
         print("\n⚠️  DRY RUN — nenhum dado foi alterado. Execute sem --dry-run para aplicar.")
@@ -184,10 +246,13 @@ def print_summary(stats: dict, dry_run: bool):
 
 def main():
     parser = argparse.ArgumentParser(
-        description="Backfill — Garante mapeamento S3 para clientes sem s3_folder (PowerCell CRM)"
+        description=(
+            "Backfill — Garante mapeamento S3 (boto3 + persistência) para "
+            "CLIENTES e PROCESSOS sem s3_folder válido (PowerCell CRM)"
+        )
     )
     parser.add_argument("--dry-run", action="store_true", help="Simular sem escrever na BD")
-    parser.add_argument("--limit", type=int, default=0, help="Limitar N clientes (0 = sem limite)")
+    parser.add_argument("--limit", type=int, default=0, help="Limitar N documentos por coleção (0 = sem limite)")
     args = parser.parse_args()
 
     mongo_url = os.environ.get("MONGO_URL")
@@ -209,16 +274,26 @@ def main():
     db = mongo_client[db_name]
 
     async def _run():
-        print(f"🚀 Backfill S3 Mappings (clients) — {datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC")
+        print(f"🚀 Backfill S3 Mappings (clients + processes) — "
+              f"{datetime.now(timezone.utc).strftime('%Y-%m-%d %H:%M')} UTC")
         print(f"   BD: {db_name}")
         print(f"   Bucket S3: {s3_service.bucket_name}")
         print(f"   Dry run: {args.dry_run}")
         print(f"   Limit: {args.limit or 'sem limite'}\n")
 
-        print("📋 A procurar clientes com s3_folder em falta...")
-        stats = await backfill_clients(db, s3_service, dry_run=args.dry_run, limit=args.limit)
+        print("📋 A procurar CLIENTES com s3_folder em falta...")
+        clients_stats = await backfill_collection(
+            db, s3_service, "clients", label="Cliente",
+            dry_run=args.dry_run, limit=args.limit,
+        )
 
-        print_summary(stats, args.dry_run)
+        print("\n📋 A procurar PROCESSOS com s3_folder em falta...")
+        processes_stats = await backfill_collection(
+            db, s3_service, "processes", label="Processo",
+            dry_run=args.dry_run, limit=args.limit,
+        )
+
+        print_summary(clients_stats, processes_stats, args.dry_run)
 
     asyncio.run(_run())
     mongo_client.close()

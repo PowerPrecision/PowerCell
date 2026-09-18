@@ -73,6 +73,17 @@ class FakeAsyncCursor:
                 ]
         return docs
 
+    def __aiter__(self):
+        """PACOTE 9 — iteração assíncrona (``async for doc in cursor``),
+        usada pelos scripts de manutenção (ex.: backfill_s3_mappings).
+        """
+        return self._iterate()
+
+    async def _iterate(self):
+        docs = await self.to_list(None)
+        for doc in docs:
+            yield doc
+
 
 class FakeAsyncCollection:
     """Coleção assíncrona em memória (substituto leve do Motor).
@@ -139,10 +150,28 @@ class FakeAsyncCollection:
                 return False
         return True
 
-    async def find_one(self, query: dict, projection: dict = None):
-        for doc in self.docs:
-            if self._matches(doc, query):
-                return dict(doc)
+    async def find_one(self, query: dict, projection: dict = None, sort=None):
+        """``find_one`` com ``sort`` opcional (PACOTE 9 — usado por
+        ``db.workflow_statuses.find_one({}, ..., sort=[("order", 1)])``).
+
+        Contrato histórico mantido: a projecção é IGNORADA (devolve o doc
+        completo) — vários serviços usam projecções com dot-notation
+        (ex.: "settings.company_name") e dependem de receber o doc inteiro
+        (o Motor real resolve dot-notation; o fake devolve sempre o doc
+        completo, que é um superconjunto seguro para os testes).
+        """
+        matched = [doc for doc in self.docs if self._matches(doc, query)]
+        if sort:
+            key_or_list = sort
+            def sort_key(doc: dict):
+                if isinstance(key_or_list, (list, tuple)) and key_or_list:
+                    if isinstance(key_or_list[0], (list, tuple)):
+                        return tuple(str(doc.get(k) or "") for k, _ in key_or_list)
+                    return tuple(str(doc.get(k) or "") for k in key_or_list)
+                return str(doc.get(key_or_list) or "")
+            matched = sorted(matched, key=sort_key)
+        for doc in matched:
+            return dict(doc)
         return None
 
     async def insert_one(self, doc: dict):

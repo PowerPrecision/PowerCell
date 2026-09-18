@@ -1,6 +1,18 @@
 """POST /clients/{id}/assign — atribuir cliente e criar processo.
 
 Extraído de `routes/clients.py`.
+
+PACOTE 9:
+- Guard de sobreposição: o cliente já atribuído a outro utilizador só
+  pode ser re-atribuído por perfis de gestão (admin/ceo/diretor).
+- Cargo efectivo (X-Active-Role/UCR) em vez da role primária do JWT —
+  utilizadores multi-perfil passam a ser validados pelo perfil activo.
+- A pasta S3 do processo é criada de VERDADE no S3 (marcadores .keep +
+  reutilização de pastas existentes) e o mapeamento é persistido no
+  processo E no cliente — antes gravava-se apenas uma string de path
+  calculada, sem estrutura no bucket.
+- Campos multi-assignee (assigned_consultor_ids/consultor_names, etc.)
+  preenchidos em simultâneo com os singulars de compatibilidade.
 """
 from __future__ import annotations
 
@@ -62,8 +74,11 @@ async def run_assign_client_to_user(
     - Admin/CEO/Diretor: Podem atribuir a qualquer utilizador
     - Consultor/Intermediario: Atribuem a si próprios
     """
-    # Verificar permissões
-    user_role = user.get("role", "")
+    # PACOTE 9 — cargo EFECTIVO (X-Active-Role resolvido contra UCR em
+    # get_current_user) em vez da role primária do JWT: um utilizador
+    # multi-perfil (ex.: admin com perfil activo de consultor) passa a ser
+    # validado pelo perfil com que está a trabalhar neste momento.
+    user_role = user.get("effective_role") or user.get("role", "")
     user_id = user.get("id", "")
     
     
@@ -77,6 +92,26 @@ async def run_assign_client_to_user(
     client = await db.clients.find_one({"id": client_id})
     if not client:
         raise HTTPException(status_code=404, detail="Cliente não encontrado")
+
+    # ============================================================
+    # PACOTE 9 — GUARD DE SOBREPOSIÇÃO
+    # ============================================================
+    # O sistema nunca pode (re)atribuir automaticamente um cliente que
+    # já tem alguém atribuído. A reatribuição deliberada continua a ser
+    # possível apenas para perfis de gestão (admin/ceo/diretor).
+    existing_assignee = (client.get("assigned_to") or "").strip()
+    if (
+        existing_assignee
+        and existing_assignee != target_user_id
+        and user_role not in ("admin", "ceo", "diretor")
+    ):
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                "Este cliente já está atribuído a outro utilizador. "
+                "Apenas Admin, CEO ou Diretor podem re-atribuir clientes."
+            ),
+        )
 
     # Desencriptar dados sensíveis do cliente antes de copiar para o processo
     # Isto evita dupla encriptação quando o processo for encriptado
@@ -127,29 +162,23 @@ async def run_assign_client_to_user(
         personal_data.pop("telefone_hash", None)
         
         # Criar documento do processo
-        # Gerar caminho S3 com verificação de pasta existente para evitar duplicados
+        # PACOTE 9 — o s3_folder gravado no doc é apenas um valor INICIAL de
+        # fallback (quando o S3 não está configurado). A estrutura REAL no
+        # bucket (marcadores .keep + reutilização de pastas existentes) é
+        # garantida logo após a inserção via ensure_s3_mapping_on_process_create,
+        # que também faz o backfill do mapeamento no documento do cliente.
         titular2_data = client.get("titular2_data")
         # Remover blind indexes do titular2_data
         if titular2_data and isinstance(titular2_data, dict):
             titular2_data.pop("nif_hash", None)
         second_client_name = titular2_data.get("name") if titular2_data else None
         
-        # IMPORTANTE: Usar função que verifica pastas existentes antes de criar
-        # Isto evita criar pastas duplicadas como "Romina_Araujo" quando já existe "Romina_e_Leyzller"
-        if s3_service.is_configured():
-            s3_folder = s3_service._get_client_base_path_for_upload(
-                process_id, 
-                client_name, 
-                second_client_name
-            )
-            logger.info(f"Pasta S3 definida para novo processo: {s3_folder}")
-        else:
-            # Fallback se S3 não estiver configurado
-            safe_name = "_".join(w.capitalize() for w in client_name.strip().split()) if client_name else process_id[:8]
-            s3_folder = f"Documentação Clientes/{safe_name}"
-            if second_client_name:
-                safe_second_name = "_".join(w.capitalize() for w in second_client_name.strip().split())
-                s3_folder = f"Documentação Clientes/{safe_name}_e_{safe_second_name}"
+        # Fallback determinístico (mesma convenção de naming do serviço S3)
+        safe_name = "_".join(w.capitalize() for w in client_name.strip().split()) if client_name else process_id[:8]
+        s3_folder = f"Documentação Clientes/{safe_name}"
+        if second_client_name:
+            safe_second_name = "_".join(w.capitalize() for w in second_client_name.strip().split())
+            s3_folder = f"Documentação Clientes/{safe_name}_e_{safe_second_name}"
         
         process_doc = {
             "id": process_id,
@@ -178,14 +207,21 @@ async def run_assign_client_to_user(
         }
         
         # Atribuir automaticamente baseado no papel do utilizador de destino
+        # PACOTE 9 — preencher também os campos multi-assignee (listas) em
+        # sincronia com os singulars de compatibilidade, tal como faz o
+        # build_staff_assign_update do fluxo manual.
         target_role = target_user.get("role", "")
         if target_role == "intermediario":
             process_doc["assigned_mediador_id"] = target_user_id
             process_doc["mediador_name"] = target_user.get("name")
+            process_doc["assigned_mediador_ids"] = [target_user_id]
+            process_doc["mediador_names"] = [target_user.get("name")]
         elif target_role == "consultor":
             process_doc["assigned_consultor_id"] = target_user_id
             process_doc["consultor_name"] = target_user.get("name")
             process_doc["consultor_id"] = target_user_id  # Consultor associado ao processo
+            process_doc["assigned_consultor_ids"] = [target_user_id]
+            process_doc["consultor_names"] = [target_user.get("name")]
         elif target_role == "indexacao":
             process_doc["assigned_indexacao_id"] = target_user_id
 
@@ -196,6 +232,33 @@ async def run_assign_client_to_user(
 
         # Inserir processo
         await db.processes.insert_one(process_doc)
+
+        # ============================================================
+        # PACOTE 9 — CRIAR ESTRUTURA S3 REAL NO MOMENTO DA CRIAÇÃO
+        # ============================================================
+        # Antes: gravava-se apenas a string de path calculada acima — sem
+        # marcadores .keep no bucket, sem reutilização de pastas existentes
+        # (risco de duplicados) e sem mapeamento no documento do cliente.
+        # Agora: ensure_client_folder_mapping cria/verifica a estrutura e o
+        # mapeamento correcto é persistido no processo E no cliente.
+        # Degradação graciosa — falhas S3 nunca rebentam a atribuição.
+        try:
+            from services.s3_mapping_on_create import (
+                ensure_s3_mapping_on_process_create,
+            )
+
+            await ensure_s3_mapping_on_process_create(
+                process_id=process_id,
+                client_id=client_id,
+                client_name=client_name,
+                second_client_name=second_client_name,
+                process_existing_s3_folder=process_doc.get("s3_folder"),
+            )
+        except Exception as e:
+            logger.warning(
+                f"[ASSIGN-CLIENT][S3-MAPPING] Erro ao garantir mapeamento S3 "
+                f"para processo {process_id}: {e}"
+            )
         
         # ============================================================
         # AUTO-ATRIBUIÇÃO DE INDEXADOR

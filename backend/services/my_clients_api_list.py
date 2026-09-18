@@ -16,6 +16,7 @@ from services.my_clients_api_helpers import (
     PROCESS_LIST_PROJECTION,
     apply_pre_registo_exclusion,
     build_my_clients_process_query,
+    build_orphan_leads_query,
     format_lead_row,
     resolve_list_context,
 )
@@ -62,24 +63,10 @@ async def run_get_my_clients(request: Request, user: dict):
 
     leads = []
     if role in [UserRole.CONSULTOR, UserRole.INTERMEDIARIO]:
-        leads_query = {
-            "$and": [
-                {"created_by": user_id},
-                # PACOTE DG — filtro is_deleted já presente (verificado).
-                # Clientes eliminados (soft-delete) não devem aparecer na
-                # lista de leads órfãos do consultor/intermediário.
-                {"is_deleted": {"$ne": True}},
-                {"$or": [
-                    {"process_ids": {"$exists": False}},
-                    {"process_ids": []},
-                    {"process_ids": None},
-                ]},
-                {"$or": [
-                    {"lead_status": {"$exists": False}},
-                    {"lead_status": "new"},
-                ]},
-            ]
-        }
+        # PACOTE 9 — helper extraído (build_orphan_leads_query): corresponde
+        # created_by == user_id OU user_email (o run_create_client grava
+        # email; a query antiga filtrava só por id → leads invisíveis).
+        leads_query = build_orphan_leads_query(user_id, user_email)
         leads_cursor = await db.clients.find(
             leads_query,
             LEADS_PROJECTION,

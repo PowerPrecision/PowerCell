@@ -208,6 +208,37 @@ def build_my_clients_stats_query(
     return EMPTY_PORTFOLIO_QUERY
 
 
+def build_orphan_leads_query(user_id: str, user_email: str) -> dict:
+    """
+    Query Mongo para leads órfãos (clientes sem processo) do criador.
+
+    PACOTE 9 — fix do mismatch de autor: ``run_create_client`` grava
+    ``created_by`` com o EMAIL do criador, mas a query original filtrava
+    apenas por ``created_by == user_id`` — os clientes criados pelo próprio
+    consultor/intermediário nunca apareciam como leads em "Os Meus
+    Clientes" durante o Pré-Registo. Passa a corresponder a ID **ou**
+    EMAIL (cobertura total dos dois formatos legacy/actual).
+    """
+    return {
+        "$and": [
+            {"$or": [{"created_by": user_id}, {"created_by": user_email}]},
+            # PACOTE DG — filtro is_deleted já presente (verificado).
+            # Clientes eliminados (soft-delete) não devem aparecer na
+            # lista de leads órfãos do consultor/intermediário.
+            {"is_deleted": {"$ne": True}},
+            {"$or": [
+                {"process_ids": {"$exists": False}},
+                {"process_ids": []},
+                {"process_ids": None},
+            ]},
+            {"$or": [
+                {"lead_status": {"$exists": False}},
+                {"lead_status": "new"},
+            ]},
+        ]
+    }
+
+
 def resolve_list_context(request: Request, user: dict) -> tuple[str, str, str, bool]:
     """Return (user_id, user_email, role, wants_deleted)."""
     return (

@@ -277,3 +277,24 @@ Quando uma entidade tem um campo de prioridade explícito (`task.priority`, defi
 
 
 
+
+
+## 15. Undo Send e Toggle "Indexado" (Pacote 9)
+
+### Envio de email = toast "Email a ser enviado..." com Desfazer
+
+O backend (Pacote 9) agenda o envio real após a janela de undo (`POST /api/emails/send` devolve `{queued: true, send_id, undo_window_seconds}` em vez de enviar de imediato). O frontend NUNCA assume envio imediato na resposta OK:
+
+- **Parse da resposta com `parseSendResponse`** (`utils/webmailSendQueue.js` — helpers puros, testáveis com `node --test`): normaliza `queued`/`send_id`/`undo_window_ms` e tolera respostas legacy/inválidas (devolve `queued: false` → caminho de envio imediato).
+- **UX canónica (Gmail-like)**: ao clicar "Enviar", o composer **fecha**; surge `toast.success("Email a ser enviado...", { duration: undoWindowMs, action: { label: "Desfazer", onClick: cancelSend } })`. O botão "Desfazer" chama `POST /api/emails/{send_id}/cancel-send` (mesmos headers de contexto: `Authorization` + `X-Company-Id`/`X-Active-Role` via `webmailHeaders()`).
+- **Undo repõe o modo de edição**: antes do fetch de envio, guardar um snapshot (`buildComposerSnapshot`) do `composerData` + `uploadAttachments`; no cancel, repor o snapshot (ou o `draft` devolvido pelo backend, convertido com `draftToComposerFields`), reabrir o composer (`setComposerOpen(true)`) e `toast.success("Envio cancelado — pode continuar a editar o rascunho.")`. Os anexos temp continuam válidos (o backend só os move no envio real).
+- **Após a janela (sem undo)**: `setTimeout` ligeiramente depois da janela confirma visualmente ("Email enviado com sucesso") e faz `handleRefresh()` (invalidação `queryKeys.emails.webmailAll()`).
+- Padrão aplicado nos DOIS pontos de envio do Webmail: `WebmailPage.jsx::handleSendEmail` (composer) e `EmailViewerModal.js::sendReply` (resposta rápida — no undo, reabre a caixa de resposta com o texto intacto).
+- Nunca duplicar a lógica de undo inline: extrair sempre para `utils/` (puro, sem JSX) e testar com `node --test`.
+
+### Toggle "Indexado" no header dos Detalhes do Processo
+
+- Switch shadcn (`components/ui/switch`) + `Label` no bloco `actions` do `PageHeader`, com `data-testid="indexed-toggle"`; `checked={!!process?.is_indexed}`.
+- **Visibilidade**: apenas perfis de gestão/indexação — `INDEX_TOGGLE_ROLES = ["indexacao", "admin", "ceo"]` (a mesma regra do backend `assert_mark_indexed_permission`), avaliada com `effectiveRole` (perfil ACTIVO) e fallback `hasAnyRole(user, ...)` (padrão do Kanban — ver `ProcessDetailsModal`). Não usar apenas `user.role` (primário do JWT): multi-perfis ficariam sem o toggle.
+- **Acção**: `setProcessIndexed(processId, isIndexed)` (`services/api.js`) → `POST /processes/{id}/set-indexed {"is_indexed": bool}`. Optimistic update local (`setProcess`) + rollback em erro + `fetchData()` (invalida o bundle de queries do processo). O ON notifica a equipa (fluxo canónico do mark-indexed no backend); o OFF reverte o flag sem mexer na fase.
+- Estado ocupado: `indexToggleBusy` desactiva o Switch e troca o label por um `Loader2` spinner — feedback imediato, sem cliques duplos.

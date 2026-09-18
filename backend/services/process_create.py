@@ -129,14 +129,31 @@ def build_staff_process_doc(
 
 
 def apply_creator_role_assignment(process_doc: dict, user: dict) -> None:
-    """Atribui mediador/consultor ao criador (mutação in-place)."""
-    if user["role"] == UserRole.INTERMEDIARIO:
+    """
+    Atribui mediador/consultor ao CRIADOR (mutação in-place).
+
+    PACOTE 9:
+    - Cargo EFECTIVO (``user["effective_role"]``, resolvido em
+      get_current_user contra X-Active-Role/UCR) em vez da role primária
+      do JWT — corrigido para utilizadores multi-perfil (ex.: admin com
+      perfil activo de consultor).
+    - Preenche também os campos multi-assignee (listas) em sincronia
+      com os singulars de compatibilidade, tal como o fluxo manual
+      (``build_staff_assign_update``), garantindo que o processo aparece
+      de imediato em "Os Meus Clientes" do criador.
+    """
+    effective = (user.get("effective_role") or user.get("role") or "")
+    if effective == UserRole.INTERMEDIARIO:
         process_doc["assigned_mediador_id"] = user["id"]
         process_doc["mediador_name"] = user["name"]
-    elif user["role"] in [UserRole.CONSULTOR, UserRole.DIRETOR]:
+        process_doc["assigned_mediador_ids"] = [user["id"]]
+        process_doc["mediador_names"] = [user["name"]]
+    elif effective in [UserRole.CONSULTOR, UserRole.DIRETOR]:
         process_doc["assigned_consultor_id"] = user["id"]
         process_doc["consultor_name"] = user["name"]
         process_doc["consultor_id"] = user["id"]
+        process_doc["assigned_consultor_ids"] = [user["id"]]
+        process_doc["consultor_names"] = [user["name"]]
 
 
 async def attach_second_client_on_create(
@@ -237,7 +254,7 @@ async def link_clients_after_process_create(
 
 
 def assert_can_create_staff_process(role: str) -> None:
-    """Roles permitidos em POST /create-client."""
+    """Roles permitidos em POST /create-client (role EFECTIVA — Pacote 9)."""
     allowed = [
         UserRole.ADMIN, UserRole.CEO, UserRole.CONSULTOR,
         UserRole.INTERMEDIARIO, UserRole.ADMINISTRATIVO, UserRole.DIRETOR,
@@ -484,7 +501,8 @@ async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
     """
     from services.process_service import get_next_process_number
 
-    assert_can_create_staff_process(user["role"])
+    # PACOTE 9 — validar com o cargo EFECTIVO (multi-perfil).
+    assert_can_create_staff_process(user.get("effective_role") or user.get("role", ""))
     assert_client_id_required(getattr(data, "client_id", None))
 
     is_lead = bool(getattr(data, "is_lead", False))
@@ -556,6 +574,7 @@ async def persist_and_finalize_staff_create(
     import asyncio
 
     from services.redis_cache import invalidate_stats_cache
+    from services.s3_mapping_on_create import ensure_s3_mapping_on_process_create
     from services.trello_service import sync_process_to_trello
     from services.websocket_manager import WSEventType
 
@@ -570,8 +589,34 @@ async def persist_and_finalize_staff_create(
     process_doc = bundle["process_doc"]
     second_client_id_for_process = bundle["second_client_id"]
 
+    # PACOTE 9 — capturar nomes plain ANTES da encriptação para o mapeamento
+    # S3 (client_name/second_client_name não são encriptados, mas capturamos
+    # aqui para não depender da forma do doc encriptado).
+    second_client_name_for_s3 = process_doc.get("second_client_name")
+
     process_doc = encrypt_fn(process_doc)
     await db.processes.insert_one(process_doc)
+
+    # ============================================================
+    # PACOTE 9 — MAPEAMENTO S3 NO MOMENTO EXACTO DA CRIAÇÃO
+    # ============================================================
+    # Antes deste hook, o processo nascia SEM s3_folder (a pasta só era
+    # criada lazy no primeiro upload via Portal) — raiz do bug "clientes
+    # não ficam mapeados com o S3". Agora garantimos pasta + mapeamento
+    # logo na criação, com backfill do documento do cliente.
+    # Degradação graciosa: falhas S3 são logadas, nunca rebentam a criação.
+    try:
+        await ensure_s3_mapping_on_process_create(
+            process_id=process_id,
+            client_id=client_id,
+            client_name=client_name,
+            second_client_name=second_client_name_for_s3,
+        )
+    except Exception as e:
+        logger.warning(
+            f"[CREATE-PROCESS][S3-MAPPING] Erro ao garantir mapeamento S3 "
+            f"para processo {process_id}: {e}"
+        )
 
     await maybe_auto_assign_indexer_on_create(
         process_id,
