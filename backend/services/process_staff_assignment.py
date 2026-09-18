@@ -531,11 +531,13 @@ async def send_assignment_email(
     Silencioso (não propaga erros para a API).
     """
     import os
-    from services.email import get_base_template
+    from services.email import get_base_template, resolve_base_template_logo
     from services.notification_service import send_notification_with_preference_check
 
     frontend_url = os.environ.get("FRONTEND_URL", "")
     process_link = f"{frontend_url}/processo/{process_id}" if frontend_url else ""
+    # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+    company_logo = await resolve_base_template_logo()
 
     for uid in newly_assigned_ids:
         try:
@@ -555,7 +557,7 @@ async def send_assignment_email(
                 process_id=process_id,
                 process_link=process_link,
             )
-            html_body = get_base_template(content_html, title=subject)
+            html_body = get_base_template(content_html, title=subject, logo_url=company_logo)
 
             await send_notification_with_preference_check(
                 to_email=user_email,

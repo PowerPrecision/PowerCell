@@ -128,7 +128,31 @@ export default function EmailAccountsCard({
           {accounts.map((account) => (
             <li
               key={account.id}
-              className="flex items-center gap-3 rounded-lg border border-border bg-muted/30 px-3 py-2"
+              role="button"
+              tabIndex={0}
+              aria-label={`Editar conta de email ${account.label || account.email_address || ""}`}
+              onClick={() => {
+                // PACOTE 11 (Eixo 3 — "Webmail Morto"): clicar no corpo do
+                // card abre a edição da conta (antes só os botões pencil/
+                // estrela/lixo reagiam — os cards pareciam mortos).
+                if (!account.is_caixa_geral) {
+                  openEdit(account);
+                }
+              }}
+              onKeyDown={(e) => {
+                if (
+                  !account.is_caixa_geral &&
+                  (e.key === "Enter" || e.key === " ")
+                ) {
+                  e.preventDefault();
+                  openEdit(account);
+                }
+              }}
+              className={`flex items-center gap-3 rounded-lg border px-3 py-2 transition-colors text-left w-full focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring ${
+                account.is_caixa_geral
+                  ? "border-border bg-muted/30 cursor-default"
+                  : "border-border bg-muted/30 cursor-pointer hover:border-primary/40 hover:bg-muted/60"
+              }`}
             >
               <Mail className="h-4 w-4 text-muted-foreground shrink-0" />
               <div className="min-w-0 flex-1">
@@ -159,7 +183,10 @@ export default function EmailAccountsCard({
                     className="h-8 w-8"
                     title="Definir como principal"
                     disabled={busyId === account.id}
-                    onClick={() => handleSetPrimary(account)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleSetPrimary(account);
+                    }}
                   >
                     <Star className="h-3.5 w-3.5" />
                   </Button>
@@ -171,7 +198,10 @@ export default function EmailAccountsCard({
                     size="icon"
                     className="h-8 w-8"
                     title="Editar"
-                    onClick={() => openEdit(account)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      openEdit(account);
+                    }}
                   >
                     <Pencil className="h-3.5 w-3.5" />
                   </Button>
@@ -184,7 +214,10 @@ export default function EmailAccountsCard({
                     className="h-8 w-8 text-destructive"
                     title="Remover"
                     disabled={busyId === account.id}
-                    onClick={() => handleDelete(account)}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleDelete(account);
+                    }}
                   >
                     {busyId === account.id ? (
                       <Loader2 className="h-3.5 w-3.5 animate-spin" />

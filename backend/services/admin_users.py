@@ -268,11 +268,26 @@ Cumprimentos,
 Equipa Precision Crédito
 """
         
+        # PACOTE 11 (Eixo 2) — injectar o logo da empresa no header do
+        # email de boas-vindas (company.logo_url / system_config).
+        try:
+            from services.email_branding import (
+                build_email_header_logo_html,
+                resolve_company_logo_url,
+            )
+            _company_logo = await resolve_company_logo_url()
+        except Exception as _logo_err:  # pragma: no cover — degradação graciosa
+            logger.debug(f"Logo da empresa indisponível para o welcome email: {_logo_err}")
+            _company_logo = None
+        _welcome_logo_html = build_email_header_logo_html(
+            _company_logo, alt="Precision Crédito"
+        )
+        
         email_html = f"""
         <html>
         <body style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
             <div style="background: linear-gradient(135deg, #1e3a5f 0%, #0d253f 100%); padding: 30px; border-radius: 10px 10px 0 0; text-align: center;">
-                <h1 style="color: white; margin: 0;">Bem-vindo ao Precision Crédito</h1>
+                {_welcome_logo_html}<h1 style="color: white; margin: 0;">Bem-vindo ao Precision Crédito</h1>
             </div>
             <div style="background: #f8fafc; padding: 30px; border-radius: 0 0 10px 10px; border: 1px solid #e2e8f0; border-top: none;">
                 <p style="font-size: 16px; color: #334155;">Olá <strong>{data.name}</strong>,</p>

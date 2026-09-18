@@ -35,6 +35,7 @@ import CreateClientModal from "../components/kanban/CreateClientModal";
 import ClientDetailsModal from "../components/ClientDetailsModal";
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
+import { formatFonteLabel } from "../utils/fonteLabels";
 import { pt } from "date-fns/locale";
 import { safeFormat } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
@@ -255,7 +256,7 @@ const MyClientsPage = () => {
         'NIF Titular 2': c.titular2_data?.nif || c.titular2_nif || '',
         'Email Titular 2': c.titular2_data?.email || c.titular2_email || '',
         'Telefone Titular 2': c.titular2_data?.phone || c.titular2_phone || '',
-        'Fonte': c.fonte || '',
+        'Fonte': c.fonte ? formatFonteLabel(c.fonte) : '',
         'Fase': c.status_label || (c.status || '').replace(/_/g, ' '),
         'Valor Imóvel': c.real_estate_data?.valor_imovel || c.property_value || '',
         'Data de Registo': c.created_at || '',

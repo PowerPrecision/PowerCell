@@ -283,6 +283,34 @@ async def run_confirm_upload(
             f"[CONFIRM-UPLOAD] Falha ao criar task log do monitor: {task_log_err}"
         )
 
+    # ============================================================
+    # PACOTE 11 (Eixo 1) — upload de documento delegado ao MOTOR DE
+    # AUTOMAÇÃO (rules engine, /admin/automation/rules): regras com o
+    # trigger "document_uploaded" (ex.: notificar consultor, mudar fase)
+    # passam a disparar aqui. Fire-and-forget: falhas do motor nunca
+    # afectam a confirmação do upload.
+    # ============================================================
+    try:
+        from services.workflow_engine import process_trigger
+        await process_trigger(
+            "document_uploaded",
+            {
+                "process_id": process_id,
+                "process_number": process.get("process_number"),
+                "client_name": client_name,
+                "client_email": process.get("client_email"),
+                "filename": normalized_filename or original_filename,
+                "category": category,
+                "user_id": user.get("id"),
+                "user_name": user.get("name"),
+            },
+        )
+    except Exception as automation_err:  # pragma: no cover — best-effort
+        logger.warning(
+            f"[CONFIRM-UPLOAD] Motor de automação falhou (não fatal) para o "
+            f"processo {process_id}: {automation_err}"
+        )
+
     response_data: dict[str, Any] = {
         "success": True,
         "s3_path": file_key,

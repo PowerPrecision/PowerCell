@@ -4279,3 +4279,56 @@ O primeiro `find_one` estendido do conftest aplicava projecções literalmente �
 ## Commit
 
 `Feat: Add duplicate client prevention, email failure UI feedback, and global background tasks monitor`
+
+## Iteração pacote-11 — UX Masterclass: no-hardcoding, emails/RGPD, navegação e soft-delete (Set 2026)
+
+**Pedido**: 4 eixos: (1) desacoplamento rigoroso de fases/status (Kanban dinâmico + transições delegadas ao motor de Automação); (2) tipografia do EmailViewerModal + logo da empresa nos emails base + fix do bold excessivo do RGPD; (3) link para cliente, aviso de permissões localizado à tab Documentos, dicionário PT para enums `fonte`, cards Webmail clicáveis; (4) protecção soft-delete (inputs disabled) + banner Restaurar + cleanup com companies e cascade forte.
+
+### Eixo 1 — Backend
+
+- **Apagado** `services/process_kanban.py` (KANBAN_COLUMNS legado, 0 imports no repo).
+- **NOVO** `services/workflow_lookup.py`: `get_first_workflow_status` / `get_flagged_workflow_status_names` / `get_inactive_workflow_status_names` / `ensure_workflow_purpose_flags_backfill` (semeadura idempotente das flags de propósito no arranque do server.py — installs pré-P11 ficam dinâmicas sem perda de semântica).
+- `process_kanban_move.py`: `resolve_workflow_purpose_flags` → async, fallbacks resolvidos da BD (nada de tuplas hardcoded); `run_move_process_kanban` awaited; trigger `process_status_changed` delegado ao workflow_engine (fire-and-forget).
+- `process_indexing.py`: default "clientes_espera" removido (1ª fase da pipeline dinâmica); trigger `process_status_changed` no salto pós-indexação.
+- `restore_api_process.py`: fallback previous_status → 1ª fase activa dinâmica.
+- `process_create.py`: trigger `process_created` pós-insert; `document_direct_upload.py`: trigger `document_uploaded` pós-confirm (ambos try/except não fatais).
+- `seed.py`: 14 fases nascem com flags de propósito + `is_active` correcto.
+- Decisão: taxonomias de FILTRO (`process_status.py`, `TERMINAL_STATUSES`) ficam — são categorias de negócio testadas, não fases de Kanban.
+
+### Eixo 2 — Backend
+
+- **NOVO** `services/email_branding.py` (resolve_company_logo_url: system_config → companies, chaves S3 → presigned 7d; build_email_header_logo_html). Injectado em `get_base_template(logo_url)` (5 templates base), welcome (`admin_users.py`), convite Portal (`public_registration.py`), magic link (`portal_magic_link.py`, novo param `logo_html`).
+- `rgpd_pdf.py`: bug do bold total — o parágrafo inteiro (título + linhas de dados) era testado como heading; agora só a 1ª linha de parágrafos de linha única, e `_is_section_heading` rejeita > 100 chars.
+
+### Eixo 4 — Backend
+
+- **NOVO** `services/restore_api_client.py` + `POST /api/clients/{id}/restore` (roles admin/ceo/diretor/administrativo): fecha a assimetria do client_delete (anunciava o endpoint que não existia). Restaura cliente (clients|processes) + cascata processos/documentos/tarefas/RGPD + auditoria `client_restored`; `previous_status` → fallback dinâmico.
+- `scripts/cleanup_prod_test_data.py`: companies no scan (name/email/smtp/imap); cascade forte — leads por client_id (query estendida) + user_company_roles de users/empresas de teste (hard-delete em ambos os modos); companies soft/hard; relatório/dry-run actualizados.
+
+### Frontend
+
+- `utils/workflowStatuses.js`: KNOWN_PROCESS_STATUSES REMOVIDA — dropdown 100% dinâmica (fallback injecta apenas o currentStatus).
+- `EmailViewerModal.js`: `buildPlainTextEmailHtml` (plain-text → `<p>`); corpo sempre `.email-content` (estilos novos no index.css: margens, interlinha, listas, tables, blockquote, pre).
+- `ProcessDetails.js`: nome do cliente → `Link` /cliente/:id (header + `headerClientId`); `isDeletedProcess` (is_deleted||deleted||eliminado*) força `isViewMode` e entra em `isInactiveProcess` (botões disabled); banner vermelho "Restaurar" (restoreProcess + spinner + refetch); banner terminal oculto quando eliminado.
+- `ClientDetailPage.js`: `isDeletedClient` — desactiva Editar/ContactRows/inputs do modal/Guardar (com guard no handleEditSave); banner "Restaurar" → `restoreClient` (novo em api.js); fonte com `formatFonteLabel`.
+- `ClientContextCard.jsx`: ContactLine com `internalLink`/`title`; titular navega para a ficha (prop `clientId`).
+- `S3FileManager.js`: 403 do fetch de ficheiros → estado `permissionDenied` → Card âmbar localizado à tab Documentos (sem toast global; "Tentar novamente").
+- **NOVO** `utils/fonteLabels.js` (FONTE_LABELS + formatFonteLabel com humanize fallback) — aplicado em ClientsPage (badge+Excel), MyClientsPage (Excel), ClientDetailPage, ClientDetailsModal.
+- `EmailAccountsCard.jsx`: `<li>` clicável (role=button, Enter/Espaço, hover) → openEdit; stopPropagation nos 3 botões.
+
+### Testes / conftest
+
+- conftest: `delete_many` + `$nin` no matcher. Novos: test_workflow_lookup (11), test_restore_api_client (7), test_cleanup_prod_test_data_p11 (8), test_email_branding_and_rgpd_bold (13); reescritos: test_process_kanban_move (async dinâmico, 8), test_restore_extraction_helpers (módulo/rota nova).
+- Frontend: `utils/fonteLabels.test.js` (5) + `utils/workflowStatuses.test.js` (6).
+- Nota: `src/pages/processDetails/*.test.js` (3 ficheiros) estão quebrados PRÉ-EXISTENTEMENTE (sintaxe Jest sem runner + imports sem extensão — nunca correram no node --test; fora do âmbito do pacote).
+
+## Validação
+
+- `pytest tests/unit -n 4` → **1280 passed, 0 falhas** (baseline 1244 + 36; zero regressões).
+- flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas.
+- Frontend: `node --test` (utils+lib+hooks+contexts+App) → **133 pass, 0 fail** (+11 novos); `vite build` verde.
+- Sandbox sem Mongo: warnings Connection refused são comportamento conhecido.
+
+## Commit
+
+`Refactor: Massive UX polish, UI soft-delete protection, dynamic process phases, and cascade test data cleanup`

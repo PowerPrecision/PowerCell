@@ -45,9 +45,12 @@ import {
   Pencil,
   Check,
   X,
+  RotateCcw,
+  Trash2,
 } from "lucide-react";
 import { toast } from "sonner";
-import { getClient, getClientFiles, updateClient } from "../services/api";
+import { getClient, getClientFiles, updateClient, restoreClient } from "../services/api";
+import { formatFonteLabel } from "../utils/fonteLabels";
 import { pt } from "date-fns/locale";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "../components/ui/table";
 import { safeFormat } from "../lib/utils";
@@ -252,6 +255,35 @@ export default function ClientDetailPage() {
   const [savingField, setSavingField] = useState(null);
   const [editModalOpen, setEditModalOpen] = useState(false);
   const [editForm, setEditForm] = useState({ nome: "", nif: "", email: "", telefone: "" });
+  // PACOTE 11 (Eixo 4) — restauro rápido: estado do botão do banner
+  const [restoring, setRestoring] = useState(false);
+
+  // PACOTE 11 (Eixo 4) — Proteção Soft-Delete: quando o registo está
+  // eliminado (is_deleted/deleted/status 'eliminado'), TODOS os inputs e
+  // botões de edição ficam desactivados — evita falsas mensagens de
+  // sucesso ao editar um cliente que já não está activo.
+  const isDeletedClient = !!(
+    client?.is_deleted ||
+    client?.deleted ||
+    client?.status === "eliminado" ||
+    client?.status === "eliminados"
+  );
+
+  const handleRestoreClient = async () => {
+    if (!id || restoring) return;
+    setRestoring(true);
+    try {
+      await restoreClient(id);
+      toast.success("Cliente restaurado com sucesso");
+      await fetchClientData();
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(err?.response?.data?.detail, "Não foi possível restaurar o cliente")
+      );
+    } finally {
+      setRestoring(false);
+    }
+  };
   const [editSaving, setEditSaving] = useState(false);
 
   // Abrir modal de edição com dados atuais do cliente
@@ -269,6 +301,13 @@ export default function ClientDetailPage() {
 
   // Guardar edição do cliente via modal
   const handleEditSave = async () => {
+    // PACOTE 11 (Eixo 4) — nunca gravar num registo eliminado (evita
+    // falsas mensagens de sucesso em clientes soft-deleted).
+    if (isDeletedClient) {
+      toast.error("Cliente eliminado — restaure o registo antes de editar.");
+      setEditModalOpen(false);
+      return;
+    }
     setEditSaving(true);
     try {
       const payload = {};
@@ -432,6 +471,42 @@ export default function ClientDetailPage() {
   return (
     <DashboardLayout title="Ficha do Cliente">
       <div className="space-y-6" data-testid="client-detail-page">
+        {/* PACOTE 11 (Eixo 4) — Banner de registo eliminado + Restauro Rápido:
+            o banner avisa que a edição está bloqueada e o botão restaura o
+            registo via POST /clients/{id}/restore (cascata incluída). */}
+        {isDeletedClient && (
+          <div
+            className="flex flex-col sm:flex-row sm:items-center gap-3 p-4 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30"
+            role="alert"
+          >
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <Trash2 className="h-5 w-5 text-red-600 dark:text-red-400 shrink-0" aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="font-medium text-red-800 dark:text-red-200 text-sm">
+                  Este cliente encontra-se eliminado
+                </p>
+                <p className="text-xs text-red-700 dark:text-red-300 mt-0.5">
+                  A edição de dados está bloqueada. Restaure o registo para voltar a editar
+                  (processos, documentos, tarefas e pedidos RGPD associados são restaurados em cascata).
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={handleRestoreClient}
+              disabled={restoring}
+              className="gap-2 bg-red-600 hover:bg-red-700 text-white shrink-0"
+              aria-label="Restaurar cliente eliminado"
+            >
+              {restoring ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
+              Restaurar
+            </Button>
+          </div>
+        )}
+
         {/* Header with back button */}
         <div className="flex items-center justify-between">
           <Button
@@ -448,6 +523,8 @@ export default function ClientDetailPage() {
               variant="outline"
               size="sm"
               onClick={openEditModal}
+              disabled={isDeletedClient || editSaving}
+              title={isDeletedClient ? "Cliente eliminado — restaure o registo para editar" : undefined}
               className="gap-2 transition-colors duration-200"
             >
               <Pencil className="h-4 w-4" />
@@ -497,7 +574,7 @@ export default function ClientDetailPage() {
                   <ContactRow
                     icon={Mail}
                     label="Email"
-                    editable
+                    editable={!isDeletedClient}
                     saving={savingField === "email"}
                     meta={getFieldMeta("contacto.email", client?.field_metadata) || undefined}
                     onEdit={async (value) => {
@@ -538,7 +615,7 @@ export default function ClientDetailPage() {
                   <ContactRow
                     icon={Phone}
                     label="Telefone"
-                    editable
+                    editable={!isDeletedClient}
                     saving={savingField === "telefone"}
                     meta={getFieldMeta("contacto.telefone", client?.field_metadata) || undefined}
                     onEdit={async (value) => {
@@ -605,7 +682,7 @@ export default function ClientDetailPage() {
                     <span className="text-sm text-muted-foreground">Fonte</span>
                     {typeof client.fonte === 'string' || typeof client.fonte === 'number' ? (
                       <Badge variant="outline" className="ml-auto text-xs border-teal-300 text-teal-700 dark:border-teal-700 dark:text-teal-300">
-                        {client.fonte}
+                        {formatFonteLabel(client.fonte)}
                       </Badge>
                     ) : (
                       <span className="ml-auto text-sm text-muted-foreground">-</span>
@@ -871,6 +948,7 @@ export default function ClientDetailPage() {
                   value={editForm.nome}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, nome: e.target.value }))}
                   placeholder="Nome do cliente"
+                  disabled={isDeletedClient}
                 />
               </div>
               <div className="space-y-2">
@@ -884,6 +962,7 @@ export default function ClientDetailPage() {
                   onChange={(e) => setEditForm((prev) => ({ ...prev, nif: e.target.value }))}
                   placeholder="123456789"
                   maxLength={9}
+                  disabled={isDeletedClient}
                 />
               </div>
               <div className="space-y-2">
@@ -897,6 +976,7 @@ export default function ClientDetailPage() {
                   value={editForm.email}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, email: e.target.value }))}
                   placeholder="email@exemplo.pt"
+                  disabled={isDeletedClient}
                 />
               </div>
               <div className="space-y-2">
@@ -909,6 +989,7 @@ export default function ClientDetailPage() {
                   value={editForm.telefone}
                   onChange={(e) => setEditForm((prev) => ({ ...prev, telefone: e.target.value }))}
                   placeholder="912345678"
+                  disabled={isDeletedClient}
                 />
               </div>
             </div>
@@ -920,7 +1001,7 @@ export default function ClientDetailPage() {
               >
                 Cancelar
               </Button>
-              <Button onClick={handleEditSave} disabled={editSaving}>
+              <Button onClick={handleEditSave} disabled={editSaving || isDeletedClient}>
                 {editSaving ? (
                   <>
                     <Loader2 className="h-4 w-4 animate-spin mr-1" />

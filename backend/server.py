@@ -1017,6 +1017,16 @@ async def startup():
     except (ImportError, ValueError, KeyError) as s3_err:
         logger.debug(f"S3 sync não disponível: {s3_err}")
     
+    # PACOTE 11 (Eixo 1 — No-Hardcoding): semear flags de propósito nos
+    # workflow_statuses pré-existentes que ainda não as têm (idempotente).
+    # Garante que o runtime resolve SEMPRE as fases/flags da BD, sem listas
+    # cravadas em código (services/workflow_lookup.py).
+    try:
+        from services.workflow_lookup import ensure_workflow_purpose_flags_backfill
+        await ensure_workflow_purpose_flags_backfill()
+    except (ImportError, ValueError, KeyError) as wf_err:
+        logger.warning(f"⚠️ Backfill de flags do workflow falhou (não fatal): {wf_err}")
+    
     # ==========================================
     # TAREFAS DE BACKGROUND
     # =========================================

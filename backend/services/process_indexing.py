@@ -386,6 +386,33 @@ async def run_mark_indexed_side_effects(
 
     await trigger_indexer_waitlist(process)
 
+    # PACOTE 11 (Eixo 1) — salto automático de fase delegado ao MOTOR DE
+    # AUTOMAÇÃO (rules engine): regras configuradas em /admin/automation
+    # com o trigger "process_status_changed" passam a disparar também
+    # na transição automática pós-indexação (igual ao PUT /processes/{id}).
+    # Fire-and-forget: falhas do motor nunca bloqueiam a indexação.
+    if next_status and next_status != current_status:
+        try:
+            from services.workflow_engine import process_trigger
+            await process_trigger(
+                "process_status_changed",
+                {
+                    "process_id": process_id,
+                    "process_number": process.get("process_number"),
+                    "client_name": process.get("client_name"),
+                    "client_email": process.get("client_email"),
+                    "old_status": current_status,
+                    "new_status": next_status,
+                    "user_id": user.get("id"),
+                    "user_name": user.get("name"),
+                },
+            )
+        except Exception as automation_err:
+            logger.warning(
+                f"[INDEXACAO] Motor de automação falhou (não fatal) para o "
+                f"processo {process_id}: {automation_err}"
+            )
+
     consultant_result, is_pre_registo = await auto_assign_after_indexacao(
         process, process_id, user, current_status, process_ref,
     )
@@ -432,8 +459,13 @@ async def run_mark_process_indexed(
             "is_indexed": True,
         }
 
-    current_status = process.get("status", "clientes_espera")
+    # PACOTE 11 (Eixo 1) — sem default hardcoded: se o processo não tem
+    # status, resolve-se a 1ª fase REAL do workflow (dinâmica da BD);
+    # se o workflow estiver vazio, fica None (sem transição).
+    current_status = process.get("status")
     status_pipeline = await load_workflow_status_pipeline()
+    if current_status is None and status_pipeline:
+        current_status = status_pipeline[0]
     next_status = compute_next_workflow_status(current_status, status_pipeline)
 
     now = datetime.now(timezone.utc).isoformat()

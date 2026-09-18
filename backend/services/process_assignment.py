@@ -690,11 +690,13 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
 
     # Email de notificação
     try:
-        from services.email import get_base_template
+        from services.email import get_base_template, resolve_base_template_logo
         import os
 
         frontend_url = os.environ.get("FRONTEND_URL", "")
         process_link = f"{frontend_url}/processo/{process_id}" if frontend_url else ""
+        # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+        company_logo = await resolve_base_template_logo()
 
         subject = f"Novo Processo Atribuído: {client_name}"
         body_text = (
@@ -756,7 +758,7 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
             {link_html}
         </table>"""
 
-        html_body = get_base_template(content_html, title=subject)
+        html_body = get_base_template(content_html, title=subject, logo_url=company_logo)
 
         await send_notification_with_preference_check(
             to_email=chosen["email"],
@@ -1083,7 +1085,7 @@ async def process_queue_for_freed_indexer(indexer_id: str) -> int:
         try:
             from services.notification_service import send_notification_with_preference_check
             from services.realtime_notifications import send_realtime_notification
-            from services.email import get_base_template
+            from services.email import get_base_template, resolve_base_template_logo
             import os
 
             frontend_url = os.environ.get("FRONTEND_URL", "")
@@ -1143,7 +1145,9 @@ async def process_queue_for_freed_indexer(indexer_id: str) -> int:
                 {link_html}
             </table>"""
 
-            html_body = get_base_template(content_html, title=subject)
+            # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+            company_logo = await resolve_base_template_logo()
+            html_body = get_base_template(content_html, title=subject, logo_url=company_logo)
 
             await send_notification_with_preference_check(
                 to_email=indexer.get("email", ""),

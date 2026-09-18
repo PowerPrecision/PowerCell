@@ -33,11 +33,17 @@ async def run_restore_process(process_id: str, user: dict):
 
     now = datetime.now(timezone.utc)
 
-    # Restaurar o status anterior se guardado, senão usar clientes_espera
-    previous_status = process.get("previous_status") or "clientes_espera"
-    # Se o previous_status era "eliminado" (caso de double-delete), usar fallback
-    if previous_status == "eliminado":
-        previous_status = "clientes_espera"
+    # Restaurar o status anterior se guardado; senão resolver DINAMICAMENTE
+    # a 1ª fase activa do workflow (PACOTE 11 — Eixo 1: sem fallback
+    # hardcoded "clientes_espera"; ambiente sem workflow → mantém None e
+    # o processo fica sem fase até o admin o mover no Kanban).
+    from services.workflow_lookup import get_first_workflow_status
+
+    previous_status = process.get("previous_status")
+    # Se o previous_status era "eliminado" (caso de double-delete), resolver
+    # dinamicamente a 1ª fase (nunca restaurar para "eliminado").
+    if not previous_status or previous_status == "eliminado":
+        previous_status = await get_first_workflow_status()
 
     restored_is_active = previous_status not in TERMINAL_STATUSES
 

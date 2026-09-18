@@ -601,6 +601,10 @@ export const setProcessIndexed = (processId, isIndexed) =>
 // botão "Restaurar" na lista de processos eliminados.
 export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);
 export const restoreProcess = (processId) => api.post(`/processes/${processId}/restore`);
+// PACOTE 11 (Eixo 4) — restauro rápido de cliente no ecrã de detalhes
+// (banner "Restaurar" quando o registo está eliminado). Simétrico do
+// DELETE /clients/{id}: cascata restaura processos/documentos/tarefas/RGPD.
+export const restoreClient = (clientId) => api.post(`/clients/${clientId}/restore`);
 
 // Visits
 export const getVisits = (processId) => api.get("/visits", { params: { process_id: processId } });

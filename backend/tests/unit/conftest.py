@@ -156,6 +156,11 @@ class FakeAsyncCollection:
                     matched_operator = True
                     if value not in expected["$in"]:
                         return False
+                # PACOTE 11 — $nin (queries como {"logo_url": {"$nin": [None, ""]}})
+                if "$nin" in expected:
+                    matched_operator = True
+                    if value in expected["$nin"]:
+                        return False
                 if "$exists" in expected:
                     matched_operator = True
                     exists = key in doc
@@ -287,6 +292,13 @@ class FakeAsyncCollection:
         return None
 
     async def delete_one(self, query: dict):
+        before = len(self.docs)
+        self.docs = [doc for doc in self.docs if not self._matches(doc, query)]
+        return MagicMock(deleted_count=before - len(self.docs))
+
+    async def delete_many(self, query: dict):
+        """PACOTE 11 — ``delete_many`` (usado por scripts de limpeza
+        como cleanup_prod_test_data.py; suportado pelo Motor real)."""
         before = len(self.docs)
         self.docs = [doc for doc in self.docs if not self._matches(doc, query)]
         return MagicMock(deleted_count=before - len(self.docs))

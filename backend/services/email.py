@@ -34,6 +34,10 @@ from services.email_v2 import (
     COMPANY_WEBSITE,
     COMPANY_PHONE
 )
+from services.email_branding import (
+    build_email_header_logo_html,
+    resolve_company_logo_url,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -49,8 +53,25 @@ def is_smtp_configured() -> bool:
 # ====================================================================
 # TEMPLATE HTML BASE
 # ====================================================================
-def get_base_template(content: str, title: str = "") -> str:
-    """Template HTML base com estilos consistentes."""
+async def resolve_base_template_logo() -> Optional[str]:
+    """PACOTE 11 (Eixo 2) — logo da empresa (system_config/companies)
+    para o header do template base. Degrada para None quando ausente."""
+    try:
+        return await resolve_company_logo_url()
+    except Exception as e:  # pragma: no cover — degradação graciosa
+        logger.debug(f"[EMAIL] Falha ao resolver logo da empresa: {e}")
+        return None
+
+
+def get_base_template(content: str, title: str = "", logo_url: Optional[str] = None) -> str:
+    """Template HTML base com estilos consistentes.
+
+    PACOTE 11 (Eixo 2): quando ``logo_url`` está definido (resolvido de
+    ``company.logo_url`` / system_config), o header passa a incluir a
+    imagem do logótipo da empresa acima do nome — os emails
+    transaccionais base deixam de sair sem branding visual.
+    """
+    logo_html = build_email_header_logo_html(logo_url, alt=COMPANY_NAME)
     return f"""
 <!DOCTYPE html>
 <html lang="pt">
@@ -194,7 +215,7 @@ def get_base_template(content: str, title: str = "") -> str:
     <div class="wrapper">
         <div class="container">
             <div class="header">
-                <h1>Power Real Estate</h1>
+                {logo_html}<h1>Power Real Estate</h1>
                 <p class="subtitle">& Precision Crédito</p>
             </div>
             <div class="content">
@@ -306,7 +327,10 @@ Cumprimentos,
 <strong>Equipa {COMPANY_NAME}</strong></p>
 """
     
-    html_body = get_base_template(content, "Pedido Recebido")
+    # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+    company_logo = await resolve_base_template_logo()
+
+    html_body = get_base_template(content, "Pedido Recebido", logo_url=company_logo)
 
     # BUGFIX (onboarding — Bug 3, Fev 2026): usar o serviço de email ligado
     # ao SystemConfig (Resend/SMTP configurados em /contas-email), em vez de
@@ -401,7 +425,10 @@ Cumprimentos,
 <strong>Equipa {COMPANY_NAME}</strong></p>
 """
     
-    html_body = get_base_template(content, "Documentos Necessários")
+    # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+    company_logo = await resolve_base_template_logo()
+
+    html_body = get_base_template(content, "Documentos Necessários", logo_url=company_logo)
     return await send_email_notification(client_email, subject, body, html_body)
 
 
@@ -481,7 +508,10 @@ e agendar a assinatura da documentação.</p>
 <strong>Equipa {COMPANY_NAME}</strong></p>
 """
     
-    html_body = get_base_template(content, "Crédito Aprovado")
+    # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+    company_logo = await resolve_base_template_logo()
+
+    html_body = get_base_template(content, "Crédito Aprovado", logo_url=company_logo)
     return await send_email_notification(client_email, subject, body, html_body)
 
 
@@ -534,7 +564,10 @@ Sistema Precision Crédito
 <strong>Sistema Precision Crédito</strong></p>
 """
     
-    html_body = get_base_template(content, "Novo Cliente")
+    # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+    company_logo = await resolve_base_template_logo()
+
+    html_body = get_base_template(content, "Novo Cliente", logo_url=company_logo)
     return await send_email_notification(staff_email, subject, body, html_body)
 
 
@@ -580,7 +613,10 @@ Cumprimentos,
 <strong>Equipa {COMPANY_NAME}</strong></p>
 """
     
-    html_body = get_base_template(content, "Atualização do Processo")
+    # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+    company_logo = await resolve_base_template_logo()
+
+    html_body = get_base_template(content, "Atualização do Processo", logo_url=company_logo)
     return await send_email_notification(client_email, subject, body, html_body)
 
 

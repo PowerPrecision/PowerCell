@@ -120,8 +120,14 @@ def build_magic_link_email_bodies(
     client_email: str,
     magic_link: str,
     portal_access_code: Optional[str],
+    logo_html: str = "",
 ) -> tuple[str, str]:
-    """Constrói (text_body, html_body) do email de magic link ao cliente."""
+    """Constrói (text_body, html_body) do email de magic link ao cliente.
+
+    PACOTE 11 (Eixo 2): ``logo_html`` (fragmento ``<img>`` do logo da
+    empresa, resolvido pelo caller async via email_branding) é injectado
+    no header. String vazia → header só com texto (comportamento antigo).
+    """
     portal_credentials_html = f"""
             <div style="background: #f0fdfa; border: 1px solid #0d9488; border-radius: 8px; padding: 20px; margin: 20px 0;">
                 <p style="font-size: 14px; color: #1e293b; margin: 0 0 10px 0;">Se o link não funcionar, aceda a <strong>www.precisioncredito.pt/portal</strong> e insira o seguinte Código de Acesso:</p>
@@ -138,8 +144,8 @@ def build_magic_link_email_bodies(
 
     html_body = f"""
     <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-        <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-            <h1 style="margin: 0; font-size: 20px;">Power Precision · Crédito Habitação</h1>
+        <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+            {logo_html}<h1 style="margin: 0; font-size: 20px;">Power Precision · Crédito Habitação</h1>
         </div>
         <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
             <p style="font-size: 16px; color: #1e293b;">Olá {client_name},</p>
@@ -255,11 +261,25 @@ async def send_magic_link_to_client(
     magic_link = issued["magic_link"]
     short_id = issued["short_id"]
 
+    # PACOTE 11 (Eixo 2) — logo da empresa no header do magic link.
+    try:
+        from services.email_branding import (
+            build_email_header_logo_html,
+            resolve_company_logo_url,
+        )
+        _magic_logo_html = build_email_header_logo_html(
+            await resolve_company_logo_url(), alt="Power Precision"
+        )
+    except Exception as _logo_err:  # pragma: no cover — degradação graciosa
+        logger.debug(f"Logo indisponível para o magic link: {_logo_err}")
+        _magic_logo_html = ""
+
     text_body, html_body = build_magic_link_email_bodies(
         client_name=client_name,
         client_email=client_email,
         magic_link=magic_link,
         portal_access_code=portal_access_code,
+        logo_html=_magic_logo_html,
     )
 
     try:

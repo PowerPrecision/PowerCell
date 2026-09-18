@@ -68,6 +68,7 @@ import CreateProcessModal from "../components/CreateProcessModal";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { getExportPermission } from "../services/api";
 import ClientFilters from "../components/filters/ClientFilters";
+import { formatFonteLabel } from "../utils/fonteLabels";
 
 const API_URL = (process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com") + "/api";
 
@@ -357,7 +358,7 @@ export default function ClientsPage() {
         'NIF Titular 2': c.titular2_data?.nif || c.titular2_nif || '',
         'Email Titular 2': c.titular2_data?.email || c.titular2_email || '',
         'Telefone Titular 2': c.titular2_data?.phone || c.titular2_phone || '',
-        'Fonte': c.fonte || '',
+        'Fonte': c.fonte ? formatFonteLabel(c.fonte) : '',
         'Data de Registo': c.created_at || '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -759,7 +760,7 @@ export default function ClientsPage() {
                             </div>
                             {client.fonte && (
                               <Badge variant="outline" className="text-xs mt-1">
-                                {client.fonte}
+                                {formatFonteLabel(client.fonte)}
                               </Badge>
                             )}
                           </div>

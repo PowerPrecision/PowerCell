@@ -642,6 +642,32 @@ async def persist_and_finalize_staff_create(
     await log_history_fn(process_id, user, f"Criou processo para cliente {client_name}")
     asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
 
+    # PACOTE 11 (Eixo 1) — delegar as automações de criação ao MOTOR DE
+    # AUTOMAÇÃO (rules engine, /admin/automation/rules) em vez de if/else
+    # soltos no fluxo principal. Fire-and-forget: falhas do motor nunca
+    # rebentam a criação do processo.
+    try:
+        from services.workflow_engine import process_trigger
+        await process_trigger(
+            "process_created",
+            {
+                "process_id": process_id,
+                "process_number": process_number,
+                "client_id": client_id,
+                "client_name": client_name,
+                "client_email": client_email,
+                "status": initial_status,
+                "process_type": bundle.get("process_type"),
+                "user_id": user.get("id"),
+                "user_name": user.get("name"),
+            },
+        )
+    except Exception as automation_err:
+        logger.warning(
+            f"[CREATE-PROCESS] Motor de automação falhou (não fatal) para o "
+            f"processo {process_id}: {automation_err}"
+        )
+
     if client_email:
         # PACOTE BH — spawn com referência forte (services/background_tasks):
         # `asyncio.create_task` puro mantém apenas referência fraca e a task

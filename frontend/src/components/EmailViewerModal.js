@@ -39,6 +39,29 @@ import { toast } from "sonner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
+// PACOTE 11 (Eixo 2) — converte o corpo em TEXTO SIMPLES num fragmento
+// HTML sanitizado com parágrafos reais: o <pre> denso passa a ter a mesma
+// tipografia espaçada do corpo HTML (parágrafos com margens, quebras
+// preservadas, sem monospace nem bloco denso).
+const escapeHtml = (text) =>
+  String(text ?? "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;");
+
+const buildPlainTextEmailHtml = (body) => {
+  if (!body) return "";
+  const blocks = String(body)
+    .split(/\n\s*\n/)
+    .map((block) => block.replace(/\r/g, "").trim())
+    .filter(Boolean);
+  if (blocks.length === 0) return "";
+  return blocks
+    .map((block) => `<p>${escapeHtml(block).replace(/\n/g, "<br/>")}</p>`)
+    .join("");
+};
+
 // Tamanhos de arquivo
 const formatFileSize = (bytes) => {
   if (!bytes) return "";
@@ -74,13 +97,14 @@ const EmailViewerModal = ({
   const [replyBody, setReplyBody] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
 
-  // Memorizar o HTML sanitizado
+  // Memorizar o HTML sanitizado (PACOTE 11 — o corpo em texto simples é
+  // convertido em parágrafos HTML para tipografia consistente e espaçada)
   const sanitizedBodyHtml = useMemo(() => {
     if (currentEmail?.body_html) {
       return sanitizeEmailHtml(currentEmail.body_html);
     }
-    return '';
-  }, [currentEmail?.body_html]);
+    return buildPlainTextEmailHtml(currentEmail?.body);
+  }, [currentEmail?.body_html, currentEmail?.body]);
 
   useEffect(() => {
     if (selectedEmailId && emails.length > 0) {
@@ -550,18 +574,20 @@ const EmailViewerModal = ({
               </div>
             </div>
 
-            {/* Corpo do email */}
+            {/* Corpo do email — PACOTE 11 (Eixo 2): tipografia prose com
+                margens/interlinha confortáveis (ver .email-content no
+                index.css); texto simples é renderizado como parágrafos. */}
             <ScrollArea className="flex-1 p-4">
               <div className="prose prose-sm max-w-none dark:prose-invert">
                 {sanitizedBodyHtml ? (
-                  <div 
+                  <div
                     dangerouslySetInnerHTML={{ __html: sanitizedBodyHtml }}
                     className="email-content"
                   />
                 ) : (
-                  <pre className="whitespace-pre-wrap font-sans text-sm">
-                    {currentEmail.body}
-                  </pre>
+                  <p className="text-sm text-muted-foreground whitespace-pre-wrap break-words leading-relaxed">
+                    {currentEmail.body || "(sem conteúdo)"}
+                  </p>
                 )}
               </div>
 
