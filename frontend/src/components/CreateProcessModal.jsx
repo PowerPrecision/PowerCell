@@ -16,6 +16,8 @@
 import React, { useState, useCallback } from "react";
 import { useNavigate } from "react-router-dom";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { parseDuplicateClientError } from "../utils/duplicateClient";
+import DuplicateClientAlert from "./shared/DuplicateClientAlert";
 import {
   Dialog,
   DialogContent,
@@ -57,6 +59,9 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
 
   // ── Novo Cliente (quando não há preSelectedClient) ───────────────
   const [clientMode, setClientMode] = useState(null); // 'existing' | 'new' | null
+  // PACOTE 10 — alerta bloqueante de cliente duplicado (409 NIF/Email):
+  // mostra banner vermelho no formulário + acção "Usar cliente existente".
+  const [duplicateError, setDuplicateError] = useState(null);
   const [newClientData, setNewClientData] = useState({
     nome: '',
     email: '',
@@ -133,6 +138,18 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
   };
 
   // ── Submit (Paradigma Relacional) ──────────────────────────────────
+  // PACOTE 10 — usar o cliente duplicado detectado (409): selecciona o
+  // cliente existente apontado pelo backend (atalho directo ao fluxo
+  // "Cliente Existente").
+  const handleUseExistingFromDuplicate = useCallback(() => {
+    if (!duplicateError?.existing_client_id) return;
+    handleSelectClient({
+      id: duplicateError.existing_client_id,
+      nome: duplicateError.existing_client_name || "Cliente existente",
+    });
+    setDuplicateError(null);
+  }, [duplicateError, handleSelectClient]);
+
   const handleSubmit = async () => {
     if (!processType) return;
 
@@ -148,7 +165,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
           telefone: newClientData.telefone.trim() || undefined,
           nif: newClientData.nif.trim() || undefined,
           fonte: 'staff_created',
-        });
+        }, { skipErrorToast: true });
         clientId = newClientRes.data?.id || newClientRes.data?.client?.id;
         if (!clientId) {
           toast.error('Erro ao criar cliente: resposta sem ID');
@@ -158,6 +175,13 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
         toast.success(`Cliente "${newClientData.nome}" criado com sucesso!`);
       } catch (createErr) {
         console.error('Erro ao criar cliente:', createErr);
+        // PACOTE 10 — 409 de duplicado → banner bloqueante no formulário
+        const dup = parseDuplicateClientError(createErr);
+        if (dup) {
+          setDuplicateError(dup);
+          setSubmitting(false);
+          return;
+        }
         toast.error(extractErrorMessage(createErr.response?.data?.detail, 'Erro ao criar cliente na base de dados'));
         setSubmitting(false);
         return;
@@ -397,6 +421,12 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
                     </button>
                   </div>
                   <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
+                    {/* PACOTE 10 — alerta bloqueante de cliente duplicado (409). */}
+                    <DuplicateClientAlert
+                      duplicate={duplicateError}
+                      onDismiss={() => setDuplicateError(null)}
+                      onUseExisting={handleUseExistingFromDuplicate}
+                    />
                     <p className="text-xs text-muted-foreground">
                       Estes dados serão guardados na ficha do Cliente. O processo será criado automaticamente.
                     </p>
@@ -410,7 +440,11 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
                       placeholder="Email * (obrigatório para o Portal do Cliente)"
                       type="email"
                       value={newClientData.email}
-                      onChange={(e) => setNewClientData(prev => ({ ...prev, email: e.target.value }))}
+                      onChange={(e) => {
+                        setNewClientData(prev => ({ ...prev, email: e.target.value }));
+                        // PACOTE 10 — alterar o campo em conflito limpa o aviso
+                        if (duplicateError) setDuplicateError(null);
+                      }}
                       required
                     />
                     <div className="grid grid-cols-2 gap-2">
@@ -420,6 +454,8 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
                         onChange={(e) => {
                           const v = e.target.value.replace(/[^\d]/g, '').slice(0, 9);
                           setNewClientData(prev => ({ ...prev, nif: v }));
+                          // PACOTE 10 — alterar o campo em conflito limpa o aviso
+                          if (duplicateError) setDuplicateError(null);
                         }}
                       />
                       <Input

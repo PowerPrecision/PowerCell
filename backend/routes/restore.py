@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends
 from models.auth import UserRole
 from services.auth import require_roles
 from services.restore_api_process import run_restore_process
+from services.restore_api_client import run_restore_client
 from services.restore_api_document import run_restore_document
 from services.restore_api_task import run_restore_task
 from services.restore_api_list import run_list_deleted_items
@@ -28,6 +29,24 @@ async def restore_process(
 ):
     """Restaura um processo que foi eliminado (soft delete)."""
     return await run_restore_process(process_id, user)
+
+
+@router.post("/clients/{client_id}/restore")
+async def restore_client(
+    client_id: str,
+    user: dict = Depends(require_roles([
+        UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR,
+        UserRole.ADMINISTRATIVO,
+    ]))
+):
+    """PACOTE 11 (Eixo 4) — restaura um cliente eliminado (soft delete).
+
+    Fecha a assimetria do DELETE /clients/{id}: o client_delete.py já
+    anunciava este endpoint, mas a rota não existia. Espelho das permissões
+    de eliminação (admin/ceo/diretor/administrativo). Cascata simétrica:
+    processos + documentos + tarefas + pedidos RGPD do 1º titular.
+    """
+    return await run_restore_client(client_id, user)
 
 
 @router.post("/documents/{document_id}/restore")

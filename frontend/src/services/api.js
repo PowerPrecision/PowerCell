@@ -303,7 +303,15 @@ api.interceptors.response.use(
     }
     
     const { status, data } = response;
-    const errorMessage = data?.detail || data?.message || "Erro desconhecido";
+    // PACOTE 10 — extractErrorMessage: o backend passa a devolver detail
+    // ESTRUTURADO (dict com message/existing_client_id/matched_fields) no
+    // 409 de cliente duplicado. Sem isto, o toast genérico receberia um
+    // objecto em `description` (React error #31). Aceita string, array
+    // Pydantic e objecto {msg|message}.
+    const errorMessage = extractErrorMessage(
+      data?.detail ?? data?.message,
+      "Erro desconhecido"
+    );
     
     // ================================================================
     // 401 - NÃO AUTORIZADO (Token inválido/expirado)
@@ -483,10 +491,16 @@ api.interceptors.response.use(
     }
     
     // ================================================================
-    // OUTROS ERROS (400, etc.)
+    // OUTROS ERROS (400, 409, etc.)
     // ================================================================
+    // PACOTE 10 — `skipErrorToast` (já usado nos 500+): componentes que
+    // tratam o erro eles próprios (ex.: banner bloqueante de cliente
+    // duplicado no CreateClientModal) evitam o toast duplicado do
+    // interceptor e mostram feedback contextual próprio.
     if (status >= 400) {
-      toast.error("Erro", { description: errorMessage });
+      if (!config?.skipErrorToast) {
+        toast.error("Erro", { description: errorMessage });
+      }
     }
     
     return Promise.reject(error);
@@ -587,6 +601,10 @@ export const setProcessIndexed = (processId, isIndexed) =>
 // botão "Restaurar" na lista de processos eliminados.
 export const deleteProcess = (processId) => api.delete(`/processes/${processId}`);
 export const restoreProcess = (processId) => api.post(`/processes/${processId}/restore`);
+// PACOTE 11 (Eixo 4) — restauro rápido de cliente no ecrã de detalhes
+// (banner "Restaurar" quando o registo está eliminado). Simétrico do
+// DELETE /clients/{id}: cascata restaura processos/documentos/tarefas/RGPD.
+export const restoreClient = (clientId) => api.post(`/clients/${clientId}/restore`);
 
 // Visits
 export const getVisits = (processId) => api.get("/visits", { params: { process_id: processId } });
@@ -837,7 +855,15 @@ export const getClients = (params = {}) => {
 };
 export const getClient = (id) => api.get(`/clients/${id}`);
 export const getClientFiles = (clientId) => api.get(`/documents/client/${clientId}/files`);
-export const createClient = (data) => api.post("/clients", data);
+/**
+ * Cria um novo cliente.
+ * PACOTE 10 — aceita config axios opcional (ex.: { skipErrorToast: true }
+ * para os formulários que mostram banner próprio de cliente duplicado
+ * no 409 em vez do toast genérico do interceptor).
+ * @param {object} data - Payload do cliente (nome, email, nif, telefone, fonte...)
+ * @param {object} [config] - Config axios (skipErrorToast, headers, ...)
+ */
+export const createClient = (data, config) => api.post("/clients", data, config);
 export const updateClient = (id, data) => api.put(`/clients/${id}`, data);
 export const deleteClient = (id) => api.delete(`/clients/${id}`);
 

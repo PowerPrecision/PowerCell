@@ -248,6 +248,69 @@ async def run_confirm_upload(
 
     logger.info(f"[CONFIRM-UPLOAD] Upload confirmado: {normalized_filename}")
 
+    # ============================================================
+    # PACOTE 10 — TASK LOG DO MONITOR GLOBAL ("Processos em
+    # Segundo Plano"): o upload confirmado fica visível no widget
+    # da topbar com estado Success (pedido explícito do Pacote 10 —
+    # acções como "Upload de Documentos" com estado Loading/
+    # Success/Failed). Best-effort: nunca afecta a resposta.
+    # ============================================================
+    try:
+        from models.task_log import TaskType
+        from services.task_log_service import task_log_service
+
+        upload_task = await task_log_service.create_task(
+            task_type=TaskType.DOCUMENT_UPLOAD,
+            user_id=user.get("id"),
+            title=f"Upload de Documento: {original_filename}",
+            description=f"Documento carregado para o processo (categoria: {category}).",
+            process_id=process_id,
+            metadata={
+                "s3_path": file_key,
+                "category": category,
+                "kind": "confirm_upload",
+            },
+        )
+        # O upload JÁ terminou com sucesso quando o confirm corre — a
+        # tarefa nasce concluída (fica no widget até ao OK do utilizador).
+        if upload_task:
+            await task_log_service.mark_completed(
+                upload_task.task_id,
+                result_data={"s3_path": file_key, "category": category},
+            )
+    except Exception as task_log_err:  # pragma: no cover — best-effort
+        logger.warning(
+            f"[CONFIRM-UPLOAD] Falha ao criar task log do monitor: {task_log_err}"
+        )
+
+    # ============================================================
+    # PACOTE 11 (Eixo 1) — upload de documento delegado ao MOTOR DE
+    # AUTOMAÇÃO (rules engine, /admin/automation/rules): regras com o
+    # trigger "document_uploaded" (ex.: notificar consultor, mudar fase)
+    # passam a disparar aqui. Fire-and-forget: falhas do motor nunca
+    # afectam a confirmação do upload.
+    # ============================================================
+    try:
+        from services.workflow_engine import process_trigger
+        await process_trigger(
+            "document_uploaded",
+            {
+                "process_id": process_id,
+                "process_number": process.get("process_number"),
+                "client_name": client_name,
+                "client_email": process.get("client_email"),
+                "filename": normalized_filename or original_filename,
+                "category": category,
+                "user_id": user.get("id"),
+                "user_name": user.get("name"),
+            },
+        )
+    except Exception as automation_err:  # pragma: no cover — best-effort
+        logger.warning(
+            f"[CONFIRM-UPLOAD] Motor de automação falhou (não fatal) para o "
+            f"processo {process_id}: {automation_err}"
+        )
+
     response_data: dict[str, Any] = {
         "success": True,
         "s3_path": file_key,

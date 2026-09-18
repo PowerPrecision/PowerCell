@@ -441,6 +441,8 @@ async def send_portal_welcome_email_from_process(
     client_id: str,
     client_email: str,
     client_name: str,
+    user_id: str = None,
+    process_id: str = None,
 ) -> None:
     """
     PACOTE CY — email de boas-vindas após create-client (fire-and-forget).
@@ -483,6 +485,8 @@ async def send_portal_welcome_email_from_process(
             client_name=client_name,
             portal_access_code=portal_access_code,
             client_id=client_id,
+            user_id=user_id,
+            process_id=process_id,
         )
     except Exception as e:
         logger.error(
@@ -638,10 +642,37 @@ async def persist_and_finalize_staff_create(
     await log_history_fn(process_id, user, f"Criou processo para cliente {client_name}")
     asyncio.create_task(sync_process_to_trello(process_doc, action="create"))
 
+    # PACOTE 11 (Eixo 1) — delegar as automações de criação ao MOTOR DE
+    # AUTOMAÇÃO (rules engine, /admin/automation/rules) em vez de if/else
+    # soltos no fluxo principal. Fire-and-forget: falhas do motor nunca
+    # rebentam a criação do processo.
+    try:
+        from services.workflow_engine import process_trigger
+        await process_trigger(
+            "process_created",
+            {
+                "process_id": process_id,
+                "process_number": process_number,
+                "client_id": client_id,
+                "client_name": client_name,
+                "client_email": client_email,
+                "status": initial_status,
+                "process_type": bundle.get("process_type"),
+                "user_id": user.get("id"),
+                "user_name": user.get("name"),
+            },
+        )
+    except Exception as automation_err:
+        logger.warning(
+            f"[CREATE-PROCESS] Motor de automação falhou (não fatal) para o "
+            f"processo {process_id}: {automation_err}"
+        )
+
     if client_email:
         # PACOTE BH — spawn com referência forte (services/background_tasks):
         # `asyncio.create_task` puro mantém apenas referência fraca e a task
         # podia ser recolhida pelo GC antes de enviar o email.
+        # PACOTE 10 — user_id + process_id para o task_log do monitor global.
         from services.background_tasks import spawn_background_task
 
         spawn_background_task(
@@ -649,6 +680,8 @@ async def persist_and_finalize_staff_create(
                 client_id=client_id,
                 client_email=client_email,
                 client_name=client_name,
+                user_id=user.get("id"),
+                process_id=process_id,
             ),
             name=f"portal-welcome-email:{client_id}",
         )

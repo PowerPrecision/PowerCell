@@ -356,7 +356,15 @@ def _parse_css_signature_margin_top_cm(
 def _is_section_heading(line: str) -> bool:
     """Deteta se uma linha de texto simples é um título de secção RGPD
     (ex.: '1. RESPONSÁVEL PELO TRATAMENTO') ou um termo-chave legal
-    conhecido — para ser convertida em `<strong>` (negrito) no PDF."""
+    conhecido — para ser convertida em `<strong>` (negrito) no PDF.
+
+    PACOTE 11 (Eixo 2 — bug "bold excessivo"): um título de secção é
+    SEMPRE CURTO (≤ 100 caracteres). Antes, qualquer parágrafo iniciado
+    por número ("1. Os dados pessoais...") era elevado a negrito — como
+    quase todo o texto legal RGPD são cláusulas numeradas multi-linha,
+    o PDF saía praticamente todo em bold. Agora apenas títulos curtos
+    (e as keywords legais) são acentuados; o corpo fica regular.
+    """
     stripped = line.strip()
     if not stripped:
         return False
@@ -364,6 +372,9 @@ def _is_section_heading(line: str) -> bool:
     if any(keyword in upper for keyword in _RGPD_PDF_BOLD_KEYWORDS):
         return True
     if not any(ch.isalpha() for ch in stripped):
+        return False
+    if len(stripped) > 100:
+        # Parágrafos longos (cláusulas legais completas) nunca são títulos.
         return False
     # Título numerado em maiúsculas: "1. RESPONSÁVEL PELO TRATAMENTO"
     is_numbered_title = bool(re.match(r"^\d+\.\s+[A-ZÀ-Ü]", stripped))
@@ -542,8 +553,25 @@ def _pacote_di_process_node(
             # PACOTE FR-2 — parágrafos cujo texto completo corresponde a um
             # título de secção / termo-chave RGPD (ex.: "RESPONSÁVEL PELO
             # TRATAMENTO") saem a negrito mesmo sem `<strong>` explícito.
-            plain_text = re.sub(r"<[^>]+>", "", text).strip()
-            if "<b>" not in text and _is_section_heading(plain_text):
+            #
+            # PACOTE 11 (Eixo 2 — bug "bold excessivo"): o teste é feito
+            # APENAS à PRIMEIRA linha do parágrafo e exige que o parágrafo
+            # seja de linha ÚNICA. Antes, o texto completo (título +
+            # <br/> + linhas de dados concatenadas) era testado — como
+            # começava por "1. RESPONSÁVEL...", o parágrafo INTEIRO
+            # (Empresa/NIF/Morada/Contacto incluídos) era elevado a
+            # <b>, deixando o documento quase todo em negrito. Agora só
+            # um parágrafo que É integralmente um título curto sai a
+            # bold; o corpo mantém-se regular (apenas <b>/<strong>
+            # explícitos são respeitados).
+            first_line = re.split(r"<br\s*/?>", text, maxsplit=1)[0]
+            plain_first = re.sub(r"<[^>]+>", "", first_line).strip()
+            is_single_line = "<br" not in text
+            if (
+                "<b>" not in text
+                and is_single_line
+                and _is_section_heading(plain_first)
+            ):
                 text = f"<b>{text}</b>"
             flowables.append(Paragraph(text, body_style))
         else:

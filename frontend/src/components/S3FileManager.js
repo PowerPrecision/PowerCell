@@ -84,6 +84,7 @@ import {
   Trash2,
   FolderOpen,
   RefreshCw,
+  ShieldAlert,
   User,
   Briefcase,
   Building2,
@@ -188,6 +189,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const [files, setFiles] = useState({});
   const [stats, setStats] = useState(null);
   const [loading, setLoading] = useState(true);
+  // PACOTE 11 (Eixo 3 — Privacy Warning localizado): quando o utilizador
+  // não tem permissão para ver os documentos do processo (403 do backend,
+  // guard `assert_can_view_process_documents`), o aviso passa a ser
+  // renderizado DENTRO desta tab (em vez de toast genérico + painel vazio).
+  // O S3FileManager só é renderizado na tab Documentos — a restante vista
+  // do processo continua acessível.
+  const [permissionDenied, setPermissionDenied] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [uploadProgress, setUploadProgress] = useState(0);
   const [activeTab, setActiveTab] = useState("all"); // "all" para mostrar todos, ou categoria específica
@@ -369,7 +377,7 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Carregar ficheiros
   const fetchFiles = useCallback(async () => {
     if (!processId) return;
-    
+
     try {
       const response = await fetch(
         `${API_URL}/api/documents/client/${processId}/files`,
@@ -382,6 +390,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         const data = await response.json();
         setFiles(data.files || {});
         setStats(data.stats || null);
+        setPermissionDenied(false);
+      } else if (response.status === 403) {
+        // PACOTE 11 — permissão insuficiente: aviso LOCALIZADO à tab (sem
+        // toast global), o utilizador continua a navegar no resto do processo.
+        setPermissionDenied(true);
+        setFiles({});
+        setStats(null);
       } else {
         const error = await response.json();
         if (error.detail !== "S3 não configurado") {
@@ -1928,6 +1943,47 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       <Card data-testid="s3-file-manager">
         <CardContent className="flex items-center justify-center py-8">
           <Loader2 className="h-6 w-6 animate-spin text-muted-foreground" />
+        </CardContent>
+      </Card>
+    );
+  }
+
+  // PACOTE 11 (Eixo 3 — Privacy Warning localizado): o backend respondeu
+  // 403 ao carregar os ficheiros (guard `assert_can_view_process_documents`
+  // — processo não indexado visível apenas a indexação/admin/utilizadores
+  // atribuídos). O aviso vive DENTRO da tab Documentos (este componente só
+  // é renderizado aqui) — a restante vista do processo permanece acessível.
+  if (permissionDenied) {
+    return (
+      <Card data-testid="s3-file-manager-permission-denied" className="border-amber-200 dark:border-amber-800">
+        <CardContent className="py-10 flex flex-col items-center justify-center text-center">
+          <div className="p-4 bg-amber-100 dark:bg-amber-900/40 rounded-full mb-4">
+            <ShieldAlert className="h-8 w-8 text-amber-600 dark:text-amber-400" aria-hidden="true" />
+          </div>
+          <h3 className="text-lg font-semibold text-amber-800 dark:text-amber-200">
+            Documentos não disponíveis
+          </h3>
+          <p className="text-sm text-muted-foreground max-w-md mt-2 leading-relaxed">
+            Não tem permissão para ver os documentos deste processo. Os documentos de
+            processos ainda não indexados são visíveis apenas para a equipa de indexação,
+            administração e utilizadores atribuídos ao processo.
+          </p>
+          <p className="text-xs text-muted-foreground/70 mt-3">
+            Os restantes separadores do processo (Resumo, Histórico, Tarefas) continuam
+            disponíveis. Contacte o administrador se precisar de acesso à documentação.
+          </p>
+          <Button
+            variant="outline"
+            size="sm"
+            className="mt-5 gap-2"
+            onClick={() => {
+              setLoading(true);
+              fetchFiles();
+            }}
+          >
+            <RefreshCw className="h-4 w-4" />
+            Tentar novamente
+          </Button>
         </CardContent>
       </Card>
     );

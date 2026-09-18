@@ -39,6 +39,9 @@ ALERT_TYPES = {
     "NEW_CLIENT_REGISTRATION": "new_registration",  # Novo registo de cliente
     "PROPERTY_MATCH": "property_match",          # Match perfeito cliente-imóvel
     "VALUATION_BELOW_PURCHASE": "valuation_below_purchase",  # Avaliação < valor compra
+    # PACOTE 10 — email de acesso ao Portal não entregue (falha definitiva
+    # registada em clients.portal_email_delivery por email_delivery_status)
+    "PORTAL_EMAIL_UNDELIVERED": "portal_email_undelivered",
 }
 
 # Dias para alertas
@@ -638,7 +641,85 @@ async def get_process_alerts(process: dict) -> List[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"Erro ao verificar avaliação: {e}")
     
+    # 6. PACOTE 10 — email de acesso ao Portal não entregue (crítico)
+    try:
+        portal_email_alert = await check_portal_email_delivery_alert(process)
+        if portal_email_alert and portal_email_alert.get("active"):
+            alerts.append(portal_email_alert)
+    except Exception as e:
+        logger.warning(f"Erro ao verificar entrega do email de acesso: {e}")
+    
     return alerts
+
+
+# ====================================================================
+# PACOTE 10 — ALERTA DE EMAIL DE ACESSO NÃO ENTREGUE
+# ====================================================================
+
+async def check_portal_email_delivery_alert(process: dict) -> Dict[str, Any]:
+    """
+    Verifica se o email de acesso ao Portal do cliente do processo
+    falhou a entrega de forma definitiva.
+
+    Este é um alerta CRÍTICO porque:
+    - O cliente não consegue aceder ao Portal sem o código de acesso
+    - O staff só descobre a falha quando o cliente reclama (antes do
+      Pacote 10 a falha vivia apenas nos logs do servidor)
+    - Bloqueia o onboarding de documentos do processo
+
+    Fonte: ``clients.portal_email_delivery.status == "failed"``
+    (gravado por services/email_delivery_status.py quando o envio
+    directo E o retry falham).
+
+    Args:
+        process: Dados do processo (usa ``client_id``)
+
+    Returns:
+        dict: Alerta crítico ou inactive se não houver falha
+    """
+    client_id = process.get("client_id")
+    if not client_id:
+        return {"type": ALERT_TYPES["PORTAL_EMAIL_UNDELIVERED"], "active": False}
+
+    client = None
+    try:
+        client = await db.clients.find_one(
+            {"id": client_id},
+            {"portal_email_delivery": 1, "contacto.email": 1, "_id": 0},
+        )
+    except Exception as e:
+        logger.warning(f"Erro ao carregar cliente {client_id} para alerta de email: {e}")
+
+    if not client:
+        return {"type": ALERT_TYPES["PORTAL_EMAIL_UNDELIVERED"], "active": False}
+
+    delivery = client.get("portal_email_delivery") or {}
+    if delivery.get("status") != "failed":
+        return {"type": ALERT_TYPES["PORTAL_EMAIL_UNDELIVERED"], "active": False}
+
+    error_detail = delivery.get("error") or "razão desconhecida"
+    last_attempt = delivery.get("last_attempt_at") or "—"
+    client_email = (client.get("contacto") or {}).get("email") or ""
+
+    return {
+        "type": ALERT_TYPES["PORTAL_EMAIL_UNDELIVERED"],
+        "active": True,
+        "client_id": client_id,
+        "client_email": client_email,
+        "message": "Email de acesso não entregue",
+        "details": (
+            f"O email de boas-vindas/acesso ao Portal "
+            f"{('para ' + client_email) if client_email else ''} "
+            f"não foi entregue ({error_detail}). Última tentativa: {last_attempt}. "
+            f"O cliente não consegue aceder ao Portal até o acesso ser reenviado."
+        ),
+        "priority": "critical",
+        "recommendations": [
+            "Reenviar o acesso ao Portal (menu Portal → Reenviar acesso)",
+            "Confirmar o email do cliente na ficha do cliente",
+            "Verificar a saúde do serviço de email (SMTP/Resend)",
+        ],
+    }
 
 
 # ====================================================================

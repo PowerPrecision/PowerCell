@@ -886,3 +886,110 @@ select:focus {
     page-break-inside: avoid;
   }
 }
+
+/* ====================================================================
+ * PACOTE 11 (Eixo 2) — Tipografia do corpo de emails (EmailViewerModal)
+ * ====================================================================
+ * O corpo do email aparecia como um bloco de texto denso (sem margens
+ * nem interlinha). O container já usa `prose prose-sm` do Tailwind, mas
+ * o HTML sanitizado dos emails transacionais traz os próprios estilos
+ * inline e o texto simples era renderizado num <pre> monospace. Estes
+ * estilos garantem espaçamento confortável em AMBOS os caminhos
+ * (HTML sanitizado e texto simples convertido em <p>).
+ * ==================================================================== */
+.email-content {
+  font-size: 0.9rem;
+  line-height: 1.7;
+  color: hsl(var(--foreground));
+  word-break: break-word;
+  overflow-wrap: break-word;
+}
+
+.email-content p {
+  margin: 0 0 0.9em 0;
+}
+
+.email-content p:last-child {
+  margin-bottom: 0;
+}
+
+.email-content h1,
+.email-content h2,
+.email-content h3,
+.email-content h4 {
+  margin: 1.4em 0 0.6em 0;
+  font-weight: 600;
+  line-height: 1.3;
+  color: hsl(var(--foreground));
+}
+
+.email-content h1 { font-size: 1.25rem; }
+.email-content h2 { font-size: 1.125rem; }
+.email-content h3 { font-size: 1rem; }
+.email-content h4 { font-size: 0.95rem; }
+
+.email-content ul,
+.email-content ol {
+  margin: 0.6em 0 1em 0;
+  padding-left: 1.4em;
+}
+
+.email-content ul { list-style-type: disc; }
+.email-content ol { list-style-type: decimal; }
+
+.email-content li {
+  margin: 0.25em 0;
+}
+
+.email-content a {
+  color: hsl(var(--primary));
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.email-content blockquote {
+  margin: 1em 0;
+  padding: 0.5em 1em;
+  border-left: 3px solid hsl(var(--border));
+  color: hsl(var(--muted-foreground));
+  font-style: italic;
+}
+
+.email-content img {
+  max-width: 100%;
+  height: auto;
+  border-radius: 6px;
+  margin: 0.5em 0;
+}
+
+.email-content table {
+  width: 100%;
+  border-collapse: collapse;
+  margin: 1em 0;
+  font-size: 0.85rem;
+}
+
+.email-content th,
+.email-content td {
+  border: 1px solid hsl(var(--border));
+  padding: 0.45em 0.6em;
+  text-align: left;
+  vertical-align: top;
+}
+
+.email-content pre {
+  margin: 1em 0;
+  padding: 0.75em 1em;
+  background: hsl(var(--muted));
+  border-radius: 8px;
+  overflow-x: auto;
+  font-size: 0.8rem;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.email-content hr {
+  margin: 1.5em 0;
+  border: 0;
+  border-top: 1px solid hsl(var(--border));
+}

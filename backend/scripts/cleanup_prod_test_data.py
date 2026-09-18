@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 ====================================================================
-LIMPEZA DE DADOS DE TESTE — POWERCELL CRM (PACOTE 9 — actualização)
+LIMPEZA DE DADOS DE TESTE — POWERCELL CRM (PACOTE 11 — actualização)
 ====================================================================
 
 Procura, TRANSVERSALMENTE, a string "test"/"teste" (case-insensitive)
@@ -17,6 +17,8 @@ COLECÇÕES E CAMPOS PESQUISADOS (match próprio, não só cascata):
         client_email, client_name, process_type, notes, observations
     Leads (imóveis)            -> `property_leads`
         title, notes, client_name, url
+    Empresas                   -> `companies`
+        name, email, smtp_email, imap_email
     Atividades                 -> `activities`
         comment
     Tarefas                    -> `tasks`
@@ -24,6 +26,12 @@ COLECÇÕES E CAMPOS PESQUISADOS (match próprio, não só cascata):
     + cascata pelos filhos: documents, tasks, task_logs, activities,
       history (ligados por client_id/process_id/task_id dos matches
       acima).
+
+CASCADE DELETE FORTE (PACOTE 11 — Eixo 4): ao apagar um cliente de
+teste são obrigatoriamente apagados, sem deixar órfãos, todos os
+processos, leads (property_leads com client_id dele) e role-mappings
+(user_company_roles dos utilizadores/empresas de teste) pertencentes
+a esse cliente.
 
 PADRÃO DE MATCH:
     regex ``\\btest`` (case-insensitive) — apanha "test", "teste",
@@ -33,10 +41,11 @@ PADRÃO DE MATCH:
 
 MODOS DE APAGAMENTO (flag --mode):
     soft (predefinição) — Marca os PAIS (clients, processes, tasks,
-        property_leads) com is_deleted=True + deleted_at/deleted_by/
-        previous_status e apaga (hard) os filhos puramente logarítmicos
-        (task_logs, history, activities, documents) — os pais já ficam
-        escondidos de todas as listas do produto. Reversível nos pais.
+        property_leads, companies) com is_deleted=True + deleted_at/
+        deleted_by/previous_status e apaga (hard) os filhos puramente
+        logarítmicos (task_logs, history, activities, documents) e as
+        ligações user_company_roles — os pais já ficam escondidos de
+        todas as listas do produto. Reversível nos pais.
     hard — Apaga fisicamente tudo (comportamento original do script).
 
 UTILIZAÇÃO:
@@ -122,16 +131,56 @@ def build_process_test_query(client_ids: list) -> dict:
     return {"$or": clauses}
 
 
-def build_property_lead_test_query() -> dict:
-    """Leads de imóveis (property_leads) por título/notas/cliente/url."""
+def build_property_lead_test_query(client_ids: list = None) -> dict:
+    """Leads de imóveis (property_leads) por título/notas/cliente/url.
+
+    PACOTE 11 (Eixo 4 — cascade forte): inclui também as leads ligadas
+    por ``client_id`` aos clientes de teste encontrados — apagar um
+    cliente de teste SEM apagar as leads dele deixaria-as órfãs.
+    """
+    clauses = [
+        {"title": TEST_PATTERN},
+        {"notes": TEST_PATTERN},
+        {"client_name": TEST_PATTERN},
+        {"url": TEST_PATTERN},
+    ]
+    if client_ids:
+        clauses.append({"client_id": {"$in": client_ids}})
+    return {"$or": clauses}
+
+
+def build_company_test_query() -> dict:
+    """PACOTE 11 (Eixo 4) — Empresas de teste (`companies`).
+
+    Match próprio por nome/emails de contacto técnicos (o NIF é
+    numérico — não interessa para o match de 'teste').
+    """
     return {
         "$or": [
-            {"title": TEST_PATTERN},
-            {"notes": TEST_PATTERN},
-            {"client_name": TEST_PATTERN},
-            {"url": TEST_PATTERN},
+            {"name": TEST_PATTERN},
+            {"email": TEST_PATTERN},
+            {"smtp_email": TEST_PATTERN},
+            {"imap_email": TEST_PATTERN},
         ]
     }
+
+
+def build_user_company_roles_test_query(user_ids: list, company_ids: list) -> dict:
+    """PACOTE 11 (Eixo 4) — role-mappings (user_company_roles) de teste.
+
+    Ligações dos utilizadores de teste (por user_id) e das empresas de
+    teste (por company_id OU company_name). Nunca casa nada quando
+    ambas as listas estão vazias.
+    """
+    clauses = []
+    if user_ids:
+        clauses.append({"user_id": {"$in": user_ids}})
+    if company_ids:
+        clauses.append({"company_id": {"$in": company_ids}})
+        clauses.append({"company_name": {"$in": company_ids}})
+    if not clauses:
+        return {"id_placeholder_never_matches": True}
+    return {"$or": clauses}
 
 
 def build_activity_test_query(process_ids: list) -> dict:
@@ -196,10 +245,10 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
     empty_in = {"id_placeholder_never_matches": True}
 
     print("=" * 70)
-    print("LIMPEZA DE DADOS DE TESTE (transversal — Pacote 9)")
+    print("LIMPEZA DE DADOS DE TESTE (transversal — Pacote 11)")
     print("Filtro: 'test'/'teste' (case-insensitive, \\btest) em:")
     print("       clientes (nome/email/notas), processos (título/notas),")
-    print("       leads, atividades e tarefas + cascata por IDs")
+    print("       leads, empresas, atividades e tarefas + cascata por IDs")
     print(f"Modo: {'SIMULAÇÃO (dry-run)' if dry_run else f'EXECUÇÃO REAL ({mode})'}")
     print("=" * 70)
 
@@ -209,6 +258,11 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
         client_query, {"_id": 0, "id": 1, "nome": 1, "contacto": 1, "email": 1}
     ).to_list(None)
     client_ids = [c["id"] for c in clients if c.get("id")]
+    client_emails = [
+        (c.get("contacto") or {}).get("email") or c.get("email")
+        for c in clients
+    ]
+    client_emails = [e for e in client_emails if e]
 
     print(f"\n[CLIENTES] Leads/Clientes encontrados: {len(clients)}")
     for c in clients[:10]:
@@ -239,9 +293,12 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
     process_id_in = {"process_id": {"$in": process_ids}} if process_ids else empty_in
 
     # ── 3) Leads de imóveis (property_leads) por campos próprios ──
+    # PACOTE 11 — cascade forte: a query inclui as leads ligadas por
+    # client_id aos clientes de teste (sem isso ficariam órfãs).
+    property_lead_query = build_property_lead_test_query(client_ids)
     property_leads = await db.property_leads.find(
-        build_property_lead_test_query(),
-        {"_id": 0, "id": 1, "title": 1, "client_name": 1, "url": 1},
+        property_lead_query,
+        {"_id": 0, "id": 1, "title": 1, "client_name": 1, "url": 1, "client_id": 1},
     ).to_list(None)
 
     print(f"\n[LEADS] Leads de imóveis encontrados: {len(property_leads)}")
@@ -252,6 +309,45 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
         )
     if len(property_leads) > 10:
         print(f"   ... e mais {len(property_leads) - 10}")
+
+    # ── 3b) Empresas (companies) — PACOTE 11 ─────────────────────
+    company_query = build_company_test_query()
+    companies = await db.companies.find(
+        company_query,
+        {"_id": 0, "id": 1, "name": 1, "email": 1},
+    ).to_list(None)
+    company_ids = [comp["id"] for comp in companies if comp.get("id")]
+
+    print(f"\n[EMPRESAS] Empresas de teste encontradas: {len(companies)}")
+    for comp in companies[:10]:
+        print(f"   - {comp.get('name', '?')} | {comp.get('email', '?')} | id={comp.get('id')}")
+    if len(companies) > 10:
+        print(f"   ... e mais {len(companies) - 10}")
+
+    # ── 3c) Role-mappings (user_company_roles) — PACOTE 11 ────────
+    # Utilizadores de teste: emails apanhados pelo padrão OU emails dos
+    # clientes de teste (utilizadores de portal criados para eles).
+    _test_email_users = await db.users.find(
+        {"email": TEST_PATTERN}, {"_id": 0, "email": 1, "id": 1}
+    ).to_list(None)
+    test_user_emails = list({
+        *client_emails,
+        *[u["email"] for u in _test_email_users if u.get("email")],
+    })
+    test_user_ids = []
+    if test_user_emails:
+        _test_users = await db.users.find(
+            {"email": {"$in": test_user_emails}}, {"_id": 0, "id": 1}
+        ).to_list(None)
+        test_user_ids = [u["id"] for u in _test_users if u.get("id")]
+    ucr_query = build_user_company_roles_test_query(test_user_ids, company_ids)
+    user_company_roles_count = await db.user_company_roles.count_documents(ucr_query)
+
+    print(
+        f"\n[ROLE-MAPPINGS] user_company_roles de teste: "
+        f"{user_company_roles_count} (users: {len(test_user_ids)}, "
+        f"empresas: {len(company_ids)})"
+    )
 
     # ── 4) Atividades por comentário OU cascade dos processos ─────
     activity_query = build_activity_test_query(process_ids)
@@ -304,6 +400,7 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
 
     total_records = (
         len(clients) + len(processes) + len(property_leads)
+        + len(companies) + user_company_roles_count
         + len(activities) + len(tasks)
         + documents_count + task_logs_count + history_count
     )
@@ -316,8 +413,9 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
         print(
             f"SIMULAÇÃO ({mode}) — seriam processados: "
             f"{len(clients)} leads/clientes, {len(processes)} processos, "
-            f"{len(property_leads)} leads, {len(activities)} atividades, "
-            f"{len(tasks)} tarefas, {documents_count} documentos, "
+            f"{len(property_leads)} leads, {len(companies)} empresas, "
+            f"{user_company_roles_count} role-mappings, {len(activities)} "
+            f"atividades, {len(tasks)} tarefas, {documents_count} documentos, "
             f"{task_logs_count} logs de tarefas e {history_count} entradas "
             f"de histórico (total {total_records})"
         )
@@ -352,12 +450,22 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
     r = await db.documents.delete_many(document_query)
     _report("Documentos eliminados", r.deleted_count, documents_count)
 
+    # PACOTE 11 (Eixo 4 — cascade forte): role-mappings são LIGAÇÕES —
+    # hard-delete em AMBOS os modos (igual aos filhos logarítmicos) para
+    # não deixar user_company_roles órfãs de utilizadores/empresas de
+    # teste escondidos.
+    r = await db.user_company_roles.delete_many(ucr_query)
+    _report("Role-mappings eliminados", r.deleted_count, user_company_roles_count)
+
     if hard:
         r = await db.tasks.delete_many(task_query)
         _report("Tarefas eliminadas", r.deleted_count, len(tasks))
 
-        r = await db.property_leads.delete_many(build_property_lead_test_query())
+        r = await db.property_leads.delete_many(property_lead_query)
         _report("Leads de imóveis eliminados", r.deleted_count, len(property_leads))
+
+        r = await db.companies.delete_many(company_query)
+        _report("Empresas eliminadas", r.deleted_count, len(companies))
 
         r = await db.processes.delete_many(process_query)
         _report("Processos eliminados", r.deleted_count, len(processes))
@@ -369,8 +477,11 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
         n = await _soft_delete_parents(db, "tasks", task_query, now_iso)
         _report("Tarefas marcadas como eliminadas (soft)", n, len(tasks))
 
-        n = await _soft_delete_parents(db, "property_leads", build_property_lead_test_query(), now_iso)
+        n = await _soft_delete_parents(db, "property_leads", property_lead_query, now_iso)
         _report("Leads de imóveis marcados como eliminados (soft)", n, len(property_leads))
+
+        n = await _soft_delete_parents(db, "companies", company_query, now_iso)
+        _report("Empresas marcadas como eliminadas (soft)", n, len(companies))
 
         n = await _soft_delete_parents(db, "processes", process_query, now_iso)
         _report("Processos marcados como eliminados (soft)", n, len(processes))
@@ -389,8 +500,9 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(
         description=(
             "Apaga transversalmente (soft/hard) Clientes, Processos, Leads, "
-            "Atividades e Tarefas cujos campos contenham 'test'/'teste' "
-            "(case-insensitive), com cascata para documentos/logs/histórico."
+            "Empresas, Atividades e Tarefas cujos campos contenham "
+            "'test'/'teste' (case-insensitive), com cascata forte para "
+            "processos/leads/role-mappings e filhos logarítmicos."
         )
     )
     parser.add_argument(

@@ -1,10 +1,16 @@
 /**
- * TasksDropdown — Dropdown de tarefas pendentes associadas ao utilizador actual.
+ * TasksDropdown — Widget global "Processos em Segundo Plano" (PACOTE 10).
  *
- * PORQUÊ: Cada utilizador do CRM tem tarefas atribuídas (validar documentos, contactar cliente, etc.).
- * Este dropdown no header permite acesso rápido às tarefas pendentes sem navegar para outra página.
+ * PORQUÊ: O PowerCell executa operações demoradas em segundo plano (geração de
+ * PDF, análise IA de documentos, envio de emails, upload S3, etc.). Este widget
+ * na topbar (ao lado das notificações) dá visibilidade global dessas operações
+ * com estado Loading/Success/Failed — incluindo as falhas recentes que exigem
+ * atenção (badge vermelho no trigger e grupo próprio na lista).
  *
- * @context {AuthContext} — Consome user, token para autenticação e permissões
+ * Fonte de dados: TasksContext (polling 5s activo / 30s idle com circuit
+ * breaker) sobre GET /tasks/active (task_logs do backend, user-scoped).
+ *
+ * @context {TasksContext} — Consome tasks/activeCount/failedCount/acknowledge/cancel
  */
 
 import { useState } from "react";
@@ -39,6 +45,7 @@ import {
   Zap,
   User,
   CalendarClock,
+  AlertTriangle,
 } from "lucide-react";
 import { cn, safeDate } from "../lib/utils";
 
@@ -251,6 +258,7 @@ const TasksDropdown = () => {
     tasks,
     activeCount,
     completedUnacknowledged,
+    failedCount,
     acknowledgeTask,
     cancelTask,
   } = useTasks();
@@ -259,9 +267,11 @@ const TasksDropdown = () => {
   
   const totalNotifications = activeCount + completedUnacknowledged;
   
-  // Agrupar tarefas por status
+  // Agrupar tarefas por status (PACOTE 10 — falhadas recentes ganham grupo
+  // próprio: são o sinal de que algo precisa de atenção do utilizador).
   const activeTasks = tasks.filter(t => t.status === "pending" || t.status === "processing");
-  const completedTasks = tasks.filter(t => (t.status === "completed" || t.status === "failed") && !t.acknowledged_at);
+  const failedTasks = tasks.filter(t => t.status === "failed" && !t.acknowledged_at);
+  const completedTasks = tasks.filter(t => t.status === "completed" && !t.acknowledged_at);
   
   return (
     <Sheet open={isOpen} onOpenChange={setIsOpen}>
@@ -273,11 +283,13 @@ const TasksDropdown = () => {
             "relative h-8 w-8",
             totalNotifications > 0 && "text-primary"
           )}
-          title="Tarefas em background"
-          aria-label={totalNotifications > 0 ? `Tarefas em background - ${totalNotifications} ativas` : "Tarefas em background"}
+          title="Processos em Segundo Plano"
+          aria-label={totalNotifications > 0 ? `Processos em Segundo Plano - ${totalNotifications} ativas${failedCount > 0 ? `, ${failedCount} falhadas` : ""}` : "Processos em Segundo Plano"}
         >
           {activeCount > 0 ? (
             <Loader2 className="h-4 w-4 animate-spin" />
+          ) : failedCount > 0 ? (
+            <AlertTriangle className="h-4 w-4 text-red-500" />
           ) : (
             <Activity className="h-4 w-4" />
           )}
@@ -301,11 +313,11 @@ const TasksDropdown = () => {
         <SheetHeader className="p-4 border-b">
           <SheetTitle className="flex items-center gap-2">
             <Activity className="h-5 w-5" />
-            Centro de Operações
+            Processos em Segundo Plano
           </SheetTitle>
           <SheetDescription>
-            {activeCount > 0 
-              ? `${activeCount} tarefa${activeCount > 1 ? "s" : ""} em execução`
+            {(activeCount > 0 || failedCount > 0)
+              ? `${activeCount} em execução${failedCount > 0 ? ` · ${failedCount} falhada${failedCount > 1 ? "s" : ""} recente${failedCount > 1 ? "s" : ""}` : ""}`
               : "Nenhuma tarefa em execução"
             }
           </SheetDescription>
@@ -332,6 +344,26 @@ const TasksDropdown = () => {
             </div>
           )}
           
+          {/* PACOTE 10 — Falhadas recentes (grupo próprio: exigem atenção) */}
+          {failedTasks.length > 0 && (
+            <div className="mb-4">
+              <h4 className="text-sm font-medium text-red-600 dark:text-red-400 mb-2 flex items-center gap-2">
+                <XCircle className="h-3 w-3" />
+                Falhadas recentes ({failedTasks.length})
+              </h4>
+              <div className="space-y-2">
+                {failedTasks.map(task => (
+                  <TaskItem
+                    key={task.task_id}
+                    task={task}
+                    onAcknowledge={acknowledgeTask}
+                    onCancel={cancelTask}
+                  />
+                ))}
+              </div>
+            </div>
+          )}
+
           {/* Tarefas concluídas */}
           {completedTasks.length > 0 && (
             <div>
@@ -360,7 +392,7 @@ const TasksDropdown = () => {
               </div>
               <p className="text-sm font-medium">Tudo em ordem</p>
               <p className="text-xs text-muted-foreground mt-1">
-                Não há tarefas em execução ou pendentes de confirmação
+                Não há operações em execução, falhadas ou pendentes de confirmação
               </p>
             </div>
           )}

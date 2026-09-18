@@ -2299,3 +2299,83 @@ Fluxo canónico de `POST /api/emails/send` (`run_send_email`): todas as validaç
 - **`scripts/backfill_s3_mappings.py`**: passou a cobrir `clients` **E** `processes` (a principal causa de "sem mapeamento"); filtros corrigidos — exclui soft-deleted (`is_deleted`/status "eliminado"; o filtro antigo usava `is_active`, campo de Process, em clients) e apanha valores "lixo" (`"undefined"`/`"null"`/`"None"` — antes só missing/None/vazio); 2º titular lido do sítio certo por colecção (`second_client_name` nos processos, `titular2_data` legacy nos clients); cria os prefixos/pastas reais via boto3 (`ensure_client_folder_mapping`) e grava o mapeamento com auditoria (`s3_mapping_backfilled_at/_by`).
 
 Validação: 37 novos testes unitários (`tests/unit/test_pacote9_infra_ux_fixes.py`) + regressão completa **1222 passed, 0 falhas** + flake8 gate (E9,F63,F7,F82) limpo; frontend: 5 novos testes `node --test` (`webmailSendQueue.test.js`), 35 existentes a passar, eslint e `vite build` verdes. `conftest.py` estendido de forma aditiva (`find_one` com `sort`, `async for` no cursor) mantendo o contrato histórico de projecção ignorada (docs completos — vários serviços dependem disso com dot-notation).
+
+## Pacote 10 — Prevenção de duplicados, feedback de email falhado e monitor global de tarefas (Set 2026)
+
+Foco: **prevenção de erros humanos e visibilidade do sistema** (UX/Observabilidade). Três frentes.
+
+### 1. Prevenção de clientes duplicados (409 Conflict)
+
+`services/client_crud.py::run_create_client` — o check de NIF/Email duplicado existia mas devolvia **400** (indistinguível de "dados inválidos" para o frontend). Agora:
+
+- **409 Conflict** com `detail` **estruturado**: `{"message", "existing_client_id", "existing_client_name", "matched_fields": ["nif"|"email", ...]}` — os formulários usam estes dados para o alerta bloqueante e a acção "Usar cliente existente" (não precisam de re-pesquisar o cliente).
+- Pesquisa por blind indexes (`dados_pessoais.nif_hash`, `contacto.email_hash`) com fallback para os campos plain (dados antigos não migrados) — inalterado.
+- **Soft-deleted não bloqueia**: a query de duplicado exclui `is_deleted: true` e `status: "eliminado"` — recriar um cliente eliminado por engano deixa de exigir restauração. Clientes ACTIVOS continuam a bloquear (é o comportamento de negócio correcto).
+- `find_or_create` herda o 409 (delega em `run_create_client`); o `public_registration` mantém o upsert por email (contrato público `blocked:true` 200 — intocado).
+- Decisão consciente: **não** se criou índice único em `nif_hash`/`email_hash` — o upsert público e a recriação pós-soft-delete gerariam duplicados de hash legítimos; a race window do find+insert é aceitável e o 409 cobre o caso prático (clique-clique).
+
+### 2. Estado de entrega do email de acesso ao Portal
+
+**Novo módulo `services/email_delivery_status.py`** — o gap: a falha total do email de boas-vindas/acesso (envio directo SMTP/Resend falhou E o retry não foi sequer agendado) vivia apenas nos logs do servidor. Agora duas camadas:
+
+1. **`clients.portal_email_delivery`** (registo persistente no cliente): `{status: "sent"|"failed"|"retry_scheduled", last_attempt_at, error}`.
+2. **`task_logs`** (monitor global — ver frente 3): ciclo `pending → processing → completed/failed` com `TaskType.EMAIL_SEND`, user-scoped (user_id explícito dos fluxos staff OU lookup `clients.created_by` email → `users.id`).
+
+Integração em `deliver_registration_email` (`services/client_portal_email.py`, assinatura estendida com `user_id`/`process_id` opcionais — chamadores `client_crud.py` e `process_create.py` passam-nos):
+
+- sucesso directo → `complete_portal_email_task` (task completed + `status: sent`);
+- falha directa + job ARQ agendado → `mark_portal_email_retry_scheduled` (`status: retry_scheduled` — **não** gera alerta; o worker ARQ `send_registration_email_task` fecha o ciclo ao consumir o retry);
+- falha total (sem job) → `fail_portal_email_task` (task failed + `status: failed`).
+
+**Alerta crítico** — `services/alerts.py`: novo `ALERT_TYPES["PORTAL_EMAIL_UNDELIVERED"] = "portal_email_undelivered"` e `check_portal_email_delivery_alert(process)` (6º check de `get_process_alerts`): quando o cliente do processo tem `portal_email_delivery.status == "failed"` → alerta **critical** "Email de acesso não entregue" (payload com client_email, erro, última tentativa e recomendações — reenviar acesso/confirmar email/verificar SMTP). Aparece no card vermelho do `ProcessAlerts` nos Detalhes do Processo. Processos finalizados não geram o alerta (regra pré-existente do motor).
+
+### 3. Monitor global "Processos em Segundo Plano"
+
+O widget já existia (`TasksDropdown` + `TasksContext` — polling 5s activo/30s idle com circuit breaker sobre `GET /tasks/active`). O que FALTAVA: o endpoint só leria `background_jobs` (jobs IA/importações) — **os `task_logs` nunca chegavam ao widget**.
+
+- `services/task_api_background.py::run_get_active_background_tasks` — **merge unificado**: além dos `background_jobs` (user_email), agrega `task_log_service.get_active_tasks(user_id)` no MESMO formato (task_id/task_type/title/status/progress/error_message/priority…), com dedup por task_id e ordenação cronológica inversa. `cancelled`/acknowledged ficam de fora; contadores (`active_count`, `completed_unacknowledged`) somam as duas fontes.
+- `run_acknowledge_background_task` / `run_cancel_background_task` — roteamento por prefixo: `task_*` → `task_log_service` (acknowledge/cancel user-scoped); restantes → `background_jobs` (comportamento anterior preservado).
+- **Novas fontes de task_logs** (alimentam o widget automaticamente):
+  - `email_send_queue.py` — `attach_task_log_to_pending_record` cria o task_log do envio (diferido E legacy); `execute_pending_email_send` faz `processing → completed/failed`; `cancel` → `cancelled`; `_mark_failed` propaga o erro. O `task_log_id` fica persistido no registo `pending_email_sends` (transições idempotentes). Best-effort total: falhas de task_log nunca afectam o envio.
+  - `document_direct_upload.py::run_confirm_upload` — task_log `DOCUMENT_UPLOAD` nasce **concluded** (o upload já terminou quando o confirm corre; fica no widget até ao OK do utilizador, com s3_path/categoria no metadata).
+  - email de acesso ao Portal (frente 2).
+- **Índices** (`services/db_indexes.py`): `idx_task_logs_user_status` (user+status — a query de cada poll) e `idx_task_logs_cleanup` (status+acknowledged+completed — suporte ao TTL de limpeza). Sem índices, cada poll (5s por utilizador activo) seria um collection scan.
+
+### Testes e validação
+
+- `tests/unit/test_pacote10_ux_observability.py` — 22 testes: 409 estruturado (NIF/email/soft-delete/payload), `email_delivery_status` (cliente+task_log+lookup de criador), alerta crítico (motor + integração em `get_process_alerts`), lifecycle completo de `deliver_registration_email` (sent/failed/retry_scheduled com mock do task_queue), task_logs da fila (queue/execute success/execute failure/cancel/degradação sem task_log), task_log do confirm-upload e **merge do `/tasks/active`** (unificação, contadores, failed→unack, roteamento acknowledge/cancel).
+- conftest estendido (PACOTE 10): `find_one_and_update` (task_log_service), `__getitem__` no FakeAsyncDatabase (`db[TASK_LOG_COLLECTION]`), resolução de **dot-notation** no matcher e no `$set` (`contacto.email_hash`, `dados_pessoais.nif_hash`) e comparadores `$gte/$gt/$lte/$lt` (janela de 1h do `get_active_tasks`). Contratos históricos preservados (projecção continua a devolver o doc completo).
+- Suite: **1244 passed / 0 falhas** (baseline 1222 + 22 novos); flake8 gate (E9,F63,F7,F82) limpo; frontend `node --test` 125 pass (117 + 8 novos do `utils/duplicateClient.test.js`), eslint limpo, `vite build` verde.
+
+## Pacote 11 — UX Masterclass: no-hardcoding de fases, emails/RGPD, navegação e soft-delete (Set 2026)
+
+Foco: **abolição rigorosa de hardcoding no motor de processos + UX de navegação/ficha + motor de soft-delete/limpeza**. Quatro eixos.
+
+### Eixo 1 — Desacoplamento e automações (Strict No-Hardcoding)
+
+O Kanban já era dinâmico (colunas da colecção `workflow_statuses` via `/api/processes/kanban` e `/api/admin/workflow-statuses`), mas coexistiam **4 conjuntos hardcoded divergentes** (enum `ProcessStatus` com 16 fases, seed com 14, módulo legado `process_kanban.py` com 15 colunas `KANBAN_COLUMNS`, e o fallback frontend `KNOWN_PROCESS_STATUSES` com ~40). Remoções:
+
+- **Apagado** `services/process_kanban.py` (legado, zero imports no repo — confirmado por grep). O endpoint HTTP actual é coberto por `process_kanban_move.py`.
+- **Frontend `utils/workflowStatuses.js`** — `KNOWN_PROCESS_STATUSES` REMOVIDO. `buildStatusOptions` passa a usar apenas a lista dinâmica da API; quando o `currentStatus` não existe na lista (API falhou/fase removida pelo admin), é injectado como opção única `_isFallback` — a dropdown nunca fica em branco mas **nunca inventa fases em código**.
+- **NOVO `services/workflow_lookup.py`** — ponto central de resolução dinâmica: `get_first_workflow_status()` (1ª fase activa por `order`), `get_flagged_workflow_status_names(flag)`, `get_inactive_workflow_status_names()` e `ensure_workflow_purpose_flags_backfill()` (migração idempotente no arranque do `server.py` que SEMEIA as flags de propósito nos workflow_statuses pré-P11; a semântica inicial fica registada NA BD — o runtime apenas LÊ).
+- **Fallbacks hardcoded eliminados nas transições**: `process_kanban_move.resolve_workflow_purpose_flags` passou a **async** e resolve cada flag ausente da BD (via workflow_lookup); `process_indexing.py` deixou de assumir `status = "clientes_espera"` (resolve a 1ª fase da pipeline dinâmica); `restore_api_process.py` restaura para `previous_status` OU 1ª fase activa dinâmica (nunca "clientes_espera" cravado).
+- **Seed actualizado** (`seed.py::seed_workflow_statuses`): as 14 fases nascem agora COM as flags de propósito (`trigger_finance` em concluidos, `trigger_countdown` em fase_bancaria, `trigger_property_check` em ch_aprovado/fase_escritura/escritura_agendada, `trigger_deed_reminder` em escritura_agendada, `is_active: False` em concluidos/desistencias).
+- **Motor de automação ligado aos fluxos** (`services/workflow_engine.py::process_trigger` — antes só era disparado em 1 sítio): `process_created` (após insert em `process_create.py`), `document_uploaded` (após confirm em `document_direct_upload.py`), `process_status_changed` (no move Kanban e na transição pós-indexação). Todos fire-and-forget com try/except — regra mal configurada nunca rebenta o fluxo principal.
+- Decisão documentada: as taxonomias de **filtros de listagem** (`process_status.py::INACTIVE_STATUSES`/`ARCHIVED_STATUSES`/`STATUS_VALUE_ALIASES` e `restore_api_helpers.TERMINAL_STATUSES`) são categorias semânticas de negócio testadas (não "fases do Kanban") — mantêm-se centralizadas nesses módulos, sem duplicação.
+
+### Eixo 2 — Experiência de emails e RGPD
+
+- **Logo no email base** — **NOVO `services/email_branding.py`**: `resolve_company_logo_url()` (SystemConfig `settings.logo_url` → fallback 1ª empresa activa com `logo_url`; chaves S3 resolvidas para URL pré-assinado de 7 dias via `resolve_logo_url`) + `build_email_header_logo_html()`. Injectado em: `email.py::get_base_template(logo_url=...)` (todos os 5 templates transaccionais base), welcome de criação de utilizador (`admin_users.py`), convite do Portal (`public_registration.py`) e magic link (`portal_magic_link.py`, novo param `logo_html`). Degradação graciosa: sem logo → header só com texto (comportamento anterior).
+- **RGPD bold excessivo (bug)**: em `rgpd_pdf.py::_pacote_di_process_node`, o plain_text do parágrafo INTEIRO (título + `<br/>` + linhas de dados) era testado por `_is_section_heading` — como começava por "1. RESPONSÁVEL...", o parágrafo completo (Empresa/NIF/Morada/Contacto) era elevado a `<b>`, deixando o documento quase todo em negrito. Fix duplo: (1) o teste é feito apenas à 1ª linha e exige parágrafo de linha única; (2) `_is_section_heading` rejeita linhas > 100 chars (cláusulas legais completas nunca são títulos). Apenas títulos curtos e tags `<b>/<strong>` explícitas saem a negrito.
+- **Tipografia do EmailViewerModal** (frontend — ver FRONTEND_GUIDELINES §17).
+
+### Eixo 4 — Motor de soft-delete e limpeza
+
+- **NOVO `services/restore_api_client.py` + rota `POST /api/clients/{id}/restore`** (`routes/restore.py`, roles admin/ceo/diretor/administrativo — espelho do DELETE): fecha a assimetria do `client_delete.py`, que anunciava o endpoint mas a rota não existia. Restaura o cliente (clients OU processes — modelo unificado) com `previous_status` → fallback 1ª fase dinâmica, cascata simétrica (processos do 1º titular + documentos + tarefas + pedidos RGPD) e registo de auditoria `client_restored`.
+- **Script `scripts/cleanup_prod_test_data.py`**: (1) pesquisa de 'teste' na colecção **companies** (name/email/smtp_email/imap_email); (2) **cascade forte** — ao apagar um cliente de teste apaga obrigatoriamente os processos (client_id), as leads (`property_leads` com `client_id` — query estendida) e os **role-mappings** (`user_company_roles` dos utilizadores de teste por email e das empresas de teste por company_id/company_name — ligações sempre HARD-deleted em ambos os modos, como os filhos logarítmicos), sem deixar órfãos; (3) companies soft/hard conforme o modo.
+
+### Testes e validação
+
+- Novos: `test_workflow_lookup.py` (11), `test_restore_api_client.py` (7), `test_cleanup_prod_test_data_p11.py` (8), `test_email_branding_and_rgpd_bold.py` (13) + `test_process_kanban_move.py` reescrito para o contrato async dinâmico (8) e `test_restore_extraction_helpers.py` actualizado (novo módulo/rota).
+- conftest (PACOTE 11): `delete_many` no FakeAsyncCollection e `$nin` no matcher (queries do email_branding/cleanup). Contratos históricos intactos.
+- Suite: **1280 passed / 0 falhas** (baseline 1244 + 36); flake8 gate (E9,F63,F7,F82) limpo; frontend `node --test` 133 pass (utils+lib+hooks+contexts+App; +11 novos), `vite build` verde. Nota: os 3 ficheiros `src/pages/processDetails/*.test.js` estão quebrados PRÉ-EXISTENTEMENTE (sintaxe Jest sem runner/imports sem extensão — nunca correram no `node --test`; documentado no worklog).

@@ -199,25 +199,61 @@ async def run_create_client(
     # Verificar se já existe cliente com mesmo NIF ou email
     # Usar blind index (nif_hash, email_hash) para pesquisa de dados encriptados
     existing_query = []
+    nif_hash = generate_nif_hash(sanitized_nif) if sanitized_nif else None
+    email_hash = generate_email_hash(sanitized_email) if sanitized_email else None
     if sanitized_nif:
-        nif_hash = generate_nif_hash(sanitized_nif)
         if nif_hash:
             existing_query.append({"dados_pessoais.nif_hash": nif_hash})
         # Fallback para dados antigos não migrados
         existing_query.append({"dados_pessoais.nif": sanitized_nif})
     if sanitized_email:
-        email_hash = generate_email_hash(sanitized_email)
         if email_hash:
             existing_query.append({"contacto.email_hash": email_hash})
         # Fallback para dados antigos não migrados
         existing_query.append({"contacto.email": sanitized_email.lower()})
 
     if existing_query:
-        existing = await db.clients.find_one({"$or": existing_query})
+        # ============================================================
+        # PACOTE 10 — PREVENÇÃO DE CLIENTES DUPLICADOS (409 Conflict)
+        # ============================================================
+        # O check existia mas devolvia 400 (Bad Request), o que não
+        # permite ao frontend distinguir "dados inválidos" de "cliente
+        # duplicado". Agora devolve 409 Conflict com payload estruturado
+        # (message + existing_client_id + existing_client_name +
+        # matched_fields) — os formulários de criação usam estes dados
+        # para mostrar um alerta visual bloqueante e oferecer a acção
+        # "Usar cliente existente".
+        # Clientes ELIMINADOS (soft-delete: is_deleted=True ou
+        # status="eliminado") NÃO bloqueiam — permite recriar um
+        # cliente eliminado por engano sem ter de o restaurar.
+        existing = await db.clients.find_one({
+            "$or": existing_query,
+            "is_deleted": {"$ne": True},
+            "status": {"$ne": "eliminado"},
+        })
         if existing:
+            existing_dados = existing.get("dados_pessoais") or {}
+            existing_contacto = existing.get("contacto") or {}
+            matched_fields = []
+            if (
+                (nif_hash and existing_dados.get("nif_hash") == nif_hash)
+                or (sanitized_nif and existing_dados.get("nif") == sanitized_nif)
+            ):
+                matched_fields.append("nif")
+            if (
+                (email_hash and existing_contacto.get("email_hash") == email_hash)
+                or (sanitized_email and existing_contacto.get("email") == sanitized_email.lower())
+            ):
+                matched_fields.append("email")
+            existing_name = existing.get("nome") or "Cliente existente"
             raise HTTPException(
-                status_code=400,
-                detail=f"Já existe um cliente com este NIF ou email: {existing.get('nome')}"
+                status_code=409,
+                detail={
+                    "message": f"Já existe um cliente com este NIF ou Email: {existing_name}",
+                    "existing_client_id": existing.get("id"),
+                    "existing_client_name": existing_name,
+                    "matched_fields": matched_fields or ["nif", "email"],
+                },
             )
     
     now = datetime.now(timezone.utc).isoformat()
@@ -339,6 +375,7 @@ async def run_create_client(
         # PACOTE BH — spawn com referência forte (services/background_tasks):
         # `asyncio.create_task` puro mantém apenas referência fraca e a task
         # podia ser recolhida pelo GC antes de enviar o email.
+        # PACOTE 10 — user_id explícito para o task_log do monitor global.
         from services.background_tasks import spawn_background_task
 
         spawn_background_task(_send_portal_welcome_email_safe(
@@ -346,6 +383,7 @@ async def run_create_client(
             client_name=sanitized_nome,
             portal_access_code=client.portal_access_code,
             client_id=client.id,
+            user_id=user.get("id"),
         ), name=f"portal-welcome-email:{client.id}")
 
     # Desencriptar para a resposta

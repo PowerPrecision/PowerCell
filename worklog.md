@@ -4236,3 +4236,99 @@ O primeiro `find_one` estendido do conftest aplicava projecções literalmente �
 ## Commit
 
 `Feat/Fix: Fix client S3 mapping, add smart auto-assignment guards, Undo Send email feature, Index toggle, and broad test data cleanup`
+
+## Iteração pacote-10 — Prevenção de duplicados, feedback de email falhado e monitor global (Set 2026)
+
+**Pedido**: 3 frentes de UX/observabilidade: (1) prevenção de clientes duplicados (409 NIF/Email + alerta visual bloqueante no frontend); (2) feedback visual de email de acesso não entregue (estado de entrega registado + badge/alerta crítico); (3) widget global "Processos em Segundo Plano" com tarefas pendentes/em execução/falhadas recentes do utilizador.
+
+### Backend
+
+- `services/client_crud.py` — check de duplicados 400→**409** com payload estruturado (message + existing_client_id + existing_client_name + matched_fields); soft-deleted (`is_deleted`/`status "eliminado"`) deixam de bloquear a recriação; sem índice único (upsert público/recriação gerariam hashes duplicados legítimos — decisão documentada).
+- **NOVO** `services/email_delivery_status.py` — duas camadas: `clients.portal_email_delivery` (sent/failed/retry_scheduled + last_attempt_at + error) e task_logs `EMAIL_SEND` user-scoped (user_id explícito ou lookup created_by→users); helpers begin/complete/fail/retry_scheduled, tudo best-effort.
+- `services/client_portal_email.py` — `deliver_registration_email` com `user_id`/`process_id` opcionais + lifecycle: sucesso→sent+completed; retry ARQ agendado→retry_scheduled (sem alerta; worker fecha o ciclo); falha total→failed. `_send_portal_welcome_email_safe` idem. Chamadores (`client_crud`, `process_create` via `send_portal_welcome_email_from_process`) passam user_id (+process_id).
+- `services/alerts.py` — `ALERT_TYPES["PORTAL_EMAIL_UNDELIVERED"]` + `check_portal_email_delivery_alert` (6º check de `get_process_alerts`): critical "Email de acesso não entregue" quando `portal_email_delivery.status == "failed"`, com recomendações.
+- `services/email_send_queue.py` — `attach_task_log_to_pending_record` (task_log EMAIL_SEND no enqueue e no modo legacy; task_log_id persistido no registo pending), `execute_pending_email_send` → processing→completed/failed, `cancel` → cancelled, `_mark_failed` propaga erro. `_update_task_log` best-effort.
+- `services/document_direct_upload.py` — `run_confirm_upload` cria task_log DOCUMENT_UPLOAD já concluído (s3_path/categoria no metadata).
+- `services/task_api_background.py` — **merge unificado no GET /tasks/active**: `_merge_task_logs_into_tasks` agrega `task_log_service.get_active_tasks(user_id)` aos background_jobs (dedup por task_id, contadores somados, ordem cronológica inversa); acknowledge/cancel roteiam por prefixo `task_`. Sem isto os task_logs NUNCA chegavam ao widget (o endpoint só lia background_jobs).
+- `services/db_indexes.py` — índices `idx_task_logs_user_status` e `idx_task_logs_cleanup` (polling 5s sem collection scan).
+- `worker/tasks.py` — docstring do send_registration_email_task actualizada (o ciclo de estado é fechado pelo deliver).
+
+### Frontend
+
+- `services/api.js` — errorMessage via `extractErrorMessage` (detail pode ser objecto); ramo 400+ respeita `config.skipErrorToast`; `createClient(data, config)`.
+- **NOVO** `utils/duplicateClient.js` + `components/shared/DuplicateClientAlert.jsx` (banner bloqueante partilhado) + `utils/duplicateClient.test.js` (8 testes).
+- `CreateClientModal.jsx`, `CreateProcessModal.jsx`, `SecondTitularCard.jsx` — skipErrorToast + parse 409 + banner bloqueante + submissão desactivada com erro activo + limpeza em onChange de NIF/Email + acção "Usar cliente existente" (excepto clientOnly).
+- `ProcessAlerts.js` — ícone `portal_email_undelivered: MailWarning`.
+- `ClientsPage.js`/`MyClientsPage.js` — pílula vermelha "Email de acesso não entregue" (mobile + desktop; defensivo no MyClients).
+- `TasksContext.js` — `failedCount` derivado no contexto.
+- `TasksDropdown.js` — renomeado "Processos em Segundo Plano"; grupos Em Execução/Falhadas recentes/Concluídas; trigger com AlertTriangle vermelho quando só há falhadas; descrição com contagens.
+
+### Testes / conftest
+
+- conftest (PACOTE 10): `find_one_and_update`, `__getitem__` (db[...] do task_log_service), dot-notation no matcher e no `$set`, comparadores `$gte/$gt/$lte/$lt`. Contratos históricos intactos.
+- `tests/unit/test_pacote10_ux_observability.py` — 22 testes (409×4, delivery status×3, alerta×3, lifecycle deliver×3, fila×5, merge /tasks/active×3, upload×1).
+- Lição: NIFs de teste não podem ser placeholders (sanitize_nif rejeita 123456789/000000000/111111111/999999999); datas de task_logs nos testes têm de ser dinâmicas (janela de 1h do get_active_tasks).
+
+## Validação
+
+- `pytest tests/unit -n 4` → **1244 passed, 0 falhas** (baseline 1222 + 22 novos).
+- flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas.
+- Frontend: `node --test` (utils+lib+hooks+queries+App) → **125 pass, 0 fail** (+8 novos); eslint limpo; `vite build` verde.
+- Sandbox sem Mongo: warnings Connection refused são comportamento conhecido (Pacote 5).
+
+## Commit
+
+`Feat: Add duplicate client prevention, email failure UI feedback, and global background tasks monitor`
+
+## Iteração pacote-11 — UX Masterclass: no-hardcoding, emails/RGPD, navegação e soft-delete (Set 2026)
+
+**Pedido**: 4 eixos: (1) desacoplamento rigoroso de fases/status (Kanban dinâmico + transições delegadas ao motor de Automação); (2) tipografia do EmailViewerModal + logo da empresa nos emails base + fix do bold excessivo do RGPD; (3) link para cliente, aviso de permissões localizado à tab Documentos, dicionário PT para enums `fonte`, cards Webmail clicáveis; (4) protecção soft-delete (inputs disabled) + banner Restaurar + cleanup com companies e cascade forte.
+
+### Eixo 1 — Backend
+
+- **Apagado** `services/process_kanban.py` (KANBAN_COLUMNS legado, 0 imports no repo).
+- **NOVO** `services/workflow_lookup.py`: `get_first_workflow_status` / `get_flagged_workflow_status_names` / `get_inactive_workflow_status_names` / `ensure_workflow_purpose_flags_backfill` (semeadura idempotente das flags de propósito no arranque do server.py — installs pré-P11 ficam dinâmicas sem perda de semântica).
+- `process_kanban_move.py`: `resolve_workflow_purpose_flags` → async, fallbacks resolvidos da BD (nada de tuplas hardcoded); `run_move_process_kanban` awaited; trigger `process_status_changed` delegado ao workflow_engine (fire-and-forget).
+- `process_indexing.py`: default "clientes_espera" removido (1ª fase da pipeline dinâmica); trigger `process_status_changed` no salto pós-indexação.
+- `restore_api_process.py`: fallback previous_status → 1ª fase activa dinâmica.
+- `process_create.py`: trigger `process_created` pós-insert; `document_direct_upload.py`: trigger `document_uploaded` pós-confirm (ambos try/except não fatais).
+- `seed.py`: 14 fases nascem com flags de propósito + `is_active` correcto.
+- Decisão: taxonomias de FILTRO (`process_status.py`, `TERMINAL_STATUSES`) ficam — são categorias de negócio testadas, não fases de Kanban.
+
+### Eixo 2 — Backend
+
+- **NOVO** `services/email_branding.py` (resolve_company_logo_url: system_config → companies, chaves S3 → presigned 7d; build_email_header_logo_html). Injectado em `get_base_template(logo_url)` (5 templates base), welcome (`admin_users.py`), convite Portal (`public_registration.py`), magic link (`portal_magic_link.py`, novo param `logo_html`).
+- `rgpd_pdf.py`: bug do bold total — o parágrafo inteiro (título + linhas de dados) era testado como heading; agora só a 1ª linha de parágrafos de linha única, e `_is_section_heading` rejeita > 100 chars.
+
+### Eixo 4 — Backend
+
+- **NOVO** `services/restore_api_client.py` + `POST /api/clients/{id}/restore` (roles admin/ceo/diretor/administrativo): fecha a assimetria do client_delete (anunciava o endpoint que não existia). Restaura cliente (clients|processes) + cascata processos/documentos/tarefas/RGPD + auditoria `client_restored`; `previous_status` → fallback dinâmico.
+- `scripts/cleanup_prod_test_data.py`: companies no scan (name/email/smtp/imap); cascade forte — leads por client_id (query estendida) + user_company_roles de users/empresas de teste (hard-delete em ambos os modos); companies soft/hard; relatório/dry-run actualizados.
+
+### Frontend
+
+- `utils/workflowStatuses.js`: KNOWN_PROCESS_STATUSES REMOVIDA — dropdown 100% dinâmica (fallback injecta apenas o currentStatus).
+- `EmailViewerModal.js`: `buildPlainTextEmailHtml` (plain-text → `<p>`); corpo sempre `.email-content` (estilos novos no index.css: margens, interlinha, listas, tables, blockquote, pre).
+- `ProcessDetails.js`: nome do cliente → `Link` /cliente/:id (header + `headerClientId`); `isDeletedProcess` (is_deleted||deleted||eliminado*) força `isViewMode` e entra em `isInactiveProcess` (botões disabled); banner vermelho "Restaurar" (restoreProcess + spinner + refetch); banner terminal oculto quando eliminado.
+- `ClientDetailPage.js`: `isDeletedClient` — desactiva Editar/ContactRows/inputs do modal/Guardar (com guard no handleEditSave); banner "Restaurar" → `restoreClient` (novo em api.js); fonte com `formatFonteLabel`.
+- `ClientContextCard.jsx`: ContactLine com `internalLink`/`title`; titular navega para a ficha (prop `clientId`).
+- `S3FileManager.js`: 403 do fetch de ficheiros → estado `permissionDenied` → Card âmbar localizado à tab Documentos (sem toast global; "Tentar novamente").
+- **NOVO** `utils/fonteLabels.js` (FONTE_LABELS + formatFonteLabel com humanize fallback) — aplicado em ClientsPage (badge+Excel), MyClientsPage (Excel), ClientDetailPage, ClientDetailsModal.
+- `EmailAccountsCard.jsx`: `<li>` clicável (role=button, Enter/Espaço, hover) → openEdit; stopPropagation nos 3 botões.
+
+### Testes / conftest
+
+- conftest: `delete_many` + `$nin` no matcher. Novos: test_workflow_lookup (11), test_restore_api_client (7), test_cleanup_prod_test_data_p11 (8), test_email_branding_and_rgpd_bold (13); reescritos: test_process_kanban_move (async dinâmico, 8), test_restore_extraction_helpers (módulo/rota nova).
+- Frontend: `utils/fonteLabels.test.js` (5) + `utils/workflowStatuses.test.js` (6).
+- Nota: `src/pages/processDetails/*.test.js` (3 ficheiros) estão quebrados PRÉ-EXISTENTEMENTE (sintaxe Jest sem runner + imports sem extensão — nunca correram no node --test; fora do âmbito do pacote).
+
+## Validação
+
+- `pytest tests/unit -n 4` → **1280 passed, 0 falhas** (baseline 1244 + 36; zero regressões).
+- flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas.
+- Frontend: `node --test` (utils+lib+hooks+contexts+App) → **133 pass, 0 fail** (+11 novos); `vite build` verde.
+- Sandbox sem Mongo: warnings Connection refused são comportamento conhecido.
+
+## Commit
+
+`Refactor: Massive UX polish, UI soft-delete protection, dynamic process phases, and cascade test data cleanup`

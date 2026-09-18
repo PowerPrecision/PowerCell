@@ -52,6 +52,8 @@ import {
   // PACOTE DG — removidos ícones `CheckCircle` e `XCircle` (dropdown de Status removido).
   Flame,
   Download,
+  // PACOTE 10 — indicador de email de acesso não entregue.
+  MailWarning,
 } from "lucide-react";
 import {
   Select,
@@ -66,6 +68,7 @@ import CreateProcessModal from "../components/CreateProcessModal";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { getExportPermission } from "../services/api";
 import ClientFilters from "../components/filters/ClientFilters";
+import { formatFonteLabel } from "../utils/fonteLabels";
 
 const API_URL = (process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com") + "/api";
 
@@ -355,7 +358,7 @@ export default function ClientsPage() {
         'NIF Titular 2': c.titular2_data?.nif || c.titular2_nif || '',
         'Email Titular 2': c.titular2_data?.email || c.titular2_email || '',
         'Telefone Titular 2': c.titular2_data?.phone || c.titular2_phone || '',
-        'Fonte': c.fonte || '',
+        'Fonte': c.fonte ? formatFonteLabel(c.fonte) : '',
         'Data de Registo': c.created_at || '',
       }));
       const ws = XLSX.utils.json_to_sheet(rows);
@@ -611,6 +614,18 @@ export default function ClientsPage() {
                             <Flame className="h-2.5 w-2.5" /> Alta
                           </Badge>
                         )}
+                        {/* PACOTE 10 — email de acesso ao Portal não entregue
+                            (badge vermelho de erro: cliente sem acesso ao Portal). */}
+                        {client.portal_email_delivery?.status === "failed" && (
+                          <Badge
+                            variant="outline"
+                            data-testid={`client-email-failed-${client.id}`}
+                            className="bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-300 dark:border-red-800 text-[9px] px-1.5 py-0 h-4 gap-0.5"
+                            title={client.portal_email_delivery?.error || "Email de acesso não entregue"}
+                          >
+                            <MailWarning className="h-2.5 w-2.5" /> Email falhado
+                          </Badge>
+                        )}
                         {/* PACOTE DG — badge "Fase" substituído por badge "Processos" (total de processos do cliente). */}
                         <Badge variant="secondary" className="gap-1 text-[10px]">
                           <FileText className="h-3 w-3" />
@@ -729,11 +744,23 @@ export default function ClientsPage() {
                                   <Flame className="h-3 w-3" /> Prioridade Alta
                                 </Badge>
                               )}
+                              {/* PACOTE 10 — email de acesso ao Portal não entregue
+                                  (badge vermelho de erro na linha do cliente). */}
+                              {client.portal_email_delivery?.status === "failed" && (
+                                <Badge
+                                  variant="outline"
+                                  data-testid={`client-email-failed-${client.id}`}
+                                  className="bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-300 dark:border-red-800 text-[10px] px-2 py-0 h-5 gap-1"
+                                  title={client.portal_email_delivery?.error || "Email de acesso não entregue"}
+                                >
+                                  <MailWarning className="h-3 w-3" /> Email de acesso não entregue
+                                </Badge>
+                              )}
                               {/* PACOTE DG — removido badge "Inativo" (clientes não têm estado activo/inactivo). */}
                             </div>
                             {client.fonte && (
                               <Badge variant="outline" className="text-xs mt-1">
-                                {client.fonte}
+                                {formatFonteLabel(client.fonte)}
                               </Badge>
                             )}
                           </div>

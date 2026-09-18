@@ -13,16 +13,17 @@ import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { Button } from "./ui/button";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "./ui/collapsible";
-import { 
-  AlertTriangle, 
-  Clock, 
-  FileText, 
-  Star, 
-  Calendar, 
-  ChevronDown, 
+import {
+  AlertTriangle,
+  Clock,
+  FileText,
+  Star,
+  Calendar,
+  ChevronDown,
   ChevronUp,
   CheckCircle,
-  Loader2
+  Loader2,
+  MailWarning
 } from "lucide-react";
 import { getProcessAlerts } from "../services/api";
 
@@ -32,6 +33,9 @@ const alertIcons = {
   document_expiry: FileText,
   property_docs_check: FileText,
   deed_reminder: Calendar,
+  // PACOTE 10 — email de acesso ao Portal não entregue (falha definitiva
+  // registada pelo backend em clients.portal_email_delivery).
+  portal_email_undelivered: MailWarning,
   default: AlertTriangle
 };
 

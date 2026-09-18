@@ -349,10 +349,24 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
                 f"insira o seguinte Código de Acesso: {_portal_access_code_dc}\n"
             )
 
+        # PACOTE 11 (Eixo 2) — injectar o logo da empresa no header do
+        # email de convite do Portal (company.logo_url / system_config).
+        try:
+            from services.email_branding import (
+                build_email_header_logo_html,
+                resolve_company_logo_url,
+            )
+            _invite_logo_html = build_email_header_logo_html(
+                await resolve_company_logo_url(), alt="Power Precision"
+            )
+        except Exception as _logo_err:  # pragma: no cover — degradação graciosa
+            logger.debug(f"Logo indisponível para o convite do Portal: {_logo_err}")
+            _invite_logo_html = ""
+
         html_body = f"""
         <div style="font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px;">
-            <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0;">
-                <h1 style="margin: 0; font-size: 20px;">Bem-vindo ao seu Portal do Cliente</h1>
+            <div style="background: #0F766E; color: white; padding: 20px; border-radius: 8px 8px 0 0; text-align: center;">
+                {_invite_logo_html}<h1 style="margin: 0; font-size: 20px;">Bem-vindo ao seu Portal do Cliente</h1>
             </div>
             <div style="padding: 30px; border: 1px solid #e2e8f0; border-top: none; border-radius: 0 0 8px 8px;">
                 <p style="font-size: 16px; color: #1e293b;">Olá {clean_name},</p>

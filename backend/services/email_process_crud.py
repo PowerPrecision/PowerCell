@@ -768,8 +768,16 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
         # Modo legacy — envio imediato (sem janela de undo). Reutiliza o
         # mesmo executor do caminho diferido (claim → anexos → envio →
         # limpeza) para manter UM único fluxo de entrega.
-        from services.email_send_queue import _pending_collection
+        from services.email_send_queue import (
+            _pending_collection,
+            attach_task_log_to_pending_record,
+        )
 
+        # PACOTE 10 — task_log do monitor global também no modo legacy
+        # (o envio aparece no widget com estado Loading → Success/Failed).
+        legacy_task_log_id = await attach_task_log_to_pending_record(record)
+        if legacy_task_log_id:
+            record["task_log_id"] = legacy_task_log_id
         await _pending_collection().insert_one(dict(record))
         result = await execute_pending_email_send(record["id"])
         if not result.get("success"):

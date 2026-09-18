@@ -298,3 +298,55 @@ O backend (Pacote 9) agenda o envio real após a janela de undo (`POST /api/emai
 - **Visibilidade**: apenas perfis de gestão/indexação — `INDEX_TOGGLE_ROLES = ["indexacao", "admin", "ceo"]` (a mesma regra do backend `assert_mark_indexed_permission`), avaliada com `effectiveRole` (perfil ACTIVO) e fallback `hasAnyRole(user, ...)` (padrão do Kanban — ver `ProcessDetailsModal`). Não usar apenas `user.role` (primário do JWT): multi-perfis ficariam sem o toggle.
 - **Acção**: `setProcessIndexed(processId, isIndexed)` (`services/api.js`) → `POST /processes/{id}/set-indexed {"is_indexed": bool}`. Optimistic update local (`setProcess`) + rollback em erro + `fetchData()` (invalida o bundle de queries do processo). O ON notifica a equipa (fluxo canónico do mark-indexed no backend); o OFF reverte o flag sem mexer na fase.
 - Estado ocupado: `indexToggleBusy` desactiva o Switch e troca o label por um `Loader2` spinner — feedback imediato, sem cliques duplos.
+
+## 16. Prevenção de duplicados, badge de email falhado e monitor "Processos em Segundo Plano" (Pacote 10)
+
+### Erro 409 de cliente duplicado — alerta visual BLOQUEANTE
+
+O backend devolve `409` com `detail` ESTRUTURADO (`{message, existing_client_id, existing_client_name, matched_fields}`). O contrato no frontend:
+
+- **Nunca** fazer parse ad-hoc do 409 nos componentes: usar `utils/duplicateClient.js` (`parseDuplicateClientError(err)` → `{message, existing_client_id, existing_client_name, matched_fields}` | null; `isDuplicateClientError`; `duplicateFieldLabel`). Reconhece também o 400 legacy (string "Já existe um cliente…") para robustez de rollout.
+- **Banner bloqueante partilhado**: `components/shared/DuplicateClientAlert.jsx` (banner vermelho `role="alert"` com ícone `AlertTriangle`, nome do cliente existente, campo(s) em conflito e acção "Usar cliente existente" quando aplicável). Nunca desenhar o alerta inline duplicado — sempre este componente.
+- **Integração canónica** (CreateClientModal, CreateProcessModal, SecondTitularCard):
+  1. chamar `createClient(payload, { skipErrorToast: true })` — o 409 é tratado pelo FORMULÁRIO (banner persistente), não pelo toast genérico do interceptor (evita dupla notificação);
+  2. no catch: `const dup = parseDuplicateClientError(err); if (dup) { setDuplicateError(dup); return; }` — só erros não-duplicados vão para toast;
+  3. **bloquear a submissão** enquanto `duplicateError` está activo (`canSubmit`/`disabled` — impede clique-clique-clique); alterar NIF/Email **limpa o estado** (onChange);
+  4. acção "Usar cliente existente": selecciona `{id, nome}` sintético via `handleSelectExistingClient`/`handleSelectClient` + `setClientMode('existing')` e limpa o erro. Em `clientOnly` o banner NÃO oferece a acção (não há processo).
+- `services/api.js`: o interceptor de response deriva `errorMessage` com `extractErrorMessage` (o detail pode ser OBJECTO — passar objectos ao `description` do sonner rebenta o render); o ramo 400+ respeita `config.skipErrorToast` (mesma flag dos 500+); `createClient(data, config)` aceita config axios.
+
+### Indicador de "Email de acesso não entregue"
+
+- **Detalhes do Processo**: o card `ProcessAlerts` (GET `/alerts/process/{id}`) renderiza o novo alerta `portal_email_undelivered` (priority `critical`) automaticamente — ícone `MailWarning` no mapa `alertIcons`. NÃO reinventar badge no header quando o alerta já vive no card.
+- **Listas de clientes**: pílula vermelha `MailWarning + "Email de acesso não entregue"` condicionada a `client.portal_email_delivery?.status === "failed"` (campo novo devolvido pelo GET /clients; MyClientsPage usa acesso defensivo — a vista agregada pode não incluir o campo). Cores canónicas de erro: `bg-red-50 dark:bg-red-950/30 text-red-700 dark:text-red-300 border-red-300 dark:border-red-800`. O `title` do badge mostra o erro da entrega.
+
+### Widget global "Processos em Segundo Plano" (topbar)
+
+- **Não criar widgets novos**: o `TasksDropdown` (Sheet ao lado das notificações) É o monitor global — renomeado e evoluído. Fonte única: `TasksContext` (polling 5s/30s + circuit breaker sobre `GET /tasks/active`, que agora agrega task_logs + background_jobs no backend).
+- Grupos do painel: **Em Execução** (pending/processing, spinner), **Falhadas recentes** (failed !ack — grupo próprio vermelho, o sinal de "precisa de atenção"), **Concluídas** (completed !ack). O trigger troca o ícone: `Loader2` (a executar) → `AlertTriangle` vermelho (só falhadas) → `Activity`.
+- `failedCount` derivado no `TasksContext` (novo campo do contexto) — não recalcular nos consumidores.
+- Novos task_types visíveis sem alteração do frontend: `EMAIL_SEND` (fila Undo Send + email de acesso ao Portal) e `DOCUMENT_UPLOAD` (upload confirmado) — os ícones/labels já estavam mapeados em `TaskTypeIcons`/`TaskTypeLabels`.
+- Acknowledge/Cancel do frontend continuam a chamar `/tasks/{id}/acknowledge` e `/tasks/{id}/cancel` — o backend roteia por prefixo `task_` (task_logs) vs uuid (background_jobs); zero mudanças nos consumidores.
+
+## 17. UX Masterclass — dropdowns dinâmicas, tipografia de email, navegação e soft-delete (Pacote 11)
+
+### Dropdown de estado: 100% dinâmica (Strict No-Hardcoding)
+
+- `utils/workflowStatuses.js` — a lista estática `KNOWN_PROCESS_STATUSES` foi **REMOVIDA**. `buildStatusOptions(workflowStatuses, currentStatus)` usa apenas a lista da API `/admin/workflow-statuses`; quando o `status` actual não vem na lista (API falhou / fase removida pelo admin), injecta-o como opção única `_isFallback` com `formatStatusLabel` — **nunca** acrescentar fases cravadas em código a um select/badge/dropdown. `formatStatusLabel` continua disponível para labels.
+- Fonte única de verdade: a colecção `workflow_statuses` (a mesma do Kanban). Se um agrupamento semântico for preciso no futuro (ex.: funnels de dashboard), expor do backend (flags na colecção), nunca listas frontend.
+
+### EmailViewerModal — tipografia do corpo (prose)
+
+- O corpo do email (HTML sanitizado OU texto simples) renderiza SEMPRE no div `.email-content` dentro do container `prose prose-sm dark:prose-invert`. Os estilos vivem em `src/index.css` (secção "PACOTE 11"): parágrafos com `margin`, `line-height 1.7`, listas/headings/tables/blockquote/pre formatados, `word-break`.
+- Texto simples é convertido em `<p>` reais por `buildPlainTextEmailHtml` (bloco `\n\n` → parágrafo; `\n` → `<br/>`; escape de HTML) — o `<pre>` denso monospace está PROIBIDO para corpos de email. Sanitização de HTML continua a cargo de `utils/sanitize.js::sanitizeEmailHtml`.
+
+### Navegação e ficha de processos
+
+- **Nome do cliente clicável**: no `ProcessDetails` (header, `PageHeader` description) e no `ClientContextCard` (ContactLine "Titular") o nome navega para `/cliente/:id` (react-router `Link`). O ID resolve por `clientData?.id || clientId || process?.client_id`. ContactLine ganhou props `internalLink`/`title` — links externos (mailto/tel) mantêm `<a>`.
+- **Aviso de permissões de Documentos LOCALIZADO à tab**: o `S3FileManager` captura o 403 do `GET /documents/client/{id}/files` (guard `assert_can_view_process_documents`) num estado `permissionDenied` e renderiza um Card âmbar próprio (`data-testid="s3-file-manager-permission-denied"`) com "Tentar novamente" — SEM toast global e SEM bloquear a vista do processo. O guard 403 do processo em si (página inteira) mantém-se — é de processo, não de documentos.
+- **Dicionário de enums `fonte`**: usar `utils/fonteLabels.js::formatFonteLabel(fonte)` (nunca mostrar `client.fonte` cru). Mapeia os valores técnicos do backend (`staff_created`, `public_form`, `auto_created`, `segundo_titular`, ...) e legados (Manual/Website/trello/...) para PT-PT; valores desconhecidos são humanizados. Aplicado em ClientsPage (badge + Excel), MyClientsPage (Excel), ClientDetailPage e ClientDetailsModal.
+- **Cards de contas Webmail clicáveis** (`EmailAccountsCard.jsx`): o `<li>` tem `role="button"`, `tabIndex`, handler Enter/Espaço e `onClick → openEdit(account)` (Caixa Geral excluída); botões internos usam `e.stopPropagation()` para não disparar a edição ao remover/definir principal.
+
+### Protecção Soft-Delete + Banner de Restauro (ProcessDetails e ClientDetailPage)
+
+- Derivar SEMPRE um flag de eliminação e usá-lo em TODOS os inputs/botões de edição: `isDeletedProcess` (`process.is_deleted || process.deleted || status eliminado(s)`) em ProcessDetails; `isDeletedClient` em ClientDetailPage. Em ProcessDetails força `isViewMode` (read-only sem excepção de role) e alimenta `isInactiveProcess` (botões de acção disabled). Em ClientDetailPage desactiva o botão "Editar Cliente", as `ContactRow` inline (`editable={!isDeletedClient}`), os inputs do modal e o Guardar (com guard extra no `handleEditSave` — nunca gravar num registo eliminado).
+- **Banner de restauro no topo** (vermelho, `role="alert"`, ícone `Trash2` + botão `RotateCcw "Restaurar"` com spinner próprio): ProcessDetails → `restoreProcess(id)` (api.js, já existia); ClientDetailPage → `restoreClient(id)` (NOVO em api.js → `POST /clients/{id}/restore`). Após sucesso: toast + refetch (`fetchData()`/`fetchClientData()`). O banner de estado terminal (âmbar) do ProcessDetails fica oculto quando o de eliminado está visível (evita dupla advertência).

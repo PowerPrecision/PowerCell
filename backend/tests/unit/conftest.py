@@ -99,6 +99,34 @@ class FakeAsyncCollection:
         self.docs: list = []
 
     @staticmethod
+    def _lookup_path(doc: dict, path: str):
+        """Resolução de dot-notation (PACOTE 10 — queries como
+        ``contacto.email_hash``/``dados_pessoais.nif_hash`` usadas pelo
+        check de duplicados; o Motor real resolve paths)."""
+        if "." not in path:
+            return doc.get(path)
+        current = doc
+        for part in path.split("."):
+            if not isinstance(current, dict):
+                return None
+            current = current.get(part)
+        return current
+
+    @staticmethod
+    def _set_path(doc: dict, path: str, value) -> None:
+        """Aplica ``$set`` com dot-notation (paths aninhados)."""
+        if "." not in path:
+            doc[path] = value
+            return
+        parts = path.split(".")
+        current = doc
+        for part in parts[:-1]:
+            if not isinstance(current.get(part), dict):
+                current[part] = {}
+            current = current[part]
+        current[parts[-1]] = value
+
+    @staticmethod
     def _matches(doc: dict, query: dict) -> bool:
         """Matcher: igualdade, ``$ne``, ``$in``, ``$regex``, ``$exists``,
         ``$or``/``$and`` recursivos (PACOTE 8 — os filtros do Webmail usam
@@ -117,7 +145,7 @@ class FakeAsyncCollection:
                 if not all(FakeAsyncCollection._matches(doc, q) for q in expected):
                     return False
                 continue
-            value = doc.get(key)
+            value = FakeAsyncCollection._lookup_path(doc, key)
             if isinstance(expected, dict):
                 matched_operator = False
                 if "$ne" in expected:
@@ -128,11 +156,36 @@ class FakeAsyncCollection:
                     matched_operator = True
                     if value not in expected["$in"]:
                         return False
+                # PACOTE 11 — $nin (queries como {"logo_url": {"$nin": [None, ""]}})
+                if "$nin" in expected:
+                    matched_operator = True
+                    if value in expected["$nin"]:
+                        return False
                 if "$exists" in expected:
                     matched_operator = True
                     exists = key in doc
                     if bool(expected["$exists"]) is not exists:
                         return False
+                # PACOTE 10 — comparações ($gte/$gt/$lte/$lt) para datas
+                # ISO e números (get_active_tasks filtra completed_at
+                # >= cutoff de 1h; comparação lexicográfica ISO é fiel).
+                for op in ("$gte", "$gt", "$lte", "$lt"):
+                    if op in expected:
+                        matched_operator = True
+                        threshold = expected[op]
+                        if value is None or isinstance(value, dict) or isinstance(threshold, dict):
+                            return False
+                        try:
+                            if op == "$gte" and not value >= threshold:
+                                return False
+                            if op == "$gt" and not value > threshold:
+                                return False
+                            if op == "$lte" and not value <= threshold:
+                                return False
+                            if op == "$lt" and not value < threshold:
+                                return False
+                        except TypeError:
+                            return False
                 if "$regex" in expected:
                     matched_operator = True
                     pattern = expected["$regex"]
@@ -189,10 +242,16 @@ class FakeAsyncCollection:
                 doc[field] = target
             target.extend(values)
 
+    @staticmethod
+    def _apply_set(doc: dict, set_ops: dict) -> None:
+        """Aplica ``$set`` com suporte a dot-notation (PACOTE 10)."""
+        for path, value in set_ops.items():
+            FakeAsyncCollection._set_path(doc, path, value)
+
     async def update_one(self, query: dict, update: dict, upsert: bool = False):
         matched = [doc for doc in self.docs if self._matches(doc, query)]
         for doc in matched:
-            doc.update(update.get("$set", {}))
+            self._apply_set(doc, update.get("$set", {}))
             push_ops = update.get("$push")
             if push_ops:
                 self._apply_push(doc, push_ops)
@@ -200,7 +259,7 @@ class FakeAsyncCollection:
             return MagicMock(matched_count=len(matched), modified_count=len(matched))
         if upsert:
             new_doc = dict(query)
-            new_doc.update(update.get("$set", {}))
+            self._apply_set(new_doc, update.get("$set", {}))
             push_ops = update.get("$push")
             if push_ops:
                 self._apply_push(new_doc, push_ops)
@@ -213,7 +272,33 @@ class FakeAsyncCollection:
             self.docs.append(dict(doc))
         return MagicMock(inserted_ids=["fake-inserted-id"] * len(docs))
 
+    async def find_one_and_update(self, query: dict, update: dict, return_document: bool = False):
+        """``find_one_and_update`` (PACOTE 10 — usado por
+        ``task_log_service.update_task`` para as transições do monitor
+        global de tarefas).
+
+        Aplica ``$set``/``$push`` ao PRIMEIRO match e devolve o doc
+        actualizado (o Mongo real devolve before/after conforme
+        ``return_document``; o serviço espera o doc actualizado —
+        ``return_document=True`` é aceito e ignorado).
+        """
+        for doc in self.docs:
+            if self._matches(doc, query):
+                self._apply_set(doc, update.get("$set", {}))
+                push_ops = update.get("$push")
+                if push_ops:
+                    self._apply_push(doc, push_ops)
+                return dict(doc)
+        return None
+
     async def delete_one(self, query: dict):
+        before = len(self.docs)
+        self.docs = [doc for doc in self.docs if not self._matches(doc, query)]
+        return MagicMock(deleted_count=before - len(self.docs))
+
+    async def delete_many(self, query: dict):
+        """PACOTE 11 — ``delete_many`` (usado por scripts de limpeza
+        como cleanup_prod_test_data.py; suportado pelo Motor real)."""
         before = len(self.docs)
         self.docs = [doc for doc in self.docs if not self._matches(doc, query)]
         return MagicMock(deleted_count=before - len(self.docs))
@@ -249,6 +334,11 @@ class FakeAsyncDatabase:
         if name not in self._collections:
             self._collections[name] = FakeAsyncCollection()
         return self._collections[name]
+
+    def __getitem__(self, name: str) -> FakeAsyncCollection:
+        """Acesso por subscript (PACOTE 10 — ``db[TASK_LOG_COLLECTION]``
+        usado por task_log_service; Motor/DatabaseProxy suportam ambos)."""
+        return self.__getattr__(name)
 
     def collection(self, name: str) -> FakeAsyncCollection:
         """Acesso explícito a uma coleção (para asserções diretas nos testes)."""

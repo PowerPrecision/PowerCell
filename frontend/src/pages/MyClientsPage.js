@@ -27,13 +27,15 @@ import {
 import { getMyClients, getWorkflowStatuses, getExportPermission } from "../services/api";
 import {
   Search, Eye, CheckCircle2, AlertTriangle, FileText,
-  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download, Trash2, Shield
+  Clock, Users, Building2, Phone, Mail, Calendar, Filter, X, Plus, ArrowUpDown, Download, Trash2, Shield,
+  MailWarning,
 } from "lucide-react";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 // PACOTE CP — ClientDetailsModal reutilizável
 import ClientDetailsModal from "../components/ClientDetailsModal";
 import { toast } from "sonner";
 import * as XLSX from 'xlsx';
+import { formatFonteLabel } from "../utils/fonteLabels";
 import { pt } from "date-fns/locale";
 import { safeFormat } from "../lib/utils";
 import { useAuth } from "../contexts/AuthContext";
@@ -254,7 +256,7 @@ const MyClientsPage = () => {
         'NIF Titular 2': c.titular2_data?.nif || c.titular2_nif || '',
         'Email Titular 2': c.titular2_data?.email || c.titular2_email || '',
         'Telefone Titular 2': c.titular2_data?.phone || c.titular2_phone || '',
-        'Fonte': c.fonte || '',
+        'Fonte': c.fonte ? formatFonteLabel(c.fonte) : '',
         'Fase': c.status_label || (c.status || '').replace(/_/g, ' '),
         'Valor Imóvel': c.real_estate_data?.valor_imovel || c.property_value || '',
         'Data de Registo': c.created_at || '',
@@ -570,6 +572,19 @@ const MyClientsPage = () => {
                               {TERMINAL_STATUSES.includes(client.status) && (
                                 <Badge variant="outline" className="text-amber-700 border-amber-300 bg-amber-50 text-[10px]">
                                   {client.status_label || "Inativo"}
+                                </Badge>
+                              )}
+                              {/* PACOTE 10 — email de acesso ao Portal não entregue
+                                  (badge vermelho de erro; campo defensivo — só
+                                  renderiza quando a vista agrega o estado). */}
+                              {client.portal_email_delivery?.status === "failed" && (
+                                <Badge
+                                  variant="outline"
+                                  data-testid={`client-email-failed-${client.id}`}
+                                  className="text-red-700 border-red-300 bg-red-50 text-[10px] gap-1"
+                                  title={client.portal_email_delivery?.error || "Email de acesso não entregue"}
+                                >
+                                  <MailWarning className="h-3 w-3" /> Email de acesso não entregue
                                 </Badge>
                               )}
                             </div>

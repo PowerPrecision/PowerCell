@@ -408,10 +408,18 @@ export function TasksProvider({ children }) {
   // NOTE: lastFetchTime is intentionally EXCLUDED from the context value
   // to prevent all consumers from re-rendering on every poll cycle (every 5-30s).
   // It was only used for debugging and is not needed by any consumer component.
+  // PACOTE 10 — failedCount: falhadas recentes não confirmadas (grupo
+  // próprio no widget "Processos em Segundo Plano").
+  const failedCount = useMemo(
+    () => tasks.filter(t => t.status === TaskStatus.FAILED && !t.acknowledged_at).length,
+    [tasks]
+  );
+
   const value = useMemo(() => ({
     tasks,
     activeCount,
     completedUnacknowledged,
+    failedCount,
     isLoading,
     fetchActiveTasks,
     acknowledgeTask,
@@ -420,7 +428,7 @@ export function TasksProvider({ children }) {
     TaskTypes,
     TaskStatus,
     TaskTypeLabels,
-  }), [tasks, activeCount, completedUnacknowledged, isLoading, fetchActiveTasks, acknowledgeTask, cancelTask, getTaskDetails]);
+  }), [tasks, activeCount, completedUnacknowledged, failedCount, isLoading, fetchActiveTasks, acknowledgeTask, cancelTask, getTaskDetails]);
   
   return (
     <TasksContext.Provider value={value}>

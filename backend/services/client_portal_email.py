@@ -30,6 +30,8 @@ async def deliver_registration_email(
     client_name: str,
     portal_access_code: str = None,
     client_id: str = None,
+    user_id: str = None,
+    process_id: str = None,
 ) -> bool:
     """
     Entrega o email de boas-vindas/acesso ao Portal do Cliente.
@@ -40,12 +42,34 @@ async def deliver_registration_email(
     2. Se o envio directo falhar, enfileira na task queue (ARQ) para
        retry posterior pelo worker — best-effort, nunca bloqueia.
 
+    PACOTE 10 — estado de entrega visível: o resultado de CADA tentativa
+    fica registado no doc do cliente (``portal_email_delivery``) e no
+    monitor global de tarefas (``task_logs`` — widget "Processos em
+    Segundo Plano" na topbar):
+    - sucesso → task_log completed + estado ``sent``;
+    - retry enfileirado → estado ``retry_scheduled`` (task_log continua
+      em processamento; o worker ARQ fecha o ciclo ao consumir o job);
+    - falha definitiva (sem job de retry) → task_log failed + estado
+      ``failed`` — dispara o alerta crítico "Email de acesso não
+      entregue" nos Detalhes do Processo (services/alerts.py).
+
     Returns:
         True se o email foi enviado com sucesso nesta chamada.
     """
     from services.email import send_registration_confirmation
+    from services.email_delivery_status import (
+        begin_portal_email_task,
+        complete_portal_email_task,
+        fail_portal_email_task,
+        mark_portal_email_retry_scheduled,
+    )
+
+    task_id = await begin_portal_email_task(
+        client_id, client_email, user_id=user_id, process_id=process_id,
+    )
 
     sent_direct = False
+    direct_error = None
     try:
         sent_direct = await send_registration_confirmation(
             client_email=client_email,
@@ -58,12 +82,14 @@ async def deliver_registration_email(
                 f"para {client_email} (client_id={client_id})"
             )
         else:
+            direct_error = "Envio directo devolveu falha (ver logs [EMAIL])."
             logger.error(
                 f"[PORTAL-EMAIL] Falha ao enviar email de boas-vindas para "
                 f"{client_email} (client_id={client_id}) — ver logs de "
                 f"[EMAIL] acima para a razão."
             )
     except Exception as direct_err:
+        direct_error = f"Excepção no envio directo: {direct_err}"
         logger.error(
             f"[PORTAL-EMAIL] Erro no envio directo para {client_email} "
             f"(client_id={client_id}): {direct_err}",
@@ -71,13 +97,15 @@ async def deliver_registration_email(
         )
 
     if sent_direct:
+        await complete_portal_email_task(task_id, client_id)
         return True
 
     # ── Retry de última esperança: enfileirar na task queue ──────────
     # A task `send_registration_email_task` está registada no worker ARQ
     # (worker/config.py) desde o PACOTE BH — quando o ARQ worker estiver
     # activo, o retry será processado; sem Redis, o enqueue devolve None
-    # e ficamos apenas com o log de erro acima.
+    # e a falha fica DEFINITIVA (registada como tal — PACOTE 10).
+    retry_enqueued = False
     try:
         from services.task_queue import task_queue
 
@@ -87,6 +115,7 @@ async def deliver_registration_email(
             portal_access_code=portal_access_code,
         )
         if job_id:
+            retry_enqueued = True
             logger.info(
                 f"[PORTAL-EMAIL] Email de boas-vindas para {client_email} "
                 f"(client_id={client_id}) enfileirado para retry "
@@ -97,6 +126,17 @@ async def deliver_registration_email(
             f"[PORTAL-EMAIL] Task Queue indisponível para retry do cliente "
             f"{client_id}: {tq_err}"
         )
+
+    if retry_enqueued:
+        # Entrega ainda possível via worker — estado intermédio (sem
+        # alerta crítico); o worker fecha o ciclo (completed/failed).
+        await mark_portal_email_retry_scheduled(task_id, client_id)
+    else:
+        # PACOTE 10 — falha definitiva: nenhum canal conseguiu sequer
+        # AGENDAR a entrega. Registada no cliente + monitor global para
+        # o staff ver e reenviar o acesso (badge vermelho + alerta).
+        error_detail = direct_error or "Envio directo falhou sem retry disponível."
+        await fail_portal_email_task(task_id, client_id, error_detail)
     return False
 
 
@@ -104,12 +144,15 @@ async def _send_portal_welcome_email_safe(
     client_email: str,
     client_name: str,
     portal_access_code: str = None,
-    client_id: str = None
+    client_id: str = None,
+    user_id: str = None,
+    process_id: str = None,
 ) -> None:
     """Envia email de boas-vindas do Portal em background, com logs de erro.
 
     Delega em `deliver_registration_email` (PACOTE BH — envio directo
-    prioritário; fila ARQ apenas como retry).
+    prioritário; fila ARQ apenas como retry). PACOTE 10: user_id e
+    process_id opcionais para o task_log do monitor global.
     """
     try:
         await deliver_registration_email(
@@ -117,6 +160,8 @@ async def _send_portal_welcome_email_safe(
             client_name=client_name,
             portal_access_code=portal_access_code,
             client_id=client_id,
+            user_id=user_id,
+            process_id=process_id,
         )
     except Exception as e:
         logger.error(f"[PORTAL-EMAIL] Erro inesperado no envio do email de boas-vindas "

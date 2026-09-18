@@ -14,6 +14,8 @@ import { useQueryClient } from "@tanstack/react-query";
 import { searchClients, updateProcess, createClient } from "../services/api";
 import { queryKeys } from "../lib/queryClient";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { parseDuplicateClientError } from "../utils/duplicateClient";
+import DuplicateClientAlert from "./shared/DuplicateClientAlert";
 import { useDebounce } from "../hooks/useDebounce";
 import { Card, CardContent } from "./ui/card";
 import { Input } from "./ui/input";
@@ -161,6 +163,8 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
   // ── Criação inline de novo cliente ──
   const [showNewClientForm, setShowNewClientForm] = useState(false);
   const [newClient, setNewClient] = useState({ nome: "", email: "", telefone: "", nif: "" });
+  // PACOTE 10 — alerta bloqueante de cliente duplicado (409 NIF/Email).
+  const [duplicateError, setDuplicateError] = useState(null);
   const [creating, setCreating] = useState(false);
 
   const secondClientData = processData?.second_client_data;
@@ -238,14 +242,15 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
     if (!newClient.nome.trim()) return;
     setCreating(true);
     try {
-      // 1. Criar o cliente na BD
+      // 1. Criar o cliente na BD (PACOTE 10 — skipErrorToast: o 409 de
+      // duplicado é tratado com banner bloqueante, não com toast genérico)
       const res = await createClient({
         nome: newClient.nome.trim(),
         email: newClient.email.trim() || undefined,
         telefone: newClient.telefone.trim() || undefined,
         nif: newClient.nif.trim() || undefined,
         fonte: "staff_created",
-      });
+      }, { skipErrorToast: true });
       const newClientId = res.data?.id || res.data?.client?.id;
       if (!newClientId) {
         toast.error("Erro ao criar cliente: resposta sem ID");
@@ -268,6 +273,12 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
       if (onUpdate) onUpdate();
     } catch (err) {
       console.error("Erro ao criar e ligar 2º titular:", err);
+      // PACOTE 10 — 409 de duplicado → banner bloqueante no formulário
+      const dup = parseDuplicateClientError(err);
+      if (dup) {
+        setDuplicateError(dup);
+        return;
+      }
       const detail = err.response?.data?.detail;
       toast.error(extractErrorMessage(detail, "Erro ao criar cliente"));
     } finally {
@@ -514,6 +525,11 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
             {/* Formulário inline para criar novo cliente */}
             {showNewClientForm && (
               <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
+                {/* PACOTE 10 — alerta bloqueante de cliente duplicado (409). */}
+                <DuplicateClientAlert
+                  duplicate={duplicateError}
+                  onDismiss={() => setDuplicateError(null)}
+                />
                 <p className="text-sm font-medium flex items-center gap-2">
                   <UserPlus className="h-4 w-4 text-cyan-500" />
                   Criar Novo Cliente
@@ -532,6 +548,8 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
                     onChange={(e) => {
                       const v = e.target.value.replace(/[^\d]/g, "").slice(0, 9);
                       setNewClient({ ...newClient, nif: v });
+                      // PACOTE 10 — alterar o campo em conflito limpa o aviso
+                      if (duplicateError) setDuplicateError(null);
                     }}
                     disabled={creating}
                   />
@@ -539,7 +557,11 @@ const SecondTitularCard = ({ process: processData, onUpdate, financialData }) =>
                     placeholder="Email"
                     type="email"
                     value={newClient.email}
-                    onChange={(e) => setNewClient({ ...newClient, email: e.target.value })}
+                    onChange={(e) => {
+                      setNewClient({ ...newClient, email: e.target.value });
+                      // PACOTE 10 — alterar o campo em conflito limpa o aviso
+                      if (duplicateError) setDuplicateError(null);
+                    }}
                     disabled={creating}
                   />
                   <Input

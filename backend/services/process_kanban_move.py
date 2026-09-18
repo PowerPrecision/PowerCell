@@ -4,8 +4,11 @@ Helpers para PUT /processes/kanban/{id}/move.
 Extraído de `routes/processes.py` — flags dinâmicas do workflow (PACOTE BR)
 e side-effects pós-persist (Trello, alerts, finance, waitlist, WS).
 
-Nota: `process_kanban.move_process` é um helper mais antigo/simplificado
-(VALID_STATUSES fixos); este módulo cobre o endpoint HTTP actual.
+PACOTE 11 (Eixo 1 — No-Hardcoding): os fallbacks de flags deixaram de
+ser listas de nomes de fases cravadas em código — quando o workflow_status
+não tem uma flag definida, o valor é resolvido DINAMICAMENTE da colecção
+`workflow_statuses` (via services/workflow_lookup.py). O módulo legado
+`services/process_kanban.py` (KANBAN_COLUMNS hardcoded) foi REMOVIDO.
 """
 from __future__ import annotations
 
@@ -18,38 +21,48 @@ from database import db
 
 logger = logging.getLogger(__name__)
 
-# Fallbacks retrocompatíveis quando flags ainda não existem no workflow_status
-_PROPERTY_CHECK_FALLBACK = ("ch_aprovado", "fase_escritura", "escritura_agendada")
-_INACTIVE_FALLBACK = ("desistencias", "concluidos")
 
-
-def resolve_workflow_purpose_flags(status_doc: dict, new_status: str) -> dict[str, bool]:
+async def resolve_workflow_purpose_flags(status_doc: dict, new_status: str) -> dict[str, bool]:
     """
-    Lê flags de comportamento do workflow_status com fallback hardcoded.
+    Lê flags de comportamento do workflow_status.
+
+    Quando uma flag não está definida no documento, o fallback é
+    DINÂMICO: consulta a colecção ``workflow_statuses`` (quais fases têm
+    essa flag marcada) — nunca listas de nomes hardcoded.
 
     Returns:
         trigger_finance, trigger_countdown, trigger_property_check,
         trigger_deed_reminder, is_active
     """
+    from services.workflow_lookup import (
+        get_flagged_workflow_status_names,
+        get_inactive_workflow_status_names,
+    )
+
     trigger_finance = status_doc.get("trigger_finance")
     if trigger_finance is None:
-        trigger_finance = new_status == "concluidos"
+        flagged = await get_flagged_workflow_status_names("trigger_finance")
+        trigger_finance = new_status in flagged
 
     trigger_countdown = status_doc.get("trigger_countdown")
     if trigger_countdown is None:
-        trigger_countdown = new_status == "fase_bancaria"
+        flagged = await get_flagged_workflow_status_names("trigger_countdown")
+        trigger_countdown = new_status in flagged
 
     trigger_property_check = status_doc.get("trigger_property_check")
     if trigger_property_check is None:
-        trigger_property_check = new_status in _PROPERTY_CHECK_FALLBACK
+        flagged = await get_flagged_workflow_status_names("trigger_property_check")
+        trigger_property_check = new_status in flagged
 
     trigger_deed_reminder = status_doc.get("trigger_deed_reminder")
     if trigger_deed_reminder is None:
-        trigger_deed_reminder = new_status == "escritura_agendada"
+        flagged = await get_flagged_workflow_status_names("trigger_deed_reminder")
+        trigger_deed_reminder = new_status in flagged
 
     is_active = status_doc.get("is_active")
     if is_active is None:
-        is_active = new_status not in _INACTIVE_FALLBACK
+        inactive_names = await get_inactive_workflow_status_names()
+        is_active = new_status not in inactive_names
 
     return {
         "trigger_finance": bool(trigger_finance),
@@ -285,6 +298,31 @@ async def run_kanban_move_side_effects(
         process, process_id, new_status, flags["is_active"],
     )
 
+    # PACOTE 11 (Eixo 1) — delegar as automações pós-mudança de fase ao
+    # MOTOR DE AUTOMAÇÃO (rules engine, /admin/automation/rules) em vez
+    # de if/else soltos no fluxo principal. Fire-and-forget seguro: uma
+    # regra mal configurada nunca pode falhar o movimento Kanban.
+    try:
+        from services.workflow_engine import process_trigger
+        await process_trigger(
+            "process_status_changed",
+            {
+                "process_id": process_id,
+                "process_number": process.get("process_number"),
+                "client_name": process.get("client_name"),
+                "client_email": process.get("client_email"),
+                "old_status": old_status,
+                "new_status": new_status,
+                "user_id": user.get("id"),
+                "user_name": user.get("name"),
+            },
+        )
+    except Exception as automation_err:
+        logger.warning(
+            f"[KANBAN-MOVE] Motor de automação falhou (não fatal) para o "
+            f"processo {process_id}: {automation_err}"
+        )
+
     return {
         "message": "Processo movido com sucesso",
         "new_status": new_status,
@@ -319,7 +357,7 @@ async def run_move_process_kanban(
         raise HTTPException(status_code=400, detail="Estado inválido")
 
     old_status = process.get("status", "")
-    flags = resolve_workflow_purpose_flags(status_exists, new_status)
+    flags = await resolve_workflow_purpose_flags(status_exists, new_status)
 
     logger.info(
         f"[KANBAN-MOVE-BR] Processo {process_id} → '{new_status}'. "

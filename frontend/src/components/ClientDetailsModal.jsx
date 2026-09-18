@@ -55,6 +55,7 @@ import {
   KeyRound,
 } from "lucide-react";
 import { safeString } from "../utils/safeString";
+import { formatFonteLabel } from "../utils/fonteLabels";
 import { formatDate, formatDateTime } from "../lib/utils";
 import { formatCurrency } from "../utils/formatCurrency";
 import { resendPortalAccess } from "../services/api";
@@ -128,7 +129,7 @@ const ClientDetailsModal = ({
                 <h3 className="text-xl font-bold">{safeString(client.nome)}</h3>
                 <div className="flex items-center gap-2 mt-1">
                   {client.fonte && (
-                    <Badge variant="outline">{safeString(client.fonte)}</Badge>
+                    <Badge variant="outline">{formatFonteLabel(client.fonte)}</Badge>
                   )}
                   {client.nif && (
                     <Badge variant="secondary" className="font-mono">

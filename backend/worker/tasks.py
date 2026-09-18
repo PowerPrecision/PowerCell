@@ -440,6 +440,11 @@ async def send_registration_email_task(
     Handler ARQ do email de boas-vindas/acesso ao Portal (retry de última
     esperança após falha do envio directo). Assinatura compatível com
     `task_queue.send_registration_email(**kwargs)`.
+
+    PACOTE 10 — o ciclo de estado (sent/failed no cliente + task_log do
+    monitor) é fechado aqui quando o retry é quem entrega: a chamada a
+    `deliver_registration_email` actualiza o task_log/estado do cliente
+    exactamente como no envio directo.
     """
     from services.client_portal_email import deliver_registration_email
 

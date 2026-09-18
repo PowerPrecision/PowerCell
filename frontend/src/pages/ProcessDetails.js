@@ -31,7 +31,7 @@
  * // O ID é obtido via useParams() internamente
  */
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
-import { useParams, useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { useAuth } from "../contexts/AuthContext";
 import { safeLabel } from "../components/dashboard/DashboardShared";
 import { buildStatusOptions, formatStatusLabel } from "../utils/workflowStatuses";
@@ -92,6 +92,8 @@ import {
   addProcessObservationNote,
   // PACOTE 9 — Toggle "Indexado" no header (set-indexed true/false)
   setProcessIndexed,
+  // PACOTE 11 (Eixo 4) — restauro rápido do processo eliminado (banner)
+  restoreProcess,
 } from "../services/api";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
@@ -117,6 +119,7 @@ import {
   ClipboardList,
   Check,
   Trash2,
+  RotateCcw,
   Loader2,
   AlertCircle,
   MessageSquare,
@@ -1407,15 +1410,15 @@ const ProcessDetails = () => {
     return statusInfo || { label: formatStatusLabel(statusName), color: "blue" };
   };
 
-  // ── Derived: opções do Select com baseline estático + fallback ─────
-  // A dropdown de estado NUNCA deve ficar em branco. buildStatusOptions:
-  //   1) usa workflowStatuses (API /admin/workflow-statuses) se existirem;
-  //   2) senão, recorre ao baseline estático KNOWN_PROCESS_STATUSES (16 canónicos
-  //      do enum ProcessStatus + legacy: triagem, fase_documental, etc.);
-  //   3) se o `status` actual (process.status) não estiver na base escolhida,
-  //      injeta-o como opção extra (label formatada, _isFallback=true).
-  // Isto corrige o bug em que a dropdown aparecia vazia quando a API devolvia []
-  // ou falhava (antes havia um `return []` prematuro que ignorava o fallback).
+  // ── Derived: opções do Select 100% dinâmicas + fallback do status ──
+  // A dropdown de estado nunca inventa fases em código (PACOTE 11 —
+  // Eixo 1, Strict No-Hardcoding). buildStatusOptions:
+  //   1) usa workflowStatuses (API /admin/workflow-statuses, colecção
+  //      `workflow_statuses` configurável pelo admin) como base ÚNICA;
+  //   2) se o `status` actual (process.status) não estiver na lista
+  //      dinâmica (API falhou / fase removida), injecta-o como opção
+  //      extra com label formatada (_isFallback=true) — a dropdown nunca
+  //      fica em branco, mas também nunca mostra fases cravadas.
   const safeStatusOptions = useMemo(
     () => buildStatusOptions(workflowStatuses, status),
     [workflowStatuses, status]
@@ -1505,7 +1508,22 @@ const ProcessDetails = () => {
   // EXCEPÇÃO: admin e CEO NUNCA sofrem lock — podem editar processos concluídos retroativamente
   const BLOCKED_STATUSES = ["eliminados", "desistencias", "concluidos"];
   const isProcessLocked = process && BLOCKED_STATUSES.includes(process.status) && !['admin', 'ceo'].includes(userRole);
-  const isViewMode = (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) || isProcessLocked;
+
+  // PACOTE 11 (Eixo 4) — Proteção Soft-Delete: quando o processo está
+  // eliminado (is_deleted OU status 'eliminado'), TODOS os inputs e botões
+  // de edição ficam desactivados (read-only forçado, sem excepção de role)
+  // para impedir falsas mensagens de sucesso. O banner de restauro (topo
+  // da página) é a única acção disponível.
+  const isDeletedProcess = !!(
+    process?.is_deleted ||
+    process?.deleted ||
+    process?.status === "eliminado" ||
+    process?.status === "eliminados"
+  );
+  const isViewMode =
+    (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) ||
+    isProcessLocked ||
+    isDeletedProcess;
 
   // Processos Inativos (Read-Only): estados finais onde as ações principais
   // (RGPD, CPCV, Enviar Balcões, Portal do Cliente, Eliminar) devem ficar
@@ -1521,7 +1539,28 @@ const ProcessDetails = () => {
     "eliminado", "eliminados",
     "perdido", "arquivo",
   ];
-  const isInactiveProcess = !!(process && INACTIVE_PROCESS_STATUSES.includes(process.status));
+  const isInactiveProcess = !!(
+    process && (INACTIVE_PROCESS_STATUSES.includes(process.status) || process.is_deleted)
+  );
+
+  // PACOTE 11 (Eixo 4) — Restauro Rápido: reactiva o processo eliminado
+  // via POST /processes/{id}/restore e refresca os dados da página.
+  const [restoringProcess, setRestoringProcess] = useState(false);
+  const handleRestoreProcess = async () => {
+    if (!id || restoringProcess) return;
+    setRestoringProcess(true);
+    try {
+      await restoreProcess(id);
+      toast.success("Processo restaurado com sucesso");
+      await fetchData();
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(err?.response?.data?.detail, "Não foi possível restaurar o processo")
+      );
+    } finally {
+      setRestoringProcess(false);
+    }
+  };
 
   // PACOTE 5 (RGPD por titular) — True quando o processo tem 2º titular
   // identificado (cliente ligado via second_client_id ou titular2_data com
@@ -1761,6 +1800,11 @@ const ProcessDetails = () => {
   const headerClientName = safeString(
     clientData?.nome || process?.client_name || personalData?.nome_completo || personalData?.nome,
   );
+  // PACOTE 11 (Eixo 3) — ID do cliente para o Link da ficha (header + card
+  // lateral). Ordem: cliente carregado do bundle → FK do processo.
+  const headerClientId = safeString(
+    clientData?.id || clientData?._id || clientId || process?.client_id,
+  );
   const headerPhone = safeString(
     process?.client_phone || personalData?.telefone || clientData?.contacto?.telefone,
   );
@@ -1774,8 +1818,44 @@ const ProcessDetails = () => {
   return (
     <DashboardLayout title="Detalhes do Processo">
       <div className="space-y-6">
-        {/* Aviso de processo bloqueado ou em modo retroativo */}
-        {isProcessLocked && (
+        {/* PACOTE 11 (Eixo 4) — Banner de processo eliminado + Restauro Rápido:
+            todos os inputs/botões de edição ficam desactivados (ver
+            isDeletedProcess acima) e o botão restaura via API. */}
+        {isDeletedProcess && (
+          <div
+            className="flex flex-col sm:flex-row sm:items-center gap-3 p-3 rounded-lg border border-red-200 dark:border-red-900 bg-red-50 dark:bg-red-950/30"
+            role="alert"
+          >
+            <div className="flex items-center gap-2.5 flex-1 min-w-0">
+              <Trash2 className="h-4 w-4 text-red-600 dark:text-red-400 shrink-0" aria-hidden="true" />
+              <div className="min-w-0">
+                <p className="font-medium text-red-800 dark:text-red-200 text-sm">
+                  Este processo encontra-se eliminado
+                </p>
+                <p className="text-xs text-red-700 dark:text-red-300 mt-0.5">
+                  A edição está bloqueada para todos os utilizadores. Restaure o processo para
+                  retomar o trabalho (documentos, tarefas e pedidos RGPD são restaurados em cascata).
+                </p>
+              </div>
+            </div>
+            <Button
+              onClick={handleRestoreProcess}
+              disabled={restoringProcess}
+              className="gap-2 bg-red-600 hover:bg-red-700 text-white shrink-0 h-8"
+              aria-label="Restaurar processo eliminado"
+            >
+              {restoringProcess ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <RotateCcw className="h-4 w-4" />
+              )}
+              Restaurar
+            </Button>
+          </div>
+        )}
+        {/* Aviso de processo bloqueado ou em modo retroativo
+            (oculto quando já está visível o banner de eliminado) */}
+        {isProcessLocked && !isDeletedProcess && (
           <div className="flex items-center gap-2 p-3 bg-amber-50 dark:bg-amber-950/30 border border-amber-200 dark:border-amber-800 rounded-lg text-amber-800 dark:text-amber-200 text-sm">
             <Lock className="h-4 w-4 shrink-0" />
             <span>
@@ -1811,7 +1891,21 @@ const ProcessDetails = () => {
               }
               description={
                 <span className="flex items-center gap-x-3 gap-y-1 flex-wrap text-sm text-muted-foreground">
-                  {headerClientName ? <span>{headerClientName}</span> : null}
+                  {/* PACOTE 11 (Eixo 3) — nome do cliente clicável: navega
+                      para a ficha do cliente (/cliente/:id). */}
+                  {headerClientName ? (
+                    headerClientId ? (
+                      <Link
+                        to={`/cliente/${headerClientId}`}
+                        className="font-medium hover:text-foreground hover:underline underline-offset-2 transition-colors"
+                        title="Abrir ficha do cliente"
+                      >
+                        {headerClientName}
+                      </Link>
+                    ) : (
+                      <span>{headerClientName}</span>
+                    )
+                  ) : null}
                   {headerPhone ? (
                     <a href={`tel:${headerPhone}`} className="inline-flex items-center gap-1 hover:text-foreground">
                       <Phone className="h-3 w-3" aria-hidden="true" />
@@ -2585,7 +2679,14 @@ const ProcessDetails = () => {
 
           {/* ── Coluna Direita: Contexto Fixo (1/3) — Cliente + Atribuição sempre visíveis ── */}
           <div className="space-y-4">
-            <ClientContextCard process={process} personalData={personalData} clientData={clientData} />
+            {/* PACOTE 11 (Eixo 3) — clientId para o nome do titular ser
+                clicável (navega para a ficha do cliente). */}
+            <ClientContextCard
+              process={process}
+              personalData={personalData}
+              clientData={clientData}
+              clientId={headerClientId || null}
+            />
 
             <AssignmentContextCard
               process={process}
