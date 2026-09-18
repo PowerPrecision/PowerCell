@@ -13,9 +13,76 @@ As fakes aqui presentes imitam o comportamento do Motor/DatabaseProxy o
 suficiente para exercitar os serviços de forma determinística, sem I/O.
 """
 
+import re
 from unittest.mock import MagicMock
 
 import pytest
+
+
+class FakeAsyncCursor:
+    """Cursor assíncrono mínimo (PACOTE 8 — find/sort/skip/limit/to_list).
+
+    Imita o encadeamento do Motor o suficiente para exercitar serviços
+    que listam documentos (``find(...).sort(...).to_list(n)``).
+    Determinístico: ordenação lexicográfica simples das chaves dadas.
+    """
+
+    def __init__(self, docs: list, projection: dict = None):
+        self._docs = docs
+        self._projection = dict(projection) if projection else None
+        self._skip = 0
+        self._limit = None
+
+    def sort(self, key_or_list, direction=1):
+        def sort_key(doc: dict):
+            if isinstance(key_or_list, (list, tuple)) and key_or_list:
+                if isinstance(key_or_list[0], (list, tuple)):
+                    return tuple(str(doc.get(k) or "") for k, _ in key_or_list)
+                return tuple(str(doc.get(k) or "") for k in key_or_list)
+            return str(doc.get(key_or_list) or "")
+
+        self._docs = sorted(self._docs, key=sort_key)
+        return self
+
+    def skip(self, n: int):
+        self._skip = n
+        return self
+
+    def limit(self, n: int):
+        self._limit = n
+        return self
+
+    async def to_list(self, length=None):
+        docs = self._docs[self._skip:]
+        if self._limit is not None:
+            docs = docs[: self._limit]
+        elif length is not None:
+            docs = docs[:length]
+        if self._projection:
+            include = {k for k, v in self._projection.items() if v}
+            exclude = {k for k, v in self._projection.items() if not v}
+            if include:
+                docs = [
+                    {k: d[k] for k in include if k in d and k not in exclude}
+                    for d in docs
+                ]
+            else:
+                docs = [
+                    {k: v for k, v in d.items() if k not in exclude}
+                    for d in docs
+                ]
+        return docs
+
+    def __aiter__(self):
+        """PACOTE 9 — iteração assíncrona (``async for doc in cursor``),
+        usada pelos scripts de manutenção (ex.: backfill_s3_mappings).
+        """
+        return self._iterate()
+
+    async def _iterate(self):
+        docs = await self.to_list(None)
+        for doc in docs:
+            yield doc
 
 
 class FakeAsyncCollection:
@@ -33,23 +100,78 @@ class FakeAsyncCollection:
 
     @staticmethod
     def _matches(doc: dict, query: dict) -> bool:
-        """Matcher mínimo: igualdade simples + operador $ne."""
+        """Matcher: igualdade, ``$ne``, ``$in``, ``$regex``, ``$exists``,
+        ``$or``/``$and`` recursivos (PACOTE 8 — os filtros do Webmail usam
+        $and/$or/$regex).
+
+        Aproximações determinísticas: ``$regex`` casa contra ``str(valor)``
+        (em arrays casa contra a lista stringificada — suficiente para os
+        testes); ``$options: i`` activa IGNORECASE.
+        """
         for key, expected in query.items():
-            value = doc.get(key)
-            if isinstance(expected, dict) and "$ne" in expected:
-                if value == expected["$ne"]:
+            if key == "$or":
+                if not any(FakeAsyncCollection._matches(doc, q) for q in expected):
                     return False
-            elif isinstance(expected, dict) and "$in" in expected:
-                if value not in expected["$in"]:
+                continue
+            if key == "$and":
+                if not all(FakeAsyncCollection._matches(doc, q) for q in expected):
+                    return False
+                continue
+            value = doc.get(key)
+            if isinstance(expected, dict):
+                matched_operator = False
+                if "$ne" in expected:
+                    matched_operator = True
+                    if value == expected["$ne"]:
+                        return False
+                if "$in" in expected:
+                    matched_operator = True
+                    if value not in expected["$in"]:
+                        return False
+                if "$exists" in expected:
+                    matched_operator = True
+                    exists = key in doc
+                    if bool(expected["$exists"]) is not exists:
+                        return False
+                if "$regex" in expected:
+                    matched_operator = True
+                    pattern = expected["$regex"]
+                    if value is None:
+                        return False
+                    flags = re.IGNORECASE if "i" in (expected.get("$options") or "") else 0
+                    try:
+                        if not re.search(pattern, str(value), flags):
+                            return False
+                    except re.error:
+                        return False
+                if not matched_operator and value != expected:
                     return False
             elif value != expected:
                 return False
         return True
 
-    async def find_one(self, query: dict, projection: dict = None):
-        for doc in self.docs:
-            if self._matches(doc, query):
-                return dict(doc)
+    async def find_one(self, query: dict, projection: dict = None, sort=None):
+        """``find_one`` com ``sort`` opcional (PACOTE 9 — usado por
+        ``db.workflow_statuses.find_one({}, ..., sort=[("order", 1)])``).
+
+        Contrato histórico mantido: a projecção é IGNORADA (devolve o doc
+        completo) — vários serviços usam projecções com dot-notation
+        (ex.: "settings.company_name") e dependem de receber o doc inteiro
+        (o Motor real resolve dot-notation; o fake devolve sempre o doc
+        completo, que é um superconjunto seguro para os testes).
+        """
+        matched = [doc for doc in self.docs if self._matches(doc, query)]
+        if sort:
+            key_or_list = sort
+            def sort_key(doc: dict):
+                if isinstance(key_or_list, (list, tuple)) and key_or_list:
+                    if isinstance(key_or_list[0], (list, tuple)):
+                        return tuple(str(doc.get(k) or "") for k, _ in key_or_list)
+                    return tuple(str(doc.get(k) or "") for k in key_or_list)
+                return str(doc.get(key_or_list) or "")
+            matched = sorted(matched, key=sort_key)
+        for doc in matched:
+            return dict(doc)
         return None
 
     async def insert_one(self, doc: dict):
@@ -98,6 +220,14 @@ class FakeAsyncCollection:
 
     async def count_documents(self, query: dict) -> int:
         return sum(1 for doc in self.docs if self._matches(doc, query))
+
+    def find(self, query: dict, projection: dict = None):
+        """Cursor com sort/skip/limit/to_list (PACOTE 8) — matcher igualdade/$ne/$in."""
+        matched = [dict(doc) for doc in self.docs if self._matches(doc, query)]
+        return FakeAsyncCursor(matched, projection)
+
+    async def update_many(self, query: dict, update: dict, upsert: bool = False):
+        return await self.update_one(query, update, upsert=upsert)
 
 
 class FakeAsyncDatabase:

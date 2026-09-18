@@ -248,7 +248,25 @@ async def run_create_client(
     # Encriptar campos sensíveis antes de guardar
     client_dict = client.model_dump()
     client_dict = encrypt_client_data(client_dict)
-    
+
+    # ============================================================
+    # PACOTE 9 — AUTO-ATRIBUIÇÃO AO CRIADOR (Consultor/Intermediário)
+    # ============================================================
+    # Se quem cria o cliente tem perfil activo de Consultor ou Intermediário,
+    # o cliente fica automaticamente atribuído ao próprio criador. Sem isto,
+    # o cliente recém-criado (fase de Pré-Registo, ainda sem processo) não
+    # aparecia de imediato na lista "Os Meus Clientes".
+    # Usa o cargo EFECTIVO (X-Active-Role/UCR) — multi-perfis validados pelo
+    # perfil activo, não pela role primária do JWT.
+    creator_role = (user.get("effective_role") or user.get("role") or "").lower()
+    if creator_role in ("consultor", "intermediario"):
+        client_dict["assigned_to"] = user.get("id")
+        client_dict["assigned_at"] = now
+        logger.info(
+            f"[CLIENT-CREATE] Auto-atribuição ao criador ({creator_role}): "
+            f"cliente {client.id} → {user.get('id')}"
+        )
+
     await db.clients.insert_one(client_dict)
 
     logger.info(f"Cliente criado: {client.id} - {client.nome} por {user.get('email')}")

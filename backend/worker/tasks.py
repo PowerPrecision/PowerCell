@@ -478,6 +478,29 @@ async def send_email_task(
 
 
 # ====================================================================
+# PACOTE 9 — UNDO SEND: execução do envio webmail diferido
+# ====================================================================
+# O POST /api/emails/send grava um registo PENDING em
+# `pending_email_sends` e enfileira ESTA task com `_defer_by` igual à
+# janela de undo (10s por defeito). O claim atómico em Mongo garante
+# que o job ARQ e o timer in-process (rede de segurança) nunca
+# enviam o mesmo email duas vezes; o endpoint
+# POST /emails/{send_id}/cancel-send apaga o registo dentro da janela
+# e o envio nunca chega a acontecer.
+
+async def send_pending_webmail_email_task(
+    ctx: Dict,
+    *,
+    send_id: str,
+) -> Dict[str, Any]:
+    """Handler ARQ do envio webmail diferido (janela de Undo Send)."""
+    from services.email_send_queue import execute_pending_email_send
+
+    result = await execute_pending_email_send(send_id)
+    return result
+
+
+# ====================================================================
 # REGISTAR TAREFAS NO WORKER
 # ====================================================================
 
@@ -488,4 +511,5 @@ TASK_FUNCTIONS = [
     cleanup_expired_sessions_task,
     send_registration_email_task,
     send_email_task,
+    send_pending_webmail_email_task,
 ]

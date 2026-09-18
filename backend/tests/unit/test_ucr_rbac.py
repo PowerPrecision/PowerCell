@@ -233,7 +233,11 @@ def test_webmail_source_unifies_shared_box_on_effective_role():
         / "services"
         / "email_webmail.py"
     ).read_text()
-    assert "if effective_role not in (UserRole.ADMIN, UserRole.INDEXACAO)" in text
+    # PACOTE 8 — a permissão da caixa partilhada mantém o guard de cargo
+    # efectivo (legado) e ganha o OR com os cargos de TODOS os UCRs válidos
+    # (webmail unificado — ver testes do pacote 8 para o comportamento).
+    assert "legacy_index_ok = effective_role in (UserRole.ADMIN, UserRole.INDEXACAO)" in text
+    assert "ucr_index_ok = bool(ucr_roles & {\"indexacao\", \"admin\"})" in text
     assert "if user_role not in (UserRole.ADMIN, UserRole.INDEXACAO)" not in text
     assert "all_roles = [user_role] + list(current_user.get(\"additional_roles\")" not in text
 

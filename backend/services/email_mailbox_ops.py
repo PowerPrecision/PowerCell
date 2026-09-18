@@ -400,11 +400,26 @@ async def _assert_email_readable(email: dict, request: Request, current_user: di
     )
     is_shared = bool(email.get("shared_role") and email.get("shared_role") == user_role)
     is_in_conversation = False
-    if user_email:
+    # PACOTE 8 — desacoplamento login ↔ webmail: a conversa é avaliada
+    # contra as contas CONFIGURADAS no UserEmailConfig (IMAP/SMTP da área
+    # pessoal, todas as empresas); o email de login é apenas fallback.
+    conversation_emails: list = []
+    try:
+        from services.user_email_config_service import get_user_mailbox_addresses
+        conversation_emails = await get_user_mailbox_addresses(user_id or "")
+    except Exception as exc:
+        logger.warning(
+            "[Webmail Attachment] Falha a resolver contas configuradas user=%s: %s",
+            user_id, exc,
+        )
+    if not conversation_emails and user_email:
+        conversation_emails = [user_email]
+    if conversation_emails:
         from_email = (email.get("from_email") or "").lower()
         to_emails = email.get("to_emails") or []
-        is_in_conversation = user_email in from_email or any(
-            user_email in str(addr).lower() for addr in to_emails
+        is_in_conversation = any(
+            conv in from_email or any(conv in str(addr).lower() for addr in to_emails)
+            for conv in conversation_emails
         )
     if not (is_owner or is_shared or is_in_conversation):
         raise HTTPException(status_code=403, detail="Sem permissão para descarregar este anexo")

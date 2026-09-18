@@ -17,6 +17,8 @@ import { ScrollArea } from "./ui/scroll-area";
 import { Textarea } from "./ui/textarea";
 import { Input } from "./ui/input";
 import { Label } from "./ui/label";
+// PACOTE 9 — Undo Send: parse da resposta {queued, send_id, undo_window_seconds}
+import { parseSendResponse } from "../utils/webmailSendQueue";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -233,6 +235,60 @@ const EmailViewerModal = ({
         throw new Error(detail);
       }
 
+      // PACOTE 9 — UNDO SEND: o backend agenda o envio após a janela de
+      // "Desfazer" (10s por defeito). Mostramos o toast com a acção de undo;
+      // cancelar chama /emails/{send_id}/cancel-send e repõe a caixa de
+      // resposta com o texto intacto.
+      const sendResult = parseSendResponse(await response.json().catch(() => null));
+
+      if (sendResult.queued && sendResult.sendId && sendResult.undoWindowMs > 0) {
+        setShowReplyBox(false); // fecha a caixa de resposta (estilo Gmail)
+
+        const cancelReplySend = async () => {
+          try {
+            const res = await fetch(
+              `${API_URL}/api/emails/${sendResult.sendId}/cancel-send`,
+              {
+                method: "POST",
+                headers: {
+                  Authorization: `Bearer ${token}`,
+                  ...(activeCompanyId ? { "X-Company-Id": activeCompanyId } : {})
+                }
+              }
+            );
+            if (res.ok) {
+              // Envio abortado no backend — regressar ao modo de edição
+              setShowReplyBox(true);
+              toast.success("Envio cancelado — pode continuar a editar a resposta.");
+            } else {
+              let detail = "Não foi possível cancelar o envio.";
+              try {
+                const errData = await res.json();
+                detail = errData.detail || detail;
+              } catch { /* sem corpo JSON */ }
+              toast.error(detail, { duration: 8000 });
+            }
+          } catch {
+            toast.error("Não foi possível cancelar o envio.", { duration: 8000 });
+          }
+        };
+
+        toast.success("Email a ser enviado...", {
+          duration: sendResult.undoWindowMs,
+          action: {
+            label: "Desfazer",
+            onClick: cancelReplySend,
+          },
+        });
+
+        // Após a janela (sem undo): confirmar visualmente
+        setTimeout(() => {
+          toast.success("Resposta enviada com sucesso");
+        }, sendResult.undoWindowMs + 250);
+        return;
+      }
+
+      // Caminho legacy (envio imediato — janela desligada no backend)
       toast.success("Resposta enviada com sucesso");
       setShowReplyBox(false);
       // TODO: Actualizar lista de emails

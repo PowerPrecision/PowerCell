@@ -12,7 +12,7 @@ Autor: PowerCell Development Team
 """
 import logging
 from typing import List, Optional
-from fastapi import APIRouter, Depends, Query, Request
+from fastapi import APIRouter, Body, Depends, Query, Request
 
 from database import db
 from models.auth import UserRole
@@ -52,6 +52,7 @@ from services.process_my_clients import (
 )
 from services.process_indexing import (
     run_mark_process_indexed,
+    run_set_process_indexed_flag,
 )
 from services.process_create import (
     assemble_staff_create_bundle,
@@ -564,6 +565,32 @@ async def mark_process_indexed(
     return await run_mark_process_indexed(
         process_id,
         user,
+        user_role=get_effective_role(request, user).lower(),
+        all_roles=get_all_user_roles(user),
+        broadcast_fn=broadcast_process_delta,
+    )
+
+
+# ====================================================================
+# PACOTE 9 — TOGGLE "INDEXADO" (header dos Detalhes do Processo)
+# Liga/desliga is_indexed directamente. ON reutiliza o fluxo canónico
+# do mark-indexed; OFF reverte o flag (sem mexer na fase do workflow).
+# ====================================================================
+
+@router.post("/{process_id}/set-indexed")
+@router.patch("/{process_id}/set-indexed")
+async def set_process_indexed(
+    process_id: str,
+    request: Request,
+    data: dict = Body(...),
+    user: dict = Depends(get_current_user),
+):
+    """Alterna o estado is_indexed (True/False) do processo via API."""
+    is_indexed = bool(data.get("is_indexed"))
+    return await run_set_process_indexed_flag(
+        process_id,
+        user,
+        is_indexed=is_indexed,
         user_role=get_effective_role(request, user).lower(),
         all_roles=get_all_user_roles(user),
         broadcast_fn=broadcast_process_delta,

@@ -66,7 +66,6 @@ import {
   CheckSquare,
   Square,
   Upload,
-  Download,
   Trash2,
   FolderPlus,
   FolderOpen,
@@ -74,6 +73,7 @@ import {
   FolderInput,
   Pencil,
   MoreVertical,
+  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
@@ -88,6 +88,12 @@ import {
   buildMailboxOptions,
   resolveMailboxSelection,
 } from "../utils/webmailMailbox";
+// PACOTE 9 — Undo Send: helpers do fluxo de envio com janela de "Desfazer"
+import {
+  parseSendResponse,
+  buildComposerSnapshot,
+  draftToComposerFields,
+} from "../utils/webmailSendQueue";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;
 
@@ -187,7 +193,14 @@ const WebmailPage = () => {
   const debouncedSearch = useDebounce(searchQuery, 400);
   const [account, setAccount] = useState(defaultAccount);
   const [personalAccounts, setPersonalAccounts] = useState([]);
-  const [selectedMailbox, setSelectedMailbox] = useState("");
+  // PACOTE 8 — mailbox inicial pode vir da URL (?mailbox=) quando o email é
+  // aberto num novo separador a partir de outro contexto do Webmail.
+  const [selectedMailbox, setSelectedMailbox] = useState(
+    () => (searchParams.get("mailbox") || "").trim(),
+  );
+  // PACOTE 8 — webmail unificado: o utilizador tem o cargo indexacao em
+  // qualquer perfil (vindo do scope=all do backend).
+  const [hasSharedIndexacao, setHasSharedIndexacao] = useState(false);
 
   // Tab-based mailbox state
   const [activeBox, setActiveBox] = useState("personal"); // "personal", "general", or "shared_indexacao"
@@ -287,9 +300,10 @@ const WebmailPage = () => {
         personalAccounts,
         showGeneral: showTabs,
         isIndexacao,
+        hasSharedIndexacao,
         unreadByBox,
       }),
-    [personalAccounts, showTabs, isIndexacao, unreadByBox],
+    [personalAccounts, showTabs, isIndexacao, hasSharedIndexacao, unreadByBox],
   );
   const mailboxValueRaw = resolveMailboxSelection({
     activeBox,
@@ -421,16 +435,24 @@ const WebmailPage = () => {
     fetchCustomFolders();
   }, [fetchCustomFolders]);
 
+  // PACOTE 8 — webmail unificado: as contas são carregadas com scope=all
+  // (TODAS as empresas/perfis do utilizador) e NÃO dependem da empresa
+  // activa no cabeçalho do CRM — o utilizador já não precisa de trocar de
+  // perfil global para ver caixas de correio diferentes. O backend devolve
+  // cada conta com company_id/company_name e injecta as Caixas Gerais de
+  // todas as empresas onde o cargo o permite, além da flag
+  // has_shared_indexacao (cargo indexacao em qualquer perfil).
   useEffect(() => {
-    if (!token || !companyId) {
+    if (!token) {
       setPersonalAccounts([]);
+      setHasSharedIndexacao(false);
       return;
     }
     let cancelled = false;
     const loadAccounts = async () => {
       try {
         const res = await fetch(
-          `${API_URL}/api/users/me/email-accounts?company_id=${encodeURIComponent(companyId)}`,
+          `${API_URL}/api/users/me/email-accounts?scope=all`,
           { headers: webmailHeaders() },
         );
         if (!res.ok) return;
@@ -438,6 +460,8 @@ const WebmailPage = () => {
         const list = data.accounts || [];
         if (cancelled) return;
         setPersonalAccounts(list);
+        setHasSharedIndexacao(Boolean(data.has_shared_indexacao));
+        // Se a mailbox veio da URL (?mailbox=) e existe na lista, mantém-se.
         const primary = list.find((item) => item.is_primary) || list[0];
         setSelectedMailbox((current) => {
           if (current && list.some((item) => item.email_address === current)) {
@@ -451,7 +475,7 @@ const WebmailPage = () => {
     };
     loadAccounts();
     return () => { cancelled = true; };
-  }, [token, companyId, webmailHeaders]);
+  }, [token, webmailHeaders]);
 
   // ============================================================
   // FETCH UNREAD COUNTS (for tab badges)
@@ -901,13 +925,20 @@ const WebmailPage = () => {
   }, [account]);
 
   // PACOTE DM: abrir compositor de rascunho quando o Dashboard envia ?folder=drafts&id=
+  // PACOTE 8: ?id= numa pasta normal abre o email no PAINEL DE LEITÃO
+  // (suporte ao botão "Abrir em novo separador" do Webmail — o novo
+  // separador carrega /webmail?folder=X&mailbox=Y&id=Z).
   useEffect(() => {
     if (openedUrlDraftRef.current || !draftIdFromUrl || !emails.length) return;
     const match = emails.find((e) => e.id === draftIdFromUrl);
     if (!match) return;
     openedUrlDraftRef.current = true;
-    openComposer("draft", match);
-  }, [emails, draftIdFromUrl, openComposer]);
+    if (initialFolder === "drafts" || match.status === "draft") {
+      openComposer("draft", match);
+    } else {
+      handleSelectEmail(match);
+    }
+  }, [emails, draftIdFromUrl, openComposer, handleSelectEmail, initialFolder]);
 
   const handleSendEmail = useCallback(async () => {
     if (!composerData.to_emails.trim()) {
@@ -951,6 +982,14 @@ const WebmailPage = () => {
       // o backend em ramos de validação de contas globais.
       const effectiveAccount = canUseGlobalAccounts ? composerData.account : "personal";
 
+      // PACOTE 9 — UNDO SEND: snapshot do rascunho para repor a edição se o
+      // utilizador clicar em "Desfazer" durante a janela de envio (o composer
+      // fecha no clique de "Enviar", estilo Gmail; o undo devolve o estado).
+      const sendSnapshot = buildComposerSnapshot({
+        composerData,
+        uploadAttachments,
+      });
+
       const response = await fetch(
         `${API_URL}/api/emails/send?account=${effectiveAccount}`,
         {
@@ -973,13 +1012,75 @@ const WebmailPage = () => {
         }
         throw new Error(detail);
       }
+
+      // ============================================================
+      // PACOTE 9 — UNDO SEND (janela de "Desfazer", 10s por defeito)
+      // ============================================================
+      // O backend não envia à rede SMTP imediatamente: grava um registo
+      // pending e agenda o envio real para o fim da janela. Dentro dela o
+      // utilizador pode cancelar (POST /emails/{send_id}/cancel-send) e
+      // regressar ao modo de edição do rascunho.
+      const sendResult = parseSendResponse(await response.json().catch(() => null));
+
+      if (sendResult.queued && sendResult.sendId && sendResult.undoWindowMs > 0) {
+        setComposerOpen(false); // fecha o composer (estilo Gmail)
+
+        const cancelSend = async () => {
+          try {
+            const res = await fetch(
+              `${API_URL}/api/emails/${sendResult.sendId}/cancel-send`,
+              { method: "POST", headers: webmailHeaders() }
+            );
+            if (!res.ok) {
+              let detail = "Não foi possível cancelar o envio.";
+              try {
+                const errData = await res.json();
+                detail = errData.detail || detail;
+              } catch { /* sem corpo JSON */ }
+              toast.error(detail, { duration: 8000 });
+              return;
+            }
+            // Envio abortado no backend — regressar ao modo de edição do
+            // rascunho com o snapshot intacto (dados + anexos temporários,
+            // que o backend ainda não moveu porque nada foi enviado).
+            const cancelData = await res.json().catch(() => ({}));
+            setComposerData((prev) => ({
+              ...prev,
+              ...draftToComposerFields(cancelData.draft || sendSnapshot.composerData),
+            }));
+            setUploadAttachments(sendSnapshot.uploadAttachments);
+            setComposerOpen(true);
+            toast.success("Envio cancelado — pode continuar a editar o rascunho.");
+          } catch {
+            toast.error("Não foi possível cancelar o envio.", { duration: 8000 });
+          }
+        };
+
+        toast.success("Email a ser enviado...", {
+          duration: sendResult.undoWindowMs,
+          action: {
+            label: "Desfazer",
+            onClick: cancelSend,
+          },
+        });
+
+        // Após a janela (sem undo): confirmar visualmente e refrescar a lista
+        setTimeout(() => {
+          toast.success("Email enviado com sucesso");
+          setUploadAttachments([]);
+          handleRefresh();
+        }, sendResult.undoWindowMs + 250);
+        return;
+      }
+
+      // Caminho legacy (envio imediato — janela desligada no backend)
       toast.success("Email enviado com sucesso");
       setComposerOpen(false);
       setUploadAttachments([]);
       handleRefresh();
     } catch (error) {
       console.error("Erro ao enviar:", error);
-      // Mensagens de configuração (403) costumam ser longas e acionáveis —
+      // Mensagens de configuração (403) costumam ser longas e accionáveis —
       // dar mais tempo de leitura para o utilizador saber o que fazer.
       toast.error(error.message || "Erro ao enviar email", { duration: 8000 });
     } finally {
@@ -1386,10 +1487,17 @@ const WebmailPage = () => {
     };
   }, [folderCountsData, unreadCount]);
 
+  // PACOTE 8 — os anexos abrem SEMPRE num novo separador (target=_blank).
+  // O window.open é feito SINCRONAMENTE no gesto de clique (antes do await
+  // do fetch) para não ser bloqueado pelos popup blockers; a navegação para
+  // o blob acontece quando o conteúdo chega. Se o browser bloqueou a janela
+  // (retornou null), cai no download clássico como fallback.
   const handleDownloadAttachment = useCallback(async (attachment, idx) => {
     if (!emailDetail?.id || !token) return;
     const attId = attachment.id || `${emailDetail.id}:${idx}`;
     setDownloadingAttachmentId(attId);
+    // Abrir o separador ANTES do await — mantém o user-gesture do clique.
+    const newTab = window.open("", "_blank");
     try {
       const params = new URLSearchParams({ email_id: emailDetail.id });
       const res = await fetch(
@@ -1402,15 +1510,24 @@ const WebmailPage = () => {
       }
       const blob = await res.blob();
       const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = attachment.filename || attachment.file_name || `anexo-${idx + 1}`;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
+      if (newTab) {
+        newTab.location.href = url;
+        // Revogar mais tarde: o novo separador precisa do blob vivo para
+        // renderizar (PDF/imagem) — revogar de imediato quebrava a pré-visualização.
+        setTimeout(() => URL.revokeObjectURL(url), 60000);
+      } else {
+        // Popup bloqueado — fallback para download directo.
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = attachment.filename || attachment.file_name || `anexo-${idx + 1}`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      }
     } catch (error) {
-      toast.error(error.message || "Erro ao descarregar anexo");
+      if (newTab) newTab.close();
+      toast.error(error.message || "Erro ao abrir anexo");
     } finally {
       setDownloadingAttachmentId(null);
     }
@@ -2115,6 +2232,31 @@ const WebmailPage = () => {
                       <Forward className="h-3.5 w-3.5" />
                       Encaminhar
                     </Button>
+                    {/* PACOTE 8 — abrir a visualização do email num novo separador */}
+                    <Tooltip>
+                      <TooltipTrigger asChild>
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          className="h-8 text-xs gap-1.5"
+                          onClick={() => {
+                            const params = new URLSearchParams({
+                              folder: activeFolder,
+                              id: emailDetail.id,
+                            });
+                            if (selectedMailbox) {
+                              params.set("mailbox", selectedMailbox);
+                            }
+                            window.open(`/webmail?${params.toString()}`, "_blank");
+                          }}
+                          aria-label="Abrir email num novo separador"
+                        >
+                          <ExternalLink className="h-3.5 w-3.5" />
+                          Novo Separador
+                        </Button>
+                      </TooltipTrigger>
+                      <TooltipContent>Abrir email num novo separador</TooltipContent>
+                    </Tooltip>
                     <Tooltip>
                       <TooltipTrigger asChild>
                         <Button
@@ -2266,16 +2408,16 @@ const WebmailPage = () => {
                                         e.stopPropagation();
                                         handleDownloadAttachment(attachment, idx);
                                       }}
-                                      aria-label={`Descarregar ${attachment.filename || "anexo"}`}
+                                      aria-label={`Abrir ${attachment.filename || "anexo"} num novo separador`}
                                     >
                                       {downloadingAttachmentId === (attachment.id || `${emailDetail.id}:${idx}`) ? (
                                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                       ) : (
-                                        <Download className="h-3.5 w-3.5" />
+                                        <ExternalLink className="h-3.5 w-3.5" />
                                       )}
                                     </Button>
                                   </TooltipTrigger>
-                                  <TooltipContent>Descarregar</TooltipContent>
+                                  <TooltipContent>Abrir num novo separador</TooltipContent>
                                 </Tooltip>
                               </div>
                             );

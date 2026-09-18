@@ -59,6 +59,71 @@ async def get_user_email_config(
     )
 
 
+async def get_user_mailbox_addresses(user_id: str) -> List[str]:
+    """
+    Endereços IMAP configurados pelo utilizador (todas as empresas).
+
+    PACOTE 8 (desacoplamento login ↔ webmail): o motor do Webmail consulta
+    a caixa EXCLUSIVAMENTE pela conta de email definida nas credenciais do
+    ``UserEmailConfig`` (IMAP/SMTP) da área pessoal — NUNCA pelo email de
+    login (``users.email``). Um utilizador que faz login com ``user@x.pt``
+    mas configurou ``geral@x.pt`` passa a ver/conversar pela caixa certa.
+
+    Retorna endereços únicos em minúsculas (apenas configs activas,
+    ``is_configured=True``, ordenadas por ``is_primary`` primeiro —
+    consistente com ``list_company_email_configs``).
+
+    Degradação graciosa: qualquer falha de I/O devolve ``[]`` (o caller
+    mantém o fallback legado — email de login).
+    """
+    if not user_id:
+        return []
+    addresses: List[str] = []
+    try:
+        cursor = db.user_email_configs.find(
+            {"user_id": user_id, "is_configured": True},
+            {"_id": 0, "email_address": 1, "company_id": 1, "is_primary": 1},
+        ).sort([("is_primary", -1), ("created_at", 1)])
+        docs = await cursor.to_list(50)
+        for doc in docs:
+            email = (doc.get("email_address") or "").strip().lower()
+            if email and email not in addresses:
+                addresses.append(email)
+    except Exception as exc:
+        logger.warning(
+            "[UserEmailConfig] Falha a listar contas do utilizador %s: %s",
+            user_id, exc,
+        )
+    return addresses
+
+
+async def list_user_email_configs_all_companies(user_id: str) -> List[Dict[str, Any]]:
+    """
+    Todas as configs de email do utilizador, em TODAS as empresas.
+
+    PACOTE 8 (webmail unificado): alimenta o seletor consolidado de caixas
+    do Webmail (``GET /users/me/email-accounts?scope=all``) — a vista não
+    depende da empresa/perfil activo no cabeçalho do CRM.
+
+    Degradação graciosa: falha de I/O devolve ``[]``.
+    """
+    if not user_id:
+        return []
+    try:
+        cursor = db.user_email_configs.find(
+            {"user_id": user_id},
+            {"_id": 0},
+        ).sort([("is_primary", -1), ("created_at", 1)])
+        return await cursor.to_list(100)
+    except Exception as exc:
+        logger.warning(
+            "[UserEmailConfig] Falha a listar contas (todas as empresas) "
+            "do utilizador %s: %s",
+            user_id, exc,
+        )
+        return []
+
+
 async def list_company_email_configs(
     user_id: str,
     company_id: str,

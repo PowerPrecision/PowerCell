@@ -722,149 +722,69 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
     if not to_emails:
         raise HTTPException(status_code=400, detail="Pelo menos um email destinatário válido é necessário")
 
-    # ==== PROCESS TEMP ATTACHMENTS ====
-    email_attachments = []
-    temp_attachment_records = []  # Track for S3 move + cleanup
-    temp_keys_to_cleanup = []
+    # ============================================================
+    # PACOTE 9 — UNDO SEND (janela de "Desfazer" de 10 segundos)
+    # ============================================================
+    # Em vez de enviar à rede SMTP imediatamente, o email entra numa
+    # fila com janela de undo:
+    #   1. Grava-se um registo PENDING (payload completo, já sanitizado
+    #      e com remetente/config resolvidos — todos os 403 de config
+    #      continuam a ser síncronos).
+    #   2. O envio real é agendado para daqui a UNDO_SEND_WINDOW_SECONDS
+    #      (job ARQ com defer + timer in-process; claim atómico em Mongo
+    #      garante execução única).
+    #   3. Dentro da janela, o utilizador pode cancelar via
+    #      POST /emails/{send_id}/cancel-send e regressar ao modo de
+    #      edição do rascunho (o payload é devolvido no cancel).
+    # Os anexos temporários passam a ser descarregados do S3 apenas no
+    # MOMENTO do envio (services/email_send_queue.py — degradação
+    # graciosa se algum expirar entretanto).
+    # EMAIL_UNDO_SEND_WINDOW=0 desliga a funcionalidade (envio imediato
+    # legacy — útil para testes automáticos/E2E).
+    from services.email_send_queue import (
+        UNDO_SEND_WINDOW_SECONDS as undo_window,
+        build_pending_send_record,
+        execute_pending_email_send,
+        queue_email_send,
+    )
 
-    if payload.attachment_ids:
-        # Look up temp attachments from MongoDB
-        temp_docs = await db.temp_attachments.find(
-            {"id": {"$in": payload.attachment_ids}, "user_id": current_user["id"]},
-            {"_id": 0}
-        ).to_list(20)
+    record = build_pending_send_record(
+        account=account,
+        to_emails=to_emails,
+        subject=subject or "",
+        body=body or "",
+        body_html=body_html,
+        cc_emails=cc_emails,
+        process_id=payload.process_id,
+        from_box=from_box,
+        from_email=from_email,
+        company_id=active_company_id,
+        created_by=current_user["id"],
+        created_by_email=current_user.get("email"),
+        attachment_ids=payload.attachment_ids or [],
+    )
 
-        if len(temp_docs) != len(payload.attachment_ids):
-            found_ids = {d["id"] for d in temp_docs}
-            missing = [aid for aid in payload.attachment_ids if aid not in found_ids]
-            logger.warning(f"Temp attachments not found: {missing}")
-            # Continue with available attachments
+    if undo_window <= 0:
+        # Modo legacy — envio imediato (sem janela de undo). Reutiliza o
+        # mesmo executor do caminho diferido (claim → anexos → envio →
+        # limpeza) para manter UM único fluxo de entrega.
+        from services.email_send_queue import _pending_collection
 
-        from services.s3_storage import s3_service
-
-        for temp_doc in temp_docs:
-            temp_key = temp_doc["temp_key"]
-            file_name = temp_doc["file_name"]
-            mime_type = temp_doc.get("mime_type", "application/octet-stream")
-
-            try:
-                # Download content from temp S3 path
-                loop = asyncio.get_running_loop()
-                content_bytes = await loop.run_in_executor(
-                    None, lambda tk=temp_key: s3_service.get_file_content(tk)
-                )
-                if content_bytes:
-                    email_attachments.append({
-                        "filename": file_name,
-                        "content_bytes": content_bytes,
-                        "content_type": mime_type,
-                    })
-                    temp_attachment_records.append({
-                        "id": temp_doc["id"],
-                        "file_name": file_name,
-                        "file_size": temp_doc.get("file_size", len(content_bytes)),
-                        "mime_type": mime_type,
-                        "temp_key": temp_key,
-                    })
-                    temp_keys_to_cleanup.append(temp_key)
-                    logger.info(f"Temp attachment prepared for send: {file_name}")
-                else:
-                    logger.warning(f"Could not download temp attachment from S3: {temp_key}")
-            except Exception as e:
-                logger.error(f"Error downloading temp attachment {file_name}: {e}")
-
-    # === EMPRESA ATIVA + from_email — já resolvidos no início (Pacote AL) ===
-    # active_company_id: para a assinatura correta da empresa ativa.
-    # from_email: remetente pessoal resolvido da config (não a conta geral).
-    # reply_to: respostas vão para o email do utilizador, não para a conta geral.
-
-    try:
-        result = await send_email(
-            account_name=account,
-            to_emails=to_emails,
-            subject=subject,
-            body=body,
-            body_html=body_html,
-            cc_emails=cc_emails,
-            process_id=payload.process_id,
-            created_by=current_user["id"],
-            attachments=email_attachments if email_attachments else None,
-            active_company_id=active_company_id,
-            from_email=from_email,
-            reply_to=from_email,
-        )
-    except Exception as e:
-        logger.exception(f"[Send Email] Erro ao chamar send_email: {e}")
-        raise HTTPException(
-            status_code=500,
-            detail=f"Erro interno ao enviar email: {type(e).__name__}: {e}"
-        )
-
-    if not result["success"]:
-        raise HTTPException(status_code=500, detail=result.get("error", "Erro ao enviar email"))
-
-    # ==== MOVE ATTACHMENTS FROM TEMP TO PERMANENT + UPDATE EMAIL DOC ====
-    if temp_attachment_records and payload.process_id:
-        from services.s3_storage import s3_service
-
-        # Find the most recently created sent email for this user+process
-        sent_email = await db.emails.find_one(
-            {
-                "process_id": payload.process_id,
-                "created_by": current_user["id"],
-                "direction": "sent",
-            },
-            sort=[("sent_at", -1)],
-        )
-
-        if sent_email:
-            permanent_attachments = []
-            for att_rec in temp_attachment_records:
-                permanent_s3_key = f"Emails/{sent_email['id']}/{att_rec['file_name']}"
-                try:
-                    loop = asyncio.get_running_loop()
-                    moved = await loop.run_in_executor(
-                        None,
-                        lambda sk=att_rec["temp_key"], pk=permanent_s3_key: s3_service.rename_file(sk, pk)
-                    )
-                    if moved:
-                        logger.info(f"Attachment moved: {att_rec['temp_key']} -> {permanent_s3_key}")
-                    else:
-                        logger.warning(f"Failed to move attachment: {att_rec['temp_key']}")
-                        permanent_s3_key = att_rec["temp_key"]  # Keep temp key as fallback
-                except Exception as e:
-                    logger.error(f"Error moving attachment {att_rec['temp_key']}: {e}")
-                    permanent_s3_key = att_rec["temp_key"]
-
-                permanent_attachments.append({
-                    "id": att_rec["id"],
-                    "filename": att_rec["file_name"],
-                    "file_name": att_rec["file_name"],
-                    "size": att_rec["file_size"],
-                    "content_type": att_rec["mime_type"],
-                    "s3_key": permanent_s3_key,
-                })
-
-            # Update email document with permanent attachment metadata
-            existing_attachments = sent_email.get("attachments", [])
-            await db.emails.update_one(
-                {"id": sent_email["id"]},
-                {"$set": {"attachments": existing_attachments + permanent_attachments}}
+        await _pending_collection().insert_one(dict(record))
+        result = await execute_pending_email_send(record["id"])
+        if not result.get("success"):
+            raise HTTPException(
+                status_code=500,
+                detail=result.get("reason") or "Erro ao enviar email",
             )
+        return {
+            "success": True,
+            "queued": False,
+            "send_id": record["id"],
+            "undo_window_seconds": 0,
+        }
 
-        # Clean up temp attachment metadata from MongoDB
-        await db.temp_attachments.delete_many({"id": {"$in": [r["id"] for r in temp_attachment_records]}})
-
-        # Clean up temp files from S3 (for any that weren't moved)
-        for temp_key in temp_keys_to_cleanup:
-            try:
-                loop = asyncio.get_running_loop()
-                await loop.run_in_executor(None, lambda tk=temp_key: s3_service.delete_file(tk))
-            except Exception as e:
-                logger.warning(f"Failed to cleanup temp file {temp_key}: {e}")
-
-    result["attachments_sent"] = len(email_attachments)
-    return result
+    return await queue_email_send(record)
 
 
 async def run_create_email_record(email_data: EmailCreate, current_user: dict):
@@ -939,6 +859,23 @@ async def run_get_email(email_id: str, request: Request, current_user: dict):
         user_id = current_user["id"]
         user_email = (current_user.get("email") or "").lower().strip()
 
+        # PACOTE 8 — desacoplamento login ↔ webmail: a conversa é avaliada
+        # contra as contas CONFIGURADAS no UserEmailConfig (IMAP/SMTP da
+        # área pessoal, todas as empresas) — um utilizador que faz login
+        # com user@x.pt mas gere geral@x.pt vê os emails da sua caixa
+        # configurada. O email de login só é fallback sem configs.
+        conversation_emails: List[str] = []
+        try:
+            from services.user_email_config_service import get_user_mailbox_addresses
+            conversation_emails = await get_user_mailbox_addresses(user_id)
+        except Exception as exc:
+            logger.warning(
+                "[Email Detail] Falha a resolver contas configuradas user=%s: %s",
+                user_id, exc,
+            )
+        if not conversation_emails:
+            conversation_emails = [user_email] if user_email else []
+
         # Verificar se o utilizador tem acesso a este email
         is_owner = (
             email.get("created_by") == user_id
@@ -949,12 +886,13 @@ async def run_get_email(email_id: str, request: Request, current_user: dict):
             and email.get("shared_role") == user_role
         )
         is_in_conversation = False
-        if user_email:
-            from_emails = email.get("from_email") or ""
+        if conversation_emails:
+            from_emails = (email.get("from_email") or "").lower()
             to_emails = email.get("to_emails") or []
-            is_in_conversation = (
-                user_email in from_emails.lower()
-                or any(user_email in addr.lower() for addr in to_emails)
+            is_in_conversation = any(
+                conv in from_emails
+                or any(conv in str(addr).lower() for addr in to_emails)
+                for conv in conversation_emails
             )
 
         if not (is_owner or is_shared_role or is_in_conversation):

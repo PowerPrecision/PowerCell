@@ -260,7 +260,41 @@ As settings de cada perfil (assinatura, webmail, preferências) são lidas do ba
 
 Quando uma entidade tem um campo de prioridade explícito (`task.priority`, definido manualmente ou por um motor automático) **e** uma heurística derivada de outro campo (ex: prazo/`due_date`), o badge deve dar sempre prioridade ao valor explícito; a heurística só serve de *fallback* quando o campo explícito está vazio. Cores fixas por nível: Alta/High → vermelho (`variant="destructive"`), Média/Medium → amarelo/`outline` com classes `bg-yellow-100 text-yellow-700`, Baixa/Low → cinzento/`outline` com `bg-slate-100 text-slate-600`. Ver `getPriorityBadge` em `components/TasksPanel.js`.
 
+## 14. Perfis fantasma e Webmail unificado (Pacote 8)
+
+### Perfis do menu = UCRs reais, ponto final
+
+`buildUserProfileItems` (`utils/userProfiles.js`) devolve **exclusivamente** os UCRs reais (`user.companies`) quando existem — **nunca** mesclar `additional_roles` ou o role primário de login nesses casos: eram a causa dos "perfis fantasma" (2 perfis activos, 3 opções no menu). O fallback legado (role primário + `additional_roles`) só existe para utilizadores **sem qualquer UCR**. O backend já filtra `is_deleted`/`is_active` na origem (ver `ARCHITECTURE.md` — "Filtro estrito de UCRs válidos"), pelo que qualquer perfil recebido é válido por construção.
+
+### Webmail — seletor de caixas unificado, sem troca de perfil
+
+- O `WebmailPage` carrega as contas com `GET /users/me/email-accounts?scope=all` (todas as empresas) — a lista de caixas **não** depende de `companyId`/`effectiveRole`, nem refaz fetch quando o perfil global muda.
+- As opções do seletor vêm de `buildMailboxOptions` (`utils/webmailMailbox.js`): labels com sufixo da empresa (`Caixa Pessoal (a@x.pt · Empresa)`), Caixa Geral marcada pelo backend (`is_caixa_geral`) e Caixa de Indexação quando `has_shared_indexacao` (cargo indexacao em **qualquer** perfil). O valor seleccionado flui para o param `mailbox` da API — nunca filtrar caixas no frontend por role activo.
+- Abrir ficheiros/anexos: **sempre** novo separador — `window.open("", "_blank")` síncrono no gesto de clique (antes de qualquer `await`, senão o popup blocker come o pedido), navegação para o blob URL quando o fetch resolve, `URL.revokeObjectURL` adiado (~60s) para o separador ter tempo de renderizar. Ver `handleDownloadAttachment` no `WebmailPage`.
+- Abrir o email em novo separador: link nativo `/webmail?folder=<pasta>&mailbox=<caixa>&id=<id>` — a página honra `?mailbox=` (selecciona a caixa) e `?id=` (abre o painel de leitura; `?folder=drafts&id=` continua a abrir o compositor — Pacote DM).
 
 
 
 
+
+
+
+## 15. Undo Send e Toggle "Indexado" (Pacote 9)
+
+### Envio de email = toast "Email a ser enviado..." com Desfazer
+
+O backend (Pacote 9) agenda o envio real após a janela de undo (`POST /api/emails/send` devolve `{queued: true, send_id, undo_window_seconds}` em vez de enviar de imediato). O frontend NUNCA assume envio imediato na resposta OK:
+
+- **Parse da resposta com `parseSendResponse`** (`utils/webmailSendQueue.js` — helpers puros, testáveis com `node --test`): normaliza `queued`/`send_id`/`undo_window_ms` e tolera respostas legacy/inválidas (devolve `queued: false` → caminho de envio imediato).
+- **UX canónica (Gmail-like)**: ao clicar "Enviar", o composer **fecha**; surge `toast.success("Email a ser enviado...", { duration: undoWindowMs, action: { label: "Desfazer", onClick: cancelSend } })`. O botão "Desfazer" chama `POST /api/emails/{send_id}/cancel-send` (mesmos headers de contexto: `Authorization` + `X-Company-Id`/`X-Active-Role` via `webmailHeaders()`).
+- **Undo repõe o modo de edição**: antes do fetch de envio, guardar um snapshot (`buildComposerSnapshot`) do `composerData` + `uploadAttachments`; no cancel, repor o snapshot (ou o `draft` devolvido pelo backend, convertido com `draftToComposerFields`), reabrir o composer (`setComposerOpen(true)`) e `toast.success("Envio cancelado — pode continuar a editar o rascunho.")`. Os anexos temp continuam válidos (o backend só os move no envio real).
+- **Após a janela (sem undo)**: `setTimeout` ligeiramente depois da janela confirma visualmente ("Email enviado com sucesso") e faz `handleRefresh()` (invalidação `queryKeys.emails.webmailAll()`).
+- Padrão aplicado nos DOIS pontos de envio do Webmail: `WebmailPage.jsx::handleSendEmail` (composer) e `EmailViewerModal.js::sendReply` (resposta rápida — no undo, reabre a caixa de resposta com o texto intacto).
+- Nunca duplicar a lógica de undo inline: extrair sempre para `utils/` (puro, sem JSX) e testar com `node --test`.
+
+### Toggle "Indexado" no header dos Detalhes do Processo
+
+- Switch shadcn (`components/ui/switch`) + `Label` no bloco `actions` do `PageHeader`, com `data-testid="indexed-toggle"`; `checked={!!process?.is_indexed}`.
+- **Visibilidade**: apenas perfis de gestão/indexação — `INDEX_TOGGLE_ROLES = ["indexacao", "admin", "ceo"]` (a mesma regra do backend `assert_mark_indexed_permission`), avaliada com `effectiveRole` (perfil ACTIVO) e fallback `hasAnyRole(user, ...)` (padrão do Kanban — ver `ProcessDetailsModal`). Não usar apenas `user.role` (primário do JWT): multi-perfis ficariam sem o toggle.
+- **Acção**: `setProcessIndexed(processId, isIndexed)` (`services/api.js`) → `POST /processes/{id}/set-indexed {"is_indexed": bool}`. Optimistic update local (`setProcess`) + rollback em erro + `fetchData()` (invalida o bundle de queries do processo). O ON notifica a equipa (fluxo canónico do mark-indexed no backend); o OFF reverte o flag sem mexer na fase.
+- Estado ocupado: `indexToggleBusy` desactiva o Switch e troca o label por um `Loader2` spinner — feedback imediato, sem cliques duplos.

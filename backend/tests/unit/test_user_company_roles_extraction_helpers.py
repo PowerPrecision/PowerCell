@@ -444,10 +444,14 @@ async def test_set_active_company_requires_role_and_matches_ucr_triple():
 
     assert result["success"] is True
     assert result["active_company_role"] == "consultor"
+    # PACOTE 8 — o triple {user_id, company_id, role} ganha os filtros
+    # estritos de perfis válidos (nunca activar um UCR apagado/inactivo).
     assert mock_db.user_company_roles.find_one.call_args[0][0] == {
         "user_id": "u1",
         "company_id": "c1",
         "role": "consultor",
+        "is_deleted": {"$ne": True},
+        "is_active": {"$ne": False},
     }
     assert mock_db.user_company_roles.update_one.call_args[0][0] == {
         "user_id": "u1",

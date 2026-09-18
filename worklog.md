@@ -4149,3 +4149,90 @@ Validação:
 Stage Summary:
 - Ficheiros alterados (2): `backend/tests/unit/test_e2e_business_logic_fixes.py`, `ARCHITECTURE.md`.
 - Resultado: CI volta ao verde; o teste de Bug 5 fica alinhado com a regra de visibilidade vigente (bypass absoluto dos perfis de administração, verificado em primeiro lugar) mantendo as asserções protectivas (consultor/intermediário/parceiro sem atribuição → 403), e o `ARCHITECTURE.md` documenta a regra correcta. Lição de processo registada: um pacote que altera um módulo coberto por testes tem de re-executar os ficheiros de teste desse módulo (não apenas os seleccionados ad-hoc) — foi exactamente o gap que deixou a asserção obsoleta entrar na dev. Commit: `Fix: Alinhar teste de visibilidade com o bypass absoluto dos perfis de administração e actualizar documentação`.
+
+---
+Task ID: pacote-8
+Agent: Senior Full-Stack Tech Lead (Z.ai)
+Task: 3 falhas de UX e Lógica de Negócio (multi-perfis e Webmail): (1) perfis fantasma no ContextSwitcher (2 perfis activos, 3 opções no menu); (2) Webmail preso ao perfil activo do CRM + falta de navegação (anexos/email em novo separador); (3) motor do webmail a forçar o email de login em vez da conta IMAP configurada (user@x.pt gere geral@x.pt). Commit na dev: `Feat/Fix: Clean ghost profiles, unify Webmail inbox with new tab UX, and decouple IMAP config from login email`.
+
+Diagnóstico (causa raiz, por leitura de código antes de alterar):
+1. **Perfis fantasma**: `services/auth.py::get_user_companies` (a fonte de `user.companies` em /auth/login e /auth/me, que alimentam o ContextSwitcher) fazia `find({"user_id": ...})` SEM filtros de validade — UCRs marcados is_deleted/is_active passavam ao frontend. Agravante no frontend: `buildUserProfileItems` (utils/userProfiles.js) mesclava `additional_roles` + role primário de login quando existiam UCRs — perfis sintéticos sem UCR (o "3º perfil" clássico), em violação da regra documentada (perfis 100% dinâmicos a partir de user.companies). A lista admin (`run_list_user_company_roles`) e o switch (`run_set_active_company`) também não filtravam.
+2. **Webmail preso ao perfil**: `run_list_my_email_accounts` listava apenas as configs da empresa ACTIVA (`list_company_email_configs(user, active_company)`); as permissões de caixa (`box=general`/`shared_indexacao`) e a comparação "mailbox == Caixa Geral" (`rewrite_box_for_caixa_geral`) avaliavam SÓ o cargo activo e a caixa da empresa activa; o sync-user procurava a mailbox apenas na empresa activa. O utilizador tinha de trocar de perfil global para ver outra caixa.
+3. **Email de login forçado**: os filtros de conversa do `run_webmail_list` (regex to_emails/from_email), o `run_get_email` (is_in_conversation) e o `_assert_email_readable` (anexos) avaliavam a conversa contra `current_user["email"]` (login, tabela users) — emails da caixa configurada (geral@x.pt) invisíveis/inacessíveis para o utilizador cujo login é outro. (O sync em si já usava `resolved.email_address` — o problema estava na LEITURA.)
+
+Correções Aplicadas (PACOTE 8):
+1. **Perfis fantasma**: filtros estritos `{"is_deleted": {"$ne": True}, "is_active": {"$ne": False}}` em `get_user_companies` (auth.py), `run_list_user_company_roles` (lista admin), `run_set_active_company` (403 ao activar UCR inválido) e na protecção do último acesso (conta só UCRs válidos). Frontend: `buildUserProfileItems` devolve EXCLUSIVAMENTE os UCRs quando existem (merge sintético removido; fallback legado sem UCRs mantém-se) — header, Área Pessoal e ProfilePage ficam consistentes por construção.
+2. **Webmail unificado**: novo `scope=all` no `GET /users/me/email-accounts` (`run_list_my_email_accounts`) — vista consolidada com todas as configs (todas as empresas, com company_name), Caixa Geral de CADA empresa com cargo de gestão em UCR válido, e flag `has_shared_indexacao` (cargo indexacao em qualquer perfil). `email_webmail.py`: `_user_ucr_roles` + guards de caixa com OR de UCRs em `run_webmail_list`/`run_webmail_stats`; `_user_caixa_geral_emails` + comparação de caixa geral em TODAS as empresas (`resolve_ucr_mailbox_filter`/`rewrite_box_for_caixa_geral`); `run_webmail_sync_user` resolve a mailbox em todas as empresas e permite sync da Caixa Geral com cargo de gestão em qualquer UCR. Frontend: `WebmailPage` carrega `scope=all` (independente de companyId/role), `buildMailboxOptions` com sufixo de empresa + Caixa de Indexação via `has_shared_indexacao`, mailbox inicial honra `?mailbox=` da URL.
+3. **Desacoplamento login↔IMAP**: novo `get_user_mailbox_addresses` (user_email_config_service.py — contas configuradas, todas as empresas, degradação graciosa); filtros de conversa do `run_webmail_list` (todas as pastas + unread), `run_get_email` e `_assert_email_readable` usam as contas configuradas (login só como fallback legado sem configs); helper `_regex_any`/`_resolve_conversation_emails` no email_webmail.py. A propriedade continua garantida por synced_for_user/created_by.
+4. **UX nova tab**: anexos abrem SEMPRE em novo separador (window.open síncrono no gesto do clique → navegação para blob URL pós-fetch → imune a popup blockers, fallback para download); botão "Novo Separador" no painel de leitura abre `/webmail?folder=X&mailbox=Y&id=Z`; `?id=` em pastas normais abre o painel de leitura (`?folder=drafts` mantém o compositor — Pacote DM).
+
+Validação:
+- `git pull origin dev` executado antes de qualquer alteração (Already up to date, base 97c8de4f).
+- Sintaxe: ast.parse de 9 ficheiros Python + esbuild (loader jsx) de WebmailPage.jsx/userProfiles.js/webmailMailbox.js — OK.
+- **Novos testes**: `backend/tests/unit/test_pacote8_ux_business_fixes.py` (22 testes: filtros UCR nas 4 queries, lista/scope=all consolidada com caixas gerais multi-empresa + flag indexacao, FORCED_SHARED preservado no scope=active, permissões de caixa por UCR com 403 negado sem UCR, caixa geral cross-company reescrita para box=general, filtro pessoal por account, get_user_mailbox_addresses só configs + degradação, _regex_any, conversa prefere config sobre login com fallback, run_get_email 200/403, anexos com caixa configurada, sync-user com match cross-company) + `frontend/src/utils/webmailMailbox.test.js` (9) + caso de perfis fantasma em `userProfiles.test.js` (1) — 32 novos.
+- **2 testes existentes actualizados** (contratos ancorados ao código antigo): `test_ucr_rbac.py::test_webmail_source_unifies_shared_box_on_effective_role` (metatest de código-fonte — novos guards legacy+UCR) e `test_user_company_roles_extraction_helpers.py::test_set_active_company_requires_role_and_matches_ucr_triple` (call_args com os filtros estritos).
+- **FakeAsyncCollection/conftest estendidos**: cursor `find().sort().skip().limit().to_list()` com projecção, `update_many`, matcher com `$or`/`$and`/`$regex`/`$exists` (recursivo) — necessário para exercitar os filtros do Webmail sem Mongo.
+- Suite unitária completa (`pytest tests/unit -n 4`): **1185 passed, 0 falhas** (1163 anteriores + 22 novos, delta exacto, zero regressões).
+- Testes frontend utils (`node --test`): 23 passed, 0 falhas.
+- flake8 (comando exacto do CI `--count --select=E9,F63,F7,F82 --show-source --statistics`, .venv local excluído): 0 problemas.
+
+Stage Summary:
+- Ficheiros alterados (13): backend — `services/auth.py`, `services/user_company_roles_api_crud.py`, `services/user_company_roles_api_active.py`, `services/user_email_config_service.py`, `services/users_api_email_config.py`, `services/email_webmail.py`, `services/email_process_crud.py`, `services/email_mailbox_ops.py`, `routes/users.py`, `tests/unit/conftest.py`, `tests/unit/test_ucr_rbac.py`, `tests/unit/test_user_company_roles_extraction_helpers.py`; frontend — `pages/WebmailPage.jsx`, `utils/userProfiles.js`, `utils/webmailMailbox.js`, `utils/userProfiles.test.js`.
+- Ficheiros novos (2): `backend/tests/unit/test_pacote8_ux_business_fixes.py`, `frontend/src/utils/webmailMailbox.test.js`.
+- Documentação: `ARCHITECTURE.md` (nova secção "Filtro estrito de UCRs válidos (Pacote 8)" + nova secção "Webmail Unificado e Desacoplamento Login↔IMAP (Pacote 8)"), `FRONTEND_GUIDELINES.md` (nova secção 14 — perfis=UCRs reais, seletor de caixas unificado, padrões de novo separador), `worklog.md` (esta iteração).
+- Resultado: o ContextSwitcher só mostra perfis válidos (2 UCRs = 2 opções), o Webmail mostra TODAS as caixas do utilizador num seletor interno sem trocar de perfil global (com Caixas Gerais por empresa e Caixa de Indexação quando aplicável), anexos e emails abrem em novos separadores, e o motor consulta a caixa pela conta do UserEmailConfig (geral@x.pt) ignorando o email de login para efeitos de conversa. Commit: `Feat/Fix: Clean ghost profiles, unify Webmail inbox with new tab UX, and decouple IMAP config from login email`.
+
+---
+
+# Pacote 9 — S3 na criação, guards de atribuição, Undo Send, toggle Indexado e manutenção
+
+**Data**: 2026-09-18 · **Branch**: `dev` · **Base**: `e08e1b1c` (Pacote 8)
+
+## Problemas reportados
+
+1. **Bug crítico**: clientes não ficavam mapeados com o S3.
+2. **Regras de atribuição**: auto-atribuição por cima de alguém já atribuído; criador consultor/intermediário não ficava atribuído a si próprio (cliente invisível em "Os Meus Clientes" durante o Pré-Registo).
+3. **UX Webmail**: necessidade de "Desfazer" no envio (janela de 10s).
+4. **Manutenção**: script de limpeza de dados de teste desactualizado (não transversal); backfill S3 não detectava clientes/processos sem pasta.
+5. **UX Detalhes do Processo**: toggle "Indexado" no header (visível só para perfis de gestão/indexação).
+
+## Diagnóstico (leitura de código)
+
+- O hook FQ-3 existia apenas em `run_create_client` (`POST /clients`). O `POST /processes/create-client` (fluxo principal do "Novo Cliente") inseria o processo **sem** `s3_folder`; o `POST /clients/{id}/assign` gravava apenas uma string de path (sem marcadores `.keep`, sem reutilização de pastas, sem backfill do cliente). O docstring de `initialize_client_folders` ("chamado automaticamente quando um novo processo é criado") não correspondia à realidade.
+- Guards de auto-atribuição cobriam apenas singulars (`consultant_id`/`assigned_consultor_id`) — processos atribuídos via multi-assign (`assigned_consultor_ids`) podiam receber um 2º consultor do motor "menos ocupado" e da dupla auto-atribuição da transição de pré-registo.
+- `apply_creator_role_assignment` usava a role PRIMÁRIA do JWT (multi-perfis ignorados); `run_create_client` grava `created_by` = email mas a query de leads órfãos filtrava `created_by == user_id` → leads invisíveis.
+- `run_send_email` enviava à rede SMTP imediatamente; sem qualquer estado de envio pendente.
+- Cleanup: substring "test" crua (falsos positivos: "atestado", "testamento", "latest"); cobertura só por cascata de clientes/processos; hard-delete único.
+- Backfill: só `clients`; filtro `is_active` (campo de Process) em clients; não apanhava `s3_folder` = "undefined"/"null"; sem cobertura de processos.
+
+## Implementação
+
+**Backend**
+- NOVO `services/s3_mapping_on_create.py`: `ensure_s3_mapping_for_entity` + `ensure_s3_mapping_on_process_create` (pasta real via `ensure_client_folder_mapping` em `asyncio.to_thread`; `$set` estrito; backfill do cliente; degradação graciosa). Hooks: `persist_and_finalize_staff_create`, `run_assign_client_to_user`. Fix extra: `id` na projecção do find_one de backfill (o Motor devolve `{}` — falsy — sem campos projectados).
+- Guards: `assign_to_least_busy_consultant` + `dual_auto_assign_on_pre_registo_transition` estendidos às listas multi-assignee; `run_assign_client_to_user` com guard 409 (assigned_to pré-existente, excepto admin/ceo/diretor) e cargo EFECTIVO; campos plurais preenchidos em `client_assign` e `apply_creator_role_assignment`.
+- Auto-atribuição ao criador: `run_create_client` grava `assigned_to`/`assigned_at` quando o cargo efectivo é consultor/intermediário; NOVA `build_orphan_leads_query` (created_by id OU email).
+- NOVO `services/email_send_queue.py` (Undo Send): colecção `pending_email_sends`; `run_send_email` passa a enfileirar (resposta `{queued, send_id, undo_window_seconds}`); execução via job ARQ `send_pending_webmail_email_task` (defer_by) + timer in-process com **claim atómico** Mongo (nunca envio duplicado); `POST /emails/{send_id}/cancel-send` devolve o draft; anexos descarregados apenas no momento do envio; `EMAIL_UNDO_SEND_WINDOW=0` = envio imediato legacy (mesmo executor); `recover_stale_pending_sends` como rede de segurança.
+- Toggle Indexado: `process_indexing.py::run_set_process_indexed_flag` (ON = fluxo canónico do mark-indexed; OFF = reversão sem mexer na fase + histórico `INDEXACAO_REVERTIDA` + broadcast WS) + rota `POST/PATCH /processes/{id}/set-indexed`.
+- Scripts: `cleanup_prod_test_data.py` reescrito (transversal: clients/processes/property_leads/activities/tasks por campos próprios + cascata; regex `(?<![a-zA-Z])test(e|es|ing)?(?![a-zA-Z])` sem falsos positivos PT/EN; `--mode soft|hard`, soft por defeito; logs descritivos); `backfill_s3_mappings.py` actualizado (clients+processes; filtros soft-delete + lixo; 2º titular por colecção).
+
+**Frontend**
+- NOVO `utils/webmailSendQueue.js` (parse da resposta, snapshot do composer, conversão do draft cancelado) + testes `node --test`.
+- `WebmailPage.jsx::handleSendEmail`: toast "Email a ser enviado..." com botão "Desfazer" (cancel-send + reposição do rascunho por snapshot); confirmação pós-janela + invalidação; caminho legacy preservado. `EmailViewerModal.js::sendReply`: mesmo padrão (reabre a caixa de resposta no undo).
+- `ProcessDetails.js`: Switch "Indexado" no header (`data-testid="indexed-toggle"`), gated por `effectiveRole`/`hasAnyRole` com `INDEX_TOGGLE_ROLES = [indexacao, admin, ceo]`; optimistic update + rollback + `fetchData()`; `api.js::setProcessIndexed`.
+
+**Testes/infra de testes**: `conftest.py` estendido de forma aditiva (`find_one` com `sort` — projecção continua ignorada por contrato histórico (dot-notation); `async for` no cursor). 37 novos testes backend (`tests/unit/test_pacote9_infra_ux_fixes.py`) + 5 frontend.
+
+## Lição de processo
+
+O primeiro `find_one` estendido do conftest aplicava projecções literalmente — quebrou 4 testes (rgpd + welcome email) porque serviços reais usam projecções dot-notation e o contrato histórico do fake é devolver o doc completo. Alterações a fixtures partilhadas exigem regressão imediata da suite completa, não só dos testes novos. (Mesma lição do Pacote 7: re-executar os ficheiros de teste dos módulos adjacentes.)
+
+## Validação
+
+- `pytest tests/unit -n 4` → **1222 passed, 0 falhas** (baseline 1185 + 37 novos; 4 falhas intermédias diagnosticadas e corrigidas — ver lição acima).
+- flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas; zero avisos novos nos ficheiros alterados.
+- Frontend: `node --test` (35 existentes + 5 novos) → 40 pass, 0 fail; eslint (ficheiros alterados) limpo; `vite build` verde.
+- Sandbox sem Mongo: os warnings de ligação (Connection refused) são comportamento conhecido e documentado (Pacote 5).
+
+## Commit
+
+`Feat/Fix: Fix client S3 mapping, add smart auto-assignment guards, Undo Send email feature, Index toggle, and broad test data cleanup`

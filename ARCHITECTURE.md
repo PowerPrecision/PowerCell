@@ -1045,6 +1045,19 @@ A UI (`UsersAccessAdminTab` / `LAST_UCR_DELETE_MESSAGE`) mostra a mesma mensagem
 
 Novos acessos UCR só podem ser criados contra empresas com `is_active !== false`. Uma empresa inactivada deixa de ser oferecida no formulário de novo acesso, mas os UCRs já existentes **não** são apagados automaticamente (soft-delete da empresa, não cascade).
 
+### Filtro estrito de UCRs válidos (Pacote 8 — perfis fantasma)
+
+Todas as queries que alimentam perfis de utilizador filtram estritamente UCRs marcados como apagados ou inactivos: `{"is_deleted": {"$ne": True}, "is_active": {"$ne": False}}` (docs legados sem as flags continuam válidos — `$ne` aceita campo ausente). Aplicado em:
+
+| Onde | Efeito |
+|---|---|
+| `services/auth.py::get_user_companies` | `/auth/login` e `/auth/me` (`user.companies`) — a fonte do `ContextSwitcher` e das tabs da Área Pessoal. **O frontend só recebe perfis válidos.** |
+| `services/user_company_roles_api_crud.py::run_list_user_company_roles` | Lista admin (`/admin/user-company-roles`) — a gestão de acessos só vê perfis válidos. |
+| `services/user_company_roles_api_active.py::run_set_active_company` | Recusa (403) activar um UCR apagado/inactivo. |
+| `services/user_company_roles_api_crud.py::run_delete_user_company_role` | A protecção do último acesso conta apenas UCRs válidos. |
+
+No frontend, `utils/userProfiles.js::buildUserProfileItems` devolve **exclusivamente** os UCRs reais quando existem — nunca mescla `additional_roles`/role primário (perfis sintéticos = fantasmas no menu). O fallback legado (role primário + `additional_roles`) só se aplica a utilizadores sem qualquer UCR. Testes: `tests/unit/test_pacote8_ux_business_fixes.py`, `frontend/src/utils/userProfiles.test.js`.
+
 ### Resolução de cargo e empresa activos (Pacote FN)
 
 Alguns UCRs legados guardam o **nome** da empresa (`Precision Crédito`) em `company_id` / `company` em vez do id canónico. Um match estrito por id falhava: o backend fazia fallback silencioso para o cargo JWT e `GET /processes/me` devolvia lista vazia (o utilizador via o ContextSwitcher certo, mas a API filtrava outro contexto).
@@ -1173,6 +1186,27 @@ Helper de leitura canónica do Bloco A:
 `services/email_service.py::_resolve_system_smtp_account()` — devolve
 `EmailAccount(name="system_smtp", ...)` ou `None` (para o caller continuar
 nos fallbacks). Testes: `tests/unit/test_email_config_lookup_mismatch.py`.
+
+### Webmail Unificado e Desacoplamento Login↔IMAP (Pacote 8)
+
+O Webmail deixou de estar preso ao perfil/empresa activa no cabeçalho do CRM e o motor passou a consultar a caixa pela conta **configurada**, não pelo email de login.
+
+**Vista consolidada de caixas** — `GET /api/users/me/email-accounts?scope=all`
+(`services/users_api_email_config.py::run_list_my_email_accounts`):
+
+- todas as configs `user_email_configs` do utilizador (todas as empresas), cada uma com `company_id`/`company_name`;
+- a **Caixa Geral de CADA empresa** em que o utilizador tem um UCR válido com cargo de gestão (`CAIXA_GERAL_INJECT_ROLES`: admin/ceo/diretor) — não apenas a da empresa activa;
+- `has_shared_indexacao`: True quando algum UCR válido tem o cargo `indexacao` — a Caixa de Indexação fica visível no seletor sem trocar de perfil.
+
+Sem `scope` (ou `scope=active`) o comportamento anterior mantém-se (contas da empresa activa) — retrocompatível. O `WebmailPage` carrega sempre com `scope=all`; o seletor (`utils/webmailMailbox.js::buildMailboxOptions`) lista as caixas com o sufixo da empresa (`Caixa Pessoal (geral@x.pt · Empresa B)`) e o valor `personal:<email>` flui para o param `mailbox` dos endpoints.
+
+**Permissões de caixa por UCR (não só pelo perfil activo)** — `services/email_webmail.py`: `run_webmail_list`/`run_webmail_stats` permitem `box=general` quando o cargo activo permite (regra legada) **OU** qualquer UCR válido tem cargo admin/ceo/diretor; `box=shared_indexacao` idem com indexacao/admin (`_user_ucr_roles`). A comparação "mailbox == Caixa Geral" (`rewrite_box_for_caixa_geral` / `resolve_ucr_mailbox_filter`) considera TODAS as caixas gerais do utilizador (`_user_caixa_geral_emails`). O sync (`run_webmail_sync_user`) resolve a config da mailbox em TODAS as empresas (não só a activa) e permite sincronizar a Caixa Geral com cargo de gestão em qualquer UCR.
+
+**Desacoplamento email de login ↔ email configurado** — o utilizador faz login com `user@x.pt` mas gere `geral@x.pt` (UserEmailConfig da área pessoal). Os filtros de conversa (from/to) do Webmail, a leitura do detalhe (`run_get_email`) e o download de anexos (`_assert_email_readable`) avaliam a conversa contra as contas configuradas (`services/user_email_config_service.py::get_user_mailbox_addresses` — todas as empresas, `is_configured=True`); o email de login (``users.email``) é apenas **fallback legado** quando não existem configs. A propriedade continua garantida por `synced_for_user`/`created_by` (carimbo do sync — ver "Motor Real-Time").
+
+**UX de separadores** — os anexos abrem **sempre num novo separador** (`window.open` síncrono no gesto de clique + navegação para o blob URL após o fetch — imune a popup blockers, com fallback para download); o painel de leitura tem o botão "Novo Separador" que abre `/webmail?folder=<pasta>&mailbox=<caixa>&id=<email>` — a página honra `?mailbox=` para seleccionar a caixa certa e `?id=` para abrir o email no painel de leitura (`?folder=drafts` continua a abrir o compositor, Pacote DM).
+
+Testes: `tests/unit/test_pacote8_ux_business_fixes.py` (22 testes — filtros UCR, scope=all, permissões por UCR, desacoplamento) e `frontend/src/utils/webmailMailbox.test.js` + `userProfiles.test.js`.
 
 ### Motor Real-Time do Webmail (v2.0 — Pacote EC)
 
@@ -2209,3 +2243,59 @@ Background tasks fire-and-forget usam `services/background_tasks.py::spawn_backg
 4. Utilizadores atribuídos ao processo (consultor/intermediário/indexador — qualquer campo de atribuição, via `collect_assigned_user_ids`).
 
 Os restantes perfis (ex.: consultor/intermediário/parceiro sem atribuição) recebem **403 Forbidden** enquanto o processo não estiver indexado. Endpoints protegidos: `GET /client/{id}/files`, `GET /client/{id}/download`, `GET /process/{id}`, `GET /metadata/{id}`, `GET /portal-requests/{id}`, `POST /search` (com `process_id`). Após `mark-indexed` (`process_indexing.py` define `is_indexed=True`), a visibilidade volta ao normal. Os downloads genéricos por path (`/download-url/{path}`, `/proxy/{path}`) mantêm `require_staff` + âmbito da raiz de documentos (controle IDOR/path-scope pré-existente).
+
+
+## Pacote 9 — S3 na criação, guards de atribuição, Undo Send e manutenção (Set 2026)
+
+### 1. Mapeamento S3 no momento exacto da criação (clientes E processos)
+
+`services/s3_mapping_on_create.py` centraliza a garantia. Raiz do bug reportado ("clientes não ficam mapeados com o S3"): o hook FQ-3 cobria apenas `POST /clients`; o `POST /processes/create-client` (fluxo principal do "Novo Cliente") inseria o processo **sem** `s3_folder` (a pasta só era criada lazy no primeiro upload do Portal), e o `POST /clients/{id}/assign` gravava apenas uma **string de path** calculada (`_get_client_base_path_for_upload`) — sem marcadores `.keep` no bucket, sem reutilização de pastas existentes e sem backfill do documento do cliente.
+
+Pontos de criação cobertos (todos com `ensure_s3_mapping_on_process_create`):
+
+| Fluxo | Ficheiro | Garantia |
+|---|---|---|
+| `POST /processes/create-client` (staff) | `process_create.py::persist_and_finalize_staff_create` | pasta no S3 + `$set s3_folder` no processo + backfill do cliente |
+| `POST /clients/{id}/assign` | `client_assign.py::run_assign_client_to_user` | idem (substitui o path-only anterior) |
+| `POST /clients` | `client_crud.py::run_create_client` | hook FQ-3 pré-existente (cliente) |
+
+Regras: reutiliza sempre `s3_service.ensure_client_folder_mapping` (match fuzzy por nome / criação idempotente com `.keep`); persistência via `$set` estrito em `s3_folder`; nomes lidos em plain-text **antes** da encriptação (`client_name`/`second_client_name` não são encriptados em repouso — ver `encrypt_sensitive_data`); degradação graciosa (falha S3 = `logger.warning`, o cliente/processo é sempre criado). Nota de implementação: o `id` TEM de estar na projecção do `find_one` de backfill — sem campos projectados o Motor devolve `{}` (falsy) e o backfill nunca executava.
+
+### 2. Guards de atribuição + auto-atribuição ao criador
+
+**Nunca auto-atribuir por cima de alguém já atribuído.** Os guards passaram a cobrir os campos multi-assignee (não apenas os singulars):
+
+- `process_assignment.py::assign_to_least_busy_consultant` — guard estendido a `assigned_consultor_ids` (a lista). Antes, um processo atribuído manualmente via `build_staff_assign_update` (que grava as listas) podia receber um SEGUNDO consultor do motor "menos ocupado".
+- `process_assignment.py::dual_auto_assign_on_pre_registo_transition` — consultor: `consultant_id` **ou** `assigned_consultor_id` **ou** `assigned_consultor_ids`; mediador idem (`mediador_id`/`assigned_mediador_id`/`assigned_mediador_ids`). A dupla auto-atribuição nunca injecta um segundo consultor/intermediário.
+- `assign_to_indexer` mantém o guard pré-existente por `assigned_indexacao_id` (indexador é single-assignee).
+- `client_assign.py::run_assign_client_to_user` — guard de cliente: `assigned_to` já preenchido e diferente do destino → **409** para perfis não-gestão (admin/ceo/diretor podem re-atribuir deliberadamente).
+
+**Auto-atribuição ao criador (Consultor/Intermediário)** — o criador fica atribuído a si próprio no momento da criação, para o cliente aparecer de imediato em "Os Meus Clientes" (mesmo em Pré-Registo):
+
+- `client_crud.py::run_create_client` — se o cargo EFECTIVO (`user["effective_role"]`, resolvido em `get_current_user` contra X-Active-Role/UCR) é consultor/intermediário → grava `assigned_to`/`assigned_at` no documento do cliente.
+- `process_create.py::apply_creator_role_assignment` — cargo efectivo (antes: role primária do JWT — multi-perfis eram ignorados) E campos plurais (`assigned_consultor_ids`/`consultor_names`, `assigned_mediador_ids`/`mediador_names`) em sincronia com os singulars.
+- `client_assign.py` — campos plurais idem para o utilizador de destino.
+- `my_clients_api_helpers.py::build_orphan_leads_query` (extraída de `my_clients_api_list.py`) — fix do mismatch de autor: `created_by == user_id` **OU** `user_email` (o `run_create_client` grava email; a query antiga filtrava só por id → leads órfãos invisíveis).
+
+### 3. Undo Send — envio de email com janela de "Desfazer" (10s)
+
+`services/email_send_queue.py` + colecção dedicada `pending_email_sends` (separada de `emails` — o doc "sent" continua a ser criado apenas pelo `send_email`; emails cancelados não deixam rasto).
+
+Fluxo canónico de `POST /api/emails/send` (`run_send_email`): todas as validações/permissões continuam **síncronas** (403 de config SMTP imediatos) → grava registo `pending` (payload sanitizado + remetente/config resolvidos) → agenda a execução → responde `{"success": true, "queued": true, "send_id", "undo_window_seconds"}`.
+
+- **Execução após a janela** por DUAS vias concorrentes, ambas idempotentes: job ARQ `send_pending_webmail_email_task` (registada em `worker/tasks.py::TASK_FUNCTIONS` e `worker/config.py::WorkerSettings.functions`) enfileirada com `defer_by` (sobrevive a restarts do processo API) + timer in-process (`spawn_background_task` + `asyncio.sleep` — rede de segurança para dev sem Redis/worker ARQ em baixo). As duas disputam um **claim atómico** em Mongo (`update_one({"id", "status": "pending"}) → "claimed"`): só a primeira executa — nunca há envio duplicado.
+- **Cancelamento**: `POST /emails/{send_id}/cancel-send` (`run_cancel_pending_email_send`) — só o autor (ou admin), só enquanto `pending`; apaga o registo (nada sai para a rede SMTP) e devolve o `draft` para o frontend repor o modo de edição.
+- **Anexos**: o download do S3 temp passa a acontecer no MOMENTO do envio (`_prepare_temp_attachments`), com move temp→permanente e limpeza no pós-envio (`_finalize_attachments`).
+- Ciclo de vida: `pending → claimed → [apagado]` (sucesso) / `pending → [apagado]` (cancel) / `claimed → failed` (erro SMTP, mantido para auditoria). `recover_stale_pending_sends()` é a rede de segurança para registos órfãos (API reiniciada a meio da janela).
+- `EMAIL_UNDO_SEND_WINDOW=0` desliga a funcionalidade (envio imediato legacy, útil em E2E) — o caminho imediato reutiliza o MESMO executor (claim → anexos → envio → limpeza).
+
+### 4. Toggle "Indexado" (Detalhes do Processo)
+
+`POST/PATCH /processes/{id}/set-indexed` com body `{"is_indexed": bool}` (`process_indexing.py::run_set_process_indexed_flag`): **ON** delega no fluxo canónico `run_mark_process_indexed` (notificações, salto dinâmico de workflow, limpeza do indexador, histórico); **OFF** reverte o flag (`build_unindex_update_set`: `is_indexed: False` + `unindexed_at/_by/_by_name`) **sem mexer na fase do workflow** (a reversão de fase é manual, por design), com histórico `INDEXACAO_REVERTIDA` e broadcast WS `PROCESS_UPDATED`. Permissão: mesma do mark-indexed (`assert_mark_indexed_permission` — indexacao/admin/ceo). Idempotente em ambos os sentidos (já ON/OFF → resposta de no-op).
+
+### 5. Scripts de manutenção
+
+- **`scripts/cleanup_prod_test_data.py`** (limpeza de dados de teste): passou a transversal — match próprio (não só cascata) em Clientes (nome/email/notas), Processos (process_type/notes/observations), Leads imobiliários (`property_leads`: title/notes/client_name/url), Activities (comment) e Tasks (title/description), além da cascata por `client_id`/`process_id`/`task_id` para documents/task_logs/history. Padrão regex `(?<![a-zA-Z])test(e|es|ing)?(?![a-zA-Z])` (case-insensitive): apanha "test"/"teste"/"testes"/"testing"/"user_test"/"test123"/"test@x.pt" e **rejeita** falsos positivos portugueses ("atestado", "testamento", "testemunho", "protesto", "Contestação") e ingleses ("latest", "contest"). Flag `--mode soft|hard`: soft (predefinição) marca os PAIS com `is_deleted`/`deleted_at`/`deleted_by` (reversível) e apaga os filhos logarítmicos; hard = apagamento físico total (comportamento original). Mantém dry-run por defeito + password de execução + log descritivo por colecção no terminal.
+- **`scripts/backfill_s3_mappings.py`**: passou a cobrir `clients` **E** `processes` (a principal causa de "sem mapeamento"); filtros corrigidos — exclui soft-deleted (`is_deleted`/status "eliminado"; o filtro antigo usava `is_active`, campo de Process, em clients) e apanha valores "lixo" (`"undefined"`/`"null"`/`"None"` — antes só missing/None/vazio); 2º titular lido do sítio certo por colecção (`second_client_name` nos processos, `titular2_data` legacy nos clients); cria os prefixos/pastas reais via boto3 (`ensure_client_folder_mapping`) e grava o mapeamento com auditoria (`s3_mapping_backfilled_at/_by`).
+
+Validação: 37 novos testes unitários (`tests/unit/test_pacote9_infra_ux_fixes.py`) + regressão completa **1222 passed, 0 falhas** + flake8 gate (E9,F63,F7,F82) limpo; frontend: 5 novos testes `node --test` (`webmailSendQueue.test.js`), 35 existentes a passar, eslint e `vite build` verdes. `conftest.py` estendido de forma aditiva (`find_one` com `sort`, `async for` no cursor) mantendo o contrato histórico de projecção ignorada (docs completos — vários serviços dependem disso com dot-notation).
