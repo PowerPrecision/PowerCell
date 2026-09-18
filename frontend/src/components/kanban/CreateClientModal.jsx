@@ -22,6 +22,8 @@
  */
 import React, { memo, useState, useCallback } from 'react';
 import { extractErrorMessage } from '../../utils/extractErrorMessage';
+import { parseDuplicateClientError } from '../../utils/duplicateClient';
+import DuplicateClientAlert from '../shared/DuplicateClientAlert';
 import {
   Dialog,
   DialogContent,
@@ -82,6 +84,11 @@ const CreateClientModal = memo(({
     nif: '',
   });
 
+  // PACOTE 10 — alerta bloqueante de cliente duplicado (409 NIF/Email).
+  // Enquanto activo, a submissão fica desativada; alterar os campos em
+  // conflito (ou "Usar cliente existente") limpa o estado.
+  const [duplicateError, setDuplicateError] = useState(null);
+
   // ── Pesquisa de Clientes Existente ────────────────────────────────
   const [searchQuery, setSearchQuery] = useState('');
   const [searchResults, setSearchResults] = useState([]);
@@ -94,6 +101,7 @@ const CreateClientModal = memo(({
     setSelectedClient(null);
     setClientMode(clientOnly ? 'new' : null);
     setNewClientData({ nome: '', email: '', telefone: '', nif: '' });
+    setDuplicateError(null);
     setSearchQuery('');
     setSearchResults([]);
     setShowDropdown(false);
@@ -181,10 +189,23 @@ const CreateClientModal = memo(({
   const isExistingClientReady = clientMode === 'existing' && selectedClient?.id;
   const isNewClientReady = clientMode === 'new' && newClientData.nome.trim().length >= 2 && newClientData.email.trim().length >= 3;
   const canSubmit = clientOnly
-    ? (isNewClientReady && !isCreating)
-    : ((isExistingClientReady || isNewClientReady) && formData.process_type && !isCreating);
+    ? (isNewClientReady && !isCreating && !duplicateError)
+    : ((isExistingClientReady || isNewClientReady) && formData.process_type && !isCreating && !duplicateError);
 
   // ── Submissão ─────────────────────────────────────────────────────
+  // PACOTE 10 — usar o cliente duplicado detectado (409): transforma o
+  // conflito num atalho — selecciona o cliente existente apontado pelo
+  // backend e passa ao modo "Cliente Existente".
+  const handleUseExistingFromDuplicate = useCallback(() => {
+    if (!duplicateError?.existing_client_id) return;
+    handleSelectExistingClient({
+      id: duplicateError.existing_client_id,
+      nome: duplicateError.existing_client_name || 'Cliente existente',
+    });
+    setClientMode('existing');
+    setDuplicateError(null);
+  }, [duplicateError, handleSelectExistingClient]);
+
   const handleCreate = useCallback(async () => {
     if (!canSubmit) return;
 
@@ -197,14 +218,28 @@ const CreateClientModal = memo(({
       // Índice (LEAD_STATUS_VALUES) e só aparece em "Registos de Clientes",
       // até ser qualificado (documentos carregados no Portal).
       if (clientOnly) {
-        const newClientRes = await createClient({
-          nome: newClientData.nome.trim(),
-          email: newClientData.email.trim() || undefined,
-          telefone: newClientData.telefone.trim() || undefined,
-          nif: newClientData.nif.trim() || undefined,
-          fonte: 'staff_created',
-          skip_welcome_email: true, // o email dispara na criação do processo, abaixo (evita duplicar)
-        });
+        // PACOTE 10 — skipErrorToast: o 409 de duplicado é tratado AQUI
+        // (banner bloqueante) e não pelo toast genérico do interceptor.
+        let newClientRes;
+        try {
+          newClientRes = await createClient({
+            nome: newClientData.nome.trim(),
+            email: newClientData.email.trim() || undefined,
+            telefone: newClientData.telefone.trim() || undefined,
+            nif: newClientData.nif.trim() || undefined,
+            fonte: 'staff_created',
+            skip_welcome_email: true, // o email dispara na criação do processo, abaixo (evita duplicar)
+          }, { skipErrorToast: true });
+        } catch (createErr) {
+          console.error('Erro ao criar cliente:', createErr);
+          const dup = parseDuplicateClientError(createErr);
+          if (dup) {
+            setDuplicateError(dup);
+            return;
+          }
+          toast.error(extractErrorMessage(createErr.response?.data?.detail, 'Erro ao criar cliente na base de dados'));
+          return;
+        }
         const newClientId = newClientRes.data?.id;
         if (!newClientId) {
           toast.error('Erro ao criar cliente: resposta sem ID');
@@ -231,13 +266,15 @@ const CreateClientModal = memo(({
       // ── PASSO 1: Se é novo cliente, criar primeiro na BD ──────────
       if (clientMode === 'new' && !clientId) {
         try {
+          // PACOTE 10 — skipErrorToast: o 409 de duplicado é tratado AQUI
+          // (banner bloqueante + acção "Usar cliente existente").
           const newClientRes = await createClient({
             nome: newClientData.nome.trim(),
             email: newClientData.email.trim() || undefined,
             telefone: newClientData.telefone.trim() || undefined,
             nif: newClientData.nif.trim() || undefined,
             fonte: 'staff_created',
-          });
+          }, { skipErrorToast: true });
           // Extrair client_id da resposta do backend
           clientId = newClientRes.data?.id || newClientRes.data?.client?.id;
           if (!clientId) {
@@ -247,6 +284,11 @@ const CreateClientModal = memo(({
           toast.success(`Cliente "${newClientData.nome}" criado com sucesso!`);
         } catch (createErr) {
           console.error('Erro ao criar cliente:', createErr);
+          const dup = parseDuplicateClientError(createErr);
+          if (dup) {
+            setDuplicateError(dup);
+            return;
+          }
           const errMsg = extractErrorMessage(createErr.response?.data?.detail, 'Erro ao criar cliente na base de dados') || createErr.message;
           toast.error(errMsg);
           return;
@@ -420,6 +462,12 @@ const CreateClientModal = memo(({
                 )}
               </div>
               <div className="border rounded-lg p-3 bg-muted/20 space-y-3">
+                {/* PACOTE 10 — alerta bloqueante de cliente duplicado (409). */}
+                <DuplicateClientAlert
+                  duplicate={duplicateError}
+                  onDismiss={() => setDuplicateError(null)}
+                  onUseExisting={clientOnly ? undefined : handleUseExistingFromDuplicate}
+                />
                 <p className="text-xs text-muted-foreground">
                   {clientOnly
                     ? 'Estes dados serão guardados na ficha do Cliente. Um processo em pré-registo é criado automaticamente (fica fora do Índice até os documentos serem carregados).'
@@ -435,7 +483,11 @@ const CreateClientModal = memo(({
                   placeholder="Email * (obrigatório para o Portal do Cliente)"
                   type="email"
                   value={newClientData.email}
-                  onChange={(e) => setNewClientData(prev => ({ ...prev, email: e.target.value }))}
+                  onChange={(e) => {
+                    setNewClientData(prev => ({ ...prev, email: e.target.value }));
+                    // PACOTE 10 — alterar o campo em conflito limpa o aviso
+                    if (duplicateError) setDuplicateError(null);
+                  }}
                   required
                 />
                 <div className="grid grid-cols-2 gap-2">
@@ -445,6 +497,8 @@ const CreateClientModal = memo(({
                     onChange={(e) => {
                       const v = e.target.value.replace(/[^\d]/g, '').slice(0, 9);
                       setNewClientData(prev => ({ ...prev, nif: v }));
+                      // PACOTE 10 — alterar o campo em conflito limpa o aviso
+                      if (duplicateError) setDuplicateError(null);
                     }}
                   />
                   <Input

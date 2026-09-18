@@ -55,6 +55,66 @@ from services.email_service import send_email
 logger = logging.getLogger(__name__)
 
 
+# ====================================================================
+# PACOTE 10 — TASK LOGS DO MONITOR GLOBAL (widget "Processos em
+# Segundo Plano")
+# ====================================================================
+# Cada envio enfileirado ganha um task_log (EMAIL_SEND) que segue o
+# ciclo pending → processing → completed/failed/cancelled. Isto torna
+# os envios de email VISIBLES no widget global da topbar
+# (GET /tasks/active) com estado Loading/Success/Failed — pedido
+# explícito do Pacote 10. Best-effort: falhas a criar/actualizar o
+# task_log nunca afectam o envio em si.
+
+
+async def attach_task_log_to_pending_record(record: dict) -> Optional[str]:
+    """
+    Cria o task_log EMAIL_SEND para um registo pending e devolve o
+    task_id (o chamador deve gravá-lo em ``record["task_log_id"]``
+    ANTES do insert na colecção).
+
+    Usado tanto pelo caminho diferido (``queue_email_send``) como pelo
+    legacy síncrono (``run_send_email`` com EMAIL_UNDO_SEND_WINDOW=0).
+    """
+    user_id = record.get("created_by")
+    if not user_id:
+        return None
+    try:
+        from models.task_log import TaskType
+        from services.task_log_service import task_log_service
+
+        subject = (record.get("subject") or "(sem assunto)")[:120]
+        task = await task_log_service.create_task(
+            task_type=TaskType.EMAIL_SEND,
+            user_id=user_id,
+            title="Envio de Email",
+            description=f"Assunto: {subject}",
+            process_id=record.get("process_id"),
+            metadata={"send_id": record.get("id"), "kind": "webmail_send"},
+        )
+        return task.task_id if task else None
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.warning(
+            "[UNDO-SEND] Falha ao criar task log do monitor para %s: %s",
+            record.get("id"), exc,
+        )
+        return None
+
+
+async def _update_task_log(task_log_id: Optional[str], **updates) -> None:
+    """Actualiza o task_log do monitor (best-effort, nunca lança)."""
+    if not task_log_id:
+        return
+    try:
+        from services.task_log_service import task_log_service
+
+        await task_log_service.update_task(task_log_id, **updates)
+    except Exception as exc:  # pragma: no cover — best-effort
+        logger.warning(
+            "[UNDO-SEND] Falha ao actualizar task log %s: %s", task_log_id, exc,
+        )
+
+
 # Janela de Undo (segundos). 0 = envio imediato (comportamento legacy,
 # p.ex. para ambientes de teste automatizado).
 def _resolve_undo_window_seconds() -> int:
@@ -123,11 +183,20 @@ async def queue_email_send(record: dict) -> dict:
     """
     Grava o registo pending e agenda a execução após a janela de undo.
 
+    PACOTE 10 — cria também o task_log do monitor global (widget
+    "Processos em Segundo Plano") para o envio ser visível com estado
+    Loading → Success/Failed na topbar.
+
     Returns:
         Payload de resposta do POST /emails/send:
         {"success": True, "queued": True, "send_id", "undo_window_seconds",
          "message"}
     """
+    # PACOTE 10 — task_log ANTES do insert (o task_id fica persistido
+    # no próprio registo pending para as transições futuras).
+    task_log_id = await attach_task_log_to_pending_record(record)
+    if task_log_id:
+        record["task_log_id"] = task_log_id
     await _pending_collection().insert_one(dict(record))
     await schedule_pending_email_send(record["id"])
 
@@ -246,6 +315,13 @@ async def execute_pending_email_send(send_id: str) -> dict:
     if not claim or not getattr(claim, "matched_count", 1):
         return {"executed": False, "success": None, "reason": "already_claimed"}
 
+    # PACOTE 10 — monitor global: pending → processing
+    await _update_task_log(
+        record.get("task_log_id"),
+        status="processing",
+        progress_message="A enviar email...",
+    )
+
     logger.info(
         "[UNDO-SEND] A executar envio real: send_id=%s para=%s",
         send_id, record.get("to_emails"),
@@ -276,13 +352,13 @@ async def execute_pending_email_send(send_id: str) -> dict:
         logger.error(
             "[UNDO-SEND] Excepção no envio de %s: %s", send_id, e, exc_info=True,
         )
-        await _mark_failed(send_id, str(e))
+        await _mark_failed(send_id, str(e), task_log_id=record.get("task_log_id"))
         return {"executed": True, "success": False, "reason": f"exception:{e}"}
 
     if not result or not result.get("success"):
         error = (result or {}).get("error", "Erro desconhecido no envio")
         logger.error("[UNDO-SEND] Envio falhou para %s: %s", send_id, error)
-        await _mark_failed(send_id, error)
+        await _mark_failed(send_id, error, task_log_id=record.get("task_log_id"))
         return {"executed": True, "success": False, "reason": error}
 
     # ── 4) Mover anexos temp → permanente + limpeza ───────────────
@@ -297,6 +373,15 @@ async def execute_pending_email_send(send_id: str) -> dict:
     logger.info(
         "[UNDO-SEND] Email enviado com sucesso: send_id=%s anexos=%s",
         send_id, len(temp_attachment_records),
+    )
+
+    # PACOTE 10 — monitor global: processing → completed (fica visível
+    # no widget com estado Success até o utilizador confirmar/OK).
+    await _update_task_log(
+        record.get("task_log_id"),
+        status="completed",
+        progress=100,
+        progress_message="Email enviado com sucesso.",
     )
     return {"executed": True, "success": True, "reason": "sent"}
 
@@ -345,6 +430,14 @@ async def cancel_pending_email_send(send_id: str, user: dict) -> dict:
         )
 
     await collection.delete_one({"id": send_id, "status": STATUS_PENDING})
+
+    # PACOTE 10 — monitor global: o envio desfeito sai do widget
+    # (task_log cancelada em vez de ficar pendente para sempre).
+    await _update_task_log(
+        record.get("task_log_id"),
+        status="cancelled",
+        progress_message="Envio cancelado pelo utilizador (Desfazer).",
+    )
 
     logger.info(
         "[UNDO-SEND] Envio cancelado pelo utilizador: send_id=%s user=%s",
@@ -508,8 +601,14 @@ async def _finalize_attachments(
             logger.warning(f"Failed to cleanup temp file {temp_key}: {e}")
 
 
-async def _mark_failed(send_id: str, error: str) -> None:
-    """Marca um registo pending como failed (mantido para auditoria)."""
+async def _mark_failed(
+    send_id: str, error: str, task_log_id: Optional[str] = None
+) -> None:
+    """Marca um registo pending como failed (mantido para auditoria).
+
+    PACOTE 10 — propaga também ao task_log do monitor global (widget
+    "Processos em Segundo Plano") para a falha ser visível na topbar.
+    """
     try:
         await _pending_collection().update_one(
             {"id": send_id},
@@ -521,6 +620,14 @@ async def _mark_failed(send_id: str, error: str) -> None:
         )
     except Exception as e:
         logger.warning(f"Erro ao marcar send {send_id} como failed: {e}")
+
+    # PACOTE 10 — monitor global: → failed (badge vermelho no widget)
+    await _update_task_log(
+        task_log_id,
+        status="failed",
+        error_message=str(error)[:500],
+        progress_message="O envio do email falhou.",
+    )
 
 
 async def recover_stale_pending_sends(older_than_seconds: int = 300) -> int:

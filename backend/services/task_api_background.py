@@ -32,6 +32,13 @@ async def run_get_active_background_tasks(current_user: dict):
     - create_background_job_db (ai_bulk): "running", "success", "failed", "paused", "pending"
     - BackgroundJobService (services/background_jobs.py): "pending", "processing", "completed", "failed"
     Este endpoint normaliza todos esses valores para o formato esperado pelo frontend.
+
+    PACOTE 10 — MONITOR GLOBAL "PROCESSOS EM SEGUNDO PLANO": além dos
+    background_jobs, o endpoint agrega agora os ``task_logs`` do
+    utilizador (fila de emails com Undo Send, email de acesso ao
+    Portal, uploads de documentos confirmados) criados por
+    task_log_service. Uma única fonte unificada para o widget da topbar
+    com estado Loading/Success/Failed.
     """
     try:
         # ── Query: incluir TODOS os status possíveis ──
@@ -204,10 +211,18 @@ async def run_get_active_background_tasks(current_user: dict):
                             {"$set": {"acknowledged_at": datetime.now(timezone.utc).isoformat()}}
                         )
 
-        return {
-            "tasks": tasks,
+        # PACOTE 10 — merge dos task_logs (fila de emails, email de
+        # acesso ao Portal, uploads confirmados) na lista unificada.
+        counters = {
             "active_count": active_count,
             "completed_unacknowledged": completed_unacknowledged,
+        }
+        await _merge_task_logs_into_tasks(current_user, tasks, counters)
+
+        return {
+            "tasks": tasks,
+            "active_count": counters["active_count"],
+            "completed_unacknowledged": counters["completed_unacknowledged"],
         }
 
     except Exception as e:
@@ -215,11 +230,89 @@ async def run_get_active_background_tasks(current_user: dict):
         return {"tasks": [], "active_count": 0, "completed_unacknowledged": 0}
 
 
+async def _merge_task_logs_into_tasks(
+    current_user: dict, tasks: list, counters: dict
+) -> None:
+    """
+    PACOTE 10 — agrega os ``task_logs`` do utilizador na lista unificada.
+
+    Fontes de task_logs: fila de envio de emails (Undo Send), email de
+    acesso ao Portal (deliver_registration_email) e uploads de
+    documentos confirmados (run_confirm_upload). Formato idêntico ao
+    dos background_jobs para o widget renderizar sem distinguir a
+    origem. Best-effort: falhas são logadas e não afectam os jobs.
+    """
+    try:
+        from services.task_log_service import task_log_service
+
+        log_tasks = await task_log_service.get_active_tasks(
+            current_user.get("id") or ""
+        )
+    except Exception as exc:
+        logger.warning(f"[TASKS-ACTIVE] Erro ao agregar task_logs: {exc}")
+        return
+
+    seen_ids = {t.get("task_id") for t in tasks}
+    for lt in log_tasks:
+        if not lt or lt.task_id in seen_ids:
+            continue
+        status = getattr(lt.status, "value", lt.status)
+        if status in ("cancelled",):
+            continue
+        is_active = status in ("pending", "processing")
+        is_done = status in ("completed", "failed")
+        is_unack = not lt.acknowledged_at
+        if not (is_active or (is_done and is_unack)):
+            continue
+
+        task_type = getattr(lt.task_type, "value", lt.task_type)
+        if is_active:
+            counters["active_count"] += 1
+        if is_done and is_unack:
+            counters["completed_unacknowledged"] += 1
+
+        tasks.append({
+            "task_id": lt.task_id,
+            "task_type": task_type,
+            "title": lt.title,
+            "description": lt.description,
+            "status": status,
+            "progress": lt.progress or 0,
+            "progress_message": lt.progress_message,
+            "created_at": lt.created_at,
+            "started_at": lt.started_at,
+            "updated_at": lt.completed_at or lt.created_at,
+            "acknowledged_at": lt.acknowledged_at,
+            "result_url": lt.result_url,
+            "error_message": lt.error_message,
+            "process_name": lt.process_name,
+            "priority": (
+                "alta" if status == "failed"
+                else "media" if status == "pending"
+                else "normal"
+            ),
+        })
+
+    # Ordem cronológica inversa (mais recentes primeiro) na lista unificada
+    tasks.sort(key=lambda t: t.get("created_at") or "", reverse=True)
+
+
 async def run_acknowledge_background_task(task_id: str, current_user: dict):
     """
     Confirmar visualização de uma tarefa assíncrona.
     Marca o job como acknowledged para parar de notificar.
+
+    PACOTE 10 — task_ids com prefixo ``task_`` pertencem aos task_logs
+    (fila de emails/Portal/uploads); os restantes são background_jobs.
     """
+    if task_id and task_id.startswith("task_"):
+        from services.task_log_service import task_log_service
+
+        ack = await task_log_service.acknowledge_task(task_id, current_user.get("id"))
+        if not ack:
+            raise HTTPException(status_code=404, detail="Tarefa não encontrada")
+        return {"success": True}
+
     result = await db.background_jobs.update_one(
         {"id": task_id, "user_email": current_user.get("email", "")},
         {"$set": {"acknowledged_at": datetime.now(timezone.utc).isoformat()}}
@@ -232,7 +325,21 @@ async def run_acknowledge_background_task(task_id: str, current_user: dict):
 async def run_cancel_background_task(task_id: str, current_user: dict):
     """
     Cancelar uma tarefa pendente/em execução.
+
+    PACOTE 10 — task_ids com prefixo ``task_`` pertencem aos task_logs
+    (ex.: envio de email dentro da janela de Undo Send).
     """
+    if task_id and task_id.startswith("task_"):
+        from services.task_log_service import task_log_service
+
+        cancelled = await task_log_service.cancel_task(task_id, current_user.get("id"))
+        if not cancelled:
+            raise HTTPException(
+                status_code=400,
+                detail="Apenas tarefas pendentes podem ser canceladas",
+            )
+        return {"success": True, "message": "Tarefa cancelada"}
+
     job = await db.background_jobs.find_one({"id": task_id}, {"_id": 0})
     if not job:
         raise HTTPException(status_code=404, detail="Tarefa não encontrada")

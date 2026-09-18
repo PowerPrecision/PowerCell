@@ -487,6 +487,24 @@ async def create_indexes(db) -> dict:
     
     for idx in process_blind_indexes:
         await _create_index_safe(db.processes, idx, "processes", results)
+
+    # ====================================================================
+    # PACOTE 10 — ÍNDICES PARA COLECÇÃO 'task_logs' (MONITOR GLOBAL)
+    # ====================================================================
+    # Os task_logs alimentam o widget "Processos em Segundo Plano"
+    # (GET /tasks/active faz polling 5s/30s por utilizador). Sem índice,
+    # cada poll seria um collection scan.
+    task_log_indexes = [
+        # Query principal de get_active_tasks: user + status
+        {"keys": [("user_id", 1), ("status", 1)], "name": "idx_task_logs_user_status"},
+        # Limpeza TTL (cleanup_old_tasks): status + acknowledged/completed
+        {"keys": [
+            ("status", 1), ("acknowledged_at", 1), ("completed_at", 1)
+        ], "name": "idx_task_logs_cleanup"},
+    ]
+
+    for idx in task_log_indexes:
+        await _create_index_safe(db.task_logs, idx, "task_logs", results)
     
     # ====================================================================
     # ÍNDICES PARA COLECÇÃO 'history' - HISTÓRICO DEDICADO

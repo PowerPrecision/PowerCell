@@ -441,6 +441,8 @@ async def send_portal_welcome_email_from_process(
     client_id: str,
     client_email: str,
     client_name: str,
+    user_id: str = None,
+    process_id: str = None,
 ) -> None:
     """
     PACOTE CY — email de boas-vindas após create-client (fire-and-forget).
@@ -483,6 +485,8 @@ async def send_portal_welcome_email_from_process(
             client_name=client_name,
             portal_access_code=portal_access_code,
             client_id=client_id,
+            user_id=user_id,
+            process_id=process_id,
         )
     except Exception as e:
         logger.error(
@@ -642,6 +646,7 @@ async def persist_and_finalize_staff_create(
         # PACOTE BH — spawn com referência forte (services/background_tasks):
         # `asyncio.create_task` puro mantém apenas referência fraca e a task
         # podia ser recolhida pelo GC antes de enviar o email.
+        # PACOTE 10 — user_id + process_id para o task_log do monitor global.
         from services.background_tasks import spawn_background_task
 
         spawn_background_task(
@@ -649,6 +654,8 @@ async def persist_and_finalize_staff_create(
                 client_id=client_id,
                 client_email=client_email,
                 client_name=client_name,
+                user_id=user.get("id"),
+                process_id=process_id,
             ),
             name=f"portal-welcome-email:{client_id}",
         )

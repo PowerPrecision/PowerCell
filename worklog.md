@@ -4236,3 +4236,46 @@ O primeiro `find_one` estendido do conftest aplicava projecções literalmente �
 ## Commit
 
 `Feat/Fix: Fix client S3 mapping, add smart auto-assignment guards, Undo Send email feature, Index toggle, and broad test data cleanup`
+
+## Iteração pacote-10 — Prevenção de duplicados, feedback de email falhado e monitor global (Set 2026)
+
+**Pedido**: 3 frentes de UX/observabilidade: (1) prevenção de clientes duplicados (409 NIF/Email + alerta visual bloqueante no frontend); (2) feedback visual de email de acesso não entregue (estado de entrega registado + badge/alerta crítico); (3) widget global "Processos em Segundo Plano" com tarefas pendentes/em execução/falhadas recentes do utilizador.
+
+### Backend
+
+- `services/client_crud.py` — check de duplicados 400→**409** com payload estruturado (message + existing_client_id + existing_client_name + matched_fields); soft-deleted (`is_deleted`/`status "eliminado"`) deixam de bloquear a recriação; sem índice único (upsert público/recriação gerariam hashes duplicados legítimos — decisão documentada).
+- **NOVO** `services/email_delivery_status.py` — duas camadas: `clients.portal_email_delivery` (sent/failed/retry_scheduled + last_attempt_at + error) e task_logs `EMAIL_SEND` user-scoped (user_id explícito ou lookup created_by→users); helpers begin/complete/fail/retry_scheduled, tudo best-effort.
+- `services/client_portal_email.py` — `deliver_registration_email` com `user_id`/`process_id` opcionais + lifecycle: sucesso→sent+completed; retry ARQ agendado→retry_scheduled (sem alerta; worker fecha o ciclo); falha total→failed. `_send_portal_welcome_email_safe` idem. Chamadores (`client_crud`, `process_create` via `send_portal_welcome_email_from_process`) passam user_id (+process_id).
+- `services/alerts.py` — `ALERT_TYPES["PORTAL_EMAIL_UNDELIVERED"]` + `check_portal_email_delivery_alert` (6º check de `get_process_alerts`): critical "Email de acesso não entregue" quando `portal_email_delivery.status == "failed"`, com recomendações.
+- `services/email_send_queue.py` — `attach_task_log_to_pending_record` (task_log EMAIL_SEND no enqueue e no modo legacy; task_log_id persistido no registo pending), `execute_pending_email_send` → processing→completed/failed, `cancel` → cancelled, `_mark_failed` propaga erro. `_update_task_log` best-effort.
+- `services/document_direct_upload.py` — `run_confirm_upload` cria task_log DOCUMENT_UPLOAD já concluído (s3_path/categoria no metadata).
+- `services/task_api_background.py` — **merge unificado no GET /tasks/active**: `_merge_task_logs_into_tasks` agrega `task_log_service.get_active_tasks(user_id)` aos background_jobs (dedup por task_id, contadores somados, ordem cronológica inversa); acknowledge/cancel roteiam por prefixo `task_`. Sem isto os task_logs NUNCA chegavam ao widget (o endpoint só lia background_jobs).
+- `services/db_indexes.py` — índices `idx_task_logs_user_status` e `idx_task_logs_cleanup` (polling 5s sem collection scan).
+- `worker/tasks.py` — docstring do send_registration_email_task actualizada (o ciclo de estado é fechado pelo deliver).
+
+### Frontend
+
+- `services/api.js` — errorMessage via `extractErrorMessage` (detail pode ser objecto); ramo 400+ respeita `config.skipErrorToast`; `createClient(data, config)`.
+- **NOVO** `utils/duplicateClient.js` + `components/shared/DuplicateClientAlert.jsx` (banner bloqueante partilhado) + `utils/duplicateClient.test.js` (8 testes).
+- `CreateClientModal.jsx`, `CreateProcessModal.jsx`, `SecondTitularCard.jsx` — skipErrorToast + parse 409 + banner bloqueante + submissão desactivada com erro activo + limpeza em onChange de NIF/Email + acção "Usar cliente existente" (excepto clientOnly).
+- `ProcessAlerts.js` — ícone `portal_email_undelivered: MailWarning`.
+- `ClientsPage.js`/`MyClientsPage.js` — pílula vermelha "Email de acesso não entregue" (mobile + desktop; defensivo no MyClients).
+- `TasksContext.js` — `failedCount` derivado no contexto.
+- `TasksDropdown.js` — renomeado "Processos em Segundo Plano"; grupos Em Execução/Falhadas recentes/Concluídas; trigger com AlertTriangle vermelho quando só há falhadas; descrição com contagens.
+
+### Testes / conftest
+
+- conftest (PACOTE 10): `find_one_and_update`, `__getitem__` (db[...] do task_log_service), dot-notation no matcher e no `$set`, comparadores `$gte/$gt/$lte/$lt`. Contratos históricos intactos.
+- `tests/unit/test_pacote10_ux_observability.py` — 22 testes (409×4, delivery status×3, alerta×3, lifecycle deliver×3, fila×5, merge /tasks/active×3, upload×1).
+- Lição: NIFs de teste não podem ser placeholders (sanitize_nif rejeita 123456789/000000000/111111111/999999999); datas de task_logs nos testes têm de ser dinâmicas (janela de 1h do get_active_tasks).
+
+## Validação
+
+- `pytest tests/unit -n 4` → **1244 passed, 0 falhas** (baseline 1222 + 22 novos).
+- flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas.
+- Frontend: `node --test` (utils+lib+hooks+queries+App) → **125 pass, 0 fail** (+8 novos); eslint limpo; `vite build` verde.
+- Sandbox sem Mongo: warnings Connection refused são comportamento conhecido (Pacote 5).
+
+## Commit
+
+`Feat: Add duplicate client prevention, email failure UI feedback, and global background tasks monitor`
