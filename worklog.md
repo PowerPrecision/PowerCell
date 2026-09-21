@@ -1,4 +1,23 @@
 ---
+Task ID: fix-ordem-import-bateria-financeira
+Agent: Cloud Agent
+Task: CI vermelho — 3 testes da bateria financeira dependentes da ordem de import
+
+Date: 2026-09-21
+
+Work Log:
+- O CI reportou 3 falhas (`IndexError: list index out of range`) em `test_e2e_financial_realtime.py`, nos únicos testes que usam a fixture `eventos`. Reproduzido localmente com a invocação do CI (`tests/unit` + integração no MESMO processo pytest).
+- PRIMEIRO confirmei a origem: `git checkout d8a739d` (antes do Épico 5) e a mesma execução falha igual. NÃO foi causado pelo Épico 5 — é do épico anterior, meu, e a minha verificação de então correu `tests/unit` e a bateria em processos SEPARADOS, pelo que nunca viu a interacção.
+- Descartado `REDIS_URL=none` (o CI usa-o): a bateria isolada passa com essa variável.
+- Bisecção: `test_task_extraction_helpers.py` e `test_task_logs_extraction_helpers.py` poluem. Nenhum faz patches — apenas importam `task_log_service` / `task_queue` / `scheduled_tasks`.
+- Causa: `task_log_service` faz `from database import db` no TOPO, ficando com a sua referência. O arnês patchava `database.db` e `financial_engine.db` mas não `task_log_service.db`. Se o módulo já tinha sido importado, ficava preso ao proxy real → `create_task` falhava a escrever → `_emit_event_safe` engolia a excepção em `logger.debug` → zero eventos. Passava ou falhava conforme a ORDEM de recolha do pytest.
+- Instrumentação usada (e removida): print no topo de `emit_task_event` (nunca chamado) e no `_emit_event_safe` (nunca chamado) — o que provou que a falha era ANTES, na escrita do TaskLog.
+- Fix 1: `patch.object(task_log_service, "db", self.db)` no `_Arnes`.
+- Fix 2: `_emit_event_safe` loga a `warning` e não a `debug`. Um Redis em baixo não chega lá (`publish_event` devolve False sem levantar), logo uma excepção nesse ponto é sempre inesperada. Continua a não propagar.
+- Lição registada no AGENTS.md: patchar sempre `patch.object(modulo, "db", fake)` por módulo da cadeia; `patch("database.db")` só cobre os imports feitos DENTRO de funções.
+- Verificação: 1536 unit+e2e verdes nas condições do CI (REDIS_URL=none) num único processo pytest; 29 e2e verdes com Redis real; flake8 gate 0.
+
+---
 Task ID: epico5-webmail-pro-live-sync
 Agent: Cloud Agent
 Task: Épico 5 — Webmail Pro & Live Sync (pastas, threads, acções, tempo real)

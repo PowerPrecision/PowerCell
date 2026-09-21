@@ -184,6 +184,7 @@ class _Arnes:
     def __enter__(self):
         from services import (
             financial_engine, process_assignment, process_indexing,
+            task_log_service,
         )
 
         patches = [
@@ -194,6 +195,15 @@ class _Arnes:
             patch.object(process_indexing, "db", self.db),
             patch.object(process_assignment, "db", self.db),
             patch.object(financial_engine, "db", self.db),
+            # `task_log_service` faz `from database import db` ao nível do
+            # módulo, ficando com a SUA referência. Patchar `database.db`
+            # só o apanha se este módulo ainda não tiver sido importado —
+            # e um qualquer teste unitário que o importe antes deixa-o
+            # preso ao proxy real. O `create_task` falhava então a escrever,
+            # a excepção era engolida por `_emit_event_safe` e a bateria
+            # ficava sem eventos. Passava ou falhava conforme a ORDEM dos
+            # testes; este patch torna-a determinística.
+            patch.object(task_log_service, "db", self.db),
             # Efeitos laterais fora do âmbito desta cadeia
             patch("services.history.log_history", AsyncMock()),
             patch.object(

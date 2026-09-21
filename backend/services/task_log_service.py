@@ -417,4 +417,13 @@ async def _emit_event_safe(task_doc: dict, *, is_creation: bool = False) -> None
 
         await emit_task_log_event(task_doc, is_creation=is_creation)
     except Exception as e:
-        logger.debug(f"[TaskLog] Evento não emitido para {task_doc.get('task_id')}: {e}")
+        # WARNING e não DEBUG: um Redis em baixo NÃO chega aqui
+        # (`publish_event` trata disso e devolve False sem levantar), pelo
+        # que uma excepção neste ponto é sempre inesperada. Em `debug` este
+        # ramo escondeu durante um épico inteiro uma escrita falhada de
+        # TaskLog — a tarefa corria, os eventos desapareciam e ninguém via
+        # porquê. Continua a não propagar: a tarefa segue na mesma.
+        logger.warning(
+            f"[TaskLog] Evento não emitido para {task_doc.get('task_id')}: "
+            f"{type(e).__name__}: {e}"
+        )

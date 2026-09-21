@@ -3,6 +3,12 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Correcção: bateria financeira dependente da ordem dos testes
+
+### Corrigido
+- **Três testes da bateria financeira falhavam no CI e passavam isoladamente.** `services/task_log_service.py` faz `from database import db` ao nível do módulo, ficando com a sua própria referência ao proxy. O arnês da bateria patchava `database.db` e `financial_engine.db`, mas não `task_log_service.db` — e `patch("database.db", ...)` só apanha um módulo que ainda não tenha sido importado. Bastava um teste unitário importar `task_log_service` antes (`test_task_extraction_helpers.py`, `test_task_logs_extraction_helpers.py`) para o `create_task` tentar escrever no Mongo real: a escrita falhava, a excepção era engolida e a bateria ficava sem eventos nenhuns. O arnês passa a patchar o módulo explicitamente, tornando o resultado independente da ordem de recolha.
+- **`_emit_event_safe` escondia a falha.** Registava a `debug`, pelo que uma escrita de TaskLog falhada era invisível. Passa a `warning`: um Redis em baixo não chega a este ramo (`publish_event` trata disso e devolve `False` sem levantar), logo uma excepção aqui é sempre inesperada. Continua a nunca propagar — a tarefa segue na mesma.
+
 ## [2026-09-21] — Épico 5: Webmail Pro & Live Sync
 
 ### Corrigido
