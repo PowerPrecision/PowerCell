@@ -98,8 +98,15 @@ class TaskLogService:
         task_doc.pop("_id", None)
         
         logger.info(f"[TaskLog] Tarefa criada: {task_id} - {title} (user: {user_id})")
-        
-        return TaskLogResponse(**task_doc)
+
+        response = TaskLogResponse(**task_doc)
+
+        # ÉPICO Event-Driven (Eixo 3) — emitir `task_started` para o dono da
+        # tarefa. Substitui o polling: o cliente vê a tarefa nascer no
+        # momento em que nasce. Falhar aqui nunca impede a criação.
+        await _emit_event_safe(task_doc, is_creation=True)
+
+        return response
     
     @staticmethod
     async def update_task(
@@ -174,6 +181,14 @@ class TaskLogService:
         if result:
             result.pop("_id", None)
             logger.info(f"[TaskLog] Tarefa atualizada: {task_id} - status: {updates.get('status', 'N/A')}")
+
+            # ÉPICO Event-Driven (Eixo 3) — cada transição emite o evento
+            # correspondente (`task_progress` / `task_completed` /
+            # `task_failed`), derivado do estado já persistido. Este é o
+            # único ponto de escrita de `task_logs`, pelo que instrumentá-lo
+            # cobre TODAS as tarefas sem tocar nos chamadores.
+            await _emit_event_safe(result)
+
             return TaskLogResponse(**result)
         
         logger.warning(f"[TaskLog] Tarefa não encontrada: {task_id}")
@@ -383,3 +398,23 @@ class TaskLogService:
 
 # Instância global do serviço
 task_log_service = TaskLogService()
+
+
+# ====================================================================
+# EMISSÃO DE EVENTOS (ÉPICO Event-Driven)
+# ====================================================================
+
+
+async def _emit_event_safe(task_doc: dict, *, is_creation: bool = False) -> None:
+    """Emite o evento de tarefa sem nunca propagar falhas ao chamador.
+
+    Import tardio: `task_events` → `redis_pubsub` → `websocket_manager`,
+    e este módulo é importado por serviços que aqueles também usam. Manter
+    o import dentro da função evita o ciclo no arranque.
+    """
+    try:
+        from services.task_events import emit_task_log_event
+
+        await emit_task_log_event(task_doc, is_creation=is_creation)
+    except Exception as e:
+        logger.debug(f"[TaskLog] Evento não emitido para {task_doc.get('task_id')}: {e}")

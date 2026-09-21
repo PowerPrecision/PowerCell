@@ -1,4 +1,40 @@
 ---
+Task ID: epico-event-driven-redis-pubsub
+Agent: Cloud Agent
+Task: Épico — Refatorização para Event-Driven (Redis Pub/Sub e WebSockets)
+
+Date: 2026-09-21
+
+Work Log:
+- Eixo 1: **NOVO** `services/redis_pubsub.py` — `redis.asyncio` sobre `REDIS_URL`, canal `powercell_system_events` (env `SYSTEM_EVENTS_CHANNEL`). `redis_cache.py` NÃO foi tocado: é Upstash REST, não suporta SUBSCRIBE. Envelope `{id,type,user_id,company_id,payload,published_at}`; `publish_event` nunca levanta excepção e degrada para entrega in-process; `SystemEventListener` com backoff exponencial 1s→30s.
+- Eixo 2: `websocket_manager.py` — `WSEventType.TASK_*` + `route_system_event` (entrega dirigida via `send_personal_message`; envelope sem `user_id` é descartado, nunca difundido). `server.py`: listener arranca no startup **fora** do guard `_is_primary_worker` (cada worker detém os seus sockets) e pára no shutdown.
+- Eixo 3: **NOVO** `services/task_events.py` (payload único + `resolve_event_type`, com desembrulhamento de str-Enums). Instrumentados os 3 pontos de estrangulamento: `TaskLogService.{create,update}_task`, `BackgroundJobService.{create_job,update_progress,set_status,set_result,set_error}` e `routes/ai_bulk/jobs.py::{create,update,finish}_background_job_db` (+ resolução `user_email`→`user_id` com cache). Zero alterações em chamadores.
+- Eixo 4: **NOVO** `utils/taskEvents.js` (merge puro) + `hooks/useTaskEvents.js` (subscrição). `TasksContext` reage a eventos e só faz polling sem WS (expõe `isRealtime`); `useBackgroundJobsQuery` invalida as queries por evento e desliga o `refetchInterval`; `TasksPanel` troca o intervalo de 10s por eventos. `useWebSocket` ganha os `TASK_*`.
+- Toasts: extraído `applyTaskToast` do ciclo do fetch — eventos e polling produzem exactamente o mesmo comportamento de toast (uma só fonte de verdade).
+
+Stage Summary:
+- O progresso das tarefas pesadas passa a chegar ao browser no instante em que muda, em vez de até 5s depois; e passa a funcionar com múltiplos workers Uvicorn, onde antes se perdia em silêncio.
+
+Files:
+- backend/services/redis_pubsub.py
+- backend/services/task_events.py
+- backend/services/websocket_manager.py
+- backend/services/task_log_service.py
+- backend/services/background_jobs.py
+- backend/routes/ai_bulk/jobs.py
+- backend/server.py
+- backend/.env.example
+- backend/tests/unit/test_redis_pubsub.py
+- frontend/src/utils/taskEvents.js
+- frontend/src/utils/taskEvents.test.js
+- frontend/src/hooks/useTaskEvents.js
+- frontend/src/hooks/useWebSocket.js
+- frontend/src/contexts/TasksContext.js
+- frontend/src/hooks/queries/useBackgroundJobsQuery.js
+- frontend/src/components/TasksPanel.js
+- AGENTS.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: epico-motor-simulacao-financeira
 Agent: Cloud Agent
 Task: Épico — Motor de Simulação Financeira Automatizada (DSTI & Cenários)

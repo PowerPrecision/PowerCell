@@ -2,7 +2,7 @@
  * TasksPanel - Painel de Tarefas
  * Componente para gerir tarefas (criar, listar, concluir)
  */
-import { useState, useEffect } from "react";
+import { useState, useEffect, useCallback } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -39,10 +39,11 @@ import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopen
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole, filterAssignmentStaff } from "../utils/roleUtils";
 import { safeFormat, safeDate } from "../lib/utils";
+import { useTaskEvents } from "../hooks/useTaskEvents";
 
 
 
-// Intervalo de refrescamento enquanto há tarefas de background em curso.
+// Intervalo do FALLBACK de refrescamento (só usado sem WebSocket).
 const BACKGROUND_JOBS_POLL_INTERVAL = 10000;
 
 const TasksPanel = ({ 
@@ -81,21 +82,32 @@ const TasksPanel = ({
     fetchData();
   }, [processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
 
-  // Refrescar enquanto houver tarefas de background em curso, para que o
-  // utilizador veja a tarefa passar a concluída (ex.: proposta financeira
-  // pronta) sem ter de recarregar a página. Só corre quando há algo activo,
-  // para não somar polling ao que o TasksContext já faz globalmente.
+  // ÉPICO Event-Driven — o intervalo de 10s que existia aqui foi SUBSTITUÍDO
+  // por eventos: cada `task_*` do backend refresca o painel no instante em
+  // que a tarefa progride. O polling só volta a correr enquanto o WebSocket
+  // estiver em baixo, e apenas se houver algo em curso para observar.
   const hasRunningBackgroundJobs = backgroundJobs.some((job) =>
     ["pending", "processing", "running"].includes(job.status)
   );
+
+  const handleTaskEvent = useCallback(() => {
+    fetchData();
+    // `fetchData` é recriado a cada render; useTaskEvents guarda o handler
+    // numa ref, pelo que a subscrição não precisa de o seguir.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
+
+  const { isConnected: tasksRealtime } = useTaskEvents(handleTaskEvent);
+
   useEffect(() => {
-    if (!hasRunningBackgroundJobs) return undefined;
+    if (tasksRealtime) return undefined;        // tempo real activo
+    if (!hasRunningBackgroundJobs) return undefined;  // nada para observar
     const interval = setInterval(() => {
       fetchData();
     }, BACKGROUND_JOBS_POLL_INTERVAL);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [hasRunningBackgroundJobs, processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
+  }, [tasksRealtime, hasRunningBackgroundJobs, processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
 
   const fetchData = async () => {
     try {

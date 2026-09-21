@@ -94,7 +94,18 @@ class BackgroundJobService:
         
         await db.background_jobs.insert_one(job_doc)
         logger.info(f"Job criado: {job_id} ({job_type.value}) por {user_email}")
-        
+
+        # ÉPICO Event-Driven (Eixo 3) — `task_started` para o dono do job.
+        await _emit_job_event(
+            job_id, user_id,
+            status=JobStatus.PENDING.value,
+            is_creation=True,
+            title=job_type.value,
+            task_type=job_type.value,
+            progress=0,
+            message="A iniciar...",
+        )
+
         return job_id
     
     async def update_progress(
@@ -121,6 +132,15 @@ class BackgroundJobService:
             update["$set"]["progress.message"] = message
         
         await db.background_jobs.update_one({"id": job_id}, update)
+
+        # ÉPICO Event-Driven — `task_progress` com a percentagem real.
+        # É isto que substitui o polling de 5s das barras de progresso.
+        await _emit_job_event(
+            job_id, await _job_owner(job_id),
+            status=JobStatus.PROCESSING.value,
+            progress=percentage,
+            message=message,
+        )
     
     async def set_status(self, job_id: str, status: JobStatus):
         """
@@ -136,6 +156,10 @@ class BackgroundJobService:
             update["$set"]["completed_at"] = now
         
         await db.background_jobs.update_one({"id": job_id}, update)
+
+        await _emit_job_event(
+            job_id, await _job_owner(job_id), status=status.value,
+        )
     
     async def set_result(self, job_id: str, result: Dict[str, Any]):
         """
@@ -151,6 +175,15 @@ class BackgroundJobService:
                 "progress.message": "Concluído"
             }}
         )
+
+        # `task_completed` — o cliente fecha a barra e refresca a lista.
+        await _emit_job_event(
+            job_id, await _job_owner(job_id),
+            status=JobStatus.COMPLETED.value,
+            progress=100,
+            message="Concluído",
+            result=result,
+        )
     
     async def set_error(self, job_id: str, error: str):
         """
@@ -164,6 +197,14 @@ class BackgroundJobService:
                 "completed_at": datetime.now(timezone.utc).isoformat(),
                 "progress.message": f"Erro: {error}"
             }}
+        )
+
+        # `task_failed` — o cliente mostra o erro sem esperar pelo próximo poll.
+        await _emit_job_event(
+            job_id, await _job_owner(job_id),
+            status=JobStatus.FAILED.value,
+            message=f"Erro: {error}",
+            error=error,
         )
 
     async def complete_job(self, job_id: str, result: Dict[str, Any]):
@@ -252,3 +293,50 @@ class BackgroundJobService:
 
 # Instância global
 background_jobs = BackgroundJobService()
+
+
+# ====================================================================
+# EMISSÃO DE EVENTOS (ÉPICO Event-Driven)
+# ====================================================================
+
+
+async def _job_owner(job_id: str) -> Optional[str]:
+    """`user_id` dono do job — o destinatário do evento (tenant-safety).
+
+    Lido da BD porque os métodos de progresso/estado só recebem o
+    `job_id`. Uma leitura projectada a um campo é barata face ao trabalho
+    que o job está a fazer; se falhar, devolve ``None`` e o evento é
+    simplesmente não emitido (nunca difundido para todos).
+    """
+    try:
+        doc = await db.background_jobs.find_one(
+            {"id": job_id}, {"_id": 0, "user_id": 1}
+        )
+        return (doc or {}).get("user_id")
+    except Exception as e:
+        logger.debug(f"[BG-JOB] Dono do job {job_id} não resolvido: {e}")
+        return None
+
+
+async def _emit_job_event(
+    job_id: str,
+    user_id: Optional[str],
+    *,
+    status: Optional[str] = None,
+    is_creation: bool = False,
+    **fields,
+) -> None:
+    """Emite um evento de job sem nunca propagar falhas ao chamador."""
+    try:
+        from services.task_events import SOURCE_BACKGROUND_JOB, emit_task_event
+
+        await emit_task_event(
+            task_id=job_id,
+            user_id=user_id,
+            source=SOURCE_BACKGROUND_JOB,
+            status=status,
+            is_creation=is_creation,
+            **fields,
+        )
+    except Exception as e:
+        logger.debug(f"[BG-JOB] Evento não emitido para {job_id}: {e}")

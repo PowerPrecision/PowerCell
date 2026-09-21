@@ -14,8 +14,10 @@
  * ====================================================================
  */
 
-import { useQuery } from '@tanstack/react-query';
+import { useCallback } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
+import { TASK_SOURCE, useTaskEvents } from '../useTaskEvents';
 import {
   getBackgroundJobs,
   getBackgroundJobNotifications,
@@ -32,6 +34,39 @@ function asArray(data) {
 const AUTO_REFRESH_INTERVAL_MS = 5000;
 
 /**
+ * ÉPICO Event-Driven — hook partilhado: invalida estas queries quando chega
+ * um evento `task_*` de um job de background, e diz se o tempo real está
+ * activo (para o `refetchInterval` poder ser desligado).
+ *
+ * O evento é o gatilho, não o transporte: invalidar faz o TanStack ir
+ * buscar a verdade completa ao backend, mantendo uma só fonte de dados e
+ * evitando reconstruir a lista a partir de payloads parciais.
+ *
+ * @param {Array<Array>} queryKeysToInvalidate
+ * @param {boolean} enabled
+ * @returns {boolean} `true` se o WebSocket está ligado.
+ */
+function useJobEventInvalidation(queryKeysToInvalidate, enabled) {
+  const queryClient = useQueryClient();
+
+  const onJobEvent = useCallback(() => {
+    queryKeysToInvalidate.forEach((key) => {
+      queryClient.invalidateQueries({ queryKey: key });
+    });
+    // `queryKeysToInvalidate` é reconstruído a cada render; a identidade não
+    // importa aqui porque o handler é guardado numa ref por useTaskEvents.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [queryClient]);
+
+  const { isConnected } = useTaskEvents(onJobEvent, {
+    source: TASK_SOURCE.BACKGROUND_JOB,
+    enabled,
+  });
+
+  return isConnected;
+}
+
+/**
  * Hook para a listagem de jobs em background + contagens por estado.
  *
  * @param {Object} options - Opções do hook
@@ -43,6 +78,14 @@ const AUTO_REFRESH_INTERVAL_MS = 5000;
 export function useBackgroundJobsQuery(options = {}) {
   const { statusFilter = null, autoRefresh = true, enabled = true } = options;
 
+  // ÉPICO Event-Driven — os eventos `task_*` do backend invalidam a query no
+  // instante em que o job progride. O polling de 5s só volta a correr se o
+  // WebSocket estiver em baixo (rede, token, Redis indisponível).
+  const isRealtime = useJobEventInvalidation(
+    [queryKeys.backgroundJobs.list(statusFilter), queryKeys.backgroundJobs.notifications()],
+    enabled
+  );
+
   const query = useQuery({
     queryKey: queryKeys.backgroundJobs.list(statusFilter),
     queryFn: async () => {
@@ -50,7 +93,7 @@ export function useBackgroundJobsQuery(options = {}) {
       return response.data;
     },
     enabled,
-    refetchInterval: autoRefresh ? AUTO_REFRESH_INTERVAL_MS : false,
+    refetchInterval: autoRefresh && !isRealtime ? AUTO_REFRESH_INTERVAL_MS : false,
   });
 
   const data = query.data;
@@ -65,6 +108,7 @@ export function useBackgroundJobsQuery(options = {}) {
     isSuccess: query.isSuccess,
     refetch: query.refetch,
     dataUpdatedAt: query.dataUpdatedAt,
+    isRealtime,
     query,
   };
 }
@@ -81,6 +125,11 @@ export function useBackgroundJobsQuery(options = {}) {
 export function useBackgroundJobNotificationsQuery(options = {}) {
   const { unreadOnly = true, autoRefresh = true, enabled = true } = options;
 
+  const isRealtime = useJobEventInvalidation(
+    [queryKeys.backgroundJobs.notifications()],
+    enabled
+  );
+
   const query = useQuery({
     queryKey: queryKeys.backgroundJobs.notifications(),
     queryFn: async () => {
@@ -92,11 +141,12 @@ export function useBackgroundJobNotificationsQuery(options = {}) {
       }
     },
     enabled,
-    refetchInterval: autoRefresh ? AUTO_REFRESH_INTERVAL_MS : false,
+    refetchInterval: autoRefresh && !isRealtime ? AUTO_REFRESH_INTERVAL_MS : false,
   });
 
   return {
     notifications: asArray(query.data),
+    isRealtime,
     isLoading: query.isLoading,
     isFetching: query.isFetching,
     isError: query.isError,

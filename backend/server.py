@@ -1006,6 +1006,25 @@ async def startup():
         await task_queue.connect()
     except (IOError, OSError, ConnectionError, ImportError, TimeoutError):
         pass 
+
+    # ÉPICO Event-Driven — listener do canal Redis `powercell_system_events`.
+    # DELIBERADAMENTE FORA do guard `_is_primary_worker`: ao contrário dos
+    # schedulers (que só podem correr num worker), CADA worker tem de
+    # subscrever o canal, porque cada um detém as SUAS próprias ligações
+    # WebSocket. Sem isto, um evento produzido no worker A nunca chegaria a
+    # um browser ligado ao worker B.
+    # Sem REDIS_URL o listener não arranca e o sistema degrada para entrega
+    # in-process + polling no frontend — nunca falha o arranque da app.
+    try:
+        from services.redis_pubsub import start_system_event_listener
+        _pubsub_started = await start_system_event_listener()
+        logger.info(
+            "📡 Pub/Sub de eventos: %s",
+            "ATIVO (tempo real entre workers)" if _pubsub_started
+            else "INATIVO (entrega in-process + polling no cliente)"
+        )
+    except Exception as _pubsub_err:
+        logger.warning(f"⚠️ Listener Pub/Sub não arrancou (não fatal): {_pubsub_err}")
     
     # Trello integration removed (deprecated)
     
@@ -1103,6 +1122,15 @@ async def startup():
 
 @app.on_event("shutdown")
 async def shutdown_db_client():
+    # ÉPICO Event-Driven — parar o listener e fechar o publicador antes de
+    # tudo o resto (corre mesmo em TESTING: são recursos deste processo,
+    # não a ligação global de BD que o pytest reutiliza).
+    try:
+        from services.redis_pubsub import stop_system_event_listener
+        await stop_system_event_listener()
+    except Exception as _pubsub_err:
+        logger.debug(f"Listener Pub/Sub não parou de forma limpa: {_pubsub_err}")
+
     # CORREÇÃO CRÍTICA: Não fechar a ligação DB se estivermos a correr testes!
     # O pytest reutiliza a ligação global, se a fecharmos aqui, o próximo teste falha.
     if os.getenv("TESTING") == "true":

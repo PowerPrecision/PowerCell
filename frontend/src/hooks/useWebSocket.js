@@ -91,6 +91,13 @@ export const WSEventType = {
   DEADLINE_UPDATED: 'deadline_updated',
   DEADLINE_REMINDER: 'deadline_reminder',
   
+  // Tarefas em background (ÉPICO Event-Driven — canal Redis)
+  // Roteados no servidor APENAS para o dono da tarefa.
+  TASK_STARTED: 'task_started',
+  TASK_PROGRESS: 'task_progress',
+  TASK_COMPLETED: 'task_completed',
+  TASK_FAILED: 'task_failed',
+
   // Sistema
   HEARTBEAT: 'heartbeat',
   CONNECTION_STATUS: 'connection_status',

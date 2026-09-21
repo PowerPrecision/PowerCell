@@ -3,6 +3,42 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Épico: Refatorização para Event-Driven (Redis Pub/Sub e WebSockets)
+
+As tarefas pesadas (importações, análises IA, envio de emails, extracção de documentos, motor de simulação financeira) deixam de ser descobertas por polling e passam a **publicar eventos** num canal Redis, que o WebSocket Manager retransmite em tempo real — e **apenas** para o utilizador dono da tarefa.
+
+### Adicionado
+- **`services/redis_pubsub.py`** — camada Pub/Sub sobre `redis.asyncio` (canal `powercell_system_events`, configurável via `SYSTEM_EVENTS_CHANNEL`), com envelope tipado, circuit breaker e listener com reconexão por backoff exponencial (1s → 30s).
+- **`services/task_events.py`** — tradutor único de estado → evento (`task_started` / `task_progress` / `task_completed` / `task_failed`) e construtor do payload partilhado pelos dois sistemas de tarefas do produto.
+- **`WSEventType.TASK_*`** e **`websocket_manager.route_system_event`** — encaminhamento dirigido do canal Redis para as ligações WebSocket.
+- **`frontend/src/utils/taskEvents.js`** (merge puro, testado) e **`hooks/useTaskEvents.js`** (subscrição).
+
+### Alterado
+- **Emissão nos 3 pontos de estrangulamento**, sem tocar num único chamador: `TaskLogService.create_task/update_task`, `BackgroundJobService.{create_job,update_progress,set_status,set_result,set_error}` e `routes/ai_bulk/jobs.py::{create,update,finish}_background_job_db`.
+- **`server.py`** — o listener arranca no startup e pára no shutdown. Deliberadamente **fora** do guard `_is_primary_worker`: ao contrário dos schedulers, cada worker tem de subscrever o canal porque cada um detém as suas próprias ligações WebSocket.
+- **Frontend reactivo**: `TasksContext` actualiza o estado ao receber o evento (e expõe `isRealtime`); `useBackgroundJobsQuery` invalida as queries por evento; `TasksPanel` deixou de usar o intervalo de 10s.
+
+### Corrigido
+- **Eventos perdidos em multi-worker**: `ConnectionManager` é um dicionário em memória por processo, pelo que uma tarefa a correr no worker A nunca alcançava um WebSocket aberto no worker B — esses eventos desapareciam em silêncio. O canal Redis é agora o barramento entre workers.
+- **Atraso de até 5s** a reflectir progresso na UI (intervalo do polling), agora substituído por entrega no instante da mudança.
+
+### Isolamento de dados (tenant-safety)
+- Todo o envelope transporta o `user_id` **destinatário**, e a entrega é feita por `send_personal_message`, que só escreve nos sockets desse utilizador.
+- Um envelope **sem** `user_id` é **descartado** — na publicação, na recepção e no router. Não existe caminho que faça fan-out de um evento de tarefa: falha fechada, nunca aberta. Uma tarefa cujo dono não se consiga resolver simplesmente não gera evento.
+
+### Resiliência (graceful degradation)
+- Publicar um evento **nunca** levanta excepção para o chamador: as operações HTTP core e as próprias tarefas não podem falhar por causa desta camada.
+- Redis em baixo ou por configurar → o evento é entregue **in-process** (as ligações do worker actual continuam a receber) e o listener fica em retry silencioso.
+- **O polling não foi apagado — mudou de papel.** Passa a ser a rede de segurança: pára quando o WebSocket liga e retoma sozinho quando cai (com um fetch imediato para recuperar o que se perdeu). Apagá-lo deixaria a UI cega numa falha de rede.
+- Upstash (`redis_cache.py`) fica intacto: é a API **REST**, não suporta `SUBSCRIBE`. Cache e eventos coexistem em infra-estruturas distintas.
+
+### Testes
+- **NOVO** `backend/tests/unit/test_redis_pubsub.py` (72): envelope e serialização, recusa de payloads desproporcionados, mensagens corrompidas, publicação e circuit breaker, listener e reconexão, mapeamento estado → evento (incluindo str-Enums) e — com maior peso — os caminhos de tenant-safety e de degradação.
+- **NOVO** `frontend/src/utils/taskEvents.test.js` (17): merge, imutabilidade, inserção de tarefas novas e filtragem por origem.
+- Validação adicional contra um **Redis real**: percurso completo publish → SUBSCRIBE → router confirmado, com os eventos de dois utilizadores a não se cruzarem, e degradação verificada matando o Redis a meio de uma emissão.
+
+---
+
 ## [2026-09-21] — Épico: Motor de Simulação Financeira Automatizada (DSTI & Cenários)
 
 Validar a indexação de um processo de **Crédito Habitação** que já tenha documentos financeiros indexados (IRS, recibos de vencimento, notas de liquidação) passa a disparar, em segundo plano, a extracção dos rendimentos, o cálculo do DSTI cruzado com a Euribor em vigor e a geração de uma **proposta em PDF com 3 cenários** (Taxa Fixa / Taxa Mista / Taxa Variável), arquivada no S3 e anexada ao separador Documentos do processo.
