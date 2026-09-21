@@ -318,8 +318,16 @@ def build_mark_indexed_response(
     assigned_ids: list[str],
     consultant_result: Any,
     is_pre_registo_transition: bool,
+    financial_engine: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Payload de sucesso do endpoint mark-indexed."""
+    """Payload de sucesso do endpoint mark-indexed.
+
+    ``financial_engine`` (ÉPICO Motor de Simulação Financeira) diz ao
+    frontend se a validação da indexação disparou o cálculo automático dos
+    cenários de crédito — é o que sustenta o toast secundário
+    "Motor financeiro a processar cenários..." e o acompanhamento da
+    tarefa em background no painel de tarefas.
+    """
     return {
         "success": True,
         "message": f"Indexação do processo {process_ref} marcada como concluída.",
@@ -335,7 +343,38 @@ def build_mark_indexed_response(
         "dual_auto_assigned": is_pre_registo_transition,
         "assignment": consultant_result if is_pre_registo_transition else None,
         "is_data_confirmed": True,
+        "financial_engine": financial_engine
+        or {"triggered": False, "reason": None, "task_id": None, "documents": 0},
     }
+
+
+async def trigger_financial_engine_safe(process: dict, user: dict) -> dict[str, Any]:
+    """Dispara o Motor de Simulação Financeira sem nunca bloquear a indexação.
+
+    ÉPICO "Motor de Simulação Financeira" (Eixo 1) — quando os documentos
+    indexados de um processo de crédito incluem documentos financeiros
+    (IRS, recibos de vencimento), a validação da indexação passa a lançar,
+    em background, a extracção dos rendimentos, o cálculo do DSTI e a
+    geração da proposta com 3 cenários.
+
+    O trabalho pesado corre em ``asyncio.create_task`` dentro de
+    ``services/financial_engine``; aqui só se aguarda a decisão e o registo
+    da tarefa. Qualquer falha do motor é engolida (com log): a indexação
+    já está persistida e não pode ser revertida por causa da simulação.
+    """
+    fallback = {"triggered": False, "reason": None, "task_id": None, "documents": 0}
+    try:
+        from services.financial_engine import (
+            trigger_financial_engine_after_indexing,
+        )
+
+        return await trigger_financial_engine_after_indexing(process, user)
+    except Exception as engine_err:
+        logger.warning(
+            f"[INDEXACAO] Motor financeiro não disparado (não fatal) para o "
+            f"processo {process.get('id')}: {engine_err}"
+        )
+        return fallback
 
 
 async def run_mark_indexed_side_effects(
@@ -417,6 +456,8 @@ async def run_mark_indexed_side_effects(
         process, process_id, user, current_status, process_ref,
     )
 
+    financial_engine = await trigger_financial_engine_safe(process, user)
+
     return build_mark_indexed_response(
         process=process,
         process_id=process_id,
@@ -426,6 +467,7 @@ async def run_mark_indexed_side_effects(
         assigned_ids=assigned_ids,
         consultant_result=consultant_result,
         is_pre_registo_transition=is_pre_registo,
+        financial_engine=financial_engine,
     )
 
 

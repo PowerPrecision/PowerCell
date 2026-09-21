@@ -151,6 +151,7 @@ import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeParseISO } from "../lib/utils";
+import { notifyFinancialEngine } from "../utils/financialEngineFeedback";
 
 import {
   cleanPersonalDataForSubmit,
@@ -1497,6 +1498,12 @@ const ProcessDetails = () => {
           ? "Indexação concluída! A equipa foi notificada."
           : "Indexação revertida — o processo voltou a 'não indexado'."
       );
+      // ÉPICO Motor de Simulação Financeira (Eixo 4) — quando a validação
+      // da indexação dispara o cálculo automático dos cenários de crédito,
+      // o backend devolve `financial_engine.triggered`. Toast informativo
+      // secundário para o utilizador saber que há trabalho em background
+      // (o progresso até ao PDF é acompanhado pelo painel de Tarefas).
+      notifyFinancialEngine(res?.data, toast.info);
       await fetchData();
     } catch (error) {
       setProcess((prev) => (prev ? { ...prev, is_indexed: previous } : prev));

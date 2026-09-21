@@ -33,6 +33,7 @@ import { useAuth } from "../contexts/AuthContext";
 import { safeString } from "../utils/safeString";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import ProcessFilters from "../components/filters/ProcessFilters";
+import { notifyFinancialEngine } from "../utils/financialEngineFeedback";
 
 const roleLabels = {
   consultor: "Consultor",
@@ -289,8 +290,12 @@ const ProcessesPage = () => {
     if (!processId || markingProcessIds.has(processId)) return;
     setMarkingProcessIds(prev => new Set(prev).add(processId));
     try {
-      await markProcessIndexed(processId);
+      const res = await markProcessIndexed(processId);
       toast.success('Indexação concluída! A equipa foi notificada.');
+      // ÉPICO Motor de Simulação Financeira (Eixo 4) — ver
+      // `utils/financialEngineFeedback`: toast informativo secundário
+      // quando a indexação arranca o cálculo dos cenários de crédito.
+      notifyFinancialEngine(res?.data, toast.info);
       // Atualizar localmente o processo
       setProcesses(prev => prev.map(p => p.id === processId ? { ...p, is_indexed: true } : p));
     } catch (error) {

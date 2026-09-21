@@ -1,4 +1,38 @@
 ---
+Task ID: epico-motor-simulacao-financeira
+Agent: Cloud Agent
+Task: Épico — Motor de Simulação Financeira Automatizada (DSTI & Cenários)
+
+Date: 2026-09-21
+
+Work Log:
+- Eixo 1 (hook): `process_indexing.run_mark_indexed_side_effects` chama `trigger_financial_engine_safe` (fire-and-forget); a resposta do mark-indexed/set-indexed ganha o bloco `financial_engine` (`triggered`/`reason`/`task_id`/`documents`)
+- Eixo 1 (detecção): `financial_engine.classify_financial_document` deriva os tipos financeiros de `document_ai_analyze.DOCUMENT_TYPE_FOLDERS` (sem lista paralela); extracção reaproveita `document_metadata.extracted_data` e só recorre a `ai_document.analyze_document_from_base64` quando falta
+- Eixo 2 (cálculo): **NOVO** `financial_simulator.py` — porta Python de `utils/mortgageCalculations.js` (sistema francês + TAEG por bisseção, generalizada para fluxos variáveis), capital em dívida para a Taxa Mista, DSTI projectado sobre `dsti_service.calculate_dsti`, 3 cenários (Fixa/Mista/Variável) cruzados com `euribor_service`
+- Eixo 3 (PDF): **NOVO** `financial_proposal_pdf.py` — reportlab/platypus reutilizando a infra do `rgpd_pdf` (DejaVu + NumberedCanvas) e `template_generator.get_nested_value`; emissor via `rgpd_service._get_company_legal_data`, logo via `email_branding.resolve_company_logo_url`, cor via `settings.primary_color`. Arquivo S3 em `Propostas/` + `document_metadata` com `ai_subcategory: "Proposta Financeira"`
+- Zero hardcoding: **NOVO** `FinancialSimulatorConfig` (spreads, índice Euribor, prémio da taxa fixa, período fixo da mista, seguros, comissões); prazo/LTV/validade reutilizam `credit_services`, limite DSTI reutiliza `dsti_analysis.critical_risk_threshold`
+- Falhas: `flag_manual_review` grava `process.financial_simulation.status = needs_manual_review`, empurra atividade de sistema na timeline e marca a TaskLog como FAILED — a indexação nunca é bloqueada nem revertida
+- Eixo 4 (UX): **NOVO** `utils/financialEngineFeedback.js` (toast "Motor financeiro a processar cenários...") ligado em ProcessDetails, ProcessesPage e kanban/ProcessDetailsModal; `TasksPanel` deixa de esconder tarefas de background em contexto de processo (filtra por `process_id` + refresca a 10s enquanto houver tarefas activas)
+
+Stage Summary:
+- Validar a indexação de um processo de Crédito Habitação com IRS/recibos passa a gerar automaticamente uma proposta em PDF com 3 cenários, DSTI projectado e Euribor em vigor, anexada aos Documentos do processo
+
+Files:
+- backend/models/system_config.py
+- backend/services/financial_simulator.py
+- backend/services/financial_engine.py
+- backend/services/financial_proposal_pdf.py
+- backend/services/process_indexing.py
+- backend/tests/unit/test_financial_simulator.py
+- frontend/src/utils/financialEngineFeedback.js
+- frontend/src/utils/financialEngineFeedback.test.js
+- frontend/src/components/TasksPanel.js
+- frontend/src/components/kanban/ProcessDetailsModal.jsx
+- frontend/src/pages/ProcessDetails.js
+- frontend/src/pages/ProcessesPage.js
+- AGENTS.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: pacote-fn-processes-me-ucr
 Agent: Cloud Agent
 Task: Pacote FN — loop GET /processes/me, mismatch UCR (id vs nome) e documentação

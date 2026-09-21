@@ -3,6 +3,36 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Épico: Motor de Simulação Financeira Automatizada (DSTI & Cenários)
+
+Validar a indexação de um processo de **Crédito Habitação** que já tenha documentos financeiros indexados (IRS, recibos de vencimento, notas de liquidação) passa a disparar, em segundo plano, a extracção dos rendimentos, o cálculo do DSTI cruzado com a Euribor em vigor e a geração de uma **proposta em PDF com 3 cenários** (Taxa Fixa / Taxa Mista / Taxa Variável), arquivada no S3 e anexada ao separador Documentos do processo.
+
+### Adicionado
+- **`services/financial_simulator.py`** — motor puro (testável sem MongoDB): sistema francês de amortização e TAEG por bisseção (porta fiel de `frontend/src/utils/mortgageCalculations.js`, generalizada para fluxos de taxa mista), capital em dívida, resolução de capital/prazo a partir do processo e **DSTI projectado** sobre o motor canónico `dsti_service.calculate_dsti`.
+- **`services/financial_engine.py`** — orquestração com efeitos: detecção dos documentos financeiros, extracção (cache do OCR → `ai_document.analyze_document_from_base64`), consolidação via `ClientDataAggregator`, tarefa de background (`TaskType.PDF_GEN`), arquivo da proposta e registo na timeline.
+- **`services/financial_proposal_pdf.py`** — PDF limpo em reportlab/platypus com enquadramento financeiro e comparação lado a lado dos 3 cenários.
+- **`FinancialSimulatorConfig`** em `models/system_config.py` — spreads por cenário, índice Euribor, prémio da taxa fixa, período fixo da taxa mista, seguros e comissões, todos configuráveis.
+- **`frontend/src/utils/financialEngineFeedback.js`** — toast informativo secundário *"Motor financeiro a processar cenários..."*.
+
+### Alterado
+- **`POST /processes/{id}/mark-indexed` e `/set-indexed`** devolvem `financial_engine: {triggered, reason, task_id, documents}`. Respostas antigas continuam a funcionar (o frontend lê um bloco neutro por omissão).
+- **`TasksPanel`** deixou de esconder as tarefas de background quando aberto dentro de um processo: mostra as tarefas **desse** processo e refresca a cada 10 s enquanto houver alguma em curso.
+- Toast secundário ligado nos três sítios que validam indexação: `ProcessDetails`, `ProcessesPage` e o modal de detalhes do Kanban.
+
+### Zero hardcoding
+- Nenhum spread, prazo, limiar ou dado de empresa vive no código do motor. Prazo por defeito, LTV máximo e validade da proposta reutilizam `credit_services`; o limite de taxa de esforço reutiliza `dsti_analysis.critical_risk_threshold`; o emissor do PDF vem de `rgpd_service._get_company_legal_data` (a mesma fonte do RGPD/Minuta), o logótipo de `email_branding.resolve_company_logo_url` e a cor de destaque de `settings.primary_color`.
+
+### Gestão de falhas (nunca encrava)
+- O motor corre em *fire-and-forget*: a indexação nunca espera por ele nem é revertida por causa dele.
+- IRS ilegível, OCR sem valores, S3 em baixo ou erro inesperado → `process.financial_simulation.status = "needs_manual_review"` com motivo legível, aviso de sistema na timeline do processo e tarefa de background marcada como falhada (visível no painel de Tarefas).
+- Euribor indisponível não aborta o cálculo: os cenários indexados usam o spread contratado e a proposta sai com o aviso correspondente.
+
+### Testes
+- **NOVO** `backend/tests/unit/test_financial_simulator.py` (72): matemática do sistema francês (valores de referência), TAEG com fluxos variáveis, definição dos 3 cenários a partir da configuração, DSTI projectado vs. limite BdP, resolução de capital/prazo (incluindo derivação por LTV), degradação sem rendimento/montante, classificação de documentos financeiros, decisão de disparo e caminhos de revisão manual.
+- **NOVO** `frontend/src/utils/financialEngineFeedback.test.js` (11).
+
+---
+
 ## [2026-08-23] — Pacote FN: Loop `/processes/me` e mismatch UCR
 
 Correcção de produção: **Os Meus Processos** (`/processos`) nunca carregava e repetia `GET /api/processes/me`. Os headers `X-Active-Role` / `X-Company-Id` não batiam com o UCR (ex.: cargo `consultor` + empresa guardada como nome `Precision Crédito` em vez do `company_id`), e o fallback silencioso para o JWT devolvia lista vazia.
