@@ -159,12 +159,12 @@ async def run_save_my_email_config(
     from services.email_config_resolver import (
         _is_nested_email_config,
         _extract_role_email_config,
+        resolve_active_ucr_role,
     )
     from services.user_email_config_service import upsert_user_email_config
     from services.auth import get_active_company_id_async, get_effective_role
 
     user_id = current_user["id"]
-    user_role = current_user.get("role", "")
     effective_role = get_effective_role(request, current_user)
 
     if effective_role in FORCED_SHARED_ROLES:
@@ -191,11 +191,23 @@ async def run_save_my_email_config(
         header_company,
     ) or "default"
 
-    active_role_header = request.headers.get("X-Active-Role", "")
-    if active_role_header and active_role_header != user_role:
-        storage_role = active_role_header
-    else:
-        storage_role = "default"
+    # ESCREVER NA MESMA CHAVE QUE O ENVIO LÊ.
+    #
+    # Isto usava o `X-Active-Role` apenas quando DIFERIA do papel base,
+    # gravando em "default" no caso comum. Mas o envio
+    # (`resolve_email_config_for_sync` → `_extract_role_email_config`) lê
+    # PRIMEIRO `email_config[<papel UCR>]` e só depois `["default"]`.
+    #
+    # Sem empresa activa, isso significa escrever num sítio e ler de outro:
+    # uma sub-config antiga em `email_config["consultor"]` continuava a
+    # sombrear a password acabada de guardar em "default", e o envio saía
+    # com a credencial velha (`535 Incorrect authentication data`), sem que
+    # voltar a gravar resolvesse nada. Incidente de 2026-09-21.
+    #
+    # `resolve_active_ucr_role` é exactamente a função que o envio usa.
+    storage_role = await resolve_active_ucr_role(
+        request, current_user, company_id if company_id != "default" else None,
+    ) or "default"
 
     # Canonical key is (user_id, company_id) — prefer company over role when set
     if company_id != "default":
@@ -308,18 +320,38 @@ async def run_test_my_email_config(
 ):
     """Testar ligação de email (Gmail OAuth ou IMAP/SMTP)."""
     from services.gmail_oauth import test_connection_smart
-    from services.email_config_resolver import resolve_email_config_for_sync
+    from services.email_config_resolver import (
+        resolve_active_ucr_role,
+        resolve_email_config_for_sync,
+    )
     from services.auth import get_active_company_id_async, get_effective_role
 
     user_id = current_user["id"]
-    user_role = current_user.get("role", "")
     effective_role = get_effective_role(request, current_user)
-    active_role = _resolve_active_role(request, user_role) or (
-        effective_role if effective_role != user_role else None
-    )
 
     header_company_id = await get_active_company_id_async(request, current_user)
     active_company_id = company_id or header_company_id
+
+    # O TESTE TEM DE TESTAR A CONFIGURAÇÃO QUE O ENVIO VAI USAR.
+    #
+    # `_extract_role_email_config` escolhe a sub-configuração de um
+    # `email_config` aninhado PELO PAPEL: com papel, usa `config[papel]`;
+    # sem papel, cai em `config["default"]`.
+    #
+    # Isto resolvia o papel de forma diferente do envio: só usava o
+    # `X-Active-Role` quando este DIFERIA do papel base, devolvendo `None`
+    # no caso comum (papel activo == papel base). O envio
+    # (`email_documentation`, `email_service`) usa `resolve_active_ucr_role`,
+    # que lê o UCR na base de dados e nunca devolve `None`.
+    #
+    # Resultado: o botão testava `config["default"]` enquanto o envio usava
+    # `config["<papel>"]`. Com passwords diferentes nas duas, o teste dava
+    # verde e o envio falhava com `535 Incorrect authentication data` —
+    # sintoma reportado em produção (2026-09-21). Passa a usar exactamente
+    # a mesma resolução do envio.
+    active_role = await resolve_active_ucr_role(
+        request, current_user, active_company_id,
+    )
 
     if effective_role in FORCED_SHARED_ROLES:
         resolved = await resolve_email_config_for_sync(

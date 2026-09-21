@@ -3,6 +3,16 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Correcção: teste de email verde com envio a falhar (535)
+
+### Corrigido
+- **O botão "Testar" da configuração de email não testava a conta que o envio usa.** O `email_config` de um utilizador pode ser aninhado por papel. O envio lê `email_config["company:<id>"]` → `email_config[<papel UCR>]` → `["default"]`, com o papel resolvido por `resolve_active_ucr_role`. O teste resolvia o papel de outra forma — só usava `X-Active-Role` quando este diferia do papel base — pelo que no caso comum testava `["default"]` enquanto o envio usava `[<papel>]`. Verde no teste, `535 Incorrect authentication data` no envio, com a mesma conta. Passa a usar a mesma resolução do envio.
+- **Guardar a password escrevia numa chave que o envio não lia.** Pelo mesmo motivo, sem empresa activa o guardar escrevia em `["default"]` enquanto o envio lia `[<papel>]`. Uma sub-config antiga sombreava a credencial acabada de gravar, e **voltar a gravar não resolvia nada**. O guardar passa a escrever na chave que o envio lê.
+
+### Notas
+- Reportado em produção no `POST /api/emails/send-documentation/...` (500), com o log a mostrar `account=personal source=profile:user` e `(535, b'Incorrect authentication data')` — ou seja, a conta certa com a credencial errada.
+- Quem tenha sido afectado precisa de **voltar a guardar a password uma vez** depois desta correcção: só então ela passa a ficar na sub-configuração que o envio consulta.
+
 ## [2026-09-21] — Correcção: bateria financeira dependente da ordem dos testes
 
 ### Corrigido
