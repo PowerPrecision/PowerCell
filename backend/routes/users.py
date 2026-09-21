@@ -17,6 +17,7 @@ from services.auth import get_current_user, require_staff
 from services.users_api_list import run_get_staff_users, run_get_user, run_get_users
 from services.users_api_email_config import (
     run_get_my_email_config,
+    run_send_test_email,
     run_save_my_email_config,
     run_test_my_email_config,
     run_list_my_email_accounts,
@@ -80,6 +81,24 @@ async def test_my_email_config(
 ):
     """Testar ligação de email do utilizador."""
     return await run_test_my_email_config(request, company_id, current_user)
+
+
+@router.post("/me/email-config/send-test")
+async def send_test_email(
+    request: Request,
+    company_id: Optional[str] = Query(
+        None, description="ID da empresa (fallback para X-Company-Id header)",
+    ),
+    current_user: dict = Depends(get_current_user),
+):
+    """Enviar um email de teste real para o próprio utilizador.
+
+    Distingue-se do `/test`: aquele só autentica (IMAP + SMTP `login`),
+    este envia mesmo, pelo `send_email` de produção. Um login aceite não
+    garante entrega — relay, política de remetente e limites falham
+    depois dele.
+    """
+    return await run_send_test_email(request, company_id, current_user)
 
 
 @router.get("/me/email-accounts")

@@ -102,9 +102,9 @@ def test_handlers_resolvem_o_papel_pela_mesma_funcao():
     """
     from pathlib import Path
 
-    origem = Path(__file__).resolve().parents[1]
-    config_api = (origem.parent / "services" / "users_api_email_config.py").read_text()
-    documentacao = (origem.parent / "services" / "email_documentation.py").read_text()
+    servicos = Path(__file__).resolve().parents[2] / "services"
+    config_api = (servicos / "users_api_email_config.py").read_text()
+    resolver = (servicos / "email_config_resolver.py").read_text()
 
     # Contar ocorrências não chega: o import sozinho já as produzia e a
     # asserção passava com o guardar a escrever em "default" na mesma.
@@ -120,6 +120,13 @@ def test_handlers_resolvem_o_papel_pela_mesma_funcao():
     assert 'storage_role = "default"' not in config_api, (
         "escrever sempre em 'default' é o bug: o envio lê primeiro pelo papel"
     )
-    assert "resolve_active_ucr_role" in documentacao, (
-        "o envio é a referência — se mudar de função, os outros têm de a seguir"
+    # A resolução do ENVIO foi extraída para
+    # `email_config_resolver.resolve_sending_account`, que é agora o ponto
+    # único. É lá que o papel tem de ser resolvido.
+    assert "async def resolve_sending_account(" in resolver, (
+        "o ponto único de resolução da conta de envio tem de existir"
+    )
+    assert "resolve_active_ucr_role(" in resolver, (
+        "o resolvedor partilhado é a referência: se deixar de usar o papel "
+        "do UCR, o guardar e o testar voltam a divergir do envio"
     )

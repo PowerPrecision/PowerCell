@@ -36,7 +36,7 @@ import { Badge } from "../components/ui/badge";
 import { toast } from "sonner";
 import api from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
-import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle, Unlink, Pencil, X } from "lucide-react";
+import { Mail, Save, RefreshCw, Loader2, Eye, EyeOff, Shield, AlertCircle, Unlink, Pencil, X, Send } from "lucide-react";
 
 const roleLabels = {
   consultor: "Consultor",
@@ -99,6 +99,11 @@ const EmailConfigForm = ({
     return `/admin/users/${userId}/email-config/test`;
   };
 
+  // Só existe para a própria conta: um envio de teste vai para a caixa do
+  // dono da configuração, pelo que não faz sentido um admin dispará-lo
+  // em nome de outra pessoa.
+  const sendTestUrl = () => "/users/me/email-config/send-test";
+
   const [emailConfig, setEmailConfig] = useState({
     email_address: "",
     imap_server: "",
@@ -115,6 +120,8 @@ const EmailConfigForm = ({
   const [testing, setTesting] = useState(false);
   const [showPassword, setShowPassword] = useState(false);
   const [testResult, setTestResult] = useState(null);
+  const [sendingTest, setSendingTest] = useState(false);
+  const [sendTestResult, setSendTestResult] = useState(null);
   const [googleOAuthConnecting, setGoogleOAuthConnecting] = useState(false);
   const [googleOAuthConnected, setGoogleOAuthConnected] = useState(false);
   // "user" | "company" | "system" | "shared_role" | "none"
@@ -340,6 +347,29 @@ const EmailConfigForm = ({
       loadConfig();
     } catch (error) {
       toast.error(extractErrorMessage(error.response?.data?.detail, "Erro ao desconectar Google OAuth"));
+    }
+  };
+
+  // ENVIAR EMAIL DE TESTE — prova a ENTREGA, não só as credenciais.
+  // O "Testar Ligação" autentica em IMAP e SMTP; isto envia mesmo, pelo
+  // caminho de produção. Relay recusado, política de remetente e limites
+  // do servidor só falham DEPOIS do login, e é essa a lacuna que fecha.
+  const handleSendTest = async () => {
+    setSendingTest(true);
+    setSendTestResult(null);
+    try {
+      const response = await api.post(sendTestUrl(), null, companyRequestConfig());
+      setSendTestResult({ success: true, ...response.data });
+      toast.success(response.data?.message || "Email de teste enviado");
+    } catch (error) {
+      const detail = extractErrorMessage(
+        error.response?.data?.detail,
+        "Não foi possível enviar o email de teste",
+      );
+      setSendTestResult({ success: false, error: detail });
+      toast.error(detail);
+    } finally {
+      setSendingTest(false);
     }
   };
 
@@ -751,6 +781,42 @@ const EmailConfigForm = ({
         </div>
       )}
 
+      {/* Resultado do envio de teste — distinto do teste de ligação:
+          aqui saiu mesmo uma mensagem para a rede. */}
+      {sendTestResult && (
+        <div
+          className={`flex items-start gap-2 p-3 rounded-lg text-sm ${
+            sendTestResult.success
+              ? "bg-primary/10 border border-primary/30 text-foreground"
+              : "bg-destructive/10 border border-destructive/30 text-foreground"
+          }`}
+        >
+          {sendTestResult.success ? (
+            <Send className="h-4 w-4 mt-0.5 shrink-0" />
+          ) : (
+            <AlertCircle className="h-4 w-4 mt-0.5 shrink-0" />
+          )}
+          <div className="space-y-0.5">
+            {sendTestResult.success ? (
+              <>
+                <div>
+                  Email enviado para <strong>{sendTestResult.sent_to}</strong>.
+                  Confirme a recepção na caixa de entrada.
+                </div>
+                <div className="text-xs text-muted-foreground">
+                  Conta: {sendTestResult.account} · SMTP: {sendTestResult.smtp_server}
+                  {sendTestResult.config_source
+                    ? ` · Origem: ${sendTestResult.config_source}`
+                    : ""}
+                </div>
+              </>
+            ) : (
+              <span>{sendTestResult.error}</span>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Action Buttons */}
       <div className="flex flex-col sm:flex-row gap-3 pt-2">
         {(isEditing || !webmailConfigured) && (
@@ -768,6 +834,24 @@ const EmailConfigForm = ({
               )}
               {testing ? "A testar..." : "Testar Ligação"}
             </Button>
+            {/* Só para a própria conta e com credenciais já guardadas:
+                o envio usa o que está na BD, não o que está no formulário. */}
+            {isSelf && webmailConfigured && (
+              <Button
+                variant="outline"
+                onClick={handleSendTest}
+                disabled={sendingTest}
+                className="gap-2"
+                title="Envia um email real para si, pelo mesmo caminho do envio de documentação"
+              >
+                {sendingTest ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Send className="h-4 w-4" />
+                )}
+                {sendingTest ? "A enviar..." : "Enviar Email de Teste"}
+              </Button>
+            )}
             <Button
               onClick={handleSave}
               disabled={saving}

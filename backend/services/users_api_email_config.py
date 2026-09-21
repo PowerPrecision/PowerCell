@@ -747,3 +747,111 @@ async def run_set_primary_email_account(
         account_id,
     )
     return {"success": True, "account": publicize_email_account(updated)}
+
+
+# ====================================================================
+# ENVIO DE TESTE — prova a cadeia toda, não só as credenciais
+# ====================================================================
+
+
+async def run_send_test_email(
+    request: Request,
+    company_id: Optional[str],
+    current_user: dict,
+):
+    """Envia um email real para o próprio utilizador, pelo caminho de produção.
+
+    PORQUÊ ISTO EXISTE: o "Testar Ligação" faz `login()` em IMAP e SMTP.
+    Isso prova que as credenciais são aceites — e mais nada. Um envio a
+    sério pode falhar DEPOIS do login: relay recusado para domínios
+    externos, política de remetente, tamanho de anexo, rate limit. Foi o
+    que aconteceu em 2026-09-21: SMTP verde, envio a falhar.
+
+    Ao contrário do teste de ligação, isto passa pelo `send_email` — o
+    ponto único de saída de email do CRM — com a conta que
+    `resolve_sending_account` devolve, exactamente como o envio real. Se
+    isto chegar à caixa de entrada, o envio funciona.
+
+    Sem `process_id` de propósito: um email de teste não tem de aparecer
+    no histórico de nenhum processo (`send_email` só arquiva quando há
+    processo).
+    """
+    from services.auth import get_active_company_id_async
+    from services.email_config_resolver import resolve_sending_account
+    from services.email_service import send_email
+
+    header_company_id = await get_active_company_id_async(request, current_user)
+    active_company_id = company_id or header_company_id
+
+    account, source = await resolve_sending_account(
+        request, current_user, active_company_id,
+    )
+    if account is None:
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Não foi possível resolver uma conta de envio: configure o "
+                "email do perfil activo ou a Caixa Geral da empresa."
+            ),
+        )
+
+    destino = (current_user.get("email") or account.email or "").strip()
+    if not destino:
+        raise HTTPException(
+            status_code=400,
+            detail="Sem endereço de destino: o seu utilizador não tem email.",
+        )
+
+    agora = datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S UTC")
+    corpo = (
+        "Este é um email de teste enviado pelo PowerCell.\n\n"
+        f"Conta utilizada: {account.email}\n"
+        f"Servidor SMTP: {account.smtp_server}:{account.smtp_port}\n"
+        f"Origem da configuração: {source}\n"
+        f"Enviado em: {agora}\n\n"
+        "Se recebeu esta mensagem, o envio de email está a funcionar — "
+        "incluindo a entrega, e não apenas as credenciais."
+    )
+
+    resultado = await send_email(
+        account_name=account.name,
+        to_emails=[destino],
+        subject="PowerCell — email de teste",
+        body=corpo,
+        from_email=account.email,
+        reply_to=destino,
+        active_company_id=active_company_id,
+        account_override=account,
+        created_by=current_user.get("id"),
+        skip_proc_tag=True,
+    )
+
+    if not resultado.get("success"):
+        # A origem vai na resposta de propósito: sem ela, diagnosticar isto
+        # obrigava a ler os logs do servidor — foi o que atrasou o
+        # diagnóstico do incidente de 2026-09-21.
+        logger.error(
+            "[email-test-send] Falhou user=%s source=%s account=%s host=%s: %s",
+            current_user.get("id"), source, account.email,
+            account.smtp_server, resultado.get("error"),
+        )
+        raise HTTPException(
+            status_code=502,
+            detail=(
+                f"{resultado.get('error') or 'Não foi possível enviar o email.'} "
+                f"(conta: {account.email}, origem: {source})"
+            ),
+        )
+
+    logger.info(
+        "[email-test-send] Enviado user=%s source=%s account=%s para=%s",
+        current_user.get("id"), source, account.email, destino,
+    )
+    return {
+        "success": True,
+        "sent_to": destino,
+        "account": account.email,
+        "smtp_server": f"{account.smtp_server}:{account.smtp_port}",
+        "config_source": source,
+        "message": f"Email de teste enviado para {destino}. Confirme a recepção.",
+    }
