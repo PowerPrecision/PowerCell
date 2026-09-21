@@ -456,14 +456,32 @@ async def send_portal_welcome_email_from_process(
     pré-registo perdia-se em silêncio na fila. Passa a delegar em
     `deliver_registration_email` (envio DIRECTO prioritário; fila ARQ
     apenas como retry de última esperância).
+
+    PACOTE 12 — IDEMPOTÊNCIA: consulta o estado de entrega do cliente
+    (``portal_email_delivery.status``) no doc já carregado; se o email
+    já foi entregue ("sent"), salta o envio (sem duplicar).
     """
     try:
         portal_access_code = None
         try:
             client_doc = await db.clients.find_one(
-                {"id": client_id}, {"portal_access_code": 1, "_id": 0},
+                {"id": client_id},
+                {"portal_access_code": 1, "portal_email_delivery": 1, "_id": 0},
             )
             if client_doc:
+                # PACOTE 12 — guarda na fonte #2: se o email de boas-vindas
+                # JÁ foi entregue (estado "sent" do PACOTE 10 gravado no
+                # cliente, p.ex. pela criação do cliente momentos antes),
+                # saltar — o fluxo Pré-Registo (criar cliente → criar
+                # processo) não deve disparar DOIS emails idênticos.
+                delivery = client_doc.get("portal_email_delivery") or {}
+                if delivery.get("status") == "sent":
+                    logger.info(
+                        f"[PORTAL-EMAIL] Email de boas-vindas do cliente "
+                        f"{client_id} já foi entregue — envio a partir da "
+                        f"criação do processo ignorado."
+                    )
+                    return
                 portal_access_code = client_doc.get("portal_access_code")
                 if not portal_access_code:
                     from models.client import generate_portal_access_code as _gen_code

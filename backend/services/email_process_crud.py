@@ -116,24 +116,19 @@ def build_participant_address_match(client_emails) -> Optional[dict]:
     return {"$or": clauses}
 
 
-def build_process_emails_base_conditions(process_id: str, client_emails) -> list:
-    """Emails linked to the process OR unassigned messages involving the client."""
-    conditions = [{"process_id": process_id}]
-    participant_match = build_participant_address_match(client_emails)
-    if participant_match:
-        conditions.append({
-            "$and": [
-                {
-                    "$or": [
-                        {"process_id": None},
-                        {"process_id": {"$exists": False}},
-                        {"process_id": ""},
-                    ]
-                },
-                participant_match,
-            ]
-        })
-    return conditions
+def build_process_emails_base_conditions(process_id: str, client_emails=None) -> list:
+    """PACOTE 12 (Eixo 2) — filtro ESTRITO por ``process_id``.
+
+    Devolve SEMPRE uma lista com a única condição ``{"process_id": process_id}``:
+    emails NÃO associados (process_id None/ausente/vazio) deixaram de ser
+    agregados por endereço de participante — a lista de emails do processo
+    mostra apenas mensagens realmente ligadas a ele (smart threading,
+    tag mágica [Proc-{id}] ou associação manual explícita).
+
+    O parâmetro ``client_emails`` é mantido por compatibilidade de
+    assinatura (callers históricos) e é deliberadamente ignorado.
+    """
+    return [{"process_id": process_id}]
 
 
 def coerce_email_response_fields(doc: Optional[dict]) -> dict:
@@ -311,17 +306,16 @@ async def run_get_email_timeline(process_id: str, current_user: dict):
 
 async def run_get_process_emails(process_id: str, current_user: dict, direction: Optional[EmailDirection] = None, filter_by_user: bool = False, include_archived: bool = False, force_refresh: bool = False):
     """
-    Listar emails de um processo.
-    
-    Retorna todos os emails associados ao processo (via process_id),
-    ordenados por data descendente.
+    Lista emails associados ao processo (via process_id), ordenados por data descendente.
     
     Associação de emails a processos é feita automaticamente por:
     1. Smart Threading (herança de process_id via In-Reply-To / References)
     2. Tag Mágica [Proc-{id}] no assunto
     3. Associação manual pelo utilizador (botão Ligar a Processo no Webmail)
-    4. Pacote DN.3: from / to / cc correspondem ao email do cliente (ou 2º titular /
-       emails monitorizados) e a mensagem ainda não está ligada a outro processo.
+    
+    PACOTE 12 (Eixo 2): filtro ESTRITO — apenas emails com process_id igual
+    a este processo (a agregação por endereço de participante do Pacote
+    DN.3 foi removida; use a associação explícita para ligar mensagens).
     
     Se force_refresh=True, limpa emails sincronizados em cache e
     dispara sincronização global (smart threading + tags aplicam-se automaticamente).
@@ -342,9 +336,8 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
         except Exception as e:
             logger.error(f"Erro na re-sync após limpeza de cache: {e}")
     
-    # ── Query: process_id directo OU from/to/cc do cliente (Pacote DN.3) ──
-    client_emails = await resolve_process_participant_emails(process_id)
-    base_conditions = build_process_emails_base_conditions(process_id, client_emails)
+    # ── PACOTE 12: filtro ESTRITO por process_id (sem agregação por endereço) ──
+    base_conditions = build_process_emails_base_conditions(process_id)
     query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
 
     if direction:
@@ -390,10 +383,12 @@ async def run_get_process_emails(process_id: str, current_user: dict, direction:
 
 
 async def run_get_email_stats(process_id: str, current_user: dict):
-    """Obter estatísticas de emails de um processo."""
-    # Mesma lógica de get_process_emails: process_id + from/to/cc do cliente
-    client_emails = await resolve_process_participant_emails(process_id)
-    base_conditions = build_process_emails_base_conditions(process_id, client_emails)
+    """Obter estatísticas de emails de um processo.
+
+    PACOTE 12 (Eixo 2): filtro ESTRITO por process_id — as estatísticas
+    contam apenas os emails realmente associados ao processo.
+    """
+    base_conditions = build_process_emails_base_conditions(process_id)
     stats_query = {"$or": base_conditions} if len(base_conditions) > 1 else base_conditions[0]
     stats_query["is_archived"] = {"$ne": True}
 
@@ -636,6 +631,24 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
         except Exception:
             active_company_id = None
 
+    # === PACOTE 12 (Eixo 2 — branding da empresa ACTIVA no webmail) ===
+    # Best-effort: resolve o NOME da empresa activa para o envio (From do
+    # email). Falhas degradam para os defaults (None → sem nome de From).
+    active_company_name = None
+    if active_company_id:
+        try:
+            from services.email_branding import resolve_active_company_branding
+            branding_name, _branding_logo = await resolve_active_company_branding(
+                active_company_id
+            )
+            if branding_name:
+                active_company_name = branding_name
+        except Exception as exc:  # pragma: no cover — degradação graciosa
+            logger.debug(
+                "[Send Email] Branding da empresa %s indisponível: %s",
+                active_company_id, exc,
+            )
+
     user_role = current_user.get("role", "")
     can_use_global_accounts = user_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     from_box = payload.from_box
@@ -709,6 +722,10 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
     cc_emails = None
     if payload.cc_emails:
         cc_emails = [e for e in (sanitize_email(e) for e in payload.cc_emails) if e]
+    # PACOTE 12 (Eixo 2 — BCC): sanitização igual à do CC (cópia oculta)
+    bcc_emails = None
+    if payload.bcc_emails:
+        bcc_emails = [e for e in (sanitize_email(e) for e in payload.bcc_emails) if e]
     subject = sanitize_string(payload.subject, max_length=300)
     body = sanitize_string(payload.body, max_length=10000)
     # PACOTE AK: Sanitização e proteção do HTML — inline styles para imagens
@@ -755,10 +772,12 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
         body=body or "",
         body_html=body_html,
         cc_emails=cc_emails,
+        bcc_emails=bcc_emails,
         process_id=payload.process_id,
         from_box=from_box,
         from_email=from_email,
         company_id=active_company_id,
+        company_name=active_company_name,
         created_by=current_user["id"],
         created_by_email=current_user.get("email"),
         attachment_ids=payload.attachment_ids or [],

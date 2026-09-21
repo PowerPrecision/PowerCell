@@ -56,15 +56,19 @@ export function buildComposerSnapshot({ composerData, uploadAttachments }) {
  * pelo backend (cancel devolve {draft: {...}}) — repõe os campos do
  * composer no formato de edição (strings separadas por vírgula).
  *
+ * PACOTE 12 (Eixo 2): repõe também o bcc_emails (cópia oculta) incluído
+ * pelo backend no draft do cancel-send.
+ *
  * @param {any} draft Campo `draft` da resposta do cancel-send.
- * @returns {{to_emails: string, cc_emails: string, subject: string,
- *            body: string, process_id: (string|null)}} payload do composer.
+ * @returns {{to_emails: string, cc_emails: string, bcc_emails: string,
+ *            subject: string, body: string, process_id: (string|null)}} payload do composer.
  */
 export function draftToComposerFields(draft) {
   if (!draft || typeof draft !== "object") {
     return {
       to_emails: "",
       cc_emails: "",
+      bcc_emails: "",
       subject: "",
       body: "",
       process_id: null,
@@ -75,6 +79,7 @@ export function draftToComposerFields(draft) {
   return {
     to_emails: join(draft.to_emails),
     cc_emails: join(draft.cc_emails),
+    bcc_emails: join(draft.bcc_emails),
     subject: typeof draft.subject === "string" ? draft.subject : "",
     body: typeof draft.body === "string" ? draft.body : "",
     process_id: draft.process_id || null,

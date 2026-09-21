@@ -785,6 +785,24 @@ class ScheduledTasksService:
         logger.info(f"Lembretes mensais: {notifications_created} notificações criadas")
         return notifications_created
     
+    async def _resolve_email_company_name(self) -> str:
+        """PACOTE 12 (Eixo 2) — nome da empresa para os emails agendados.
+
+        Best-effort: branding global (system_config ``main`` → primeira
+        empresa activa, via ``services.email_branding``); falha ou ausência
+        → constante efectiva (env ``COMPANY_NAME``, default dual-brand).
+        Nunca lança excepção — o envio do email nunca é bloqueado.
+        """
+        try:
+            from services.email_branding import resolve_active_company_branding
+            company_name, _logo = await resolve_active_company_branding(None)
+            if company_name:
+                return company_name
+        except Exception as e:
+            logger.debug(f"[SCHEDULED] Falha ao resolver nome da empresa: {e}")
+        from services.email_v2 import COMPANY_NAME
+        return COMPANY_NAME
+
     async def send_monthly_reminder_email(
         self, 
         to_email: str, 
@@ -806,6 +824,10 @@ class ScheduledTasksService:
             logger.warning("SMTP não configurado - email não enviado")
             return
         
+        # PACOTE 12 (Eixo 2): nome da empresa (branding global) em vez do
+        # dual-brand hardcoded no header e na assinatura do email mensal.
+        company_name = await self._resolve_email_company_name()
+        
         subject = f"Documentação Mensal - {month_name} {year}"
         
         html_content = f"""
@@ -825,7 +847,7 @@ class ScheduledTasksService:
         <body>
             <div class="container">
                 <div class="header">
-                    <h1>Power Real Estate & Precision Crédito</h1>
+                    <h1>{company_name}</h1>
                 </div>
                 <div class="content">
                     <p>Exmo(a). Sr(a). <strong>{client_name}</strong>,</p>
@@ -845,7 +867,7 @@ class ScheduledTasksService:
                     <p>Pode enviar os documentos em resposta a este email ou através do seu consultor/intermediário.</p>
                     
                     <p>Com os melhores cumprimentos,<br>
-                    <strong>Equipa Power Real Estate & Precision Crédito</strong></p>
+                    <strong>Equipa {company_name}</strong></p>
                 </div>
                 <div class="footer">
                     <p>Este email foi enviado automaticamente. Por favor não responda diretamente.</p>
@@ -1108,6 +1130,10 @@ class ScheduledTasksService:
             "client_email": "Email",
         }
         
+        # PACOTE 12 (Eixo 2): nome da empresa (branding global) para o
+        # rodapé do relatório — em vez do dual-brand hardcoded.
+        company_name = await self._resolve_email_company_name()
+        
         # Gerar HTML do email
         html_content = f"""
         <!DOCTYPE html>
@@ -1203,7 +1229,7 @@ class ScheduledTasksService:
                 
                 <div class="footer">
                     <p>Este relatório foi gerado automaticamente pelo PowerCell</p>
-                    <p>Power Real Estate & Precision Crédito</p>
+                    <p>{company_name}</p>
                 </div>
             </div>
         </body>

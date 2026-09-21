@@ -198,9 +198,11 @@ def test_process_participant_email_helpers_include_cc():
     assert "from_email" in blob
     assert "(^|<)" in blob
 
+    # PACOTE 12 (Eixo 2): filtro ESTRITO por process_id — a agregação de
+    # emails não associados por endereço de participante (Pacote DN.3)
+    # foi removida; devolve apenas a condição estrita.
     conditions = build_process_emails_base_conditions("proc-1", {"ana@cliente.pt"})
-    assert {"process_id": "proc-1"} in conditions
-    assert any("cc_emails" in str(c) for c in conditions)
+    assert conditions == [{"process_id": "proc-1"}]
 
 
 def test_coerce_email_response_fields_fills_required():

@@ -375,25 +375,32 @@ const ProcessDetails = () => {
   };
 
   // Buscar estado do RGPD
-  const fetchRgpdStatus = async () => {
+  // PACOTE 12 (Eixo 1) — aceita um AbortSignal: o effect de [id] aborta o
+  // pedido quando o processo muda ou o ecrã desmonta, evitando setStates
+  // tardios em componente desmontado e respostas obsoletas (do processo
+  // anterior) a sobrescreverem o estado do processo novo.
+  const fetchRgpdStatus = async (signal) => {
     if (!id) return;
     setRgpdLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/rgpd/status/${id}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal,
       });
       if (response.ok) {
         const data = await response.json();
-        setRgpdStatus(data);
+        if (!signal?.aborted) setRgpdStatus(data);
       } else if (response.status === 404) {
         // Processo sem pedido RGPD ainda — estado neutro, sem erro na UI.
-        setRgpdStatus(null);
+        if (!signal?.aborted) setRgpdStatus(null);
       }
     } catch {
       // RGPD status check failed silently — not critical
+      // (o aborto do cleanup do effect também cai aqui e é ignorado)
+      if (signal?.aborted) return;
       setRgpdStatus(null);
     } finally {
-      setRgpdLoading(false);
+      if (!signal?.aborted) setRgpdLoading(false);
     }
   };
 
@@ -927,8 +934,13 @@ const ProcessDetails = () => {
     toast.success(`Campo "${field}" actualizado`);
   };
 
+  // PACOTE 12 (Eixo 1) — AbortController: cancela o pedido do estado RGPD
+  // quando o id muda ou o componente desmonta (cleanup), para que respostas
+  // obsoletas nunca cheguem ao setState.
   useEffect(() => {
-    fetchRgpdStatus();
+    const controller = new AbortController();
+    fetchRgpdStatus(controller.signal);
+    return () => controller.abort();
   }, [id]);
 
   // Side panels: consume TanStack query directly (no local copy)
@@ -1520,10 +1532,22 @@ const ProcessDetails = () => {
     process?.status === "eliminado" ||
     process?.status === "eliminados"
   );
+  // PACOTE 12 (Eixo 1) — mesmo guard para o CLIENTE do processo (dados do
+  // bundle GET /clients/{id}): quando o cliente está eliminado, a edição
+  // fica bloqueada mesmo com o processo activo — os PUTs de cliente não
+  // podem gravar num registo inactivo. Sem banner adicional: o restauro do
+  // cliente faz-se na sua ficha (ClientDetailPage).
+  const isDeletedClient = !!(
+    clientData?.is_deleted ||
+    clientData?.deleted ||
+    clientData?.status === "eliminado" ||
+    clientData?.status === "eliminados"
+  );
   const isViewMode =
     (!hasEditProcess && !(userActions.includes("view_financials") && userRole === "indexacao")) ||
     isProcessLocked ||
-    isDeletedProcess;
+    isDeletedProcess ||
+    isDeletedClient;
 
   // Processos Inativos (Read-Only): estados finais onde as ações principais
   // (RGPD, CPCV, Enviar Balcões, Portal do Cliente, Eliminar) devem ficar
@@ -1540,7 +1564,8 @@ const ProcessDetails = () => {
     "perdido", "arquivo",
   ];
   const isInactiveProcess = !!(
-    process && (INACTIVE_PROCESS_STATUSES.includes(process.status) || process.is_deleted)
+    (process && (INACTIVE_PROCESS_STATUSES.includes(process.status) || process.is_deleted)) ||
+    isDeletedClient
   );
 
   // PACOTE 11 (Eixo 4) — Restauro Rápido: reactiva o processo eliminado

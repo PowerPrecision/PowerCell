@@ -812,13 +812,46 @@ async def assign_to_indexer(process_id: str, update_status: bool = True) -> Tupl
 # (todas as variações legadas singular/plural).
 CONSULTANT_INACTIVE_STATUSES = set(INACTIVE_STATUSES)
 
+# PACOTE 12 (Eixo 3 — least-busy ESTRITO): perfis de gestão EXCLUÍDOS da
+# auto-atribuição "menos ocupado". Um admin/ceo/diretor com
+# additional_roles=["consultor"] NÃO é um consultor de operações — a
+# distribuição automática de carga é para o staff que trabalha os
+# processos no terreno, não para a gestão (que além disso já tem bypass
+# absoluto de visibilidade). Espelha os _ADMIN_BYPASS_ROLES do
+# services/document_visibility.py (inclui variantes legadas defensivas).
+LEAST_BUSY_EXCLUDED_ROLES = [
+    "admin", "ceo", "diretor", "administrativo", "system_admin", "super_admin",
+]
+
+
+def _least_busy_candidate_query(role: str) -> dict:
+    """
+    PACOTE 12 — pool de candidatos ESTRITO para a auto-atribuição:
+    utilizadores activos com o role pedido (deep: role principal OU
+    additional_roles) que NÃO tenham qualquer perfil de gestão
+    (excluídos via ``deep_role_nin_filter``).
+
+    Usado por ``assign_to_least_busy_consultant`` (role="consultor") e
+    ``_find_least_busy_user`` (consultor + intermediario).
+    """
+    from services.role_query import build_deep_role_query, deep_role_nin_filter
+
+    return {
+        "$and": [
+            build_deep_role_query({"is_active": True}, role=role),
+            deep_role_nin_filter(LEAST_BUSY_EXCLUDED_ROLES),
+        ]
+    }
+
 
 async def _count_active_processes_for_consultant(consultant_id: str) -> int:
     """
     Conta quantos processos ATIVOS um consultor/intermediário tem atualmente.
 
     Um processo conta como "ativo" se:
-    - Está atribuído a ele (assigned_consultor_id == consultant_id OU consultant_id == consultant_id)
+    - Está atribuído a ele (assigned_consultor_id == consultant_id OU
+      consultant_id == consultant_id OU consta na lista
+      assigned_consultor_ids — multi-assignee, PACOTE 12)
     - O seu status NÃO está na lista de estados inativos
 
     Args:
@@ -831,6 +864,10 @@ async def _count_active_processes_for_consultant(consultant_id: str) -> int:
         "$or": [
             {"assigned_consultor_id": consultant_id},
             {"consultant_id": consultant_id},
+            # PACOTE 12 — multi-assignee: processos atribuídos via lista
+            # (build_staff_assign_update) também contam para a carga, para
+            # não subestimar o consultor e equilibrar a distribuição.
+            {"assigned_consultor_ids": consultant_id},
         ],
         "status": {"$nin": list(CONSULTANT_INACTIVE_STATUSES)},
     }
@@ -841,11 +878,12 @@ async def _count_active_processes_for_consultant(consultant_id: str) -> int:
 
 async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, str]:
     """
-    Atribui automaticamente um processo ao consultor/intermediário com menor carga.
+    Atribui automaticamente um processo ao consultor com menor carga.
 
     Algoritmo de distribuição:
-    1. Encontra todos os utilizadores com o role 'consultor' ou 'intermediario'
-       (incluindo additional_roles).
+    1. Encontra todos os utilizadores com o role 'consultor'
+       (incluindo additional_roles), EXCLUINDO perfis de gestão
+       (admin/ceo/diretor/… — PACOTE 12, pool ESTRITO).
     2. Para cada consultor, conta os processos ativos (status não terminal).
     3. Ordena pelo número de processos ativos (ascendente) — distribui a quem tem menos.
     4. Se houver consultor disponível:
@@ -854,13 +892,17 @@ async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, 
     5. Se NÃO houver consultores no sistema:
        - O processo avança de estado mas fica sem consultor atribuído (não órfão de estado).
 
+    Nota (PACOTE 12): o papel de INTERMEDIÁRIO/mediador já não entra neste
+    pool — é preenchido pela dupla auto-atribuição
+    (``_find_least_busy_user("intermediario")``), que aplica a mesma
+    exclusão de perfis de gestão.
+
     Args:
         process_id: ID do processo a atribuir
 
     Returns:
         Tuple com (sucesso, dados atualizados, mensagem)
     """
-    from services.role_query import build_deep_role_query
     from services.history import log_history
 
     # ── 1. Obter o processo ──
@@ -889,40 +931,30 @@ async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, 
             "assigned_consultor_id": existing_consultor,
         }, f"Processo já tem consultor atribuído: {existing_name}"
 
-    # ── 2. Encontrar todos os consultores/intermediários ativos ──
-    # Pesquisar por ambos os roles
-    consultor_query = build_deep_role_query({"is_active": True}, role="consultor")
-    intermediario_query = build_deep_role_query({"is_active": True}, role="intermediario")
+    # ── 2. Encontrar os consultores activos (pool ESTRITO) ──────────
+    # PACOTE 12 — pool ESTRITAMENTE consultor:
+    # - REMOVIDA a junção com intermediários (o papel de mediador é
+    #   preenchido pela dupla auto-atribuição via
+    #   _find_least_busy_user("intermediario"));
+    # - EXCLUÍDOS perfis de gestão (admin/ceo/diretor/… mesmo com
+    #   additional_roles=["consultor"]) — ver _least_busy_candidate_query.
+    consultor_query = _least_busy_candidate_query("consultor")
 
     consultores_cursor = db.users.find(
         consultor_query,
         {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
     )
-    intermediarios_cursor = db.users.find(
-        intermediario_query,
-        {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1, "additional_roles": 1}
-    )
-
-    consultores = await consultores_cursor.to_list(length=100)
-    intermediarios = await intermediarios_cursor.to_list(length=100)
-
-    # Combinar e remover duplicados (alguém pode ter ambos os roles)
-    seen_ids = set()
-    all_consultants = []
-    for c in consultores + intermediarios:
-        if c["id"] not in seen_ids:
-            seen_ids.add(c["id"])
-            all_consultants.append(c)
+    all_consultants = await consultores_cursor.to_list(length=100)
 
     if not all_consultants:
         logger.warning(
-            f"[ASSIGN-CONSULTANT] Nenhum consultor/intermediário encontrado no sistema. "
+            f"[ASSIGN-CONSULTANT] Nenhum consultor activo encontrado no sistema. "
             f"Processo {process_id} avança de estado sem consultor atribuído."
         )
         return True, {
             "assigned": False,
             "reason": "no_consultants",
-        }, "Nenhum consultor/intermediário disponível — processo avança sem atribuição"
+        }, "Nenhum consultor disponível — processo avança sem atribuição"
 
     # ── 3. Contar processos ativos por consultor ──
     consultant_loads: List[Dict] = []
@@ -972,7 +1004,7 @@ async def assign_to_least_busy_consultant(process_id: str) -> Tuple[bool, dict, 
     await log_history(
         process_id=process_id,
         user=system_user,
-        action=f"Auto-atribuição ao consultor/intermediário {chosen['name']}",
+        action=f"Auto-atribuição ao consultor {chosen['name']}",
         field="assigned_consultor_id",
         old_value=None,
         new_value=chosen["name"],
@@ -1262,9 +1294,11 @@ async def _find_least_busy_user(
     Returns:
         Dict com id, name, current_load ou None
     """
-    from services.role_query import build_deep_role_query
-
-    query = build_deep_role_query({"is_active": True}, role=role)
+    # PACOTE 12 — pool ESTRITO: exclui perfis de gestão (admin/ceo/
+    # diretor/… com additional_roles do role pedido), aplicando a MESMA
+    # regra do assign_to_least_busy_consultant a ambos os roles servidos
+    # aqui (consultor + intermediario).
+    query = _least_busy_candidate_query(role)
     
     users = await db.users.find(
         query,

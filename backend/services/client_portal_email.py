@@ -17,10 +17,22 @@ A entrega canónica passa a ser: (1) ENVIO DIRECTO primeiro — é o caminho
 que funciona com ou sem worker; (2) em caso de falha real de envio
 (SMP temporário, rede), enfileirar na task queue como retry de última
 esperança (a task ARQ passa a estar registada em `worker/config.py`).
+
+PACOTE 12 (Eixo 3 — idempotência): o envio tornou-se IDEMPOTENTE por
+cliente — quando ``client_id`` é fornecido, o estado de entrega do
+PACOTE 10 (``clients.portal_email_delivery.status``) é consultado ANTES
+do envio: se já estiver "sent", o email duplicado é ignorado (log info
++ return True). Protege TODOS os chamadores do fluxo Pré-Registo
+(criação do cliente + criação do processo disparavam DOIS emails de
+boas-vindas para o mesmo cliente). O retry do worker ARQ chama SEM
+``client_id`` → não é afectado; o reenvio de magic-link não passa por
+aqui → não é afectado.
 """
 from __future__ import annotations
 
 import logging
+
+from database import db
 
 logger = logging.getLogger(__name__)
 
@@ -63,6 +75,33 @@ async def deliver_registration_email(
         fail_portal_email_task,
         mark_portal_email_retry_scheduled,
     )
+
+    # PACOTE 12 — IDEMPOTÊNCIA: já entregue com sucesso antes? Não voltar
+    # a enviar. Lookup best-effort (fail-open): se a leitura falhar, o
+    # envio prossegue normalmente — a deduplicação nunca bloqueia o
+    # primeiro email legítimo.
+    if client_id:
+        try:
+            client_doc = await db.clients.find_one(
+                {"id": client_id}, {"_id": 0, "portal_email_delivery": 1}
+            )
+        except Exception as lookup_err:
+            logger.warning(
+                f"[PORTAL-EMAIL] Não foi possível verificar o estado de "
+                f"entrega do cliente {client_id} (o envio prossegue): "
+                f"{lookup_err}"
+            )
+            client_doc = None
+        delivery_status = (
+            (client_doc or {}).get("portal_email_delivery") or {}
+        ).get("status")
+        if delivery_status == "sent":
+            logger.info(
+                f"[PORTAL-EMAIL] Email de boas-vindas para {client_email} "
+                f"(client_id={client_id}) já foi entregue — envio "
+                f"duplicado ignorado."
+            )
+            return True
 
     task_id = await begin_portal_email_task(
         client_id, client_email, user_id=user_id, process_id=process_id,

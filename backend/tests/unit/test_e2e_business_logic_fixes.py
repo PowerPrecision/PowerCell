@@ -35,7 +35,10 @@ class TestBug1WelcomeEmail:
             new=AsyncMock(return_value=True),
         ) as mock_send, patch(
             "services.task_queue.task_queue"
-        ) as mock_tq:
+        ) as mock_tq, patch(
+            # PACOTE 12 — o envio consulta o estado de entrega no cliente
+            "services.client_portal_email.db", new=FakeAsyncDatabase(),
+        ):
             from services.client_portal_email import deliver_registration_email
 
             sent = await deliver_registration_email(
@@ -57,7 +60,10 @@ class TestBug1WelcomeEmail:
             new=AsyncMock(return_value=False),
         ), patch(
             "services.task_queue.task_queue"
-        ) as mock_tq:
+        ) as mock_tq, patch(
+            # PACOTE 12 — o envio consulta o estado de entrega no cliente
+            "services.client_portal_email.db", new=FakeAsyncDatabase(),
+        ):
             mock_tq.send_registration_email = AsyncMock(return_value="job-123")
             from services.client_portal_email import deliver_registration_email
 

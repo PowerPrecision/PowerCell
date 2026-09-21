@@ -18,6 +18,8 @@ const axiosError = (status, detail) => ({
 test("parseDuplicateClientError extrai o 409 estruturado do backend", () => {
   const parsed = parseDuplicateClientError(
     axiosError(409, {
+      // PACOTE 12 — a mensagem genérica do backend é ignorada: a mensagem
+      // do banner é construída a partir dos matched_fields (granular).
       message: "Já existe um cliente com este NIF ou Email: João Silva",
       existing_client_id: "cli-123",
       existing_client_name: "João Silva",
@@ -27,7 +29,7 @@ test("parseDuplicateClientError extrai o 409 estruturado do backend", () => {
   assert.equal(parsed.existing_client_id, "cli-123");
   assert.equal(parsed.existing_client_name, "João Silva");
   assert.deepEqual(parsed.matched_fields, ["nif"]);
-  assert.match(parsed.message, /Já existe um cliente com este NIF ou Email: João Silva/);
+  assert.match(parsed.message, /Já existe um cliente com este NIF: João Silva/);
 });
 
 test("parseDuplicateClientError reconhece match de email e nif simultâneo", () => {
@@ -41,6 +43,25 @@ test("parseDuplicateClientError reconhece match de email e nif simultâneo", () 
   );
   assert.deepEqual(parsed.matched_fields, ["nif", "email"]);
   assert.equal(duplicateFieldLabel(parsed.matched_fields), "NIF e Email");
+  assert.match(parsed.message, /Já existe um cliente com este NIF e este Email: Maria/);
+});
+
+test("mensagem granular por campo: email isolado (PACOTE 12)", () => {
+  const parsed = parseDuplicateClientError(
+    axiosError(409, {
+      existing_client_id: "cli-7",
+      existing_client_name: "Ana Costa",
+      matched_fields: ["email"],
+    })
+  );
+  assert.match(parsed.message, /Já existe um cliente com este Email: Ana Costa/);
+});
+
+test("mensagem granular sem nome do cliente existente (PACOTE 12)", () => {
+  const parsed = parseDuplicateClientError(
+    axiosError(409, { matched_fields: ["nif"] })
+  );
+  assert.match(parsed.message, /Já existe um cliente com este NIF\.$/);
 });
 
 test("parseDuplicateClientError suporta o formato legacy (400 string)", () => {
@@ -73,6 +94,8 @@ test("matched_fields desconhecidos caem no fallback nif|email", () => {
   );
   assert.deepEqual(parsed.matched_fields, ["nif", "email"]);
   assert.equal(duplicateFieldLabel(parsed.matched_fields), "NIF e Email");
+  // Sem discriminação de campos, a mensagem não afirma que ambos coincidiram.
+  assert.match(parsed.message, /Já existe um cliente com este NIF ou Email\.$/);
 });
 
 test("duplicateFieldLabel devolve labels amigáveis", () => {

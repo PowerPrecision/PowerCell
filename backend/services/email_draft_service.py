@@ -191,7 +191,10 @@ async def create_missing_doc_draft(
         doc_label = DOC_TYPE_LABELS.get(missing_doc_type.lower(), missing_doc_type)
         prompt = config["base_prompt"]
         if not company_name:
-            company_name = "Power Real Estate & Precision Crédito"
+            # PACOTE 12 (Eixo 2): sem contexto de empresa, usa a constante
+            # efectiva (env COMPANY_NAME) em vez do dual-brand hardcoded.
+            from services.email_v2 import COMPANY_NAME as _DEFAULT_COMPANY_NAME
+            company_name = _DEFAULT_COMPANY_NAME
 
         # Substituir variáveis no prompt
         prompt_filled = prompt.format(

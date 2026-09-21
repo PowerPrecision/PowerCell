@@ -79,21 +79,25 @@ export default function VisitasTab({ processId }) {
   const [propertySearchLoading, setPropertySearchLoading] = useState(false);
   const [associatingProperty, setAssociatingProperty] = useState(false);
 
-  const fetchVisitasProperties = useCallback(async () => {
+  const fetchVisitasProperties = useCallback(async (signal) => {
     if (!processId) return;
     setVisitasLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/properties/by-process/${processId}`, {
         headers: { Authorization: `Bearer ${token}` },
+        signal,
       });
       if (response.ok) {
         const data = await response.json();
-        setVisitasProperties(Array.isArray(data) ? data : []);
+        if (!signal?.aborted) setVisitasProperties(Array.isArray(data) ? data : []);
       }
     } catch (error) {
+      // PACOTE 12 (Eixo 1) — abortos (troca de processId / desmonte) não
+      // são erros reais: o cleanup do effect cancela pedidos obsoletos.
+      if (signal?.aborted) return;
       console.error("Erro ao carregar imóveis:", error);
     } finally {
-      setVisitasLoading(false);
+      if (!signal?.aborted) setVisitasLoading(false);
     }
   }, [processId, token]);
 
@@ -148,8 +152,14 @@ export default function VisitasTab({ processId }) {
     }
   }, [processId, token, fetchVisitasProperties]);
 
+  // PACOTE 12 (Eixo 1) — AbortController: cancela o carregamento quando o
+  // processId muda (nova identidade do useCallback) ou o tab desmonta — evita
+  // setStates em componente desmontado e respostas obsoletas do processo
+  // anterior a sobrescreverem os imóveis do actual.
   useEffect(() => {
-    fetchVisitasProperties();
+    const controller = new AbortController();
+    fetchVisitasProperties(controller.signal);
+    return () => controller.abort();
   }, [fetchVisitasProperties]);
 
   useEffect(() => {

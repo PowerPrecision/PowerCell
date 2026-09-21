@@ -26,6 +26,13 @@ COLECÇÕES E CAMPOS PESQUISADOS (match próprio, não só cascata):
     + cascata pelos filhos: documents, tasks, task_logs, activities,
       history (ligados por client_id/process_id/task_id dos matches
       acima).
+    + PACOTE 12 — filhos dependentes por process_id (cascade infalível,
+      zero órfãos): rgpd_requests, document_metadata, portal_tokens,
+      portal_messages, deadlines, process_finances, notifications,
+      annotations, temp_links, data_suggestions, emails; e visits por
+      process_id OU client_id. Hard-delete em AMBOS os modos (são filhos,
+      como task_logs/history). process_activities (auditoria) e minutas
+      (templates) NÃO são tocados por design.
 
 CASCADE DELETE FORTE (PACOTE 11 — Eixo 4): ao apagar um cliente de
 teste são obrigatoriamente apagados, sem deixar órfãos, todos os
@@ -91,6 +98,28 @@ TEST_PATTERN = {
 
 CLEANUP_SCRIPT_PASSWORD_DEFAULT = "POWERCELL_CLEANUP_2026"
 DELETED_BY_TAG = "cleanup_test_data_script"
+
+# PACOTE 12 (Eixo 3 — cascade infalível, zero órfãos): colecções FILHAS
+# dependentes por ``process_id`` que o P11 não cobria — apagar o processo
+# sem apagar estas dependências deixava-as órfãs. São filhos (como
+# task_logs/history/activities/documents): hard-delete em AMBOS os modos.
+# NÃO inclui ``process_activities`` (trilho de auditoria por design) nem
+# ``minutas`` (biblioteca de templates). ``visits`` liga-se por process_id
+# OU client_id (tratada à parte no corpo do script); ``emails`` apenas por
+# process_id.
+PROCESS_CHILD_COLLECTIONS = [
+    "rgpd_requests",      # pedidos RGPD por processo
+    "document_metadata",  # metadados de documentos por processo
+    "portal_tokens",      # tokens de acesso ao Portal por processo
+    "portal_messages",    # mensagens do Portal por processo
+    "deadlines",          # prazos por processo
+    "process_finances",   # dados financeiros por processo
+    "notifications",      # notificações por processo
+    "annotations",        # anotações por processo
+    "temp_links",         # links temporários por processo
+    "data_suggestions",   # sugestões de dados por processo
+    "emails",             # emails do webmail por processo
+]
 
 
 def _confirm_password() -> bool:
@@ -398,11 +427,36 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
           f"Logs de tarefas: {task_logs_count} | "
           f"Entradas de histórico: {history_count}")
 
+    # ── 6b) PACOTE 12 — filhos dependentes por process_id/client_id ──
+    # Colecções que o P11 deixava órfãs (rgpd_requests, document_metadata,
+    # portal_tokens, portal_messages, deadlines, process_finances,
+    # notifications, annotations, temp_links, data_suggestions, emails —
+    # todas por process_id; visits por process_id OU client_id).
+    # Reutiliza os filtros EXACTOS já construídos (process_id_in /
+    # doc_client_filter) — sem semânticas de match novas.
+    visits_query = {"$or": [process_id_in, doc_client_filter]}
+    process_child_counts = {}
+    for coll_name in PROCESS_CHILD_COLLECTIONS:
+        process_child_counts[coll_name] = await getattr(
+            db, coll_name
+        ).count_documents(process_id_in)
+    visits_count = await db.visits.count_documents(visits_query)
+    children_total = sum(process_child_counts.values()) + visits_count
+
+    print(f"\n[CASCADE-DEPENDENTES] Filhos adicionais (PACOTE 12): "
+          f"{children_total} registos")
+    for coll_name, count in process_child_counts.items():
+        if count:
+            print(f"   - {coll_name}: {count}")
+    if visits_count:
+        print(f"   - visits: {visits_count}")
+
     total_records = (
         len(clients) + len(processes) + len(property_leads)
         + len(companies) + user_company_roles_count
         + len(activities) + len(tasks)
         + documents_count + task_logs_count + history_count
+        + children_total
     )
     if total_records == 0:
         print("\nNada para limpar - não há dados de teste correspondentes.")
@@ -416,8 +470,9 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
             f"{len(property_leads)} leads, {len(companies)} empresas, "
             f"{user_company_roles_count} role-mappings, {len(activities)} "
             f"atividades, {len(tasks)} tarefas, {documents_count} documentos, "
-            f"{task_logs_count} logs de tarefas e {history_count} entradas "
-            f"de histórico (total {total_records})"
+            f"{task_logs_count} logs de tarefas, {history_count} entradas "
+            f"de histórico e {children_total} registos dependentes em "
+            f"cascata (PACOTE 12) (total {total_records})"
         )
         print("=" * 70)
         print("\nPara executar a limpeza real:")
@@ -449,6 +504,19 @@ async def cleanup_prod_test_data(dry_run: bool = True, mode: str = "soft"):
 
     r = await db.documents.delete_many(document_query)
     _report("Documentos eliminados", r.deleted_count, documents_count)
+
+    # PACOTE 12 — filhos dependentes (cascade forte, SEM óRFÃOS): apagados
+    # em AMBOS os modos (como os filhos logarítmicos acima), com os mesmos
+    # filtros contabilizados na simulação.
+    for coll_name in PROCESS_CHILD_COLLECTIONS:
+        r = await getattr(db, coll_name).delete_many(process_id_in)
+        _report(
+            f"Dependentes eliminados ({coll_name})",
+            r.deleted_count, process_child_counts[coll_name],
+        )
+
+    r = await db.visits.delete_many(visits_query)
+    _report("Visitas eliminadas", r.deleted_count, visits_count)
 
     # PACOTE 11 (Eixo 4 — cascade forte): role-mappings são LIGAÇÕES —
     # hard-delete em AMBOS os modos (igual aos filhos logarítmicos) para

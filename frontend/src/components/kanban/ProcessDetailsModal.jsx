@@ -211,9 +211,37 @@ const ProcessDetailsModal = memo(({
     navigate(`/process/${process?.id}`);
   }, [navigate, onOpenChange, process?.id]);
 
+  // ── PACOTE 12 (Eixo 1) — Soft-Delete guard ───────────────
+  // Quando o processo OU o cliente está eliminado, a edição inline fica
+  // bloqueada (botão "Editar" desactivado + guard no handleSave) — evita
+  // falsas mensagens de sucesso ao gravar PUTs num registo inactivo. O
+  // restauro faz-se na ficha correspondente (ProcessDetails/ClientDetail).
+  const isDeletedProcess = !!(
+    process?.is_deleted ||
+    process?.deleted ||
+    process?.status === 'eliminado' ||
+    process?.status === 'eliminados'
+  );
+  const isDeletedClient = !!(
+    clientData?.is_deleted ||
+    clientData?.deleted ||
+    clientData?.status === 'eliminado' ||
+    clientData?.status === 'eliminados'
+  );
+  const isDeletedRecord = isDeletedProcess || isDeletedClient;
+  const deletedRecordMessage = isDeletedProcess
+    ? 'Processo eliminado — restaure o registo antes de editar.'
+    : 'Cliente eliminado — restaure o registo antes de editar.';
+
   // ── handleSave: Gravação concorrente com Promise.all ─────────────
   const handleSave = useCallback(async () => {
     if (!process?.id) return;
+    // PACOTE 12 (Eixo 1) — nunca gravar num registo eliminado (o PUT do
+    // cliente/processo falharia ou gravaria num registo inactivo).
+    if (isDeletedRecord) {
+      toast.error(deletedRecordMessage);
+      return;
+    }
     setSaving(true);
     try {
       const promises = [];
@@ -297,7 +325,7 @@ const ProcessDetailsModal = memo(({
     } finally {
       setSaving(false);
     }
-  }, [process, editClient, editProcess]);
+  }, [process, editClient, editProcess, isDeletedRecord, deletedRecordMessage]);
 
   // ── Cancelar edição ──────────────────────────────────────────────
   const handleCancelEdit = useCallback(() => {
@@ -366,6 +394,8 @@ const ProcessDetailsModal = memo(({
                       size="sm"
                       onClick={() => setIsEditing(true)}
                       className="gap-1"
+                      disabled={isDeletedRecord}
+                      title={isDeletedRecord ? deletedRecordMessage : undefined}
                     >
                       <Pencil className="h-3.5 w-3.5" />
                       Editar
