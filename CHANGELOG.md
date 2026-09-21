@@ -3,6 +3,15 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Correcção: envio para balcões usava a configuração de email errada
+
+### Corrigido
+- **`SendDocumentationModal` enviava com `fetch` cru**, passando apenas `Content-Type` e `Authorization`. O interceptor que injecta `X-Company-Id` vive no cliente Axios, pelo que esse cabeçalho não seguia. Sem ele, o backend resolve a empresa activa por `user.company` — o **nome** e não o id — a procura da configuração de email falha e cai numa sub-configuração antiga, enviando com a password errada (`535 Incorrect authentication data`). O envio passa a ir pelo cliente Axios.
+
+### Notas
+- Foi o **email de teste** que denunciou o problema: funcionava com a mesma conta, porque o `EmailConfigForm` usa Axios. A assimetria entre os dois caminhos era o sintoma.
+- Terceira instância do mesmo padrão neste dia: dois caminhos a resolverem a configuração de email de maneiras diferentes. As duas primeiras foram o guardar/testar e a duplicação da resolução da conta de envio.
+
 ## [2026-09-21] — Envio de email de teste
 
 ### Adicionado
