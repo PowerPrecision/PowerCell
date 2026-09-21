@@ -950,19 +950,6 @@ const ClientRegistrationsPage = () => {
                 Ver Processo
               </Button>
             )}
-            {canAssign && (
-              <Button
-                onClick={() => {
-                  const client = detailsDialog.client;
-                  setDetailsDialog({ open: false, client: null });
-                  // Abrir o CreateProcessModal já wired abaixo, pré-selecionando o cliente.
-                  setCreateProcessModal({ open: true, client });
-                }}
-              >
-                <FileText className="h-4 w-4 mr-2" />
-                Adicionar Processo
-              </Button>
-            )}
           </DialogFooter>
         </DialogContent>
       </Dialog>

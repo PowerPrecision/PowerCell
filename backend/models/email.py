@@ -208,6 +208,8 @@ class EmailSendRequest(BaseModel):
     body: str = ""
     body_html: Optional[str] = None
     cc_emails: Optional[List[str]] = None
+    # PACOTE 12 (Eixo 2 — BCC): cópia oculta, mesmo estilo do cc_emails.
+    bcc_emails: Optional[List[str]] = None
     process_id: Optional[str] = None
     attachment_ids: Optional[List[str]] = None
     from_box: Optional[str] = None  # "general", "personal", "shared_indexacao" — indica de que caixa o email parte

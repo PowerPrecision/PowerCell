@@ -17,6 +17,10 @@
  * se mostram o alerta visual BLOQUEANTE (banner vermelho com a acção
  * "Usar cliente existente") em vez de um toast genérico.
  *
+ * PACOTE 12 (Eixo 1) — a `message` devolvida é agora construída no frontend
+ * a partir dos `matched_fields` (granular: NIF, Email ou ambos) em vez de
+ * reutilizar a string genérica "NIF ou Email" do backend.
+ *
  * Compatibilidade: durante o rollout também reconhece o formato LEGACY
  * (400 com string "Já existe um cliente com este NIF ou email"), para
  * não perder o alerta se um backend antigo responder primeiro.
@@ -64,12 +68,22 @@ export function parseDuplicateClientError(err) {
     const matched = Array.isArray(detail.matched_fields)
       ? detail.matched_fields.filter((f) => f === "nif" || f === "email")
       : [];
+    // PACOTE 12 (Eixo 1) — mensagem granular: construída a partir dos campos
+    // em conflito (em vez da string genérica do backend), para o utilizador
+    // saber imediatamente QUE campo duplicou. Com "matched" cru (backend sem
+    // matched_fields úteis), o duplicateFieldLabel devolve "NIF ou Email" —
+    // sem afirmar que ambos coincidiram.
+    const hasBoth = matched.includes("nif") && matched.includes("email");
+    const fieldPhrase = hasBoth
+      ? "este NIF e este Email"
+      : `este ${duplicateFieldLabel(matched)}`;
+    const existingName = detail.existing_client_name || null;
     return {
-      message:
-        detail.message ||
-        `Já existe um cliente com este NIF ou Email${detail.existing_client_name ? `: ${detail.existing_client_name}` : ""}`,
+      message: existingName
+        ? `Já existe um cliente com ${fieldPhrase}: ${existingName}`
+        : `Já existe um cliente com ${fieldPhrase}.`,
       existing_client_id: detail.existing_client_id || null,
-      existing_client_name: detail.existing_client_name || null,
+      existing_client_name: existingName,
       matched_fields: matched.length > 0 ? matched : ["nif", "email"],
     };
   }

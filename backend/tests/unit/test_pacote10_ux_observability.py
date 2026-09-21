@@ -269,7 +269,10 @@ class TestDeliverRegistrationEmailLifecycle:
         fake_tq = MagicMock()
         fake_tq.send_registration_email = AsyncMock(return_value=None)
 
-        with patch.object(eds, "db", fake_async_db), \
+        # PACOTE 12 — deliver_registration_email consulta agora o doc do
+        # cliente (estado de entrega) → patch do db do próprio módulo.
+        with patch.object(mod, "db", fake_async_db), \
+             patch.object(eds, "db", fake_async_db), \
              patch.object(tls_mod, "db", fake_async_db), \
              patch("services.email.send_registration_confirmation", AsyncMock(return_value=True)), \
              patch("services.task_queue.task_queue", fake_tq):
@@ -302,7 +305,9 @@ class TestDeliverRegistrationEmailLifecycle:
         fake_tq = MagicMock()
         fake_tq.send_registration_email = AsyncMock(return_value=None)  # sem Redis/ARQ
 
-        with patch.object(eds, "db", fake_async_db), \
+        # PACOTE 12 — patch do db do módulo (consulta de estado de entrega)
+        with patch.object(mod, "db", fake_async_db), \
+             patch.object(eds, "db", fake_async_db), \
              patch.object(tls_mod, "db", fake_async_db), \
              patch("services.email.send_registration_confirmation", AsyncMock(return_value=False)), \
              patch("services.task_queue.task_queue", fake_tq):
@@ -332,7 +337,9 @@ class TestDeliverRegistrationEmailLifecycle:
         fake_tq = MagicMock()
         fake_tq.send_registration_email = AsyncMock(return_value="job-123")
 
-        with patch.object(eds, "db", fake_async_db), \
+        # PACOTE 12 — patch do db do módulo (consulta de estado de entrega)
+        with patch.object(mod, "db", fake_async_db), \
+             patch.object(eds, "db", fake_async_db), \
              patch.object(tls_mod, "db", fake_async_db), \
              patch("services.email.send_registration_confirmation", AsyncMock(return_value=False)), \
              patch("services.task_queue.task_queue", fake_tq):

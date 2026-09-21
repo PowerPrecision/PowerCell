@@ -38,6 +38,17 @@ parceiro, cliente). Os perfis de administração/gestão:
 Depois de o processo estar indexado (marcado pelo Índice em
 `process_indexing.run_mark_process_indexed` → `is_indexed=True`),
 a visibilidade volta ao comportamento normal da aplicação.
+
+PACOTE 12 (Eixo 3 — RBAC): um CONSULTOR com relação directa com o
+CLIENTE do processo — atribuído ao cliente (`client.assigned_to` ==
+user id) ou criador do cliente (`client.created_by` == user email) —
+também vê a documentação em tratamento (allow-path adicional nas
+guardas async, avaliado após a atribuição ao processo). Antes, um
+consultor responsável pelo cliente mas não atribuído ao processo
+recebia 403 nas rotas de leitura (GET /api/documents/client/{id}/files
+e simétricas) — sem sequer conseguir abrir os documentos do próprio
+cliente dele. A leitura deixa de bloquear; as operações de ESCRITA
+(delete/unlink do cliente) mantêm as regras de gestão originais.
 """
 from __future__ import annotations
 
@@ -101,7 +112,41 @@ def _user_allows(user: dict) -> set:
     return roles
 
 
-def user_can_view_process_documents(user: dict, process: dict) -> bool:
+def _user_is_related_to_client_doc(user: dict, client: Optional[dict]) -> bool:
+    """
+    PACOTE 12 — relação directa entre o utilizador e o CLIENTE (pura,
+    sem I/O): consultor atribuído ao cliente (``client.assigned_to`` ==
+    user id) ou criador do registo do cliente (``client.created_by`` ==
+    user email).
+    """
+    if not client:
+        return False
+    if user.get("id") and client.get("assigned_to") == user.get("id"):
+        return True
+    if user.get("email") and client.get("created_by") == user.get("email"):
+        return True
+    return False
+
+
+async def _user_related_to_client(user: dict, client_id: Optional[str]) -> bool:
+    """
+    PACOTE 12 — carrega o doc do cliente e avalia a relação (async, I/O).
+
+    Devolve False quando não há ``client_id`` ou o cliente não existe
+    (guardas contra None) — a verificação é apenas um allow-path
+    adicional, nunca um novo motivo de bloqueio.
+    """
+    if not client_id:
+        return False
+    client = await db.clients.find_one({"id": client_id}, {"_id": 0})
+    return _user_is_related_to_client_doc(user, client)
+
+
+def user_can_view_process_documents(
+    user: dict,
+    process: dict,
+    client: Optional[dict] = None,
+) -> bool:
     """
     Verifica a permissão de VER documentos do processo.
 
@@ -110,10 +155,17 @@ def user_can_view_process_documents(user: dict, process: dict) -> bool:
     indexado) — um admin/ceo/diretor/administrativo nunca é bloqueado,
     independentemente do estado do processo ou de qualquer outra condição.
 
+    PACOTE 12 — argumento opcional ``client`` (doc do cliente JÁ
+    carregado pelo caller): allow-path por relação com o cliente
+    (``_user_is_related_to_client_doc``). Esta função mantém-se PURA —
+    nunca faz I/O; quem precisa da verificação com carga do doc usa as
+    guardas async (``assert_*`` → ``_user_related_to_client``).
+
     Returns:
         True se o utilizador é um perfil de administração (bypass absoluto),
         se o processo já está indexado (visibilidade normal), se o
-        utilizador é INDEX, ou se está atribuído ao processo.
+        utilizador é INDEX, se está atribuído ao processo ou se tem
+        relação directa com o cliente (doc pré-carregado).
     """
     # 1. BYPASS ABSOLUTO — perfis de administração (admin, ceo, diretor,
     #    administrativo): verificado primeiro, incondicionalmente.
@@ -134,6 +186,11 @@ def user_can_view_process_documents(user: dict, process: dict) -> bool:
     if user.get("id") and user.get("id") in assigned_ids:
         return True
 
+    # 5. PACOTE 12 — relação directa com o CLIENTE do processo (doc
+    #    opcional pré-carregado; sem I/O nesta função).
+    if _user_is_related_to_client_doc(user, client):
+        return True
+
     return False
 
 
@@ -141,11 +198,21 @@ async def assert_can_view_process_documents(user: dict, process: dict) -> None:
     """
     Guarda de permissão para endpoints de leitura/listagem de documentos.
 
+    PACOTE 12 — allow-path adicional (após a verificação pura, antes do
+    raise): utilizador com relação directa com o CLIENTE do processo
+    (atribuído ao cliente / criador do registo) também pode ler.
+
     Raises:
         HTTPException(403) se o processo não está indexado e o utilizador
-        não é INDEX/ADMIN nem está atribuído ao processo.
+        não é INDEX/ADMIN nem está atribuído ao processo nem tem relação
+        com o cliente.
     """
     if user_can_view_process_documents(user, process):
+        return
+    # PACOTE 12 — consultor responsável pelo cliente (assigned_to) ou
+    # criador do registo (created_by): allow-path assíncrono, avaliado
+    # apenas no caminho de negação (sem I/O extra quando já é permitido).
+    if await _user_related_to_client(user, process.get("client_id")):
         return
     logger.warning(
         f"[DOCS-VISIBILITY] Acesso negado: user={user.get('id')} "
@@ -168,6 +235,9 @@ async def assert_can_view_process_documents_by_id(
     Raises:
         HTTPException(404) se o processo não existir;
         HTTPException(403) se a visibilidade estiver restrita.
+
+    PACOTE 12 — a delegação em ``assert_can_view_process_documents``
+    herda automaticamente o allow-path por relação com o cliente.
     """
     process = await db.processes.find_one({"id": process_id}, {"_id": 0})
     if not process:

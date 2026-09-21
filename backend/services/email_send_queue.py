@@ -144,15 +144,22 @@ def build_pending_send_record(
     body: str,
     body_html: Optional[str],
     cc_emails: Optional[list],
+    bcc_emails: Optional[list] = None,
     process_id: Optional[str],
     from_box: Optional[str],
     from_email: Optional[str],
     company_id: Optional[str],
+    company_name: Optional[str] = None,
     created_by: str,
     created_by_email: Optional[str],
     attachment_ids: Optional[list],
 ) -> dict:
-    """Constrói o documento PENDING (função pura — testável isoladamente)."""
+    """Constrói o documento PENDING (função pura — testável isoladamente).
+
+    PACOTE 12 (Eixo 2): ``bcc_emails`` (cópia oculta, mesmo estilo do CC) e
+    ``company_name`` (nome da empresa activa — branding do From) passaram
+    a ser persistidos no registo para o executor os aplicar no envio.
+    """
     now = datetime.now(timezone.utc)
     return {
         "id": str(uuid.uuid4()),
@@ -165,9 +172,11 @@ def build_pending_send_record(
         "from_box": from_box,
         "from_email": from_email,
         "company_id": company_id,
+        "company_name": company_name,
         # Payload do email (já sanitizado)
         "to_emails": to_emails,
         "cc_emails": cc_emails,
+        "bcc_emails": bcc_emails,
         "subject": subject,
         "body": body,
         "body_html": body_html,
@@ -341,10 +350,14 @@ async def execute_pending_email_send(send_id: str) -> dict:
             body=record.get("body") or "",
             body_html=record.get("body_html"),
             cc_emails=record.get("cc_emails"),
+            # PACOTE 12 (Eixo 2) — BCC persistido no registo (cópia oculta)
+            bcc_emails=record.get("bcc_emails"),
             process_id=record.get("process_id"),
             created_by=record.get("created_by"),
             attachments=email_attachments if email_attachments else None,
             active_company_id=record.get("company_id"),
+            # PACOTE 12 (Eixo 2) — nome da empresa activa (branding do From)
+            company_name=record.get("company_name"),
             from_email=record.get("from_email"),
             reply_to=record.get("from_email"),
         )
@@ -453,6 +466,7 @@ async def cancel_pending_email_send(send_id: str, user: dict) -> dict:
         "draft": {
             "to_emails": record.get("to_emails") or [],
             "cc_emails": record.get("cc_emails") or [],
+            "bcc_emails": record.get("bcc_emails") or [],
             "subject": record.get("subject") or "",
             "body": record.get("body") or "",
             "body_html": record.get("body_html"),

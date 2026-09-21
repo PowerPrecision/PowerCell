@@ -78,7 +78,9 @@ SMTP_EMAIL = os.environ.get("SMTP_EMAIL", "")
 SMTP_PASSWORD = os.environ.get("SMTP_PASSWORD", "")
 
 # Configurações gerais
-COMPANY_NAME = "Power Real Estate & Precision Crédito"
+# PACOTE 12 (Eixo 2 — branding exclusivo): o nome da empresa é configurável
+# por env (COMPANY_NAME), mantendo o default dual-brand para retrocompat.
+COMPANY_NAME = os.environ.get("COMPANY_NAME", "Power Real Estate & Precision Crédito")
 COMPANY_WEBSITE = "https://powerealestate.pt"
 COMPANY_PHONE = "+351 XXX XXX XXX"
 

@@ -27,6 +27,7 @@ from typing import Optional, List, Dict, Any
 from datetime import datetime, timezone, timedelta
 import uuid
 import re
+import html as html_module
 
 from database import db
 
@@ -508,6 +509,29 @@ async def _resolve_system_smtp_account() -> Optional["EmailAccount"]:
     return None
 
 
+def _synthesize_html_body(body: str, signature_html: str) -> str:
+    """PACOTE 12 (Eixo 2 — assinatura HTML) — sintetiza corpo HTML.
+
+    Quando o utilizador só escreveu texto simples (body_html=None) mas tem
+    uma assinatura HTML configurada, o email sai agora como
+    multipart/alternative com a assinatura renderizada (antes saía apenas
+    em texto, perdendo o branding/imagem da assinatura nos clientes HTML).
+
+    Transformação (função pura, determinística):
+    - escapa o HTML do corpo (``<b>`` vira ``&lt;b&gt;``);
+    - parágrafos: ``\n\n`` separa ``</p><p>``; ``\n`` isolado vira ``<br/>``;
+    - anexa ``<br/><hr/>`` + a assinatura (markup seguro já preparado
+      pelo chamador — mesmo wrapper do caminho body_html existente).
+    """
+    escaped = html_module.escape(body or "")
+    paragraphs = [p.replace("\n", "<br/>") for p in escaped.split("\n\n")]
+    body_html = "<p>" + "</p><p>".join(paragraphs) + "</p>"
+    return (
+        f'{body_html}<br/><hr/>'
+        f'<div style="max-width: 100%; overflow-x: hidden;">{signature_html}</div>'
+    )
+
+
 async def send_email(
     account_name: str,
     to_emails: List[str],
@@ -525,6 +549,7 @@ async def send_email(
     skip_proc_tag: bool = False,
     from_email: Optional[str] = None,
     active_company_id: Optional[str] = None,
+    company_name: Optional[str] = None,
     account_override: Optional["EmailAccount"] = None,
 ) -> Dict[str, Any]:
     """
@@ -541,6 +566,10 @@ async def send_email(
             a assinatura da UCR desta empresa tem prioridade sobre a
             assinatura global do utilizador — cada user pode ter uma
             assinatura diferente por empresa.
+        company_name: PACOTE 12 — nome da empresa ATIVA (resolvido no
+            run_send_email do webmail). Quando o From não tem nome
+            configurado (system_smtp sem smtp_from_name), passa a ser usado
+            como nome de exibição do remetente em vez de sair sem nome.
     do processo.
 
     Esta função é o ponto central de saída de emails do CRM. É utilizada por
@@ -781,6 +810,13 @@ async def send_email(
         except Exception:
             pass
 
+    # PACOTE 12 (Eixo 2 — branding da empresa ACTIVA): quando o From não
+    # tem nome configurado (system_smtp sem smtp_from_name), usa o nome da
+    # empresa activa da sessão (webmail) — o remetente deixa de sair “nu”.
+    if not from_name and company_name:
+        from_name = company_name
+        logger.info("[Send Email] From com o nome da empresa activa: %s", from_name)
+
     # === RESOLVER ASSINATURA DE EMAIL ===
     # A assinatura é injetada no corpo ANTES da construção MIME para que
     # funcione tanto no caminho Resend como no SMTP directo.
@@ -859,6 +895,11 @@ async def send_email(
         )
         if body_html:
             body_html = f'{body_html}<br/><hr/><div style="max-width: 100%; overflow-x: hidden;">{safe_signature}</div>'
+        else:
+            # PACOTE 12 (Eixo 2) — sem HTML do composer mas COM assinatura:
+            # sintetizar o corpo HTML a partir do texto (o email passa a sair
+            # multipart/alternative e a assinatura HTML fica renderizada).
+            body_html = _synthesize_html_body(body, safe_signature)
         # Versão plain text: strip HTML da assinatura
         sig_text = re.sub(r'<[^>]+>', '', resolved_signature).strip()
         if sig_text:

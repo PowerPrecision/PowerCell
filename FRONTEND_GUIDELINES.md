@@ -350,3 +350,36 @@ O backend devolve `409` com `detail` ESTRUTURADO (`{message, existing_client_id,
 
 - Derivar SEMPRE um flag de eliminação e usá-lo em TODOS os inputs/botões de edição: `isDeletedProcess` (`process.is_deleted || process.deleted || status eliminado(s)`) em ProcessDetails; `isDeletedClient` em ClientDetailPage. Em ProcessDetails força `isViewMode` (read-only sem excepção de role) e alimenta `isInactiveProcess` (botões de acção disabled). Em ClientDetailPage desactiva o botão "Editar Cliente", as `ContactRow` inline (`editable={!isDeletedClient}`), os inputs do modal e o Guardar (com guard extra no `handleEditSave` — nunca gravar num registo eliminado).
 - **Banner de restauro no topo** (vermelho, `role="alert"`, ícone `Trash2` + botão `RotateCcw "Restaurar"` com spinner próprio): ProcessDetails → `restoreProcess(id)` (api.js, já existia); ClientDetailPage → `restoreClient(id)` (NOVO em api.js → `POST /clients/{id}/restore`). Após sucesso: toast + refetch (`fetchData()`/`fetchClientData()`). O banner de estado terminal (âmbar) do ProcessDetails fica oculto quando o de eliminado está visível (evita dupla advertência).
+
+## 18. Bug Squash & UX Polish — unmount, undo send, duplicados e webmail (Pacote 12)
+
+### Fetches internos + cleanup (anti-ecrã-branco)
+
+- Todo fetch interno de página que faz setState depois de `await` DEVE aceitar `AbortSignal` (ou guard `isMountedRef`), e o effect dono cria `AbortController` com `return () => controller.abort()`. setState só quando `!signal?.aborted`. Padrão de referência: `ProcessDetails.js::fetchRgpdStatus` (effect `[id]`) e `VisitasTab.jsx::fetchVisitasProperties`. Abortos são silenciados no `catch` (não são erros do utilizador). Chamadas pontuais de refresh continuam a funcionar sem signal.
+
+### Soft-delete do CLIENTE também bloqueia edição de processos
+
+- `ProcessDetails.js` deriva `isDeletedClient` (bundle do cliente: `is_deleted`/`deleted`/status eliminado) e dobra-o em `isViewMode` E `isInactiveProcess` — um processo ACTIVO cujo cliente está eliminado deixa de ser editável (espelho do `isDeletedProcess`).
+- `kanban/ProcessDetailsModal.jsx`: `isDeletedRecord` (processo OU cliente) desabilita o botão Editar (com `title` explicativo) e `handleSave` faz early-return com `toast.error` PT antes de qualquer `updateClient`/`updateProcess`. Regra: **nunca gravar num registo eliminado**, independentemente da permissão.
+
+### Undo Send — toast de sucesso condicional
+
+- O timer pós-janela de undo (confirmação "enviado com sucesso" + limpeza de anexos + refresh) vive num `useRef` (`sendConfirmTimerRef`) e é SEMPRE cancelado (`clearTimeout`) no sucesso do Desfazer. Um envio desfeito nunca mostra toast de sucesso nem apaga o snapshot de anexos restaurado. Padrão duplicado: `WebmailPage.jsx` (handleSend/cancelSend) e `EmailViewerModal.js` (cancelReplySend).
+
+### 409 de duplicados — headline granular NIF vs Email
+
+- `utils/duplicateClient.js::parseDuplicateClientError` constrói a mensagem do utilizador a partir de `matched_fields` + `existing_client_name` ("Já existe um cliente com este NIF: X" / "…este Email: X" / "…este NIF e este Email: X") — NUNCA propagar a string genérica do backend ("NIF ou Email"). O banner bloqueante `DuplicateClientAlert` mantém a sub-linha por campo e a acção "Usar cliente existente".
+
+### Webmail — BCC, assinatura e chips de anexos
+
+- Compositor (`WebmailPage.jsx`): campo **BCC** collapsible espelhando exactamente o padrão do CC (estado `bcc_emails` string; expande automaticamente quando há valor); payload constrói `bccList` como o `ccList`; o draft do cancel-send restaura o BCC via `utils/webmailSendQueue.js::draftToComposerFields`.
+- Chips de anexos: ler `file.filename || file.file_name` e `file.size ?? file.file_size` (contrato real da resposta do `POST /emails/attachments/upload`).
+- Pré-preenchimento: `/webmail?compose=new&to=<email>&process_id=<id>` abre o compositor com prefill UMA única vez (guard: `compose === "new" && !draftIdFromUrl`; não colide com o effect de abrir rascunhos). Usado pelo botão "+ Novo" da tab Emails (`processDetails/tabs/EmailsTab.jsx`) — destinatário = email do cliente, processo associado (tag `[Proc-{id}]` + histórico).
+
+### Tab Emails — semântica estrita
+
+- O backend filtra ESTRITAMENTE por `process_id` (emails não associados deixaram de ser agregados por endereço de participante). Subtítulo/UI da tab deve reflectir apenas "emails associados a este processo" — não documentar lógica de participante.
+
+### Vista rápida de cliente (ClientRegistrationsPage)
+
+- O detailsDialog da lista de registos NÃO tem botão "Adicionar Processo" (removido no P12 — o fluxo de criação fica no botão de linha "Criar Processo", que pré-selecciona o cliente). Não reintroduzir ações de criação dentro de quick-views.

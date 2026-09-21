@@ -8,7 +8,7 @@
  * - Resposta rápida com templates
  * - Navegação por setas
  */
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useRef } from "react";
 import { Dialog, DialogContent, DialogTitle, DialogDescription } from "./ui/dialog";
 import { VisuallyHidden } from "@radix-ui/react-visually-hidden";
 import { Button } from "./ui/button";
@@ -96,6 +96,12 @@ const EmailViewerModal = ({
   const [replySubject, setReplySubject] = useState("");
   const [replyBody, setReplyBody] = useState("");
   const [sendingReply, setSendingReply] = useState(false);
+
+  // PACOTE 12 (Eixo 1) — timer do toast de confirmação "Resposta enviada
+  // com sucesso" (disparado após a janela de Desfazer): guardado em ref para
+  // que o cancelamento (Desfazer) o possa limpar — um envio cancelado nunca
+  // deve mostrar o toast de sucesso.
+  const sendConfirmTimerRef = useRef(null);
 
   // Memorizar o HTML sanitizado (PACOTE 11 — o corpo em texto simples é
   // convertido em parágrafos HTML para tipografia consistente e espaçada)
@@ -282,6 +288,12 @@ const EmailViewerModal = ({
             );
             if (res.ok) {
               // Envio abortado no backend — regressar ao modo de edição
+              // PACOTE 12 (Eixo 1) — cancelar o toast de sucesso agendado
+              // para o fim da janela de Desfazer (envio desfeito ≠ enviado).
+              if (sendConfirmTimerRef.current) {
+                clearTimeout(sendConfirmTimerRef.current);
+                sendConfirmTimerRef.current = null;
+              }
               setShowReplyBox(true);
               toast.success("Envio cancelado — pode continuar a editar a resposta.");
             } else {
@@ -306,7 +318,9 @@ const EmailViewerModal = ({
         });
 
         // Após a janela (sem undo): confirmar visualmente
-        setTimeout(() => {
+        // PACOTE 12 (Eixo 1) — o id do timer fica guardado em ref para que
+        // o "Desfazer" o possa cancelar no cancelReplySend acima.
+        sendConfirmTimerRef.current = setTimeout(() => {
           toast.success("Resposta enviada com sucesso");
         }, sendResult.undoWindowMs + 250);
         return;

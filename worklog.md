@@ -4332,3 +4332,58 @@ O primeiro `find_one` estendido do conftest aplicava projecções literalmente �
 ## Commit
 
 `Refactor: Massive UX polish, UI soft-delete protection, dynamic process phases, and cascade test data cleanup`
+
+## Iteração pacote-12 — Bug Squash & UX/UI Polish: estabilidade, emails com branding exclusivo, RBAC de consultor e atribuição (Set 2026)
+
+**Pedido**: 3 eixos cirúrgicos: (1) frontend/UX — crash de estado no unmount do ProcessDetails, toast de "Envio Cancelado" condicional ao Undo Send, 409 granular NIF vs Email, Editar disabled quando eliminado, scroll do EmailViewerModal, remoção do "Adicionar Processo" da vista rápida; (2) emails/webmail — templates com branding EXCLUSIVO da empresa activa (fim do "Empresa A & Empresa B") + URL clicável do Portal, filtro estrito por process_id na tab Emails, compositor com BCC/assinatura HTML/anexos, botão "+ Novo" pré-preenchido; (3) backend/regras — RBAC do Consultor por relação ao cliente (fim do 403 de leitura), least-busy estritamente Consultor, eliminação do email de boas-vindas duplicado, cascade hard do cleanup sem órfãos.
+
+### Eixo 1 — Frontend/UX
+
+- `ProcessDetails.js`: `fetchRgpdStatus(signal)` — AbortController no effect `[id]` com cleanup; setStates guardados (`!signal?.aborted`), aborto silenciado no catch. `isDeletedClient` (bundle do cliente) dobrado em `isViewMode`/`isInactiveProcess`.
+- `VisitasTab.jsx`: `fetchVisitasProperties(signal)` com o mesmo padrão (desmonte + troca de processId).
+- `utils/duplicateClient.js`: headline granular construída de `matched_fields` + `existing_client_name` ("Já existe um cliente com este NIF: X" / "…este Email: X" / "…este NIF e este Email: X"); fallback legacy intacto; +2 testes (10 no total).
+- `kanban/ProcessDetailsModal.jsx`: `isDeletedRecord` (processo OU cliente) → Editar disabled + tooltip; `handleSave` early-return com toast PT antes de updateClient/updateProcess.
+- `ClientRegistrationsPage.js`: bloco "Adicionar Processo" do detailsDialog REMOVIDO (wiring do CreateProcessModal mantido para o botão de linha).
+- `EmailViewerModal.js`: `sendConfirmTimerRef` — timer pós-janela cancelado no sucesso do Desfazer (nunca "Resposta enviada com sucesso" após cancelar).
+- EmailViewerModal scroll: verificado FUNCIONAL pré-P12 (dialog `h-[85vh]` + `ScrollArea flex-1` fazem o corpo scrollar dentro do modal; sem alteração — documentado).
+
+### Eixo 2 — Emails/Webmail
+
+- `email_branding.py`: **NOVO** `resolve_active_company_branding(company_id)` → `(company_name, logo_url)` (system_config `company:<id>` → companies por id → fallback global); `resolve_company_logo_url(company_id=None)` scoped.
+- `email.py`: `get_base_template(company_name=…)` — header de UM só nome (fim do "Power Real Estate & Precision Crédito"); os 5 templates + `send_registration_confirmation` ganham `company_name` opcional (assunto/saudações/assinatura com nome efectivo); `portal_url` opcional → CTA `<a class="btn">Aceder ao Portal do Cliente</a>` + URL na versão texto.
+- `email_v2.py`: `COMPANY_NAME` env-driven (default dual-brand retrocompat).
+- `email_process_crud.py`: `build_process_emails_base_conditions` devolve SEMPRE `[{"process_id": process_id}]` (fim do leak de emails não associados por endereço do participante); `run_send_email` sanitiza `bcc_emails` e resolve o branding da empresa activa (X-Company-Id) com threading best-effort.
+- `email_draft_service.py` / `scheduled_tasks.py`: nome da empresa resolvido (empresa activa / default) em vez de strings cravadas.
+- `models/email.py`: `EmailSendRequest.bcc_emails`.
+- `email_send_queue.py`: BCC persistido no pending record, passado ao `send_email`, devolvido no draft do cancel-send.
+- `email_service.py`: **NOVO** `_synthesize_html_body(body, signature_html)` — webmail com `body_html=None` passa a gerar HTML real (escape + parágrafos) com a assinatura em HTML (antes: tags despiadas → texto).
+- Frontend `WebmailPage.jsx`: campo BCC (collapsible espelho do CC) + `bccList` no payload; `sendConfirmTimerRef` cancela o toast de sucesso pós-Desfazer (e deixa de apagar os anexos restaurados); chips de anexos leem `filename || file_name` / `size ?? file_size`; `?compose=new&to=&process_id=` abre o compositor pré-preenchido (uma vez, sem colidir com draft-open).
+- `webmailSendQueue.js`: `draftToComposerFields` restaura `bcc_emails`.
+- `EmailsTab.jsx`: botão "+ Novo" → `/webmail?compose=new&to=<cliente>&process_id=<id>`; subtítulo com a semântica estrita.
+
+### Eixo 3 — Backend/Regras
+
+- `document_visibility.py`: allow-path nova nas duas guards async — consultor com `client.assigned_to == user.id` OU `client.created_by == user.email` VÊ a documentação (antes 403 nas rotas client-keyed). Helper pura `_user_is_related_to_client_doc`; bypass admin primeiro; write-ops inalteradas.
+- `process_assignment.py`: `LEAST_BUSY_EXCLUDED_ROLES` + `$and [build_deep_role_query, deep_role_nin_filter]` — pool do `assign_to_least_busy_consultant` só consultores (intermediário removido); `_find_least_busy_user` também exclui gestão (slot mediador do dual_auto_assign mantém-se); `_count_active_processes_for_consultant` conta `assigned_consultant_ids`.
+- `client_portal_email.py`: idempotência — `deliver_registration_email` com `client_id` consulta `portal_email_delivery.status`; "sent" → return True sem reenviar (fail-open).
+- `process_create.py`: `send_portal_welcome_email_from_process` salta quando "sent" (projecção estendida).
+- Frontend `CreateProcessModal.jsx`/`CreateClientModal.jsx`: `skip_welcome_email: true` nos fluxos que criam processo a seguir (o email dispara na criação do processo).
+- `cleanup_prod_test_data.py`: +12 colecções dependentes (rgpd_requests, document_metadata, portal_tokens, portal_messages, deadlines, process_finances, notifications, annotations, temp_links, data_suggestions, emails; visits por process_id OU client_id) — hard-delete em ambos os modos, contagens no dry-run/total. Zero órfãos.
+
+### Testes
+
+- **NOVO** `tests/unit/test_pacote12_emails_webmail.py` (23): filtro estrito, BCC (model/record/transporte), `_synthesize_html_body`, branding scoped, portal URL clicável, template com company_name.
+- **NOVO** `tests/unit/test_pacote12_backend_rbac.py` (35): allow/deny 403 por relação ao cliente (ambas as guards + bypass + by_id), least-busy estrito (composição da query + selecção), dedup do welcome (deliver + from_process, fail-open, retry ARQ), cascata do cleanup (hard/soft, 12 filhos, dry-run).
+- Frontend: `duplicateClient.test.js` +2 (headline granular; 10 no total).
+- Expectativas ajustadas (comportamento legitimamente alterado): `test_e2e_business_logic_fixes.py`, `test_pacote10_ux_observability.py`, `test_email_extraction_helpers.py`.
+
+## Validação
+
+- `pytest tests/unit -n 4` → **1338 passed, 0 falhas** (baseline 1280 + 58 novos; zero regressões).
+- flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas.
+- Frontend: `node --test` (utils+lib+hooks+contexts+App) → **133 pass, 0 fail**; eslint 0 erros (warnings pré-existentes); `vite build` verde (21s).
+- Sandbox sem Mongo: warnings Connection refused são comportamento conhecido (Pacote 5).
+
+## Commit
+
+`Fix: Comprehensive UX polish, email rendering fixes, strict RBAC, and assignment logic refinement`

@@ -63,15 +63,36 @@ async def resolve_base_template_logo() -> Optional[str]:
         return None
 
 
-def get_base_template(content: str, title: str = "", logo_url: Optional[str] = None) -> str:
+def get_base_template(
+    content: str,
+    title: str = "",
+    logo_url: Optional[str] = None,
+    company_name: Optional[str] = None,
+) -> str:
     """Template HTML base com estilos consistentes.
 
     PACOTE 11 (Eixo 2): quando ``logo_url`` está definido (resolvido de
     ``company.logo_url`` / system_config), o header passa a incluir a
     imagem do logótipo da empresa acima do nome — os emails
     transaccionais base deixam de sair sem branding visual.
+
+    PACOTE 12 (Eixo 2 — branding EXCLUSIVO): quando ``company_name`` está
+    definido (empresa activa da sessão), o header mostra UM único nome —
+    ``<h1>{company_name}</h1>`` SEM o subtítulo dual-brand — e o rodapé
+    usa o mesmo nome. Sem ``company_name`` mantém-se o header histórico.
     """
-    logo_html = build_email_header_logo_html(logo_url, alt=COMPANY_NAME)
+    # Nome efectivo: empresa activa (quando fornecida) ou a constante global
+    effective_company_name = company_name or COMPANY_NAME
+    logo_html = build_email_header_logo_html(logo_url, alt=effective_company_name)
+    if company_name:
+        # PACOTE 12 — branding exclusivo: um único nome, sem subtítulo
+        header_html = f"{logo_html}<h1>{company_name}</h1>"
+    else:
+        # Header histórico (sem contexto de empresa)
+        header_html = (
+            f'{logo_html}<h1>Power Real Estate</h1>\n'
+            f'                <p class="subtitle">& Precision Crédito</p>'
+        )
     return f"""
 <!DOCTYPE html>
 <html lang="pt">
@@ -215,14 +236,13 @@ def get_base_template(content: str, title: str = "", logo_url: Optional[str] = N
     <div class="wrapper">
         <div class="container">
             <div class="header">
-                {logo_html}<h1>Power Real Estate</h1>
-                <p class="subtitle">& Precision Crédito</p>
+                {header_html}
             </div>
             <div class="content">
                 {content}
             </div>
             <div class="footer">
-                <p class="company">{COMPANY_NAME}</p>
+                <p class="company">{effective_company_name}</p>
                 <p>Intermediação de Crédito • Consultoria Imobiliária</p>
                 <p style="margin-top: 15px; font-size: 11px; color: #999;">
                     Este email foi enviado automaticamente. Por favor não responda diretamente a este email.
@@ -239,25 +259,47 @@ def get_base_template(content: str, title: str = "", logo_url: Optional[str] = N
 # TEMPLATES DE EMAIL
 # ====================================================================
 
-async def send_registration_confirmation(client_email: str, client_name: str, portal_access_code: str = None) -> bool:
+async def send_registration_confirmation(
+    client_email: str,
+    client_name: str,
+    portal_access_code: str = None,
+    portal_url: Optional[str] = None,
+    company_name: Optional[str] = None,
+) -> bool:
     """
     Email de confirmação de registo para o cliente.
     Enviado imediatamente após submissão do formulário.
     
     Se portal_access_code for fornecido, inclui informações de acesso ao Portal.
+
+    PACOTE 12 (Eixo 2):
+    - ``portal_url``: quando fornecido, o bloco do Portal ganha um botão
+      CTA (<a class="btn">) para aceder directamente — e a versão em
+      texto inclui o URL por extenso. Sem ele mantém o comportamento
+      antigo (email + código, sem link).
+    - ``company_name``: nome da empresa activa — substitui o dual-brand
+      hardcoded no assunto, saudações e template base.
     """
-    subject = "Recebemos o seu pedido - Power Real Estate & Precision"
+    # PACOTE 12 — nome efectivo: empresa activa (se fornecida) ou default
+    effective_company_name = company_name or COMPANY_NAME
+    subject = f"Recebemos o seu pedido - {effective_company_name}"
     
     # Bloco opcional com credenciais do portal
     portal_section_text = ""
     portal_section_html = ""
     if portal_access_code:
+        # PACOTE 12 — URL clicável do Portal (apenas quando fornecido)
+        portal_url_text = f"Aceder ao Portal: {portal_url}\n" if portal_url else ""
+        portal_cta_html = (
+            f'<p style="text-align: center; margin: 15px 0 5px 0;">'
+            f'<a href="{portal_url}" class="btn">Aceder ao Portal do Cliente</a></p>'
+        ) if portal_url else ""
         portal_section_text = f"""
 
 Os seus dados de acesso ao Portal do Cliente:
 - Email: {client_email}
 - Código de Acesso: {portal_access_code}
-
+{portal_url_text}
 Através do Portal poderá acompanhar o estado do seu processo e carregar documentação.
 """
         portal_section_html = f"""
@@ -265,6 +307,7 @@ Através do Portal poderá acompanhar o estado do seu processo e carregar docume
     <h3 style="color: #0f766e;">Acesso ao Portal do Cliente</h3>
     <p><strong>Email:</strong> {client_email}</p>
     <p><strong>Código de Acesso:</strong> <span style="font-family: 'Courier New', monospace; font-size: 18px; font-weight: bold; color: #0f766e; letter-spacing: 3px;">{portal_access_code}</span></p>
+    {portal_cta_html}
     <p style="font-size: 13px; color: #64748b; margin-top: 10px;">Através do Portal poderá acompanhar o estado do seu processo e carregar documentação.</p>
 </div>
 """
@@ -286,7 +329,7 @@ Enquanto aguarda, pode preparar os seguintes documentos:
 Se tiver alguma questão urgente, não hesite em contactar-nos.
 
 Cumprimentos,
-{COMPANY_NAME}
+{effective_company_name}
 """
     
     content = f"""
@@ -324,13 +367,17 @@ Cumprimentos,
 <p>Se tiver alguma questão urgente, não hesite em contactar-nos.</p>
 
 <p>Cumprimentos,<br>
-<strong>Equipa {COMPANY_NAME}</strong></p>
+<strong>Equipa {effective_company_name}</strong></p>
 """
     
     # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
+    # PACOTE 12 — o nome da empresa activa (quando fornecido) substitui o
+    # dual-brand hardcoded no header/rodapé do template.
     company_logo = await resolve_base_template_logo()
 
-    html_body = get_base_template(content, "Pedido Recebido", logo_url=company_logo)
+    html_body = get_base_template(
+        content, "Pedido Recebido", logo_url=company_logo, company_name=company_name,
+    )
 
     # BUGFIX (onboarding — Bug 3, Fev 2026): usar o serviço de email ligado
     # ao SystemConfig (Resend/SMTP configurados em /contas-email), em vez de
@@ -357,10 +404,20 @@ Cumprimentos,
     return bool(result.get("success"))
 
 
-async def send_documents_checklist(client_email: str, client_name: str, documents: List[str] = None) -> bool:
+async def send_documents_checklist(
+    client_email: str,
+    client_name: str,
+    documents: List[str] = None,
+    company_name: Optional[str] = None,
+) -> bool:
     """
     Email com lista de documentos necessários para crédito habitação.
+
+    PACOTE 12: ``company_name`` (empresa activa) substitui o dual-brand
+    hardcoded nas saudações e no template base; default mantém o anterior.
     """
+    # PACOTE 12 — nome efectivo: empresa activa (se fornecida) ou default
+    effective_company_name = company_name or COMPANY_NAME
     subject = "Lista de Documentos Necessários - Crédito Habitação"
     
     default_documents = [
@@ -392,7 +449,7 @@ Pode responder a este email com os documentos em anexo ou entregar presencialmen
 Estamos ao dispor para qualquer esclarecimento.
 
 Cumprimentos,
-{COMPANY_NAME}
+{effective_company_name}
 """
     
     docs_html = "".join([f"<li>{doc}</li>" for doc in docs_list])
@@ -422,13 +479,15 @@ Cumprimentos,
 <p>Estamos ao dispor para qualquer esclarecimento.</p>
 
 <p>Cumprimentos,<br>
-<strong>Equipa {COMPANY_NAME}</strong></p>
+<strong>Equipa {effective_company_name}</strong></p>
 """
     
     # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
     company_logo = await resolve_base_template_logo()
 
-    html_body = get_base_template(content, "Documentos Necessários", logo_url=company_logo)
+    html_body = get_base_template(
+        content, "Documentos Necessários", logo_url=company_logo, company_name=company_name,
+    )
     return await send_email_notification(client_email, subject, body, html_body)
 
 
@@ -438,11 +497,17 @@ async def send_credit_approved(
     bank_name: str,
     approved_amount: str,
     interest_rate: str = None,
-    monthly_payment: str = None
+    monthly_payment: str = None,
+    company_name: Optional[str] = None,
 ) -> bool:
     """
     Email de notificação de aprovação de crédito.
+
+    PACOTE 12: ``company_name`` (empresa activa) substitui o dual-brand
+    hardcoded nas saudações e no template base; default mantém o anterior.
     """
+    # PACOTE 12 — nome efectivo: empresa activa (se fornecida) ou default
+    effective_company_name = company_name or COMPANY_NAME
     subject = "Parabéns! O seu Crédito foi Aprovado!"
     
     details = f"Banco: {bank_name}\nValor Aprovado: {approved_amount}"
@@ -466,7 +531,7 @@ e agendar a assinatura da documentação.
 Obrigado por confiar em nós para este momento tão importante da sua vida!
 
 Cumprimentos,
-{COMPANY_NAME}
+{effective_company_name}
 """
     
     details_html = f"""
@@ -505,13 +570,15 @@ e agendar a assinatura da documentação.</p>
 <p>Obrigado por confiar em nós para este momento tão importante da sua vida!</p>
 
 <p>Cumprimentos,<br>
-<strong>Equipa {COMPANY_NAME}</strong></p>
+<strong>Equipa {effective_company_name}</strong></p>
 """
     
     # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
     company_logo = await resolve_base_template_logo()
 
-    html_body = get_base_template(content, "Crédito Aprovado", logo_url=company_logo)
+    html_body = get_base_template(
+        content, "Crédito Aprovado", logo_url=company_logo, company_name=company_name,
+    )
     return await send_email_notification(client_email, subject, body, html_body)
 
 
@@ -521,9 +588,14 @@ async def send_new_client_notification(
     client_phone: str,
     process_type: str,
     staff_email: str,
-    staff_name: str
+    staff_name: str,
+    company_name: Optional[str] = None,
 ) -> bool:
-    """Notificação para staff sobre novo cliente registado."""
+    """Notificação para staff sobre novo cliente registado.
+
+    PACOTE 12: ``company_name`` (empresa activa) substitui o dual-brand
+    hardcoded no template base (header/rodapé); default mantém o anterior.
+    """
     
     subject = f"Novo Cliente: {client_name}"
     
@@ -567,7 +639,9 @@ Sistema Precision Crédito
     # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
     company_logo = await resolve_base_template_logo()
 
-    html_body = get_base_template(content, "Novo Cliente", logo_url=company_logo)
+    html_body = get_base_template(
+        content, "Novo Cliente", logo_url=company_logo, company_name=company_name,
+    )
     return await send_email_notification(staff_email, subject, body, html_body)
 
 
@@ -575,10 +649,16 @@ async def send_status_update_notification(
     client_email: str,
     client_name: str,
     new_status: str,
-    message: str = ""
+    message: str = "",
+    company_name: Optional[str] = None,
 ) -> bool:
-    """Notificação de actualização de estado para o cliente."""
-    
+    """Notificação de actualização de estado para o cliente.
+
+    PACOTE 12: ``company_name`` (empresa activa) substitui o dual-brand
+    hardcoded nas saudações e no template base; default mantém o anterior.
+    """
+    # PACOTE 12 — nome efectivo: empresa activa (se fornecida) ou default
+    effective_company_name = company_name or COMPANY_NAME
     subject = f"Atualização do seu Processo - {new_status}"
     
     body = f"""
@@ -591,7 +671,7 @@ O estado do seu processo foi atualizado para: {new_status}
 Para mais informações, entre em contacto connosco.
 
 Cumprimentos,
-{COMPANY_NAME}
+{effective_company_name}
 """
     
     message_html = f"<p>{message}</p>" if message else ""
@@ -610,13 +690,15 @@ Cumprimentos,
 <p>Para mais informações, não hesite em contactar-nos.</p>
 
 <p>Cumprimentos,<br>
-<strong>Equipa {COMPANY_NAME}</strong></p>
+<strong>Equipa {effective_company_name}</strong></p>
 """
     
     # PACOTE 11 (Eixo 2) — logo da empresa no header do template base.
     company_logo = await resolve_base_template_logo()
 
-    html_body = get_base_template(content, "Atualização do Processo", logo_url=company_logo)
+    html_body = get_base_template(
+        content, "Atualização do Processo", logo_url=company_logo, company_name=company_name,
+    )
     return await send_email_notification(client_email, subject, body, html_body)
 
 

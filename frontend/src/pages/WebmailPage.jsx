@@ -157,6 +157,12 @@ const WebmailPage = () => {
     ? searchParams.get("folder")
     : "inbox";
   const draftIdFromUrl = searchParams.get("id") || searchParams.get("draftId");
+  // PACOTE 12 (Eixo 2) — botão "+ Novo" da tab Emails do processo:
+  // /webmail?compose=new&to=<cliente>&process_id=<id> abre o compositor
+  // pré-preenchido (lidos uma vez no mount — ver effect abaixo).
+  const composeFromUrl = searchParams.get("compose");
+  const composeToFromUrl = (searchParams.get("to") || "").trim();
+  const composeProcessIdFromUrl = searchParams.get("process_id");
 
   // Pacote DN.2: empresa do Header (ContextSwitcher), não o user.company_id estático.
   const companyId = activeCompanyId || effectiveCompanyId || "";
@@ -212,6 +218,7 @@ const WebmailPage = () => {
   const [composerData, setComposerData] = useState({
     to_emails: "",
     cc_emails: "",
+    bcc_emails: "",
     subject: "",
     body: "",
     account: defaultAccount,
@@ -219,6 +226,8 @@ const WebmailPage = () => {
   });
   const [composerSending, setComposerSending] = useState(false);
   const [ccExpanded, setCcExpanded] = useState(false);
+  // PACOTE 12 (Eixo 2) — BCC (cópia oculta) espelhando a linha do CC
+  const [bccExpanded, setBccExpanded] = useState(false);
 
   // Link to process dialog
   const [linkDialogOpen, setLinkDialogOpen] = useState(false);
@@ -261,6 +270,10 @@ const WebmailPage = () => {
   const [contextMenuFolder, setContextMenuFolder] = useState(null);
 
   const openedUrlDraftRef = useRef(false);
+  // PACOTE 12 — garante que o ?compose=new abre o compositor apenas uma vez
+  const openedUrlComposeRef = useRef(false);
+  // PACOTE 12 — FIX 6: id do timer do toast pós-janela (cancelado no Desfazer)
+  const sendConfirmTimerRef = useRef(null);
 
   // ============================================================
   // ROLE-BASED TABS: Initialize activeBox
@@ -875,51 +888,64 @@ const WebmailPage = () => {
   // ============================================================
   // COMPOSER
   // ============================================================
-  const openComposer = useCallback((mode, email = null) => {
+  // PACOTE 12 (Eixo 2):
+  // - bcc_emails (cópia oculta) em todos os modos;
+  // - prefill opcional (to_emails/process_id) — usado pelo ?compose=new
+  //   da tab Emails do processo (botão "+ Novo").
+  const openComposer = useCallback((mode, email = null, prefill = null) => {
+    let nextData;
     if (mode === "reply" && email) {
       const senderEmail = email.direction === "sent"
         ? email.to_emails?.[0] || ""
         : email.from_email || "";
-      setComposerData({
+      nextData = {
         to_emails: senderEmail,
         cc_emails: "",
+        bcc_emails: "",
         subject: email.subject ? `Re: ${email.subject}` : "",
         body: `\n\n---------- Mensagem original ----------\nDe: ${email.from_email}\nData: ${formatFullDate(email.sent_at)}\nAssunto: ${email.subject || ""}\n\n${email.body || ""}`,
         account: email.account || "precision",
         process_id: email.process_id || null,
-      });
+      };
     } else if (mode === "forward" && email) {
-      setComposerData({
+      nextData = {
         to_emails: "",
         cc_emails: "",
+        bcc_emails: "",
         subject: email.subject ? `Fwd: ${email.subject}` : "",
         body: `\n\n---------- Mensagem encaminhada ----------\nDe: ${email.from_email}\nData: ${formatFullDate(email.sent_at)}\nAssunto: ${email.subject || ""}\n\n${email.body || ""}`,
         account: email.account || "precision",
         process_id: null,
-      });
+      };
     } else if (mode === "draft" && email) {
       const toList = Array.isArray(email.to_emails)
         ? email.to_emails.join(", ")
         : (email.to_emails || email.to || "");
-      setComposerData({
+      nextData = {
         to_emails: toList,
         cc_emails: Array.isArray(email.cc_emails) ? email.cc_emails.join(", ") : (email.cc_emails || ""),
+        bcc_emails: Array.isArray(email.bcc_emails) ? email.bcc_emails.join(", ") : (email.bcc_emails || ""),
         subject: email.subject || "",
         body: email.body || email.body_html || "",
         account: email.account || account,
         process_id: email.process_id || null,
-      });
+      };
     } else {
-      setComposerData({
+      nextData = {
         to_emails: "",
         cc_emails: "",
+        bcc_emails: "",
         subject: "",
         body: "",
         account: account,
         process_id: null,
-      });
+        // PACOTE 12 — pré-preenchimento ("+ Novo" da tab Emails)
+        ...(prefill || {}),
+      };
     }
-    setCcExpanded(mode === "forward" || false);
+    setComposerData(nextData);
+    setCcExpanded(mode === "forward" || Boolean(nextData.cc_emails));
+    setBccExpanded(Boolean(nextData.bcc_emails));
     setUploadAttachments([]);
     setComposerOpen(true);
   }, [account]);
@@ -939,6 +965,20 @@ const WebmailPage = () => {
       handleSelectEmail(match);
     }
   }, [emails, draftIdFromUrl, openComposer, handleSelectEmail, initialFolder]);
+
+  // PACOTE 12 (Eixo 2) — "?compose=new&to=...&process_id=...": abre o
+  // compositor PRÉ-PREENCHIDO no mount (botão "+ Novo" da tab Emails do
+  // processo). Corre uma única vez (ref) e não disputa com o effect do
+  // rascunho (?id=) — quando ambos existem, o id ganha (não entramos).
+  useEffect(() => {
+    if (openedUrlComposeRef.current) return;
+    if (composeFromUrl !== "new" || draftIdFromUrl) return;
+    openedUrlComposeRef.current = true;
+    const prefill = {};
+    if (composeToFromUrl) prefill.to_emails = composeToFromUrl;
+    if (composeProcessIdFromUrl) prefill.process_id = composeProcessIdFromUrl;
+    openComposer("new", null, Object.keys(prefill).length > 0 ? prefill : null);
+  }, [composeFromUrl, composeToFromUrl, composeProcessIdFromUrl, draftIdFromUrl, openComposer]);
 
   const handleSendEmail = useCallback(async () => {
     if (!composerData.to_emails.trim()) {
@@ -960,6 +1000,11 @@ const WebmailPage = () => {
         .split(/[;,]/)
         .map((e) => e.trim())
         .filter(Boolean);
+      // PACOTE 12 (Eixo 2) — BCC: mesma construção do CC (cópia oculta)
+      const bccList = (composerData.bcc_emails || "")
+        .split(/[;,]/)
+        .map((e) => e.trim())
+        .filter(Boolean);
 
       const bodyPayload = {
         to_emails: toList,
@@ -967,6 +1012,7 @@ const WebmailPage = () => {
         body: composerData.body || "",
         body_html: composerData.body_html || null,
         cc_emails: ccList.length > 0 ? ccList : null,
+        bcc_emails: bccList.length > 0 ? bccList : null,
         process_id: composerData.process_id || null,
         from_box: activeBox || null,
       };
@@ -1044,12 +1090,23 @@ const WebmailPage = () => {
             // rascunho com o snapshot intacto (dados + anexos temporários,
             // que o backend ainda não moveu porque nada foi enviado).
             const cancelData = await res.json().catch(() => ({}));
+            const restoredFields = draftToComposerFields(
+              cancelData.draft || sendSnapshot.composerData
+            );
             setComposerData((prev) => ({
               ...prev,
-              ...draftToComposerFields(cancelData.draft || sendSnapshot.composerData),
+              ...restoredFields,
             }));
             setUploadAttachments(sendSnapshot.uploadAttachments);
             setComposerOpen(true);
+            setBccExpanded(Boolean(restoredFields.bcc_emails));
+            // PACOTE 12 — FIX 6: o envio foi desfeito — cancelar o timer do
+            // toast de sucesso pós-janela (senão disparava "Email enviado
+            // com sucesso" e apagava os anexos acabados de repor).
+            if (sendConfirmTimerRef.current) {
+              clearTimeout(sendConfirmTimerRef.current);
+              sendConfirmTimerRef.current = null;
+            }
             toast.success("Envio cancelado — pode continuar a editar o rascunho.");
           } catch {
             toast.error("Não foi possível cancelar o envio.", { duration: 8000 });
@@ -1064,8 +1121,11 @@ const WebmailPage = () => {
           },
         });
 
-        // Após a janela (sem undo): confirmar visualmente e refrescar a lista
-        setTimeout(() => {
+        // Após a janela (sem undo): confirmar visualmente e refrescar a lista.
+        // PACOTE 12 — FIX 6: o id do timer fica no ref para o "Desfazer" o
+        // poder cancelar (o envio desfeito nunca mostra o toast de sucesso).
+        sendConfirmTimerRef.current = setTimeout(() => {
+          sendConfirmTimerRef.current = null;
           toast.success("Email enviado com sucesso");
           setUploadAttachments([]);
           handleRefresh();
@@ -2553,6 +2613,34 @@ const WebmailPage = () => {
                 </CollapsibleContent>
               </Collapsible>
 
+              {/* BCC (collapsible) — PACOTE 12 (Eixo 2): cópia oculta,
+                  espelhando a linha do CC */}
+              <Collapsible open={bccExpanded} onOpenChange={setBccExpanded}>
+                <CollapsibleTrigger asChild>
+                  <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+                    {bccExpanded ? (
+                      <ChevronDown className="h-3 w-3" />
+                    ) : (
+                      <ChevronRight className="h-3 w-3" />
+                    )}
+                    {bccExpanded ? "Ocultar BCC" : "Mostrar BCC"}
+                  </button>
+                </CollapsibleTrigger>
+                <CollapsibleContent className="mt-2">
+                  <div className="flex items-center gap-2">
+                    <label className="text-sm font-medium w-12 shrink-0">BCC:</label>
+                    <Input
+                      placeholder="email@exemplo.com (separar por vírgulas)"
+                      value={composerData.bcc_emails}
+                      onChange={(e) =>
+                        setComposerData((d) => ({ ...d, bcc_emails: e.target.value }))
+                      }
+                      className="flex-1"
+                    />
+                  </div>
+                </CollapsibleContent>
+              </Collapsible>
+
               {/* Subject */}
               <div className="flex items-center gap-2">
                 <label className="text-sm font-medium w-12 shrink-0">
@@ -2637,11 +2725,15 @@ const WebmailPage = () => {
                 )}
               </div>
 
-              {/* Uploaded files list */}
+              {/* Uploaded files list — PACOTE 12 (Eixo 2): o upload devolve
+                  file_name/file_size (backend); chips aceitam ambos os
+                  formatos (filename/size legado incluído) */}
               {uploadAttachments.length > 0 && (
                 <div className="space-y-1.5">
                   {uploadAttachments.map((file) => {
-                    const UpIcon = getAttachmentIcon(file.filename);
+                    const displayName = file.filename || file.file_name;
+                    const displaySize = file.size ?? file.file_size;
+                    const UpIcon = getAttachmentIcon(displayName);
                     return (
                       <div
                         key={file.id}
@@ -2649,13 +2741,13 @@ const WebmailPage = () => {
                       >
                         <UpIcon className="h-4 w-4 text-muted-foreground shrink-0" />
                         <span className="flex-1 text-sm truncate">
-                          {file.filename || "Ficheiro"}
+                          {displayName || "Ficheiro"}
                         </span>
-                        {file.size && (
+                        {displaySize ? (
                           <span className="text-xs text-muted-foreground shrink-0">
-                            {formatFileSize(file.size)}
+                            {formatFileSize(displaySize)}
                           </span>
-                        )}
+                        ) : null}
                         <button
                           onClick={(e) => {
                             e.stopPropagation();

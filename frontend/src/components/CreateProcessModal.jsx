@@ -165,6 +165,7 @@ const CreateProcessModal = ({ open, onOpenChange, onSuccess, preSelectedClient, 
           telefone: newClientData.telefone.trim() || undefined,
           nif: newClientData.nif.trim() || undefined,
           fonte: 'staff_created',
+          skip_welcome_email: true, // o email dispara na criação do processo, abaixo (evita duplicar)
         }, { skipErrorToast: true });
         clientId = newClientRes.data?.id || newClientRes.data?.client?.id;
         if (!clientId) {
