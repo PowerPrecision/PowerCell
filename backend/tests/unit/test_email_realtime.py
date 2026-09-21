@@ -1,6 +1,6 @@
 """Pacote EC — IMAP auto-sync interval + WebSocket new_email helpers."""
 import asyncio
-from unittest.mock import AsyncMock, MagicMock
+from unittest.mock import AsyncMock
 
 from services.email_realtime import (
     NEW_EMAIL_EVENT,
@@ -54,31 +54,46 @@ def test_get_email_auto_sync_interval_seconds(monkeypatch):
     assert get_email_auto_sync_interval_seconds() == 60
 
 
-def test_notify_new_email_skips_disconnected(monkeypatch):
+# ====================================================================
+# ÉPICO 5 — emissão via canal Redis (ver docstring de email_realtime)
+# ====================================================================
+# Estes dois testes afirmavam o comportamento ANTERIOR: entrega directa
+# pelo ConnectionManager deste processo, saltando quem não estivesse
+# ligado *aqui*. Isso era o bug de multi-worker — o worker que corre a
+# sincronização IMAP quase nunca é o que detém o socket do utilizador.
+# Passam a afirmar o contrato novo: um envelope publicado POR
+# DESTINATÁRIO, entregue pelo worker que tiver a ligação.
+
+
+def test_notify_new_email_publishes_even_if_not_connected_here(monkeypatch):
+    """Não estar ligado a ESTE worker não pode cancelar o evento.
+
+    Regressão directa do bug: o socket do utilizador pode viver noutro
+    processo, e é esse que decide se há a quem entregar.
+    """
     from services import email_realtime as mod
 
     monkeypatch.setattr(mod.manager, "is_user_connected", lambda _uid: False)
-    broadcast = AsyncMock()
-    monkeypatch.setattr(mod.manager, "broadcast_to_room", broadcast)
+    published = AsyncMock(return_value=True)
+    monkeypatch.setattr(mod, "publish_event", published)
 
     count = asyncio.run(notify_new_email("u1", {"id": "e1", "direction": "received"}))
-    assert count == 0
-    broadcast.assert_not_called()
+
+    assert count == 1, "o evento tem de ser emitido à mesma"
+    published.assert_awaited_once()
+    assert published.await_args.kwargs["user_id"] == "u1"
 
 
-def test_notify_new_email_broadcasts_to_user_room(monkeypatch):
+def test_notify_new_email_publishes_one_envelope_per_recipient(monkeypatch):
+    """Tenant-safety: um envelope endereçado a cada um, nunca uma difusão."""
     from services import email_realtime as mod
 
-    monkeypatch.setattr(mod.manager, "is_user_connected", lambda _uid: True)
-    monkeypatch.setattr(mod.manager, "is_in_room", lambda _room, _uid: True)
-    monkeypatch.setattr(mod.manager, "join_room", MagicMock())
-    broadcast = AsyncMock()
-    monkeypatch.setattr(mod.manager, "broadcast_to_room", broadcast)
-    monkeypatch.setattr(mod.manager, "send_personal_message", AsyncMock())
+    published = AsyncMock(return_value=True)
+    monkeypatch.setattr(mod, "publish_event", published)
 
     count = asyncio.run(
         notify_new_email(
-            "user-1",
+            ["user-1", "user-2"],
             {
                 "id": "e1",
                 "from_email": "ana@x.pt",
@@ -88,14 +103,29 @@ def test_notify_new_email_broadcasts_to_user_room(monkeypatch):
             },
         )
     )
-    assert count == 1
-    broadcast.assert_awaited()
-    room, msg = broadcast.await_args.args[:2]
-    assert room == "user_user-1"
-    assert msg["event"] == "new_email"
-    assert msg["message"] == "Novo email recebido"
-    assert msg["type"] == "new_email"
-    assert msg["data"]["from_email"] == "ana@x.pt"
+
+    assert count == 2
+    assert published.await_count == 2
+    destinatarios = [c.kwargs["user_id"] for c in published.await_args_list]
+    assert destinatarios == ["user-1", "user-2"]
+
+    event_type, payload = published.await_args_list[0].args[:2]
+    assert event_type == "new_email"
+    assert payload["from_email"] == "ana@x.pt"
+    assert payload["folder"] == "inbox"
+    assert payload["is_read"] is False, "a lista incrementa não-lidos sem ir ao servidor"
+
+
+def test_notify_new_email_survives_publish_failure(monkeypatch):
+    """Um Redis em baixo não pode rebentar a sincronização IMAP."""
+    from services import email_realtime as mod
+
+    monkeypatch.setattr(
+        mod, "publish_event", AsyncMock(side_effect=RuntimeError("redis morto"))
+    )
+
+    count = asyncio.run(notify_new_email("u1", {"id": "e1", "direction": "received"}))
+    assert count == 0, "falha de transporte conta como não-emitido, mas não levanta"
 
 
 def test_websocket_connect_joins_user_email_room():

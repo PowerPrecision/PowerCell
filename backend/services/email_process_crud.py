@@ -781,6 +781,8 @@ async def run_send_email(payload: EmailSendRequest, request: Request, current_us
         created_by=current_user["id"],
         created_by_email=current_user.get("email"),
         attachment_ids=payload.attachment_ids or [],
+        in_reply_to=payload.in_reply_to,
+        references=payload.references,
     )
 
     if undo_window <= 0:

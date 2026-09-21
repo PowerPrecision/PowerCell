@@ -1,4 +1,109 @@
 ---
+Task ID: fix-ordem-import-bateria-financeira
+Agent: Cloud Agent
+Task: CI vermelho — 3 testes da bateria financeira dependentes da ordem de import
+
+Date: 2026-09-21
+
+Work Log:
+- O CI reportou 3 falhas (`IndexError: list index out of range`) em `test_e2e_financial_realtime.py`, nos únicos testes que usam a fixture `eventos`. Reproduzido localmente com a invocação do CI (`tests/unit` + integração no MESMO processo pytest).
+- PRIMEIRO confirmei a origem: `git checkout d8a739d` (antes do Épico 5) e a mesma execução falha igual. NÃO foi causado pelo Épico 5 — é do épico anterior, meu, e a minha verificação de então correu `tests/unit` e a bateria em processos SEPARADOS, pelo que nunca viu a interacção.
+- Descartado `REDIS_URL=none` (o CI usa-o): a bateria isolada passa com essa variável.
+- Bisecção: `test_task_extraction_helpers.py` e `test_task_logs_extraction_helpers.py` poluem. Nenhum faz patches — apenas importam `task_log_service` / `task_queue` / `scheduled_tasks`.
+- Causa: `task_log_service` faz `from database import db` no TOPO, ficando com a sua referência. O arnês patchava `database.db` e `financial_engine.db` mas não `task_log_service.db`. Se o módulo já tinha sido importado, ficava preso ao proxy real → `create_task` falhava a escrever → `_emit_event_safe` engolia a excepção em `logger.debug` → zero eventos. Passava ou falhava conforme a ORDEM de recolha do pytest.
+- Instrumentação usada (e removida): print no topo de `emit_task_event` (nunca chamado) e no `_emit_event_safe` (nunca chamado) — o que provou que a falha era ANTES, na escrita do TaskLog.
+- Fix 1: `patch.object(task_log_service, "db", self.db)` no `_Arnes`.
+- Fix 2: `_emit_event_safe` loga a `warning` e não a `debug`. Um Redis em baixo não chega lá (`publish_event` devolve False sem levantar), logo uma excepção nesse ponto é sempre inesperada. Continua a não propagar.
+- Lição registada no AGENTS.md: patchar sempre `patch.object(modulo, "db", fake)` por módulo da cadeia; `patch("database.db")` só cobre os imports feitos DENTRO de funções.
+- Verificação: 1536 unit+e2e verdes nas condições do CI (REDIS_URL=none) num único processo pytest; 29 e2e verdes com Redis real; flake8 gate 0.
+
+---
+Task ID: epico5-webmail-pro-live-sync
+Agent: Cloud Agent
+Task: Épico 5 — Webmail Pro & Live Sync (pastas, threads, acções, tempo real)
+
+Date: 2026-09-21
+
+Work Log:
+- DIAGNÓSTICO (3 premissas do enunciado corrigidas antes de tocar em código):
+  (a) `shared_email_sync.py` NÃO é o ponto de emissão — são 97 linhas de validação da sync manual do Gmail de um admin. A recepção real insere em 6 sítios (`email_service.py` x5 + `gmail_api_service.py`), todos já a chamar `notify_new_email`.
+  (b) O `new_email` JÁ existia (`email_realtime.py`), mas entregava pelo ConnectionManager em memória — bug de multi-worker, não funcionalidade em falta. O `route_system_event` já era genérico e não precisou de alteração.
+  (c) O EIXO 1 estava ~60% feito: pastas (inbox/sent/drafts/starred/trash/custom + contagens `$facet`), `is_read` no backend (`POST /{id}/mark`, com sync da flag IMAP) e Responder/Encaminhar já existiam. Em falta: threads, Responder a Todos, toggle de não-lido e — o elo partido — os cabeçalhos de threading no envio.
+- EIXO 2: emissão reencaminhada para `redis_pubsub.publish_event` num ÚNICO chokepoint (`notify_new_email`), não nos 6 call sites. Removido o filtro `is_user_connected`, que era a causa do bug. Frontend: `useNewEmailRealtime` insere a linha via `setQueryData` em vez de `invalidateQueries`; polling de contagens suspenso quando `isConnected`.
+- EIXO 1: **NOVO** `services/email_threading.py` + `send_email(in_reply_to=, references=)` com `Message-ID` gerado; propagado por `EmailSendRequest` → `build_pending_send_record` → `execute_pending_email_send` (o envio real corre depois da janela de undo, noutro job — os cabeçalhos têm de viajar no registo). **NOVO** `utils/emailThreads.js` (agrupamento + reply-all + cabeçalhos da resposta); lista agrupada em conversas expansíveis; botões Responder a Todos e Marcar como não lida.
+- EIXO 3: **NOVO** `tests/integration/test_e2e_webmail_realtime.py` (15) — recepção, payload da lista, idempotência do sync, caixa vazia, tenant-safety (incl. fail-closed do router), Redis em baixo, falha a publicar, IMAP inacessível, threading da resposta, cabeçalhos no fio SMTP, volta completa cliente→nós→cliente, 5 mensagens numa conversa, e prova com Redis real.
+- Dois testes ANTIGOS foram reescritos, não remendados: `test_notify_new_email_skips_disconnected` e `..._broadcasts_to_user_room` afirmavam o comportamento que ERA o bug (saltar quem não está ligado a este worker). Passam a afirmar o contrato novo.
+- Falhas durante a execução, todas no arnês de teste e não na aplicação: (a) `FakeAsyncCollection` expõe `.docs`, não `._docs`; (b) `encryption_service` é importado DENTRO da função de sync, logo o patch tinha de ser em `services.encryption`, não em `email_service` (mesma lição do `database.db` do épico anterior); (c) o `send_email` usa `sendmail(...)` e não `send_message(...)`, pelo que o duplo SMTP não capturava nada.
+- Um achado do código, NÃO alterado por ser pré-existente e arriscado: `send_email` só arquiva em `db.emails` quando há `process_id`. Sem processo, o email volta pelo sync da pasta Enviados — "corrigir" isto sem tratar duplicados criaria linhas repetidas.
+- Mutation testing: remover o `In-Reply-To` do envio → 1 vermelho; trocar `send_personal_message` por `broadcast` (quebrar tenant-safety) → 2 vermelhos.
+- Verificação: 1509 unit + 29 e2e (15 webmail + 14 financeiro) verdes; flake8 gate 0; frontend 196 testes de utils, eslint --quiet limpo, build verde.
+- Pré-existentes, confirmados com `git stash` na árvore limpa: 3 testes de `pages/processDetails/*` falham no `node --test` puro (importam sem a extensão `.js`) e os `tests/integration/test_iteration1{1,2}_*` precisam de `mongod` + uvicorn vivos, que este container não tem.
+
+---
+Task ID: qa-bugfix-atribuicao-e-bateria-e2e
+Agent: Cloud Agent
+Task: QA — bug de reatividade na Atribuição + bateria e2e (financeiro & tempo real)
+
+Date: 2026-09-21
+
+Work Log:
+- MISSÃO 1 (causa real ≠ hipótese): não era WebSocket nem cache do React Query. `dual_auto_assign_on_pre_registo_transition` gravava APENAS `consultant_id`/`mediador_id` (legado, grafia inglesa); o `AssignmentContextCard` lê `consultor_names` → `assigned_consultor_ids` → `assigned_consultor_id` — nenhum deles existia, logo cartão em branco. Bug reproduzido antes da correcção.
+- Fix 1: a auto-atribuição passa a gravar o conjunto canónico completo (igual a `client_assign.py`), mantendo `consultant_id` porque `process_list_filters` filtra por ele.
+- Fix 2: `run_mark_indexed_side_effects` difunde um SEGUNDO delta (`broadcast_assignment_delta`) depois da atribuição — o broadcast existente corre ANTES dela e só levava o estado, pelo que outro operador refrescava para dados sem consultor.
+- Fix 3: `ProcessDetails` não escutava `process_updated` (o delta não teria ouvintes). Passa a fundir via **NOVO** `utils/processDelta.js` (`applyProcessDelta`, lista de campos explícita — o contrato que voltaria a partir em silêncio).
+- MISSÃO 2: **NOVO** `tests/integration/test_e2e_financial_realtime.py` (14) — cadeia completa indexação → atribuição → motor → PDF → eventos. Caminho feliz, OCR ilegível, sem rendimento legível, Euribor em baixo, Euribor estimada, S3 em baixo, motor desligado, sem docs financeiros, processo não-crédito, Redis real e Redis em baixo.
+- Falhas encontradas na execução foram todas nos TESTES, não na aplicação: (a) patch de `process_indexing.db` não cobria `from database import db` local → patch de `database.db`; (b) constantes de documento partilhadas ao nível do módulo eram mutadas entre testes → `deepcopy` na fixture; (c) o patch de Euribor do arnês sobrepunha-se ao do cenário → parametrizado.
+- Mutation testing para provar que os testes têm dentes: reverter o Fix 1 → 4 testes vermelhos; quebrar a tenant-safety (`broadcast` em vez de `send_personal_message`) → prova de tempo real vermelha.
+
+Stage Summary:
+- O cartão de Atribuição passa a reflectir a auto-atribuição pós-indexação, para quem clica e para quem observa; a cadeia financeira+tempo real fica coberta por testes e2e executáveis sem Mongo.
+
+Files:
+- backend/services/process_assignment.py
+- backend/services/process_indexing.py
+- backend/tests/integration/test_e2e_financial_realtime.py
+- frontend/src/pages/ProcessDetails.js
+- frontend/src/utils/processDelta.js
+- frontend/src/utils/processDelta.test.js
+- AGENTS.md, CHANGELOG.md, worklog.md
+
+---
+Task ID: epico-event-driven-redis-pubsub
+Agent: Cloud Agent
+Task: Épico — Refatorização para Event-Driven (Redis Pub/Sub e WebSockets)
+
+Date: 2026-09-21
+
+Work Log:
+- Eixo 1: **NOVO** `services/redis_pubsub.py` — `redis.asyncio` sobre `REDIS_URL`, canal `powercell_system_events` (env `SYSTEM_EVENTS_CHANNEL`). `redis_cache.py` NÃO foi tocado: é Upstash REST, não suporta SUBSCRIBE. Envelope `{id,type,user_id,company_id,payload,published_at}`; `publish_event` nunca levanta excepção e degrada para entrega in-process; `SystemEventListener` com backoff exponencial 1s→30s.
+- Eixo 2: `websocket_manager.py` — `WSEventType.TASK_*` + `route_system_event` (entrega dirigida via `send_personal_message`; envelope sem `user_id` é descartado, nunca difundido). `server.py`: listener arranca no startup **fora** do guard `_is_primary_worker` (cada worker detém os seus sockets) e pára no shutdown.
+- Eixo 3: **NOVO** `services/task_events.py` (payload único + `resolve_event_type`, com desembrulhamento de str-Enums). Instrumentados os 3 pontos de estrangulamento: `TaskLogService.{create,update}_task`, `BackgroundJobService.{create_job,update_progress,set_status,set_result,set_error}` e `routes/ai_bulk/jobs.py::{create,update,finish}_background_job_db` (+ resolução `user_email`→`user_id` com cache). Zero alterações em chamadores.
+- Eixo 4: **NOVO** `utils/taskEvents.js` (merge puro) + `hooks/useTaskEvents.js` (subscrição). `TasksContext` reage a eventos e só faz polling sem WS (expõe `isRealtime`); `useBackgroundJobsQuery` invalida as queries por evento e desliga o `refetchInterval`; `TasksPanel` troca o intervalo de 10s por eventos. `useWebSocket` ganha os `TASK_*`.
+- Toasts: extraído `applyTaskToast` do ciclo do fetch — eventos e polling produzem exactamente o mesmo comportamento de toast (uma só fonte de verdade).
+
+Stage Summary:
+- O progresso das tarefas pesadas passa a chegar ao browser no instante em que muda, em vez de até 5s depois; e passa a funcionar com múltiplos workers Uvicorn, onde antes se perdia em silêncio.
+
+Files:
+- backend/services/redis_pubsub.py
+- backend/services/task_events.py
+- backend/services/websocket_manager.py
+- backend/services/task_log_service.py
+- backend/services/background_jobs.py
+- backend/routes/ai_bulk/jobs.py
+- backend/server.py
+- backend/.env.example
+- backend/tests/unit/test_redis_pubsub.py
+- frontend/src/utils/taskEvents.js
+- frontend/src/utils/taskEvents.test.js
+- frontend/src/hooks/useTaskEvents.js
+- frontend/src/hooks/useWebSocket.js
+- frontend/src/contexts/TasksContext.js
+- frontend/src/hooks/queries/useBackgroundJobsQuery.js
+- frontend/src/components/TasksPanel.js
+- AGENTS.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: epico-motor-simulacao-financeira
 Agent: Cloud Agent
 Task: Épico — Motor de Simulação Financeira Automatizada (DSTI & Cenários)

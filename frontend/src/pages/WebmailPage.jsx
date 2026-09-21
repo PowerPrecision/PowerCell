@@ -10,7 +10,13 @@ import { useAuth } from "../contexts/AuthContext";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { useQueryClient } from "@tanstack/react-query";
 import { useNewEmailRealtime, invalidateEmailQueries } from "../hooks/useNewEmailRealtime";
-import { useWebmailEmails, patchWebmailEmail } from "../hooks/useWebmailEmails";
+import { useWebmailEmails, patchWebmailEmail, buildWebmailQueryKey } from "../hooks/useWebmailEmails";
+import {
+  buildReplyAllRecipients,
+  buildReplyThreadHeaders,
+  groupEmailsIntoThreads,
+  normalizeSubject,
+} from "../utils/emailThreads";
 import useDebounce from "../hooks/useDebounce";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -52,6 +58,7 @@ import {
   MailOpen,
   Paperclip,
   Reply,
+  ReplyAll,
   Forward,
   Link2,
   ChevronDown,
@@ -377,7 +384,10 @@ const WebmailPage = () => {
   // ============================================================
   const fetchUnreadCountsRef = useRef(null);
 
-  const onNewEmailReceived = useCallback((payload) => {
+  // `inserted` = a linha já entrou na lista aberta (hook → utils/webmailRealtime).
+  // Nesse caso o contador sobe localmente; ir buscar as contagens ao servidor
+  // anularia o objectivo de não fazer round-trip por email recebido.
+  const onNewEmailReceived = useCallback((payload, inserted) => {
     if (!payload) return;
 
     const fromEmail = payload.from_email || "remetente desconhecido";
@@ -391,15 +401,23 @@ const WebmailPage = () => {
       });
     }
 
+    if (inserted) {
+      if (payload.is_read !== true) {
+        setUnreadCount((prev) => prev + 1);
+        setFolderCountsData((prev) => ({
+          ...prev,
+          inbox: (prev.inbox || 0) + (direction === "received" ? 1 : 0),
+        }));
+      }
+      return;
+    }
+
+    // Chegou algo que não pertence à lista aberta (outra pasta/caixa) —
+    // aí sim, as contagens vêm do servidor.
     if (fetchUnreadCountsRef.current) {
       fetchUnreadCountsRef.current();
     }
   }, []);
-
-  useNewEmailRealtime({
-    autoConnect: true,
-    onReceived: onNewEmailReceived,
-  });
 
   // ============================================================
   // FETCH LABELS
@@ -563,10 +581,10 @@ const WebmailPage = () => {
     }
   }, [token, user?.role, effectiveRole, companyId, webmailHeaders]);
 
+  // O polling das contagens foi movido para baixo do `useNewEmailRealtime`:
+  // precisa de saber se o WebSocket está ligado para se suspender.
   useEffect(() => {
     fetchUnreadCounts();
-    const interval = setInterval(fetchUnreadCounts, 60000);
-    return () => clearInterval(interval);
   }, [fetchUnreadCounts]);
 
   // ============================================================
@@ -592,7 +610,82 @@ const WebmailPage = () => {
     enabled: Boolean(token),
   });
 
+  // ============================================================
+  // TEMPO REAL — `new_email` entra directamente nesta lista
+  // ============================================================
+  // Declarado DEPOIS do `useWebmailEmails` porque precisa dos mesmos
+  // filtros: sem eles o hook não sabe se o email que chegou pertence à
+  // lista que está aberta, nem em que chave da cache o inserir.
+  const webmailFilters = useMemo(
+    () => ({
+      folder: activeCustomFolder ? "custom" : activeFolder,
+      page: currentPage,
+      search: debouncedSearch || "",
+      label: selectedLabel || null,
+      customFolderId: activeCustomFolder || null,
+      account: account || "",
+      box: effectiveBox || "",
+      companyId: companyId || "",
+      mailbox: selectedMailbox || "",
+    }),
+    [
+      activeCustomFolder,
+      activeFolder,
+      currentPage,
+      debouncedSearch,
+      selectedLabel,
+      account,
+      effectiveBox,
+      companyId,
+      selectedMailbox,
+    ],
+  );
+
+  const { isConnected: emailRealtimeConnected } = useNewEmailRealtime({
+    autoConnect: true,
+    onReceived: onNewEmailReceived,
+    view: webmailFilters,
+    queryKey: buildWebmailQueryKey(webmailFilters),
+  });
+
+  // POLLING = FALLBACK, não mecanismo primário (mesma regra do TasksContext).
+  // Com o WebSocket ligado os eventos chegam sozinhos e o intervalo é puro
+  // desperdício; se a ligação cair, volta a correr sem intervenção.
+  useEffect(() => {
+    if (emailRealtimeConnected) return undefined;
+    const interval = setInterval(fetchUnreadCounts, 60000);
+    return () => clearInterval(interval);
+  }, [emailRealtimeConnected, fetchUnreadCounts]);
+
   const emails = webmailData?.emails || [];
+
+  // ============================================================
+  // CONVERSAS (threads)
+  // ============================================================
+  // Uma troca de 5 emails com o mesmo cliente ocupava 5 linhas da caixa
+  // de entrada. Passa a ocupar 1, expansível. A regra de agrupamento
+  // (RFC 5322, com recurso ao assunto) vive em utils/emailThreads.
+  //
+  // ÂMBITO: agrupa a página carregada (30 emails), não o histórico todo —
+  // uma conversa que atravesse a paginação aparece como dois grupos.
+  const emailThreads = useMemo(() => groupEmailsIntoThreads(emails), [emails]);
+  const [expandedThreads, setExpandedThreads] = useState(() => new Set());
+
+  const toggleThread = useCallback((key) => {
+    setExpandedThreads((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
+  }, []);
+
+  // Mudar de pasta/caixa/página fecha as conversas: manter chaves de uma
+  // lista que já não está no ecrã só acumula estado morto.
+  useEffect(() => {
+    setExpandedThreads(new Set());
+  }, [activeFolder, activeCustomFolder, currentPage, selectedMailbox, effectiveBox]);
+
   const totalEmails = webmailData?.total || 0;
   const totalPages = webmailData?.pages || 1;
   // Skeleton só na 1ª carga sem cache — refetch de new_email / staleTime é silencioso
@@ -862,6 +955,46 @@ const WebmailPage = () => {
   }, [token, multiSelectMode, webmailHeaders, queryClient]);
 
   // ============================================================
+  // TOGGLE LIDO / NÃO LIDO
+  // ============================================================
+  // O endpoint já existia (POST /emails/{id}/mark com read|unread, que
+  // também sincroniza a flag no servidor IMAP) — faltava a acção na UI.
+  const handleToggleRead = useCallback(async (email) => {
+    if (!email?.id) return;
+    const nextRead = email.is_read === false;
+    // Optimista: a linha muda já; um erro repõe o estado anterior.
+    patchWebmailEmail(queryClient, email.id, { is_read: nextRead }, nextRead ? -1 : 1);
+    setEmailDetail((prev) =>
+      prev && prev.id === email.id ? { ...prev, is_read: nextRead } : prev
+    );
+    setUnreadCount((prev) => Math.max(0, prev + (nextRead ? -1 : 1)));
+
+    try {
+      const res = await fetch(`${API_URL}/api/emails/${email.id}/mark`, {
+        method: "POST",
+        headers: webmailHeaders({ "Content-Type": "application/json" }),
+        body: JSON.stringify({ type: nextRead ? "read" : "unread" }),
+      });
+      if (!res.ok) throw new Error(`Erro ${res.status}`);
+    } catch {
+      patchWebmailEmail(queryClient, email.id, { is_read: !nextRead }, nextRead ? 1 : -1);
+      setEmailDetail((prev) =>
+        prev && prev.id === email.id ? { ...prev, is_read: !nextRead } : prev
+      );
+      setUnreadCount((prev) => Math.max(0, prev + (nextRead ? 1 : -1)));
+      toast.error("Não foi possível alterar o estado de leitura");
+    }
+  }, [queryClient, webmailHeaders]);
+
+  // Quantos interlocutores existem além de nós — decide se o botão
+  // "Responder a Todos" tem sentido nesta mensagem.
+  const replyAllRecipientCount = useMemo(() => {
+    if (!emailDetail) return 0;
+    const { to, cc } = buildReplyAllRecipients(emailDetail, user?.email || "");
+    return to.length + cc.length;
+  }, [emailDetail, user?.email]);
+
+  // ============================================================
   // TOGGLE STAR
   // ============================================================
   const handleToggleStar = useCallback(async (email, e) => {
@@ -894,18 +1027,21 @@ const WebmailPage = () => {
   //   da tab Emails do processo (botão "+ Novo").
   const openComposer = useCallback((mode, email = null, prefill = null) => {
     let nextData;
-    if (mode === "reply" && email) {
-      const senderEmail = email.direction === "sent"
-        ? email.to_emails?.[0] || ""
-        : email.from_email || "";
+    if ((mode === "reply" || mode === "reply_all") && email) {
+      // "Responder a Todos" mantém os restantes intervenientes em Cc;
+      // "Responder" fala só com o remetente. A remoção do próprio
+      // utilizador e dos duplicados vive em utils/emailThreads.
+      const { to, cc } = buildReplyAllRecipients(email, user?.email || "");
+      const isReplyAll = mode === "reply_all";
       nextData = {
-        to_emails: senderEmail,
-        cc_emails: "",
+        to_emails: to.join(", "),
+        cc_emails: isReplyAll ? cc.join(", ") : "",
         bcc_emails: "",
-        subject: email.subject ? `Re: ${email.subject}` : "",
+        subject: email.subject ? `Re: ${normalizeSubject(email.subject)}` : "",
         body: `\n\n---------- Mensagem original ----------\nDe: ${email.from_email}\nData: ${formatFullDate(email.sent_at)}\nAssunto: ${email.subject || ""}\n\n${email.body || ""}`,
         account: email.account || "precision",
         process_id: email.process_id || null,
+        ...buildReplyThreadHeaders(email),
       };
     } else if (mode === "forward" && email) {
       nextData = {
@@ -944,11 +1080,11 @@ const WebmailPage = () => {
       };
     }
     setComposerData(nextData);
-    setCcExpanded(mode === "forward" || Boolean(nextData.cc_emails));
+    setCcExpanded(mode === "forward" || mode === "reply_all" || Boolean(nextData.cc_emails));
     setBccExpanded(Boolean(nextData.bcc_emails));
     setUploadAttachments([]);
     setComposerOpen(true);
-  }, [account]);
+  }, [account, user?.email]);
 
   // PACOTE DM: abrir compositor de rascunho quando o Dashboard envia ?folder=drafts&id=
   // PACOTE 8: ?id= numa pasta normal abre o email no PAINEL DE LEITÃO
@@ -1015,6 +1151,10 @@ const WebmailPage = () => {
         bcc_emails: bccList.length > 0 ? bccList : null,
         process_id: composerData.process_id || null,
         from_box: activeBox || null,
+        // Threading (RFC 5322): sem estes, a resposta nasce fora da
+        // conversa — no nosso Webmail e no cliente do destinatário.
+        in_reply_to: composerData.in_reply_to || null,
+        references: composerData.references?.length ? composerData.references : null,
       };
 
       // Include attachment_ids if any uploads
@@ -2038,15 +2178,37 @@ const WebmailPage = () => {
               ) : (
                 // Email items
                 <div className="divide-y">
-                  {emails.map((email) => {
+                  {emailThreads.map((thread) => {
+                    const email = thread.latest;
+                    const isThread = thread.count > 1;
+                    const isExpanded = expandedThreads.has(thread.key);
                     const isSelected = selectedEmail?.id === email.id;
                     const isChecked = selectedEmails.has(email.id);
                     return (
+                      <div key={thread.key}>
+                      <div className="flex items-stretch">
+                      {/* Expandir a conversa é uma acção SEPARADA de abrir a
+                          mensagem — e um <button> não pode viver dentro de
+                          outro <button>, daí os dois lado a lado. */}
+                      {isThread && (
+                        <button
+                          type="button"
+                          onClick={() => toggleThread(thread.key)}
+                          aria-expanded={isExpanded}
+                          aria-label={isExpanded ? "Fechar conversa" : `Expandir conversa com ${thread.count} mensagens`}
+                          className="px-1.5 shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
+                        >
+                          {isExpanded ? (
+                            <ChevronDown className="h-4 w-4" />
+                          ) : (
+                            <ChevronRight className="h-4 w-4" />
+                          )}
+                        </button>
+                      )}
                       <button
-                        key={email.id}
                         onClick={() => handleSelectEmail(email)}
                         className={`
-                          w-full text-left p-3 transition-colors hover:bg-accent/50
+                          flex-1 min-w-0 text-left p-3 transition-colors hover:bg-accent/50
                           ${isSelected && !multiSelectMode ? "bg-accent" : ""}
                         `}
                       >
@@ -2083,6 +2245,15 @@ const WebmailPage = () => {
                                   ? email.to_emails?.[0] || "Destinatário"
                                   : safeString(email.client_name) || safeString(email.from_email) || "Remetente"}
                               </span>
+                              {isThread && (
+                                <Badge
+                                  variant="secondary"
+                                  className="h-4 text-[10px] px-1.5 py-0 shrink-0"
+                                  title={`${thread.count} mensagens nesta conversa`}
+                                >
+                                  {thread.count}
+                                </Badge>
+                              )}
                               <span className="text-[11px] text-muted-foreground whitespace-nowrap shrink-0">
                                 {formatEmailDate(email.sent_at)}
                               </span>
@@ -2148,6 +2319,47 @@ const WebmailPage = () => {
                           </div>
                         </div>
                       </button>
+                      </div>
+
+                      {/* Mensagens anteriores da conversa */}
+                      {isThread && isExpanded && (
+                        <div className="divide-y border-l-2 border-border ml-4 bg-muted/30">
+                          {thread.emails.slice(1).map((prev) => (
+                            <button
+                              key={prev.id}
+                              onClick={() => handleSelectEmail(prev)}
+                              className={`w-full text-left px-3 py-2 transition-colors hover:bg-accent/50 ${
+                                selectedEmail?.id === prev.id && !multiSelectMode ? "bg-accent" : ""
+                              }`}
+                            >
+                              <div className="flex items-center gap-1.5">
+                                {!prev.is_read && (
+                                  <span className="bg-primary w-1.5 h-1.5 rounded-full shrink-0" />
+                                )}
+                                <span
+                                  className={`text-xs truncate flex-1 ${
+                                    !prev.is_read ? "font-semibold text-foreground" : "text-muted-foreground"
+                                  }`}
+                                >
+                                  {prev.direction === "sent"
+                                    ? prev.to_emails?.[0] || "Destinatário"
+                                    : safeString(prev.client_name) || safeString(prev.from_email) || "Remetente"}
+                                </span>
+                                {prev.attachments?.length > 0 && (
+                                  <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
+                                )}
+                                <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
+                                  {formatEmailDate(prev.sent_at)}
+                                </span>
+                              </div>
+                              <p className="text-xs text-muted-foreground truncate mt-0.5">
+                                {safeString(prev.preview) || safeString(prev.subject, "(Sem assunto)")}
+                              </p>
+                            </button>
+                          ))}
+                        </div>
+                      )}
+                      </div>
                     );
                   })}
                 </div>
@@ -2283,6 +2495,19 @@ const WebmailPage = () => {
                       <Reply className="h-3.5 w-3.5" />
                       Responder
                     </Button>
+                    {/* "Responder a Todos" só faz sentido quando há mais
+                        alguém na conversa além de nós e do remetente. */}
+                    {replyAllRecipientCount > 1 && (
+                      <Button
+                        variant="outline"
+                        size="sm"
+                        className="h-8 text-xs gap-1.5"
+                        onClick={() => openComposer("reply_all", emailDetail)}
+                      >
+                        <ReplyAll className="h-3.5 w-3.5" />
+                        Responder a Todos
+                      </Button>
+                    )}
                     <Button
                       variant="outline"
                       size="sm"
@@ -2291,6 +2516,18 @@ const WebmailPage = () => {
                     >
                       <Forward className="h-3.5 w-3.5" />
                       Encaminhar
+                    </Button>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="h-8 text-xs gap-1.5"
+                      onClick={() => handleToggleRead(emailDetail)}
+                    >
+                      {emailDetail.is_read === false ? (
+                        <><MailOpen className="h-3.5 w-3.5" />Marcar como lida</>
+                      ) : (
+                        <><Mail className="h-3.5 w-3.5" />Marcar como não lida</>
+                      )}
                     </Button>
                     {/* PACOTE 8 — abrir a visualização do email num novo separador */}
                     <Tooltip>

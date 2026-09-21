@@ -35,6 +35,12 @@ import { createContext, useState, useEffect, useCallback, useRef, useContext, us
 import { toast } from "sonner";
 import api from "../services/api";
 import { useAuth } from "./AuthContext";
+import {
+  applyTaskEvent,
+  countActiveTasks,
+  TASK_SOURCE,
+  useTaskEvents,
+} from "../hooks/useTaskEvents";
 
 const TasksContext = createContext(null);
 
@@ -105,6 +111,11 @@ export function TasksProvider({ children }) {
 
   // Estado das tarefas
   const [tasks, setTasks] = useState([]);
+  // ÉPICO Event-Driven: quando o WebSocket está ligado, os eventos `task_*`
+  // são a fonte primária e o polling fica parado. Esta ref é lida pelo
+  // agendador do polling (que não pode depender do estado sem se reiniciar
+  // a cada render).
+  const wsConnectedRef = useRef(false);
   const [activeCount, setActiveCount] = useState(0);
   const [completedUnacknowledged, setCompletedUnacknowledged] = useState(0);
   const [isLoading, setIsLoading] = useState(false);
@@ -212,6 +223,71 @@ export function TasksProvider({ children }) {
   }, [stopPolling]);
 
   /**
+   * Aplicar o efeito visual (toast) de UMA tarefa.
+   *
+   * Extraído do ciclo do fetch para que os eventos WebSocket produzam
+   * exactamente os mesmos toasts do polling — um só sítio a decidir quando
+   * um toast nasce, morfa em sucesso/erro, ou é ignorado por duplicação.
+   */
+  const applyTaskToast = useCallback((task) => {
+    if (!task?.task_id) return;
+
+    const isActive =
+      task.status === TaskStatus.PENDING || task.status === TaskStatus.PROCESSING;
+    const isNowCompleted = task.status === TaskStatus.COMPLETED;
+    const isNowFailed = task.status === TaskStatus.FAILED;
+    const isUnacknowledged = !task.acknowledged_at;
+
+    if (isActive) {
+      upsertLoadingToast(task);
+      return;
+    }
+
+    // Permanent dedup: skip if already toasted completion for this task
+    if (toastedTaskIdsRef.current.has(task.task_id)) return;
+
+    if (isUnacknowledged && (isNowCompleted || isNowFailed)) {
+      toastedTaskIdsRef.current.add(task.task_id);
+      if (toastedTaskIdsRef.current.size > 200) {
+        const arr = [...toastedTaskIdsRef.current];
+        toastedTaskIdsRef.current = new Set(arr.slice(-200));
+      }
+      finalizeToast(task, isNowCompleted ? "success" : "error");
+    }
+  }, [upsertLoadingToast, finalizeToast]);
+
+  /**
+   * ÉPICO Event-Driven — reagir a um evento `task_*` vindo do WebSocket.
+   *
+   * Substitui o polling como caminho primário: o estado local é actualizado
+   * no momento em que o backend emite, sem esperar pelo próximo intervalo.
+   * O merge é feito por `applyTaskEvent` (função pura, testada à parte).
+   */
+  const handleTaskEvent = useCallback((payload) => {
+    if (!payload?.task_id) return;
+
+    setTasks((prev) => {
+      const next = applyTaskEvent(prev, payload);
+      const updated = next.find((t) => t.task_id === payload.task_id);
+      if (updated) applyTaskToast(updated);
+      setActiveCount(countActiveTasks(next));
+      return next;
+    });
+    setLastFetchTime(new Date().toISOString());
+  }, [applyTaskToast]);
+
+  // Subscrever apenas os eventos de `task_logs` — os jobs de importação
+  // (`background_job`) pertencem ao Centro de Operações, não a este contexto.
+  const { isConnected: wsConnected } = useTaskEvents(handleTaskEvent, {
+    source: TASK_SOURCE.TASK_LOG,
+    enabled: !!user,
+  });
+
+  useEffect(() => {
+    wsConnectedRef.current = wsConnected;
+  }, [wsConnected]);
+
+  /**
    * Buscar tarefas ativas do backend
    */
   const fetchActiveTasks = useCallback(async () => {
@@ -233,34 +309,9 @@ export function TasksProvider({ children }) {
       // Detectar tarefas que mudaram de estado
       const currentTaskIds = new Set(data.tasks.map(t => t.task_id));
       
-      // Sticky toasts: loading → morph success/error (same id)
-      data.tasks.forEach(task => {
-        const isActive =
-          task.status === TaskStatus.PENDING ||
-          task.status === TaskStatus.PROCESSING;
-        const isNowCompleted = task.status === TaskStatus.COMPLETED;
-        const isNowFailed = task.status === TaskStatus.FAILED;
-        const isUnacknowledged = !task.acknowledged_at;
-
-        if (isActive) {
-          upsertLoadingToast(task);
-          return;
-        }
-
-        // Permanent dedup: skip if already toasted completion for this task
-        if (toastedTaskIdsRef.current.has(task.task_id)) return;
-
-        // Morph sticky toast on terminal status. Same toast id survives navigation
-        // (Toaster is outside BrowserRouter). Always morph — deterministic id.
-        if (isUnacknowledged && (isNowCompleted || isNowFailed)) {
-          toastedTaskIdsRef.current.add(task.task_id);
-          if (toastedTaskIdsRef.current.size > 200) {
-            const arr = [...toastedTaskIdsRef.current];
-            toastedTaskIdsRef.current = new Set(arr.slice(-200));
-          }
-          finalizeToast(task, isNowCompleted ? "success" : "error");
-        }
-      });
+      // Sticky toasts: loading → morph success/error (same id).
+      // Mesma função usada pelos eventos WebSocket — um só comportamento.
+      data.tasks.forEach(applyTaskToast);
 
       // Tasks that left /tasks/active without a terminal toast: NEVER auto-dismiss.
       // Sticky BG toasts must survive page changes and list churn; user closes via X.
@@ -293,7 +344,7 @@ export function TasksProvider({ children }) {
     } finally {
       setIsLoading(false);
     }
-  }, [user, activateCircuitBreaker, upsertLoadingToast, finalizeToast]);
+  }, [user, activateCircuitBreaker, applyTaskToast]);
   
   /**
    * Confirmar visualização de uma tarefa
@@ -353,6 +404,12 @@ export function TasksProvider({ children }) {
    */
   const startPolling = useCallback(() => {
     stopPolling();
+    // ÉPICO Event-Driven — o polling é a REDE DE SEGURANÇA, não o mecanismo
+    // primário. Com o WebSocket ligado, os eventos `task_*` trazem o estado
+    // no momento em que muda e o intervalo não chega a ser criado. Se a
+    // ligação cair (rede, token expirado, Redis em baixo), o efeito abaixo
+    // volta a chamar esta função e o polling retoma — a UI nunca fica cega.
+    if (wsConnectedRef.current) return;
     const interval = activeCountRef.current > 0 ? BASE_POLLING_INTERVAL : IDLE_POLLING_INTERVAL;
     pollingIntervalRef.current = setInterval(fetchActiveTasks, interval);
   }, [fetchActiveTasks, stopPolling]);
@@ -387,6 +444,21 @@ export function TasksProvider({ children }) {
     if (circuitBreakerActiveRef.current) return;
     startPolling();
   }, [activeCount, startPolling, user]);
+
+  // ÉPICO Event-Driven — comutação entre tempo real e fallback.
+  // WebSocket liga  → parar o polling (os eventos assumem).
+  // WebSocket cai   → um fetch imediato (para recuperar o que se perdeu
+  //                   enquanto esteve em baixo) e retomar o polling.
+  useEffect(() => {
+    if (!user) return;
+    if (wsConnected) {
+      stopPolling();
+      return;
+    }
+    if (circuitBreakerActiveRef.current) return;
+    fetchActiveTasks();
+    startPolling();
+  }, [wsConnected, user, stopPolling, startPolling, fetchActiveTasks]);
   
   /**
    * Listener para visibilidade da página
@@ -421,6 +493,9 @@ export function TasksProvider({ children }) {
     completedUnacknowledged,
     failedCount,
     isLoading,
+    // ÉPICO Event-Driven — expõe se o tempo real está activo, para que os
+    // consumidores (ex.: TasksPanel) saibam que não precisam de pedir nada.
+    isRealtime: wsConnected,
     fetchActiveTasks,
     acknowledgeTask,
     cancelTask,
@@ -428,7 +503,7 @@ export function TasksProvider({ children }) {
     TaskTypes,
     TaskStatus,
     TaskTypeLabels,
-  }), [tasks, activeCount, completedUnacknowledged, failedCount, isLoading, fetchActiveTasks, acknowledgeTask, cancelTask, getTaskDetails]);
+  }), [tasks, activeCount, completedUnacknowledged, failedCount, isLoading, wsConnected, fetchActiveTasks, acknowledgeTask, cancelTask, getTaskDetails]);
   
   return (
     <TasksContext.Provider value={value}>

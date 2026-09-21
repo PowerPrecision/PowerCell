@@ -151,6 +151,7 @@ import { safeCopyToClipboard } from "../utils/clipboard";
 import { safeString, safeStringArray } from "../utils/safeString";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { safeParseISO } from "../lib/utils";
+import { applyProcessDelta } from "../utils/processDelta";
 import { notifyFinancialEngine } from "../utils/financialEngineFeedback";
 
 import {
@@ -222,6 +223,15 @@ const ProcessDetails = () => {
       if (data?.process_id === id) {
         portalRefreshRef.current();
       }
+    },
+    // BUGFIX (reatividade do cartão de Atribuição) — reagir ao delta de
+    // processo. Quem clica em "Indexado" já vê o cartão actualizado pelo
+    // refetch, mas OUTRO operador com o mesmo processo aberto não via nada:
+    // esta página não escutava `process_updated`. A auto-atribuição
+    // pós-indexação difunde agora um delta com os nomes/ids já resolvidos,
+    // que aqui é fundido no estado local (sem refetch).
+    onProcessUpdate: (_type, data) => {
+      setProcess((prev) => applyProcessDelta(prev, data, id));
     },
   });
   const [process, setProcess] = useState(null);

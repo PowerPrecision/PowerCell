@@ -377,6 +377,64 @@ async def trigger_financial_engine_safe(process: dict, user: dict) -> dict[str, 
         return fallback
 
 
+async def broadcast_assignment_delta(
+    *,
+    process_id: str,
+    process: dict,
+    status: Optional[str],
+    broadcast_fn,
+) -> None:
+    """Difunde a atribuição já persistida como delta de processo.
+
+    Lê o processo de novo (a auto-atribuição acabou de o escrever) e envia
+    `assigned_consultor_ids` / `consultor_names` / equivalentes de mediador
+    no delta, que `build_process_delta_payload` já sabe transportar. Sem
+    isto, outros operadores com o processo aberto só voltariam a ver a
+    atribuição no próximo refresh manual.
+
+    Nunca levanta excepção: a indexação já está persistida e não pode ser
+    revertida por uma falha de broadcast.
+    """
+    try:
+        from services.websocket_manager import WSEventType
+
+        fresh = await db.processes.find_one(
+            {"id": process_id},
+            {
+                "_id": 0,
+                "assigned_consultor_ids": 1, "consultor_names": 1,
+                "assigned_mediador_ids": 1, "mediador_names": 1,
+                "updated_at": 1,
+            },
+        ) or {}
+
+        if not any(
+            fresh.get(k)
+            for k in (
+                "assigned_consultor_ids", "consultor_names",
+                "assigned_mediador_ids", "mediador_names",
+            )
+        ):
+            return  # nada foi atribuído — não há delta a enviar
+
+        await broadcast_fn(
+            event_type=WSEventType.PROCESS_UPDATED,
+            process_id=process_id,
+            client_name=process.get("client_name", ""),
+            status=status,
+            assigned_consultor_ids=fresh.get("assigned_consultor_ids"),
+            consultor_names=fresh.get("consultor_names"),
+            assigned_mediador_ids=fresh.get("assigned_mediador_ids"),
+            mediador_names=fresh.get("mediador_names"),
+            updated_at=fresh.get("updated_at"),
+        )
+    except Exception as ws_err:
+        logger.debug(
+            f"Erro ao difundir delta de atribuição do processo "
+            f"{process_id}: {ws_err}"
+        )
+
+
 async def run_mark_indexed_side_effects(
     *,
     process: dict,
@@ -454,6 +512,19 @@ async def run_mark_indexed_side_effects(
 
     consultant_result, is_pre_registo = await auto_assign_after_indexacao(
         process, process_id, user, current_status, process_ref,
+    )
+
+    # BUGFIX (reatividade do cartão de Atribuição) — SEGUNDO broadcast.
+    # O broadcast acima corre ANTES da auto-atribuição, pelo que só
+    # transporta a mudança de estado: quem estivesse com o processo aberto
+    # noutro separador recebia o evento e refrescava para dados ainda SEM
+    # consultor/intermediário. Este segundo delta vai depois da escrita e
+    # leva os campos de atribuição já resolvidos.
+    await broadcast_assignment_delta(
+        process_id=process_id,
+        process=process,
+        status=next_status or current_status,
+        broadcast_fn=broadcast_fn,
     )
 
     financial_engine = await trigger_financial_engine_safe(process, user)

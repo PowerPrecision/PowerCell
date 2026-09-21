@@ -1418,7 +1418,22 @@ async def dual_auto_assign_on_pre_registo_transition(
     else:
         consultor = await _find_least_busy_user("consultor", company_id)
         if consultor:
+            # BUGFIX (reatividade do cartão de Atribuição) — escrever o
+            # conjunto CANÓNICO de campos multi-assignee, o mesmo que o
+            # fluxo manual grava (`client_assign.py`). Antes só se gravava
+            # `consultant_id` (legado, grafia inglesa), que NENHUM leitor do
+            # frontend conhece: o `AssignmentContextCard` lê
+            # `consultor_names` → `assigned_consultor_ids` →
+            # `assigned_consultor_id`, pelo que o cartão ficava em branco
+            # apesar de a atribuição ter corrido bem e de a Timeline a
+            # mostrar. `consultant_id` mantém-se porque
+            # `process_list_filters` filtra por ele em "Os Meus Processos".
             update_data["consultant_id"] = consultor["id"]
+            update_data["assigned_consultor_id"] = consultor["id"]
+            update_data["assigned_consultor_ids"] = [consultor["id"]]
+            update_data["consultor_id"] = consultor["id"]
+            update_data["consultor_name"] = consultor["name"]
+            update_data["consultor_names"] = [consultor["name"]]
             result_data["consultant_id"] = consultor["id"]
             result_data["consultant_name"] = consultor["name"]
             newly_assigned.append(consultor)
@@ -1441,7 +1456,12 @@ async def dual_auto_assign_on_pre_registo_transition(
     else:
         intermediario = await _find_least_busy_user("intermediario", company_id)
         if intermediario:
+            # Simétrico do consultor — ver comentário acima.
             update_data["mediador_id"] = intermediario["id"]
+            update_data["assigned_mediador_id"] = intermediario["id"]
+            update_data["assigned_mediador_ids"] = [intermediario["id"]]
+            update_data["mediador_name"] = intermediario["name"]
+            update_data["mediador_names"] = [intermediario["name"]]
             result_data["mediador_id"] = intermediario["id"]
             result_data["mediador_name"] = intermediario["name"]
             newly_assigned.append(intermediario)

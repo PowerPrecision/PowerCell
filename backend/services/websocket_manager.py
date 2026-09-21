@@ -234,6 +234,14 @@ class WSEventType:
     DEADLINE_UPDATED = "deadline_updated"
     DEADLINE_REMINDER = "deadline_reminder"
     
+    # Tarefas em background (Event-Driven — canal Redis `powercell_system_events`)
+    # Emitidos por `TaskLogService` / `BackgroundJobService` / importações IA
+    # e encaminhados por `route_system_event` APENAS para o destinatário.
+    TASK_STARTED = "task_started"
+    TASK_PROGRESS = "task_progress"
+    TASK_COMPLETED = "task_completed"
+    TASK_FAILED = "task_failed"
+
     # Sistema
     HEARTBEAT = "heartbeat"
     CONNECTION_STATUS = "connection_status"
@@ -261,3 +269,78 @@ def create_ws_message(event_type: str, data: dict, timestamp: Optional[str] = No
         "data": data,
         "timestamp": timestamp or datetime.now(timezone.utc).isoformat()
     }
+
+
+# ====================================================================
+# ROUTER DE EVENTOS DE SISTEMA (canal Redis → WebSocket)
+# ====================================================================
+# ÉPICO Event-Driven: `services/redis_pubsub` entrega aqui cada envelope
+# que chega ao canal `powercell_system_events` (e também, em bypass, os
+# eventos publicados neste mesmo processo quando o Redis está em baixo).
+#
+# TENANT-SAFETY — a regra central deste módulo:
+#   A entrega é SEMPRE dirigida ao `user_id` do envelope, através de
+#   `send_personal_message`, que só escreve nos sockets desse utilizador.
+#   Um envelope sem `user_id` é DESCARTADO, nunca difundido. Não existe
+#   aqui nenhum caminho que faça fan-out de um evento de tarefa para
+#   outros utilizadores — nem por omissão de campo, nem por erro de
+#   payload. Falha fechada, nunca aberta.
+
+
+async def route_system_event(envelope: dict) -> bool:
+    """Encaminha um evento do canal Redis para as ligações do destinatário.
+
+    Args:
+        envelope: ``{"id", "type", "user_id", "company_id", "payload",
+            "published_at"}`` — ver ``redis_pubsub.build_event_envelope``.
+
+    Returns:
+        ``True`` se foi entregue a pelo menos uma ligação deste processo;
+        ``False`` se o envelope era inválido ou o utilizador não tem
+        ligações **aqui** (o normal com vários workers: o envelope chega a
+        todos, mas só o worker que detém o socket entrega).
+
+    Nunca levanta excepção: um evento malformado não pode derrubar o
+    listener que serve todos os outros.
+    """
+    if not isinstance(envelope, dict):
+        return False
+
+    user_id = envelope.get("user_id")
+    event_type = envelope.get("type")
+
+    # Tenant-safety: sem destinatário explícito não há entrega possível.
+    if not user_id or not event_type:
+        logger.warning(
+            "[WS-ROUTER] Evento descartado sem destinatário "
+            f"(type={event_type!r}) — nunca difundido"
+        )
+        return False
+
+    if not manager.is_user_connected(user_id):
+        # Normal em multi-worker: o socket vive noutro processo.
+        logger.debug(
+            f"[WS-ROUTER] '{event_type}' para {user_id}: sem ligações "
+            "neste worker"
+        )
+        return False
+
+    message = create_ws_message(
+        event_type,
+        envelope.get("payload") or {},
+        timestamp=envelope.get("published_at"),
+    )
+    # `event_id` permite ao cliente descartar duplicados (reconexões).
+    if envelope.get("id"):
+        message["event_id"] = envelope["id"]
+
+    try:
+        await manager.send_personal_message(message, user_id)
+        logger.debug(f"[WS-ROUTER] '{event_type}' entregue a {user_id}")
+        return True
+    except Exception as e:
+        logger.warning(
+            f"[WS-ROUTER] Falha ao entregar '{event_type}' a {user_id}: "
+            f"{type(e).__name__}: {e}"
+        )
+        return False

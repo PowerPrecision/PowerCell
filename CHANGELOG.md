@@ -3,6 +3,88 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Correcção: bateria financeira dependente da ordem dos testes
+
+### Corrigido
+- **Três testes da bateria financeira falhavam no CI e passavam isoladamente.** `services/task_log_service.py` faz `from database import db` ao nível do módulo, ficando com a sua própria referência ao proxy. O arnês da bateria patchava `database.db` e `financial_engine.db`, mas não `task_log_service.db` — e `patch("database.db", ...)` só apanha um módulo que ainda não tenha sido importado. Bastava um teste unitário importar `task_log_service` antes (`test_task_extraction_helpers.py`, `test_task_logs_extraction_helpers.py`) para o `create_task` tentar escrever no Mongo real: a escrita falhava, a excepção era engolida e a bateria ficava sem eventos nenhuns. O arnês passa a patchar o módulo explicitamente, tornando o resultado independente da ordem de recolha.
+- **`_emit_event_safe` escondia a falha.** Registava a `debug`, pelo que uma escrita de TaskLog falhada era invisível. Passa a `warning`: um Redis em baixo não chega a este ramo (`publish_event` trata disso e devolve `False` sem levantar), logo uma excepção aqui é sempre inesperada. Continua a nunca propagar — a tarefa segue na mesma.
+
+## [2026-09-21] — Épico 5: Webmail Pro & Live Sync
+
+### Corrigido
+- **`new_email` morria em silêncio com vários workers.** A notificação de email novo entregava pelo `ConnectionManager` em memória: o worker que corre a sincronização IMAP quase nunca é o que detém o socket do utilizador, e `is_user_connected` respondia `False` nesse worker, descartando o evento. A emissão passa pelo canal Redis do Épico 4 (`redis_pubsub.publish_event`), com **um envelope por destinatário** — o worker dono da ligação é que entrega. Sem Redis, degrada para entrega in-process, como antes.
+- **As respostas enviadas pelo CRM nasciam fora da conversa.** O sistema lia `Message-ID`/`In-Reply-To`/`References` do IMAP (e usava-os no Smart Threading), mas enviava sem nenhum deles. Sem `Message-ID` próprio, a resposta do cliente não tinha a que se agarrar; sem `In-Reply-To`, a nossa resposta ficava solta. Cada troca partia-se em mensagens avulsas, no nosso Webmail e no cliente do destinatário. `send_email` passa a gerar o `Message-ID` e a propagar a cadeia, e o compositor envia os cabeçalhos ao responder.
+- **O evento de email novo obrigava a um GET completo da lista.** Chegava o `new_email` e disparava `invalidateQueries` — um round-trip inteiro para mostrar uma linha que o próprio evento já transportava, com a lista a saltar para a página 1.
+
+### Adicionado
+- **Conversas (threads) na caixa de entrada.** Uma troca de 5 emails ocupava 5 linhas; passa a ocupar 1, expansível, com contador de mensagens e de não-lidos.
+- **"Responder a Todos"** — o remetente vai para Para, os restantes intervenientes para Cc, sem o próprio utilizador nem duplicados.
+- **Marcar como lida / não lida** na leitura (o endpoint já existia e sincroniza a flag no IMAP; faltava a acção na UI).
+- **`backend/services/email_threading.py`** — threading RFC 5322 em funções puras, partilhado pelo envio e pelo agrupamento.
+- **`frontend/src/utils/emailThreads.js`** e **`webmailRealtime.js`** — agrupamento e inserção em tempo real, puros e testados à parte.
+- **`backend/tests/integration/test_e2e_webmail_realtime.py`** (15 testes) — IMAP simulado → sync → Pub/Sub → resposta com threading.
+
+### Notas de teste
+- Em `dev` as ligações IMAP/SMTP são falsas: o servidor IMAP é substituído na fronteira de rede do sync (`_fetch_all_from_folder_sync`) e o SMTP em `smtplib`. Tudo o resto é código de produção.
+- O teste do SMTP lê a mensagem **serializada** (`sendmail(..., msg.as_string())`) e reparsa-a — prova que os cabeçalhos sobrevivem à serialização, não apenas que foram postos no objecto.
+- A prova de tempo real usa um **Redis real** e é saltada quando não há Redis alcançável.
+- Limitação assumida: o agrupamento em conversas é **por página** (30 emails). Uma conversa que atravesse a paginação aparece como dois grupos.
+
+## [2026-09-21] — QA: cartão de Atribuição em branco + bateria e2e
+
+### Corrigido
+- **Cartão de Atribuição em branco após marcar um processo como indexado.** A dupla auto-atribuição gravava apenas `consultant_id` / `mediador_id` (campos legados, grafia inglesa), mas o `AssignmentContextCard` lê `consultor_names` → `assigned_consultor_ids` → `assigned_consultor_id`. Nenhum desses campos era escrito, por isso o cartão ficava vazio embora a atribuição tivesse corrido bem e a Timeline a mostrasse. A auto-atribuição passa a gravar o conjunto canónico completo, igual ao fluxo manual (`client_assign.py`); `consultant_id` mantém-se porque `process_list_filters` filtra por ele em "Os Meus Processos".
+- **Delta de atribuição difundido tarde demais.** O broadcast de `process_updated` corria ANTES da auto-atribuição, pelo que outro operador com o processo aberto recebia o evento e refrescava para dados ainda sem consultor. Passa a haver um segundo delta (`broadcast_assignment_delta`) emitido depois da escrita, com os nomes e ids já resolvidos.
+- **`ProcessDetails` não escutava `process_updated`.** O delta acima não teria ouvintes nesta página. Passa a ser fundido no estado local por `utils/processDelta.applyProcessDelta`, sem refetch.
+
+### Adicionado
+- **`frontend/src/utils/processDelta.js`** — merge do delta com lista de campos explícita. É o contrato entre backend e UI: um desencontro de nomes (a causa do bug acima) passa a falhar em teste em vez de aparecer em produção. A allowlist também impede que um payload inesperado sobreponha campos que o utilizador está a editar.
+- **`backend/tests/integration/test_e2e_financial_realtime.py`** (14 testes) — bateria ponta a ponta da cadeia indexação → atribuição → motor financeiro → PDF → eventos em tempo real.
+
+### Notas de teste
+- A bateria corre **sem MongoDB** (usa a `FakeAsyncDatabase`) e usa um **Redis real** para a prova de Pub/Sub, saltando esse teste quando não há Redis alcançável — a falta de infra-estrutura não se transforma em falso negativo.
+- Cenários cobertos: caminho feliz; IRS ilegível; documentos legíveis sem valores; Euribor em baixo (fallback ao spread contratado); Euribor estimada (aviso); S3 em baixo; motor desligado por configuração; processo sem documentos financeiros; processo não-crédito; Redis vivo; Redis em baixo.
+- Em todos os cenários de falha valida-se explicitamente que **a indexação não é revertida** e que a atribuição se mantém.
+- Os testes foram validados por *mutation testing*: reverter a correcção da atribuição torna 4 testes vermelhos, e trocar a entrega dirigida por um broadcast (quebrando a tenant-safety) torna a prova de tempo real vermelha.
+
+---
+
+## [2026-09-21] — Épico: Refatorização para Event-Driven (Redis Pub/Sub e WebSockets)
+
+As tarefas pesadas (importações, análises IA, envio de emails, extracção de documentos, motor de simulação financeira) deixam de ser descobertas por polling e passam a **publicar eventos** num canal Redis, que o WebSocket Manager retransmite em tempo real — e **apenas** para o utilizador dono da tarefa.
+
+### Adicionado
+- **`services/redis_pubsub.py`** — camada Pub/Sub sobre `redis.asyncio` (canal `powercell_system_events`, configurável via `SYSTEM_EVENTS_CHANNEL`), com envelope tipado, circuit breaker e listener com reconexão por backoff exponencial (1s → 30s).
+- **`services/task_events.py`** — tradutor único de estado → evento (`task_started` / `task_progress` / `task_completed` / `task_failed`) e construtor do payload partilhado pelos dois sistemas de tarefas do produto.
+- **`WSEventType.TASK_*`** e **`websocket_manager.route_system_event`** — encaminhamento dirigido do canal Redis para as ligações WebSocket.
+- **`frontend/src/utils/taskEvents.js`** (merge puro, testado) e **`hooks/useTaskEvents.js`** (subscrição).
+
+### Alterado
+- **Emissão nos 3 pontos de estrangulamento**, sem tocar num único chamador: `TaskLogService.create_task/update_task`, `BackgroundJobService.{create_job,update_progress,set_status,set_result,set_error}` e `routes/ai_bulk/jobs.py::{create,update,finish}_background_job_db`.
+- **`server.py`** — o listener arranca no startup e pára no shutdown. Deliberadamente **fora** do guard `_is_primary_worker`: ao contrário dos schedulers, cada worker tem de subscrever o canal porque cada um detém as suas próprias ligações WebSocket.
+- **Frontend reactivo**: `TasksContext` actualiza o estado ao receber o evento (e expõe `isRealtime`); `useBackgroundJobsQuery` invalida as queries por evento; `TasksPanel` deixou de usar o intervalo de 10s.
+
+### Corrigido
+- **Eventos perdidos em multi-worker**: `ConnectionManager` é um dicionário em memória por processo, pelo que uma tarefa a correr no worker A nunca alcançava um WebSocket aberto no worker B — esses eventos desapareciam em silêncio. O canal Redis é agora o barramento entre workers.
+- **Atraso de até 5s** a reflectir progresso na UI (intervalo do polling), agora substituído por entrega no instante da mudança.
+
+### Isolamento de dados (tenant-safety)
+- Todo o envelope transporta o `user_id` **destinatário**, e a entrega é feita por `send_personal_message`, que só escreve nos sockets desse utilizador.
+- Um envelope **sem** `user_id` é **descartado** — na publicação, na recepção e no router. Não existe caminho que faça fan-out de um evento de tarefa: falha fechada, nunca aberta. Uma tarefa cujo dono não se consiga resolver simplesmente não gera evento.
+
+### Resiliência (graceful degradation)
+- Publicar um evento **nunca** levanta excepção para o chamador: as operações HTTP core e as próprias tarefas não podem falhar por causa desta camada.
+- Redis em baixo ou por configurar → o evento é entregue **in-process** (as ligações do worker actual continuam a receber) e o listener fica em retry silencioso.
+- **O polling não foi apagado — mudou de papel.** Passa a ser a rede de segurança: pára quando o WebSocket liga e retoma sozinho quando cai (com um fetch imediato para recuperar o que se perdeu). Apagá-lo deixaria a UI cega numa falha de rede.
+- Upstash (`redis_cache.py`) fica intacto: é a API **REST**, não suporta `SUBSCRIBE`. Cache e eventos coexistem em infra-estruturas distintas.
+
+### Testes
+- **NOVO** `backend/tests/unit/test_redis_pubsub.py` (72): envelope e serialização, recusa de payloads desproporcionados, mensagens corrompidas, publicação e circuit breaker, listener e reconexão, mapeamento estado → evento (incluindo str-Enums) e — com maior peso — os caminhos de tenant-safety e de degradação.
+- **NOVO** `frontend/src/utils/taskEvents.test.js` (17): merge, imutabilidade, inserção de tarefas novas e filtragem por origem.
+- Validação adicional contra um **Redis real**: percurso completo publish → SUBSCRIBE → router confirmado, com os eventos de dois utilizadores a não se cruzarem, e degradação verificada matando o Redis a meio de uma emissão.
+
+---
+
 ## [2026-09-21] — Épico: Motor de Simulação Financeira Automatizada (DSTI & Cenários)
 
 Validar a indexação de um processo de **Crédito Habitação** que já tenha documentos financeiros indexados (IRS, recibos de vencimento, notas de liquidação) passa a disparar, em segundo plano, a extracção dos rendimentos, o cálculo do DSTI cruzado com a Euribor em vigor e a geração de uma **proposta em PDF com 3 cenários** (Taxa Fixa / Taxa Mista / Taxa Variável), arquivada no S3 e anexada ao separador Documentos do processo.

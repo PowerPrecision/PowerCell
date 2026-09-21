@@ -79,6 +79,14 @@ async def create_background_job_db(
     
     # Log sem dados controlados pelo utilizador
     logger.info(f"[BG JOB] Criado: tipo={_sanitize_for_log(job_type)} ficheiros={total_files}")
+
+    # ÉPICO Event-Driven (Eixo 3) — `task_started` para o dono da importação.
+    await _emit_bulk_job_event(
+        job_id, user_email,
+        status="running", is_creation=True,
+        title=job_type, task_type=job_type, progress=0,
+        message=initial_step,
+    )
     return job_id
 
 
@@ -117,6 +125,16 @@ async def update_background_job_db(job_id: str, **kwargs):
     await db.background_jobs.update_one(
         {"id": job_id},
         {"$set": db_update}
+    )
+
+    # ÉPICO Event-Driven — `task_progress` com a percentagem recalculada
+    # acima. Substitui o `refetchInterval` de 5s do Centro de Operações.
+    _cached = background_processes.get(job_id) or {}
+    await _emit_bulk_job_event(
+        job_id, _cached.get("user_email"),
+        status=db_update.get("status") or _cached.get("status") or "running",
+        progress=db_update.get("progress", _cached.get("progress")),
+        message=db_update.get("current_step") or _cached.get("current_step"),
     )
 
 
@@ -159,6 +177,16 @@ async def finish_background_job_db(
         {"$set": db_update}
     )
     
+    # ÉPICO Event-Driven — `task_completed` / `task_failed`.
+    _cached = background_processes.get(job_id) or {}
+    await _emit_bulk_job_event(
+        job_id, _cached.get("user_email"),
+        status=status,
+        progress=100 if success else None,
+        message=final_step,
+        error=message if not success else None,
+    )
+
     logger.info(f"[BG JOB] Terminado: status={status}")
 
 
@@ -444,3 +472,61 @@ async def cleanup_stuck_jobs(max_age_hours: int = 2) -> dict:
         "cleaned": len(cleaned_ids),
         "details": stuck_jobs
     }
+
+
+# ====================================================================
+# EMISSÃO DE EVENTOS (ÉPICO Event-Driven)
+# ====================================================================
+# Estes jobs identificam o dono por `user_email`, mas o WebSocket encaminha
+# por `user_id`. A tradução é feita aqui, com cache em memória — sem ela,
+# cada actualização de progresso faria uma query a `db.users`.
+
+_USER_ID_BY_EMAIL: dict = {}
+
+
+async def _resolve_user_id(user_email: Optional[str]) -> Optional[str]:
+    """`user_id` a partir do email do dono do job (com cache)."""
+    if not user_email:
+        return None
+    if user_email in _USER_ID_BY_EMAIL:
+        return _USER_ID_BY_EMAIL[user_email]
+    try:
+        user = await db.users.find_one({"email": user_email}, {"_id": 0, "id": 1})
+        user_id = (user or {}).get("id")
+    except Exception as e:
+        logger.debug(f"[BG JOB] user_id não resolvido para o dono do job: {e}")
+        return None
+    if user_id:
+        # Cache limitada: estes jobs são poucos e de vida curta.
+        if len(_USER_ID_BY_EMAIL) > 500:
+            _USER_ID_BY_EMAIL.clear()
+        _USER_ID_BY_EMAIL[user_email] = user_id
+    return user_id
+
+
+async def _emit_bulk_job_event(
+    job_id: str,
+    user_email: Optional[str],
+    *,
+    status: Optional[str] = None,
+    is_creation: bool = False,
+    **fields,
+) -> None:
+    """Emite um evento de job de importação IA (nunca propaga falhas)."""
+    try:
+        from services.task_events import SOURCE_BACKGROUND_JOB, emit_task_event
+
+        user_id = await _resolve_user_id(user_email)
+        if not user_id:
+            return  # sem destinatário não há evento (nunca difundir)
+
+        await emit_task_event(
+            task_id=job_id,
+            user_id=user_id,
+            source=SOURCE_BACKGROUND_JOB,
+            status=status,
+            is_creation=is_creation,
+            **{k: v for k, v in fields.items() if v is not None},
+        )
+    except Exception as e:
+        logger.debug(f"[BG JOB] Evento não emitido para {job_id}: {e}")
