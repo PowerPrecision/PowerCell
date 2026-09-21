@@ -3,6 +3,15 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Envio de email de teste
+
+### Adicionado
+- **Botão "Enviar Email de Teste"** na configuração de email. O "Testar Ligação" autentica em IMAP e SMTP — prova que as credenciais são aceites, e nada mais. Um envio a sério falha **depois** do login: relay recusado para domínios externos, política de remetente, tamanho de anexo, rate limits. O novo botão envia um email verdadeiro para o próprio utilizador, pelo `send_email` de produção. Se chegar à caixa de entrada, o envio funciona.
+- A resposta (e a mensagem de erro) dizem **que conta** e **que origem de configuração** foram usadas — diagnosticar um envio falhado deixa de exigir os logs do servidor.
+
+### Alterado
+- **`email_config_resolver.resolve_sending_account`** passa a ser o ponto único de resolução da conta de envio (perfil activo → Caixa Geral). O `send-documentation` tinha esta cadeia em linha; foi extraída e ambos a partilham. Duplicá-la é exactamente o que permitiu o desencontro entre testar e enviar corrigido acima.
+
 ## [2026-09-21] — Correcção: teste de email verde com envio a falhar (535)
 
 ### Corrigido

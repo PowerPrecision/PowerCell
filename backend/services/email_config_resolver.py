@@ -625,3 +625,105 @@ async def _load_system_config() -> Optional[Dict[str, Any]]:
     except Exception as e:
         logger.warning(f"[EmailConfigResolver] Erro ao carregar system_config: {e}")
         return None
+
+
+# ====================================================================
+# CONTA DE ENVIO — ponto ÚNICO de resolução
+# ====================================================================
+
+
+async def resolve_sending_account(
+    request: Any,
+    current_user: Dict[str, Any],
+    active_company_id: Optional[str] = None,
+) -> tuple:
+    """Resolve a conta SMTP que um envio deste utilizador vai mesmo usar.
+
+    PORQUÊ AQUI E NÃO EM CADA CHAMADOR: o incidente de 2026-09-21 nasceu de
+    dois caminhos resolverem a configuração de email de maneiras diferentes
+    — o botão "Testar" dava verde numa sub-configuração e o envio usava
+    outra. Duplicar esta lógica é o que permite essa divergência, por isso
+    ela vive num sítio só e todos a chamam.
+
+    Ordem (a mesma do envio de documentação):
+      1. Configuração do perfil activo (`resolve_email_config_for_sync`
+         com o papel do UCR).
+      2. Caixa Geral da empresa.
+      3. Nenhuma — cabe ao chamador decidir o erro a devolver.
+
+    Returns:
+        ``(EmailAccount | None, source)`` — ``source`` identifica a origem
+        (``"profile:<config_source>"``, ``"caixa_geral"``, ``"none"``) e é
+        o que torna um envio falhado diagnosticável sem ler logs.
+    """
+    # Import tardio: `email_service` importa deste módulo.
+    from services.email_service import EmailAccount
+
+    account = None
+    source = "none"
+
+    try:
+        ucr_role = (
+            await resolve_active_ucr_role(request, current_user, active_company_id)
+            if request is not None
+            else current_user.get("role", "")
+        )
+        resolved = await resolve_email_config_for_sync(
+            current_user["id"],
+            active_role=ucr_role,
+            active_company_id=active_company_id,
+        )
+        if resolved:
+            password = decrypt_email_secret(
+                resolved.get("encrypted_password", ""),
+                (
+                    f"sending-account user={current_user.get('id')} "
+                    f"email={resolved.get('email_address')} "
+                    f"source={resolved.get('config_source')}"
+                ),
+            )
+            host = resolved.get("smtp_server") or resolved.get("imap_server")
+            user_email = resolved.get("email_address")
+            if user_email and host and password:
+                account = EmailAccount(
+                    name="personal",
+                    imap_server=resolved.get("imap_server") or host,
+                    imap_port=int(resolved.get("imap_port") or 993),
+                    smtp_server=host,
+                    smtp_port=int(resolved.get("smtp_port") or 465),
+                    email=user_email,
+                    password=password,
+                )
+                source = f"profile:{resolved.get('config_source')}"
+    except Exception as exc:
+        logger.warning(
+            "[SendingAccount] Falha a resolver SMTP do perfil user=%s: %s: %s",
+            current_user.get("id"), type(exc).__name__, exc,
+        )
+
+    if account is None:
+        try:
+            caixa = await load_caixa_geral_config(active_company_id)
+            if (
+                caixa
+                and caixa.get("password")
+                and caixa.get("smtp_server")
+                and caixa.get("email_address")
+            ):
+                account = EmailAccount(
+                    name="caixa_geral",
+                    imap_server=caixa.get("imap_server") or caixa["smtp_server"],
+                    imap_port=int(caixa.get("imap_port") or 993),
+                    smtp_server=caixa["smtp_server"],
+                    smtp_port=int(caixa.get("smtp_port") or 465),
+                    email=caixa["email_address"],
+                    password=caixa["password"],
+                )
+                source = caixa.get("source") or "caixa_geral"
+        except Exception as exc:
+            logger.warning(
+                "[SendingAccount] Falha a resolver Caixa Geral company=%s: %s: %s",
+                active_company_id, type(exc).__name__, exc,
+            )
+
+    return account, source

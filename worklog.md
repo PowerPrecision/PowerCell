@@ -1,4 +1,21 @@
 ---
+Task ID: envio-email-de-teste
+Agent: Cloud Agent
+Task: Botão "Enviar Email de Teste" — provar a entrega, não só as credenciais
+
+Date: 2026-09-21
+
+Work Log:
+- Pergunta do utilizador: "o teste não devia testar a receção e o envio?". Resposta verificada no código: JÁ testa ambos — `test_imap_connection` faz `mail.login` E `smtp_server.login`, com `success = imap_ok and smtp_ok`, e o `EmailConfigForm` mostra "IMAP: Ligado | SMTP: Ligado". O verde do incidente era honesto sobre o que testou; testou é a sub-config errada (corrigido no commit anterior).
+- Lacuna real identificada: autenticar não é entregar. Relay recusado, política de remetente, tamanho de anexo e rate limits falham DEPOIS do `login()`. Daí o envio de teste.
+- Decisão de desenho: NÃO duplicar a resolução da conta. Duplicá-la seria repetir a causa do incidente (dois caminhos a resolver diferente). Extraí `resolve_sending_account` para `email_config_resolver` (perfil activo → Caixa Geral → nenhuma, devolvendo também a `source`) e pus o `send-documentation` a usá-la — a cadeia estava lá em linha.
+- **NOVO** `POST /users/me/email-config/send-test` → `run_send_test_email`: resolve pelo helper, envia pelo `send_email` de produção para o próprio utilizador. Sem `process_id` de propósito (o `send_email` só arquiva quando há processo; um teste não polui o histórico). A `source` e a conta vão na resposta E na mensagem de erro — sem isso, diagnosticar obriga a ler logs do servidor, que foi o que atrasou o incidente.
+- Frontend: botão "Enviar Email de Teste" (só `isSelf` e com credenciais já guardadas, porque o envio usa o que está na BD e não o formulário) + painel de resultado com conta/SMTP/origem. Tokens semânticos do Shadcn — confirmei que as minhas linhas não entram nos avisos da regra de cores (os avisos são do painel legado).
+- **NOVO** `tests/unit/test_email_send_test.py` (6): a mensagem sai mesmo para o SMTP (o que distingue do teste de ligação), a resposta identifica a conta, o 535 devolve 502 com conta e origem no detalhe, sem conta resolvida dá 400, não arquiva no histórico, e guarda contra a re-duplicação da resolução.
+- Um teste ANTIGO falhou e fez o seu trabalho: `test_handlers_resolvem_o_papel_pela_mesma_funcao` afirmava `resolve_active_ucr_role` em `email_documentation.py`, que deixou de o chamar directamente depois da extracção. Actualizado para afirmar o novo ponto único, não silenciado.
+- Verificação: 1549 unit+e2e verdes nas condições do CI; flake8 gate 0; eslint --quiet limpo; build verde. Dois F401 em `email_config_resolver`/`email_documentation` são PRÉ-EXISTENTES (confirmado com `git stash`).
+
+---
 Task ID: fix-email-config-chave-escrita-leitura
 Agent: Cloud Agent
 Task: Envio de documentação falha com 535 apesar de o teste de email dar verde
