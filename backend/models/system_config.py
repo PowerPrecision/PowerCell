@@ -203,6 +203,51 @@ class DSTIConfig(BaseModel):
     critical_risk_threshold: float = 50.0
 
 
+class FinancialSimulatorConfig(BaseModel):
+    """Motor de Simulação Financeira Automatizada (DSTI & Cenários).
+
+    Parametriza os 3 cenários de Crédito Habitação (Taxa Fixa / Mista /
+    Variável) gerados automaticamente quando a Indexação valida documentos
+    financeiros (IRS / Recibos de Vencimento) de um processo.
+
+    ZERO HARDCODING: nenhum spread, prazo ou limiar vive no código do
+    ``services/financial_simulator.py`` — tudo vem daqui ou de configuração
+    já existente, deliberadamente NÃO duplicada:
+      - prazo por defeito  → ``credit_services.default_term_years``
+      - LTV máximo         → ``credit_services.max_loan_to_value``
+      - validade da proposta → ``credit_services.simulation_validity_days``
+      - limite DSTI (BdP)  → ``dsti_analysis.critical_risk_threshold``
+    """
+
+    # Liga/desliga o disparo automático pós-indexação (o cálculo manual,
+    # se vier a existir, não depende deste flag).
+    enabled: bool = True
+
+    # Índice Euribor usado como base das taxas indexadas ("1m"|"3m"|"6m"|"12m").
+    # Resolvido contra `services/euribor_service.get_euribor_rates()`.
+    euribor_index: str = "12m"
+
+    # Spreads comerciais por cenário (pontos percentuais somados ao índice).
+    spread_variavel: float = 1.00
+    spread_mista: float = 1.00
+    spread_fixa: float = 1.25
+
+    # Prémio da taxa fixa sobre o índice (p.p.). A taxa fixa não é indexada:
+    # este prémio + spread_fixa são a aproximação usada enquanto não houver
+    # tabela de preçário do banco carregada no sistema.
+    premio_taxa_fixa: float = 0.50
+
+    # Anos em taxa fixa no cenário de Taxa Mista (depois indexa à Euribor).
+    periodo_fixo_mista_anos: int = 5
+
+    # Seguros mensais estimados (0 = não incluídos na prestação/TAEG).
+    seguro_vida_mensal: float = 0.0
+    seguro_multirriscos_mensal: float = 0.0
+
+    # Comissões iniciais (€) consideradas apenas no cálculo da TAEG.
+    comissoes_iniciais: float = 0.0
+
+
 class AutoDraftConfig(BaseModel):
     """Configuração de rascunhos automáticos de e-mails"""
     enabled: bool = False
@@ -331,6 +376,7 @@ class SystemConfig(BaseModel):
     credit_services: CreditServicesConfig = CreditServicesConfig()
     document_recipients: DocumentRecipientsConfig = DocumentRecipientsConfig()
     dsti_analysis: DSTIConfig = DSTIConfig()
+    financial_simulator: FinancialSimulatorConfig = FinancialSimulatorConfig()
     auto_draft: AutoDraftConfig = AutoDraftConfig()
     audit_trail: AuditTrailConfig = AuditTrailConfig()
     system_smtp: SystemSMTPConfig = SystemSMTPConfig()

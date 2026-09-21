@@ -42,6 +42,9 @@ import { safeFormat, safeDate } from "../lib/utils";
 
 
 
+// Intervalo de refrescamento enquanto há tarefas de background em curso.
+const BACKGROUND_JOBS_POLL_INTERVAL = 10000;
+
 const TasksPanel = ({ 
   processId = null, 
   processName = null,
@@ -78,6 +81,22 @@ const TasksPanel = ({
     fetchData();
   }, [processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
 
+  // Refrescar enquanto houver tarefas de background em curso, para que o
+  // utilizador veja a tarefa passar a concluída (ex.: proposta financeira
+  // pronta) sem ter de recarregar a página. Só corre quando há algo activo,
+  // para não somar polling ao que o TasksContext já faz globalmente.
+  const hasRunningBackgroundJobs = backgroundJobs.some((job) =>
+    ["pending", "processing", "running"].includes(job.status)
+  );
+  useEffect(() => {
+    if (!hasRunningBackgroundJobs) return undefined;
+    const interval = setInterval(() => {
+      fetchData();
+    }, BACKGROUND_JOBS_POLL_INTERVAL);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [hasRunningBackgroundJobs, processId, showCompleted, showOnlyMyTasks, showCreatedByMe]);
+
   const fetchData = async () => {
     try {
       setLoading(true);
@@ -107,16 +126,23 @@ const TasksPanel = ({
       
       setTasks(filteredTasks);
 
-      // Fetch active background jobs (only when not in a specific process context)
-      if (!processId) {
-        try {
-          const bgRes = await getActiveBackgroundTasks();
-          setBackgroundJobs(bgRes.data.tasks || []);
-        } catch (bgErr) {
-          console.warn("Não foi possível carregar tarefas em background:", bgErr);
-          setBackgroundJobs([]);
-        }
-      } else {
+      // === TAREFAS EM BACKGROUND ===
+      // ÉPICO Motor de Simulação Financeira (Eixo 4): o motor de crédito
+      // corre em background após a validação da indexação e regista-se como
+      // tarefa PDF_GEN com `process_id`. O painel dentro do processo deixou
+      // de as esconder — sem isto, o utilizador não tinha onde ver que a
+      // proposta estava a ser gerada nem quando ficava pronta.
+      // Em contexto de processo, mostram-se apenas as tarefas DESSE processo.
+      try {
+        const bgRes = await getActiveBackgroundTasks();
+        const allJobs = bgRes.data.tasks || [];
+        setBackgroundJobs(
+          processId
+            ? allJobs.filter((job) => String(job.process_id || "") === String(processId))
+            : allJobs
+        );
+      } catch (bgErr) {
+        console.warn("Não foi possível carregar tarefas em background:", bgErr);
         setBackgroundJobs([]);
       }
 

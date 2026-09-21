@@ -49,6 +49,7 @@ import {
 import { safeString } from '../../utils/safeString';
 import { getClient, updateClient, updateProcess, markProcessIndexed, getVisits, sendMagicLinkEmail } from '../../services/api';
 import { toast } from 'sonner';
+import { notifyFinancialEngine } from '../../utils/financialEngineFeedback';
 import { useAuth } from '../../contexts/AuthContext';
 import { hasAnyRole } from '../../utils/roleUtils';
 import { formatDate, formatDateTime } from '../../lib/utils';
@@ -679,6 +680,10 @@ const ProcessDetailsModal = memo(({
                           return;
                         }
                         toast.success('Indexação marcada como concluída! A equipa foi notificada.');
+                        // ÉPICO Motor de Simulação Financeira (Eixo 4) —
+                        // toast informativo secundário quando a indexação
+                        // arranca o cálculo dos cenários de crédito.
+                        notifyFinancialEngine(res?.data, toast.info);
                         // Atualizar o processo localmente para refletir o estado
                         process.is_indexed = true;
                         // Notificar o componente pai para atualizar os dados
