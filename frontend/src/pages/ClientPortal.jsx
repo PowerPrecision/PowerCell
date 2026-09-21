@@ -72,6 +72,7 @@ import { formatDate, safeDate } from '../lib/utils';
 import { formatCurrency } from '../utils/formatCurrency';
 import ClientPortalLogin from './ClientPortalLogin';
 import SimulatorCH from '../components/portal/SimulatorCH';
+import { API_BASE_URL } from "../utils/apiBaseUrl";
 
 // ====================================================================
 // CLIENT-ONLY WRAPPER — prevents hydration mismatches with Radix portals
@@ -94,7 +95,7 @@ function LoaderFallback() {
   );
 }
 
-const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
+const BACKEND_URL = API_BASE_URL;
 
 // ── Helper: obter token do portal (localStorage > sessionStorage legado) ──
 function getPortalToken() {

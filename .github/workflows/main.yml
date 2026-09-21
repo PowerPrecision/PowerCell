@@ -82,7 +82,13 @@ jobs:
         # Warnings ainda são muitos (~5k); --quiet falha só em errors.
         # yarn lint (--max-warnings 0) continua disponível localmente para limpeza gradual.
         run: yarn eslint . --quiet
-      
+
+      # Os testes unitários do frontend (node --test, sem dependências extra)
+      # existiam desde há vários pacotes mas NENHUM job do CI os corria — uma
+      # regressão em src/utils passava despercebida até produção.
+      - name: Run frontend unit tests (node --test)
+        run: yarn test
+
       - name: Build Vite project
         run: yarn build
         env:

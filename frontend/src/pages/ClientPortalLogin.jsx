@@ -21,8 +21,9 @@ import {
   LogIn,
   Lock,
 } from 'lucide-react';
+import { API_BASE_URL } from "../utils/apiBaseUrl";
 
-const BACKEND_URL = (process.env.REACT_APP_BACKEND_URL || 'https://powercell.onrender.com') + '/api';
+const BACKEND_URL = API_BASE_URL;
 
 // ====================================================================
 // FETCH WITH RETRY — handles Render cold starts (503) automatically

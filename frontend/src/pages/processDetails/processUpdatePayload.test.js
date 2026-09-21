@@ -1,12 +1,14 @@
 /**
  * Unit tests for process update payload sanitizers / optimistic merge.
  */
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import {
   sanitizeProcessUpdatePayload,
   sanitizeClientUpdatePayload,
   mergeProcessOptimistic,
   FORBIDDEN_PROCESS_UPDATE_KEYS,
-} from './processUpdatePayload';
+} from './processUpdatePayload.js';
 
 describe('sanitizeProcessUpdatePayload', () => {
   it('strips forbidden keys including documents / onedrive_links', () => {
@@ -17,11 +19,11 @@ describe('sanitizeProcessUpdatePayload', () => {
       attachments: [],
       personal_data: { nif: '123456789' },
     });
-    expect(out.notes).toBe('ok');
-    expect(out.personal_data).toEqual({ nif: '123456789' });
-    expect(out.documents).toBeUndefined();
-    expect(out.onedrive_links).toBeUndefined();
-    expect(out.attachments).toBeUndefined();
+    assert.strictEqual(out.notes, 'ok');
+    assert.deepStrictEqual(out.personal_data, { nif: '123456789' });
+    assert.strictEqual(out.documents, undefined);
+    assert.strictEqual(out.onedrive_links, undefined);
+    assert.strictEqual(out.attachments, undefined);
   });
 
   it('omits empty wipe-sensitive arrays by default', () => {
@@ -31,10 +33,10 @@ describe('sanitizeProcessUpdatePayload', () => {
       labels: [],
       status: 'em_analise',
     });
-    expect(out.monitored_emails).toBeUndefined();
-    expect(out.co_buyers).toBeUndefined();
-    expect(out.labels).toBeUndefined();
-    expect(out.status).toBe('em_analise');
+    assert.strictEqual(out.monitored_emails, undefined);
+    assert.strictEqual(out.co_buyers, undefined);
+    assert.strictEqual(out.labels, undefined);
+    assert.strictEqual(out.status, 'em_analise');
   });
 
   it('allows empty labels when allowEmptyArrays includes labels', () => {
@@ -42,8 +44,8 @@ describe('sanitizeProcessUpdatePayload', () => {
       { labels: [], notes: 'x' },
       { allowEmptyArrays: ['labels'] }
     );
-    expect(out.labels).toEqual([]);
-    expect(out.notes).toBe('x');
+    assert.deepStrictEqual(out.labels, []);
+    assert.strictEqual(out.notes, 'x');
   });
 
   it('keeps observations and notes (Pacote DP)', () => {
@@ -51,8 +53,8 @@ describe('sanitizeProcessUpdatePayload', () => {
       observations: 'nota livre',
       notes: 'nota livre',
     });
-    expect(out.observations).toBe('nota livre');
-    expect(out.notes).toBe('nota livre');
+    assert.strictEqual(out.observations, 'nota livre');
+    assert.strictEqual(out.notes, 'nota livre');
   });
 
   it('keeps non-empty arrays', () => {
@@ -60,13 +62,13 @@ describe('sanitizeProcessUpdatePayload', () => {
       monitored_emails: ['a@b.pt'],
       labels: ['urgente'],
     });
-    expect(out.monitored_emails).toEqual(['a@b.pt']);
-    expect(out.labels).toEqual(['urgente']);
+    assert.deepStrictEqual(out.monitored_emails, ['a@b.pt']);
+    assert.deepStrictEqual(out.labels, ['urgente']);
   });
 
   it('lists expected forbidden keys', () => {
-    expect(FORBIDDEN_PROCESS_UPDATE_KEYS).toContain('documents');
-    expect(FORBIDDEN_PROCESS_UPDATE_KEYS).toContain('onedrive_links');
+    assert.ok(FORBIDDEN_PROCESS_UPDATE_KEYS.includes('documents'));
+    assert.ok(FORBIDDEN_PROCESS_UPDATE_KEYS.includes('onedrive_links'));
   });
 });
 
@@ -76,8 +78,8 @@ describe('sanitizeClientUpdatePayload', () => {
       nome: 'Ana',
       contacto: { email: '', telefone: '912345678' },
     });
-    expect(out.nome).toBe('Ana');
-    expect(out.contacto).toEqual({ telefone: '912345678' });
+    assert.strictEqual(out.nome, 'Ana');
+    assert.deepStrictEqual(out.contacto, { telefone: '912345678' });
   });
 
   it('omits contacto entirely when both empty', () => {
@@ -85,8 +87,8 @@ describe('sanitizeClientUpdatePayload', () => {
       contacto: { email: '  ', telefone: '' },
       dados_pessoais: { nif: '123' },
     });
-    expect(out.contacto).toBeUndefined();
-    expect(out.dados_pessoais).toEqual({ nif: '123' });
+    assert.strictEqual(out.contacto, undefined);
+    assert.deepStrictEqual(out.dados_pessoais, { nif: '123' });
   });
 });
 
@@ -96,8 +98,8 @@ describe('mergeProcessOptimistic', () => {
       { personal_data: { nif: '111', nome: 'A' }, status: 'x' },
       { personal_data: { nif: '222' }, notes: 'n' }
     );
-    expect(merged.personal_data).toEqual({ nif: '222', nome: 'A' });
-    expect(merged.status).toBe('x');
-    expect(merged.notes).toBe('n');
+    assert.deepStrictEqual(merged.personal_data, { nif: '222', nome: 'A' });
+    assert.strictEqual(merged.status, 'x');
+    assert.strictEqual(merged.notes, 'n');
   });
 });

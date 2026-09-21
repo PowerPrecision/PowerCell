@@ -69,8 +69,9 @@ import CreateClientModal from "../components/kanban/CreateClientModal";
 import { getExportPermission } from "../services/api";
 import ClientFilters from "../components/filters/ClientFilters";
 import { formatFonteLabel } from "../utils/fonteLabels";
+import { API_BASE_URL } from "../utils/apiBaseUrl";
 
-const API_URL = (process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com") + "/api";
+const API_URL = API_BASE_URL;
 
 // PACOTE DG — removida função `getContrastColor` (só era usada para colorir badges de Fase,
 // que foram removidos; clientes não têm lifecycle states).

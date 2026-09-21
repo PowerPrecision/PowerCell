@@ -49,12 +49,14 @@ import {
   installFetch401Guard,
   isSessionInvalid,
 } from "./sessionExpiry";
+import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
 
 // ====================================================================
 // CONFIGURAÇÃO
 // ====================================================================
-// URL do backend - usa variável de ambiente ou fallback para produção
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
+// URL do backend — resolvido em `utils/apiBaseUrl.js` (ponto único; um host
+// local nunca cai para a API de produção por omissão).
+const BACKEND_URL = RESOLVED_BACKEND_URL;
 const API_URL = BACKEND_URL + "/api";
 
 // Criar instância Axios

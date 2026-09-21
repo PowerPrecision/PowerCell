@@ -2414,3 +2414,41 @@ Foco: **correcções cirúrgicas de bugs de UX + templates de email com branding
 - Novos: `test_pacote12_emails_webmail.py` (23 — filtro estrito, BCC model/queue/transporte, síntese de assinatura, branding scoped, portal URL clicável, template com company_name) e `test_pacote12_backend_rbac.py` (35 — allow/deny 403 com relação ao cliente, least-busy estrito, dedup welcome, cascata de cleanup em hard/soft). Frontend: `duplicateClient.test.js` +2 (headline granular).
 - Ajustes de expectativas legítimas: `test_e2e_business_logic_fixes.py`, `test_pacote10_ux_observability.py`, `test_email_extraction_helpers.py`.
 - Suite: **1338 passed / 0 falhas** (baseline 1280 + 58); flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas; frontend `node --test` 133 pass, eslint 0 erros (warnings pré-existentes), `vite build` verde.
+
+## Isolamento dev/prod — resolução de URLs, CORS do S3 e guarda dos seeds (Set 2026)
+
+A infraestrutura é separada por ambiente (serviço Render e bucket S3 dedicados a dev, outros distintos para prod). Esta secção documenta os três pontos onde essa separação dependia de convenção — e não de código — e passou a ser garantida.
+
+### 1. URL do backend no frontend — ponto único (`utils/apiBaseUrl.js`)
+
+**Problema**: seis módulos repetiam `process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com"` e o `define` do `vite.config.js` aplicava o mesmo fallback em tempo de build, **em qualquer modo**. Um build de dev sem a variável definida apontava, em silêncio e sem qualquer aviso, para a **API de produção** — uma sessão de desenvolvimento a escrever sobre dados reais de clientes.
+
+**Regra** (`frontend/src/utils/apiBaseUrl.js`, ponto único; o `vite.config.js` importa daqui):
+
+| Situação | URL resolvido |
+| --- | --- |
+| `REACT_APP_BACKEND_URL` definido | esse valor, normalizado (sem barra final) |
+| Ausente + host local (`localhost`, `127.0.0.1`, `*.local`, `*.localhost`) | `http://localhost:8001` |
+| Ausente + build `mode !== "production"` | `http://localhost:8001` |
+| Ausente + host/build remoto de produção | fallback histórico (retrocompatibilidade) + aviso no build |
+
+- `resolveApiBaseUrl({ envUrl, hostname })` — runtime (browser); `resolveBuildTimeBackendUrl({ envUrl, mode })` — build (Vite, que não conhece o hostname). Ambas puras e testadas.
+- `warnOnCrossEnvironment` grita na consola quando a app corre num host local mas aponta para produção. Não altera o comportamento (pode ser intencional) — apenas deixa de ser silencioso.
+- Consumidores importam `BACKEND_URL` / `API_BASE_URL` em vez de repetir o literal. **Nunca** voltar a escrever um URL de produção como fallback em código de página.
+
+### 2. CORS do bucket S3 passa a seguir o ambiente
+
+`services/s3_storage.py::_ensure_cors_configured` importava `from backend.config import CORS_ORIGINS`. O pacote `backend` **não existe em runtime** (a aplicação corre com `backend/` na raiz do `sys.path`, como comprovam todos os outros imports: `from config import …`, `from database import db`). O `ImportError` caía sempre no `except`, pelo que **todos** os buckets — incluindo o de dev — eram configurados com a lista hardcoded de origens de produção e a variável `CORS_ORIGINS` não tinha efeito nenhum.
+
+Corrigido para `from config import CORS_ORIGINS`; o fallback mantém-se para arranques sem config, mas passa a registar `logger.warning` (antes era mudo). `tests/unit/test_s3_cors_origins.py` afirma as origens aplicadas e impede, por AST, o regresso de qualquer import do pacote inexistente `backend`.
+
+### 3. Guarda de ambiente nos scripts de dados simulados
+
+`scripts/env_guard.py::require_non_production_db(nome)` aborta com `SystemExit(2)` quando o ambiente parece produção:
+
+1. `ENVIRONMENT`/`APP_ENV` ∈ {production, prod, live}; ou
+2. `DB_NAME` contém "prod" sem marcador seguro (`dev`, `test`, `qa`, `staging`, `local`, `sandbox`) — `prod_test_db` é base de teste, `powercell_prod` não é.
+
+Escape explícito: `ALLOW_SEED_IN_PRODUCTION=true` (prossegue com aviso). Ambiente sem variáveis (CI) **não** é bloqueado — falha aberta só neste caso, por ser o do CI, e fechada em tudo o resto.
+
+Ligado como primeira instrução do `__main__` dos 8 scripts que inserem mock data (`seed_completo`, `seed_fill_mock_data`, `seed_massive_dev_data`, `seed_notes`, `seed_performance_data`, `seed_qa_ultimate`, `seed_realistic_data`, `seed_test_clients`). `tests/unit/test_scripts_env_guard.py` verifica por AST que a chamada existe **e** corre antes de qualquer outra chamada do bloco — depois do `main()` já não serviria de nada.

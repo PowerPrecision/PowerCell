@@ -31,8 +31,9 @@ import {
 } from "recharts";
 import { format, subDays, startOfWeek, startOfMonth, endOfWeek, endOfMonth } from "date-fns";
 import { pt } from "date-fns/locale";
+import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
+const BACKEND_URL = RESOLVED_BACKEND_URL;
 
 // ── Mapeamento de roles para labels legíveis ──────────────────
 const roleLabels = {

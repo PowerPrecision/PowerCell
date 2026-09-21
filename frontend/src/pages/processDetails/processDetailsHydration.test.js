@@ -1,12 +1,14 @@
 /**
  * Unit tests for ProcessDetails hydration helpers.
  */
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
 import {
   buildPersonalData,
   normalizeFormSlices,
   deriveProcessDetailsViewModel,
   resolveAssignedNames,
-} from "../../pages/processDetails/processDetailsHydration";
+} from "./processDetailsHydration.js";
 
 describe("buildPersonalData", () => {
   it("prefers client as source of truth", () => {
@@ -18,11 +20,11 @@ describe("buildPersonalData", () => {
         dados_pessoais: { nif: "123", nif_hash: "x" },
       },
     );
-    expect(personalData.nome_completo).toBe("Ana");
-    expect(personalData.email).toBe("a@x.com");
-    expect(personalData.nif).toBe("123");
-    expect(personalData.nif_hash).toBeUndefined();
-    expect(resolvedEmail).toBe("a@x.com");
+    assert.strictEqual(personalData.nome_completo, "Ana");
+    assert.strictEqual(personalData.email, "a@x.com");
+    assert.strictEqual(personalData.nif, "123");
+    assert.strictEqual(personalData.nif_hash, undefined);
+    assert.strictEqual(resolvedEmail, "a@x.com");
   });
 
   it("falls back to process personal_data", () => {
@@ -30,8 +32,8 @@ describe("buildPersonalData", () => {
       { personal_data: { nome_completo: "Bob", email_hash: "h" } },
       null,
     );
-    expect(personalData.nome_completo).toBe("Bob");
-    expect(personalData.email_hash).toBeUndefined();
+    assert.strictEqual(personalData.nome_completo, "Bob");
+    assert.strictEqual(personalData.email_hash, undefined);
   });
 });
 
@@ -49,12 +51,12 @@ describe("normalizeFormSlices", () => {
       { tipo_imovel: "Apartamento" },
       { estado_civil: "Solteiro(a)" },
     );
-    expect(out.personalData.sexo).toBe("M");
-    expect(out.personalData.estado_civil).toBe("casado");
-    expect(out.financialData.employment_type).toBe("efetivo");
-    expect(out.realEstateData.tipo_imovel).toBe("apartamento");
-    expect(out.titular2Data.estado_civil).toBe("solteiro");
-    expect(out.processPatch.client_email).toBe("e@x.com");
+    assert.strictEqual(out.personalData.sexo, "M");
+    assert.strictEqual(out.personalData.estado_civil, "casado");
+    assert.strictEqual(out.financialData.employment_type, "efetivo");
+    assert.strictEqual(out.realEstateData.tipo_imovel, "apartamento");
+    assert.strictEqual(out.titular2Data.estado_civil, "solteiro");
+    assert.strictEqual(out.processPatch.client_email, "e@x.com");
   });
 });
 
@@ -78,11 +80,11 @@ describe("deriveProcessDetailsViewModel", () => {
         dados_pessoais: {},
       },
     );
-    expect(vm.clientId).toBe("c1");
-    expect(vm.process.client_email).toBe("a@x.com");
-    expect(vm.process.client_phone).toBe("900");
-    expect(vm.creditData).toEqual({ bank: "x" });
-    expect(vm.status).toBe("fase_1");
+    assert.strictEqual(vm.clientId, "c1");
+    assert.strictEqual(vm.process.client_email, "a@x.com");
+    assert.strictEqual(vm.process.client_phone, "900");
+    assert.deepStrictEqual(vm.creditData, { bank: "x" });
+    assert.strictEqual(vm.status, "fase_1");
   });
 
   // PACOTE FQ-2 — bugfix: AssignmentContextCard lia apenas consultor_names /
@@ -104,8 +106,8 @@ describe("deriveProcessDetailsViewModel", () => {
       },
       null,
     );
-    expect(vm.process.consultor_names).toEqual(["Ana Consultora"]);
-    expect(vm.process.mediador_names).toEqual(["Bruno Intermediário"]);
+    assert.deepStrictEqual(vm.process.consultor_names, ["Ana Consultora"]);
+    assert.deepStrictEqual(vm.process.mediador_names, ["Bruno Intermediário"]);
   });
 
   it("keeps the canonical arrays untouched when already populated", () => {
@@ -121,7 +123,7 @@ describe("deriveProcessDetailsViewModel", () => {
       },
       null,
     );
-    expect(vm.process.consultor_names).toEqual(["Carla", "Duarte"]);
+    assert.deepStrictEqual(vm.process.consultor_names, ["Carla", "Duarte"]);
   });
 
   it("leaves consultor_names/mediador_names undefined when nothing is assigned", () => {
@@ -135,15 +137,15 @@ describe("deriveProcessDetailsViewModel", () => {
       },
       null,
     );
-    expect(vm.process.consultor_names).toBeUndefined();
-    expect(vm.process.mediador_names).toBeUndefined();
+    assert.strictEqual(vm.process.consultor_names, undefined);
+    assert.strictEqual(vm.process.mediador_names, undefined);
   });
 });
 
 describe("resolveAssignedNames", () => {
   it("prefers already-resolved names over ids", () => {
     const usersById = new Map([["u1", { name: "Diana" }]]);
-    expect(resolveAssignedNames(["Zeta"], ["u1"], usersById)).toEqual(["Zeta"]);
+    assert.deepStrictEqual(resolveAssignedNames(["Zeta"], ["u1"], usersById), ["Zeta"]);
   });
 
   it("resolves names from ids via the users lookup when no names are available", () => {
@@ -151,16 +153,16 @@ describe("resolveAssignedNames", () => {
       ["u1", { name: "Diana" }],
       ["u2", { name: "Eduardo" }],
     ]);
-    expect(resolveAssignedNames([], ["u1", "u2"], usersById)).toEqual(["Diana", "Eduardo"]);
+    assert.deepStrictEqual(resolveAssignedNames([], ["u1", "u2"], usersById), ["Diana", "Eduardo"]);
   });
 
   it("accepts a single id string (assigned_consultor_id) instead of an array", () => {
     const usersById = new Map([["u2", { name: "Eduardo" }]]);
-    expect(resolveAssignedNames(null, "u2", usersById)).toEqual(["Eduardo"]);
+    assert.deepStrictEqual(resolveAssignedNames(null, "u2", usersById), ["Eduardo"]);
   });
 
   it("returns an empty array when there is nothing to resolve", () => {
-    expect(resolveAssignedNames(null, null, new Map())).toEqual([]);
-    expect(resolveAssignedNames([], [], new Map())).toEqual([]);
+    assert.deepStrictEqual(resolveAssignedNames(null, null, new Map()), []);
+    assert.deepStrictEqual(resolveAssignedNames([], [], new Map()), []);
   });
 });
