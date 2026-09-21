@@ -1,4 +1,23 @@
 ---
+Task ID: fix-email-config-chave-escrita-leitura
+Agent: Cloud Agent
+Task: Envio de documentação falha com 535 apesar de o teste de email dar verde
+
+Date: 2026-09-21
+
+Work Log:
+- Sintoma: `POST /api/emails/send-documentation/...` → 500, "erro de SMTP", com o utilizador a garantir que o teste da conta dava verde.
+- PRIMEIRO descartei a minha própria alteração (Épico 5 mexeu no `send_email`, ponto único de saída): reproduzi localmente a chamada EXACTA do send-documentation (sem threading, com anexos) e passa — Message-ID posto, In-Reply-To ausente, anexo e registo OK.
+- Primeira hipótese (conta diferente entre testar e enviar) foi REFUTADA pelo log que o utilizador forneceu: `account=personal user=fernandoandrade@precisioncredito.pt source=profile:user` e `(535, b'Incorrect authentication data')`. A conta estava certa; a credencial é que não.
+- Causa real: `user.email_config` pode ser ANINHADO por papel. O envio lê `["company:<id>"]` → `[<papel UCR>]` → `["default"]` (`_extract_role_email_config`), com o papel de `resolve_active_ucr_role` (lê o UCR na BD, nunca None). O testar e o guardar resolviam o papel de outra maneira: só usavam `X-Active-Role` quando DIFERIA do papel base, caindo em "default" no caso comum.
+- Consequência dupla: (a) o teste testava `["default"]` e o envio usava `[<papel>]` → verde a mentir; (b) o guardar escrevia em `["default"]` → uma sub-config antiga em `[<papel>]` sombreava a password nova e voltar a gravar NÃO resolvia.
+- Fix: testar e guardar passam a usar `resolve_active_ucr_role`, a mesma função do envio. Escrever e ler na mesma chave.
+- NOVO `tests/unit/test_email_config_write_read_key.py` (7) — precedência da leitura, config flat legada intacta, papel inexistente cai em default, e guarda sobre o código-fonte dos handlers.
+- Mutation testing: a primeira versão do teste contava ocorrências de `resolve_active_ucr_role` e NÃO apanhou a mutação (o import sozinho bastava). Reforçado para afirmar as atribuições concretas; reverter o guardar → 1 vermelho; reverter o testar → 1 vermelho.
+- Verificação: 1543 unit+e2e verdes nas condições do CI (REDIS_URL=none, processo único); flake8 gate 0.
+- Nota operacional: quem foi afectado tem de voltar a guardar a password UMA vez depois desta correcção — só então ela fica na sub-config que o envio consulta.
+
+---
 Task ID: fix-ordem-import-bateria-financeira
 Agent: Cloud Agent
 Task: CI vermelho — 3 testes da bateria financeira dependentes da ordem de import
