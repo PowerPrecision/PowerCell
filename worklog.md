@@ -1,4 +1,32 @@
 ---
+Task ID: qa-bugfix-atribuicao-e-bateria-e2e
+Agent: Cloud Agent
+Task: QA — bug de reatividade na Atribuição + bateria e2e (financeiro & tempo real)
+
+Date: 2026-09-21
+
+Work Log:
+- MISSÃO 1 (causa real ≠ hipótese): não era WebSocket nem cache do React Query. `dual_auto_assign_on_pre_registo_transition` gravava APENAS `consultant_id`/`mediador_id` (legado, grafia inglesa); o `AssignmentContextCard` lê `consultor_names` → `assigned_consultor_ids` → `assigned_consultor_id` — nenhum deles existia, logo cartão em branco. Bug reproduzido antes da correcção.
+- Fix 1: a auto-atribuição passa a gravar o conjunto canónico completo (igual a `client_assign.py`), mantendo `consultant_id` porque `process_list_filters` filtra por ele.
+- Fix 2: `run_mark_indexed_side_effects` difunde um SEGUNDO delta (`broadcast_assignment_delta`) depois da atribuição — o broadcast existente corre ANTES dela e só levava o estado, pelo que outro operador refrescava para dados sem consultor.
+- Fix 3: `ProcessDetails` não escutava `process_updated` (o delta não teria ouvintes). Passa a fundir via **NOVO** `utils/processDelta.js` (`applyProcessDelta`, lista de campos explícita — o contrato que voltaria a partir em silêncio).
+- MISSÃO 2: **NOVO** `tests/integration/test_e2e_financial_realtime.py` (14) — cadeia completa indexação → atribuição → motor → PDF → eventos. Caminho feliz, OCR ilegível, sem rendimento legível, Euribor em baixo, Euribor estimada, S3 em baixo, motor desligado, sem docs financeiros, processo não-crédito, Redis real e Redis em baixo.
+- Falhas encontradas na execução foram todas nos TESTES, não na aplicação: (a) patch de `process_indexing.db` não cobria `from database import db` local → patch de `database.db`; (b) constantes de documento partilhadas ao nível do módulo eram mutadas entre testes → `deepcopy` na fixture; (c) o patch de Euribor do arnês sobrepunha-se ao do cenário → parametrizado.
+- Mutation testing para provar que os testes têm dentes: reverter o Fix 1 → 4 testes vermelhos; quebrar a tenant-safety (`broadcast` em vez de `send_personal_message`) → prova de tempo real vermelha.
+
+Stage Summary:
+- O cartão de Atribuição passa a reflectir a auto-atribuição pós-indexação, para quem clica e para quem observa; a cadeia financeira+tempo real fica coberta por testes e2e executáveis sem Mongo.
+
+Files:
+- backend/services/process_assignment.py
+- backend/services/process_indexing.py
+- backend/tests/integration/test_e2e_financial_realtime.py
+- frontend/src/pages/ProcessDetails.js
+- frontend/src/utils/processDelta.js
+- frontend/src/utils/processDelta.test.js
+- AGENTS.md, CHANGELOG.md, worklog.md
+
+---
 Task ID: epico-event-driven-redis-pubsub
 Agent: Cloud Agent
 Task: Épico — Refatorização para Event-Driven (Redis Pub/Sub e WebSockets)

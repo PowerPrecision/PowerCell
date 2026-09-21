@@ -3,6 +3,25 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — QA: cartão de Atribuição em branco + bateria e2e
+
+### Corrigido
+- **Cartão de Atribuição em branco após marcar um processo como indexado.** A dupla auto-atribuição gravava apenas `consultant_id` / `mediador_id` (campos legados, grafia inglesa), mas o `AssignmentContextCard` lê `consultor_names` → `assigned_consultor_ids` → `assigned_consultor_id`. Nenhum desses campos era escrito, por isso o cartão ficava vazio embora a atribuição tivesse corrido bem e a Timeline a mostrasse. A auto-atribuição passa a gravar o conjunto canónico completo, igual ao fluxo manual (`client_assign.py`); `consultant_id` mantém-se porque `process_list_filters` filtra por ele em "Os Meus Processos".
+- **Delta de atribuição difundido tarde demais.** O broadcast de `process_updated` corria ANTES da auto-atribuição, pelo que outro operador com o processo aberto recebia o evento e refrescava para dados ainda sem consultor. Passa a haver um segundo delta (`broadcast_assignment_delta`) emitido depois da escrita, com os nomes e ids já resolvidos.
+- **`ProcessDetails` não escutava `process_updated`.** O delta acima não teria ouvintes nesta página. Passa a ser fundido no estado local por `utils/processDelta.applyProcessDelta`, sem refetch.
+
+### Adicionado
+- **`frontend/src/utils/processDelta.js`** — merge do delta com lista de campos explícita. É o contrato entre backend e UI: um desencontro de nomes (a causa do bug acima) passa a falhar em teste em vez de aparecer em produção. A allowlist também impede que um payload inesperado sobreponha campos que o utilizador está a editar.
+- **`backend/tests/integration/test_e2e_financial_realtime.py`** (14 testes) — bateria ponta a ponta da cadeia indexação → atribuição → motor financeiro → PDF → eventos em tempo real.
+
+### Notas de teste
+- A bateria corre **sem MongoDB** (usa a `FakeAsyncDatabase`) e usa um **Redis real** para a prova de Pub/Sub, saltando esse teste quando não há Redis alcançável — a falta de infra-estrutura não se transforma em falso negativo.
+- Cenários cobertos: caminho feliz; IRS ilegível; documentos legíveis sem valores; Euribor em baixo (fallback ao spread contratado); Euribor estimada (aviso); S3 em baixo; motor desligado por configuração; processo sem documentos financeiros; processo não-crédito; Redis vivo; Redis em baixo.
+- Em todos os cenários de falha valida-se explicitamente que **a indexação não é revertida** e que a atribuição se mantém.
+- Os testes foram validados por *mutation testing*: reverter a correcção da atribuição torna 4 testes vermelhos, e trocar a entrega dirigida por um broadcast (quebrando a tenant-safety) torna a prova de tempo real vermelha.
+
+---
+
 ## [2026-09-21] — Épico: Refatorização para Event-Driven (Redis Pub/Sub e WebSockets)
 
 As tarefas pesadas (importações, análises IA, envio de emails, extracção de documentos, motor de simulação financeira) deixam de ser descobertas por polling e passam a **publicar eventos** num canal Redis, que o WebSocket Manager retransmite em tempo real — e **apenas** para o utilizador dono da tarefa.
