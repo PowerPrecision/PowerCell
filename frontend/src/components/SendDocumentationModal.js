@@ -35,6 +35,7 @@
  * />
  */
 import { useState, useEffect } from "react";
+import api from "../services/api";
 import {
   Dialog,
   DialogContent,
@@ -463,42 +464,50 @@ const SendDocumentationModal = ({
         requestBody.custom_html_body = emailHtml;
       }
 
-      const response = await fetch(`${API_URL}/api/emails/send-documentation/${processId}`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${token}`,
-        },
-        body: JSON.stringify(requestBody),
-      });
+      // AXIOS E NÃO `fetch`: o cliente Axios injecta `X-Company-Id` (e
+      // `X-Active-Role`) a partir do snapshot do AuthContext. Com `fetch`
+      // cru esses cabeçalhos não seguiam, e sem `X-Company-Id` o backend
+      // resolvia a configuração de email por OUTRA chave — o
+      // `get_active_company_id_async` cai em `user.company`, que é o NOME
+      // da empresa e não o id, pelo que a procura por `company_id` falha.
+      // Resultado: o envio usava uma sub-configuração antiga e falhava com
+      // `535 Incorrect authentication data`, enquanto o email de teste
+      // (que vai por Axios) funcionava com a mesma conta. Incidente de
+      // 2026-09-21.
+      const response = await api.post(
+        `/emails/send-documentation/${processId}`,
+        requestBody,
+      );
+      const data = response.data;
 
-      const data = await response.json();
-
-      if (response.ok) {
-        toast.success(data.message);
-        if (data.warnings && data.warnings.length > 0) {
-          setWarnings(data.warnings);
-          setTimeout(() => setWarnings([]), 5000);
-        }
-        onOpenChange(false);
-        // Reset state
-        setSelectedDocs([]);
-        setSelectedRecipients([]);
-        setSelectedToEmails(config?.default_to_emails || []);
-        setEmailHtml("");
-        setEmailSubject("");
-        setCcEmails("");
-        setBccEmails("");
-      } else {
-        if (response.status === 404) {
-          toast.error(extractErrorMessage(data.detail, "Processo ou documento não encontrado."), { duration: 6000 });
-        } else {
-          toast.error(extractErrorMessage(data.detail, "Erro ao enviar documentação"));
-        }
+      toast.success(data.message);
+      if (data.warnings && data.warnings.length > 0) {
+        setWarnings(data.warnings);
+        setTimeout(() => setWarnings([]), 5000);
       }
+      onOpenChange(false);
+      // Reset state
+      setSelectedDocs([]);
+      setSelectedRecipients([]);
+      setSelectedToEmails(config?.default_to_emails || []);
+      setEmailHtml("");
+      setEmailSubject("");
+      setCcEmails("");
+      setBccEmails("");
     } catch (error) {
-      console.error("Erro ao enviar:", error);
-      toast.error("Erro ao enviar documentação");
+      // O `finally` abaixo repõe `sending`; aqui só se escolhe a mensagem.
+      const detalhe = error.response?.data?.detail;
+      if (error.response?.status === 404) {
+        toast.error(
+          extractErrorMessage(detalhe, "Processo ou documento não encontrado."),
+          { duration: 6000 },
+        );
+      } else if (detalhe) {
+        toast.error(extractErrorMessage(detalhe, "Erro ao enviar documentação"));
+      } else {
+        console.error("Erro ao enviar:", error);
+        toast.error("Erro ao enviar documentação");
+      }
     } finally {
       setSending(false);
     }

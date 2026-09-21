@@ -1,4 +1,22 @@
 ---
+Task ID: fix-send-documentation-header-empresa
+Agent: Cloud Agent
+Task: Envio para balcões falha com 535 mas o email de teste funciona
+
+Date: 2026-09-21
+
+Work Log:
+- Facto que resolveu o caso: o utilizador reportou que o EMAIL DE TESTE funcionou e o envio para balcões continuou a falhar, com a mesma conta. Ambos passam pelo mesmo `send_email` e pelo mesmo `resolve_sending_account` — logo a diferença tinha de estar no INPUT do resolvedor.
+- Antes disso, confirmei por sondagem HTTP que as correcções anteriores não estavam em produção (`/send-test` → 404, `/test` → 401), o que invalidou o teste anterior do utilizador. Corrigi o conselho que tinha dado (voltar a guardar a password) — era prematuro sem o deploy.
+- Causa: `SendDocumentationModal` chamava por `fetch` cru com apenas `Content-Type` e `Authorization`. O interceptor que injecta `X-Company-Id`/`X-Active-Role` vive no cliente Axios (`services/api.js`). Sem `X-Company-Id`, `get_active_company_id_async` devolve `user.company` — o NOME da empresa, não o id — a procura em `user_email_configs` por `company_id` falha, o CAMINHO 0b (`email_config["company:<id>"]`) não casa, e cai no CAMINHO 0c (`[<papel>]`/`["default"]`), com a password antiga. Daí `source=profile:user` e 535.
+- O `EmailConfigForm` (email de teste) usa `api.post` + `companyRequestConfig()`, por isso levava o header e resolvia a config certa. A assimetria era exactamente o sintoma.
+- Fix: o envio passa a `api.post("/emails/send-documentation/<id>")`. Reescrito o tratamento de erro para o modelo do Axios (lança em vez de `response.ok`), simplificado por o `finally` já repor `sending`.
+- Verificado que a pré-visualização NÃO precisa da mesma mudança: `run_preview_documentation_email` não recebe `request` nem contexto de empresa, logo não pode divergir por esse eixo.
+- **NOVO** `src/components/sendDocumentation.test.js` (4): guarda que o envio vai por Axios, que não volta a `fetch`, que o import existe, e que o interceptor continua a injectar `X-Company-Id`. Mutation testing: repor o `fetch` cru → 2 vermelhos.
+- Verificação: eslint --quiet limpo, build verde, 237/240 testes frontend (as 3 falhas são as pré-existentes de `pages/processDetails/*`, que importam sem extensão `.js` e não correm em `node --test` puro — confirmado na árvore limpa).
+- Terceira instância do mesmo padrão hoje: dois caminhos a resolver a config de email de maneiras diferentes. Registado no AGENTS.md como regra geral (contexto de empresa/papel → sempre pelo Axios).
+
+---
 Task ID: envio-email-de-teste
 Agent: Cloud Agent
 Task: Botão "Enviar Email de Teste" — provar a entrega, não só as credenciais
