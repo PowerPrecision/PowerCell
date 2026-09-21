@@ -213,6 +213,10 @@ class EmailSendRequest(BaseModel):
     process_id: Optional[str] = None
     attachment_ids: Optional[List[str]] = None
     from_box: Optional[str] = None  # "general", "personal", "shared_indexacao" — indica de que caixa o email parte
+    # ÉPICO 5 — threading (RFC 5322). O compositor envia-os ao responder,
+    # para a mensagem entrar na conversa em vez de nascer solta.
+    in_reply_to: Optional[str] = None
+    references: Optional[List[str]] = None
 
 
 class LabelCreateRequest(BaseModel):

@@ -30,6 +30,12 @@ import re
 import html as html_module
 
 from database import db
+from services.email_threading import (
+    build_reference_chain,
+    domain_from_email,
+    generate_message_id,
+    normalize_message_id,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -551,6 +557,8 @@ async def send_email(
     active_company_id: Optional[str] = None,
     company_name: Optional[str] = None,
     account_override: Optional["EmailAccount"] = None,
+    in_reply_to: Optional[str] = None,
+    references: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Envia um email através de uma das contas SMTP configuradas (Precision Crédito
@@ -1014,6 +1022,27 @@ async def send_email(
         # === Reply-To: quando fornecido, as respostas vão para o utilizador ===
         if reply_to:
             msg["Reply-To"] = reply_to
+
+        # === THREADING (RFC 5322) ===
+        # Sem Message-ID próprio a resposta do destinatário não tem a que
+        # se agarrar, e a conversa parte-se no cliente dele e no nosso
+        # Webmail. Sem In-Reply-To/References, é a NOSSA resposta que
+        # nasce órfã. Ambos são gerados/propagados aqui, no único ponto
+        # de saída de email do CRM.
+        outgoing_message_id = generate_message_id(
+            domain_from_email(effective_from_email)
+        )
+        msg["Message-ID"] = outgoing_message_id
+
+        normalized_in_reply_to = normalize_message_id(in_reply_to)
+        if normalized_in_reply_to:
+            msg["In-Reply-To"] = normalized_in_reply_to
+
+        reference_chain = build_reference_chain(
+            normalized_in_reply_to, references
+        ) if (normalized_in_reply_to or references) else []
+        if reference_chain:
+            msg["References"] = " ".join(reference_chain)
         
         # === CRITICAL: Reply-To default policy ===
         # When force_system is True and no explicit reply_to is provided,
@@ -1101,6 +1130,12 @@ async def send_email(
                 "notes": f"Enviado via {account.name}" + (f" com {len(attachment_records)} anexo(s)" if attachment_records else ""),
                 "synced": False,
                 "account": account.email or account.name,
+                # Threading: sem isto gravado, uma resposta do cliente a
+                # este email não encontra o pai na nossa BD.
+                "message_id": outgoing_message_id,
+                "in_reply_to": normalized_in_reply_to,
+                "references": reference_chain,
+                "is_read": True,
             }
             if active_company_id and active_company_id != "default":
                 email_doc["company_id"] = active_company_id

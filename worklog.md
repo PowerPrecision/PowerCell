@@ -1,4 +1,26 @@
 ---
+Task ID: epico5-webmail-pro-live-sync
+Agent: Cloud Agent
+Task: Épico 5 — Webmail Pro & Live Sync (pastas, threads, acções, tempo real)
+
+Date: 2026-09-21
+
+Work Log:
+- DIAGNÓSTICO (3 premissas do enunciado corrigidas antes de tocar em código):
+  (a) `shared_email_sync.py` NÃO é o ponto de emissão — são 97 linhas de validação da sync manual do Gmail de um admin. A recepção real insere em 6 sítios (`email_service.py` x5 + `gmail_api_service.py`), todos já a chamar `notify_new_email`.
+  (b) O `new_email` JÁ existia (`email_realtime.py`), mas entregava pelo ConnectionManager em memória — bug de multi-worker, não funcionalidade em falta. O `route_system_event` já era genérico e não precisou de alteração.
+  (c) O EIXO 1 estava ~60% feito: pastas (inbox/sent/drafts/starred/trash/custom + contagens `$facet`), `is_read` no backend (`POST /{id}/mark`, com sync da flag IMAP) e Responder/Encaminhar já existiam. Em falta: threads, Responder a Todos, toggle de não-lido e — o elo partido — os cabeçalhos de threading no envio.
+- EIXO 2: emissão reencaminhada para `redis_pubsub.publish_event` num ÚNICO chokepoint (`notify_new_email`), não nos 6 call sites. Removido o filtro `is_user_connected`, que era a causa do bug. Frontend: `useNewEmailRealtime` insere a linha via `setQueryData` em vez de `invalidateQueries`; polling de contagens suspenso quando `isConnected`.
+- EIXO 1: **NOVO** `services/email_threading.py` + `send_email(in_reply_to=, references=)` com `Message-ID` gerado; propagado por `EmailSendRequest` → `build_pending_send_record` → `execute_pending_email_send` (o envio real corre depois da janela de undo, noutro job — os cabeçalhos têm de viajar no registo). **NOVO** `utils/emailThreads.js` (agrupamento + reply-all + cabeçalhos da resposta); lista agrupada em conversas expansíveis; botões Responder a Todos e Marcar como não lida.
+- EIXO 3: **NOVO** `tests/integration/test_e2e_webmail_realtime.py` (15) — recepção, payload da lista, idempotência do sync, caixa vazia, tenant-safety (incl. fail-closed do router), Redis em baixo, falha a publicar, IMAP inacessível, threading da resposta, cabeçalhos no fio SMTP, volta completa cliente→nós→cliente, 5 mensagens numa conversa, e prova com Redis real.
+- Dois testes ANTIGOS foram reescritos, não remendados: `test_notify_new_email_skips_disconnected` e `..._broadcasts_to_user_room` afirmavam o comportamento que ERA o bug (saltar quem não está ligado a este worker). Passam a afirmar o contrato novo.
+- Falhas durante a execução, todas no arnês de teste e não na aplicação: (a) `FakeAsyncCollection` expõe `.docs`, não `._docs`; (b) `encryption_service` é importado DENTRO da função de sync, logo o patch tinha de ser em `services.encryption`, não em `email_service` (mesma lição do `database.db` do épico anterior); (c) o `send_email` usa `sendmail(...)` e não `send_message(...)`, pelo que o duplo SMTP não capturava nada.
+- Um achado do código, NÃO alterado por ser pré-existente e arriscado: `send_email` só arquiva em `db.emails` quando há `process_id`. Sem processo, o email volta pelo sync da pasta Enviados — "corrigir" isto sem tratar duplicados criaria linhas repetidas.
+- Mutation testing: remover o `In-Reply-To` do envio → 1 vermelho; trocar `send_personal_message` por `broadcast` (quebrar tenant-safety) → 2 vermelhos.
+- Verificação: 1509 unit + 29 e2e (15 webmail + 14 financeiro) verdes; flake8 gate 0; frontend 196 testes de utils, eslint --quiet limpo, build verde.
+- Pré-existentes, confirmados com `git stash` na árvore limpa: 3 testes de `pages/processDetails/*` falham no `node --test` puro (importam sem a extensão `.js`) e os `tests/integration/test_iteration1{1,2}_*` precisam de `mongod` + uvicorn vivos, que este container não tem.
+
+---
 Task ID: qa-bugfix-atribuicao-e-bateria-e2e
 Agent: Cloud Agent
 Task: QA — bug de reatividade na Atribuição + bateria e2e (financeiro & tempo real)

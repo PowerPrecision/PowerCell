@@ -3,6 +3,27 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-21] — Épico 5: Webmail Pro & Live Sync
+
+### Corrigido
+- **`new_email` morria em silêncio com vários workers.** A notificação de email novo entregava pelo `ConnectionManager` em memória: o worker que corre a sincronização IMAP quase nunca é o que detém o socket do utilizador, e `is_user_connected` respondia `False` nesse worker, descartando o evento. A emissão passa pelo canal Redis do Épico 4 (`redis_pubsub.publish_event`), com **um envelope por destinatário** — o worker dono da ligação é que entrega. Sem Redis, degrada para entrega in-process, como antes.
+- **As respostas enviadas pelo CRM nasciam fora da conversa.** O sistema lia `Message-ID`/`In-Reply-To`/`References` do IMAP (e usava-os no Smart Threading), mas enviava sem nenhum deles. Sem `Message-ID` próprio, a resposta do cliente não tinha a que se agarrar; sem `In-Reply-To`, a nossa resposta ficava solta. Cada troca partia-se em mensagens avulsas, no nosso Webmail e no cliente do destinatário. `send_email` passa a gerar o `Message-ID` e a propagar a cadeia, e o compositor envia os cabeçalhos ao responder.
+- **O evento de email novo obrigava a um GET completo da lista.** Chegava o `new_email` e disparava `invalidateQueries` — um round-trip inteiro para mostrar uma linha que o próprio evento já transportava, com a lista a saltar para a página 1.
+
+### Adicionado
+- **Conversas (threads) na caixa de entrada.** Uma troca de 5 emails ocupava 5 linhas; passa a ocupar 1, expansível, com contador de mensagens e de não-lidos.
+- **"Responder a Todos"** — o remetente vai para Para, os restantes intervenientes para Cc, sem o próprio utilizador nem duplicados.
+- **Marcar como lida / não lida** na leitura (o endpoint já existia e sincroniza a flag no IMAP; faltava a acção na UI).
+- **`backend/services/email_threading.py`** — threading RFC 5322 em funções puras, partilhado pelo envio e pelo agrupamento.
+- **`frontend/src/utils/emailThreads.js`** e **`webmailRealtime.js`** — agrupamento e inserção em tempo real, puros e testados à parte.
+- **`backend/tests/integration/test_e2e_webmail_realtime.py`** (15 testes) — IMAP simulado → sync → Pub/Sub → resposta com threading.
+
+### Notas de teste
+- Em `dev` as ligações IMAP/SMTP são falsas: o servidor IMAP é substituído na fronteira de rede do sync (`_fetch_all_from_folder_sync`) e o SMTP em `smtplib`. Tudo o resto é código de produção.
+- O teste do SMTP lê a mensagem **serializada** (`sendmail(..., msg.as_string())`) e reparsa-a — prova que os cabeçalhos sobrevivem à serialização, não apenas que foram postos no objecto.
+- A prova de tempo real usa um **Redis real** e é saltada quando não há Redis alcançável.
+- Limitação assumida: o agrupamento em conversas é **por página** (30 emails). Uma conversa que atravesse a paginação aparece como dois grupos.
+
 ## [2026-09-21] — QA: cartão de Atribuição em branco + bateria e2e
 
 ### Corrigido

@@ -153,6 +153,8 @@ def build_pending_send_record(
     created_by: str,
     created_by_email: Optional[str],
     attachment_ids: Optional[list],
+    in_reply_to: Optional[str] = None,
+    references: Optional[list] = None,
 ) -> dict:
     """Constrói o documento PENDING (função pura — testável isoladamente).
 
@@ -182,6 +184,10 @@ def build_pending_send_record(
         "body_html": body_html,
         "process_id": process_id,
         "attachment_ids": list(attachment_ids or []),
+        # Threading: o envio real acontece DEPOIS da janela de undo, num
+        # job à parte — estes cabeçalhos têm de viajar no registo.
+        "in_reply_to": in_reply_to,
+        "references": list(references or []),
         # Auditoria
         "created_by": created_by,
         "created_by_email": created_by_email,
@@ -360,6 +366,8 @@ async def execute_pending_email_send(send_id: str) -> dict:
             company_name=record.get("company_name"),
             from_email=record.get("from_email"),
             reply_to=record.get("from_email"),
+            in_reply_to=record.get("in_reply_to"),
+            references=record.get("references"),
         )
     except Exception as e:
         logger.error(

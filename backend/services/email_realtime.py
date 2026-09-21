@@ -4,15 +4,29 @@ Pacote EC — when a sync path inserts an email that did not exist before,
 emit ``new_email`` to that user's WebSocket room so the Webmail UI can
 refetch silently.
 
-The in-memory ConnectionManager lives in the API process. Sync that runs
-inside uvicorn (``run_email_auto_sync``) can reach connected clients;
-a separate worker process cannot.
+ÉPICO 5 — TRANSPORTE VIA REDIS PUB/SUB
+--------------------------------------
+Esta emissão usava directamente o ``ConnectionManager`` em memória. Isso
+funciona num só processo, mas com vários workers Uvicorn (o cenário real
+depois do Épico 4) um email sincronizado no worker A nunca chegava a um
+socket aberto no worker B: o `is_user_connected` do worker A respondia
+`False` e o evento era **descartado em silêncio**.
+
+A emissão passa agora por ``services.redis_pubsub.publish_event``, o mesmo
+canal dos eventos de tarefa. O envelope leva o ``user_id`` do destinatário
+e o router (`websocket_manager.route_system_event`) entrega-o apenas às
+ligações desse utilizador, no worker onde elas viverem.
+
+Degradação graciosa: sem Redis (ou com ele em baixo), `publish_event` cai
+para entrega in-process — exactamente o comportamento anterior. A
+sincronização IMAP nunca quebra por causa de um socket ou de um Redis.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Dict, Iterable, Optional, Sequence, Union
 
+from services.redis_pubsub import publish_event
 from services.websocket_manager import WSEventType, create_ws_message, manager
 
 logger = logging.getLogger(__name__)
@@ -37,15 +51,18 @@ def join_user_email_room(user_id: str) -> str:
     return room
 
 
-def build_new_email_ws_message(
+def build_new_email_payload(
     email_doc: Optional[Dict[str, Any]] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> dict:
-    """Build the canonical ``new_email`` payload.
+    """Constrói o ``data`` do evento ``new_email``.
 
-    Keeps the existing ``type`` / ``data`` envelope (frontend dispatcher) and
-    also exposes ``event`` + ``message`` at the top level as specified by
-    Pacote EC.
+    É um SINAL, não o email: leva o suficiente para a lista inserir uma
+    linha sem esperar por um GET (remetente, assunto, pasta, lido). O corpo
+    e os anexos vêm depois, quando o utilizador abre a mensagem.
+
+    ``is_read`` vai explícito a ``False`` para o contador de não-lidos do
+    Webmail poder incrementar sem consultar o servidor.
     """
     doc = email_doc or {}
     extra = extra or {}
@@ -59,13 +76,32 @@ def build_new_email_ws_message(
         "direction": doc.get("direction", extra.get("direction", "received")),
         "message": NEW_EMAIL_MESSAGE,
     }
+    # Campos que permitem à lista inserir a linha sem refetch.
+    for key in ("sent_at", "created_at", "to_emails", "is_read", "process_id"):
+        if doc.get(key) is not None:
+            payload[key] = doc[key]
+    payload.setdefault("is_read", False)
+
     if extra.get("box"):
         payload["box"] = extra["box"]
     for key, value in extra.items():
         if key not in payload and value is not None:
             payload[key] = value
+    return payload
 
-    ws_msg = create_ws_message(WSEventType.NEW_EMAIL, payload)
+
+def build_new_email_ws_message(
+    email_doc: Optional[Dict[str, Any]] = None,
+    extra: Optional[Dict[str, Any]] = None,
+) -> dict:
+    """Envelope WebSocket completo do ``new_email``.
+
+    Mantido para a entrega in-process e para quem já dependia da forma
+    ``type``/``data`` mais ``event``/``message`` no topo (Pacote EC).
+    """
+    ws_msg = create_ws_message(
+        WSEventType.NEW_EMAIL, build_new_email_payload(email_doc, extra)
+    )
     ws_msg["event"] = NEW_EMAIL_EVENT
     ws_msg["message"] = NEW_EMAIL_MESSAGE
     return ws_msg
@@ -84,33 +120,46 @@ async def notify_new_email(
     email_doc: Optional[Dict[str, Any]] = None,
     extra: Optional[Dict[str, Any]] = None,
 ) -> int:
-    """Emit ``new_email`` to each user's room after a fresh insert.
+    """Emite ``new_email`` para cada destinatário, via canal Redis.
 
-    Skips users that are not currently connected. Failures are logged and
-    never raised — IMAP sync must not break because a socket is down.
+    UM ENVELOPE POR DESTINATÁRIO, nunca uma difusão: é o mesmo contrato de
+    tenant-safety dos eventos de tarefa. O router a jusante descarta
+    qualquer envelope sem ``user_id`` em vez de o mandar para todos, pelo
+    que um email do utilizador A não pode aparecer no Webmail do B.
+
+    NÃO filtra por ``is_user_connected``: essa era precisamente a falha de
+    multi-worker. O worker que corre a sincronização IMAP raramente é o que
+    detém o socket do utilizador, e perguntar-lhe se está ligado *aqui*
+    respondia `False` e deitava o evento fora. Quem sabe responder a isso é
+    o worker dono da ligação, depois de receber o envelope.
+
+    Falhas são registadas e nunca propagadas — a sincronização de email não
+    pode quebrar porque um socket ou o Redis estão em baixo.
 
     Returns:
-        Number of users the event was sent to.
+        Número de destinatários para os quais o evento foi emitido (não o
+        número de sockets que o receberam — isso acontece noutros workers).
     """
     targets = _normalize_user_ids(user_ids)
     if not targets:
         return 0
 
-    ws_msg = build_new_email_ws_message(email_doc, extra)
+    payload = build_new_email_payload(email_doc, extra)
+    company_id = (email_doc or {}).get("company_id")
+
     notified = 0
     for uid in targets:
         try:
-            if not manager.is_user_connected(uid):
-                continue
-            room = user_email_room(uid)
-            if not manager.is_in_room(room, uid):
-                manager.join_room(room, uid)
-            await manager.broadcast_to_room(room, ws_msg)
-            # Room broadcast is a no-op if the room was empty; personal
-            # send covers that without duplicating (broadcast already uses it
-            # when the user is a room member).
-            if not manager.is_in_room(room, uid):
-                await manager.send_personal_message(ws_msg, uid)
+            await publish_event(
+                NEW_EMAIL_EVENT,
+                payload,
+                user_id=uid,
+                company_id=company_id,
+            )
+            # `publish_event` devolve False quando degrada para entrega
+            # in-process. Isso não é um erro nem uma não-entrega: o
+            # utilizador ligado a ESTE worker continua a receber. Contamos
+            # a emissão, não o transporte.
             notified += 1
         except Exception as ws_err:
             logger.debug(

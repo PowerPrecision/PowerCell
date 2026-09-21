@@ -95,6 +95,24 @@ TASK_EVENT_TYPES = frozenset(
 
 
 # ====================================================================
+# TIPOS DE EVENTO DE EMAIL (contrato com o Webmail)
+# ====================================================================
+# O nome do evento na rede é `new_email` e NÃO `email_received`: o
+# dispatcher do frontend (`useWebSocket` → `onNewEmail`) já escuta este
+# tipo desde o Pacote EC. Inventar um segundo nome para o mesmo facto
+# obrigaria os dois lados a conhecer ambos, sem ganho nenhum.
+#
+# O que muda com o Épico 5 não é o nome — é o TRANSPORTE: este evento
+# passava só pelo ConnectionManager em memória (logo, morria no worker
+# onde a sincronização IMAP corria) e passa agora por este canal, que
+# todos os workers escutam.
+
+NEW_EMAIL = "new_email"
+
+EMAIL_EVENT_TYPES = frozenset({NEW_EMAIL})
+
+
+# ====================================================================
 # ESTADO (singleton por processo)
 # ====================================================================
 
