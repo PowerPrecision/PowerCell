@@ -83,10 +83,11 @@ jobs:
         # yarn lint (--max-warnings 0) continua disponível localmente para limpeza gradual.
         run: yarn eslint . --quiet
 
-      # Os testes unitários do frontend (node --test, sem dependências extra)
-      # existiam desde há vários pacotes mas NENHUM job do CI os corria — uma
-      # regressão em src/utils passava despercebida até produção.
-      - name: Run frontend unit tests (node --test)
+      # Testes unitários do frontend (Vitest + jsdom — Épico 6).
+      # Até Set 2026 nenhum job do CI os corria e uma regressão em src/utils
+      # passava despercebida até produção. O motor é agora o Vitest, que corre
+      # também os testes de COMPONENTE (React Testing Library).
+      - name: Run frontend unit tests (Vitest)
         run: yarn test
 
       - name: Build Vite project
