@@ -3,6 +3,17 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (6) — Ler um documento com IA, sem correr riscos com os dados
+
+### Adicionado
+- **Extrair dados de um documento com IA.** Na lista de documentos de um processo, cada imagem ou PDF tem agora um botão **Extrair Dados com IA**. O sistema lê o documento e mostra-lhe o que encontrou — lado a lado com o que já está na ficha — antes de gravar seja o que for.
+- **Nada é gravado sem a sua confirmação.** A janela de revisão abre sempre e mostra duas coisas: os campos em que a IA encontrou um valor diferente do que está na ficha (e onde escolhe qual fica) e os campos que a ficha ainda não tem e que vão ser preenchidos. Só o botão **Confirmar Todos** grava. Fechar a janela não grava nada.
+- **Cadernetas Prediais.** O sistema passa a saber ler cadernetas prediais: artigo matricial, Valor Patrimonial Tributário, áreas, tipologia, morada e titulares. Antes eram tratadas como um documento qualquer e quase nada era aproveitado.
+
+### Corrigido
+- **O modelo de IA escolhido no painel de administração passou a ser respeitado** na análise de documentos. A escolha estava lá, mas a análise usava sempre o mesmo modelo, independentemente do que estivesse configurado.
+- **Dados de cadernetas prediais apareciam duplicados** nas observações do processo, além de já estarem nos campos próprios do imóvel.
+
 ## [2026-09-22] (5) — "Ver Processo" no RGPD levava ao Login
 
 ### Corrigido

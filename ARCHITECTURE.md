@@ -2748,3 +2748,156 @@ ficheiros NOVOS e sobrevivem) e religação dos seis num **único passo em
 memória**, com cada bloco localizado pelo seu texto de abertura e pela
 indentação, não por número de linha. É assim que se faz este tipo de
 edição em lote.
+
+---
+
+## Épico 9 — Visão computacional: ler um documento e propor os dados (Set 2026)
+
+### O que já existia (e porque não se criou um motor novo)
+
+O briefing pedia um serviço nativo `services/vision_extraction.py` e um
+diálogo `VLMReviewDialog.jsx`. O levantamento mostrou que ambos já tinham
+equivalente no produto, e construí-los teria produzido duas UIs a fazer o
+mesmo — precisamente o que a norma `AGENTS.md` ("Canonical only. No
+duplicate UI") existe para evitar.
+
+| Peça pedida | O que já existia |
+|---|---|
+| Motor de visão | `ai_document.analyze_with_vision` + `convert_pdf_to_image` + `resize_image_base64` |
+| Prompt JSON por tipo | `get_document_tool_definition` — **JSON Schema** em function calling, mais rigoroso do que um prompt a pedir JSON |
+| Diálogo lado a lado | `AIReviewDialog` (Actual ↔ Extraído, edição manual, guarda de conflitos por resolver) |
+| Revisão humana por ficheiro | PACOTE DJ: `suggested_*` → `apply-ai-review` — mas só para **metadados** |
+
+O que faltava a sério eram quatro coisas, e é só isso que este épico fez.
+
+### 1. O modelo deixou de estar fixo no código
+
+`AI_MODEL = "gpt-4o-mini"` estava no topo de `services/ai_document.py` e era
+usado nas três chamadas ao modelo, apesar de o painel de admin ter uma
+escolha por tarefa (`document_analysis`) e de existir já um resolutor
+canónico — `ai_document_analyzer.resolve_document_analysis_model`. O painel
+estava lá; ninguém o lia.
+
+`ai_document.resolve_ai_model()` delega nesse resolutor (import tardio: o
+`ai_document_analyzer` importa deste módulo e um import no topo fecharia o
+ciclo) e degrada para `AI_MODEL` quando a configuração não está acessível.
+`call_openai_api` aceita o modelo já resolvido; `analyze_with_text` e
+`analyze_with_vision` resolvem **uma vez** e reportam o modelo REAL no
+resultado, não a constante.
+
+Guarda de regressão: `test_nenhuma_chamada_usa_a_constante_fixa` lê o
+código-fonte. Voltar a pôr `"model": AI_MODEL` numa chamada não parte mais
+nada — e era esse o problema.
+
+### 2. A Caderneta Predial tinha mapeador mas não tinha esquema
+
+`build_update_data_from_extraction` já sabia traduzir caderneta → ficha
+(`artigo_matricial`, `valor_patrimonial`, `area`, `localizacao`,
+`tipologia`), mas `get_document_tool_definition` não tinha ramo para o
+tipo: a IA caía no esquema genérico, devolvia texto livre e o mapeador não
+encontrava nada. Extracção "com sucesso", ficha vazia.
+
+Os nomes dos campos do esquema novo **não são livres** — têm de casar
+exactamente com o `field_mapping` do mapeador. Há um teste só para isso.
+
+O prompt distingue explicitamente o VPT do preço de compra e do valor de
+avaliação bancária, que é a confusão que um modelo comete sozinho.
+
+**Bónus encontrado pelo caminho:** o ramo da caderneta no mapeador não
+chamava `track_mapped`, pelo que os cinco campos que ENTRAVAM na ficha eram
+copiados outra vez para `ai_extracted_notes` por `collect_unmapped_data`.
+
+### 3. Extracção por ficheiro, a partir do caminho S3
+
+`POST /api/processes/{id}/documents/extract` (`routes/document_extraction.py`
+→ `services/document_vision_extract.py`) recebe o caminho S3 de um ficheiro
+já arquivado. Antes, extrair dados obrigava o browser a descarregar o
+ficheiro pelo proxy e a reenviá-lo como `FormData`.
+
+A análise **não foi duplicada**: `document_ai_analyze.run_ai_analyze_documents`
+foi partido em dois, e o tronco comum — `run_analysis_on_documents` — serve
+os dois caminhos. O que muda é a ORIGEM dos bytes (upload multipart vs. S3);
+o formato da resposta é o mesmo, que é o contrato que o `AIReviewDialog`
+consome e que o `/ai-apply-suggestions` sabe aplicar.
+
+**Duas guardas de caminho, não uma.** O caminho vem do cliente:
+`assert_path_within_document_root` impede sair da árvore de documentos
+(backups e logótipos vivem no MESMO bucket, sob outros prefixos) e
+`assert_s3_file_belongs_to_process` impede ler o processo do vizinho. Sem a
+segunda, qualquer utilizador com acesso a um processo lia os documentos de
+outro cliente pelo caminho.
+
+Formatos não suportados são recusados **antes** de tocar no S3: um `.docx`
+seguiria para uma chamada paga e voltaria vazio.
+
+### 4. A regra de ouro, e o buraco que ela destapou
+
+> "A IA nunca escreve na base de dados (dados pessoais/financeiros) sem a
+> confirmação do utilizador."
+
+O caminho em lote **não cumpria isto**. `commitAIExtractedData` pré-enche o
+formulário e, quando `conflicts` vem vazio, chama `persistAISuggestions` →
+`POST /ai-apply-suggestions` — uma escrita, sem diálogo nenhum pelo meio.
+E "sem conflitos" não é o caso benigno: é precisamente o caso em que a ficha
+está VAZIA e tudo o que a IA leu vai entrar de novo.
+
+O caminho novo não repete o erro:
+
+1. `S3FileManager` lê o ficheiro e entrega os dados ao contentor. Não grava.
+2. `utils/documentExtraction.prepararRevisaoDaExtraccao` (puro, testado)
+   separa o que foi lido em **conflitos** (a ficha tem outro valor → o
+   consultor escolhe) e **campos a preencher** (a ficha está vazia → nada a
+   escolher, mas à vista).
+3. O diálogo abre **sempre**, mesmo sem conflitos, com o nome do ficheiro
+   de origem no cabeçalho.
+4. Só o clique em "Confirmar Todos" aplica ao formulário e persiste.
+   Fechar descarta a extracção pendente — guardá-la faria a confirmação
+   seguinte escrever dados de um documento já rejeitado.
+
+`AIReviewDialog` ganhou `newValues` e `sourceDocument`, ambos opcionais: o
+caminho em lote continua a funcionar sem alterações (17 testes seus,
+intactos).
+
+**A decisão do consultor tem de sobreviver à confirmação.** Resolver um
+conflito removia-o da lista mas deixava o valor da IA em `extractedData` —
+e é `extractedData` que a confirmação aplica à ficha. Escolher "fica o
+valor existente" fazia desaparecer o conflito do ecrã e gravava o valor da
+IA na mesma: a interface dizia uma coisa e a ficha ficava com outra, que é
+o pior tipo de defeito porque ninguém o vai procurar.
+`aplicarDecisaoNaRevisao` (pura, imutável) regista cada decisão nos dados
+que vão ser gravados.
+
+### Um defeito que a bateria e2e apanhou na primeira execução
+
+Reutilizar o tronco comum trouxe consigo `_mark_documents_ai_analyzed`. Na
+extracção por ficheiro isso marcava o documento como `ai_analyzed` **sem
+nada ter sido aplicado à ficha** — o consultor extraía, fechava o diálogo
+sem confirmar, e o documento ficava invisível para a análise em lote,
+permanentemente. Saltar e marcar são hoje a mesma política (`skip_analyzed`)
+e a extracção por ficheiro não participa em nenhuma das duas.
+
+### Cobertura
+
+| Ficheiro | Casos | O que prova |
+|---|---|---|
+| `tests/unit/test_vision_extraction.py` | 47 | formatos, esquema da caderneta, modelo do painel, guardas de caminho, motor simulado |
+| `tests/integration/test_e2e_vlm_extraction.py` | 19 | cadeia S3 → visão → comparação → revisão; CC, recibo, caderneta, ilegível, S3 em baixo, âmbito, nada escrito |
+| `utils/documentExtraction.test.js` | 25 | a separação conflitos/valores novos, a escolha de titular e o registo das decisões |
+| `AIReviewDialog.extraccao.test.jsx` | 11 | o que o consultor vê e o que só acontece ao confirmar |
+| `S3FileManager.extraccao.test.jsx` | 10 | papel, formato, e que o componente NÃO grava |
+
+Mutação (dez, todas mataram testes): tirar o `track_mapped` da caderneta;
+voltar a fixar o modelo na constante; tirar a guarda de âmbito do processo;
+desactivar o esquema da caderneta; aceitar qualquer formato; entregar dados
+vazios ao contentor; não separar conflitos de valores novos; esconder a
+secção de campos a preencher; não registar a decisão do consultor; mutar a
+revisão em vez de a substituir.
+
+Nota sobre mutação, aprendida aqui: uma mutação que NÃO mata pode ser um
+teste fraco **ou** uma mutação que não chegou ao sítio. A primeira do
+`track_mapped` substituiu a primeira ocorrência do ficheiro — outro ramo,
+não o da caderneta — e eu quase dei o teste por fraco. Verificar qual das
+duas antes de concluir.
+
+Nenhum teste contacta uma API paga — há uma guarda explícita para isso
+(`TestNenhumaChamadaReal`).

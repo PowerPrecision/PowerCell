@@ -575,3 +575,64 @@ expõe.
 apanha o que a extracção destapa: dentro de um ficheiro de 4000 linhas, um
 `<AlertCircle />` herdava o import de um vizinho; sozinho num ficheiro novo,
 falha logo.
+
+---
+
+## 23. A IA propõe, o utilizador dispõe (Épico 9, Set 2026)
+
+Sempre que um modelo lê dados **pessoais ou financeiros** de um documento e
+esses dados se destinam à ficha de um cliente, vale uma regra sem excepções:
+
+> **Nada é escrito — nem no formulário, nem na base de dados — antes de um
+> clique explícito de confirmação.**
+
+Não é uma norma de UX, é de segurança de dados: um modelo de visão que leia
+mal um dígito de um NIF ou uma casa decimal de um vencimento produz um erro
+plausível, que ninguém detecta a olho, num campo que alimenta decisões de
+crédito.
+
+### O padrão
+
+1. **O componente que lê não grava.** `S3FileManager` chama o endpoint de
+   extracção e entrega o resultado ao contentor por callback
+   (`onDocumentDataExtracted`). Se alguma vez chamar `ai-apply-suggestions`,
+   a regra caiu — há um teste a prová-lo.
+2. **A decisão vive numa função pura.**
+   `utils/documentExtraction.prepararRevisaoDaExtraccao` separa o que foi
+   lido em conflitos e campos a preencher. Dentro de um componente de 2900
+   linhas esta decisão não se testa; fora dele, testa-se com 17 casos.
+3. **O diálogo abre sempre.** Mesmo sem conflitos — "sem conflitos" quer
+   dizer que a ficha está vazia e que **tudo** vai entrar. Mostrar só os
+   conflitos faria o consultor confirmar às cegas o resto.
+4. **Fechar não é confirmar.** Desistir descarta o que estava pendente.
+   Guardá-lo faria a confirmação seguinte escrever dados de um documento já
+   rejeitado.
+
+### Estender um diálogo existente em vez de criar outro
+
+`AIReviewDialog` já fazia o lado-a-lado "Actual ↔ Extraído" para a análise
+em lote. Ganhou duas props **opcionais** — `newValues` e `sourceDocument` —
+e o caminho antigo continuou a funcionar sem uma linha alterada (os seus 17
+testes ficaram intactos). Criar um `VLMReviewDialog` paralelo teria dado
+dois diálogos a fazer o mesmo, que é o que `AGENTS.md` proíbe em "Canonical
+only. No duplicate UI".
+
+Quando um diálogo novo parecer inevitável, a pergunta certa é: **que props
+opcionais faltam ao que já existe?**
+
+### Só oferecer o botão quando a acção é possível
+
+A extracção aceita imagens e PDF. Um `.docx` com botão seguiria para uma
+chamada **paga** e voltaria vazio. O `podeExtrairDados(nome)` decide pela
+extensão e o botão simplesmente não aparece — dizer que não dá depois de
+gastar dinheiro é a pior das ordens.
+
+O mesmo vale para o papel: é uma ferramenta de gestão e olha para o
+`effectiveRole` (perfil activo), nunca para o papel base (§ 20, AGENTS.md).
+
+### Botões só de ícone precisam de `aria-label`
+
+Os três botões de extracção (vista de lista, grelha "Todos", grelha por
+categoria) levam `aria-label={`Extrair dados de ${file.name}`}`. Sem ele
+não há nome acessível — é um bug de acessibilidade e um teste impossível
+(§ 20). Com ele, o teste consulta por papel e nome, como deve.

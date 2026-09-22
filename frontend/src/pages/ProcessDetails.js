@@ -99,6 +99,10 @@ import {
 } from "../services/api";
 import ProcessDomainTabsList from "../components/processDetails/ProcessDomainTabsList";
 import AIReviewDialog from "../components/processDetails/dialogs/AIReviewDialog";
+import {
+  aplicarDecisaoNaRevisao,
+  prepararRevisaoDaExtraccao,
+} from "../utils/documentExtraction";
 import RGPDRequestDialog from "../components/processDetails/dialogs/RGPDRequestDialog";
 import TitularChoiceDialog from "../components/processDetails/dialogs/TitularChoiceDialog";
 import useTaskEvents from "../hooks/useTaskEvents";
@@ -647,6 +651,10 @@ const ProcessDetails = () => {
   const [aiFieldConfidence, setAiFieldConfidence] = useState({});
   const [aiConflicts, setAiConflicts] = useState([]);
   const [showAIReviewDialog, setShowAIReviewDialog] = useState(false);
+  // Épico 9 — extracção por ficheiro à espera de confirmação.
+  // Enquanto isto não for `null`, NADA foi escrito: nem no formulário, nem
+  // na base de dados. É o que separa este caminho do da análise em lote.
+  const [revisaoPendente, setRevisaoPendente] = useState(null);
   const [titularChoiceDialog, setTitularChoiceDialog] = useState({
     open: false,
     items: [],
@@ -789,6 +797,42 @@ const ProcessDetails = () => {
     }
 
     setActiveTab("personal");
+  };
+
+  /**
+   * Épico 9 — dados lidos de UM documento, à espera de revisão.
+   *
+   * REGRA DE OURO: ao contrário da análise em lote (que pré-preenche o
+   * formulário e, quando não há conflitos, chega a gravar sozinha em
+   * `/ai-apply-suggestions`), aqui não se toca em nada antes do "Confirmar".
+   * São dados pessoais e financeiros lidos por um modelo de visão: uma
+   * alucinação sobre um NIF ou um vencimento não pode entrar na ficha sem
+   * um humano a validar.
+   *
+   * O diálogo abre SEMPRE, mesmo sem conflitos — sem conflitos é
+   * precisamente o caso em que a ficha está vazia e tudo o que a IA leu
+   * vai entrar de novo.
+   */
+  const handleDocumentDataExtracted = ({
+    extractedData,
+    conflicts,
+    sourceDocument,
+    titularMatches,
+  }) => {
+    const revisao = prepararRevisaoDaExtraccao({
+      extractedData,
+      conflicts,
+      sourceDocument,
+      titularMatches,
+    });
+    if (!revisao) {
+      toast.warning("A IA não devolveu dados deste documento.");
+      return;
+    }
+
+    setAiConflicts(revisao.conflicts);
+    setRevisaoPendente(revisao);
+    setShowAIReviewDialog(true);
   };
 
   // Handler para dados extraídos pela IA dos documentos
@@ -962,6 +1006,15 @@ const ProcessDetails = () => {
     
     // Remover conflito da lista
     setAiConflicts(prev => prev.filter(c => c.field !== field));
+
+    // Épico 9 — a decisão tem de ficar registada nos dados que a
+    // confirmação vai gravar. Sem isto, escolher "fica o valor existente"
+    // limpava o conflito do ecrã e o `Confirmar` escrevia o valor da IA na
+    // mesma: a interface dizia uma coisa e a ficha ficava com outra.
+    setRevisaoPendente((anterior) =>
+      aplicarDecisaoNaRevisao(anterior, field, chosenValue),
+    );
+
     toast.success(`Campo "${field}" actualizado`);
   };
 
@@ -1447,9 +1500,32 @@ const ProcessDetails = () => {
 
   // O diálogo de revisão não anuncia nada: diz que o utilizador confirmou
   // e o contentor é que sabe que isso implica fechar e avisar para guardar.
-  const handleConfirmAIReview = useCallback(() => {
+  const handleConfirmAIReview = useCallback(async () => {
     setShowAIReviewDialog(false);
+
+    // Caminho do Épico 9: nada foi aplicado ainda. A confirmação do
+    // consultor é o que autoriza escrever no formulário e na ficha.
+    if (revisaoPendente) {
+      const { extractedData, targetTitular } = revisaoPendente;
+      setRevisaoPendente(null);
+      applySharedExtractedFields(extractedData);
+      applyPersonalAndFinancialToTitular(extractedData, targetTitular);
+      await persistAISuggestions(extractedData, 1, targetTitular);
+      setActiveTab("personal");
+      return;
+    }
+
+    // Caminho da análise em lote: os campos já tinham sido pré-preenchidos
+    // antes de o diálogo abrir; só falta avisar que é preciso guardar.
     toast.success("Campos actualizados. Não esqueça de guardar!");
+  }, [revisaoPendente]);
+
+  // Fechar o diálogo sem confirmar DESCARTA a extracção pendente. Guardá-la
+  // seria pior do que inútil: a próxima confirmação escreveria dados de um
+  // documento que o consultor já tinha rejeitado.
+  const handleAIReviewOpenChange = useCallback((aberto) => {
+    setShowAIReviewDialog(aberto);
+    if (!aberto) setRevisaoPendente(null);
   }, []);
 
   // ── Escolha de titular para documentos ambíguos (Épico 8) ────────
@@ -2740,6 +2816,7 @@ const ProcessDetails = () => {
                   id={id}
                   process={process}
                   handleAIDataExtractedFromDocs={handleAIDataExtractedFromDocs}
+                  handleDocumentDataExtracted={handleDocumentDataExtracted}
                   setDocumentsRefreshKey={setDocumentsRefreshKey}
                 />
               </TabsContent>
@@ -2875,7 +2952,9 @@ const ProcessDetails = () => {
       <AIReviewDialog
         open={showAIReviewDialog}
         conflicts={aiConflicts}
-        onOpenChange={setShowAIReviewDialog}
+        newValues={revisaoPendente?.newValues || []}
+        sourceDocument={revisaoPendente?.sourceDocument || ""}
+        onOpenChange={handleAIReviewOpenChange}
         onResolve={resolveAIConflict}
         onConfirmAll={handleConfirmAIReview}
       />

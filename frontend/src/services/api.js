@@ -788,6 +788,15 @@ export const checkEmployerNif = (nif) =>
 // pelo JWT e um utilizador multi-perfil recebe 403 no perfil errado.
 export const aiAnalyzeS3Documents = (processId, formData) =>
   api.post(`/documents/ai-analyze/${processId}`, formData, { skipErrorToast: true });
+// Épico 9 — extracção por ficheiro. Recebe o CAMINHO S3 e devolve os dados
+// lidos, comparados com a ficha. Não grava nada: quem grava continua a ser
+// `aiApplyS3Suggestions`, depois de o consultor confirmar no diálogo.
+export const extractDocumentData = (processId, s3Path) =>
+  api.post(
+    `/processes/${processId}/documents/extract`,
+    { s3_path: s3Path },
+    { skipErrorToast: true },
+  );
 export const aiApplyS3Suggestions = (processId, suggestions) =>
   api.post(`/documents/ai-apply-suggestions/${processId}`, suggestions, {
     skipErrorToast: true,

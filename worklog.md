@@ -1,4 +1,28 @@
 ---
+Task ID: epico-9-visao-computacional
+Agent: Cloud Agent
+Task: Épico 9 — Visão computacional: ler um documento e propor os dados (sem os escrever)
+
+Date: 2026-09-22
+
+Work Log:
+- O LEVANTAMENTO MUDOU O PLANO, e é a terceira vez neste projecto que medir primeiro poupa trabalho duplicado. O briefing pedia `services/vision_extraction.py` e um `VLMReviewDialog.jsx` novos. Ambos já tinham equivalente: o motor de visão é o `ai_document.analyze_with_vision` (+ `convert_pdf_to_image`, `resize_image_base64`) e o esquema por tipo é o `get_document_tool_definition` — JSON Schema em function calling, que é MAIS rigoroso do que o system prompt a pedir JSON que o briefing descrevia; o diálogo lado-a-lado é o `AIReviewDialog`, que extraí no Épico 8. Construir os dois teria dado duas UIs a fazer o mesmo, que é o que o AGENTS.md proíbe. Apresentei isto antes de escrever código e o dono deu luz verde.
+- O QUE FALTAVA A SÉRIO, e foi só isso que fiz:
+  1. MODELO FIXO NO CÓDIGO. `AI_MODEL = "gpt-4o-mini"` no topo do `ai_document.py`, usado nas três chamadas, apesar de o painel de admin ter uma escolha por tarefa (`document_analysis`) e de já existir um resolutor canónico (`ai_document_analyzer.resolve_document_analysis_model`). O painel estava lá; ninguém o lia. `resolve_ai_model()` delega nele (import tardio — o analyzer importa deste módulo e um import no topo fecharia o ciclo) e cai na omissão quando a config não está acessível. As funções reportam agora o modelo REAL, não a constante.
+  2. CADERNETA PREDIAL sem esquema de extracção. O mapeador para a ficha já existia (`build_update_data_from_extraction`), mas o `get_document_tool_definition` não tinha ramo: a IA caía no genérico, devolvia texto livre e o mapeador não encontrava nada — extracção "com sucesso", ficha vazia. Os nomes dos campos não são livres, têm de casar exactamente com o `field_mapping`; há um teste só para isso.
+  3. Sem endpoint por CAMINHO S3. Extrair obrigava o browser a descarregar o ficheiro pelo proxy e a reenviá-lo como FormData. `POST /processes/{id}/documents/extract` lê-o directamente.
+  4. Sem extracção por ficheiro para dados PESSOAIS/FINANCEIROS — só em lote. O botão por ficheiro que existia (PACOTE DJ) trata apenas de metadados.
+- ZERO DUPLICAÇÃO NA ANÁLISE: parti o `run_ai_analyze_documents` em dois e o tronco comum (`run_analysis_on_documents`) serve os dois caminhos. Só muda a origem dos bytes; o formato da resposta é o mesmo, que é o contrato que o `AIReviewDialog` consome e que o `/ai-apply-suggestions` sabe aplicar.
+- A REGRA DE OURO DESTAPOU UM BURACO NO CAMINHO ANTIGO. O `commitAIExtractedData` do lote pré-enche o formulário e, quando `conflicts` vem vazio, chama `persistAISuggestions` → `POST /ai-apply-suggestions`: uma escrita, sem diálogo nenhum. E "sem conflitos" não é o caso benigno — é exactamente o caso em que a ficha está VAZIA e tudo o que a IA leu vai entrar. O caminho novo não repete isso: o diálogo abre SEMPRE, mostra conflitos E campos a preencher, e só o "Confirmar Todos" escreve. Fechar descarta. (Não mexi no caminho em lote: é uma mudança de comportamento que não me foi pedida. Fica registado aqui e no ARCHITECTURE.md como dívida conhecida.)
+- DEFEITO QUE EU PRÓPRIO INTRODUZI, apanhado pela bateria e2e na PRIMEIRA execução: reutilizar o tronco comum trouxe o `_mark_documents_ai_analyzed`. Na extracção por ficheiro isso marcava o documento como analisado SEM nada ter sido aplicado à ficha — o consultor extraía, fechava sem confirmar, e o documento ficava invisível para a análise em lote, para sempre. Saltar e marcar são hoje a mesma política.
+- ERRO MEU NUMA MUTAÇÃO, e vale a pena ficar escrito: a primeira mutação do `track_mapped` NÃO matou o teste e eu ia dar isso por bom. A mutação é que estava errada — `replace(..., 1)` apanhou o primeiro `track_mapped(src_key)` do ficheiro (outro ramo, linha 2061) e não o da caderneta (2302). Repetida no sítio certo, matou. Uma mutação que não mata pode ser um teste fraco OU uma mutação que não chegou ao sítio; verificar qual das duas antes de concluir.
+- SEGUNDO ERRO MEU: escrevi um teste que passava sem provar nada. As notas escrevem o rótulo legível ("Artigo Matricial") e eu procurava a chave crua ("artigo_matricial") — passaria com o bug de volta. Só apareceu porque um teste vizinho falhou pelo mesmo motivo de formatação.
+- TERCEIRO DEFEITO, este apanhado por mim a reler o meu próprio diff antes de commitar: resolver um conflito removia-o da lista mas deixava o valor da IA em `extractedData` — e é `extractedData` que a confirmação aplica. Escolher "fica o valor existente" limpava o conflito do ecrã e gravava o valor da IA na mesma. A interface dizia uma coisa e a ficha ficava com outra, que é o pior tipo de defeito porque ninguém o vai procurar. `aplicarDecisaoNaRevisao` (pura, imutável, 8 casos) regista cada decisão nos dados a gravar.
+- Duas guardas de caminho, não uma: raiz de documentos (backups e logótipos vivem no MESMO bucket) E prefixo do processo (o vizinho). Formato não suportado recusado ANTES do S3 — um .docx seguiria para uma chamada paga e voltaria vazio.
+- Testes: 47 unitários + 19 e2e no backend, 46 no frontend (25 do utilitário puro, 11 do diálogo, 10 do gestor de ficheiros). Dez mutações, dez apanhadas. Guarda explícita a provar que nenhum teste contacta uma API paga.
+- Suites: frontend 610 testes (era 564), eslint --quiet limpo, vite build verde; backend 1909 passed / 8 skipped (era 1843/8).
+
+---
 Task ID: epico-8-selagem-e-bug-rgpd
 Agent: Cloud Agent
 Task: Épico 8 — os 10 diálogos do S3 e o "Ver Processo" que ia dar ao Login

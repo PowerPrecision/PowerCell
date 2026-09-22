@@ -16,7 +16,7 @@
  * deixaria de fazer nada, em silêncio. O campo passa a ser controlado.
  */
 import { useState } from "react";
-import { AlertTriangle, Check, CheckCircle, Sparkles } from "lucide-react";
+import { AlertTriangle, Check, CheckCircle, FileText, Sparkles } from "lucide-react";
 
 import { safeString } from "../../../utils/safeString";
 import { Button } from "../../ui/button";
@@ -116,9 +116,40 @@ function LinhaDeConflito({ conflito, onResolve }) {
 }
 
 /**
+ * @typedef {Object} ValorNovo
+ * @property {string} field - Nome do campo.
+ * @property {any} value - O que a IA leu.
+ */
+
+/**
+ * Campo que a IA leu e para o qual a ficha ainda não tem valor.
+ *
+ * Não há nada a decidir aqui — não é um conflito — mas TEM de estar à vista.
+ * Um NIF ou um vencimento lido de um documento entra na ficha do cliente:
+ * a regra é que o consultor veja tudo o que vai entrar antes de confirmar,
+ * e não apenas aquilo que por acaso colidiu com um valor já existente.
+ *
+ * @param {{valor: ValorNovo}} props
+ */
+function LinhaDeValorNovo({ valor }) {
+  return (
+    <div className="flex items-center justify-between gap-3 border rounded-lg px-3 py-2">
+      <span className="text-sm text-muted-foreground shrink-0">
+        {rotuloDoCampo(valor.field)}
+      </span>
+      <span className="text-sm font-medium text-right break-all">
+        {safeString(valor.value, "-")}
+      </span>
+    </div>
+  );
+}
+
+/**
  * @param {Object} props
  * @param {boolean} props.open
  * @param {ConflitoIA[]} props.conflicts - Conflitos por resolver.
+ * @param {ValorNovo[]} [props.newValues] - Campos lidos sem valor na ficha.
+ * @param {string} [props.sourceDocument] - Ficheiro de onde vieram os dados.
  * @param {(aberto: boolean) => void} props.onOpenChange
  * @param {(campo: string, valor: any) => void} props.onResolve
  * @param {() => void} props.onConfirmAll - Só quando não sobra nenhum.
@@ -126,6 +157,8 @@ function LinhaDeConflito({ conflito, onResolve }) {
 export default function AIReviewDialog({
   open,
   conflicts = [],
+  newValues = [],
+  sourceDocument = "",
   onOpenChange,
   onResolve,
   onConfirmAll,
@@ -143,6 +176,14 @@ export default function AIReviewDialog({
           </DialogDescription>
         </DialogHeader>
 
+        {sourceDocument && (
+          <div className="flex items-center gap-2 rounded-md border bg-muted/50 px-3 py-2 text-sm">
+            <FileText className="h-4 w-4 text-muted-foreground shrink-0" />
+            <span className="text-muted-foreground shrink-0">Documento:</span>
+            <span className="font-medium truncate">{safeString(sourceDocument)}</span>
+          </div>
+        )}
+
         <div className="space-y-4 py-4">
           {conflicts.map((conflito, idx) => (
             <LinhaDeConflito
@@ -156,6 +197,21 @@ export default function AIReviewDialog({
             <div className="text-center py-8 text-muted-foreground">
               <CheckCircle className="h-12 w-12 mx-auto mb-3 text-green-500" />
               <p>Todos os conflitos foram resolvidos!</p>
+            </div>
+          )}
+
+          {newValues.length > 0 && (
+            <div className="space-y-2">
+              <div className="flex items-center gap-2 text-sm font-medium">
+                <Sparkles className="h-4 w-4 text-primary" />
+                Campos a preencher ({newValues.length})
+              </div>
+              <p className="text-xs text-muted-foreground">
+                A ficha ainda não tem estes valores. Serão gravados ao confirmar.
+              </p>
+              {newValues.map((valor, idx) => (
+                <LinhaDeValorNovo key={valor.field || idx} valor={valor} />
+              ))}
             </div>
           )}
         </div>

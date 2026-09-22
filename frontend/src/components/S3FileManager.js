@@ -91,6 +91,7 @@ import DocumentReviewModal from "./DocumentReviewModal";
 import { hasRole, MANAGEMENT_ROLES, canAccessByEffectiveRole } from "../utils/roleUtils";
 import {
   FileText,
+  ScanText,
   Upload,
   Loader2,
   Download,
@@ -140,6 +141,7 @@ import {
   aiAnalyzeS3Documents,
   aiApplyS3Suggestions,
   analyzeDocumentForReview,
+  extractDocumentData,
   bulkDeleteProcessS3Files,
   bulkDownloadS3Files,
   categorizeAllS3Documents,
@@ -217,7 +219,7 @@ const FileIcon = ({ filename }) => {
   return <File className="h-4 w-4 text-gray-500" />;
 };
 
-const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
+const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDataExtracted }) => {
   const { token, user, effectiveRole } = useAuth();
   const queryClient = useQueryClient();
   const [files, setFiles] = useState({});
@@ -257,6 +259,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // por ficheiro enquanto o endpoint /ai-analyze-review corre). `reviewModal`
   // controla a abertura do DocumentReviewModal com o doc a rever.
   const [analyzingDocIds, setAnalyzingDocIds] = useState(new Set());
+  // Épico 9 — extracção de dados por ficheiro. Indexado pelo CAMINHO S3
+  // (e não pelo doc_id): ficheiros ainda sem `document_metadata` também
+  // podem ser lidos, e o caminho existe sempre na listagem.
+  const [extractingPaths, setExtractingPaths] = useState(new Set());
   const [reviewModal, setReviewModal] = useState({ open: false, doc: null });
 
   
@@ -1161,6 +1167,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
   };
   
+  // Épico 9 — o motor de visão só lê imagens e PDF. Um .docx seguiria para
+  // uma chamada PAGA e voltaria vazio; mais vale não oferecer o botão.
+  const podeExtrairDados = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    return ['pdf', 'jpg', 'jpeg', 'png', 'webp'].includes(ext);
+  };
+
   // Verificar se ficheiro é PDF (para anotações)
   const isPdfFile = (filename) => {
     const ext = filename?.split('.').pop()?.toLowerCase();
@@ -1347,6 +1360,67 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       setAnalyzingDocIds((prev) => {
         const next = new Set(prev);
         next.delete(docId);
+        return next;
+      });
+    }
+  };
+
+  /**
+   * Épico 9 — lê UM ficheiro com IA e entrega os dados ao contentor.
+   *
+   * REGRA DE OURO: isto não grava nada. O endpoint é de leitura e o que
+   * volta vai para o diálogo de revisão, onde o consultor confirma. Uma
+   * alucinação sobre um NIF ou um vencimento não entra na base de dados
+   * sem um humano pelo meio.
+   */
+  const handleExtractDocData = async (file) => {
+    if (!canUseAIDocumentTools) {
+      toast.error("Sem permissão para extrair dados com IA");
+      return;
+    }
+    const caminho = file?.path;
+    if (!caminho) {
+      toast.error("Não foi possível identificar o ficheiro (caminho em falta).");
+      return;
+    }
+    if (!podeExtrairDados(file?.name)) {
+      toast.error("Formato não suportado. A extracção aceita imagens e PDF.");
+      return;
+    }
+
+    setExtractingPaths((prev) => new Set([...prev, caminho]));
+    try {
+      const { data: resultado } = await extractDocumentData(processId, caminho);
+      const extraidos = resultado?.extracted_data || {};
+      if (Object.keys(extraidos).length === 0) {
+        toast.warning("A IA não conseguiu ler dados deste documento.");
+        return;
+      }
+      if (!onDocumentDataExtracted) {
+        // Sem contentor a ouvir não há onde rever; melhor dizê-lo do que
+        // deixar o consultor à espera de um diálogo que nunca abre.
+        toast.info("Dados extraídos, mas não há ecrã de revisão disponível.");
+        return;
+      }
+      onDocumentDataExtracted({
+        extractedData: extraidos,
+        fieldConfidence: resultado?.field_confidence || {},
+        conflicts: resultado?.conflicts || [],
+        sourceDocument: resultado?.source_document?.name || file?.name || "",
+        titularMatches: resultado?.titular_matches || [],
+        needsTitularChoice: !!resultado?.needs_titular_choice,
+      });
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(
+          err?.response?.data?.detail,
+          "Erro ao extrair dados do documento.",
+        ),
+      );
+    } finally {
+      setExtractingPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(caminho);
         return next;
       });
     }
@@ -2483,6 +2557,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 )}
                               </Button>
                             )}
+                            {canUseAIDocumentTools && !isFolder && podeExtrairDados(file?.name) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 flex-shrink-0 text-primary hover:text-primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleExtractDocData(file);
+                                }}
+                                disabled={extractingPaths.has(file.path)}
+                                title="Extrair Dados com IA"
+                                aria-label={`Extrair dados de ${file.name}`}
+                                data-testid={`vlm-extract-btn-${idx}`}
+                              >
+                                {extractingPaths.has(file.path) ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <ScanText className="h-3 w-3" />
+                                )}
+                              </Button>
+                            )}
                             {isPreviewable(file.name) && (
                               <Button 
                                 variant="ghost" 
@@ -2848,6 +2943,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                     )}
                                   </Button>
                                 )}
+                                {canUseAIDocumentTools && !isFolder && podeExtrairDados(file?.name) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-primary hover:text-primary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleExtractDocData(file);
+                                    }}
+                                    disabled={extractingPaths.has(file.path)}
+                                    title="Extrair Dados com IA"
+                                    aria-label={`Extrair dados de ${file.name}`}
+                                    data-testid={`vlm-extract-btn-all-${idx}`}
+                                  >
+                                    {extractingPaths.has(file.path) ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <ScanText className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                )}
                                 {isPdfFile(file.name) && (
                                   <Button
                                     variant="ghost"
@@ -3032,6 +3148,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                         <Loader2 className="h-3.5 w-3.5 animate-spin" />
                                       ) : (
                                         <BrainCircuit className="h-3.5 w-3.5" />
+                                      )}
+                                    </Button>
+                                  )}
+                                  {canUseAIDocumentTools && !file?.path?.endsWith('/') && podeExtrairDados(file?.name) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-primary hover:text-primary"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleExtractDocData(file);
+                                      }}
+                                      disabled={extractingPaths.has(file.path)}
+                                      title="Extrair Dados com IA"
+                                      aria-label={`Extrair dados de ${file.name}`}
+                                      data-testid={`vlm-extract-btn-cat-${idx}`}
+                                    >
+                                      {extractingPaths.has(file.path) ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <ScanText className="h-3.5 w-3.5" />
                                       )}
                                     </Button>
                                   )}

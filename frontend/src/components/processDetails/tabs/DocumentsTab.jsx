@@ -24,6 +24,7 @@ export default function DocumentsTab({
   id,
   process,
   handleAIDataExtractedFromDocs,
+  handleDocumentDataExtracted,
   setDocumentsRefreshKey,
 }) {
   return (
@@ -137,6 +138,7 @@ export default function DocumentsTab({
             processId={id}
             clientName={process?.client_name}
             onAIDataExtracted={handleAIDataExtractedFromDocs}
+            onDocumentDataExtracted={handleDocumentDataExtracted}
           />
         </CardContent>
       </Card>
