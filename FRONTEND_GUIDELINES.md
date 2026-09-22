@@ -408,3 +408,49 @@ import { BACKEND_URL, API_BASE_URL } from "@/utils/apiBaseUrl"; // ou caminho re
 - **O job "Frontend CI" corre `yarn test` e falha o pipeline.** Até Set 2026 nenhum job corria estes testes: existiam ~240 e uma regressão em `src/utils` passava despercebida até produção.
 - Assertivas em **`node:assert/strict`** com `describe`/`it` importados de `node:test`. Não usar a API `expect(...)` do Jest: o projecto não tem Jest nem Vitest instalados — três ficheiros escritos assim (`pages/processDetails/*.test.js`) nunca chegaram a correr e só foram recuperados quando convertidos.
 - Imports em ficheiros de teste levam **extensão explícita** (`from "./x.js"`): o ESM puro do Node não resolve extensões omitidas, ao contrário do bundler.
+
+## 20. Vitest + React Testing Library e a divisão do Webmail (Épico 6, Set 2026)
+
+### Motor de testes
+
+- `yarn test` (uma vez), `yarn test:watch`, `yarn test:coverage`. O CI corre `yarn test` e falha o pipeline.
+- Configuração em `vite.config.js`, bloco `test`. Vive lá e não num `vitest.config.js` separado para herdar o que os testes precisam e o build já define: o alias `@`, o `define` do `process.env` e o **loader JSX para ficheiros `.js`** (este projecto tem JSX dentro de `.js`, herança do CRA).
+- Os testes antigos de utilitários continuam a importar `describe`/`it` de `node:test`: um alias (`src/test/nodeTestShim.js`) traduz isso para a API do Vitest. **Código novo importa directamente de `vitest`.**
+- `src/test/setup.js` liga os matchers do `jest-dom`, faz `cleanup()` entre testes e preenche o que o jsdom não traz (`matchMedia`, `ResizeObserver`, `scrollIntoView`).
+
+### Escrever um teste de componente
+
+```jsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+```
+
+- Consultar por **papel e nome acessível** (`getByRole("button", { name: "Limpar pasta" })`), não por classe CSS. Um botão sem nome acessível é um bug de acessibilidade **e** um teste impossível de escrever — dar-lhe `aria-label`.
+- Componentes que usam `Tooltip` têm de ser montados dentro de um `<TooltipProvider>`; os testes do Webmail fazem-no num `wrapper`.
+- **Um teste que possa passar sem provar nada é pior do que não existir.** Nada de `if (mock.calls.length) expect(...)`. Se o alvo é difícil de encontrar, o problema está no componente.
+- Confirmar que o teste tem dentes: partir de propósito o que ele afirma e ver vermelho.
+
+### Página/Contentor vs componentes de apresentação
+
+O `WebmailPage.jsx` é o **Contentor**: detém o estado, os hooks (`useWebmailEmails`, `useNewEmailRealtime`), os efeitos e os handlers. Os componentes em `components/webmail/` são de **apresentação**:
+
+| Componente | Responsabilidade |
+| --- | --- |
+| `FolderNavigation.jsx` | Caixas, pastas, marcadores e pastas personalizadas |
+| `EmailList.jsx` | Lista de conversas (recebe as threads JÁ agrupadas) |
+| `EmailThreadViewer.jsx` | Leitura da mensagem (recebe o HTML JÁ sanitizado) |
+| `EmailComposer.jsx` | Compositor (controlado: `onFieldChange(campo, valor)`) |
+| `webmailFormatters.js` | Data, tamanho de ficheiro e ícone de anexo |
+
+Regras para quem continuar o trabalho:
+
+1. **Props explícitas, nunca `{...props}`.** O contrato está em JSDoc no topo de cada componente.
+2. **Nada de `set*` dentro de um componente de apresentação.** O componente diz o que aconteceu (`onSelectFolder(id)`); o contentor decide o que isso implica. Um `onClick` com quatro setters encadeados é lógica de página disfarçada de UI.
+3. **O tempo real não atravessa a fronteira.** O agrupamento em conversas, o WebSocket e a suspensão do polling ficam no contentor — os componentes só vêem o resultado.
+4. **Canalização de DOM fica no componente.** O `input` escondido do upload, o clique na zona e o arrastar-largar vivem no `EmailComposer`; o contentor recebe `File[]`.
+5. Ao extrair, limpar os imports que ficam órfãos na página e confirmar com `npx eslint <ficheiro>` (o `--quiet` não mostra `no-unused-vars`, que é aviso).
+
+### `react/jsx-no-undef` é bloqueante
+
+Um componente ou ícone usado em JSX sem import **não** era apanhado: o `no-undef` não cobre JSX e a regra estava desligada. A regra é agora `error` — foi activada depois de um `<Loader2 />` sem import passar no CI e só rebentar no clique de transferir um anexo. Apanhou logo mais 15 casos reais no código existente.

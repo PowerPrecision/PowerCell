@@ -3,6 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] — Testes de interface e divisão do Webmail
+
+### Adicionado
+- **Testes de componente.** O frontend passou a ter Vitest com React Testing Library: até aqui só era possível testar funções puras, e nenhum ecrã tinha rede de segurança. Os 276 testes que já existiam continuam a correr, sem uma linha reescrita, e juntaram-se 70 novos sobre a interface do Webmail.
+- `yarn test`, `yarn test:watch` e `yarn test:coverage`. O CI corre os testes e falha se algum partir.
+
+### Alterado
+- **O Webmail deixou de ser um ficheiro só.** A página tinha 3288 linhas; a lista de conversas, o painel de leitura, o compositor e a navegação de pastas passaram a componentes próprios e a página ficou com 2237. Não há alterações de comportamento: o que o utilizador vê e faz é o mesmo.
+
+### Corrigido
+- **Botão dentro de botão nas pastas personalizadas.** O menu de uma pasta vivia dentro do botão da própria pasta, o que é HTML inválido e cada browser resolve à sua maneira. Passam a ser dois botões lado a lado.
+- **Ecrãs que podiam rebentar por um ícone em falta.** Quinze sítios usavam um ícone ou componente sem o importar — no separador de Crédito, no Financeiro, no RGPD e nos Emails de Sistema. Não davam erro nenhum no CI e só falhavam quando o utilizador chegasse àquela parte do ecrã. Corrigidos, e o CI passa a recusar novos casos.
+
 ## [2026-09-22] — O envio de email deixa de poder pendurar um pedido
 
 ### Corrigido

@@ -2505,3 +2505,34 @@ nenhum teste marque um servidor de email real — a origem da intermitência.
   aceita a ligação e nunca responde; o registo tem de responder em menos de 3s. A margem
   entre o limite (3s) e o tempo pendurado (8s) é deliberada — com um limite frouxo o
   teste passava nas duas versões e não provava nada (verificado por mutação).
+
+## Épico 6 — Fortaleza Frontend: Vitest e a divisão do Webmail (Set 2026)
+
+### Porquê
+
+O frontend tinha 276 testes e nenhum de componente: o `node --test` só exercita funções puras. Um ficheiro como o `WebmailPage.jsx`, com 3288 linhas e 49 `useState`, não tinha rede de segurança nenhuma — qualquer refactor de UI era feito às cegas.
+
+### Motor de testes
+
+Vitest + jsdom + React Testing Library. A configuração vive no bloco `test` do `vite.config.js` (não num ficheiro separado) para herdar o alias `@`, o `define` do `process.env` e o loader JSX para ficheiros `.js`, que os testes precisam tanto como o build.
+
+Os 276 testes existentes correm **sem uma linha reescrita**: importam `describe`/`it` de `node:test`, que sob o Vitest devolveria o corredor do próprio Node — os testes registavam-se noutro motor e o Vitest não veria nada, sem sequer falhar. Um alias de `node:test` para `src/test/nodeTestShim.js` resolve-o, e só no ambiente de teste.
+
+O corredor antigo foi **removido**, não mantido em paralelo: dois motores de teste é o mesmo padrão de "dois caminhos" que produziu três incidentes neste repositório.
+
+### Divisão do WebmailPage
+
+`WebmailPage.jsx` passa a **Contentor** (estado, hooks, efeitos, handlers) e a UI vive em `components/webmail/`: `FolderNavigation`, `EmailList`, `EmailThreadViewer`, `EmailComposer` e `webmailFormatters`. Regras e contratos em `FRONTEND_GUIDELINES.md` § 20.
+
+| | Antes | Depois |
+| --- | --- | --- |
+| `WebmailPage.jsx` | 3288 linhas | 2237 (−32%) |
+| Testes de frontend | 276 (0 de componente) | 346 (70 de componente) |
+| Avisos `no-unused-vars` no ficheiro | 9 | 2 |
+
+O Épico 5 (tempo real e conversas) fica intacto por construção: o agrupamento em threads, o `useNewEmailRealtime` e a suspensão do polling continuam no contentor; os componentes só recebem o resultado.
+
+### Dois bugs que a extracção destapou
+
+1. **`<button>` dentro de `<button>`** nas pastas personalizadas: o botão do menu de contexto vivia dentro do botão da pasta. HTML inválido, que cada browser desfaz como entende. Passam a irmãos — o mesmo desenho que a lista de conversas já usava — com teste a trancá-lo.
+2. **JSX com componentes por importar**: `react/jsx-no-undef` estava desligada e o `no-undef` não cobre JSX, por isso um `<Loader2 />` sem import passava no CI e só rebentava no clique do utilizador. A regra passa a `error`; apanhou mais 15 casos reais (`AlertTriangle` no CreditTab, `CheckCircle`/`Trash2`/`Clock` no FinancialTab, `Label`/`Input`/`CheckCircle` no RGPDTab e cinco ícones no SystemEmailsSection), todos corrigidos.

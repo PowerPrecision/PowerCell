@@ -1,4 +1,48 @@
 ---
+Task ID: epico6-fortaleza-frontend-vitest-e-webmail
+Agent: Cloud Agent
+Task: Épico 6 — Vitest + React Testing Library e divisão do WebmailPage
+
+Date: 2026-09-22
+
+Work Log:
+- EIXO 1 (infra): vitest + jsdom + @testing-library/{react,user-event,jest-dom,dom} + @vitest/coverage-v8. Configuração no bloco `test` do `vite.config.js` e NÃO num `vitest.config.js` à parte — os testes precisam exactamente do que o build já define: alias `@`, `define` do process.env e o loader JSX para ficheiros `.js` (há JSX dentro de `.js` neste projecto). Um segundo ficheiro de configuração seria a próxima divergência silenciosa.
+- EIXO 2 (baseline): os 276 testes correm sem UMA linha reescrita. O problema não era óbvio: importam `describe`/`it` de `node:test`, que sob o Vitest devolveria o corredor do PRÓPRIO Node — os testes registavam-se noutro motor e o Vitest não via nada, **sem falhar**. Alias de `node:test` → `src/test/nodeTestShim.js` (reexporta a API do Vitest), só no ambiente de teste. Primeira execução: 32 ficheiros, 276 passed.
+- O corredor antigo (`scripts/run-unit-tests.mjs`) foi REMOVIDO, não mantido em paralelo. Dois motores de teste é o mesmo padrão de dois caminhos que produziu três incidentes neste repositório.
+- ARMADILHA apanhada a tempo: o `.gitignore` tinha uma regra `test` sem barra inicial — ignora QUALQUER pasta com esse nome em toda a árvore. Engoliu o `frontend/src/test/` (setup e ponte) no primeiro commit: `git add -A` não protesta com ficheiros ignorados, o `git status` fica limpo e localmente passa tudo, porque estão no disco. Só o CI falharia, a dizer que o setup não existe. Regra ancorada a `/test`.
+- PLANO DE CORTE apresentado antes de extrair, com mapa de linhas e contratos de props; aprovado com "os 4 componentes, um a um" e "EmailList a sério + smoke nos outros".
+- EIXO 3+4, quatro incisões, cada uma validada e commitada em separado:
+  1. `EmailList` (30 testes, escritos ANTES da extracção) — 3288 → 3005.
+  2. `EmailThreadViewer` (11) — 3005 → 2702.
+  3. `EmailComposer` (15) — 2702 → 2433.
+  4. `FolderNavigation` (14) — 2433 → 2237.
+- Total: **−32% no ficheiro, 276 → 346 testes** (70 de componente, que antes eram impossíveis).
+- ACHADO 1 (uma mudança de comportamento que eu próprio ia introduzir): comecei por unificar os dois X do cabeçalho da lista num só. Fui verificar a premissa e estava errada — escolher um marcador NÃO limpa a pasta personalizada, logo os dois filtros podem coexistir. Um botão só obrigaria a dois cliques e limparia pela ordem errada. Ficaram os dois, com teste.
+- ACHADO 2 (bug pré-existente): nas pastas personalizadas, o botão do menu de contexto vivia DENTRO do botão da pasta. `<button>` dentro de `<button>` é HTML inválido e cada browser desfaz como entende. Corrigido para irmãos — o mesmo desenho que a lista de conversas já usava — com teste a trancá-lo.
+- ACHADO 3 (lacuna do CI): durante a extracção do painel de leitura, o componente ficou a usar `<Loader2 />` sem o importar e NADA protestou — nem o eslint nem o build. O `no-undef` não cobre JSX e a `react/jsx-no-undef` estava desligada. Só rebentaria no clique de transferir um anexo, em produção. Activei a regra como error: apanhou logo mais **15 casos reais** já no código (AlertTriangle no CreditTab; CheckCircle/Trash2/Clock no FinancialTab; Label/Input/CheckCircle no RGPDTab; cinco ícones no SystemEmailsSection). Todos corrigidos — imports em falta, zero regras de negócio tocadas.
+- ACHADO 4 (teste sem dentes, meu): o teste de remover anexo procurava o botão por heurística de classe e só afirmava SE o encontrasse — podia passar sem provar nada. O botão não tinha nome acessível nenhum; ganhou `aria-label` e o teste deixou de ser condicional. Mesma lição do teste de integração do commit anterior.
+- Desvio ao plano, assumido: os três diálogos de pasta (menu de contexto, criar/editar, mover) ficaram no contentor em vez de acompanharem o `FolderNavigation`. São modais em portal, com estado próprio; arrastá-los aumentava o risco sem reduzir acoplamento.
+- Higiene: cada extracção deixa imports órfãos na página. Limpei-os a cada passo (os avisos `no-unused-vars` do WebmailPage.jsx passam de 9 para 2, apesar de o ficheiro ter encolhido 32%).
+
+Stage Summary:
+- O frontend passa a poder testar o que o utilizador vê, o Webmail deixa de ser um ficheiro de 3288 linhas e o CI passa a recusar JSX com componentes por importar.
+
+Files:
+- frontend/vite.config.js, frontend/package.json, frontend/eslint.config.js, .gitignore, .github/workflows/main.yml
+- frontend/src/test/{nodeTestShim,setup}.js (novos)
+- frontend/src/components/webmail/{EmailList,EmailThreadViewer,EmailComposer,FolderNavigation}.jsx + webmailFormatters.js (novos)
+- frontend/src/components/webmail/__tests__/*.test.jsx (4 novos, 70 testes)
+- frontend/src/pages/WebmailPage.jsx
+- frontend/src/components/processDetails/tabs/{CreditTab,FinancialTab}.jsx, frontend/src/pages/systemConfig/{RGPDTab,SystemEmailsSection}.js (imports em falta)
+- ARCHITECTURE.md, FRONTEND_GUIDELINES.md (§ 20), AGENTS.md, CHANGELOG.md, worklog.md
+
+Validação:
+- `yarn test` → **36 ficheiros, 346 testes, 0 falhas**.
+- `eslint . --quiet` → limpo, já com a regra `jsx-no-undef` activa.
+- `vite build` → verde.
+- Backend intocado (1710 passed no commit anterior).
+
+---
 Task ID: fix-email-bloqueante-no-registo-publico
 Agent: Cloud Agent
 Task: CI vermelho — 3 testes do registo público a falhar aos 30000ms exactos
