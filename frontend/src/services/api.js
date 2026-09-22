@@ -384,9 +384,17 @@ api.interceptors.response.use(
     // 403 - PROIBIDO (Sem permissão)
     // ================================================================
     if (status === 403) {
-      toast.error("Acesso Negado", {
-        description: "Não tem permissão para realizar esta ação.",
-      });
+      // `skipErrorToast` também vale aqui (antes só era honrado nos 500+).
+      // Há ecrãs em que a falta de permissão NÃO é um erro genérico a
+      // anunciar com um toast: o gestor de documentos, por exemplo, mostra
+      // um aviso localizado dentro da própria tab (PACOTE 11) e o resto do
+      // processo continua navegável. Um toast global por cima disso diria
+      // duas vezes a mesma coisa, a segunda sem contexto.
+      if (!config?.skipErrorToast) {
+        toast.error("Acesso Negado", {
+          description: "Não tem permissão para realizar esta ação.",
+        });
+      }
       return Promise.reject(error);
     }
     
@@ -714,6 +722,129 @@ export const getClientOneDriveFiles = (clientName, subfolder) =>
 export const getOneDriveDownloadUrl = (itemId) => 
   api.get(`/onedrive/download/${itemId}`);
 export const getOneDriveStatus = () => api.get("/onedrive/status");
+
+// ====================================================================
+// DOCUMENTOS S3 — gestor de ficheiros do processo
+// ====================================================================
+// Estas funções existem para que o `S3FileManager` deixe de fazer `fetch`
+// cru. O interceptor do Axios injecta `Authorization`, `X-Company-Id` e
+// `X-Active-Role`; um `fetch` só leva o que lhe escreverem à mão, e o que
+// lhe escreviam era só o token. Sem `X-Company-Id`, `get_active_company_id_async`
+// cai em `user.company` (o NOME, não o id) — o mesmo mecanismo do incidente
+// de 2026-09-21. Ver AGENTS.md e `sendDocumentation.test.js`.
+//
+// O `responseType: "blob"` é indispensável nas que devolvem ficheiros: sem
+// ele o Axios tenta interpretar bytes como texto e o PDF chega corrompido.
+
+// ── Listagem, upload e remoção ──
+// `skipErrorToast` no 403: quem não pode ver os documentos recebe um aviso
+// LOCALIZADO dentro da tab (PACOTE 11); um toast global por cima seria a
+// mesma informação duas vezes, a segunda sem contexto.
+export const getProcessS3Files = (processId) =>
+  api.get(`/documents/client/${processId}/files`, { skipErrorToast: true });
+export const uploadProcessS3File = (processId, formData) =>
+  api.post(`/documents/client/${processId}/upload`, formData, {
+    // Content-Type deliberadamente ausente: o Axios tem de o gerar com o
+    // `boundary` do FormData. Escrevê-lo à mão parte o multipart.
+    skipErrorToast: true,
+  });
+export const deleteProcessS3File = (processId, filePath) =>
+  api.delete(`/documents/client/${processId}/file`, {
+    params: { file_path: filePath },
+    skipErrorToast: true,
+  });
+export const bulkDeleteProcessS3Files = (processId, filePaths) =>
+  api.post(`/documents/client/${processId}/bulk-delete`, { file_paths: filePaths }, {
+    skipErrorToast: true,
+  });
+export const bulkDownloadS3Files = (payload) =>
+  api.post("/documents/bulk-download", payload, {
+    responseType: "blob",
+    skipErrorToast: true,
+  });
+
+// ── Proxy de conteúdo (é o que evita o CORS do S3) ──
+// NUNCA substituir por um URL pré-assinado do bucket: o download directo
+// falha no browser por falta de cabeçalhos CORS no bucket, e foi por isso
+// que este proxy existe.
+export const getS3FileContent = (filePath) =>
+  api.get(`/documents/proxy/${encodeURIComponent(filePath)}`, {
+    responseType: "blob",
+    skipErrorToast: true,
+  });
+
+// ── Conflitos e movimentação ──
+export const checkS3UploadConflict = (payload) =>
+  api.post("/documents/check-upload-conflict", payload, { skipErrorToast: true });
+export const checkS3MoveConflict = (payload) =>
+  api.post("/documents/check-move-conflict", payload, { skipErrorToast: true });
+export const moveS3File = (processId, payload) =>
+  api.post(`/documents/move-file/${processId}`, payload, { skipErrorToast: true });
+export const checkEmployerNif = (nif) =>
+  api.get(`/documents/check-employer-nif/${nif}`, { skipErrorToast: true });
+
+// ── Ferramentas de IA (backend exige admin/CEO/diretor) ──
+// É aqui que o `X-Active-Role` conta: sem ele o backend resolve o papel
+// pelo JWT e um utilizador multi-perfil recebe 403 no perfil errado.
+export const aiAnalyzeS3Documents = (processId, formData) =>
+  api.post(`/documents/ai-analyze/${processId}`, formData, { skipErrorToast: true });
+export const aiApplyS3Suggestions = (processId, suggestions) =>
+  api.post(`/documents/ai-apply-suggestions/${processId}`, suggestions, {
+    skipErrorToast: true,
+  });
+export const organizeS3Documents = (processId, payload) =>
+  api.post(`/documents/organize/${processId}`, payload, { skipErrorToast: true });
+export const categorizeAllS3Documents = (processId) =>
+  api.post(`/documents/categorize-all/${processId}`, {}, { skipErrorToast: true });
+export const renameAllS3DocumentsSmart = (processId) =>
+  api.post(`/documents/rename-all-smart/${processId}`, {}, { skipErrorToast: true });
+export const renameS3DocumentSmart = (processId, payload) =>
+  api.post(`/documents/rename-smart/${processId}`, payload, { skipErrorToast: true });
+
+// ── Mapeamento cliente ↔ pasta S3 (admin) ──
+export const getClientS3Mappings = (search) =>
+  api.get("/admin/client-s3-mappings", {
+    params: { search: search || "" },
+    skipErrorToast: true,
+  });
+export const saveClientS3Mapping = (processId, s3Folder) =>
+  api.post("/admin/client-s3-mappings", null, {
+    params: s3Folder
+      ? { process_id: processId, s3_folder: s3Folder }
+      : { process_id: processId },
+    skipErrorToast: true,
+  });
+
+// ── Geração de minutas a partir do processo ──
+export const generateProcessTemplate = (processId, template) =>
+  api.get(`/templates/process/${processId}/generate/${template}/download`, {
+    responseType: "blob",
+    skipErrorToast: true,
+  });
+
+/**
+ * Lê o corpo de erro de um pedido feito com `responseType: "blob"`.
+ *
+ * ARMADILHA QUE ISTO RESOLVE: com `responseType: "blob"`, o Axios devolve
+ * o corpo como Blob TAMBÉM quando o pedido falha. `error.response.data.detail`
+ * fica `undefined` e a mensagem do servidor desaparece em silêncio — o
+ * utilizador vê "Erro ao gerar minuta" em vez da lista de campos em falta.
+ *
+ * @param {any} error - O erro apanhado do Axios.
+ * @returns {Promise<object>} O corpo em JSON, ou `{}` se não for legível.
+ */
+export const readBlobErrorBody = async (error) => {
+  const corpo = error?.response?.data;
+  if (!corpo) return {};
+  if (typeof Blob !== "undefined" && corpo instanceof Blob) {
+    try {
+      return JSON.parse(await corpo.text());
+    } catch {
+      return {};
+    }
+  }
+  return typeof corpo === "object" ? corpo : {};
+};
 
 // Notas de voz do consultor (Épico 7)
 // Vai pelo `api` do Axios e nunca por `fetch` cru: só o interceptor injecta

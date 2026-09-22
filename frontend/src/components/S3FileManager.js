@@ -24,7 +24,10 @@
  * @param {string} [props.clientName] — Nome do cliente (para mapeamento S3)
  * @param {Function} [props.onAIDataExtracted] — Callback quando a IA extrai dados dos documentos
  *
- * @context {AuthContext} — Consome token, user para autenticação e permissões de role
+ * @context {AuthContext} — Consome token, user e effectiveRole para permissões de role.
+ *   Os pedidos vão pelo cliente Axios (`services/api`), que injecta
+ *   `Authorization`, `X-Company-Id` e `X-Active-Role` — um `fetch` cru só
+ *   levaria o que lhe escrevessem à mão (ver AGENTS.md).
  *
  * @example
  * <S3FileManager
@@ -123,9 +126,30 @@ import { Input } from "./ui/input";
 import { pt } from "date-fns/locale";
 import { safeDate, safeFormat } from "../lib/utils";
 // PACOTE DJ — helper api.js para o novo endpoint de revisão HITL
-import { analyzeDocumentForReview } from "../services/api";
+import {
+  aiAnalyzeS3Documents,
+  aiApplyS3Suggestions,
+  analyzeDocumentForReview,
+  bulkDeleteProcessS3Files,
+  bulkDownloadS3Files,
+  categorizeAllS3Documents,
+  checkEmployerNif,
+  checkS3MoveConflict,
+  checkS3UploadConflict,
+  deleteProcessS3File,
+  generateProcessTemplate,
+  getClientS3Mappings,
+  getProcessS3Files,
+  getS3FileContent,
+  moveS3File,
+  organizeS3Documents,
+  renameAllS3DocumentsSmart,
+  readBlobErrorBody,
+  renameS3DocumentSmart,
+  saveClientS3Mapping,
+  uploadProcessS3File,
+} from "../services/api";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Calcula cor de texto com contraste adequado para a cor de fundo
 const getContrastColor = (bgColor) => {
@@ -379,36 +403,32 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     if (!processId) return;
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/files`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setFiles(data.files || {});
-        setStats(data.stats || null);
-        setPermissionDenied(false);
-      } else if (response.status === 403) {
+      const { data } = await getProcessS3Files(processId);
+      setFiles(data.files || {});
+      setStats(data.stats || null);
+      setPermissionDenied(false);
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status === 403) {
         // PACOTE 11 — permissão insuficiente: aviso LOCALIZADO à tab (sem
         // toast global), o utilizador continua a navegar no resto do processo.
+        // O `skipErrorToast` da função de API é o que impede o interceptor
+        // de sobrepor aqui o toast genérico "Acesso Negado".
         setPermissionDenied(true);
         setFiles({});
         setStats(null);
-      } else {
-        const error = await response.json();
-        if (error.detail !== "S3 não configurado") {
-          toast.error(extractErrorMessage(error.detail, "Erro ao carregar ficheiros"));
+      } else if (status) {
+        const detalhe = error?.response?.data?.detail;
+        if (detalhe !== "S3 não configurado") {
+          toast.error(extractErrorMessage(detalhe, "Erro ao carregar ficheiros"));
         }
+      } else {
+        console.error("Erro ao carregar ficheiros:", error);
       }
-    } catch (error) {
-      console.error("Erro ao carregar ficheiros:", error);
     } finally {
       setLoading(false);
     }
-  }, [processId, token]);
+  }, [processId]);
 
   useEffect(() => {
     fetchFiles();
@@ -421,22 +441,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setLoadingS3Folders(true);
     try {
       // Buscar dados do mapeamento
-      const response = await fetch(
-        `${API_URL}/api/admin/client-s3-mappings?search=${encodeURIComponent(clientName || '')}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        setS3Folders(data.available_folders || []);
-        
-        // Encontrar mapeamento actual deste processo
-        const currentProcess = data.processes?.find(p => p.id === processId);
-        if (currentProcess) {
-          // Backend retorna 's3_folder', não 's3_folder_mapping'
-          setCurrentS3Mapping(currentProcess.s3_folder || null);
-          setSelectedS3Folder(currentProcess.s3_folder || "");
-        }
+      const { data } = await getClientS3Mappings(clientName || "");
+      setS3Folders(data.available_folders || []);
+
+      // Encontrar mapeamento actual deste processo
+      const currentProcess = data.processes?.find(p => p.id === processId);
+      if (currentProcess) {
+        // Backend retorna 's3_folder', não 's3_folder_mapping'
+        setCurrentS3Mapping(currentProcess.s3_folder || null);
+        setSelectedS3Folder(currentProcess.s3_folder || "");
       }
     } catch (error) {
       console.error("Erro ao carregar mapeamento S3:", error);
@@ -451,29 +464,20 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     
     setSavingS3Mapping(true);
     try {
-      const url = selectedS3Folder
-        ? `${API_URL}/api/admin/client-s3-mappings?process_id=${processId}&s3_folder=${encodeURIComponent(selectedS3Folder)}`
-        : `${API_URL}/api/admin/client-s3-mappings?process_id=${processId}`;
-      
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        toast.success(data.message || "Mapeamento guardado");
-        setCurrentS3Mapping(selectedS3Folder);
-        setS3MappingOpen(false);
-        // Recarregar ficheiros para mostrar os da nova pasta
-        fetchFiles();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao guardar mapeamento"));
-      }
+      const { data } = await saveClientS3Mapping(processId, selectedS3Folder);
+      toast.success(data.message || "Mapeamento guardado");
+      setCurrentS3Mapping(selectedS3Folder);
+      setS3MappingOpen(false);
+      // Recarregar ficheiros para mostrar os da nova pasta
+      fetchFiles();
     } catch (error) {
       console.error("Erro ao guardar mapeamento:", error);
-      toast.error("Erro ao guardar mapeamento");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao guardar mapeamento",
+        ),
+      );
     } finally {
       setSavingS3Mapping(false);
     }
@@ -484,17 +488,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Verificar NIF da empresa
   const checkEmpresaNif = async (nif) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/check-employer-nif/${nif}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      
-      if (response.ok) {
-        return await response.json();
-      }
-      return null;
+      const { data } = await checkEmployerNif(nif);
+      return data;
     } catch (error) {
       console.error("Erro ao verificar NIF:", error);
       return null;
@@ -562,34 +557,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       }
 
       try {
-        const response = await fetch(
-          `${API_URL}/api/documents/client/${processId}/upload`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          }
-        );
-
-        if (response.ok) {
-          successCount++;
-        } else if (response.status === 429) {
-          // Rate limiting - esperar e tentar novamente
-          const retryAfter = response.headers.get("Retry-After") || 60;
+        await uploadProcessS3File(processId, formData);
+        successCount++;
+      } catch (error) {
+        const status = error?.response?.status;
+        if (status === 429) {
+          // Rate limiting. O interceptor do Axios já tentou de novo (3x com
+          // recuo exponencial) antes de chegar aqui; esta espera é a última
+          // linha, mantida do comportamento anterior para que um lote
+          // grande acabe por passar em vez de perder ficheiros.
+          const retryAfter = error?.response?.headers?.["retry-after"] || 60;
           toast.warning(`Aguardar ${retryAfter} segundos antes de continuar...`);
-          // Esperar e tentar novamente o mesmo ficheiro
           await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000));
           i--; // Tentar novamente o mesmo ficheiro
           continue;
-        } else {
-          const error = await response.json();
-          // Mensagem de erro mais amigável
-          const errorMsg = extractErrorMessage(error.detail, `Erro ${response.status}`);
-          toast.error(`${file.name}: ${errorMsg}`);
-          errorCount++;
         }
-      } catch {
-        toast.error(`Erro de conexão ao enviar ${file.name}`);
+        if (status) {
+          const errorMsg = extractErrorMessage(
+            error?.response?.data?.detail,
+            `Erro ${status}`,
+          );
+          toast.error(`${file.name}: ${errorMsg}`);
+        } else {
+          toast.error(`Erro de conexão ao enviar ${file.name}`);
+        }
         errorCount++;
       }
 
@@ -631,26 +622,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Verificar conflitos de upload antes de enviar
   const checkUploadConflicts = async (filenames, category) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/check-upload-conflict`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            process_id: processId,
-            filenames: filenames,
-            category: category
-          })
-        }
-      );
-      
-      if (response.ok) {
-        return await response.json();
-      }
-      return { has_conflicts: false, conflicts: [] };
+      const { data } = await checkS3UploadConflict({
+        process_id: processId,
+        filenames: filenames,
+        category: category,
+      });
+      return data;
     } catch (error) {
       console.error("Erro ao verificar conflitos:", error);
       return { has_conflicts: false, conflicts: [] };
@@ -795,31 +772,26 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       }
 
       try {
-        const response = await fetch(
-          `${API_URL}/api/documents/client/${processId}/upload`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          }
-        );
-
-        if (response.ok) {
-          successCount++;
-        } else if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After") || 60;
+        await uploadProcessS3File(processId, formData);
+        successCount++;
+      } catch (error) {
+        const status = error?.response?.status;
+        if (status === 429) {
+          const retryAfter = error?.response?.headers?.["retry-after"] || 60;
           toast.warning(`Aguardar ${retryAfter} segundos antes de continuar...`);
           await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000));
           i--;
           continue;
-        } else {
-          const error = await response.json();
-          const errorMsg = extractErrorMessage(error.detail, `Erro ${response.status}`);
-          toast.error(`${file.name}: ${errorMsg}`);
-          errorCount++;
         }
-      } catch {
-        toast.error(`Erro de conexão ao enviar ${file.name}`);
+        if (status) {
+          const errorMsg = extractErrorMessage(
+            error?.response?.data?.detail,
+            `Erro ${status}`,
+          );
+          toast.error(`${file.name}: ${errorMsg}`);
+        } else {
+          toast.error(`Erro de conexão ao enviar ${file.name}`);
+        }
         errorCount++;
       }
 
@@ -857,30 +829,23 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const handleDownload = async (file) => {
     try {
       // Usar proxy endpoint para evitar CORS do S3
-      const response = await fetch(
-        `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name || 'download';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao fazer download"));
-      }
+      const { data: blob } = await getS3FileContent(file.path);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Erro ao fazer download:", error);
-      toast.error("Erro ao fazer download");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao fazer download",
+        ),
+      );
     }
   };
 
@@ -897,23 +862,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
     setDeleting(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/file?file_path=${encodeURIComponent(deleteDialog.file.path)}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        }
+      await deleteProcessS3File(processId, deleteDialog.file.path);
+      toast.success("Ficheiro eliminado");
+      fetchFiles();
+    } catch (error) {
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao eliminar ficheiro",
+        ),
       );
-
-      if (response.ok) {
-        toast.success("Ficheiro eliminado");
-        fetchFiles();
-      } else {
-        const error = await response.json().catch(() => ({}));
-        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar ficheiro"));
-      }
-    } catch {
-      toast.error("Erro ao eliminar ficheiro");
     } finally {
       setDeleting(false);
       setDeleteDialog({ open: false, file: null });
@@ -926,41 +884,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
     setBulkDeleting(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/bulk-delete`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            file_paths: selectedFilesForAI.map((f) => f.path),
-          }),
-        }
+      const { data } = await bulkDeleteProcessS3Files(
+        processId,
+        selectedFilesForAI.map((f) => f.path),
       );
-
-      if (response.ok) {
-        const data = await response.json();
-        const deleted = data.deleted_count || 0;
-        const failed = data.failed_count || 0;
-        if (failed > 0) {
-          toast.warning(
-            `${deleted} ficheiro(s) eliminado(s), ${failed} falhou(aram)`
-          );
-        } else {
-          toast.success(`${deleted} ficheiro(s) eliminado(s) com sucesso`);
-        }
-        setSelectedFilesForAI([]);
-        setBulkDeleteDialog({ open: false });
-        fetchFiles();
+      const deleted = data.deleted_count || 0;
+      const failed = data.failed_count || 0;
+      if (failed > 0) {
+        toast.warning(
+          `${deleted} ficheiro(s) eliminado(s), ${failed} falhou(aram)`
+        );
       } else {
-        const error = await response.json().catch(() => ({}));
-        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar ficheiros"));
+        toast.success(`${deleted} ficheiro(s) eliminado(s) com sucesso`);
       }
+      setSelectedFilesForAI([]);
+      setBulkDeleteDialog({ open: false });
+      fetchFiles();
     } catch (error) {
       console.error("Erro ao eliminar ficheiros em massa:", error);
-      toast.error("Erro ao eliminar ficheiros");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao eliminar ficheiros",
+        ),
+      );
     } finally {
       setBulkDeleting(false);
     }
@@ -977,52 +924,47 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setTemplateError(null);
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/templates/process/${processId}/generate/${selectedTemplate}/download`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const resposta = await generateProcessTemplate(processId, selectedTemplate);
+      const url = window.URL.createObjectURL(resposta.data);
+      const a = document.createElement('a');
+      a.href = url;
 
-      if (response.ok) {
-        // Download do ficheiro
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        
-        // Obter nome do ficheiro do header ou usar default
-        const disposition = response.headers.get('Content-Disposition');
-        let filename = `minuta_${selectedTemplate}.txt`;
-        if (disposition) {
-          const match = disposition.match(/filename="(.+)"/);
-          if (match) filename = match[1];
-        }
-        
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        toast.success("Minuta gerada com sucesso!");
-        setTemplateDialog({ open: false });
-        setSelectedTemplate("");
-      } else {
-        const error = await response.json();
-        // Se for erro de validação (campos em falta)
-        if (error.detail?.missing_fields) {
-          setTemplateError({
-            message: error.detail.message || "Dados incompletos",
-            missingFields: error.detail.missing_fields
-          });
-        } else {
-          toast.error(extractErrorMessage(error.detail?.message || error.detail, "Erro ao gerar minuta"));
-        }
+      // Obter nome do ficheiro do header ou usar default
+      const disposition = resposta.headers?.["content-disposition"];
+      let filename = `minuta_${selectedTemplate}.txt`;
+      if (disposition) {
+        const match = disposition.match(/filename="(.+)"/);
+        if (match) filename = match[1];
       }
+
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast.success("Minuta gerada com sucesso!");
+      setTemplateDialog({ open: false });
+      setSelectedTemplate("");
     } catch (error) {
       console.error("Erro ao gerar template:", error);
-      toast.error("Erro ao gerar minuta");
+      // Com `responseType: "blob"` o corpo de ERRO também vem como Blob:
+      // sem o ler como texto, a lista de campos em falta desaparecia e o
+      // utilizador via só "Erro ao gerar minuta".
+      const corpo = await readBlobErrorBody(error);
+      if (corpo.detail?.missing_fields) {
+        setTemplateError({
+          message: corpo.detail.message || "Dados incompletos",
+          missingFields: corpo.detail.missing_fields,
+        });
+      } else {
+        toast.error(
+          extractErrorMessage(
+            corpo.detail?.message || corpo.detail,
+            "Erro ao gerar minuta",
+          ),
+        );
+      }
     } finally {
       setGeneratingTemplate(false);
     }
@@ -1121,23 +1063,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     
     try {
       // Usar proxy endpoint para evitar CORS do S3
-      const response = await fetch(
-        `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        setPreviewUrl(url);
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao carregar preview"));
-        setPreviewFile(null);
-      }
+      const { data: blob } = await getS3FileContent(file.path);
+      setPreviewUrl(URL.createObjectURL(blob));
     } catch (error) {
       console.error("Erro ao carregar preview:", error);
-      toast.error("Erro ao carregar preview");
+      const corpo = await readBlobErrorBody(error);
+      toast.error(extractErrorMessage(corpo.detail, "Erro ao carregar preview"));
       setPreviewFile(null);
     } finally {
       setPreviewLoading(false);
@@ -1211,19 +1142,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       for (const file of filesToAnalyze) {
         try {
           // Usar proxy endpoint que faz streaming através do backend (evita CORS)
-          const proxyResponse = await fetch(
-            `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          
-          if (proxyResponse.ok) {
-            const blob = await proxyResponse.blob();
-            formData.append('files', blob, file.name);
-            uploadedPaths.push(file.path);
-          } else {
-            console.warn(`Erro ao obter ficheiro ${file.name} via proxy: ${proxyResponse.status}`);
-            continue;
-          }
+          const { data: blob } = await getS3FileContent(file.path);
+          formData.append('files', blob, file.name);
+          uploadedPaths.push(file.path);
         } catch (e) {
           console.error(`Erro ao obter ficheiro ${file.name}:`, e);
         }
@@ -1236,20 +1157,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       formData.append('file_paths', JSON.stringify(uploadedPaths));
 
       // Enviar para análise
-      const response = await fetch(
-        `${API_URL}/api/documents/ai-analyze/${processId}`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
-          },
-          body: formData,
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
+      // O `X-Active-Role` deixa de ser escrito à mão: o interceptor do
+      // Axios injecta-o (e o `X-Company-Id`, que aqui nunca seguia).
+      let result;
+      try {
+        ({ data: result } = await aiAnalyzeS3Documents(processId, formData));
+      } catch (erroAnalise) {
+        const corpo = erroAnalise?.response?.data || {};
+        toast.error(extractErrorMessage(corpo.detail, "Erro na análise IA"));
+        return;
+      }
+      {
 
         if ((result.documents_count || 0) === 0 && (result.skipped_already_analyzed || 0) > 0) {
           toast.info(result.message || "Documentos já analisados pela IA");
@@ -1271,16 +1189,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             }).filter(doc => doc.source_path);
 
             if (docsToOrganize.length > 0) {
-              await fetch(`${API_URL}/api/documents/organize/${processId}`, {
-                method: 'POST',
-                headers: { 
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  documents: docsToOrganize,
-                  create_folders: true
-                })
+              await organizeS3Documents(processId, {
+                documents: docsToOrganize,
+                create_folders: true,
               });
             }
           } catch (orgError) {
@@ -1310,9 +1221,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         
         // Recarregar ficheiros para ver nova organização + badges "Analisado"
         fetchFiles();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro na análise IA"));
       }
     } catch (error) {
       console.error("Erro na análise IA:", error);
@@ -1388,29 +1296,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
     setApplyingChanges(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/ai-apply-suggestions/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(suggestions),
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`${result.updated_fields} campo(s) actualizado(s)`);
-        setAiDialog({ open: false, results: null });
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao aplicar sugestões"));
-      }
+      const { data: result } = await aiApplyS3Suggestions(processId, suggestions);
+      toast.success(`${result.updated_fields} campo(s) actualizado(s)`);
+      setAiDialog({ open: false, results: null });
     } catch (error) {
       console.error("Erro ao aplicar sugestões:", error);
-      toast.error("Erro ao aplicar alterações");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao aplicar alterações",
+        ),
+      );
     } finally {
       setApplyingChanges(false);
     }
@@ -1435,33 +1331,26 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     try {
       // 1) Categorizar docs ainda sem categoria (necessário para gerar nomes inteligentes)
       try {
-        await fetch(`${API_URL}/api/documents/categorize-all/${processId}`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
-          },
-        });
+        await categorizeAllS3Documents(processId);
       } catch (catErr) {
         console.warn("Categorização prévia falhou (a tentar renomear na mesma):", catErr);
       }
 
       // 2) Renomear com nomes inteligentes baseados na categoria IA
-      const response = await fetch(
-        `${API_URL}/api/documents/rename-all-smart/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
-          }
+      let result;
+      try {
+        ({ data: result } = await renameAllS3DocumentsSmart(processId));
+      } catch (erroRename) {
+        const detalhe = erroRename?.response?.data?.detail;
+        if (typeof detalhe === "string" && detalhe.includes("categorizado")) {
+          toast.warning("Execute primeiro a análise IA para categorizar os documentos");
+        } else {
+          toast.error(extractErrorMessage(detalhe, "Erro ao renomear documentos"));
         }
-      );
+        return;
+      }
 
-      if (response.ok) {
-        const result = await response.json();
-        
+      {
         if (result.renamed > 0) {
           toast.success(`${result.renamed} documento(s) renomeado(s) com sucesso!`);
           // Recarregar ficheiros para mostrar novos nomes
@@ -1475,13 +1364,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         // Mostrar diálogo com detalhes se houver resultados
         if (result.details && result.details.length > 0) {
           setRenameDialog({ open: true, results: result });
-        }
-      } else {
-        const error = await response.json();
-        if (error.detail?.includes("categorizado")) {
-          toast.warning("Execute primeiro a análise IA para categorizar os documentos");
-        } else {
-          toast.error(extractErrorMessage(error.detail, "Erro ao renomear documentos"));
         }
       }
     } catch (error) {
@@ -1518,34 +1400,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setManualRenaming(true);
     
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/rename-smart/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            s3_path: file.path,
-            apply_ai_name: false,
-            novo_nome: newName.trim()
-          })
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Ficheiro renomeado para "${result.new_name}"`);
-        setManualRenameDialog({ open: false, file: null, newName: "" });
-        fetchFiles(); // Recarregar lista
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao renomear ficheiro"));
-      }
+      const { data: result } = await renameS3DocumentSmart(processId, {
+        s3_path: file.path,
+        apply_ai_name: false,
+        novo_nome: newName.trim(),
+      });
+      toast.success(`Ficheiro renomeado para "${result.new_name}"`);
+      setManualRenameDialog({ open: false, file: null, newName: "" });
+      fetchFiles(); // Recarregar lista
     } catch (error) {
       console.error("Erro ao renomear ficheiro:", error);
-      toast.error("Erro ao renomear ficheiro");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao renomear ficheiro",
+        ),
+      );
     } finally {
       setManualRenaming(false);
     }
@@ -1570,36 +1440,25 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       
       for (const file of allFiles) {
         try {
-          const proxyResponse = await fetch(
-            `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          
-          if (proxyResponse.ok) {
-            const blob = await proxyResponse.blob();
-            formData.append('files', blob, file.name);
-          }
+          const { data: blob } = await getS3FileContent(file.path);
+          formData.append('files', blob, file.name);
         } catch (e) {
           console.error(`Erro ao obter ficheiro ${file.name}:`, e);
         }
       }
 
       // Análise IA
-      const analyzeResponse = await fetch(
-        `${API_URL}/api/documents/ai-analyze/${processId}`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        }
-      );
-
-      if (!analyzeResponse.ok) {
-        const error = await analyzeResponse.json();
-        throw new Error(extractErrorMessage(error.detail, "Erro na análise IA"));
+      let analyzeResult;
+      try {
+        ({ data: analyzeResult } = await aiAnalyzeS3Documents(processId, formData));
+      } catch (erroAnalise) {
+        throw new Error(
+          extractErrorMessage(
+            erroAnalise?.response?.data?.detail,
+            "Erro na análise IA",
+          ),
+        );
       }
-
-      const analyzeResult = await analyzeResponse.json();
 
       // Passo 2: Organizar documentos nas pastas
       // Juntar source_path dos ficheiros originais com resultados da IA
@@ -1611,24 +1470,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         };
       }).filter(doc => doc.source_path);
 
-      const organizeResponse = await fetch(
-        `${API_URL}/api/documents/organize/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            documents: docsToOrganize,
-            create_folders: true
-          })
-        }
-      );
+      let organizeResult;
+      try {
+        ({ data: organizeResult } = await organizeS3Documents(processId, {
+          documents: docsToOrganize,
+          create_folders: true,
+        }));
+      } catch (erroOrganize) {
+        throw new Error(
+          extractErrorMessage(
+            erroOrganize?.response?.data?.detail,
+            "Erro ao organizar documentos",
+          ),
+        );
+      }
 
-      if (organizeResponse.ok) {
-        const organizeResult = await organizeResponse.json();
-        
+      {
         setOrganizeResults({
           analyzed: analyzeResult.documents_count || allFiles.length,
           organized: organizeResult.organized_count || organizeResult.organized?.length || 0,
@@ -1638,9 +1495,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
         toast.success(`Organização completa! ${organizeResult.organized_count || 0} documento(s) organizado(s).`);
         fetchFiles(); // Recarregar lista
-      } else {
-        const error = await organizeResponse.json();
-        throw new Error(extractErrorMessage(error.detail, "Erro ao organizar documentos"));
       }
 
     } catch (error) {
@@ -1706,32 +1560,18 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     
     for (const file of filesToMove) {
       try {
-        const response = await fetch(
-          `${API_URL}/api/documents/check-move-conflict`,
-          {
-            method: 'POST',
-            headers: { 
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              process_id: processId,
-              source_path: file.path,
-              target_category: targetCategory
-            })
-          }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.has_conflict) {
-            conflicts.push({
-              file,
-              conflictPath: data.conflict_path,
-              conflictFilename: data.conflict_filename,
-              suggestedNames: data.suggested_names
-            });
-          }
+        const { data } = await checkS3MoveConflict({
+          process_id: processId,
+          source_path: file.path,
+          target_category: targetCategory,
+        });
+        if (data.has_conflict) {
+          conflicts.push({
+            file,
+            conflictPath: data.conflict_path,
+            conflictFilename: data.conflict_filename,
+            suggestedNames: data.suggested_names,
+          });
         }
       } catch (err) {
         console.error(`Erro ao verificar conflito para ${file.name}:`, err);
@@ -1757,24 +1597,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       body.auto_rename = true;
     }
     
-    const response = await fetch(
-      `${API_URL}/api/documents/move-file/${processId}`,
-      {
-        method: 'POST',
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      }
-    );
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail?.message || errorData.detail || 'Erro ao mover ficheiro');
+    try {
+      const { data } = await moveS3File(processId, body);
+      return data;
+    } catch (error) {
+      const detalhe = error?.response?.data?.detail;
+      throw new Error(detalhe?.message || detalhe || 'Erro ao mover ficheiro');
     }
-    
-    return response.json();
   };
 
   const handleDrop = async (e, targetCategory) => {
@@ -2651,37 +2480,26 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                         className="h-5 text-[10px] bg-emerald-50 hover:bg-emerald-100 border-emerald-200 px-2"
                         onClick={async () => {
                           try {
-                            const response = await fetch(`${API_URL}/api/documents/bulk-download`, {
-                              method: 'POST',
-                              headers: {
-                                Authorization: `Bearer ${token}`,
-                                'Content-Type': 'application/json'
-                              },
-                              body: JSON.stringify({
-                                document_ids: selectedFilesForAI.map(f => f.path),
-                                process_id: processId
-                              })
+                            const { data: blob } = await bulkDownloadS3Files({
+                              document_ids: selectedFilesForAI.map(f => f.path),
+                              process_id: processId,
                             });
-                            
-                            if (response.ok) {
-                              const blob = await response.blob();
-                              const url = URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = `documentos_${new Date().toISOString().slice(0,10)}.zip`;
-                              document.body.appendChild(a);
-                              a.click();
-                              document.body.removeChild(a);
-                              URL.revokeObjectURL(url);
-                              toast.success(`${selectedFilesForAI.length} documento(s) descarregado(s)`);
-                              setSelectedFilesForAI([]);
-                            } else {
-                              const error = await response.json();
-                              toast.error(extractErrorMessage(error.detail, "Erro ao descarregar documentos"));
-                            }
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `documentos_${new Date().toISOString().slice(0,10)}.zip`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                            toast.success(`${selectedFilesForAI.length} documento(s) descarregado(s)`);
+                            setSelectedFilesForAI([]);
                           } catch (error) {
                             console.error("Erro no download em massa:", error);
-                            toast.error("Erro ao descarregar documentos");
+                            const corpo = await readBlobErrorBody(error);
+                            toast.error(
+                              extractErrorMessage(corpo.detail, "Erro ao descarregar documentos"),
+                            );
                           }
                         }}
                       >

@@ -45,20 +45,63 @@ vi.mock("../../services/api", async (original) => {
   const resolver = (metodo) => (url, ...resto) => {
     axiosFalso.chamadas.push({ metodo, url: String(url), resto });
     for (const [padrao, carga] of axiosFalso.respostas) {
-      if (String(url).includes(padrao)) return Promise.resolve({ data: carga });
+      if (String(url).includes(padrao)) {
+        if (carga instanceof Error) return Promise.reject(carga);
+        return Promise.resolve({ data: carga });
+      }
     }
     return Promise.resolve({ data: {} });
   };
+  const cliente = {
+    get: resolver("GET"),
+    post: resolver("POST"),
+    put: resolver("PUT"),
+    patch: resolver("PATCH"),
+    delete: resolver("DELETE"),
+  };
   return {
     ...real,
-    default: {
-      get: resolver("GET"),
-      post: resolver("POST"),
-      put: resolver("PUT"),
-      patch: resolver("PATCH"),
-      delete: resolver("DELETE"),
-    },
+    default: cliente,
     analyzeDocumentForReview: vi.fn(() => Promise.resolve({ data: {} })),
+    // As funções de documentos do gestor de ficheiros passam pelo mesmo
+    // resolvedor, para que o teste continue a descrever o comportamento e
+    // não o transporte.
+    getProcessS3Files: (processId) =>
+      cliente.get(`/documents/client/${processId}/files`),
+    getClientS3Mappings: (procura) =>
+      cliente.get("/admin/client-s3-mappings", { params: { search: procura } }),
+    saveClientS3Mapping: (processId, pasta) =>
+      cliente.post("/admin/client-s3-mappings", null, { processId, pasta }),
+    uploadProcessS3File: (processId, formData) =>
+      cliente.post(`/documents/client/${processId}/upload`, formData),
+    deleteProcessS3File: (processId, caminho) =>
+      cliente.delete(`/documents/client/${processId}/file`, { caminho }),
+    bulkDeleteProcessS3Files: (processId, caminhos) =>
+      cliente.post(`/documents/client/${processId}/bulk-delete`, caminhos),
+    bulkDownloadS3Files: (carga) => cliente.post("/documents/bulk-download", carga),
+    getS3FileContent: (caminho) =>
+      cliente.get(`/documents/proxy/${encodeURIComponent(caminho)}`),
+    checkS3UploadConflict: (carga) =>
+      cliente.post("/documents/check-upload-conflict", carga),
+    checkS3MoveConflict: (carga) =>
+      cliente.post("/documents/check-move-conflict", carga),
+    moveS3File: (processId, carga) =>
+      cliente.post(`/documents/move-file/${processId}`, carga),
+    checkEmployerNif: (nif) => cliente.get(`/documents/check-employer-nif/${nif}`),
+    aiAnalyzeS3Documents: (processId, carga) =>
+      cliente.post(`/documents/ai-analyze/${processId}`, carga),
+    aiApplyS3Suggestions: (processId, carga) =>
+      cliente.post(`/documents/ai-apply-suggestions/${processId}`, carga),
+    organizeS3Documents: (processId, carga) =>
+      cliente.post(`/documents/organize/${processId}`, carga),
+    categorizeAllS3Documents: (processId) =>
+      cliente.post(`/documents/categorize-all/${processId}`, {}),
+    renameAllS3DocumentsSmart: (processId) =>
+      cliente.post(`/documents/rename-all-smart/${processId}`, {}),
+    renameS3DocumentSmart: (processId, carga) =>
+      cliente.post(`/documents/rename-smart/${processId}`, carga),
+    generateProcessTemplate: (processId, modelo) =>
+      cliente.get(`/templates/process/${processId}/generate/${modelo}`),
   };
 });
 
@@ -98,7 +141,14 @@ const RESPOSTA_FICHEIROS = {
 
 /** Responde a qualquer pedido; a listagem devolve os ficheiros acima. */
 function ligarRede({ estadoDaListagem = 200, carga = RESPOSTA_FICHEIROS } = {}) {
-  axiosFalso.respostas.set("/files", carga);
+  if (estadoDaListagem === 200) {
+    axiosFalso.respostas.set("/files", carga);
+  } else {
+    // O Axios rejeita em não-2xx, com o estado em `error.response.status`.
+    const erro = new Error(`HTTP ${estadoDaListagem}`);
+    erro.response = { status: estadoDaListagem, data: { detail: "Sem permissão" } };
+    axiosFalso.respostas.set("/files", erro);
+  }
 
   globalThis.fetch = vi.fn((url) => {
     const endereco = String(url);
