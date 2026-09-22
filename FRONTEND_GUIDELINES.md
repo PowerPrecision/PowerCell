@@ -454,3 +454,56 @@ Regras para quem continuar o trabalho:
 ### `react/jsx-no-undef` é bloqueante
 
 Um componente ou ícone usado em JSX sem import **não** era apanhado: o `no-undef` não cobre JSX e a regra estava desligada. A regra é agora `error` — foi activada depois de um `<Loader2 />` sem import passar no CI e só rebentar no clique de transferir um anexo. Apanhou logo mais 15 casos reais no código existente.
+
+## 21. Nota de voz do consultor (Épico 7, Set 2026)
+
+**Onde vive.** Botão **Nota de voz** no separador *Histórico* do processo,
+ao lado de *Registar Atividade*. Progressive Disclosure: o ecrã normal tem
+um botão; o gravador só existe dentro do `Dialog`.
+
+**Três peças, três responsabilidades.**
+
+| Ficheiro | O que faz | O que NÃO faz |
+|---|---|---|
+| `utils/voiceNote.js` | Decisões puras: formato a pedir, limites, validação, cronómetro, mensagens | Tocar no browser |
+| `hooks/useAudioRecorder.js` | `getUserMedia`, `MediaRecorder`, libertar o microfone | Decidir formatos ou validar |
+| `components/processDetails/VoiceNoteRecorder.jsx` | Renderizar os estados e entregar o ficheiro por `onEnviar(File)` | Chamar a API, saber o que é um processo |
+
+O estado (diálogo aberto, upload em curso, tarefa em curso) e a chamada à
+API vivem no contentor `ProcessDetails`. O componente diz o que aconteceu;
+o contentor decide o que isso implica — a mesma regra do § 20.
+
+**Os quatro estados visíveis:** repouso → *A gravar...* (cronómetro, com
+aviso a 30 s do limite) → pré-escuta (`<audio controls>`, enviar ou
+descartar) → *A enviar...*; e, depois do upload, *A processar Inteligência
+Artificial...*, ligado aos eventos `task_*` e não a um temporizador.
+
+**Gravar pode simplesmente não ser possível.** Safari antigo sem
+`MediaRecorder`, permissão recusada, browser sem formato compatível, página
+fora de HTTPS. Em qualquer destes casos o componente **oferece o upload de
+ficheiro** e explica porquê — nunca mostra um botão que não faz nada.
+
+**O microfone é sempre libertado.** Cada faixa do `MediaStream` é parada ao
+terminar, ao cancelar e ao desmontar. Sem isso, o indicador de gravação do
+browser fica aceso depois de o diálogo fechar e o utilizador julga — com
+razão — que continua a ser ouvido. Há dois testes só sobre isto.
+
+**A URL de pré-escuta é revogada.** `URL.createObjectURL` sem
+`revokeObjectURL` deixa o áudio inteiro em memória até ao refresh.
+
+**Upload pelo `api` do Axios, nunca por `fetch`.** Regra geral do projecto
+(incidente 2026-09-21): só o interceptor injecta o token e os cabeçalhos de
+empresa/papel.
+
+**O evento é filtrado antes de invalidar.** `eNotaDeVozDoProcesso(payload,
+id)` exige `task_type === "VOICE_NOTE"` **e** o `process_id` desta página.
+Sem o filtro, qualquer tarefa de fundo do CRM (importação Excel, análise em
+massa, geração de PDF) recarregaria a página de detalhes do processo.
+
+**Limites iguais aos do backend** (25 MB, 5 minutos): rejeitar cedo poupa ao
+consultor um upload de 20 MB para receber um 413 no fim.
+
+**Testar APIs de media:** falsear `MediaRecorder`, `getUserMedia` e
+`createObjectURL` — os três — e deixar o hook e o componente reais. Falsear
+o hook deixaria a integração por testar, que é precisamente onde estão os
+bugs.

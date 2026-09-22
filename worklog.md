@@ -1,4 +1,26 @@
 ---
+Task ID: epico-7-consultor-hands-free
+Agent: Cloud Agent
+Task: Épico 7 — nota de voz do consultor: ASR + LLM → timeline e tarefas
+
+Date: 2026-09-22
+
+Work Log:
+- ACHADO QUE MUDOU O EIXO 2, e disse-o antes de codificar: a pasta `skills/` não é código do produto. São pacotes de documentação de fornecedor (`SKILL.md` + exemplos `.ts`) para o `z-ai-web-dev-sdk` — TypeScript, SDK não instalado em lado nenhum, zero referências no `backend/` ou no `frontend/src/`. Não dá para "usar os módulos da pasta skills/" à letra num backend Python. Honrei a intenção: implementei ASR e LLM como serviços Python com a mesma separação que os SKILL.md descrevem, sobre o cliente OpenAI que o produto já tem, e registei no ARCHITECTURE.md porque é que a pasta não é importada — quem lá for procurar o motor que corre em produção não o encontra.
+- Levantamento antes de mexer: tarefas e histórico são QUATRO coisas, não duas — `db.tasks` (tarefas de equipa), `process.activities`/`db.activities` (timeline e comentários), `db.history` (auditoria) e `db.task_logs` (progresso de trabalho pesado). O resumo vai para `db.activities`, as tarefas para `db.tasks` via `run_create_task`, e o progresso para um `TaskLog`.
+- Decisão de desenho que poupou um contrato: a nota usa um `TaskLog` do tipo `VOICE_NOTE`, por isso herda os eventos `task_*` do Épico 4 de graça. Não inventei um `voice_note_ready` — seria obrigar os dois lados a conhecer dois nomes, o erro que o Épico 5 evitou ao manter o `new_email`. O que o cliente precisa para se actualizar viaja no `result_data` do evento terminal.
+- Dev nunca chama uma API paga: `resolver_provider` só devolve o motor real em produção E com chave. Ter chave no `.env` local não é autorização — a nota de voz de um consultor tem dados de um cliente real. Valor desconhecido na variável cai no simulado (falha fechada). Há testes explícitos só sobre esta decisão, porque uma regressão aqui não parte nenhum ecrã: apenas passa a enviar voz para fora, em silêncio.
+- BUG MEU, apanhado pelo teste e2e: sem `status=PROCESSING` explícito, a tarefa ficava em `pending` durante toda a corrida e o `resolve_event_type` traduzia cada actualização de progresso num `task_started`. O consultor receberia meia dúzia de "começou" e nenhuma barra a andar. O `_progresso` passa agora o estado.
+- DOIS BUGS MEUS apanhados pelos testes puros da extracção, antes de tocarem em rede: (1) "amanhã à tarde" era lido como 09:00 porque "manha" é subcadeia de "amanha" e eu usei um teste de pertença — passou a exigir fronteira de palavra; (2) uma resposta que fosse um ARRAY de tarefas era "salva" pela varredura de chavetas, que devolvia o primeiro objecto de dentro da lista como se fosse o payload — uma tarefa interpretada como extracção, em silêncio. Agora tenta o documento inteiro primeiro e recusa o que não seja um objecto.
+- Degradação graciosa onde interessa: se o LLM falhar depois de o áudio estar transcrito, o texto transcrito entra na timeline à mesma e a tarefa termina com aviso (`status: "partial"`). A transcrição tem valor por si; perdê-la por causa do segundo passo seria castigar o consultor por uma falha nossa. Só uma falha de transcrição termina em FAILED.
+- As tarefas nascem por `run_create_task` e não por um `insert_one` paralelo — é o único caminho que prefixa `[PROC-012]`, regista no histórico e notifica. Tenho um teste que prova isso precisamente pelo prefixo: um `insert_one` directo não o teria.
+- Frontend: o que é decisão (formatos, limites, validação, cronómetro, mensagens) vive em `utils/voiceNote.js` e testa-se sem browser; o `useAudioRecorder` fica só com o imperativo. Dois testes existem só para provar que o microfone é libertado — sem isso o indicador de gravação do browser fica aceso e o utilizador julga, com razão, que continua a ser ouvido.
+- Filtro antes de invalidar: `eNotaDeVozDoProcesso` exige `task_type === "VOICE_NOTE"` E o `process_id` desta página. Sem ele, qualquer importação Excel ou análise em massa recarregaria a página de detalhes do processo.
+- MUTAÇÃO para provar que os testes têm dentes — 7 mutações, 7 apanhadas: tirar o `origin` da atividade (1 vermelho), não criar as tarefas (5), inventar a data de hoje quando não se percebe a expressão (2), deixar dev com chave usar a API real (1), o filtro de eventos deixar de filtrar (2), não libertar o microfone (2), ignorar o aviso de degradação na mensagem (1).
+- LIMITE QUE DEIXO DITO: o teste de integração monta o `HistoryTab` real com o gravador real, não o `ProcessDetails` inteiro (3000 linhas, dezenas de dependências). Prova a ligação que acrescentei — botão → diálogo → ficheiro no callback do contentor — mas um teste da página montada, como o que o Épico 6 fez ao Webmail, ainda não existe para o ProcessDetails. Foi exactamente um desses que apanhou a zona morta temporal no Webmail.
+- Suites: backend 133 testes novos (60 extracção + 42 providers + 31 e2e), frontend 60 novos (33 + 20 + 7). Zero regressões.
+
+---
 Task ID: webmail-testes-da-pagina-montada
 Agent: Cloud Agent
 Task: CI do Épico 6 + testes de integração do WebmailPage

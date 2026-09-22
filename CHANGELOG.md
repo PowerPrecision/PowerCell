@@ -3,6 +3,24 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (3) — Notas de voz: falar em vez de escrever
+
+### Adicionado
+- **Nota de voz no processo.** No separador *Histórico* há agora um botão **Nota de voz**. O consultor grava directamente no browser (ou carrega um ficheiro de áudio) e o sistema trata do resto: transcreve, escreve um resumo no histórico do processo e cria as tarefas que foram mencionadas, com prazo e prioridade.
+- **Sem esperas.** O envio devolve logo o controlo. O trabalho corre em segundo plano e, quando termina, a nota e as tarefas aparecem no ecrã sozinhas — sem recarregar a página. Enquanto corre, aparece "A processar Inteligência Artificial...".
+- **Prazos deduzidos do que se diz.** "amanhã de manhã", "sexta-feira", "daqui a duas semanas", "final do mês" ou uma data concreta viram prazos reais na tarefa. Quando a expressão é ambígua ("quando o banco responder"), a tarefa fica **sem** prazo em vez de receber uma data inventada.
+- **Funciona sem microfone.** Browser que não grava, permissão recusada ou formato incompatível passam a oferecer o carregamento de um ficheiro, com a explicação do motivo.
+- **O áudio fica guardado** na pasta do processo, para poder ser ouvido outra vez.
+
+### Segurança e ambiente
+- **O ambiente de desenvolvimento não envia voz para fora.** Os motores de transcrição e de análise só usam os serviços externos em produção e com credenciais configuradas; em qualquer outro caso simulam. Ter credenciais na máquina local não basta para as usar.
+- **O modelo de análise é escolhido no painel de administração**, não está fixo no código.
+
+### Robustez
+- **Falhar a análise não faz perder a gravação.** Se a transcrição correr bem mas a análise falhar, o texto transcrito entra na mesma no histórico e o consultor é avisado de que não foram criadas tarefas.
+- **Uma falha do armazenamento não impede a nota.** O arquivo do áudio é um extra, não uma dependência.
+- **As tarefas criadas são identificáveis** como tendo vindo de uma nota de voz.
+
 ## [2026-09-22] (2) — Webmail deixava de abrir
 
 ### Corrigido

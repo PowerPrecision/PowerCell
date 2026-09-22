@@ -715,6 +715,25 @@ export const getOneDriveDownloadUrl = (itemId) =>
   api.get(`/onedrive/download/${itemId}`);
 export const getOneDriveStatus = () => api.get("/onedrive/status");
 
+// Notas de voz do consultor (Épico 7)
+// Vai pelo `api` do Axios e nunca por `fetch` cru: só o interceptor injecta
+// o token e os cabeçalhos de empresa/papel (ver AGENTS.md, incidente
+// 2026-09-21). O backend responde de imediato com o `task_id` — a
+// transcrição e a extração correm em background.
+export const uploadVoiceNote = (processId, file, onProgress) => {
+  const formData = new FormData();
+  formData.append("file", file);
+  return api.post(`/processes/${processId}/voice-notes`, formData, {
+    headers: { "Content-Type": "multipart/form-data" },
+    onUploadProgress: (evento) => {
+      if (!onProgress || !evento.total) return;
+      onProgress(Math.round((evento.loaded * 100) / evento.total));
+    },
+  });
+};
+export const getVoiceNotes = (processId) =>
+  api.get(`/processes/${processId}/voice-notes`);
+
 // S3 Document Storage (Current)
 export const getClientS3Files = (processId) => 
   api.get(`/documents/client/${processId}/files`);

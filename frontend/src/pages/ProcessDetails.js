@@ -94,7 +94,14 @@ import {
   setProcessIndexed,
   // PACOTE 11 (Eixo 4) — restauro rápido do processo eliminado (banner)
   restoreProcess,
+  // ÉPICO 7 — nota de voz do consultor
+  uploadVoiceNote,
 } from "../services/api";
+import useTaskEvents from "../hooks/useTaskEvents";
+import {
+  eNotaDeVozDoProcesso,
+  mensagemDeConclusao,
+} from "../utils/voiceNote";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
 import ProcessAlerts from "../components/ProcessAlerts";
@@ -309,6 +316,13 @@ const ProcessDetails = () => {
   // Activity state
   const [newComment, setNewComment] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
+  // ── Nota de voz (Épico 7) ────────────────────────────────────────
+  // Declarado JUNTO DO RESTANTE ESTADO, e não ao pé dos handlers: um
+  // `const` usado por um `useCallback` declarado antes dele fica na zona
+  // morta temporal e rebenta no primeiro render (regressão do Épico 6).
+  const [voiceNoteOpen, setVoiceNoteOpen] = useState(false);
+  const [aEnviarNotaDeVoz, setAEnviarNotaDeVoz] = useState(false);
+  const [notaDeVozEmCurso, setNotaDeVozEmCurso] = useState(null);
 
   // Deadline dialog
   const [isDeadlineDialogOpen, setIsDeadlineDialogOpen] = useState(false);
@@ -1361,6 +1375,51 @@ const ProcessDetails = () => {
       setSendingComment(false);
     }
   };
+
+  // ── Nota de voz (Épico 7) ────────────────────────────────────────
+  // O upload devolve de imediato; o trabalho pesado (transcrição, IA,
+  // escrita na timeline, criação de tarefas) corre em background no
+  // servidor e volta pelos eventos `task_*` do Épico 4.
+  const handleEnviarNotaDeVoz = useCallback(
+    async (ficheiro) => {
+      setAEnviarNotaDeVoz(true);
+      try {
+        const { data } = await uploadVoiceNote(id, ficheiro);
+        setNotaDeVozEmCurso(data?.task_id || null);
+        setVoiceNoteOpen(false);
+        toast.info("Nota enviada. A transcrever e a analisar...");
+      } catch (erro) {
+        toast.error(
+          erro?.response?.data?.detail || "Não foi possível enviar a nota de voz.",
+        );
+      } finally {
+        setAEnviarNotaDeVoz(false);
+      }
+    },
+    [id],
+  );
+
+  // A nota só aparece no ecrã sem refresh porque este handler invalida as
+  // queries do processo quando o evento terminal chega. Sem o filtro por
+  // tipo e processo, QUALQUER tarefa de fundo do CRM (importações, análises
+  // em massa) recarregaria esta página.
+  useTaskEvents(
+    useCallback(
+      (payload, tipoDeEvento) => {
+        if (!eNotaDeVozDoProcesso(payload, id)) return;
+
+        if (tipoDeEvento === "task_completed") {
+          setNotaDeVozEmCurso(null);
+          fetchData();
+          toast.success(mensagemDeConclusao(payload?.result));
+        } else if (tipoDeEvento === "task_failed") {
+          setNotaDeVozEmCurso(null);
+          toast.error(payload?.error || "A nota de voz não pôde ser processada.");
+        }
+      },
+      [id, fetchData],
+    ),
+  );
 
   const handleDeleteComment = async (activityId) => {
     try {
@@ -2714,6 +2773,11 @@ const ProcessDetails = () => {
                   handleDeleteComment={handleDeleteComment}
                   user={user}
                   isProcessLocked={isProcessLocked}
+                  voiceNoteOpen={voiceNoteOpen}
+                  onVoiceNoteOpenChange={setVoiceNoteOpen}
+                  onEnviarNotaDeVoz={handleEnviarNotaDeVoz}
+                  aEnviarNotaDeVoz={aEnviarNotaDeVoz}
+                  aProcessarNotaDeVoz={Boolean(notaDeVozEmCurso)}
                 />
               </TabsContent>
             </Tabs>

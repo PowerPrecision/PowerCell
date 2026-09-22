@@ -2536,3 +2536,117 @@ O Épico 5 (tempo real e conversas) fica intacto por construção: o agrupamento
 
 1. **`<button>` dentro de `<button>`** nas pastas personalizadas: o botão do menu de contexto vivia dentro do botão da pasta. HTML inválido, que cada browser desfaz como entende. Passam a irmãos — o mesmo desenho que a lista de conversas já usava — com teste a trancá-lo.
 2. **JSX com componentes por importar**: `react/jsx-no-undef` estava desligada e o `no-undef` não cobre JSX, por isso um `<Loader2 />` sem import passava no CI e só rebentava no clique do utilizador. A regra passa a `error`; apanhou mais 15 casos reais (`AlertTriangle` no CreditTab, `CheckCircle`/`Trash2`/`Clock` no FinancialTab, `Label`/`Input`/`CheckCircle` no RGPDTab e cinco ícones no SystemEmailsSection), todos corrigidos.
+
+## Épico 7 — O Consultor "Hands-Free": nota de voz → resumo e tarefas (Set 2026)
+
+### O problema
+
+O consultor sai de uma reunião com o cliente e traz na cabeça três ou
+quatro coisas combinadas. Se não as escrever nos minutos seguintes,
+perdem-se — e escrevê-las obriga a parar, abrir o processo e redigir. O
+resultado é histórico incompleto e prazos que ninguém agendou.
+
+### O fluxo
+
+    gravação no browser (ou upload de ficheiro)
+        → POST /api/processes/{id}/voice-notes   (responde de imediato)
+        → arquivo do áudio no S3 (pasta "Notas de Voz" do processo)
+        → tarefa de acompanhamento (TaskLog, tipo VOICE_NOTE)
+        → [background] transcrição (ASR)
+        → [background] extração de resumo + tarefas (LLM)
+        → resumo em `db.activities` (origin="voice_note")
+        → tarefas em `db.tasks` via `task_api_crud.run_create_task`
+        → eventos `task_*` (Redis → WebSocket) → o ecrã actualiza-se sozinho
+
+### A pasta `skills/` NÃO é código do produto
+
+`skills/{ASR,LLM,TTS,…}/` são pacotes de documentação de um fornecedor
+(formato `SKILL.md` + exemplos `.ts`) para o `z-ai-web-dev-sdk`. **Não são
+importáveis por este backend**: são TypeScript, o SDK não está instalado em
+lado nenhum do repositório e nenhum ficheiro do produto os referencia. O
+que o Épico 7 reaproveita é o *contrato* que essa documentação descreve —
+um serviço de transcrição e um serviço de chat com *system prompt*
+rigoroso, isolados do resto da aplicação — implementado em Python sobre o
+cliente OpenAI que o PowerCell já tem (`ai_document.get_openai_client`).
+Quem procurar em `skills/` o motor que corre em produção não o encontra: é
+`services/voice_transcription.py` e `services/voice_extraction.py`.
+
+### Os módulos
+
+| Módulo | Responsabilidade |
+|---|---|
+| `services/voice_transcription.py` | ASR. Escolhe o *provider*, valida o formato, normaliza o nome do ficheiro. Não conhece processos. |
+| `services/voice_extraction.py` | LLM. *System prompt*, parsing defensivo do JSON, resolução de datas relativas, normalização das tarefas. Metade é pura. |
+| `services/voice_note_engine.py` | Orquestração: transcrever → extrair → timeline → tarefas → estado da tarefa. É o único que toca na base de dados. |
+| `services/voice_note_api.py` | Endpoint: valida, arquiva o áudio, cria o TaskLog, lança o background e **devolve**. |
+| `routes/voice_notes.py` | Stubs finos. |
+
+### Dev nunca chama uma API paga
+
+O *provider* vem de `VOICE_ASR_PROVIDER` / `VOICE_LLM_PROVIDER`. **Sem
+variável, só produção COM chave usa o motor real** — qualquer outro caso
+simula (`resolver_provider`, falha fechada). Ter uma chave no `.env` local
+não é autorização para a usar: a nota de voz de um consultor contém dados
+de um cliente real e não sai do ambiente. Um valor desconhecido na variável
+cai no simulado em vez de abrir a porta ao motor real. O modo simulado usa
+uma transcrição realista e uma heurística de palavras-chave, para que o
+fluxo de dev exercite mesmo a criação de tarefas — mas **os testes usam
+duplos explícitos** (`FakeASRService`/`FakeLLMService`), nunca a heurística:
+um teste não pode passar por causa do simulador em vez do código.
+
+O modelo do LLM vem do painel de administração (chave
+`voice_note_extraction` em `AI_CONFIG_DEFAULTS`), não do código.
+
+### Tempo real sem contrato novo
+
+A nota usa um `TaskLog` do tipo `VOICE_NOTE`, pelo que herda os eventos
+`task_started`/`task_progress`/`task_completed`/`task_failed` do Épico 4,
+entregues **apenas ao dono da tarefa**. Inventar um `voice_note_ready`
+obrigaria os dois lados a conhecer dois contratos — o mesmo erro que o
+Épico 5 evitou ao manter o nome `new_email`. O que o cliente precisa para
+se actualizar (`voice_note_id`, `activity_id`, `task_ids`, `aviso`) viaja
+no `result_data` do evento terminal.
+
+**Detalhe que custou um teste vermelho:** `update_progress` sozinho não
+muda o estado da tarefa. Com a tarefa em `pending`, `resolve_event_type`
+traduzia cada actualização num `task_started` — o cliente recebia meia
+dúzia de "começou" e nenhuma barra a andar. O `_progresso` da nota de voz
+escreve `status=PROCESSING` explicitamente.
+
+### Degradação graciosa
+
+A transcrição tem valor por si. Se o LLM falhar depois de o áudio estar
+transcrito, **o texto transcrito entra na timeline** e a tarefa termina com
+aviso (`status: "partial"`), em vez de o consultor perder o que gravou. Só
+uma falha de transcrição termina em `FAILED` — aí não há nada a dizer. O
+arquivo no S3 é acessório: serve para reouvir, e um S3 em baixo não impede
+o processamento.
+
+### As tarefas nascem pelo caminho canónico
+
+`run_create_task` prefixa o título com a referência do processo
+(`[PROC-012]`), regista no histórico e notifica os atribuídos. Escrever
+`db.tasks` directamente daqui criaria tarefas com forma diferente das
+criadas à mão e perderia a notificação sem ninguém reparar. Cada tarefa
+ditada leva `[Nota de voz <id>]` na descrição — é por aí que se identifica
+(e se desfaz em bloco) o que a IA criou.
+
+### Nunca se inventa uma data
+
+`resolver_data_relativa` traduz ISO, `DD/MM/AAAA`, "amanhã", "depois de
+amanhã", "daqui a N dias/semanas", dias da semana, "próxima semana" e
+"final do mês" — e devolve `None` para tudo o resto. Uma tarefa com prazo
+errado é pior do que uma tarefa sem prazo: o consultor confia nela. A
+expressão original fica guardada em `data_original` para ele ver o que
+disse.
+
+### Cobertura
+
+| Ficheiro | Âmbito |
+|---|---|
+| `tests/unit/test_voice_extraction.py` (60) | Parsing do JSON do modelo, datas relativas, normalização |
+| `tests/unit/test_voice_note_providers.py` (42) | Escolha de motor, formatos, garantia de que o modo simulado não toca na rede |
+| `tests/integration/test_e2e_ai_consultant.py` (31) | Fluxo completo com `FakeASRService`/`FakeLLMService` + espião no `publish_event` |
+| `src/utils/voiceNote.test.js` (33) | Lógica pura do frontend |
+| `VoiceNoteRecorder.test.jsx` (20) | Gravador real sobre `MediaRecorder`/`getUserMedia`/`createObjectURL` falsos |
+| `HistoryTab.voiceNote.test.jsx` (7) | A ligação separador ↔ gravador ↔ contentor |
