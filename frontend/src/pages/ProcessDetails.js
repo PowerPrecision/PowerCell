@@ -97,6 +97,10 @@ import {
   // ÉPICO 7 — nota de voz do consultor
   uploadVoiceNote,
 } from "../services/api";
+import ProcessDomainTabsList from "../components/processDetails/ProcessDomainTabsList";
+import AIReviewDialog from "../components/processDetails/dialogs/AIReviewDialog";
+import RGPDRequestDialog from "../components/processDetails/dialogs/RGPDRequestDialog";
+import TitularChoiceDialog from "../components/processDetails/dialogs/TitularChoiceDialog";
 import useTaskEvents from "../hooks/useTaskEvents";
 import {
   eNotaDeVozDoProcesso,
@@ -136,7 +140,6 @@ import {
   ChevronDown,
   ExternalLink,
   Link as LinkIcon,
-  Users,
   Sparkles,
   Mail,
   Phone,
@@ -1442,6 +1445,31 @@ const ProcessDetails = () => {
     ),
   );
 
+  // O diálogo de revisão não anuncia nada: diz que o utilizador confirmou
+  // e o contentor é que sabe que isso implica fechar e avisar para guardar.
+  const handleConfirmAIReview = useCallback(() => {
+    setShowAIReviewDialog(false);
+    toast.success("Campos actualizados. Não esqueça de guardar!");
+  }, []);
+
+  // ── Escolha de titular para documentos ambíguos (Épico 8) ────────
+  // O diálogo é de apresentação: diz qual foi a escolha, o contentor é que
+  // sabe que isso significa reconstruir a lista de itens.
+  const handleTitularChoice = useCallback((indice, escolha) => {
+    setTitularChoiceDialog((anterior) => ({
+      ...anterior,
+      items: anterior.items.map((item, i) =>
+        i === indice ? { ...item, choice: escolha } : item,
+      ),
+    }));
+  }, []);
+
+  const handleTitularDialogOpenChange = useCallback((aberto) => {
+    if (!aberto) {
+      setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+    }
+  }, []);
+
   const handleDeleteComment = async (activityId) => {
     try {
       await processMutations.deleteActivity.mutateAsync(activityId);
@@ -2051,38 +2079,16 @@ const ProcessDetails = () => {
               actions={
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* Dialog RGPD */}
-            <Dialog open={rgpdDialogOpen} onOpenChange={setRgpdDialogOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Solicitar Consentimento RGPD</DialogTitle>
-                  <DialogDescription>
-                    Envie um pedido de consentimento RGPD para <strong>{safeString(process?.client_name)}</strong> ({safeString(process?.client_email)}).
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="py-4">
-                  <label className="text-sm font-medium text-foreground mb-2 block">
-                    Mensagem personalizada <span className="text-muted-foreground font-normal">(opcional)</span>
-                  </label>
-                  <Textarea
-                    placeholder="Adicione uma mensagem personalizada para o cliente..."
-                    value={rgpdCustomMessage}
-                    onChange={(e) => setRgpdCustomMessage(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setRgpdDialogOpen(false)}>
-                    Cancelar
-                  </Button>
-                  <Button onClick={handleConfirmRgpd} disabled={rgpdSending}>
-                    {rgpdSending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : null}
-                    Solicitar RGPD
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <RGPDRequestDialog
+              open={rgpdDialogOpen}
+              onOpenChange={setRgpdDialogOpen}
+              clientName={process?.client_name}
+              clientEmail={process?.client_email}
+              message={rgpdCustomMessage}
+              onMessageChange={setRgpdCustomMessage}
+              onConfirm={handleConfirmRgpd}
+              sending={rgpdSending}
+            />
 
             {/* PACOTE DE — RGPD DropdownMenu: Solicitar + Download PDF (Assinatura Manual) */}
             {userRole !== "indexacao" && (
@@ -2477,48 +2483,7 @@ const ProcessDetails = () => {
                       setActiveTab(v);
                       writeTabQuery(mainTab, v);
                     }}>
-                      <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
-                        {/* ── DADOS DO CLIENTE ── */}
-                        <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
-                      <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Cliente</span>
-                    </TabsTrigger>
-                    {/* ── DADOS DO PROCESSO/NEGÓCIO ── */}
-                    <TabsTrigger value="financial" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <Briefcase className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Financeiros</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="realestate" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Imóvel / CPCV</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="credit" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Crédito</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="prazos" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      {/* PACOTE DH — Tab label evoluído de "Prazos" para "Agenda" */}
-                      <span className="hidden sm:inline">Agenda</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
-                      <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Emails</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="visitas" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-emerald-50 dark:bg-emerald-900/20 data-[state=active]:bg-emerald-100 dark:data-[state=active]:bg-emerald-900/40">
-                      <Home className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Visitas</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="mensagens" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-violet-50 dark:bg-violet-900/20 data-[state=active]:bg-violet-100 dark:data-[state=active]:bg-violet-900/40 relative">
-                      <MessageSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Mensagens</span>
-                      {portal.unreadCount > 0 && (
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                          {portal.unreadCount > 9 ? '9+' : portal.unreadCount}
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  </TabsList>
+                      <ProcessDomainTabsList unreadMessagesCount={portal.unreadCount} />
 
                   {/* ── FASE 3: Tab Dados do Cliente ── */}
                   <TabsContent value="personal" className="mt-4">
@@ -2907,192 +2872,22 @@ const ProcessDetails = () => {
       />
 
       {/* Dialog de Revisão de Conflitos IA */}
-      <Dialog open={showAIReviewDialog} onOpenChange={setShowAIReviewDialog}>
-        <DialogContent className="sm:max-w-2xl w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
-              Revisão de Dados Extraídos
-            </DialogTitle>
-            <DialogDescription>
-              A análise IA detectou valores diferentes para alguns campos. Escolha o valor correcto ou edite manualmente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            {aiConflicts.map((conflict, idx) => (
-              <div key={idx} className="border rounded-lg p-4 space-y-3">
-                <div className="font-medium text-sm">
-                  {conflict.field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div 
-                    className="border rounded p-3 cursor-pointer hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950"
-                    onClick={() => resolveAIConflict(conflict.field, conflict.existing_value)}
-                  >
-                    <div className="text-xs text-muted-foreground mb-1">Valor Existente</div>
-                    <div className="font-medium">{safeString(conflict.existing_value, "-")}</div>
-                  </div>
-                  
-                  <div 
-                    className="border rounded p-3 cursor-pointer hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-950"
-                    onClick={() => resolveAIConflict(conflict.field, conflict.new_value)}
-                  >
-                    <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                      <Sparkles className="h-3 w-3" />
-                      Valor Extraído (IA)
-                    </div>
-                    <div className="font-medium text-green-700 dark:text-green-400">{safeString(conflict.new_value, "-")}</div>
-                    {conflict.source && (
-                      <div className="text-xs text-muted-foreground mt-1">Fonte: {safeString(conflict.source)}</div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Input
-                    placeholder="Ou edite manualmente..."
-                    className="flex-1 text-sm"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && e.target.value) {
-                        resolveAIConflict(conflict.field, e.target.value);
-                        e.target.value = '';
-                      }
-                    }}
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={(e) => {
-                      const input = e.target.parentElement.querySelector('input');
-                      if (input?.value) {
-                        resolveAIConflict(conflict.field, input.value);
-                        input.value = '';
-                      }
-                    }}
-                  >
-                    Aplicar
-                  </Button>
-                </div>
-              </div>
-            ))}
-            
-            {aiConflicts.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                <CheckCircle className="h-12 w-12 mx-auto mb-3 text-green-500" />
-                <p>Todos os conflitos foram resolvidos!</p>
-              </div>
-            )}
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAIReviewDialog(false)}>
-              Fechar
-            </Button>
-            <Button 
-              onClick={() => {
-                setShowAIReviewDialog(false);
-                toast.success("Campos actualizados. Não esqueça de guardar!");
-              }}
-              disabled={aiConflicts.length > 0}
-            >
-              <Check className="h-4 w-4 mr-2" />
-              Confirmar Todos
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AIReviewDialog
+        open={showAIReviewDialog}
+        conflicts={aiConflicts}
+        onOpenChange={setShowAIReviewDialog}
+        onResolve={resolveAIConflict}
+        onConfirmAll={handleConfirmAIReview}
+      />
 
       {/* Dialog: documento ambíguo → Titular 1 / Titular 2 / Ignorar */}
-      <Dialog
+      <TitularChoiceDialog
         open={titularChoiceDialog.open}
-        onOpenChange={(open) => {
-          if (!open) setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
-        }}
-      >
-        <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-purple-600" />
-              Este documento é de quem?
-            </DialogTitle>
-            <DialogDescription>
-              A IA não conseguiu associar com confiança. Escolha o titular para aplicar os dados de identidade
-              (o 2º titular já está definido no processo).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            {titularChoiceDialog.items.map((item, idx) => (
-              <div key={item.key || idx} className="border rounded-lg p-3 space-y-2">
-                <div className="text-sm font-medium truncate">{item.file_name}</div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.choice === "titular1" ? "default" : "outline"}
-                    onClick={() =>
-                      setTitularChoiceDialog((prev) => ({
-                        ...prev,
-                        items: prev.items.map((it, i) =>
-                          i === idx ? { ...it, choice: "titular1" } : it
-                        ),
-                      }))
-                    }
-                  >
-                    Titular 1{item.titular1_name ? `: ${item.titular1_name}` : ""}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.choice === "titular2" ? "default" : "outline"}
-                    onClick={() =>
-                      setTitularChoiceDialog((prev) => ({
-                        ...prev,
-                        items: prev.items.map((it, i) =>
-                          i === idx ? { ...it, choice: "titular2" } : it
-                        ),
-                      }))
-                    }
-                  >
-                    Titular 2{item.titular2_name ? `: ${item.titular2_name}` : ""}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.choice === "ignore" ? "secondary" : "ghost"}
-                    onClick={() =>
-                      setTitularChoiceDialog((prev) => ({
-                        ...prev,
-                        items: prev.items.map((it, i) =>
-                          i === idx ? { ...it, choice: "ignore" } : it
-                        ),
-                      }))
-                    }
-                  >
-                    Ignorar
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setTitularChoiceDialog({ open: false, items: [], pendingPayload: null })}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={confirmTitularChoices}
-              disabled={titularChoiceDialog.items.some((it) => !it.choice)}
-            >
-              <Check className="h-4 w-4 mr-2" />
-              Aplicar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        items={titularChoiceDialog.items}
+        onOpenChange={handleTitularDialogOpenChange}
+        onChoose={handleTitularChoice}
+        onConfirm={confirmTitularChoices}
+      />
 
       {/* Modal CPCV - Contrato Promessa Compra e Venda */}
       <CPCVModal
