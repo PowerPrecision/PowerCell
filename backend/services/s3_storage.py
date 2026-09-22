@@ -128,13 +128,24 @@ class S3Service:
         if not self.s3_client or not self.bucket_name:
             return
 
-        # Ler origens do config.py (falha graciosamente se não disponível)
+        # Ler origens do config.py (falha graciosamente se não disponível).
+        #
+        # BUGFIX (Set 2026): o import era `from backend.config import ...`, mas a
+        # aplicação corre com `backend/` como raiz do sys.path — o pacote
+        # `backend` NUNCA existe em runtime. O ImportError caía sempre no
+        # `except`, pelo que o bucket recebia a lista hardcoded de PRODUÇÃO
+        # independentemente do ambiente: o bucket de dev era configurado com as
+        # origens de prod e a variável CORS_ORIGINS não tinha qualquer efeito.
         explicit_origins = []
         try:
-            from backend.config import CORS_ORIGINS
+            from config import CORS_ORIGINS
             explicit_origins = list(CORS_ORIGINS)
-        except Exception:
+        except Exception as exc:
             # Fallback para origens hardcoded se config não estiver disponível
+            logger.warning(
+                f"CORS_ORIGINS indisponível ({exc}); a usar a lista de origens por omissão. "
+                "Defina CORS_ORIGINS no ambiente para controlar as origens do bucket."
+            )
             explicit_origins = [
                 'https://powercell.pt',
                 'https://www.powercell.pt',

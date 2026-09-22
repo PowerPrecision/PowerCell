@@ -3,6 +3,36 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] — O envio de email deixa de poder pendurar um pedido
+
+### Corrigido
+- **O formulário público esperava pelo servidor de email.** `POST /public/client-registration` fazia três envios em série dentro do pedido (convite do Portal, email de registo, notificação ao staff). Com um servidor de email lento, quem submetia o formulário esperava até 90 segundos — por emails que o código já tratava como não-fatais. Os três passam a correr em background; o registo responde de imediato. Um deles nem sequer tinha tratamento de erro, pelo que um servidor de email em baixo devolvia 500 num registo que já tinha sido gravado.
+- **Um envio de email congelava o servidor todo.** O transporte (`smtplib` no SMTP, `requests` no Resend) corria dentro do event loop: enquanto esperava pelo servidor de email, nenhum outro pedido era servido — até 30 segundos. Passa a correr fora do loop.
+- **O CI marcava um servidor de email real.** O workflow definia credenciais falsas mas não o endereço do servidor, pelo que a suite tentava ligar-se ao servidor de produção do webmail. Quando esse servidor não respondia, três testes do registo público falhavam — o mesmo commit falhava ou passava conforme o dia. O endereço passa a ser local, como as credenciais.
+
+### Adicionado
+- `SMTP_CONNECT_TIMEOUT` configurável por ambiente (30s por omissão; 5s no CI). Um valor inválido cai no default — o timeout nunca fica desligado.
+
+### Notas
+- Os campos `magic_link_sent` e `email_queued` da resposta do registo passam a significar **agendado** em vez de **enviado**; o resultado real do envio vai para os logs. Nenhum consumidor os lê.
+- O envio continua a ser esperado onde o utilizador precisa da resposta: o botão "Enviar Email de Teste" e o envio de documentação.
+
+## [2026-09-21] — Isolamento dev/prod: a dev deixa de poder falar com produção por omissão
+
+### Corrigido
+- **Build de dev apontava para a API de produção em silêncio.** O `define` do `vite.config.js` aplicava o fallback `https://powercell.onrender.com` em qualquer modo, e seis módulos repetiam o mesmo literal. Sem `REACT_APP_BACKEND_URL` definido, uma sessão de desenvolvimento escrevia sobre dados reais de clientes — sem erro e sem aviso. A regra passa a viver num ponto único (`src/utils/apiBaseUrl.js`): host local ou build que não seja de produção resolvem para `http://localhost:8001`. O build anuncia sempre o URL que embebeu.
+- **CORS do bucket S3 ignorava o ambiente.** `_ensure_cors_configured` importava `backend.config`, um pacote que não existe em runtime; o `except` mudo apanhava-o sempre e todos os buckets — o de dev incluído — recebiam a lista hardcoded de origens de produção. `CORS_ORIGINS` não tinha efeito nenhum. Import corrigido e fallback passa a registar aviso.
+- **Três ficheiros de teste do frontend nunca correram.** `pages/processDetails/*.test.js` estavam escritos na API `expect(...)` do Jest, que o projecto não tem instalado. Convertidos para `node:assert/strict` — mais 22 asserções vivas sobre a hidratação do ProcessDetails e o payload de actualização.
+
+### Adicionado
+- **Guarda de ambiente nos scripts de seed** (`scripts/env_guard.py`): os 8 scripts que inserem dados simulados abortam se `ENVIRONMENT`/`APP_ENV` forem de produção ou o `DB_NAME` parecer de produção. Escape explícito com `ALLOW_SEED_IN_PRODUCTION=true`.
+- **`yarn test`** corre os testes unitários do frontend (276) e **o CI passou a corrê-los**, de forma bloqueante, antes do build. Até aqui nenhum job os corria: uma regressão em `src/utils` só aparecia em produção.
+
+### Notas
+- O comportamento de um build de **produção** é o de antes (o fallback mantém-se, para não partir deploys existentes), mas passa a avisar quando a variável está em falta.
+- Quem tenha `REACT_APP_BACKEND_URL` por definir num ambiente de dev vai passar a falar com `http://localhost:8001`. Se o backend de dev estiver noutro lado, definir a variável no `frontend/.env`.
+
+
 ## [2026-09-21] — Correcção: envio para balcões usava a configuração de email errada
 
 ### Corrigido

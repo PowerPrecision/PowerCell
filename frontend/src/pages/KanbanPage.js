@@ -18,8 +18,9 @@ import { getUsers } from "../services/api";
 import { toast } from "sonner";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
+import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
 
-const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
+const BACKEND_URL = RESOLVED_BACKEND_URL;
 const API_URL = BACKEND_URL + "/api";
 
 const KanbanPage = () => {

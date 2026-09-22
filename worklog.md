@@ -1,4 +1,89 @@
 ---
+Task ID: fix-email-bloqueante-no-registo-publico
+Agent: Cloud Agent
+Task: CI vermelho — 3 testes do registo público a falhar aos 30000ms exactos
+
+Date: 2026-09-22
+
+Work Log:
+- PRIMEIRO: apurar de quem era. O job "Backend CI — Full" falhou no meu commit (41ee52d) e o anterior estava verde, por isso tratei-o como meu até prova em contrário. Duas provas independentes de que não era:
+  (a) `git diff 5b4b5ba 41ee52d -- services/email_service.py services/public_registration.py tests/test_public.py` → **vazio**. O meu diff não toca nesta cadeia (mexeu em s3_storage, scripts, frontend, workflow e documentação).
+  (b) Re-execução do MESMO SHA, sem alterar uma linha → **verde** (87s no passo de testes, contra 227s na falha). A diferença era externa.
+- O "exactamente 30000ms" no log do middleware foi o que abriu o caso: é um valor de configuração, não de carga. Dois timeouts de 30s a correr um contra o outro — `smtplib.SMTP_SSL(..., timeout=30)` e o cliente httpx dos testes (`timeout=30.0` no conftest). Quem ganha decide se o teste passa.
+- Cadeia: `/public/client-registration` → `run_public_client_registration` → `await send_email(...)` → `smtplib.SMTP_SSL(webmail2.hcpro.pt, 465)`. O host vem do default HARDCODED de `get_email_accounts`: o CI define `POWER_EMAIL` mas nunca definiu `POWER_SMTP_SERVER`, por isso a suite marcava o servidor de webmail REAL. Servidor a responder → teste passa; servidor em silêncio → 30s → vermelho.
+- REPRODUÇÃO LOCAL (o que tornou isto verificável): instalei um `mongod` avulso (tarball 7.0.14) — a suite completa nunca tinha corrido nesta sessão — e escrevi um "buraco negro" SMTP (aceita a ligação TCP e nunca responde). Com os dois ficheiros na versão ORIGINAL: **1 failed**, com a assinatura idêntica à do CI. Prova de que a falha vive no código anterior ao meu commit, e não no CI.
+- EXPERIÊNCIA que corrigiu o meu primeiro plano: ia pôr só o envio em background. Montei um ASGI mínimo a medir as três variantes e o resultado foi: inline 2.00s, **background 2.00s**, background+thread 0.01s. `asyncio.create_task` não torna código síncrono não-bloqueante — a task corre no mesmo loop e congela-o na mesma. Sem esta medição tinha "corrigido" o bug sem o corrigir.
+- CORRECÇÃO em duas peças, que só juntas resolvem:
+  1. `email_service.send_email`: os dois transportes (`smtplib` e o `requests` do Resend) passam por `asyncio.to_thread`. O bloqueio não era só do pedido em curso — parava o event loop do worker INTEIRO até 30s.
+  2. `public_registration`: os envios saem do ciclo pedido/resposta por `spawn_background_task` (o helper com referência forte que já existia em `process_create`).
+- Eram **três** envios awaited em série, não um: convite do Portal, email de registo e notificação ao staff — até 90s de espera num formulário público. Só encontrei o terceiro (`deliver_registration_email`) porque, depois de corrigir os dois primeiros, o teste novo continuou a marcar 8.2s em vez de passar. Era também o único sem `try/except`: um servidor de email em baixo devolvia 500 num registo JÁ gravado.
+- `SMTP_CONNECT_TIMEOUT` passa a ser configurável (default 30; valor inválido cai no default — nunca desligar o timeout). CI: 5.
+- CI: `POWER_SMTP_SERVER`/`PRECISION_SMTP_SERVER=127.0.0.1`. O host tem de ser tão falso como as credenciais — era esta a origem da intermitência.
+- Testes novos: `tests/unit/test_email_nao_bloqueia_event_loop.py` (8 — o loop continua a avançar durante um envio lento, dois envios não somam os tempos, timeout configurável) e `tests/integration/test_public_registration_smtp_pendurado.py` (2 — SMTP pendurado, a resposta tem de chegar em menos de 3s).
+- O teste de integração começou SEM dentes: com limite de 5s contra um timeout de 2s, passava nas duas versões. A mutação denunciou-o (2 passed com o bug reposto). Margem apertada para 3s contra 8s → a mutação dá 16.2s e fica vermelha. A lição fica no próprio ficheiro.
+- Mutações finais: repor o `smtplib` dentro do loop → 2 vermelhos; repor os envios dentro do pedido → 1 vermelho (16.2s).
+
+Stage Summary:
+- Um servidor de email lento deixa de poder pendurar um formulário público ou congelar o worker, e a suite deixa de marcar servidores de email reais. A bateria completa do CI passou a ser executável localmente.
+
+Files:
+- backend/services/email_service.py, backend/services/public_registration.py
+- backend/tests/unit/test_email_nao_bloqueia_event_loop.py (novo)
+- backend/tests/integration/test_public_registration_smtp_pendurado.py (novo)
+- .github/workflows/main.yml, ARCHITECTURE.md, AGENTS.md, CHANGELOG.md, worklog.md
+
+Validação:
+- **Bateria COMPLETA do CI, local com Mongo: 1710 passed, 8 skipped em 22s** (o comando exacto do job Full). É a primeira vez nesta sessão que corre — no CI eram 224s, dos quais ~90s eram os SMTP pendurados.
+- Os 3 testes que o CI reprovou: 0.06s a 0.10s cada, com o SMTP deliberadamente pendurado e `--timeout=30`.
+- flake8 gate (`E9,F63,F7,F82`) → 0.
+
+---
+Task ID: auditoria-isolamento-dev-prod-e-testes-frontend
+Agent: Cloud Agent
+Task: Auditoria pós-worklog — isolamento dev/prod e testes de frontend que ninguém corria
+
+Date: 2026-09-21
+
+Work Log:
+- Contexto: pedido de leitura do worklog + sugestões de melhoria + execução de testes. Baseline medida ANTES de tocar em código: 1549 backend (1522 unit + 27 e2e) verdes, flake8 gate 0, eslint --quiet limpo, `vite build` verde, frontend `node --test` 237 pass / **3 fail**.
+- ACHADO 1 (o mais grave, e silencioso): `vite.config.js` fazia `define` de `REACT_APP_BACKEND_URL` com fallback `https://powercell.onrender.com` **em qualquer modo**, e seis módulos repetiam o mesmo literal. Um build de dev sem a variável apontava, sem erro nem aviso, para a **API de produção** — sessão de dev a escrever dados reais. Provado com `vite build --mode development`: o bundle levava o URL de produção.
+  - Fix: **NOVO** `src/utils/apiBaseUrl.js` (ponto único): `resolveApiBaseUrl({envUrl, hostname})` para runtime e `resolveBuildTimeBackendUrl({envUrl, mode})` para build; host local ou modo ≠ production sem variável → `http://localhost:8001`, nunca produção. O `vite.config.js` importa a regra (não a duplica) e anuncia sempre o URL embebido. `warnOnCrossEnvironment` grita quando um host local aponta para prod.
+  - Os 6 literais (`services/api.js`, `pages/{ClientsPage,ClientPortal,ClientPortalLogin,KanbanPage,TeamPerformanceDashboard}`) passam a importar `BACKEND_URL`/`API_BASE_URL`.
+  - Verificação: `vite build --mode development` → bundle com `http://localhost:8001/api`; build de produção inalterado (fallback mantido para não partir deploys, agora com aviso).
+- ACHADO 2: `s3_storage.py::_ensure_cors_configured` importava `from backend.config import CORS_ORIGINS`. O pacote `backend` NÃO existe em runtime (a app corre com `backend/` na raiz do sys.path) — confirmado no interpretador: `ModuleNotFoundError: No module named 'backend'` enquanto `from config import CORS_ORIGINS` funciona. O `except` mudo apanhava-o SEMPRE, logo todos os buckets (o de dev incluído) recebiam a lista hardcoded de origens de produção e `CORS_ORIGINS` não tinha efeito.
+  - Fix: import correcto + `logger.warning` no fallback (era mudo — a razão de isto ter durado).
+- ACHADO 3: os 8 scripts de seed inserem centenas de clientes/processos FICTÍCIOS na base de dados de `MONGO_URL`/`DB_NAME` e **não tinham qualquer guarda** contra produção (o `cleanup_prod_test_data.py`, esse, pede password). Um `.env` errado no terminal bastava.
+  - Fix: **NOVO** `scripts/env_guard.py::require_non_production_db` — aborta com SystemExit(2) em `ENVIRONMENT`/`APP_ENV` de produção ou `DB_NAME` com "prod" sem marcador seguro; escape explícito `ALLOW_SEED_IN_PRODUCTION=true`; ambiente sem variáveis (CI) não bloqueia. Ligado como PRIMEIRA instrução do `__main__` dos 8 scripts.
+  - Verificação end-to-end no script real: `ENVIRONMENT=production` → abortou com código 2 antes de tocar na BD; `ENVIRONMENT=development` → passou e arrancou o seed.
+- ACHADO 4: os 3 testes "pré-existentes a falhar" de `pages/processDetails/*` (documentados como falhas conhecidas em pelo menos duas iterações anteriores) não eram um problema de extensão de import — estavam escritos na API `expect(...).toBe(...)` do **Jest**, e o projecto não tem Jest nem Vitest instalados. Nunca correram: 22 asserções mortas desde que foram escritas.
+  - Fix: convertidas para `node:assert/strict` (59 asserções, conversão com parser de parênteses equilibrados, não regex) + imports com extensão explícita. Mutation testing: remover o `delete clean.nif_hash` do helper → 1 vermelho, prova que os testes recuperados têm dentes.
+- ACHADO 5: **nenhum job do CI corria os testes unitários do frontend** — o job "Frontend CI" fazia eslint + build e mais nada. 276 testes sem rede de segurança.
+  - Fix: `yarn test` (**NOVO** `scripts/run-unit-tests.mjs` — enumeração própria porque os globs do `node --test` só existem no Node 22 e o CI corre Node 20) + passo bloqueante no workflow, antes do build. Bloco de eslint para `scripts/**` com globais de Node (senão o `--quiet` ficava vermelho com 7 `no-undef`).
+- Testes novos: `tests/unit/test_s3_cors_origins.py` (5 — origens vindas do ambiente, curinga preservado, degradação sem cliente, ClientError não propaga, guarda AST contra o import partido) e `tests/unit/test_scripts_env_guard.py` (38 — detecção, heurística do DB_NAME, escape, e guarda AST de que a chamada corre ANTES do trabalho em cada um dos 8 scripts). Frontend: `utils/apiBaseUrl.test.js` (17).
+- Mutation testing das guardas novas: repor `from backend.config` → 2 vermelhos; remover o guarda de `seed_notes.py` → 2 vermelhos.
+- INCOERÊNCIAS REGISTADAS (não corrigidas — decisão do dono do produto):
+  (a) o worklog não tinha as últimas 8 iterações (o CHANGELOG.md, esse, estava em dia);
+  (b) `render.yaml` descreve UM só serviço, `powercell`, com `ENVIRONMENT=production` e origens de prod, mas com `branch: dev` — o serviço de dev não está no blueprint, pelo que a separação dev/prod vive só no painel do Render;
+  (c) a bateria "Full" do CI não corre neste contentor sem Mongo: a fixture `_setup_test_data` (session-scoped, autouse) bloqueia ~30 s por timeout e, com `--timeout`, transforma-se em erro de setup que derruba os 1665 testes de uma vez. Não é regressão (é a ausência de mongod), mas torna a suite completa inexecutável localmente — vale um `skip` explícito quando não há Mongo.
+
+Stage Summary:
+- Um ambiente de dev deixa de poder falar com a API de produção por omissão, o bucket de cada ambiente passa a receber as suas próprias origens CORS, os seeds recusam-se a correr contra produção, e os 276 testes de frontend passaram a ser bloqueantes no CI (22 deles estavam mortos desde que foram escritos).
+
+Files:
+- frontend/src/utils/apiBaseUrl.js (novo), frontend/src/utils/apiBaseUrl.test.js (novo)
+- frontend/scripts/run-unit-tests.mjs (novo), frontend/package.json, frontend/eslint.config.js, frontend/vite.config.js
+- frontend/src/services/api.js, frontend/src/pages/{ClientsPage.js,ClientPortal.jsx,ClientPortalLogin.jsx,KanbanPage.js,TeamPerformanceDashboard.jsx}
+- frontend/src/pages/processDetails/{processDetailsHydration,processUpdatePayload,processDetailsQuerySync}.test.js
+- backend/services/s3_storage.py, backend/scripts/env_guard.py (novo), backend/scripts/seed_*.py (8)
+- backend/tests/unit/test_s3_cors_origins.py (novo), backend/tests/unit/test_scripts_env_guard.py (novo)
+- .github/workflows/main.yml, .gitignore, ARCHITECTURE.md, FRONTEND_GUIDELINES.md, CHANGELOG.md, worklog.md
+
+Validação:
+- Backend: **1592 passed, 2 skipped** (baseline 1549 + 43 novos; zero regressões), nas condições do CI (`REDIS_URL=none`, processo único).
+- flake8 gate CI (`E9,F63,F7,F82`) → 0.
+- Frontend: `yarn test` → **276 pass, 0 fail** (baseline 237 pass / 3 fail); `eslint . --quiet` limpo; `vite build` verde em produção e em development.
+
+---
 Task ID: fix-send-documentation-header-empresa
 Agent: Cloud Agent
 Task: Envio para balcões falha com 535 mas o email de teste funciona

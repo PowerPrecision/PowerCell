@@ -383,3 +383,28 @@ O backend devolve `409` com `detail` ESTRUTURADO (`{message, existing_client_id,
 ### Vista rápida de cliente (ClientRegistrationsPage)
 
 - O detailsDialog da lista de registos NÃO tem botão "Adicionar Processo" (removido no P12 — o fluxo de criação fica no botão de linha "Criar Processo", que pré-selecciona o cliente). Não reintroduzir ações de criação dentro de quick-views.
+
+## 19. URL do backend e testes unitários no CI (Set 2026)
+
+### URL do backend — importar, nunca repetir
+
+```js
+// ❌ ERRADO — repete o literal e, sem a variável, fala com PRODUÇÃO a partir de dev
+const BACKEND_URL = process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com";
+
+// ✅ CORRECTO — ponto único, com a regra dev/prod já aplicada
+import { BACKEND_URL, API_BASE_URL } from "@/utils/apiBaseUrl"; // ou caminho relativo
+```
+
+- `BACKEND_URL` → raiz do backend; `API_BASE_URL` → `BACKEND_URL + "/api"` (o que a maioria dos módulos quer).
+- Um host local sem `REACT_APP_BACKEND_URL` resolve para `http://localhost:8001` — **nunca** para produção. A regra completa está em `ARCHITECTURE.md` › "Isolamento dev/prod".
+- Em dev, definir `REACT_APP_BACKEND_URL` em `frontend/.env` (ver `.env.example`). O `vite build` anuncia sempre o URL embebido no bundle; se aparecer um aviso `⚠️ REACT_APP_BACKEND_URL não definido`, a variável está em falta no ambiente.
+- Os módulos que ainda lêem `process.env.REACT_APP_BACKEND_URL` directamente continuam a funcionar (o Vite injecta o valor já resolvido), mas código novo usa o import.
+
+### Testes unitários — `yarn test` e bloqueantes no CI
+
+- `yarn test` corre todos os `src/**/*.test.js(x)` com `node --test`, sem dependências extra. `yarn test <filtro>` limita por substring do caminho (ex.: `yarn test utils`).
+- A enumeração dos ficheiros vive em `scripts/run-unit-tests.mjs` — os globs do `node --test` só existem no Node 22 e o CI corre Node 20.
+- **O job "Frontend CI" corre `yarn test` e falha o pipeline.** Até Set 2026 nenhum job corria estes testes: existiam ~240 e uma regressão em `src/utils` passava despercebida até produção.
+- Assertivas em **`node:assert/strict`** com `describe`/`it` importados de `node:test`. Não usar a API `expect(...)` do Jest: o projecto não tem Jest nem Vitest instalados — três ficheiros escritos assim (`pages/processDetails/*.test.js`) nunca chegaram a correr e só foram recuperados quando convertidos.
+- Imports em ficheiros de teste levam **extensão explícita** (`from "./x.js"`): o ESM puro do Node não resolve extensões omitidas, ao contrário do bundler.

@@ -1494,4 +1494,8 @@ Exemplos:
 
 
 if __name__ == "__main__":
+    # Dados SIMULADOS: nunca contra a base de dados de produção.
+    from scripts.env_guard import require_non_production_db
+    require_non_production_db("seed_massive_dev_data")
+
     main()

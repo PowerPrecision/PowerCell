@@ -63,6 +63,23 @@ export default [
   // Base JS rules
   js.configs.recommended,
 
+  // Scripts de tooling que correm em Node (ex.: corredor dos testes unitários).
+  // Não são código de browser: precisam dos globais do Node, não dos do DOM.
+  {
+    files: ['scripts/**/*.{js,mjs}'],
+    languageOptions: {
+      ecmaVersion: 2022,
+      sourceType: 'module',
+      globals: {
+        ...globals.node,
+      },
+    },
+    rules: {
+      // Um script de linha de comandos comunica pela consola.
+      'no-console': 'off',
+    },
+  },
+
   // Unit tests (Vitest/Jest-style globals: describe/it/expect)
   {
     files: ['**/*.{test,spec}.{js,jsx}'],

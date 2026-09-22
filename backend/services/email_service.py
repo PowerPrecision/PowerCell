@@ -42,6 +42,22 @@ logger = logging.getLogger(__name__)
 # Thread pool para operações IMAP/SMTP bloqueantes
 _email_executor = ThreadPoolExecutor(max_workers=4, thread_name_prefix="email_")
 
+# Timeout da ligação SMTP, em segundos. Configurável porque o valor certo
+# depende do ambiente: em produção 30s é a margem para um servidor de email
+# lento; em dev/CI (onde o envio é simulado) esperar 30s por um servidor que
+# não existe só serve para pendurar a suite. Ver ARCHITECTURE.md › "Envio de
+# email fora do ciclo pedido/resposta".
+SMTP_CONNECT_TIMEOUT_DEFAULT = 30
+
+
+def get_smtp_connect_timeout() -> int:
+    """Timeout (s) da ligação SMTP — `SMTP_CONNECT_TIMEOUT` ou 30 por omissão."""
+    try:
+        valor = int(os.environ.get("SMTP_CONNECT_TIMEOUT", SMTP_CONNECT_TIMEOUT_DEFAULT))
+        return valor if valor > 0 else SMTP_CONNECT_TIMEOUT_DEFAULT
+    except (TypeError, ValueError):
+        return SMTP_CONNECT_TIMEOUT_DEFAULT
+
 
 class EmailAccount:
     """Configuração de uma conta de email."""
@@ -1051,11 +1067,20 @@ async def send_email(
         # the no-reply policy so replies go to the authenticated user.
 
         # === ENVIAR: Resend API vs SMTP ===
+        #
+        # BUGFIX (Set 2026): ambos os transportes são SÍNCRONOS — `requests`
+        # no Resend e `smtplib` no SMTP. Chamados directamente de uma corotina,
+        # bloqueiam o event loop do worker INTEIRO enquanto esperam pelo
+        # servidor de email: até aos 30s do timeout do SMTP, durante os quais
+        # nenhum outro pedido é servido. Foi assim que um servidor SMTP externo
+        # inacessível congelou o `/public/client-registration` no CI.
+        # Vão para uma thread; o loop continua livre.
         if account.smtp_server == "resend" and account.password:
             # --- Resend API (HTTP) ---
             # NOTA: A assinatura já foi injetada no body_html/body acima,
             # não passamos email_signature ao _send_via_resend para evitar duplicação.
-            _send_via_resend(
+            await asyncio.to_thread(
+                _send_via_resend,
                 api_key=account.password,
                 from_email=account.email,
                 from_name=from_name,
@@ -1087,12 +1112,21 @@ async def send_email(
                     "success": False,
                     "error": "Falha de autenticação SMTP. Verifique as credenciais da conta de email activa.",
                 }
-            context = ssl.create_default_context()
-            with smtplib.SMTP_SSL(account.smtp_server, account.smtp_port, context=context, timeout=30) as server:
-                server.login(account.email, smtp_password)
-                
-                all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
-                server.sendmail(account.email, all_recipients, msg.as_string())
+            def _enviar_por_smtp():
+                """Bloco SMTP bloqueante — corre numa thread, fora do event loop."""
+                context = ssl.create_default_context()
+                with smtplib.SMTP_SSL(
+                    account.smtp_server,
+                    account.smtp_port,
+                    context=context,
+                    timeout=get_smtp_connect_timeout(),
+                ) as server:
+                    server.login(account.email, smtp_password)
+
+                    all_recipients = to_emails + (cc_emails or []) + (bcc_emails or [])
+                    server.sendmail(account.email, all_recipients, msg.as_string())
+
+            await asyncio.to_thread(_enviar_por_smtp)
         
         logger.info(f"Email enviado via {account.name} para {to_emails} ({len(attachments or [])} anexos)")
         

@@ -2,6 +2,7 @@ import { defineConfig, loadEnv } from 'vite'
 import react from '@vitejs/plugin-react'
 import { sentryVitePlugin } from '@sentry/vite-plugin'
 import path from 'path'
+import { resolveBuildTimeBackendUrl } from './src/utils/apiBaseUrl.js'
 
 // https://vitejs.dev/config/
 export default defineConfig(({ mode }) => {
@@ -15,6 +16,26 @@ export default defineConfig(({ mode }) => {
   const sentryOrg = process.env.SENTRY_ORG || env.SENTRY_ORG || 'power-precision'
   const sentryProject = process.env.SENTRY_PROJECT || env.SENTRY_PROJECT || 'powercell-frontend'
   const sentryRelease = process.env.SENTRY_RELEASE || env.SENTRY_RELEASE || `powercell@${Date.now()}`
+
+  // URL do backend embebido no bundle. A regra está centralizada para que um
+  // build de dev sem REACT_APP_BACKEND_URL não fale, em silêncio, com produção.
+  const backendUrl = resolveBuildTimeBackendUrl({
+    envUrl: env.REACT_APP_BACKEND_URL || process.env.REACT_APP_BACKEND_URL,
+    mode,
+  })
+  if (backendUrl.source === 'local-fallback') {
+    console.warn(
+      `⚠️  REACT_APP_BACKEND_URL não definido (mode=${mode}). A usar o backend local ${backendUrl.url}. ` +
+      'Defina a variável no .env do frontend para apontar para o ambiente pretendido.'
+    )
+  } else if (backendUrl.source === 'production-fallback') {
+    console.warn(
+      `⚠️  REACT_APP_BACKEND_URL não definido num build de produção. A usar o fallback ${backendUrl.url}. ` +
+      'Configure a variável no serviço de deploy.'
+    )
+  } else {
+    console.log(`🔗 Backend do bundle: ${backendUrl.url} (REACT_APP_BACKEND_URL)`)
+  }
 
   return {
     plugins: [
@@ -131,12 +152,11 @@ export default defineConfig(({ mode }) => {
           acc[`process.env.${key}`] = JSON.stringify(env[key])
           return acc
         }, {}),
-      // SEMPRE definir REACT_APP_BACKEND_URL com fallback robusto
-      'process.env.REACT_APP_BACKEND_URL': JSON.stringify(
-        env.REACT_APP_BACKEND_URL ||
-        process.env.REACT_APP_BACKEND_URL ||
-        'https://powercell.onrender.com'
-      ),
+      // SEMPRE definir REACT_APP_BACKEND_URL.
+      // A regra do fallback vive em `src/utils/apiBaseUrl.js` (ponto único):
+      // um build que NÃO seja de produção nunca cai para a API de produção —
+      // cai para o backend local. Ver o cabeçalho desse módulo.
+      'process.env.REACT_APP_BACKEND_URL': JSON.stringify(backendUrl.url),
       // Note: NODE_ENV is set by Vite automatically based on mode
     },
 

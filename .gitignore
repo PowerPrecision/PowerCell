@@ -87,3 +87,8 @@ coverage.xml
 backend/backup_test/
 frontend/test-results/
 frontend/e2e-report/
+
+# Ambientes virtuais Python locais (nunca versionados)
+.venv/
+venv/
+backend/.venv/

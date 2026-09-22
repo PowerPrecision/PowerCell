@@ -2414,3 +2414,94 @@ Foco: **correcções cirúrgicas de bugs de UX + templates de email com branding
 - Novos: `test_pacote12_emails_webmail.py` (23 — filtro estrito, BCC model/queue/transporte, síntese de assinatura, branding scoped, portal URL clicável, template com company_name) e `test_pacote12_backend_rbac.py` (35 — allow/deny 403 com relação ao cliente, least-busy estrito, dedup welcome, cascata de cleanup em hard/soft). Frontend: `duplicateClient.test.js` +2 (headline granular).
 - Ajustes de expectativas legítimas: `test_e2e_business_logic_fixes.py`, `test_pacote10_ux_observability.py`, `test_email_extraction_helpers.py`.
 - Suite: **1338 passed / 0 falhas** (baseline 1280 + 58); flake8 gate CI (`E9,F63,F7,F82`, `--exclude=.venv`) → 0 problemas; frontend `node --test` 133 pass, eslint 0 erros (warnings pré-existentes), `vite build` verde.
+
+## Isolamento dev/prod — resolução de URLs, CORS do S3 e guarda dos seeds (Set 2026)
+
+A infraestrutura é separada por ambiente (serviço Render e bucket S3 dedicados a dev, outros distintos para prod). Esta secção documenta os três pontos onde essa separação dependia de convenção — e não de código — e passou a ser garantida.
+
+### 1. URL do backend no frontend — ponto único (`utils/apiBaseUrl.js`)
+
+**Problema**: seis módulos repetiam `process.env.REACT_APP_BACKEND_URL || "https://powercell.onrender.com"` e o `define` do `vite.config.js` aplicava o mesmo fallback em tempo de build, **em qualquer modo**. Um build de dev sem a variável definida apontava, em silêncio e sem qualquer aviso, para a **API de produção** — uma sessão de desenvolvimento a escrever sobre dados reais de clientes.
+
+**Regra** (`frontend/src/utils/apiBaseUrl.js`, ponto único; o `vite.config.js` importa daqui):
+
+| Situação | URL resolvido |
+| --- | --- |
+| `REACT_APP_BACKEND_URL` definido | esse valor, normalizado (sem barra final) |
+| Ausente + host local (`localhost`, `127.0.0.1`, `*.local`, `*.localhost`) | `http://localhost:8001` |
+| Ausente + build `mode !== "production"` | `http://localhost:8001` |
+| Ausente + host/build remoto de produção | fallback histórico (retrocompatibilidade) + aviso no build |
+
+- `resolveApiBaseUrl({ envUrl, hostname })` — runtime (browser); `resolveBuildTimeBackendUrl({ envUrl, mode })` — build (Vite, que não conhece o hostname). Ambas puras e testadas.
+- `warnOnCrossEnvironment` grita na consola quando a app corre num host local mas aponta para produção. Não altera o comportamento (pode ser intencional) — apenas deixa de ser silencioso.
+- Consumidores importam `BACKEND_URL` / `API_BASE_URL` em vez de repetir o literal. **Nunca** voltar a escrever um URL de produção como fallback em código de página.
+
+### 2. CORS do bucket S3 passa a seguir o ambiente
+
+`services/s3_storage.py::_ensure_cors_configured` importava `from backend.config import CORS_ORIGINS`. O pacote `backend` **não existe em runtime** (a aplicação corre com `backend/` na raiz do `sys.path`, como comprovam todos os outros imports: `from config import …`, `from database import db`). O `ImportError` caía sempre no `except`, pelo que **todos** os buckets — incluindo o de dev — eram configurados com a lista hardcoded de origens de produção e a variável `CORS_ORIGINS` não tinha efeito nenhum.
+
+Corrigido para `from config import CORS_ORIGINS`; o fallback mantém-se para arranques sem config, mas passa a registar `logger.warning` (antes era mudo). `tests/unit/test_s3_cors_origins.py` afirma as origens aplicadas e impede, por AST, o regresso de qualquer import do pacote inexistente `backend`.
+
+### 3. Guarda de ambiente nos scripts de dados simulados
+
+`scripts/env_guard.py::require_non_production_db(nome)` aborta com `SystemExit(2)` quando o ambiente parece produção:
+
+1. `ENVIRONMENT`/`APP_ENV` ∈ {production, prod, live}; ou
+2. `DB_NAME` contém "prod" sem marcador seguro (`dev`, `test`, `qa`, `staging`, `local`, `sandbox`) — `prod_test_db` é base de teste, `powercell_prod` não é.
+
+Escape explícito: `ALLOW_SEED_IN_PRODUCTION=true` (prossegue com aviso). Ambiente sem variáveis (CI) **não** é bloqueado — falha aberta só neste caso, por ser o do CI, e fechada em tudo o resto.
+
+Ligado como primeira instrução do `__main__` dos 8 scripts que inserem mock data (`seed_completo`, `seed_fill_mock_data`, `seed_massive_dev_data`, `seed_notes`, `seed_performance_data`, `seed_qa_ultimate`, `seed_realistic_data`, `seed_test_clients`). `tests/unit/test_scripts_env_guard.py` verifica por AST que a chamada existe **e** corre antes de qualquer outra chamada do bloco — depois do `main()` já não serviria de nada.
+
+## Envio de email fora do ciclo pedido/resposta (Set 2026)
+
+### O incidente
+
+O job "Backend CI — Full" falhou em três testes do registo público com
+`RuntimeError: No response returned.` ao fim de **exactamente 30000ms**. A re-execução
+do mesmo commit, sem alterar uma linha, passou — o sinal de que a causa era externa.
+
+Cadeia real: `POST /public/client-registration` → `run_public_client_registration` →
+`await send_email(...)` → `smtplib.SMTP_SSL(host, port, timeout=30)`. O host vinha do
+default **hardcoded** de `get_email_accounts` (`webmail2.hcpro.pt`), porque o CI define
+`POWER_EMAIL` mas nunca definiu `POWER_SMTP_SERVER`. Quando esse servidor real não
+respondia, o pedido ficava pendurado os 30s do timeout do SMTP — e o cliente HTTP dos
+testes desiste exactamente aos 30s.
+
+### As duas falhas de desenho, ambas corrigidas
+
+1. **Transporte síncrono dentro do event loop.** `send_email` chamava `smtplib` (e o
+   `requests` do Resend) directamente de uma corotina. Não era só o pedido em curso a
+   esperar: o event loop do worker **inteiro** ficava parado até 30s, sem servir mais
+   ninguém. Ambos os transportes passam por `asyncio.to_thread`.
+2. **O pedido esperava pelo email.** O registo público fazia **três** envios awaited em
+   série (convite do Portal, email de registo, notificação ao staff) — até 90s de espera
+   num formulário público, para emails que o próprio código já tratava como não-fatais
+   (dois estavam dentro de `try/except` que só regista aviso; o terceiro nem isso, pelo
+   que um servidor de email em baixo dava 500 num registo já gravado). Passam todos por
+   `spawn_background_task` (`services/background_tasks.py`, referência forte).
+
+`SMTP_CONNECT_TIMEOUT` passa a ser configurável (default 30, valor inválido cai no
+default — nunca desligar o timeout). Em CI vale 5.
+
+### Regra
+
+Um envio de email **nunca** decide se um pedido HTTP responde. Quando o utilizador não
+precisa do resultado do envio, o envio vai para background. Quando precisa (ex.: o botão
+"Enviar Email de Teste", o `send-documentation`), o envio é awaited de propósito — e
+continua fora do event loop, pela thread.
+
+### Ambiente
+
+Em dev/CI o envio é simulado: o host SMTP tem de ser tão falso como as credenciais. O
+workflow define `POWER_SMTP_SERVER`/`PRECISION_SMTP_SERVER` como `127.0.0.1`, para que
+nenhum teste marque um servidor de email real — a origem da intermitência.
+
+### Cobertura
+
+- `tests/unit/test_email_nao_bloqueia_event_loop.py` (8): outra corotina continua a
+  avançar durante um envio lento; dois envios não somam os tempos; timeout configurável.
+- `tests/integration/test_public_registration_smtp_pendurado.py` (2): servidor SMTP que
+  aceita a ligação e nunca responde; o registo tem de responder em menos de 3s. A margem
+  entre o limite (3s) e o tempo pendurado (8s) é deliberada — com um limite frouxo o
+  teste passava nas duas versões e não provava nada (verificado por mutação).
