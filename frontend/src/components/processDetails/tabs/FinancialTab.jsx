@@ -17,6 +17,7 @@ import { AIBadge } from "../../ui/AIBadge";
 import AutoDSTIBadge from "../../AutoDSTIBadge";
 import {
   Briefcase, CreditCard, Database, User, Eye, EyeOff, Pencil, Plus, AlertCircle,
+  CheckCircle, Clock, Trash2,
 } from "lucide-react";
 import { BANK_LIST, getBankColor } from "../../../pages/processDetails/processDetailsConstants";
 import { safeString } from "../../../utils/safeString";

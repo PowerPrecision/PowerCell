@@ -8,7 +8,7 @@ import { Label } from "../../ui/label";
 import { Textarea } from "../../ui/textarea";
 import { Switch } from "../../ui/switch";
 import { AIBadge } from "../../ui/AIBadge";
-import { CreditCard, Building2, Shield } from "lucide-react";
+import { AlertTriangle, CreditCard, Building2, Shield } from "lucide-react";
 import { formatDateForInput } from "../../../pages/processDetails/processFormCleaners";
 import { safeNumber } from "../../dashboard/DashboardShared";
 

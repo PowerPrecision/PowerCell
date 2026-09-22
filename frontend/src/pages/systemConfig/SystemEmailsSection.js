@@ -22,6 +22,11 @@ import {
   FolderOpen,
   AlertTriangle,
   Zap,
+  CheckCircle,
+  Info,
+  Pencil,
+  TestTube,
+  XCircle,
 } from "lucide-react";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL;

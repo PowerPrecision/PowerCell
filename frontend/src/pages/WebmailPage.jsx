@@ -22,7 +22,6 @@ import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
 import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
-import { ScrollArea } from "../components/ui/scroll-area";
 import { Separator } from "../components/ui/separator";
 import { Skeleton } from "../components/ui/skeleton";
 import { Label } from "../components/ui/label";
@@ -55,20 +54,12 @@ import {
   Search,
   RefreshCw,
   Mail,
-  MailOpen,
-  Paperclip,
-  Reply,
-  ReplyAll,
-  Forward,
   Link2,
   ChevronDown,
   ChevronRight,
   X,
   Loader2,
   ArrowLeft,
-  Image,
-  FileSpreadsheet,
-  File,
   Tag,
   CheckSquare,
   Square,
@@ -80,23 +71,19 @@ import {
   FolderInput,
   Pencil,
   MoreVertical,
-  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { format, isToday, isYesterday } from "date-fns";
-import { pt } from "date-fns/locale";
+import { format } from "date-fns";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
-import { safeString } from "../utils/safeString";
 import EmailList from "../components/webmail/EmailList";
+import EmailThreadViewer from "../components/webmail/EmailThreadViewer";
 import {
-  formatEmailDate,
   formatFileSize,
   formatFullDate,
   getAttachmentIcon,
 } from "../components/webmail/webmailFormatters";
-import { safeFormat } from "../lib/utils";
 import {
   applyMailboxSelection,
   buildMailboxOptions,
@@ -678,6 +665,15 @@ const WebmailPage = () => {
   // Dois limpadores independentes: escolher uma pasta personalizada limpa o
   // marcador, mas escolher um marcador NÃO limpa a pasta — os dois filtros
   // podem coexistir e cada um tem o seu X, como antes da extracção.
+  // O URL do "Novo Separador" depende da pasta e da caixa activas — estado
+  // deste contentor. O painel de leitura só recebe a acção já pronta.
+  const handleOpenEmailInNewTab = useCallback(() => {
+    if (!emailDetail?.id) return;
+    const params = new URLSearchParams({ folder: activeFolder, id: emailDetail.id });
+    if (selectedMailbox) params.set("mailbox", selectedMailbox);
+    window.open(`/webmail?${params.toString()}`, "_blank");
+  }, [emailDetail?.id, activeFolder, selectedMailbox]);
+
   const handleClearCustomFolder = useCallback(() => setActiveCustomFolder(null), []);
   const handleClearLabel = useCallback(() => setSelectedLabel(null), []);
 
@@ -2124,337 +2120,24 @@ const WebmailPage = () => {
             className="min-h-0"
             id="webmail-reading-pane"
           >
-          <div
-            className="h-full flex flex-col bg-background overflow-hidden"
-            data-testid="webmail-reading-pane"
-          >
-            {detailLoading ? (
-              // Loading skeleton
-              <div className="flex-1 p-5 space-y-4">
-                <Skeleton className="h-7 w-[70%]" />
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-[200px]" />
-                  <Skeleton className="h-4 w-[250px]" />
-                  <Skeleton className="h-4 w-[150px]" />
-                </div>
-                <Separator />
-                <div className="space-y-3">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <Skeleton key={i} className="h-4 w-full" />
-                  ))}
-                  <Skeleton className="h-4 w-[80%]" />
-                  <Skeleton className="h-4 w-[60%]" />
-                </div>
-              </div>
-            ) : selectedEmail && emailDetail ? (
-              /* ===== EMAIL DETAIL ===== */
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Header */}
-                <div className="px-5 py-4 border-b shrink-0">
-                  {/* Subject */}
-                  <h2 className="text-lg font-semibold leading-snug break-words">
-                    {safeString(emailDetail.subject, "(Sem assunto)")}
-                  </h2>
-
-                  {/* Meta info */}
-                  <div className="mt-2 space-y-1.5 text-sm">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-muted-foreground shrink-0">De:</span>
-                      <span className="font-medium truncate">
-                        {safeString(emailDetail.from_email, "-")}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-muted-foreground shrink-0">Para:</span>
-                      <span className="truncate">
-                        {emailDetail.to_emails?.join(", ") || "-"}
-                      </span>
-                    </div>
-                    {emailDetail.cc_emails?.length > 0 && (
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-muted-foreground shrink-0">CC:</span>
-                        <span className="truncate">
-                          {emailDetail.cc_emails.join(", ")}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <span>Data:</span>
-                      <span>{formatFullDate(emailDetail.sent_at)}</span>
-                    </div>
-                    {/* Label badges on detail */}
-                    {emailDetail.labels?.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                        {emailDetail.labels.map((lbl) => (
-                          <span
-                            key={lbl.id || lbl.name}
-                            className="rounded-full px-2 py-0.5 text-white leading-none"
-                            style={{
-                              backgroundColor: lbl.color || "#6b7280",
-                              fontSize: "11px",
-                            }}
-                          >
-                            {safeString(lbl.name)}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={() => openComposer("reply", emailDetail)}
-                    >
-                      <Reply className="h-3.5 w-3.5" />
-                      Responder
-                    </Button>
-                    {/* "Responder a Todos" só faz sentido quando há mais
-                        alguém na conversa além de nós e do remetente. */}
-                    {replyAllRecipientCount > 1 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs gap-1.5"
-                        onClick={() => openComposer("reply_all", emailDetail)}
-                      >
-                        <ReplyAll className="h-3.5 w-3.5" />
-                        Responder a Todos
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={() => openComposer("forward", emailDetail)}
-                    >
-                      <Forward className="h-3.5 w-3.5" />
-                      Encaminhar
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={() => handleToggleRead(emailDetail)}
-                    >
-                      {emailDetail.is_read === false ? (
-                        <><MailOpen className="h-3.5 w-3.5" />Marcar como lida</>
-                      ) : (
-                        <><Mail className="h-3.5 w-3.5" />Marcar como não lida</>
-                      )}
-                    </Button>
-                    {/* PACOTE 8 — abrir a visualização do email num novo separador */}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-xs gap-1.5"
-                          onClick={() => {
-                            const params = new URLSearchParams({
-                              folder: activeFolder,
-                              id: emailDetail.id,
-                            });
-                            if (selectedMailbox) {
-                              params.set("mailbox", selectedMailbox);
-                            }
-                            window.open(`/webmail?${params.toString()}`, "_blank");
-                          }}
-                          aria-label="Abrir email num novo separador"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          Novo Separador
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Abrir email num novo separador</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={`h-8 w-8 p-0 ${
-                            emailDetail.is_starred
-                              ? "text-amber-500"
-                              : "text-muted-foreground"
-                          }`}
-                          onClick={(e) => handleToggleStar(emailDetail, e)}
-                        >
-                          <Star
-                            className={`h-3.5 w-3.5 ${
-                              emailDetail.is_starred ? "fill-amber-500" : ""
-                            }`}
-                          />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {emailDetail.is_starred ? "Remover destaque" : "Destacar"}
-                      </TooltipContent>
-                    </Tooltip>
-                    {emailDetail.process_id ? (
-                      <Badge
-                        variant="secondary"
-                        className="h-8 text-xs gap-1.5 cursor-pointer hover:bg-accent"
-                        onClick={() => navigate(`/processo/${emailDetail.process_id}`)}
-                      >
-                        <Link2 className="h-3.5 w-3.5" />
-                        {safeString(emailDetail.client_name) || safeString(emailDetail.process_id)} Associado
-                      </Badge>
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 text-xs gap-1.5"
-                            onClick={handleOpenLinkDialog}
-                          >
-                            <Link2 className="h-3.5 w-3.5" />
-                            Ligar a Processo
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Ligar a Processo</TooltipContent>
-                      </Tooltip>
-                    )}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={() => setMoveFolderOpen(true)}
-                          className="p-1.5 rounded-md hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Mover para pasta"
-                        >
-                          <FolderInput className="h-4 w-4" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>Mover para pasta</TooltipContent>
-                    </Tooltip>
-                    {emailDetail.process_id && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs gap-1.5"
-                        onClick={() => navigate(`/processo/${emailDetail.process_id}`)}
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        Ver Processo
-                      </Button>
-                    )}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={handleDeleteSingle}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Eliminar email</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-
-                {/* Body */}
-                <ScrollArea className="flex-1">
-                  <div className="p-5">
-                    {sanitizedBodyHtml ? (
-                      <iframe
-                        srcDoc={sanitizedBodyHtml}
-                        className="w-full border-0 rounded-md"
-                        style={{ minHeight: "200px", maxHeight: "600px" }}
-                        title="Email content"
-                        sandbox="allow-same-origin"
-                        onLoad={(e) => {
-                          const doc = e.target.contentDocument;
-                          if (doc) {
-                            const h = doc.body?.scrollHeight || 200;
-                            e.target.style.height = Math.min(h + 20, 600) + "px";
-                          }
-                        }}
-                      />
-                    ) : (
-                      <pre className="whitespace-pre-wrap font-sans text-sm">
-                        {emailDetail.body || ""}
-                      </pre>
-                    )}
-
-                    {/* Attachments - Visual Cards */}
-                    {emailDetail.attachments?.length > 0 && (
-                      <div className="mt-6 pt-4 border-t">
-                        <h4 className="font-medium text-sm flex items-center gap-2 mb-3">
-                          <Paperclip className="h-4 w-4" />
-                          Anexos ({emailDetail.attachments.length})
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {emailDetail.attachments.map((attachment, idx) => {
-                            const AttIcon = getAttachmentIcon(attachment.filename);
-                            return (
-                              <div
-                                key={attachment.id || idx}
-                                className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors group"
-                              >
-                                <div className="h-9 w-9 rounded-md bg-muted flex items-center justify-center shrink-0">
-                                  <AttIcon className="h-4 w-4 text-muted-foreground" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium truncate">
-                                    {attachment.filename || attachment.file_name || `Anexo ${idx + 1}`}
-                                  </p>
-                                  {(attachment.size || attachment.file_size) && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      {formatFileSize(attachment.size || attachment.file_size)}
-                                    </p>
-                                  )}
-                                </div>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-8 w-8 shrink-0"
-                                      disabled={downloadingAttachmentId === (attachment.id || `${emailDetail.id}:${idx}`)}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownloadAttachment(attachment, idx);
-                                      }}
-                                      aria-label={`Abrir ${attachment.filename || "anexo"} num novo separador`}
-                                    >
-                                      {downloadingAttachmentId === (attachment.id || `${emailDetail.id}:${idx}`) ? (
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      ) : (
-                                        <ExternalLink className="h-3.5 w-3.5" />
-                                      )}
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Abrir num novo separador</TooltipContent>
-                                </Tooltip>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </ScrollArea>
-              </div>
-            ) : (
-              /* ===== EMPTY STATE ===== */
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-                <Mail className="h-14 w-14 text-muted-foreground opacity-30 mb-4" />
-                <p className="text-muted-foreground text-sm">
-                  Selecione um email para visualizar
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Clique num email da lista à esquerda
-                </p>
-              </div>
-            )}
-          </div>
+            <EmailThreadViewer
+              email={selectedEmail && emailDetail ? emailDetail : null}
+              loading={detailLoading}
+              sanitizedBodyHtml={sanitizedBodyHtml}
+              replyAllRecipientCount={replyAllRecipientCount}
+              downloadingAttachmentId={downloadingAttachmentId}
+              onReply={() => openComposer("reply", emailDetail)}
+              onReplyAll={() => openComposer("reply_all", emailDetail)}
+              onForward={() => openComposer("forward", emailDetail)}
+              onToggleRead={() => handleToggleRead(emailDetail)}
+              onToggleStar={(e) => handleToggleStar(emailDetail, e)}
+              onLinkToProcess={handleOpenLinkDialog}
+              onMoveToFolder={() => setMoveFolderOpen(true)}
+              onDelete={handleDeleteSingle}
+              onOpenProcess={() => navigate(`/processo/${emailDetail?.process_id}`)}
+              onOpenInNewTab={handleOpenEmailInNewTab}
+              onDownloadAttachment={handleDownloadAttachment}
+            />
           </ResizablePanel>
           </ResizablePanelGroup>
         </div>

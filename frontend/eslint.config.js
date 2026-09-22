@@ -130,6 +130,11 @@ export default [
       // usado apenas em JSX (ex: `<Foo />`) está "usado" — dá falsos positivos
       // que, se "corrigidos", apagam componentes que estão realmente em uso.
       'react/jsx-uses-vars': 'error',
+      // Um componente ou ícone usado em JSX sem import passava no CI: o
+      // `no-undef` não cobre JSX e esta regra estava desligada. Descoberto
+      // no Épico 6 — um `<Loader2 />` sem import só rebentava no clique de
+      // transferir um anexo, em produção.
+      'react/jsx-no-undef': 'error',
       'react-hooks/rules-of-hooks': 'error',
       'react-hooks/exhaustive-deps': 'warn',
 
