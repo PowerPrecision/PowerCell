@@ -320,6 +320,9 @@ const ProcessDetails = () => {
   // Declarado JUNTO DO RESTANTE ESTADO, e não ao pé dos handlers: um
   // `const` usado por um `useCallback` declarado antes dele fica na zona
   // morta temporal e rebenta no primeiro render (regressão do Épico 6).
+  // Processo actualmente hidratado — distingue a montagem de uma mudança
+  // de processo no efeito de reset (ver o BUGFIX do Épico 8 abaixo).
+  const processoAnteriorRef = useRef(null);
   const [voiceNoteOpen, setVoiceNoteOpen] = useState(false);
   const [aEnviarNotaDeVoz, setAEnviarNotaDeVoz] = useState(false);
   const [notaDeVozEmCurso, setNotaDeVozEmCurso] = useState(null);
@@ -1088,7 +1091,25 @@ const ProcessDetails = () => {
   }, [queryClient, id, clientId, processBundle.process?.client_id, processBundle.refetchAll]);
 
   // Reset hydration when navigating to another process
+  //
+  // BUGFIX (Épico 8): este efeito é declarado DEPOIS do de hidratação, pelo
+  // que na montagem corriam os dois pela mesma ordem — hidratar e logo a
+  // seguir desfazer. Na primeira visita isso passava despercebido: a query
+  // ainda não tinha resolvido, `dataUpdatedAt` mudava a seguir e a
+  // hidratação voltava a correr. Numa REVISITA dentro do `staleTime` (60 s)
+  // o TanStack serve a cache logo no primeiro render, `dataUpdatedAt` nunca
+  // muda, a hidratação não volta a correr — e a página ficava presa no
+  // esqueleto de carregamento, para sempre.
+  //
+  // Na montagem não há nada a limpar: o estado acabou de nascer. Só uma
+  // MUDANÇA de processo justifica o reset, que é o que o nome do efeito
+  // sempre disse.
   useEffect(() => {
+    if (processoAnteriorRef.current === id) return;
+    const eraMontagem = processoAnteriorRef.current === null;
+    processoAnteriorRef.current = id;
+    if (eraMontagem) return;
+
     lastHydratedAtRef.current = 0;
     setLoading(true);
     setProcess(null);
