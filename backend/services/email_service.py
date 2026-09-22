@@ -531,6 +531,85 @@ async def _resolve_system_smtp_account() -> Optional["EmailAccount"]:
     return None
 
 
+async def resolve_email_signature(
+    *,
+    created_by: Optional[str],
+    active_company_id: Optional[str],
+    is_system_account: bool = False,
+    system_email_signature: Optional[str] = None,
+) -> tuple:
+    """Assinatura a usar num email, e de onde veio.
+
+    A assinatura de um email é a identidade de quem o envia. Por isso a
+    regra é estreita: **só se usa uma assinatura que seja daquele
+    utilizador naquele contexto**. Quem não configurou assinatura nenhuma
+    envia SEM assinatura — não herda a de outro perfil seu nem a do
+    sistema.
+
+    Prioridade:
+      1. UCR da empresa ACTIVA — o contexto que o utilizador escolheu.
+      2. `users.email_signature` — a assinatura global dele.
+      3. UCR da empresa por omissão, **apenas** quando não há empresa
+         activa. Com empresa activa, a assinatura de outra empresa é uma
+         fuga entre perfis, não um fallback.
+
+    Uma conta de sistema (`system_smtp`) é o único caso que usa a
+    assinatura do sistema: aí ela É a identidade do remetente.
+
+    Returns:
+        `(assinatura | None, origem)`. A origem vai para os logs: sem ela,
+        diagnosticar "porque é que este email saiu com esta assinatura?"
+        obriga a reproduzir o envio.
+    """
+    if is_system_account:
+        return system_email_signature, "system"
+
+    if not created_by:
+        return None, "none"
+
+    try:
+        sender_user = await db.users.find_one(
+            {"id": created_by},
+            {"email_signature": 1, "company": 1, "_id": 0},
+        )
+
+        tem_empresa_activa = bool(active_company_id and active_company_id != "default")
+
+        # 1. UCR da empresa activa.
+        if tem_empresa_activa:
+            ucr_active = await db.user_company_roles.find_one(
+                {"user_id": created_by, "company_id": active_company_id},
+                {"signature": 1, "_id": 0},
+            )
+            if ucr_active and ucr_active.get("signature"):
+                return ucr_active["signature"], f"ucr_active({active_company_id})"
+
+        # 2. Assinatura global do próprio utilizador.
+        if sender_user and sender_user.get("email_signature"):
+            return sender_user["email_signature"], "user_global"
+
+        # 3. UCR da empresa por omissão — SÓ sem empresa activa. Com uma
+        #    empresa activa escolhida, ir buscar a assinatura de outra
+        #    seria assinar um email da empresa A com a identidade da B.
+        if not tem_empresa_activa and sender_user and sender_user.get("company"):
+            ucr = await db.user_company_roles.find_one(
+                {"user_id": created_by, "company_id": sender_user["company"]},
+                {"signature": 1, "_id": 0},
+            )
+            if ucr and ucr.get("signature"):
+                return ucr["signature"], f"ucr_default({sender_user['company']})"
+    except Exception as e:  # noqa: BLE001 - degradação graciosa
+        logger.warning(
+            "[Send Email] Falha a resolver assinatura de %s: %s", created_by, e
+        )
+        return None, "erro"
+
+    # Sem assinatura configurada, o email sai sem assinatura. Herdar a de
+    # qualquer outro perfil (`ucr_any`) ou a do sistema punha o HTML de
+    # outra pessoa por baixo do texto de quem enviou.
+    return None, "none"
+
+
 def _synthesize_html_body(body: str, signature_html: str) -> str:
     """PACOTE 12 (Eixo 2 — assinatura HTML) — sintetiza corpo HTML.
 
@@ -856,57 +935,12 @@ async def send_email(
     #   3. UCR da empresa default (users.company)
     #   4. UCR de qualquer empresa
     #   5. system_smtp.email_signature — assinatura do sistema
-    resolved_signature = None
-    sig_source = "none"
-    if account and account.name == "system_smtp":
-        resolved_signature = system_email_signature
-        sig_source = "system"
-    elif created_by:
-        try:
-            sender_user = await db.users.find_one(
-                {"id": created_by},
-                {"email_signature": 1, "company": 1, "_id": 0}
-            )
-            # Prioridade 1: UCR da empresa ATIVA (contexto da sessão)
-            if not resolved_signature and active_company_id and active_company_id != "default":
-                ucr_active = await db.user_company_roles.find_one(
-                    {"user_id": created_by, "company_id": active_company_id},
-                    {"signature": 1, "_id": 0}
-                )
-                if ucr_active and ucr_active.get("signature"):
-                    resolved_signature = ucr_active["signature"]
-                    sig_source = f"ucr_active({active_company_id})"
-            # Prioridade 2: assinatura global do utilizador
-            if not resolved_signature and sender_user:
-                resolved_signature = sender_user.get("email_signature")
-                if resolved_signature:
-                    sig_source = "user_global"
-            # Prioridade 3: UCR da empresa default
-            if not resolved_signature and sender_user:
-                default_company = sender_user.get("company")
-                if default_company:
-                    ucr = await db.user_company_roles.find_one(
-                        {"user_id": created_by, "company_id": default_company},
-                        {"signature": 1, "_id": 0}
-                    )
-                    if ucr and ucr.get("signature"):
-                        resolved_signature = ucr["signature"]
-                        sig_source = f"ucr_default({default_company})"
-            # Prioridade 4: UCR de qualquer empresa
-            if not resolved_signature:
-                ucr_any = await db.user_company_roles.find_one(
-                    {"user_id": created_by, "signature": {"$exists": True, "$nin": [None, ""]}},
-                    {"signature": 1, "_id": 0}
-                )
-                if ucr_any and ucr_any.get("signature"):
-                    resolved_signature = ucr_any["signature"]
-                    sig_source = "ucr_any"
-            # Prioridade 5: assinatura do sistema (fallback)
-            if not resolved_signature and system_email_signature:
-                resolved_signature = system_email_signature
-                sig_source = "system_fallback"
-        except Exception:
-            pass
+    resolved_signature, sig_source = await resolve_email_signature(
+        created_by=created_by,
+        active_company_id=active_company_id,
+        is_system_account=bool(account and account.name == "system_smtp"),
+        system_email_signature=system_email_signature,
+    )
 
     # Injetar assinatura no corpo do email (HTML + plain text)
     if resolved_signature:

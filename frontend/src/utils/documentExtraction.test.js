@@ -215,3 +215,50 @@ describe("aplicarDecisaoNaRevisao — a escolha do consultor é que manda", () =
     expect(depois.conflicts).toHaveLength(1);
   });
 });
+
+describe("prepararRevisaoDaExtraccao — decisões já tomadas pelo consultor", () => {
+  const DADOS = { extractedData: { nif: "123456789" } };
+
+  it("um titular explícito vence a dedução dos matches", () => {
+    // Na análise em lote o consultor já respondeu "este documento é de
+    // quem?" num diálogo anterior. Recalcular a partir dos matches
+    // deitaria essa resposta fora e escreveria na pessoa errada.
+    const revisao = prepararRevisaoDaExtraccao({
+      ...DADOS,
+      targetTitular: "titular2",
+      titularMatches: [{ scope: "process_aggregate", match: "titular1" }],
+    });
+    expect(revisao.targetTitular).toBe("titular2");
+  });
+
+  it("sem titular explícito, a dedução continua a valer", () => {
+    const revisao = prepararRevisaoDaExtraccao({
+      ...DADOS,
+      titularMatches: [{ scope: "process_aggregate", match: "titular2" }],
+    });
+    expect(revisao.targetTitular).toBe("titular2");
+  });
+
+  it("a contagem de documentos é transportada", () => {
+    const revisao = prepararRevisaoDaExtraccao({ ...DADOS, documentsProcessed: 4 });
+    expect(revisao.documentsProcessed).toBe(4);
+  });
+
+  it("sem contagem assume um documento", () => {
+    expect(prepararRevisaoDaExtraccao(DADOS).documentsProcessed).toBe(1);
+  });
+
+  it("a decisão sobre um conflito preserva titular e contagem", () => {
+    // `aplicarDecisaoNaRevisao` faz spread: se algum campo novo se
+    // perdesse aqui, a confirmação escreveria no titular errado.
+    const revisao = prepararRevisaoDaExtraccao({
+      extractedData: { nif: "1", monthly_income: 1480 },
+      conflicts: [{ field: "monthly_income", existing_value: 1200, new_value: 1480 }],
+      targetTitular: "titular2",
+      documentsProcessed: 3,
+    });
+    const depois = aplicarDecisaoNaRevisao(revisao, "monthly_income", 1200);
+    expect(depois.targetTitular).toBe("titular2");
+    expect(depois.documentsProcessed).toBe(3);
+  });
+});

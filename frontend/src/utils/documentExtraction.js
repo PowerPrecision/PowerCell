@@ -38,6 +38,11 @@
  * @param {ConflitoIA[]} [resposta.conflicts]
  * @param {string} [resposta.sourceDocument]
  * @param {Array} [resposta.titularMatches]
+ * @param {"titular1"|"titular2"} [resposta.targetTitular] - Titular já
+ *   decidido (a análise em lote pergunta-o ao consultor num diálogo
+ *   próprio antes de chegar aqui). Sem ele, deduz-se de `titularMatches`.
+ * @param {number} [resposta.documentsProcessed] - Quantos documentos
+ *   deram origem a estes dados. Só serve para a mensagem final.
  * @returns {RevisaoPendente|null} `null` quando não há nada para rever —
  *   abrir um diálogo vazio é pior do que dizer que a leitura não deu.
  */
@@ -46,6 +51,8 @@ export function prepararRevisaoDaExtraccao({
   conflicts,
   sourceDocument,
   titularMatches,
+  targetTitular,
+  documentsProcessed,
 } = {}) {
   if (!extractedData || typeof extractedData !== "object") return null;
 
@@ -68,12 +75,18 @@ export function prepararRevisaoDaExtraccao({
     (match) => match?.scope === "process_aggregate",
   );
 
+  // Um titular explícito vence a dedução: na análise em lote o consultor
+  // já respondeu "este documento é de quem?" num diálogo anterior, e
+  // recalcular a partir dos matches deitaria essa resposta fora.
+  const titularDeduzido = agregado?.match === "titular2" ? "titular2" : "titular1";
+
   return {
     extractedData,
     conflicts: listaConflitos,
     newValues: valoresNovos,
     sourceDocument: sourceDocument || "",
-    targetTitular: agregado?.match === "titular2" ? "titular2" : "titular1",
+    targetTitular: targetTitular || titularDeduzido,
+    documentsProcessed: documentsProcessed || 1,
   };
 }
 

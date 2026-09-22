@@ -1,4 +1,24 @@
 ---
+Task ID: limpeza-final-lote-1
+Agent: Cloud Agent
+Task: Missão de Limpeza (1/4) — IA que gravava sozinha, assinaturas herdadas, contas no perfil errado
+
+Date: 2026-09-22
+
+Work Log:
+- PONTO 1 (falsa regra de ouro em lote). Confirmado no `commitAIExtractedData`: `if (conflicts.length > 0) abrir diálogo; else await persistAISuggestions(...)`. O ramo perigoso é o `else`, e não é um caso raro — um conflito só existe quando a ficha JÁ TEM outro valor, portanto ficha vazia = zero conflitos = tudo o que a IA leu entrava de uma vez. Era o caso mais comum (processo novo), não o mais improvável. O lote passa agora pelo mesmo `prepararRevisaoDaExtraccao` do Épico 9; o diálogo abre sempre e só a confirmação grava.
+- Aproveitei para tirar também o pré-preenchimento do formulário antes da revisão. Não é uma escrita na BD, mas mostrava ao consultor uma ficha já alterada por baixo de um diálogo que ele ainda não tinha aceite — e bastava carregar em Guardar para a tornar real.
+- Detalhe que quase perdi: o lote já tinha perguntado "este documento é de quem?" num diálogo anterior. Se o `prepararRevisaoDaExtraccao` recalculasse o titular a partir dos `titularMatches`, essa resposta ia ao lixo e os dados entravam na pessoa errada. Acrescentei o `targetTitular` explícito, que vence a dedução.
+- ERRO MEU NUM TESTE, e é o segundo da mesma família: escrevi um caso ("o diálogo abre em qualquer extracção em lote") que procurava `setShowAIReviewDialog(true)` dentro do `commitAIExtractedData`. Mas essa chamada JÁ existia — dentro do ramo dos conflitos. O teste passava com o defeito presente. Reescrevi-o para afirmar a AUSÊNCIA do ramo `conflicts.length > 0`.
+- PONTO 2 (assinatura herdada). A cadeia tinha cinco níveis, dois deles indevidos: `ucr_any` ia buscar a assinatura de QUALQUER empresa do utilizador (um email da Power saía assinado pela Precision) e `system_fallback` punha a assinatura do sistema — o bloco HTML com logótipo — a quem nunca configurou nada. É este o "com HTML" do relatório. Extraí a cadeia para `resolve_email_signature` (estava inline num `send_email` gigante, portanto não era testável) e cortei os dois últimos níveis. O nível 3 (empresa por omissão) só vale quando NÃO há empresa activa: com um contexto escolhido, ir buscar a de outra é fuga, não fallback.
+- A guarda sobre o código-fonte falhou à primeira por causa do meu próprio comentário a explicar porque é que `ucr_any` saiu. Mesma armadilha do `s3FileManagerTransport.test.js`. Escrevi um helper que remove comentários e docstrings por tokenize/AST — e um teste de contraprova, senão um erro no despiste dava um guarda que passa sempre.
+- PONTO 3 (contas no perfil errado). Não é o filtro da BD, que está correcto — é uma substituição silenciosa. `_non_default_company_id` descarta "default" por desenho, mas o cartão da Área Pessoal renderiza um separador por perfil e um perfil sem empresa pede `company_id=default` SEM header `X-Company-Id` (só o envia quando difere de "default"). O pedido caía em `get_active_company_id_async` → `user["company"]`. O separador pedia "default" e recebia as contas de outra empresa.
+- E encontrei a mesma coisa ao contrário: o padrão aparece TRÊS vezes, não uma. Ao gravar (`run_save_my_email_config` e `run_add_my_email_account`), uma conta criada no separador "default" era escrita na empresa activa e desaparecia de onde tinha sido criada. O meu primeiro script abortou precisamente porque assumiu uma ocorrência — foi o `assert` que destapou as outras duas.
+- Testes: 23 novos no backend (13 assinatura + 10 âmbito de empresa), 10 no frontend (5 guarda de escrita + 5 do utilitário). Quatro mutações, quatro apanhadas: repor o fallback do sistema, repor o `ucr_any`, repor a substituição do "default", repor a escrita directa no lote.
+- Suites: backend 1932 passed / 8 skipped (era 1909/8); frontend 620 (era 610); eslint --quiet limpo.
+- NOTA OPERACIONAL: o `mongod` avulso desapareceu de /tmp a meio da sessão (o binário, não a pasta) e a bateria completa pendurou-se no timeout da fixture, sem output. Re-descarregado. Se voltar a acontecer, é isto — não é a suite.
+
+---
 Task ID: epico-9-visao-computacional
 Agent: Cloud Agent
 Task: Épico 9 — Visão computacional: ler um documento e propor os dados (sem os escrever)

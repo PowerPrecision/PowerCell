@@ -770,18 +770,51 @@ const ProcessDetails = () => {
     }
   };
 
+  /**
+   * Entrega a extracção em LOTE ao diálogo de revisão.
+   *
+   * REGRA DE OURO, SEM EXCEPÇÃO: nada é escrito na ficha antes de o
+   * consultor confirmar. Este caminho fazia-o — abria o diálogo quando
+   * havia conflitos e, quando não havia, gravava directamente em
+   * `/ai-apply-suggestions`.
+   *
+   * E "sem conflitos" não era o caso benigno: um conflito só existe
+   * quando a ficha JÁ TEM outro valor. Ficha vazia = zero conflitos =
+   * tudo o que a IA leu entrava de uma vez, sem ninguém ver.
+   *
+   * O diálogo abre agora sempre, e mostra os dois grupos: o que colide
+   * (a decidir) e o que vai preencher campos vazios (a confirmar).
+   */
   const commitAIExtractedData = async (payload, targetTitular) => {
     const { extractedData, fieldConfidence, conflicts, documentsProcessed } = payload;
     if (!extractedData) return;
 
-    applySharedExtractedFields(extractedData);
-    applyPersonalAndFinancialToTitular(extractedData, targetTitular);
+    if (targetTitular === "ignore") {
+      // Só os campos partilhados (imóvel) — nada de identidade nem de
+      // rendimentos, que é o que o "ignorar" quer dizer.
+      applySharedExtractedFields(extractedData);
+    } else {
+      const revisao = prepararRevisaoDaExtraccao({
+        extractedData,
+        conflicts,
+        sourceDocument:
+          documentsProcessed > 1
+            ? `${documentsProcessed} documentos analisados`
+            : "1 documento analisado",
+        targetTitular,
+        documentsProcessed,
+      });
 
-    if (conflicts && conflicts.length > 0 && targetTitular !== "ignore") {
-      setShowAIReviewDialog(true);
-      toast.info(`${conflicts.length} conflito(s) detectado(s). Reveja os valores.`);
-    } else if (targetTitular !== "ignore") {
-      await persistAISuggestions(extractedData, documentsProcessed, targetTitular);
+      if (revisao) {
+        setAiConflicts(revisao.conflicts);
+        setRevisaoPendente(revisao);
+        setShowAIReviewDialog(true);
+        if (revisao.conflicts.length > 0) {
+          toast.info(
+            `${revisao.conflicts.length} conflito(s) detectado(s). Reveja os valores.`,
+          );
+        }
+      }
     }
 
     if (fieldConfidence) {
@@ -1506,11 +1539,16 @@ const ProcessDetails = () => {
     // Caminho do Épico 9: nada foi aplicado ainda. A confirmação do
     // consultor é o que autoriza escrever no formulário e na ficha.
     if (revisaoPendente) {
-      const { extractedData, targetTitular } = revisaoPendente;
+      const { extractedData, targetTitular, documentsProcessed } =
+        revisaoPendente;
       setRevisaoPendente(null);
       applySharedExtractedFields(extractedData);
       applyPersonalAndFinancialToTitular(extractedData, targetTitular);
-      await persistAISuggestions(extractedData, 1, targetTitular);
+      await persistAISuggestions(
+        extractedData,
+        documentsProcessed || 1,
+        targetTitular,
+      );
       setActiveTab("personal");
       return;
     }

@@ -3,6 +3,13 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (7) — Limpeza antes do Staging (1/4): IA, assinaturas e perfis
+
+### Corrigido
+- **A análise de documentos com IA já não grava sozinha.** Quando a ficha do cliente estava vazia, analisar documentos em lote escrevia tudo o que a IA tinha lido directamente na ficha, sem passar pela janela de revisão. Agora a revisão aparece sempre — com ou sem valores em conflito — e nada é gravado até carregar em **Confirmar**.
+- **E-mails de quem não tem assinatura deixam de sair assinados.** Quem nunca configurou uma assinatura recebia automaticamente a assinatura do sistema (um bloco com logótipo) no fundo dos seus e-mails. Pior: quem tinha assinatura numa empresa e não noutra saía assinado pela empresa errada. Cada e-mail leva agora apenas a assinatura do próprio, do perfil em que está a trabalhar — ou nenhuma.
+- **Contas de e-mail deixam de aparecer no perfil errado.** Na Área Pessoal, o separador de um perfil sem empresa associada mostrava as contas de e-mail de outro perfil. Pelo mesmo motivo, uma conta criada nesse separador era guardada noutro sítio e desaparecia.
+
 ## [2026-09-22] (6) — Ler um documento com IA, sem correr riscos com os dados
 
 ### Adicionado
