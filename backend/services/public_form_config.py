@@ -11,6 +11,51 @@ from fastapi.responses import JSONResponse
 from database import db
 from services.form_config_defaults import DEFAULT_FORM_CONFIG, DEFAULT_STEP_CONFIG
 
+async def load_merged_form_fields() -> list:
+    """Campos do formulário interno, com os defaults já fundidos.
+
+    Extraído de `run_get_public_form_config` para o Portal do Cliente
+    poder derivar daqui o seu perfil (`portal_profile_schema`) em vez de
+    manter uma lista paralela — foi tê-las separadas que as fez divergir.
+
+    Returns:
+        Todos os campos VISÍVEIS, ordenados por passo e ordem.
+    """
+    config = await db.form_config.find_one({"type": "public_form"}, {"_id": 0})
+    if not config:
+        visiveis = [f for f in DEFAULT_FORM_CONFIG if f.get("is_visible")]
+        visiveis.sort(key=lambda f: (f.get("step", 0), f.get("order", 0)))
+        return visiveis
+
+    saved_fields = config.get("fields", [])
+    saved_map = {f["field_key"]: f for f in saved_fields}
+    merged = []
+    added_keys = set()
+    for default_field in DEFAULT_FORM_CONFIG:
+        key = default_field["field_key"]
+        if key in saved_map:
+            db_field = saved_map[key]
+            merged_field = {**default_field, **db_field}
+            # O admin não edita estes: se a BD os perdeu, valem os defaults.
+            if not db_field.get("options") and default_field.get("options"):
+                merged_field["options"] = default_field["options"]
+            if not db_field.get("field_type") and default_field.get("field_type"):
+                merged_field["field_type"] = default_field["field_type"]
+            merged.append(merged_field)
+        else:
+            merged.append(default_field)
+        added_keys.add(key)
+    for saved_field in saved_fields:
+        if saved_field["field_key"] not in added_keys:
+            merged.append(saved_field)
+
+    visiveis = [f for f in merged if f.get("is_visible")]
+    visiveis.sort(
+        key=lambda f: (f.get("step", 0), f.get("order_index", f.get("order", 0)))
+    )
+    return visiveis
+
+
 async def run_get_public_form_config(request: Request):
     """Obter configuração do formulário público (todos os campos visíveis, ordenados).
 

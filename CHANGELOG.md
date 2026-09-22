@@ -3,6 +3,19 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (9) — Limpeza antes do Staging (3/4): perfil do cliente, acessos e 404s
+
+### Adicionado
+- **O perfil no Portal do Cliente passa a ter os mesmos campos do formulário interno.** Os campos que a sua equipa configura no CRM aparecem agora também no Portal, com os obrigatórios assinalados. Para não tornar o formulário pesado, só os obrigatórios estão à vista — os restantes ficam em **"Preencher mais detalhes"**, que o cliente abre se quiser completar a ficha.
+
+### Corrigido
+- **O perfil do cliente deixa de perder dados em silêncio.** Campos que o Portal mostrava mas o sistema não reconhecia eram descartados sem aviso: o cliente preenchia, gravava, via "Perfil atualizado com sucesso" e o valor desaparecia. Faltavam também o Código Postal e o NISS.
+- **O perfil "Diretora" já consegue abrir "Os Meus Clientes".** O menu mostrava a opção e clicar nela devolvia o utilizador ao Dashboard.
+- **O sistema deixa de insistir em processos eliminados.** Ao abrir um processo que já tinha sido removido, a aplicação continuava a contactar o servidor sobre ele a cada 30 segundos, apesar de já mostrar "Processo não encontrado".
+
+### Segurança
+- **O NIF continua a não ser editável pelo cliente.** É o campo que o identifica fiscalmente; só a equipa o altera.
+
 ## [2026-09-22] (8) — Limpeza antes do Staging (2/4): RGPD, portal e ficheiros apagados
 
 ### Corrigido

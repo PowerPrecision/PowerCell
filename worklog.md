@@ -1,4 +1,28 @@
 ---
+Task ID: limpeza-final-lote-3
+Agent: Cloud Agent
+Task: Missão de Limpeza (3/4) — perfil do Portal ligado ao form_config, RBAC do diretor, polling de processos apagados
+
+Date: 2026-09-22
+
+Work Log:
+- PONTO 8 (diretor bloqueado). Uma linha: `diretor` não estava nas `allowedRoles` de `/meus-clientes`. O que torna isto grave é a DISCORDÂNCIA — o `DashboardLayout` tem um bloco explícito `if (userRole === "diretor")` que inclui o grupo "O Meu Negócio", onde vive esse item. O menu mostra, a rota recusa. Não é "não tens acesso", é o produto a contradizer-se, e não dá erro nem no build nem no eslint.
+- Antes de corrigir, verifiquei se era sistémico: cruzei as 14 entradas de menu do diretor com as `allowedRoles` de todas as rotas. **Uma única divergência.** Fica um teste (`App.rotasMenu.test.js`) a cruzar as duas listas por perfil, e apanhou logo um erro MEU: a extracção só lia `if (userRole === "x")` e o layout também usa `["consultor","intermediario"].includes(userRole)` — dois perfis liam zero itens, ou seja, dois testes que passavam sem ver nada. Corrigido antes de seguir.
+- PONTO 9 (polling de processos apagados). O backend está certo e a página também: `setNotFound(true)` → ecrã "Processo não encontrado". O problema é que isso é um `return` no RENDER e os hooks correm ANTES dele. `useProcessPortalMessages` estava na linha 269 e o `if (notFound) return` na 2028 — a página dizia "não existe" enquanto continuava a perguntar por ele de 30 em 30 segundos.
+- O hook tinha defesa própria, mas só no intervalo. O efeito de `isActive`, o `refresh()` do WebSocket e o `fetchMessages` ignoravam-na, e o guard é um `useRef` que reinicia em cada montagem — cada visita recomeçava o ciclo. Em vez de remendar os quatro caminhos, pus um `enabled` e movi o `notFound`/`accessDenied` para antes da chamada do hook. Quem sabe que o recurso desapareceu é a página.
+- PONTO 7 (perfil do Portal, Opção A). O diagnóstico já tinha mostrado que o problema de fundo era estrutural: o formulário interno é configurável, o do Portal era uma lista escrita à mão, e havia DUAS listas à mão — a da UI e o allowlist do backend. A pior consequência não era a falta de campos, era o `if key in PROFILE_UPDATABLE_PERSONAL_FIELDS` descartar em silêncio: o cliente gravava, lia "Perfil atualizado com sucesso!" e o valor não existia.
+- `portal_profile_schema.py` deriva do `form_config` as DUAS coisas — o que se mostra e o que se aceita gravar. Há um teste a afirmar que são exactamente o mesmo conjunto, que é o que impede a divergência de voltar. Extraí `load_merged_form_fields` do `public_form_config` em vez de duplicar a lógica de merge (que é longa e tem casos subtis).
+- O NIF fica trancado, como o dono confirmou. Está em `PORTAL_LOCKED_FIELDS` e não entra no esquema — e o componente da UI não o trata como caso especial. É deliberado: uma regra aplicada no servidor e invisível no cliente não se perde numa refactorização do ecrã.
+- Divulgação progressiva: obrigatórios à vista, restantes atrás de "Preencher mais detalhes". Acrescentei uma salvaguarda — se o admin não marcar nada como obrigatório, os primeiros quatro campos ficam à vista à mesma; um formulário inteiro escondido atrás de um acordeão seria pior do que não ter divulgação nenhuma.
+- DOIS ERROS MEUS NOS TESTES, ambos apanhados por eles próprios:
+  (1) Assertei o nome acessível como "Email * (obrigatório)". O asterisco é `aria-hidden` de propósito (só para quem vê) e a palavra vai num `sr-only`, portanto o nome real não tem o símbolo. O comportamento estava certo; a asserção é que estava errada. Passou a regex + uma asserção separada de que o asterisco continua visível.
+  (2) A validação do esquema derivado era `if campos["dados_pessoais"] or campos["contacto"]` — e `contacto` traz SEMPRE os extras do Portal, pelo que um esquema vazio parecia válido e deixava o Portal sem conseguir gravar um único campo pessoal. Apanhado pelo teste de degradação.
+- Detalhe que quase esqueci: os contactos secundários (email/telefone) existiam no allowlist mas não no `form_config`. Se só entrassem no allowlist, a UI — que desenha a partir do esquema — deixava de os mostrar. Entram agora no esquema como secundários, e há um teste a dizer que não basta serem graváveis, têm de ser DESENHADOS.
+- Apaguei o componente `Field` do `ClientPortal.jsx` (32 linhas) que ficou morto com a substituição.
+- Testes: 33 no backend (esquema + endpoint), 65 no frontend (24 componente + 17 utilitário + 9 hook + 5 coerência menu/rotas + 10 já existentes tocados). Três mutações, três apanhadas.
+- Suites: backend 2019 passed / 8 skipped (era 1986/8); frontend 675 (era 620); eslint --quiet limpo.
+
+---
 Task ID: limpeza-final-lote-2
 Agent: Cloud Agent
 Task: Missão de Limpeza (2/4) — RGPD do 2.º titular, pedidos do portal invisíveis, ficheiro fantasma

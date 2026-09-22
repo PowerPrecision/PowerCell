@@ -266,7 +266,17 @@ const ProcessDetails = () => {
   const [mainTab, setMainTab] = useState(initialTabs.mainTab);
 
   // Mensagens do Portal — estado/polling vivem no hook (badge do tab precisa de unread)
-  const portal = useProcessPortalMessages(id, { isActive: activeTab === "mensagens" });
+  // Declarados ANTES do hook do portal de propósito: o `if (notFound) return`
+  // da página é um early return no RENDER, e os hooks correm antes dele. Sem
+  // isto, a página mostrava "Processo não encontrado" enquanto continuava a
+  // interrogar o servidor sobre o processo eliminado, de 30 em 30 segundos.
+  const [notFound, setNotFound] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  const portal = useProcessPortalMessages(id, {
+    isActive: activeTab === "mensagens",
+    enabled: !notFound && !accessDenied,
+  });
   portalRefreshRef.current = portal.refresh;
 
   const tabQuery = searchParams.get("tab");
@@ -290,8 +300,6 @@ const ProcessDetails = () => {
   };
 
 
-  const [accessDenied, setAccessDenied] = useState(false);
-  const [notFound, setNotFound] = useState(false);
   
   // Estado de erro de validação do NIF
   const [nifError, setNifError] = useState(null);

@@ -504,11 +504,15 @@ function App() {
             }
           />
           
-          {/* My Clients - For Consultors, Intermediários e Indexação */}
+          {/* Os Meus Clientes — consultores, intermediários, diretor e gestão.
+              `diretor` faltava aqui e o menu MOSTRAVA-LHE o item: o utilizador
+              clicava em "Os Meus Clientes" e era devolvido ao Dashboard, sem
+              explicação. `App.rotasMenu.test.js` cruza as duas listas para a
+              divergência não voltar. */}
           <Route
             path="/meus-clientes"
             element={
-              <ProtectedRoute allowedRoles={["consultor", "intermediario", "admin", "ceo", "indexacao"]}>
+              <ProtectedRoute allowedRoles={["consultor", "intermediario", "diretor", "admin", "ceo", "indexacao"]}>
                 <RouteBoundary name="Meus Clientes">
                   <MyClientsPage />
                 </RouteBoundary>
