@@ -2650,3 +2650,86 @@ disse.
 | `src/utils/voiceNote.test.js` (33) | Lógica pura do frontend |
 | `VoiceNoteRecorder.test.jsx` (20) | Gravador real sobre `MediaRecorder`/`getUserMedia`/`createObjectURL` falsos |
 | `HistoryTab.voiceNote.test.jsx` (7) | A ligação separador ↔ gravador ↔ contentor |
+
+## Épico 8 — A Grande Refatorização: ProcessDetails e S3FileManager (Set 2026)
+
+### Método: medir a superfície de props ANTES de cortar
+
+A lição central deste épico não é sobre React, é sobre decidir. Um bloco de
+JSX grande **não é**, por si, um candidato a extracção: o que decide é
+quantos símbolos do contentor ele usa.
+
+| Bloco | Linhas | Símbolos do contentor | Decisão |
+|---|---|---|---|
+| Diálogos do `S3FileManager` (10) | 980 | 2 a 10 cada | **extrair** |
+| `TitularChoiceDialog` | 88 | 3 | **extrair** |
+| Barra de domínios do processo | 42 | 1 | **extrair** |
+| Vista de grelha do S3 | 436 | ~28 | rever o contrato primeiro |
+| Vista de lista do S3 | 559 | ~55 | rever o contrato primeiro |
+| Cola do separador Resumo | ~230 | **55** | **não extrair** |
+
+A cola do Resumo é o caso a não repetir: 230 linhas que só passam props aos
+separadores JÁ extraídos (`PersonalInfoTab`, `FinancialTab`, …). Envolvê-la
+exigiria um componente com 55 props — isso não é um contrato, é um borrão,
+e prop-drilling não é arquitectura. Ficou onde está, de propósito.
+
+### Bugs que só apareceram porque os testes vieram primeiro
+
+**1. Revisitar um processo dentro de 60 s deixava a página presa no
+esqueleto.** `ProcessDetails` hidrata o formulário num efeito e limpa o
+estado noutro, declarado depois. Na montagem corriam ambos: hidratar e logo
+desfazer. Na primeira visita passava despercebido (a query resolvia a
+seguir, `dataUpdatedAt` mudava, a hidratação repetia-se); numa revisita
+dentro do `staleTime`, o TanStack serve a cache logo no primeiro render,
+`refetchOnMount: true` não dispara nada porque os dados não estão stale, e
+nada volta a hidratar. **Na montagem não há nada a limpar** — o efeito
+passa a distinguir a montagem de uma mudança de processo.
+
+**2. `S3FileManager` falava por `fetch` em 25 chamadas.** Nenhuma levava
+`X-Company-Id`; três levavam `X-Active-Role` escrito à mão. Quarta
+instância do incidente de 2026-09-21. Ver a secção do transporte abaixo.
+
+**3. O "Aplicar" manual da revisão IA lia o valor do DOM** com
+`e.target.parentElement.querySelector("input")`. Um ícone dentro do botão
+faria `e.target` ser o `<svg>` e o clique deixaria de fazer nada, em
+silêncio. O campo é agora controlado.
+
+**4. Quase-acidente:** a primeira tentativa de extrair a barra de domínios
+apanhou a `TabsList` ERRADA — a exterior, de Resumo/Documentos/Histórico,
+porque a classe `grid w-full grid-cols-3` casa com as duas. Seis testes
+ficaram vermelhos no instante seguinte. Sem a página montada num teste,
+isto chegava a produção com os separadores de topo trocados.
+
+### Transporte: o `S3FileManager` passa pelo cliente Axios
+
+As 25 chamadas `fetch` foram convertidas em funções de `services/api.js`
+(`getProcessS3Files`, `uploadProcessS3File`, `getS3FileContent`, …). Três
+armadilhas da conversão, todas tratadas:
+
+- **O 403 passou a honrar `skipErrorToast`** (antes só valia nos 500+). A
+  listagem de ficheiros precisa do contrário do toast global: o PACOTE 11
+  mostra um aviso LOCALIZADO na tab e deixa o resto do processo navegável.
+- **`responseType: "blob"` devolve o corpo de ERRO também como Blob.**
+  `error.response.data.detail` fica `undefined` e a mensagem do servidor
+  desaparece — era o que aconteceria à lista de campos em falta da geração
+  de minutas. `readBlobErrorBody` lê-o como texto.
+- **O proxy do backend mantém-se.** É ele que evita o CORS do bucket;
+  nenhum URL pré-assinado foi introduzido.
+
+Cobertura: `components/s3FileManagerTransport.test.js` — guarda de
+código-fonte (zero `fetch`, zero cabeçalhos à mão, zero
+`REACT_APP_BACKEND_URL`), no molde do `sendDocumentation.test.js`. O guarda
+**ignora comentários**: sem isso, a explicação de porque NÃO se escreve o
+cabeçalho à mão fazia-o ficar vermelho, e a saída óbvia seria apagar a
+explicação.
+
+### Estado
+
+| Ficheiro | Antes | Depois |
+|---|---|---|
+| `pages/ProcessDetails.js` | 3101 | 2916 |
+| `components/S3FileManager.js` | 4302 | 3798 |
+
+Por fazer: 8 dos 10 diálogos do S3 (~800 linhas, corte mecânico) e as duas
+vistas, que precisam de famílias de props agrupadas (`dragHandlers`,
+`fileActions`) antes de valerem a pena.

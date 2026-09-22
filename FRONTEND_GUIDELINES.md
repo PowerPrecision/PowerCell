@@ -507,3 +507,71 @@ consultor um upload de 20 MB para receber um 413 no fim.
 `createObjectURL` — os três — e deixar o hook e o componente reais. Falsear
 o hook deixaria a integração por testar, que é precisamente onde estão os
 bugs.
+
+## 22. Extrair de ficheiros grandes: medir antes de cortar (Épico 8, Set 2026)
+
+**A regra.** Um bloco de JSX grande não é, por si, candidato a extracção. O
+que decide é **quantos símbolos do contentor ele usa**. Antes de mover uma
+linha, conta-os:
+
+```bash
+# Identificadores do bloco que são declarações do contentor
+python3 - <<'PY'
+import re
+linhas = open("pages/ProcessDetails.js").read().split("\n")
+corpo = "\n".join(linhas[:INICIO_DO_JSX])
+declarados = set(re.findall(r"const\s+(\w+)\s*=", corpo))
+for a, b in re.findall(r"const\s+\[\s*(\w+)\s*,\s*(\w+)\s*\]", corpo):
+    declarados |= {a, b}
+bloco = "\n".join(linhas[INICIO:FIM])
+print(sorted(set(re.findall(r"\b([a-zA-Z_]\w*)\b", bloco)) & declarados))
+PY
+```
+
+**O limiar, por experiência deste épico:**
+
+| Símbolos | Decisão |
+|---|---|
+| ≤ 10 | Extrair. Contrato legível, JSDoc cabe num parágrafo. |
+| 10 – 25 | Extrair **se** os símbolos formarem famílias coesas que se possam agrupar (`dragHandlers`, `fileActions`). |
+| > 25 | Não extrair sem redesenhar. Um componente com 50 props não é um contrato, é um borrão. |
+
+**O caso a não repetir:** as ~230 linhas de cola do separador Resumo do
+`ProcessDetails` usam **55** símbolos do contentor e não fazem nada além de
+passar props aos separadores que já estão extraídos. Envolvê-las produziria
+prop-drilling com nome novo. Ficaram onde estão, e está escrito porquê.
+
+**Ordem de trabalho, sem excepção:**
+1. Teste que monta o ecrã inteiro (só fronteiras de rede/sessão falsas);
+2. medir as superfícies;
+3. cortar do menor risco para o maior, **um commit por peça**, com a suite
+   verde entre cada;
+4. teste de componente para cada peça extraída;
+5. mutação, para provar que os testes novos têm dentes.
+
+**Porque é que o passo 1 não é opcional.** Neste épico, o teste da página
+montada apanhou, no primeiro arranque, um bug que estava em produção
+(revisitar um processo dentro de 60 s deixava a página presa no esqueleto)
+e, minutos depois, uma extracção que apanhara a `TabsList` errada — a
+exterior, de Resumo/Documentos/Histórico, porque a classe
+`grid w-full grid-cols-3` casa com duas listas diferentes. Seis testes
+ficaram vermelhos de imediato; sem eles, os separadores de topo chegavam a
+produção trocados.
+
+**O que muda de dono na extracção.** Um `set*` do contentor dentro da UI é
+sinal de fronteira mal posta: `setTitularChoiceDialog(prev => …)` que
+reconstruía a lista de escolhas passou a `onChoose(indice, escolha)`; o
+`toast.success` do "Confirmar Todos" passou para o contentor, que é quem
+sabe que há alterações por gravar.
+
+**Armadilhas de JSDoc.** Documentação errada é pior do que nenhuma. Neste
+épico escrevi duas vezes contratos que não correspondiam ao código
+(`onResolve(indice, decisao)` quando a assinatura é `(accao, nomeProprio)`;
+`filename` quando o campo é `original_filename`). Ambas foram apanhadas por
+testes — escrever o teste a partir da JSDoc, e não do código, é o que as
+expõe.
+
+**Ícones deixam de vir de borla.** `react/jsx-no-undef` (§ 21 e AGENTS.md)
+apanha o que a extracção destapa: dentro de um ficheiro de 4000 linhas, um
+`<AlertCircle />` herdava o import de um vizinho; sozinho num ficheiro novo,
+falha logo.

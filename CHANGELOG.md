@@ -3,6 +3,18 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (4) — A página do processo deixou de encravar
+
+### Corrigido
+- **Voltar a um processo visitado há pouco deixava a página a carregar para sempre.** Se abrisse um processo, saísse e voltasse dentro de um minuto, a página ficava no ecrã de carregamento sem nunca mostrar nada — era preciso recarregar o separador. Apanhado pelo primeiro teste automático que abre a página inteira.
+- **O gestor de documentos usava a empresa e o perfil errados em 25 operações.** Carregar, descarregar, eliminar, analisar com IA e renomear não enviavam a empresa activa nem o perfil em que o utilizador está a trabalhar. Quem tem mais do que um perfil podia ver um botão no ecrã e receber "sem permissão" ao carregar nele. Todas as operações passam agora pelo mesmo caminho do resto da aplicação.
+- **Mensagem de erro que desaparecia ao gerar uma minuta.** Quando faltavam dados obrigatórios, o sistema mostrava um erro genérico em vez de dizer que campos faltavam.
+- **Botão "Aplicar" na revisão de dados da IA.** O campo de edição manual podia deixar de funcionar sem qualquer aviso.
+- **Acessibilidade:** as duas caixas de escolha na revisão de dados da IA ("Valor Existente" / "Valor Extraído") não eram alcançáveis por teclado.
+
+### Alterado
+- **Arrumação interna das duas maiores páginas.** A página de detalhes do processo e o gestor de documentos foram divididos em peças mais pequenas e independentes, sem qualquer alteração ao que o utilizador vê ou faz. O objectivo é que uma alteração futura numa delas deixe de poder partir as outras.
+
 ## [2026-09-22] (3) — Notas de voz: falar em vez de escrever
 
 ### Adicionado

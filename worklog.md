@@ -1,4 +1,23 @@
 ---
+Task ID: epico-8-grande-refatoracao
+Agent: Cloud Agent
+Task: Épico 8 — ProcessDetails e S3FileManager: testes primeiro, corte depois
+
+Date: 2026-09-22
+
+Work Log:
+- CORRIGI O MEU PRÓPRIO PLANO DUAS VEZES, e ambas por medição. (1) Disse "3 chamadas fetch" no S3FileManager; eram 25, nenhuma com X-Company-Id. O commit isolado que o dono aprovou era, por minha culpa, muito maior do que eu o tinha descrito — disse-o antes de avançar. (2) Prometi extrair um `ProcessSummaryTab` de 335 linhas; ao medir, o bloco usa 55 símbolos do contentor e ~230 dessas linhas são só cola a passar props aos separadores JÁ extraídos. Um componente com 55 props não é um contrato. Não o fiz, e expliquei porquê em vez de entregar prop-drilling com nome novo.
+- MÉTODO QUE FICA: medir a superfície de props antes de cortar. ≤10 extrair; 10–25 só com famílias agrupáveis; >25 redesenhar primeiro. Está no FRONTEND_GUIDELINES § 22 com o script de contagem.
+- BUG EM PRODUÇÃO, apanhado pelo PRIMEIRO teste que monta o ProcessDetails: revisitar um processo dentro do staleTime (60 s) deixava a página presa no esqueleto, para sempre. O efeito que limpa o estado ao mudar de processo está declarado depois do que hidrata — na montagem corriam ambos, hidratar e desfazer. Na primeira visita a query resolvia a seguir e `dataUpdatedAt` mudava; numa revisita, a cache é servida no primeiro render, `refetchOnMount: true` não dispara e nada volta a hidratar. Isolei-o com uma experiência (montar com a query a resolver depois vs. dados já presentes) em vez de o deduzir.
+- QUASE-ACIDENTE MEU: a primeira tentativa de extrair a barra de domínios apanhou a TabsList ERRADA — a exterior, de Resumo/Documentos/Histórico, porque a classe `grid w-full grid-cols-3` casa com as duas. Seis testes vermelhos no segundo seguinte. Sem a página montada num teste, ia para produção com os separadores de topo trocados. É o argumento mais forte que tenho para a ordem "teste de fumo primeiro".
+- CONVERSÃO fetch→Axios: três armadilhas que só se vêem lendo cada call site. O interceptor dispara um toast global em qualquer 403 e a listagem precisa do contrário (aviso localizado do PACOTE 11) — o `skipErrorToast` passou a valer no 403. Com `responseType: "blob"` o corpo de ERRO também vem Blob e a mensagem do servidor desaparece — `readBlobErrorBody`. E o URL da minuta termina em `/download`, que a minha primeira versão omitia.
+- TESTES QUE NÃO PROVAVAM NADA, meus, apanhados por mutação: o guarda do 403 lia o meu próprio COMENTÁRIO em vez do código; a verificação do `skipErrorToast` usava uma janela de caracteres que transbordava para a função seguinte; e a escolha de titular só estava coberta numa das três vias (um índice fixo nas outras duas mandaria os dados de identidade para o documento errado). Todos corrigidos, todos re-mutados.
+- DUAS JSDoc MINHAS ESTAVAM ERRADAS e foram apanhadas por escrever o teste a partir do contrato e não do código: `onResolve(indice, decisao)` quando a assinatura é `(accao, nomeProprio)`, e `filename` quando o campo é `original_filename`. Documentação errada é pior do que nenhuma.
+- `react/jsx-no-undef` (Épico 6) provou-se outra vez: dentro de um ficheiro de 4000 linhas um `<AlertCircle />` herdava o import de um vizinho; sozinho num ficheiro novo, falhou logo.
+- ESTADO: ProcessDetails 3101 → 2916; S3FileManager 4302 → 3798. POR FAZER, com números: 8 dos 10 diálogos do S3 (~800 linhas, 2–10 props cada, corte mecânico) e as duas vistas (lista 559 linhas/~55 símbolos, grelha 436/~28), que precisam de famílias de props agrupadas antes de valerem a pena. Deixei a decisão ao dono em vez de a tomar sozinho.
+- Suites: frontend 49 ficheiros / 524 testes (era 37/358 no início do Épico 6); backend 1843 passed / 8 skipped, intocado.
+
+---
 Task ID: epico-7-consultor-hands-free
 Agent: Cloud Agent
 Task: Épico 7 — nota de voz do consultor: ASR + LLM → timeline e tarefas
