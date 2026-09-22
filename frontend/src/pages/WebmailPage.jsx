@@ -89,6 +89,13 @@ import { pt } from "date-fns/locale";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
 import { safeString } from "../utils/safeString";
+import EmailList from "../components/webmail/EmailList";
+import {
+  formatEmailDate,
+  formatFileSize,
+  formatFullDate,
+  getAttachmentIcon,
+} from "../components/webmail/webmailFormatters";
 import { safeFormat } from "../lib/utils";
 import {
   applyMailboxSelection,
@@ -113,47 +120,9 @@ const FOLDERS = [
   { id: "trash", label: "Lixo", icon: Trash2 },
 ];
 
-// Formatar data relativa ou absoluta
-const formatEmailDate = (dateStr) => {
-  if (!dateStr) return "";
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return "";
-    if (isToday(date)) {
-      return format(date, "HH:mm", { locale: pt });
-    }
-    if (isYesterday(date)) {
-      return "ontem";
-    }
-    return format(date, "dd/MM/yyyy", { locale: pt });
-  } catch {
-    return "";
-  }
-};
-
-// Formatar data completa
-const formatFullDate = (dateStr) => {
-  if (!dateStr) return "-";
-  return safeFormat(dateStr, "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt });
-};
-
-// Formatar tamanho de ficheiro
-const formatFileSize = (bytes) => {
-  if (!bytes) return '';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-};
-
-// Ícone por tipo de ficheiro
-const getAttachmentIcon = (filename) => {
-  if (!filename) return File;
-  const lower = filename.toLowerCase();
-  if (/\.(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff?)$/i.test(lower)) return Image;
-  if (/\.(xls|xlsx|csv|ods)$/i.test(lower)) return FileSpreadsheet;
-  if (/\.(doc|docx|pdf|txt|rtf|odt)$/i.test(lower)) return FileText;
-  return File;
-};
+// Os formatadores (data, tamanho, ícone de anexo) vivem em
+// components/webmail/webmailFormatters.js — são usados por mais do que
+// um dos componentes extraídos no Épico 6.
 
 const WebmailPage = () => {
   const { token, user, effectiveRole, activeCompanyId, effectiveCompanyId } = useAuth();
@@ -690,6 +659,27 @@ const WebmailPage = () => {
   const totalPages = webmailData?.pages || 1;
   // Skeleton só na 1ª carga sem cache — refetch de new_email / staleTime é silencioso
   const loading = emailsLoading;
+
+  // ── Dados derivados da coluna da lista (Épico 6) ──────────────────────
+  // O cabeçalho e o estado vazio dependem do filtro activo, que é estado
+  // DESTE contentor; o EmailList recebe-os já resolvidos, em texto.
+  const listHeaderTitle = activeCustomFolder
+    ? customFolders.find((f) => f.id === activeCustomFolder)?.name || "Pasta"
+    : selectedLabel
+    ? labels.find((l) => l.id === selectedLabel)?.name || "Marcador"
+    : FOLDERS.find((f) => f.id === activeFolder)?.label || "";
+
+  const listEmptyMessage = searchQuery
+    ? "Nenhum email encontrado"
+    : selectedLabel
+    ? "Sem emails com este marcador"
+    : "Sem emails nesta pasta";
+
+  // Dois limpadores independentes: escolher uma pasta personalizada limpa o
+  // marcador, mas escolher um marcador NÃO limpa a pasta — os dois filtros
+  // podem coexistir e cada um tem o seu X, como antes da extracção.
+  const handleClearCustomFolder = useCallback(() => setActiveCustomFolder(null), []);
+  const handleClearLabel = useCallback(() => setSelectedLabel(null), []);
 
   useEffect(() => {
     if (typeof webmailData?.unread_count === "number") {
@@ -2085,7 +2075,11 @@ const WebmailPage = () => {
 
           <ResizableHandle withHandle className="hidden md:flex" />
 
-          {/* ========== COLUMN 2: EMAIL LIST ========== */}
+          {/* ========== COLUNA 2: LISTA DE CONVERSAS ========== */}
+          {/* Extraída para components/webmail/EmailList.jsx (Épico 6).
+              O agrupamento em conversas, o tempo real e a paginação ficam
+              AQUI, no contentor; o componente só apresenta e devolve
+              intenções. */}
           <ResizablePanel
             ref={listPanelRef}
             defaultSize={32}
@@ -2096,304 +2090,27 @@ const WebmailPage = () => {
             className="min-h-0"
             id="webmail-list-pane"
           >
-          <div
-            className="h-full border-r border-border flex flex-col bg-background overflow-hidden"
-            data-testid="webmail-list-pane"
-          >
-            {/* List header */}
-            <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold">
-                  {activeCustomFolder
-                    ? customFolders.find((f) => f.id === activeCustomFolder)?.name || "Pasta"
-                    : selectedLabel
-                    ? labels.find((l) => l.id === selectedLabel)?.name || "Marcador"
-                    : FOLDERS.find((f) => f.id === activeFolder)?.label}
-                </h2>
-                {activeCustomFolder && (
-                  <button
-                    onClick={() => setActiveCustomFolder(null)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-                {selectedLabel && (
-                  <button
-                    onClick={() => setSelectedLabel(null)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {multiSelectMode && (
-                  <button
-                    onClick={handleSelectAll}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {selectedEmails.size === emails.length && emails.length > 0
-                      ? "Desselecionar"
-                      : "Selecionar tudo"}
-                  </button>
-                )}
-                {totalPages > 1 && (
-                  <span className="text-xs text-muted-foreground">
-                    Página {currentPage} de {totalPages}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Email list */}
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                // Skeleton loading
-                <div className="divide-y">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="p-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-3 w-3 rounded-full" />
-                        <Skeleton className="h-4 w-[140px]" />
-                        <Skeleton className="h-3 w-[40px] ml-auto" />
-                      </div>
-                      <Skeleton className="h-3.5 w-full" />
-                      <Skeleton className="h-3 w-[70%]" />
-                    </div>
-                  ))}
-                </div>
-              ) : emails.length === 0 ? (
-                // Empty state
-                <div className="flex flex-col items-center justify-center h-full text-center p-6">
-                  <MailOpen className="h-10 w-10 text-muted-foreground opacity-40 mb-3" />
-                  <p className="text-sm text-muted-foreground">
-                    {searchQuery
-                      ? "Nenhum email encontrado"
-                      : selectedLabel
-                      ? "Sem emails com este marcador"
-                      : "Sem emails nesta pasta"}
-                  </p>
-                </div>
-              ) : (
-                // Email items
-                <div className="divide-y">
-                  {emailThreads.map((thread) => {
-                    const email = thread.latest;
-                    const isThread = thread.count > 1;
-                    const isExpanded = expandedThreads.has(thread.key);
-                    const isSelected = selectedEmail?.id === email.id;
-                    const isChecked = selectedEmails.has(email.id);
-                    return (
-                      <div key={thread.key}>
-                      <div className="flex items-stretch">
-                      {/* Expandir a conversa é uma acção SEPARADA de abrir a
-                          mensagem — e um <button> não pode viver dentro de
-                          outro <button>, daí os dois lado a lado. */}
-                      {isThread && (
-                        <button
-                          type="button"
-                          onClick={() => toggleThread(thread.key)}
-                          aria-expanded={isExpanded}
-                          aria-label={isExpanded ? "Fechar conversa" : `Expandir conversa com ${thread.count} mensagens`}
-                          className="px-1.5 shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleSelectEmail(email)}
-                        className={`
-                          flex-1 min-w-0 text-left p-3 transition-colors hover:bg-accent/50
-                          ${isSelected && !multiSelectMode ? "bg-accent" : ""}
-                        `}
-                      >
-                        <div className="flex items-start gap-2">
-                          {/* Multi-select checkbox */}
-                          {multiSelectMode && (
-                            <span className="mt-1 shrink-0">
-                              {isChecked ? (
-                                <CheckSquare className="h-4 w-4 text-primary" />
-                              ) : (
-                                <Square className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </span>
-                          )}
-
-                          {/* Unread dot */}
-                          {!multiSelectMode && !email.is_read && (
-                            <span className="bg-primary w-2 h-2 rounded-full mt-1.5 shrink-0" />
-                          )}
-                          {!multiSelectMode && email.is_read && <span className="w-2 shrink-0" />}
-
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            {/* Top row: sender + date + indicators */}
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={`text-sm truncate flex-1 ${
-                                  !email.is_read
-                                    ? "font-semibold text-foreground"
-                                    : "text-muted-foreground"
-                                }`}
-                              >
-                                {email.direction === "sent"
-                                  ? email.to_emails?.[0] || "Destinatário"
-                                  : safeString(email.client_name) || safeString(email.from_email) || "Remetente"}
-                              </span>
-                              {isThread && (
-                                <Badge
-                                  variant="secondary"
-                                  className="h-4 text-[10px] px-1.5 py-0 shrink-0"
-                                  title={`${thread.count} mensagens nesta conversa`}
-                                >
-                                  {thread.count}
-                                </Badge>
-                              )}
-                              <span className="text-[11px] text-muted-foreground whitespace-nowrap shrink-0">
-                                {formatEmailDate(email.sent_at)}
-                              </span>
-                            </div>
-
-                            {/* Subject */}
-                            <p
-                              className={`text-sm truncate mt-0.5 ${
-                                !email.is_read ? "font-medium" : ""
-                              }`}
-                            >
-                              {safeString(email.subject, "(Sem assunto)")}
-                            </p>
-
-                            {/* Preview + indicators */}
-                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                              <p className="text-xs text-muted-foreground truncate flex-1 min-w-0">
-                                {safeString(email.preview)}
-                              </p>
-                              {/* Label badges */}
-                              {email.labels?.length > 0 && (
-                                <span className="flex items-center gap-1 shrink-0">
-                                  {email.labels.slice(0, 2).map((lbl) => (
-                                    <span
-                                      key={lbl.id || lbl.name}
-                                      className="rounded-full px-1.5 py-0.5 text-white leading-none"
-                                      style={{
-                                        backgroundColor: lbl.color || "#6b7280",
-                                        fontSize: "10px",
-                                      }}
-                                    >
-                                      {safeString(lbl.name)}
-                                    </span>
-                                  ))}
-                                  {email.labels.length > 2 && (
-                                    <span
-                                      className="rounded-full px-1.5 py-0.5 text-muted-foreground leading-none border"
-                                      style={{ fontSize: "10px" }}
-                                    >
-                                      +{email.labels.length - 2}
-                                    </span>
-                                  )}
-                                </span>
-                              )}
-                              {/* Star */}
-                              {email.is_starred && (
-                                <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />
-                              )}
-                              {/* Attachment */}
-                              {email.attachments?.length > 0 && (
-                                <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
-                              )}
-                              {/* Process badge */}
-                              {email.process_id && (
-                                <Badge
-                                  variant="outline"
-                                  className="h-4 text-[9px] px-1 py-0 shrink-0"
-                                >
-                                  Proc.
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                      </div>
-
-                      {/* Mensagens anteriores da conversa */}
-                      {isThread && isExpanded && (
-                        <div className="divide-y border-l-2 border-border ml-4 bg-muted/30">
-                          {thread.emails.slice(1).map((prev) => (
-                            <button
-                              key={prev.id}
-                              onClick={() => handleSelectEmail(prev)}
-                              className={`w-full text-left px-3 py-2 transition-colors hover:bg-accent/50 ${
-                                selectedEmail?.id === prev.id && !multiSelectMode ? "bg-accent" : ""
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                {!prev.is_read && (
-                                  <span className="bg-primary w-1.5 h-1.5 rounded-full shrink-0" />
-                                )}
-                                <span
-                                  className={`text-xs truncate flex-1 ${
-                                    !prev.is_read ? "font-semibold text-foreground" : "text-muted-foreground"
-                                  }`}
-                                >
-                                  {prev.direction === "sent"
-                                    ? prev.to_emails?.[0] || "Destinatário"
-                                    : safeString(prev.client_name) || safeString(prev.from_email) || "Remetente"}
-                                </span>
-                                {prev.attachments?.length > 0 && (
-                                  <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
-                                )}
-                                <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
-                                  {formatEmailDate(prev.sent_at)}
-                                </span>
-                              </div>
-                              <p className="text-xs text-muted-foreground truncate mt-0.5">
-                                {safeString(prev.preview) || safeString(prev.subject, "(Sem assunto)")}
-                              </p>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-3 py-2 border-t shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((p) => p - 1)}
-                >
-                  Anterior
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  {currentPage} / {totalPages}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((p) => p + 1)}
-                >
-                  Seguinte
-                </Button>
-              </div>
-            )}
-          </div>
+            <EmailList
+              threads={emailThreads}
+              loading={loading}
+              headerTitle={listHeaderTitle}
+              emptyMessage={listEmptyMessage}
+              totalEmails={emails.length}
+              selectedEmailId={selectedEmail?.id || null}
+              selectedEmails={selectedEmails}
+              multiSelectMode={multiSelectMode}
+              expandedThreads={expandedThreads}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onSelectEmail={handleSelectEmail}
+              onToggleThread={toggleThread}
+              onSelectAll={handleSelectAll}
+              onPageChange={setCurrentPage}
+              onClearFolder={activeCustomFolder ? handleClearCustomFolder : null}
+              onClearLabel={selectedLabel ? handleClearLabel : null}
+            />
           </ResizablePanel>
+
 
           <ResizableHandle withHandle className="hidden md:flex" />
 
