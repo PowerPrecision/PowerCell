@@ -1,4 +1,35 @@
 ---
+Task ID: webmail-testes-da-pagina-montada
+Agent: Cloud Agent
+Task: CI do Épico 6 + testes de integração do WebmailPage
+
+Date: 2026-09-22
+
+Work Log:
+- CI VERMELHO no push do Épico 6, e era meu: o job Frontend CI falhou no PRIMEIRO passo, o `yarn install`. `@testing-library/jest-dom@7` exige Node >=22 e o CI corre Node 20. Aqui há Node 22 — instalou sem uma queixa e não vi.
+- Gravidade maior do que um CI vermelho: o frontend é construído na Vercel e como static site no Render, ambos com `yarn install` e sem Node fixado no repositório. Uma devDependency que exija Node 22 parte o install do DEPLOY. Por isso baixei as versões em vez de subir o Node do CI, que não consigo verificar nos painéis.
+- Não era só o jest-dom: varri a árvore inteira à procura de módulos que excluíssem o Node 20 e o `jsdom@30` também exige >=22.22. E o `^6` do jest-dom ainda resolvia para 6.10.0, que TAMBÉM pede >=22 — fixado em 6.9.1. Sobrou um binário nativo opcional (`@napi-rs/lzma-linux-x64-gnu`); assumir que o yarn o salta seria repetir o erro, por isso descarreguei o Node 20.20.2 — o mesmo do CI — e corri o job todo: install numa árvore limpa, testes, eslint e build. Tudo verde.
+- ACHADO GRAVE, meu, apanhado pelo PRIMEIRO teste que monta a página: `Cannot access 'handleOpenFolderDialog' before initialization`. Na extracção do FolderNavigation pus `handleCreateFolderFromNav` ANTES do `handleOpenFolderDialog` de que depende — um `const` na zona morta temporal, e a referência está na lista de dependências do `useCallback`, que é avaliada no próprio render. **A página do Webmail rebentava ao abrir**, em branco, desde o commit a24ad03.
+- Nada tinha apanhado: o eslint não vê ordem de declaração entre `const`s usados em dependências, o `vite build` não faz essa análise, e os 70 testes de componente nunca montam a página. Era exactamente o buraco que eu tinha declarado no relatório anterior — e estava lá um bug a sério.
+- Corrigido (handler recolocado depois da sua dependência, com comentário a dizer porquê) e trancado por mutação: repor a ordem partida → 12 vermelhos com a mensagem original.
+- NOVO `pages/__tests__/WebmailPage.test.jsx` (12): as três colunas ligadas, os emails do hook a chegarem à lista agrupados, abrir uma conversa e ver o detalhe no painel de leitura, marcar como lido ao abrir, expandir/fechar conversa (estado que vive no contentor), escolher pasta muda o pedido de dados, mudar de pasta volta à página 1, o cabeçalho acompanha a pasta, compositor abre/fecha e mantém o texto, e a paginação.
+- Desenho do teste: falseia só quatro fronteiras (DashboardLayout, AuthContext, os dois hooks de dados e o `fetch`) mais o `ui/resizable` — o `react-resizable-panels` mede elementos e no jsdom tudo tem dimensão zero. Estado, handlers e componentes extraídos são os reais.
+
+Stage Summary:
+- O install volta a funcionar no Node 20 (CI e deploy), a página do Webmail deixa de rebentar ao abrir, e passa a haver teste que monta a página inteira.
+
+Files:
+- frontend/package.json, frontend/yarn.lock (jsdom@^26, jest-dom@6.9.1)
+- frontend/src/pages/WebmailPage.jsx (ordem do handler)
+- frontend/src/pages/__tests__/WebmailPage.test.jsx (novo)
+- AGENTS.md, CHANGELOG.md, worklog.md
+
+Validação (no Node 20.20.2, o mesmo do CI):
+- `yarn install --frozen-lockfile` verde em árvore limpa.
+- **37 ficheiros, 358 testes verdes** (346 + 12).
+- eslint --quiet limpo; vite build verde.
+
+---
 Task ID: epico6-fortaleza-frontend-vitest-e-webmail
 Agent: Cloud Agent
 Task: Épico 6 — Vitest + React Testing Library e divisão do WebmailPage

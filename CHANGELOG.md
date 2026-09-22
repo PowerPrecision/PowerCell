@@ -3,6 +3,15 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (2) — Webmail deixava de abrir
+
+### Corrigido
+- **A página do Webmail ficava em branco.** Uma função declarada fora de ordem no ficheiro, introduzida na divisão do Webmail feita hoje, rebentava logo ao abrir a página. Não chegou a produção: foi apanhada pelo primeiro teste que monta a página inteira, escrito a seguir.
+- **Dependências de teste que impediam a instalação.** Duas bibliotecas novas exigiam uma versão de Node mais recente do que a usada para construir a aplicação, o que partia a instalação no CI — e teria partido também a publicação. Fixadas em versões compatíveis.
+
+### Adicionado
+- **Teste da página do Webmail montada** (12 casos): as três colunas ligadas, abrir um email da lista no painel de leitura, marcar como lido, expandir e fechar conversas, mudar de pasta (que volta à primeira página), o compositor e a paginação.
+
 ## [2026-09-22] — Testes de interface e divisão do Webmail
 
 ### Adicionado

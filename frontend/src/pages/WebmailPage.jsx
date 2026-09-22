@@ -1540,11 +1540,6 @@ const WebmailPage = () => {
     setContextMenuPosition(posicao);
   }, []);
 
-  const handleCreateFolderFromNav = useCallback(() => {
-    setContextMenuFolder(null);
-    handleOpenFolderDialog("create");
-  }, [handleOpenFolderDialog]);
-
   const handleComposerFieldChange = useCallback((campo, valor) => {
     setComposerData((d) => ({ ...d, [campo]: valor }));
   }, []);
@@ -1565,6 +1560,16 @@ const WebmailPage = () => {
     }
     setFolderDialogOpen(true);
   }, []);
+
+  // Tem de vir DEPOIS de `handleOpenFolderDialog`: é um `const`, e uma
+  // referência na lista de dependências de um `useCallback` é avaliada no
+  // próprio render. Declarado antes, o render rebentava com
+  // "Cannot access before initialization" — a página inteira ficava em
+  // branco. Coberto por `pages/__tests__/WebmailPage.test.jsx`.
+  const handleCreateFolderFromNav = useCallback(() => {
+    setContextMenuFolder(null);
+    handleOpenFolderDialog("create");
+  }, [handleOpenFolderDialog]);
 
   const handleSaveFolder = useCallback(async () => {
     if (!folderDialogData.name.trim()) {
