@@ -1,4 +1,21 @@
 ---
+Task ID: epico-8-selagem-e-bug-rgpd
+Agent: Cloud Agent
+Task: Épico 8 — os 10 diálogos do S3 e o "Ver Processo" que ia dar ao Login
+
+Date: 2026-09-22
+
+Work Log:
+- BUG DO RGPD: o botão "Ver Processo" fazia `window.open("/processes/" + id)`. As rotas são `/process/:id` e `/processo/:id` — `/processes/` (plural) não existe, e o `App.js` tem um catch-all `<Route path="*" element={<Navigate to="/login" replace />} />`. Qualquer caminho desconhecido acaba no Login. Como abre num separador novo (recarga completa da SPA), o sintoma parecia perda de sessão — não era. Das três hipóteses do briefing, a resposta é a primeira (caminho errado); o `process_id` não era undefined (o backend resolve o processo com `find_one({"id": request["process_id"]})` e o botão só aparece com o processo encontrado) e a recarga só disfarçava o sintoma.
+- Guardas que deixei: o teste afirma o caminho E verifica que a rota existe no App.js e que o catch-all continua a mandar para o Login — se alguém renomear a rota, o teste cai e diz porquê, em vez de o utilizador descobrir no ecrã de sessão.
+- OS 10 DIÁLOGOS SAÍRAM: S3FileManager 4302 → 3303 linhas. Todos de apresentação, 2 a 10 props cada.
+- ERRO MEU, CARO, e vale a pena ficar escrito: a meio da extracção parti o ficheiro. Estava a medir as fronteiras dos blocos uma vez e a reutilizar os números depois de já ter editado — cada substituição desloca as linhas seguintes. Um recorte apanhou o bloco errado e removeu 111 linhas de outro diálogo. Recuperei com `git checkout` do contentor (os componentes extraídos são ficheiros NOVOS e sobrevivem a isso) e religuei os seis num ÚNICO passo em memória, com cada bloco localizado pelo texto de abertura e pela indentação. A regra fica no ARCHITECTURE.md: ancorar por texto, nunca por número de linha.
+- Dois defeitos apanhados ao extrair: o `react/jsx-no-undef` apanhou um `<X />` de uma só letra que a minha própria regex de detecção de ícones não via (`[A-Z]\w+` exige dois caracteres — corrigido para `\w*`); e o botão de verificar o NIF da empresa não tinha nome acessível, o que o tornava impossível de testar. Pus-lhe `aria-label`.
+- Testes: 33 casos novos para os 8 diálogos num só ficheiro (pequenos, coesos, testados da mesma maneira). Cinco mutações, cinco apanhadas: eliminar sem nomear o ficheiro, NIF sem os 9 dígitos, renomear para vazio, "para todos" sempre visível, e gerar minuta sem tipo escolhido.
+- Suites: frontend 564 testes (era 358 no início do Épico 6); backend 1843 passed / 8 skipped.
+- POR FAZER, honestamente: as duas vistas do S3 (lista 559 linhas/~55 símbolos, grelha 436/~28). Não são recorte — precisam de famílias de props agrupadas primeiro. Deixo o número em vez de uma promessa.
+
+---
 Task ID: epico-8-grande-refatoracao
 Agent: Cloud Agent
 Task: Épico 8 — ProcessDetails e S3FileManager: testes primeiro, corte depois

@@ -2728,8 +2728,23 @@ explicação.
 | Ficheiro | Antes | Depois |
 |---|---|---|
 | `pages/ProcessDetails.js` | 3101 | 2916 |
-| `components/S3FileManager.js` | 4302 | 3798 |
+| `components/S3FileManager.js` | 4302 | **3303** |
 
-Por fazer: 8 dos 10 diálogos do S3 (~800 linhas, corte mecânico) e as duas
-vistas, que precisam de famílias de props agrupadas (`dragHandlers`,
-`fileActions`) antes de valerem a pena.
+Os 10 diálogos do S3 estão extraídos para `components/storage/dialogs/`.
+Fica por fazer, com o número em cima da mesa: as duas VISTAS — lista (559
+linhas, ~55 símbolos do contentor) e grelha (436, ~28). Precisam de
+famílias de props agrupadas (`dragHandlers`, `fileActions`) antes de
+valerem a pena; isso é desenho de contrato, não recorte.
+
+### Uma lição cara: ancorar por texto, nunca por número de linha
+
+A meio da extracção dos diálogos, o ficheiro partiu-se. A causa: cada
+substituição desloca as linhas seguintes, e eu media as fronteiras uma vez
+e reutilizava-as depois de já ter editado. Um recorte apanhou o bloco
+errado e removeu 111 linhas de outro diálogo.
+
+Recuperação: `git checkout` do contentor (os componentes extraídos são
+ficheiros NOVOS e sobrevivem) e religação dos seis num **único passo em
+memória**, com cada bloco localizado pelo seu texto de abertura e pela
+indentação, não por número de linha. É assim que se faz este tipo de
+edição em lote.

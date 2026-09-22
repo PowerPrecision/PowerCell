@@ -3,6 +3,15 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (5) — "Ver Processo" no RGPD levava ao Login
+
+### Corrigido
+- **O botão "Ver Processo" nos detalhes de um pedido RGPD abria o ecrã de início de sessão** em vez do processo. O endereço tinha um "s" a mais e não correspondia a nenhuma página; como abre num separador novo, o sintoma parecia sessão expirada. A sessão estava intacta.
+- **Botão sem nome para leitores de ecrã** no diálogo de NIF da empresa (verificação do NIF antes do upload).
+
+### Alterado
+- **Gestor de documentos arrumado.** As dez janelas de confirmação e resultados (eliminar, eliminar vários, renomear, minutas, NIF da empresa, conflitos de nome, resultados da IA) passaram a viver em ficheiros próprios. Nada muda no que o utilizador vê ou faz.
+
 ## [2026-09-22] (4) — A página do processo deixou de encravar
 
 ### Corrigido

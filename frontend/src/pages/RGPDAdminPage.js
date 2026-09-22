@@ -260,7 +260,9 @@ const EditModal = ({ open, onClose, rgpd, onSave }) => {
 };
 
 // Modal de Visualização
-const ViewModal = ({ open, onClose, rgpd, process }) => {
+// Exportado para teste: é aqui que vive o botão "Ver Processo", e um
+// caminho errado neste sítio manda o utilizador para o Login.
+export const ViewModal = ({ open, onClose, rgpd, process }) => {
   if (!rgpd) return null;
 
   return (
@@ -392,8 +394,15 @@ const ViewModal = ({ open, onClose, rgpd, process }) => {
           <Button variant="outline" onClick={onClose}>
             Fechar
           </Button>
+          {/* BUGFIX: o caminho era `/processes/` (plural) e NÃO existe — as
+              rotas são `/process/:id` e `/processo/:id`. O `App.js` tem um
+              catch-all `<Route path="*" element={<Navigate to="/login"
+              replace />} />`, por isso qualquer caminho desconhecido acaba
+              no Login. Como isto abre num separador novo (recarga completa
+              da SPA), o sintoma parecia perda de sessão — não era: era um
+              "s" a mais. */}
           {process && (
-            <Button onClick={() => window.open(`/processes/${rgpd.process_id}`, "_blank")}>
+            <Button onClick={() => window.open(`/process/${rgpd.process_id}`, "_blank")}>
               <ExternalLink className="h-4 w-4 mr-2" />
               Ver Processo
             </Button>

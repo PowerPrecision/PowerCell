@@ -46,6 +46,14 @@ import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
 import AIResultsDialog from "./storage/dialogs/AIResultsDialog";
+import EmpresaNifDialog from "./storage/dialogs/EmpresaNifDialog";
+import MoveConflictDialog from "./storage/dialogs/MoveConflictDialog";
+import DeleteFileDialog from "./storage/dialogs/DeleteFileDialog";
+import BulkDeleteDialog from "./storage/dialogs/BulkDeleteDialog";
+import ManualRenameDialog from "./storage/dialogs/ManualRenameDialog";
+import SmartRenameResultsDialog from "./storage/dialogs/SmartRenameResultsDialog";
+import OrganizeResultsDialog from "./storage/dialogs/OrganizeResultsDialog";
+import GenerateTemplateDialog from "./storage/dialogs/GenerateTemplateDialog";
 import UploadConflictDialog from "./storage/dialogs/UploadConflictDialog";
 import { ScrollArea } from "./ui/scroll-area";
 import { Progress } from "./ui/progress";
@@ -850,6 +858,70 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       );
     }
   };
+
+  // ── Fechos e edições dos diálogos extraídos (Épico 8) ────────────
+  // Cancelar o NIF limpa também o `input` de ficheiro: sem isso, escolher
+  // o MESMO ficheiro outra vez não dispara `change` e o upload não arranca.
+  const handleCancelEmpresaNif = useCallback(() => {
+    setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
+    setPendingFiles(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
+  const handleEmpresaNifChange = useCallback((nif) => {
+    setEmpresaNifDialog((anterior) => ({ ...anterior, empresaNif: nif }));
+  }, []);
+
+  // Cancelar o conflito de movimentação limpa também o estado de
+  // arrastamento — senão o próximo "largar" herdaria os ficheiros antigos.
+  const handleCancelMoveConflict = useCallback(() => {
+    setConflictDialog({ open: false, files: [], targetCategory: null, currentIndex: 0, conflicts: [] });
+    setDraggedFile(null);
+    setDraggedFiles([]);
+  }, []);
+
+  // Os diálogos são de apresentação: devolvem a intenção, e é aqui que se
+  // decide o que ela implica ao estado.
+  const handleDeleteDialogOpenChange = useCallback((aberto) => {
+    setDeleteDialog({ open: aberto, file: null });
+  }, []);
+
+  const handleManualRenameOpenChange = useCallback((aberto) => {
+    if (!aberto) setManualRenameDialog({ open: false, file: null, newName: "" });
+  }, []);
+
+  const handleManualRenameNameChange = useCallback((nome) => {
+    setManualRenameDialog((anterior) => ({ ...anterior, newName: nome }));
+  }, []);
+
+  // Fechar preserva os resultados enquanto o diálogo estiver aberto, tal
+  // como antes; ao fechar de vez, limpa-os.
+  const handleRenameDialogOpenChange = useCallback((aberto) => {
+    setRenameDialog((anterior) => ({
+      open: aberto,
+      results: aberto ? anterior.results : null,
+    }));
+  }, []);
+
+  const handleCloseOrganizeResults = useCallback(() => setOrganizeResults(null), []);
+
+  // Fechar o diálogo de minutas limpa a escolha e o erro de validação —
+  // reabrir traz uma folha em branco, como antes.
+  const handleTemplateDialogOpenChange = useCallback((aberto) => {
+    setTemplateDialog({ open: aberto });
+    if (!aberto) {
+      setTemplateError(null);
+      setSelectedTemplate("");
+    }
+  }, []);
+
+  // Escolher um tipo novo limpa o erro do tipo anterior.
+  const handleTemplateChange = useCallback((id) => {
+    setSelectedTemplate(id);
+    setTemplateError(null);
+  }, []);
 
   // Eliminar ficheiro
   const handleDelete = async () => {
@@ -2552,40 +2624,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
               </div>
 
               {/* Diálogo de confirmação para eliminar selecionados */}
-              <AlertDialog open={bulkDeleteDialog.open} onOpenChange={(open) => { if (!bulkDeleting) setBulkDeleteDialog({ open }); }}>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Eliminar {selectedFilesForAI.length} ficheiro(s)</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Tem a certeza que pretende eliminar {selectedFilesForAI.length} ficheiro(s) selecionado(s)? 
-                      Esta ação não pode ser revertida. Os ficheiros serão removidos permanentemente do armazenamento.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={bulkDeleting}>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={(e) => {
-                        e.preventDefault();
-                        handleBulkDelete();
-                      }}
-                      disabled={bulkDeleting}
-                      className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-300"
-                    >
-                      {bulkDeleting ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                          A eliminar...
-                        </>
-                      ) : (
-                        <>
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Eliminar {selectedFilesForAI.length} ficheiro(s)
-                        </>
-                      )}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <BulkDeleteDialog
+                open={bulkDeleteDialog.open}
+                count={selectedFilesForAI.length}
+                deleting={bulkDeleting}
+                onOpenChange={(aberto) => setBulkDeleteDialog({ open: aberto })}
+                onConfirm={handleBulkDelete}
+              />
 
               {/* Painel de Preview Lateral */}
               {previewFile && (
@@ -3139,244 +3184,35 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       </Card>
 
       {/* Dialog de confirmação de eliminação */}
-      <AlertDialog open={deleteDialog.open} onOpenChange={(open) => setDeleteDialog({ open, file: null })}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Eliminar ficheiro?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tem a certeza que deseja eliminar "{deleteDialog.file?.name}"?
-              Esta ação não pode ser revertida.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              disabled={deleting}
-              className="bg-red-500 hover:bg-red-600"
-            >
-              {deleting ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Trash2 className="h-4 w-4 mr-2" />
-              )}
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteFileDialog
+        open={deleteDialog.open}
+        fileName={deleteDialog.file?.name}
+        deleting={deleting}
+        onOpenChange={handleDeleteDialogOpenChange}
+        onConfirm={handleDelete}
+      />
 
       {/* Dialog para conflito de nomes ao mover/renomear */}
-      <Dialog open={conflictDialog.open} onOpenChange={(open) => {
-        if (!open) {
-          setConflictDialog({ open: false, files: [], targetCategory: null, currentIndex: 0, conflicts: [] });
-          setDraggedFile(null);
-          setDraggedFiles([]);
-        }
-      }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="h-5 w-5" />
-              Ficheiro com Nome Duplicado
-            </DialogTitle>
-            <DialogDescription>
-              Já existe um ficheiro com o mesmo nome na pasta de destino.
-            </DialogDescription>
-          </DialogHeader>
-          
-          {conflictDialog.conflicts?.length > 0 && (
-            <div className="space-y-4 py-4">
-              {/* Info do ficheiro em conflito */}
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                <div className="flex items-center gap-3">
-                  <FileText className="h-8 w-8 text-amber-600" />
-                  <div>
-                    <p className="font-medium text-amber-800 dark:text-amber-200">
-                      {conflictDialog.conflicts[0]?.conflictFilename || conflictDialog.conflicts[0]?.file?.name}
-                    </p>
-                    <p className="text-sm text-amber-600 dark:text-amber-400">
-                      Destino: {conflictDialog.targetCategory}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Mostrar mais ficheiros se houver múltiplos conflitos */}
-              {conflictDialog.conflicts.length > 1 && (
-                <p className="text-sm text-muted-foreground">
-                  +{conflictDialog.conflicts.length - 1} outro(s) ficheiro(s) com conflito
-                </p>
-              )}
-              
-              {/* Opções de resolução */}
-              <div className="space-y-2">
-                <p className="text-sm font-medium">O que deseja fazer?</p>
-                
-                {/* Sugestões de nomes alternativos */}
-                {conflictDialog.conflicts[0]?.suggestedNames?.length > 0 && (
-                  <div className="bg-muted/50 rounded-lg p-3 mb-3">
-                    <p className="text-xs text-muted-foreground mb-2">Nomes sugeridos:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {conflictDialog.conflicts[0].suggestedNames.slice(0, 3).map((suggestion, idx) => (
-                        <Button
-                          key={idx}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleConflictDecision('custom', suggestion.filename)}
-                          className="text-xs"
-                        >
-                          <Save className="h-3 w-3 mr-1" />
-                          {suggestion.filename || suggestion}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => handleConflictDecision('rename')}
-                    className="w-full"
-                  >
-                    <Pencil className="h-4 w-4 mr-2" />
-                    Renomear Automaticamente
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => handleConflictDecision('overwrite')}
-                    className="w-full"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Substituir Existente
-                  </Button>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleConflictDecision('skip')}
-                    className="w-full"
-                  >
-                    <X className="h-4 w-4 mr-2" />
-                    Ignorar Este
-                  </Button>
-                  {conflictDialog.conflicts?.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => handleConflictDecisionForAll('rename')}
-                      className="w-full text-amber-600 hover:text-amber-700"
-                    >
-                      <FolderSync className="h-4 w-4 mr-2" />
-                      Renomear Todos
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <MoveConflictDialog
+        open={conflictDialog.open}
+        conflicts={conflictDialog.conflicts}
+        targetCategory={conflictDialog.targetCategory}
+        onDecide={handleConflictDecision}
+        onDecideForAll={handleConflictDecisionForAll}
+        onCancel={handleCancelMoveConflict}
+      />
 
       {/* Dialog para geração de minutas */}
-      <Dialog open={templateDialog.open} onOpenChange={(open) => {
-        setTemplateDialog({ open });
-        if (!open) {
-          setTemplateError(null);
-          setSelectedTemplate("");
-        }
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileDown className="h-5 w-5 text-emerald-600" />
-              Gerar Minuta
-            </DialogTitle>
-            <DialogDescription>
-              Selecione o tipo de documento para gerar automaticamente com os dados do cliente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Tipo de Documento</label>
-              <Select
-                value={selectedTemplate}
-                onValueChange={(value) => {
-                  setSelectedTemplate(value);
-                  setTemplateError(null);
-                }}
-              >
-                <SelectTrigger data-testid="template-select">
-                  <SelectValue placeholder="Selecione o tipo de documento..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {TEMPLATES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Erro de validação - campos em falta */}
-            {templateError && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-amber-800 dark:text-amber-200">
-                      Não é possível gerar a minuta
-                    </p>
-                    <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                      {templateError.message}
-                    </p>
-                    {templateError.missingFields?.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                          Campos em falta:
-                        </p>
-                        <ul className="mt-1 text-sm text-amber-700 dark:text-amber-300 list-disc list-inside">
-                          {templateError.missingFields.map((field, idx) => (
-                            <li key={idx}>{field}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
-                      Preencha os dados em falta na ficha do cliente antes de gerar o documento.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setTemplateDialog({ open: false })}
-              disabled={generatingTemplate}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleGenerateTemplate}
-              disabled={!selectedTemplate || generatingTemplate}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {generatingTemplate ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <FileDown className="h-4 w-4 mr-2" />
-              )}
-              Gerar e Descarregar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <GenerateTemplateDialog
+        open={templateDialog.open}
+        templates={TEMPLATES}
+        selectedTemplate={selectedTemplate}
+        error={templateError}
+        generating={generatingTemplate}
+        onOpenChange={handleTemplateDialogOpenChange}
+        onTemplateChange={handleTemplateChange}
+        onGenerate={handleGenerateTemplate}
+      />
 
       {/* Dialog de Resultados da Análise IA */}
       <AIResultsDialog
@@ -3389,373 +3225,42 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       />
 
       {/* Diálogo de resultados de renomeação inteligente */}
-      <Dialog open={renameDialog.open} onOpenChange={(open) => setRenameDialog({ open, results: open ? renameDialog.results : null })}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-amber-600" />
-              Renomeação Inteligente
-            </DialogTitle>
-            <DialogDescription>
-              Resultado da renomeação automática dos documentos
-            </DialogDescription>
-          </DialogHeader>
-          
-          {renameDialog.results && (
-            <div className="space-y-4 py-4">
-              {/* Estatísticas resumidas */}
-              <div className="grid grid-cols-4 gap-2">
-                <div className="text-center p-2 bg-muted rounded-lg">
-                  <p className="text-2xl font-bold">{renameDialog.results.total}</p>
-                  <p className="text-xs text-muted-foreground">Total</p>
-                </div>
-                <div className="text-center p-2 bg-green-50 dark:bg-green-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-green-600">{renameDialog.results.renamed}</p>
-                  <p className="text-xs text-green-600">Renomeados</p>
-                </div>
-                <div className="text-center p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-amber-600">{renameDialog.results.skipped}</p>
-                  <p className="text-xs text-amber-600">Ignorados</p>
-                </div>
-                <div className="text-center p-2 bg-red-50 dark:bg-red-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-red-600">{renameDialog.results.errors}</p>
-                  <p className="text-xs text-red-600">Erros</p>
-                </div>
-              </div>
-              
-              {/* Lista detalhada */}
-              {renameDialog.results.details && renameDialog.results.details.length > 0 && (
-                <div className="border rounded-lg divide-y max-h-60 overflow-auto">
-                  {renameDialog.results.details.map((item, idx) => (
-                    <div key={idx} className="p-2 flex items-center gap-2 text-sm">
-                      {item.status === "renamed" ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
-                      ) : item.status === "skipped" ? (
-                        <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                      ) : (
-                        <X className="h-4 w-4 text-red-500 flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="truncate font-medium">{item.file}</p>
-                        {item.new_name && (
-                          <p className="text-xs text-green-600 truncate">→ {item.new_name}</p>
-                        )}
-                        {item.reason && (
-                          <p className="text-xs text-muted-foreground">{item.reason}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          
-          <DialogFooter>
-            <Button onClick={() => setRenameDialog({ open: false, results: null })}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <SmartRenameResultsDialog
+        open={renameDialog.open}
+        results={renameDialog.results}
+        onOpenChange={handleRenameDialogOpenChange}
+      />
 
       {/* Dialog para NIF da Empresa (obrigatório para indexacao) */}
-      <Dialog open={empresaNifDialog.open} onOpenChange={(open) => {
-        if (!open) {
-          setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
-          setPendingFiles(null);
-          if (fileInputRef.current) {
-            fileInputRef.current.value = "";
-          }
-        }
-      }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-blue-600" />
-              NIF da Empresa
-            </DialogTitle>
-            <DialogDescription>
-              Para concluir o upload, é obrigatório indicar o NIF da empresa onde o cliente trabalha.
-              <br />
-              <span className="text-sm text-muted-foreground mt-1 block">
-                {empresaNifDialog.files?.length || 0} ficheiro(s) selecionado(s) para upload.
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">NIF da Empresa (9 dígitos)</label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Ex: 509123456"
-                  value={empresaNifDialog.empresaNif}
-                  onChange={(e) => setEmpresaNifDialog(prev => ({
-                    ...prev,
-                    empresaNif: e.target.value.replace(/\D/g, '').slice(0, 9)
-                  }))}
-                  maxLength={9}
-                  className="flex-1"
-                />
-                <Button
-                  variant="outline"
-                  onClick={handleVerifyEmpresaNif}
-                  disabled={empresaNifDialog.empresaNif.length !== 9 || empresaNifDialog.checking}
-                >
-                  {empresaNifDialog.checking ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Search className="h-4 w-4" />
-                  )}
-                  Verificar
-                </Button>
-              </div>
-            </div>
-
-            {/* Resultado da verificação */}
-            {empresaNifDialog.existingProcesses && (
-              <div className={`rounded-lg border p-4 ${
-                empresaNifDialog.existingProcesses.exists 
-                  ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800' 
-                  : 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
-              }`}>
-                {empresaNifDialog.existingProcesses.exists ? (
-                  <>
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-amber-800 dark:text-amber-200">
-                          Este NIF já foi utilizado em {empresaNifDialog.existingProcesses.total_count} processo(s)
-                        </p>
-                        <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                          Documentos desta empresa já foram enviados para os seguintes balcões:
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div className="mt-3 max-h-40 overflow-y-auto space-y-2">
-                      {empresaNifDialog.existingProcesses.processes.map((proc, idx) => (
-                        <div 
-                          key={idx}
-                          className="flex items-center justify-between p-2 rounded bg-white/50 dark:bg-black/20 border border-amber-100 dark:border-amber-900"
-                        >
-                          <div>
-                            <p className="font-medium text-sm">{proc.client_name}</p>
-                            {proc.employer_name && (
-                              <p className="text-xs text-muted-foreground">{proc.employer_name}</p>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <Badge 
-                              style={{ 
-                                backgroundColor: proc.status_color || '#6B7280',
-                                color: getContrastColor(proc.status_color),
-                                fontSize: '10px'
-                              }}
-                            >
-                              {proc.status_label}
-                            </Badge>
-                            {(proc.consultor_name || proc.mediador_name) && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {proc.consultor_name || proc.mediador_name}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">
-                      Pode prosseguir com o upload mesmo assim. Este aviso é apenas informativo.
-                    </p>
-                  </>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                    <div>
-                      <p className="font-medium text-green-800 dark:text-green-200">
-                        NIF não registado anteriormente
-                      </p>
-                      <p className="text-sm text-green-700 dark:text-green-300">
-                        Este NIF de empresa ainda não foi utilizado em nenhum processo.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
-                setPendingFiles(null);
-                if (fileInputRef.current) {
-                  fileInputRef.current.value = "";
-                }
-              }}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleConfirmUploadWithNif}
-              disabled={empresaNifDialog.empresaNif.length !== 9}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Confirmar Upload
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EmpresaNifDialog
+        open={empresaNifDialog.open}
+        files={empresaNifDialog.files}
+        nif={empresaNifDialog.empresaNif}
+        checking={empresaNifDialog.checking}
+        existingProcesses={empresaNifDialog.existingProcesses}
+        contrastColorOf={getContrastColor}
+        onNifChange={handleEmpresaNifChange}
+        onVerify={handleVerifyEmpresaNif}
+        onConfirm={handleConfirmUploadWithNif}
+        onCancel={handleCancelEmpresaNif}
+      />
 
       {/* Diálogo de renomeação manual */}
-      <Dialog open={manualRenameDialog.open} onOpenChange={(open) => {
-        if (!open) {
-          setManualRenameDialog({ open: false, file: null, newName: "" });
-        }
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Pencil className="h-5 w-5 text-blue-600" />
-              Renomear Ficheiro
-            </DialogTitle>
-            <DialogDescription>
-              Introduza o novo nome para "{manualRenameDialog.file?.name}".
-              <br />
-              <span className="text-xs text-muted-foreground">
-                A extensão será mantida automaticamente.
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Novo nome</label>
-              <Input
-                placeholder="Introduza o novo nome..."
-                value={manualRenameDialog.newName}
-                onChange={(e) => setManualRenameDialog(prev => ({
-                  ...prev,
-                  newName: e.target.value
-                }))}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && manualRenameDialog.newName.trim()) {
-                    handleManualRename();
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setManualRenameDialog({ open: false, file: null, newName: "" })}
-              disabled={manualRenaming}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleManualRename}
-              disabled={!manualRenameDialog.newName.trim() || manualRenaming}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {manualRenaming ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Pencil className="h-4 w-4 mr-2" />
-              )}
-              Renomear
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ManualRenameDialog
+        open={manualRenameDialog.open}
+        fileName={manualRenameDialog.file?.name}
+        newName={manualRenameDialog.newName}
+        renaming={manualRenaming}
+        onOpenChange={handleManualRenameOpenChange}
+        onNameChange={handleManualRenameNameChange}
+        onConfirm={handleManualRename}
+      />
 
       {/* Diálogo de resultados da organização */}
-      <Dialog open={!!organizeResults} onOpenChange={(open) => !open && setOrganizeResults(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FolderSync className="h-5 w-5 text-teal-600" />
-              Organização Completa
-            </DialogTitle>
-            <DialogDescription>
-              Os documentos foram analisados e organizados automaticamente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          {organizeResults && (
-            <div className="space-y-4 py-4">
-              {/* Resumo */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center p-3 bg-muted rounded-lg">
-                  <p className="text-2xl font-bold text-blue-600">{organizeResults.analyzed}</p>
-                  <p className="text-xs text-muted-foreground">Analisados</p>
-                </div>
-                <div className="text-center p-3 bg-teal-50 dark:bg-teal-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-teal-600">{organizeResults.organized}</p>
-                  <p className="text-xs text-teal-600">Organizados</p>
-                </div>
-              </div>
-
-              {/* Categorias encontradas */}
-              {organizeResults.categories?.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Categorias identificadas:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {organizeResults.categories.map((cat, idx) => (
-                      <Badge key={idx} variant="outline" className="text-xs">
-                        {cat}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Detalhes */}
-              {organizeResults.details?.length > 0 && (
-                <div className="border rounded-lg max-h-40 overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted sticky top-0">
-                      <tr>
-                        <th className="text-left p-2">Ficheiro</th>
-                        <th className="text-left p-2">Pasta</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {organizeResults.details.slice(0, 10).map((item, idx) => (
-                        <tr key={idx}>
-                          <td className="p-2 truncate max-w-[150px]">{item.filename || item.file_name}</td>
-                          <td className="p-2">{item.target_folder || item.category}</td>
-                        </tr>
-                      ))}
-                      {organizeResults.details.length > 10 && (
-                        <tr>
-                          <td colSpan={2} className="p-2 text-center text-muted-foreground">
-                            +{organizeResults.details.length - 10} mais...
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button onClick={() => setOrganizeResults(null)} className="bg-teal-600 hover:bg-teal-700">
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <OrganizeResultsDialog
+        results={organizeResults}
+        onClose={handleCloseOrganizeResults}
+      />
 
       {/* Diálogo de conflitos de upload (ficheiros duplicados) */}
       <UploadConflictDialog
