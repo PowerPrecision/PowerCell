@@ -2452,3 +2452,56 @@ Corrigido para `from config import CORS_ORIGINS`; o fallback mantém-se para arr
 Escape explícito: `ALLOW_SEED_IN_PRODUCTION=true` (prossegue com aviso). Ambiente sem variáveis (CI) **não** é bloqueado — falha aberta só neste caso, por ser o do CI, e fechada em tudo o resto.
 
 Ligado como primeira instrução do `__main__` dos 8 scripts que inserem mock data (`seed_completo`, `seed_fill_mock_data`, `seed_massive_dev_data`, `seed_notes`, `seed_performance_data`, `seed_qa_ultimate`, `seed_realistic_data`, `seed_test_clients`). `tests/unit/test_scripts_env_guard.py` verifica por AST que a chamada existe **e** corre antes de qualquer outra chamada do bloco — depois do `main()` já não serviria de nada.
+
+## Envio de email fora do ciclo pedido/resposta (Set 2026)
+
+### O incidente
+
+O job "Backend CI — Full" falhou em três testes do registo público com
+`RuntimeError: No response returned.` ao fim de **exactamente 30000ms**. A re-execução
+do mesmo commit, sem alterar uma linha, passou — o sinal de que a causa era externa.
+
+Cadeia real: `POST /public/client-registration` → `run_public_client_registration` →
+`await send_email(...)` → `smtplib.SMTP_SSL(host, port, timeout=30)`. O host vinha do
+default **hardcoded** de `get_email_accounts` (`webmail2.hcpro.pt`), porque o CI define
+`POWER_EMAIL` mas nunca definiu `POWER_SMTP_SERVER`. Quando esse servidor real não
+respondia, o pedido ficava pendurado os 30s do timeout do SMTP — e o cliente HTTP dos
+testes desiste exactamente aos 30s.
+
+### As duas falhas de desenho, ambas corrigidas
+
+1. **Transporte síncrono dentro do event loop.** `send_email` chamava `smtplib` (e o
+   `requests` do Resend) directamente de uma corotina. Não era só o pedido em curso a
+   esperar: o event loop do worker **inteiro** ficava parado até 30s, sem servir mais
+   ninguém. Ambos os transportes passam por `asyncio.to_thread`.
+2. **O pedido esperava pelo email.** O registo público fazia **três** envios awaited em
+   série (convite do Portal, email de registo, notificação ao staff) — até 90s de espera
+   num formulário público, para emails que o próprio código já tratava como não-fatais
+   (dois estavam dentro de `try/except` que só regista aviso; o terceiro nem isso, pelo
+   que um servidor de email em baixo dava 500 num registo já gravado). Passam todos por
+   `spawn_background_task` (`services/background_tasks.py`, referência forte).
+
+`SMTP_CONNECT_TIMEOUT` passa a ser configurável (default 30, valor inválido cai no
+default — nunca desligar o timeout). Em CI vale 5.
+
+### Regra
+
+Um envio de email **nunca** decide se um pedido HTTP responde. Quando o utilizador não
+precisa do resultado do envio, o envio vai para background. Quando precisa (ex.: o botão
+"Enviar Email de Teste", o `send-documentation`), o envio é awaited de propósito — e
+continua fora do event loop, pela thread.
+
+### Ambiente
+
+Em dev/CI o envio é simulado: o host SMTP tem de ser tão falso como as credenciais. O
+workflow define `POWER_SMTP_SERVER`/`PRECISION_SMTP_SERVER` como `127.0.0.1`, para que
+nenhum teste marque um servidor de email real — a origem da intermitência.
+
+### Cobertura
+
+- `tests/unit/test_email_nao_bloqueia_event_loop.py` (8): outra corotina continua a
+  avançar durante um envio lento; dois envios não somam os tempos; timeout configurável.
+- `tests/integration/test_public_registration_smtp_pendurado.py` (2): servidor SMTP que
+  aceita a ligação e nunca responde; o registo tem de responder em menos de 3s. A margem
+  entre o limite (3s) e o tempo pendurado (8s) é deliberada — com um limite frouxo o
+  teste passava nas duas versões e não provava nada (verificado por mutação).

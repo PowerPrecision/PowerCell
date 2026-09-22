@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] — O envio de email deixa de poder pendurar um pedido
+
+### Corrigido
+- **O formulário público esperava pelo servidor de email.** `POST /public/client-registration` fazia três envios em série dentro do pedido (convite do Portal, email de registo, notificação ao staff). Com um servidor de email lento, quem submetia o formulário esperava até 90 segundos — por emails que o código já tratava como não-fatais. Os três passam a correr em background; o registo responde de imediato. Um deles nem sequer tinha tratamento de erro, pelo que um servidor de email em baixo devolvia 500 num registo que já tinha sido gravado.
+- **Um envio de email congelava o servidor todo.** O transporte (`smtplib` no SMTP, `requests` no Resend) corria dentro do event loop: enquanto esperava pelo servidor de email, nenhum outro pedido era servido — até 30 segundos. Passa a correr fora do loop.
+- **O CI marcava um servidor de email real.** O workflow definia credenciais falsas mas não o endereço do servidor, pelo que a suite tentava ligar-se ao servidor de produção do webmail. Quando esse servidor não respondia, três testes do registo público falhavam — o mesmo commit falhava ou passava conforme o dia. O endereço passa a ser local, como as credenciais.
+
+### Adicionado
+- `SMTP_CONNECT_TIMEOUT` configurável por ambiente (30s por omissão; 5s no CI). Um valor inválido cai no default — o timeout nunca fica desligado.
+
+### Notas
+- Os campos `magic_link_sent` e `email_queued` da resposta do registo passam a significar **agendado** em vez de **enviado**; o resultado real do envio vai para os logs. Nenhum consumidor os lê.
+- O envio continua a ser esperado onde o utilizador precisa da resposta: o botão "Enviar Email de Teste" e o envio de documentação.
+
 ## [2026-09-21] — Isolamento dev/prod: a dev deixa de poder falar com produção por omissão
 
 ### Corrigido

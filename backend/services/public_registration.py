@@ -20,6 +20,7 @@ from models.auth import UserRole
 from models.process import PublicClientRegistration
 from services.email import send_new_client_notification
 from services.alerts import notify_new_client_registration
+from services.background_tasks import spawn_background_task
 from services.encryption import (
     encrypt_client_data,
     decrypt_client_data,
@@ -403,21 +404,41 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
             f"Este link é válido por 90 dias.\n\n"
             f"Power Precision · Crédito Habitação"
         )
-        await send_email(
-            account_name="power",
-            to_emails=[clean_email],
-            subject=f"Bem-vindo ao seu Portal do Cliente — {clean_name}",
-            body=text_body,
-            body_html=html_body,
-            process_id=None,
-            force_system=True,
-            system_purpose="NOTIFICATIONS",
+        # BUGFIX (Set 2026): o envio era AWAITED aqui dentro. Um servidor de
+        # email lento punha um formulário PÚBLICO a responder ao fim de 30s
+        # (o timeout do SMTP) — e, como o envio nunca condicionou a resposta
+        # (o `except` abaixo só regista um aviso), o utilizador esperava por
+        # algo que nem sequer podia falhar-lhe o registo. Passa a background,
+        # com referência forte, como já se fazia em `process_create`.
+        async def _enviar_convite_do_portal():
+            try:
+                await send_email(
+                    account_name="power",
+                    to_emails=[clean_email],
+                    subject=f"Bem-vindo ao seu Portal do Cliente — {clean_name}",
+                    body=text_body,
+                    body_html=html_body,
+                    process_id=None,
+                    force_system=True,
+                    system_purpose="NOTIFICATIONS",
+                )
+                logger.info(
+                    f"[PUBLIC FORM] Email de convite do Portal enviado para {clean_email} "
+                    f"(cliente {client_id}, short_id {short_id}, sem processo ainda)"
+                )
+            except Exception as envio_err:
+                logger.warning(
+                    f"[PUBLIC FORM] Falha no envio do convite do Portal para "
+                    f"{clean_email} (cliente {client_id}): {envio_err}"
+                )
+
+        spawn_background_task(
+            _enviar_convite_do_portal(),
+            name=f"portal-invite-email:{client_id}",
         )
+        # Semântica: o convite foi AGENDADO (o resultado do envio vai para os
+        # logs). Nenhum consumidor depende deste campo; mantido por retrocompat.
         magic_link_sent = True
-        logger.info(
-            f"[PUBLIC FORM] Email de convite do Portal enviado para {clean_email} "
-            f"(cliente {client_id}, short_id {short_id}, sem processo ainda)"
-        )
     except Exception as e:
         logger.warning(
             f"[PUBLIC FORM] Falha ao preparar portal/email de convite "
@@ -452,13 +473,38 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
     # o worker ARQ nunca arranca nem tem a task registada). Com Redis UP, o
     # job_id devolvido fazia o envio directo nunca executar. Ordem canónica:
     # envio DIRECTO primeiro; fila ARQ apenas como retry de falha real.
+    # BUGFIX (Set 2026): terceiro envio que era awaited dentro do pedido — e o
+    # único sem `try/except`, pelo que um servidor de email em baixo podia
+    # devolver 500 num registo JÁ gravado. Vai também para background; a
+    # idempotência (`portal_email_delivery.status`) continua do lado do
+    # `deliver_registration_email`.
     from services.client_portal_email import deliver_registration_email
-    email_sent = await deliver_registration_email(
-        client_email=clean_email,
-        client_name=clean_name,
-        portal_access_code=portal_access_code,
-        client_id=client_id,
+
+    async def _enviar_email_de_registo():
+        try:
+            enviado = await deliver_registration_email(
+                client_email=clean_email,
+                client_name=clean_name,
+                portal_access_code=portal_access_code,
+                client_id=client_id,
+            )
+            logger.info(
+                f"[PUBLIC FORM] Email de registo para {clean_email} "
+                f"(cliente {client_id}): enviado={bool(enviado)}"
+            )
+        except Exception as registo_err:
+            logger.warning(
+                f"[PUBLIC FORM] Falha no email de registo para {clean_email} "
+                f"(cliente {client_id}): {registo_err}"
+            )
+
+    spawn_background_task(
+        _enviar_email_de_registo(),
+        name=f"portal-welcome-email:{client_id}",
     )
+    # Semântica: AGENDADO (o resultado real vai para os logs). Nenhum
+    # consumidor lê este campo; mantido por retrocompatibilidade.
+    email_sent = True
     
     # Criar alertas no sistema de notificações (passar dados do cliente — SEM processo)
     client_notification_data = {
@@ -512,28 +558,38 @@ async def run_public_client_registration(request: Request, data: PublicClientReg
         # PACOTE BH — envio DIRECTO primeiro; fila ARQ (`send_email_task`)
         # apenas como retry quando o envio directo falha (o job ARQ sem
         # consumidor fazia o email do staff perder-se em silêncio).
-        staff_sent = False
-        try:
-            staff_sent = await send_new_client_notification(
-                client_name=clean_name,
-                client_email=clean_email,
-                client_phone=clean_phone or "N/A",
-                process_type=process_type,
-                staff_email=first_admin["email"],
-                staff_name=first_admin["name"]
-            )
-        except Exception as staff_err:
-            logger.warning(f"[PUBLIC FORM] Falha no email directo ao staff: {staff_err}")
-        if not staff_sent:
+        # BUGFIX (Set 2026): também este envio era awaited no pedido. Dois
+        # envios bloqueantes em série dão até 60s de espera a quem submete o
+        # formulário público. O retry pela fila ARQ mantém-se — apenas deixa
+        # de acontecer dentro do ciclo pedido/resposta.
+        async def _notificar_staff():
+            staff_sent = False
             try:
-                from services.task_queue import task_queue
-                await task_queue.send_email(
-                    to=first_admin["email"],
-                    subject=f"Novo Cliente Registado: {clean_name}",
-                    body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\nTipo pretendido: {process_type}\n\nO registo aguarda triagem na página de Registos de Clientes."
+                staff_sent = await send_new_client_notification(
+                    client_name=clean_name,
+                    client_email=clean_email,
+                    client_phone=clean_phone or "N/A",
+                    process_type=process_type,
+                    staff_email=first_admin["email"],
+                    staff_name=first_admin["name"]
                 )
-            except Exception as tq_err:
-                logger.warning(f"[PUBLIC FORM] Task Queue indisponível para email ao staff: {tq_err}")
+            except Exception as staff_err:
+                logger.warning(f"[PUBLIC FORM] Falha no email directo ao staff: {staff_err}")
+            if not staff_sent:
+                try:
+                    from services.task_queue import task_queue
+                    await task_queue.send_email(
+                        to=first_admin["email"],
+                        subject=f"Novo Cliente Registado: {clean_name}",
+                        body=f"Foi registado um novo cliente via formulário público:\n\nNome: {clean_name}\nEmail: {clean_email}\nTelefone: {clean_phone or 'N/A'}\nTipo pretendido: {process_type}\n\nO registo aguarda triagem na página de Registos de Clientes."
+                    )
+                except Exception as tq_err:
+                    logger.warning(f"[PUBLIC FORM] Task Queue indisponível para email ao staff: {tq_err}")
+
+        spawn_background_task(
+            _notificar_staff(),
+            name=f"staff-new-client-email:{client_id}",
+        )
     
     is_new_client = existing_client is None
     

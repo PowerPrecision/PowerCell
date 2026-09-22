@@ -1,4 +1,43 @@
 ---
+Task ID: fix-email-bloqueante-no-registo-publico
+Agent: Cloud Agent
+Task: CI vermelho — 3 testes do registo público a falhar aos 30000ms exactos
+
+Date: 2026-09-22
+
+Work Log:
+- PRIMEIRO: apurar de quem era. O job "Backend CI — Full" falhou no meu commit (41ee52d) e o anterior estava verde, por isso tratei-o como meu até prova em contrário. Duas provas independentes de que não era:
+  (a) `git diff 5b4b5ba 41ee52d -- services/email_service.py services/public_registration.py tests/test_public.py` → **vazio**. O meu diff não toca nesta cadeia (mexeu em s3_storage, scripts, frontend, workflow e documentação).
+  (b) Re-execução do MESMO SHA, sem alterar uma linha → **verde** (87s no passo de testes, contra 227s na falha). A diferença era externa.
+- O "exactamente 30000ms" no log do middleware foi o que abriu o caso: é um valor de configuração, não de carga. Dois timeouts de 30s a correr um contra o outro — `smtplib.SMTP_SSL(..., timeout=30)` e o cliente httpx dos testes (`timeout=30.0` no conftest). Quem ganha decide se o teste passa.
+- Cadeia: `/public/client-registration` → `run_public_client_registration` → `await send_email(...)` → `smtplib.SMTP_SSL(webmail2.hcpro.pt, 465)`. O host vem do default HARDCODED de `get_email_accounts`: o CI define `POWER_EMAIL` mas nunca definiu `POWER_SMTP_SERVER`, por isso a suite marcava o servidor de webmail REAL. Servidor a responder → teste passa; servidor em silêncio → 30s → vermelho.
+- REPRODUÇÃO LOCAL (o que tornou isto verificável): instalei um `mongod` avulso (tarball 7.0.14) — a suite completa nunca tinha corrido nesta sessão — e escrevi um "buraco negro" SMTP (aceita a ligação TCP e nunca responde). Com os dois ficheiros na versão ORIGINAL: **1 failed**, com a assinatura idêntica à do CI. Prova de que a falha vive no código anterior ao meu commit, e não no CI.
+- EXPERIÊNCIA que corrigiu o meu primeiro plano: ia pôr só o envio em background. Montei um ASGI mínimo a medir as três variantes e o resultado foi: inline 2.00s, **background 2.00s**, background+thread 0.01s. `asyncio.create_task` não torna código síncrono não-bloqueante — a task corre no mesmo loop e congela-o na mesma. Sem esta medição tinha "corrigido" o bug sem o corrigir.
+- CORRECÇÃO em duas peças, que só juntas resolvem:
+  1. `email_service.send_email`: os dois transportes (`smtplib` e o `requests` do Resend) passam por `asyncio.to_thread`. O bloqueio não era só do pedido em curso — parava o event loop do worker INTEIRO até 30s.
+  2. `public_registration`: os envios saem do ciclo pedido/resposta por `spawn_background_task` (o helper com referência forte que já existia em `process_create`).
+- Eram **três** envios awaited em série, não um: convite do Portal, email de registo e notificação ao staff — até 90s de espera num formulário público. Só encontrei o terceiro (`deliver_registration_email`) porque, depois de corrigir os dois primeiros, o teste novo continuou a marcar 8.2s em vez de passar. Era também o único sem `try/except`: um servidor de email em baixo devolvia 500 num registo JÁ gravado.
+- `SMTP_CONNECT_TIMEOUT` passa a ser configurável (default 30; valor inválido cai no default — nunca desligar o timeout). CI: 5.
+- CI: `POWER_SMTP_SERVER`/`PRECISION_SMTP_SERVER=127.0.0.1`. O host tem de ser tão falso como as credenciais — era esta a origem da intermitência.
+- Testes novos: `tests/unit/test_email_nao_bloqueia_event_loop.py` (8 — o loop continua a avançar durante um envio lento, dois envios não somam os tempos, timeout configurável) e `tests/integration/test_public_registration_smtp_pendurado.py` (2 — SMTP pendurado, a resposta tem de chegar em menos de 3s).
+- O teste de integração começou SEM dentes: com limite de 5s contra um timeout de 2s, passava nas duas versões. A mutação denunciou-o (2 passed com o bug reposto). Margem apertada para 3s contra 8s → a mutação dá 16.2s e fica vermelha. A lição fica no próprio ficheiro.
+- Mutações finais: repor o `smtplib` dentro do loop → 2 vermelhos; repor os envios dentro do pedido → 1 vermelho (16.2s).
+
+Stage Summary:
+- Um servidor de email lento deixa de poder pendurar um formulário público ou congelar o worker, e a suite deixa de marcar servidores de email reais. A bateria completa do CI passou a ser executável localmente.
+
+Files:
+- backend/services/email_service.py, backend/services/public_registration.py
+- backend/tests/unit/test_email_nao_bloqueia_event_loop.py (novo)
+- backend/tests/integration/test_public_registration_smtp_pendurado.py (novo)
+- .github/workflows/main.yml, ARCHITECTURE.md, AGENTS.md, CHANGELOG.md, worklog.md
+
+Validação:
+- **Bateria COMPLETA do CI, local com Mongo: 1710 passed, 8 skipped em 22s** (o comando exacto do job Full). É a primeira vez nesta sessão que corre — no CI eram 224s, dos quais ~90s eram os SMTP pendurados.
+- Os 3 testes que o CI reprovou: 0.06s a 0.10s cada, com o SMTP deliberadamente pendurado e `--timeout=30`.
+- flake8 gate (`E9,F63,F7,F82`) → 0.
+
+---
 Task ID: auditoria-isolamento-dev-prod-e-testes-frontend
 Agent: Cloud Agent
 Task: Auditoria pós-worklog — isolamento dev/prod e testes de frontend que ninguém corria

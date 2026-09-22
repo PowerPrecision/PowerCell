@@ -370,6 +370,17 @@ jobs:
           POWER_PASSWORD: "test_password"
           GENIUS_EMAIL: "genius@test.com"
           GENIUS_PASSWORD: "test_password"
+          # O host SMTP tem de ser FALSO, como as credenciais.
+          # Sem estas duas variáveis, `get_email_accounts` caía no default
+          # hardcoded (webmail2.hcpro.pt) e a suite marcava um servidor de
+          # email REAL: quando esse servidor não respondia, o pedido ficava
+          # 30s pendurado e os testes do registo público falhavam de forma
+          # intermitente. Em dev/CI o envio é simulado — ver AGENTS.md.
+          POWER_SMTP_SERVER: "127.0.0.1"
+          POWER_SMTP_PORT: "9"
+          PRECISION_SMTP_SERVER: "127.0.0.1"
+          PRECISION_SMTP_PORT: "9"
+          SMTP_CONNECT_TIMEOUT: "5"
           AWS_ACCESS_KEY_ID: "AKIAIOSFODNN1EXAMPLE"
           AWS_SECRET_ACCESS_KEY: "wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY"
           AWS_REGION: "eu-west-1"
