@@ -45,6 +45,8 @@ import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import AIResultsDialog from "./storage/dialogs/AIResultsDialog";
+import UploadConflictDialog from "./storage/dialogs/UploadConflictDialog";
 import { ScrollArea } from "./ui/scroll-area";
 import { Progress } from "./ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -1286,6 +1288,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     if (!file) return;
     setReviewModal({ open: true, doc: file });
   };
+
+  // Fechar o diálogo de resultados. Reabrir sem resultados limpava-os; o
+  // comportamento anterior preservava-os enquanto o diálogo estivesse
+  // aberto, e é isso que se mantém.
+  const handleAIDialogOpenChange = useCallback((aberto) => {
+    setAiDialog((anterior) => ({
+      open: aberto,
+      results: aberto ? anterior.results : null,
+    }));
+  }, []);
 
   // Aplicar sugestões da análise IA
   const handleApplyAISuggestions = async (suggestions) => {
@@ -3367,178 +3379,14 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       </Dialog>
 
       {/* Dialog de Resultados da Análise IA */}
-      <Dialog open={aiDialog.open} onOpenChange={(open) => setAiDialog({ open, results: open ? aiDialog.results : null })}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5 text-purple-600" />
-              Resultados da Análise IA
-            </DialogTitle>
-            <DialogDescription>
-              Dados extraídos dos documentos de {clientName || "cliente"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto py-4 space-y-4">
-            {aiDialog.results?.analysis && (
-              <>
-                {/* Documentos Analisados */}
-                <div className="space-y-2">
-                  <h4 className="font-medium text-sm flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Documentos Processados ({aiDialog.results.analysis.documents_analyzed?.length || 0})
-                  </h4>
-                  <div className="grid gap-2">
-                    {aiDialog.results.analysis.documents_analyzed?.map((doc, idx) => (
-                      <div key={idx} className="p-2 rounded border bg-muted/30">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{doc.file_name}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {doc.tipo_documento || "outro"}
-                          </Badge>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                          Confiança: {Math.round((doc.confianca || 0) * 100)}%
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Campos Vazios (Podem ser Preenchidos) */}
-                {aiDialog.results.analysis.comparison?.empty_fields?.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-sm flex items-center gap-2 text-green-600">
-                      <CheckCircle className="h-4 w-4" />
-                      Campos a Preencher ({aiDialog.results.analysis.comparison.empty_fields.length})
-                    </h4>
-                    <div className="grid gap-2">
-                      {aiDialog.results.analysis.comparison.empty_fields.map((field, idx) => {
-                        // Obter confiança do campo via auto_fill_suggestions
-                        const suggestion = aiDialog.results.analysis.auto_fill_suggestions?.[field.field];
-                        const conf = suggestion?.confidence;
-                        const pct = Math.round((conf || 0) * 100);
-                        const confBadge = conf >= 0.8
-                          ? "bg-green-100 text-green-700"
-                          : conf >= 0.6
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-red-100 text-red-700";
-                        return (
-                          <div key={idx} className={`p-2 rounded border ${conf < 0.8 ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/30' : 'bg-green-50 dark:bg-green-950/30'}`}>
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">{field.field}</span>
-                              <div className="flex gap-1">
-                                <Badge className="bg-green-100 text-green-700">Novo</Badge>
-                                {conf !== undefined && (
-                                  <Badge className={`text-[10px] ${confBadge}`}>
-                                    {pct}%
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                            <p className={`text-sm mt-1 ${conf < 0.8 ? 'text-amber-700 dark:text-amber-300' : 'text-green-700 dark:text-green-300'}`}>
-                              {field.suggested_value}
-                            </p>
-                            {conf < 0.8 && conf !== undefined && (
-                              <p className="text-[10px] text-amber-600 mt-1">⚠️ Baixa confiança — verifique manualmente</p>
-                            )}
-                            <p className="text-xs text-muted-foreground">
-                              Fonte: {field.source}
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Campos com Diferenças */}
-                {aiDialog.results.analysis.comparison?.different?.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-sm flex items-center gap-2 text-amber-600">
-                      <AlertCircle className="h-4 w-4" />
-                      Dados Divergentes ({aiDialog.results.analysis.comparison.different.length})
-                    </h4>
-                    <div className="grid gap-2">
-                      {aiDialog.results.analysis.comparison.different.map((field, idx) => (
-                        <div key={idx} className="p-2 rounded border bg-amber-50 dark:bg-amber-950/30">
-                          <div className="text-sm font-medium">{field.field}</div>
-                          <div className="grid grid-cols-2 gap-2 mt-1">
-                            <div className="text-xs">
-                              <span className="text-muted-foreground">Actual:</span>
-                              <p className="font-medium">{field.current_value}</p>
-                            </div>
-                            <div className="text-xs">
-                              <span className="text-muted-foreground">Documento:</span>
-                              <p className="font-medium text-amber-700">{field.document_value}</p>
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="mt-2 text-xs bg-amber-100 hover:bg-amber-200 border-amber-300"
-                            onClick={() => handleApplyAISuggestions({ [field.field]: field.document_value })}
-                            disabled={applyingChanges}
-                          >
-                            {applyingChanges ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />}
-                            Usar valor do documento
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Campos Coincidentes */}
-                {aiDialog.results.analysis.comparison?.matching?.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-sm flex items-center gap-2 text-muted-foreground">
-                      <CheckCircle className="h-4 w-4" />
-                      Dados Confirmados ({aiDialog.results.analysis.comparison.matching.length})
-                    </h4>
-                    <div className="flex flex-wrap gap-1">
-                      {aiDialog.results.analysis.comparison.matching.map((field, idx) => (
-                        <Badge key={idx} variant="outline" className="text-xs">
-                          {field.field}: {field.value?.toString().substring(0, 20)}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          <DialogFooter className="flex gap-2 pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => setAiDialog({ open: false, results: null })}
-            >
-              Fechar
-            </Button>
-            {aiDialog.results?.analysis?.auto_fill_suggestions && 
-              Object.keys(aiDialog.results.analysis.auto_fill_suggestions).length > 0 && (
-              <Button
-                onClick={() => handleApplyAISuggestions(
-                  Object.fromEntries(
-                    Object.entries(aiDialog.results.analysis.auto_fill_suggestions)
-                      .map(([k, v]) => [k, v.value])
-                  )
-                )}
-                disabled={applyingChanges}
-                className="bg-purple-600 hover:bg-purple-700"
-              >
-                {applyingChanges ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Sparkles className="h-4 w-4 mr-2" />
-                )}
-                Aplicar Sugestões
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AIResultsDialog
+        open={aiDialog.open}
+        results={aiDialog.results}
+        clientName={clientName}
+        applying={applyingChanges}
+        onOpenChange={handleAIDialogOpenChange}
+        onApplySuggestions={handleApplyAISuggestions}
+      />
 
       {/* Diálogo de resultados de renomeação inteligente */}
       <Dialog open={renameDialog.open} onOpenChange={(open) => setRenameDialog({ open, results: open ? renameDialog.results : null })}>
@@ -3910,185 +3758,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       </Dialog>
 
       {/* Diálogo de conflitos de upload (ficheiros duplicados) */}
-      <Dialog open={uploadConflictDialog.open} onOpenChange={(open) => {
-        if (!open) handleCancelUpload();
-      }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="h-5 w-5" />
-              Ficheiro Duplicado Detetado
-            </DialogTitle>
-            <DialogDescription>
-              Já existe um ficheiro com o mesmo nome no destino.
-              Escolha como pretende resolver este conflito.
-            </DialogDescription>
-          </DialogHeader>
-
-          {uploadConflictDialog.conflicts.length > 0 && (
-            <>
-              {/* Indicador de progresso */}
-              {uploadConflictDialog.conflicts.length > 1 && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <span>
-                    Conflito {uploadConflictDialog.currentConflictIndex + 1} de {uploadConflictDialog.conflicts.length}
-                  </span>
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-amber-500 transition-all"
-                      style={{ 
-                        width: `${((uploadConflictDialog.currentConflictIndex + 1) / uploadConflictDialog.conflicts.length) * 100}%` 
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Conflito atual */}
-              {(() => {
-                const conflict = uploadConflictDialog.conflicts[uploadConflictDialog.currentConflictIndex];
-                const resolution = uploadConflictDialog.resolutions?.[uploadConflictDialog.currentConflictIndex];
-                
-                if (!conflict) return null;
-                
-                return (
-                  <div className="space-y-4 py-4">
-                    {/* Info do ficheiro */}
-                    <div className="p-4 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
-                      <div className="flex items-start gap-3">
-                        <FileText className="h-8 w-8 text-amber-600 flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-amber-800 dark:text-amber-200 truncate">
-                            {conflict.original_filename}
-                          </p>
-                          <p className="text-sm text-amber-700 dark:text-amber-300">
-                            Já existe um ficheiro com este nome na categoria "{uploadConflictDialog.category}"
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Opções de resolução */}
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium">Escolha uma ação:</p>
-                      
-                      {/* Opção: Substituir */}
-                      <label className={`
-                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
-                        ${resolution?.action === 'overwrite' 
-                          ? 'border-red-500 bg-red-50 dark:bg-red-950/30' 
-                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-                        }
-                      `}>
-                        <input
-                          type="radio"
-                          name="conflict-action"
-                          checked={resolution?.action === 'overwrite'}
-                          onChange={() => handleConflictResolution('overwrite')}
-                          className="mt-1"
-                        />
-                        <div>
-                          <p className="font-medium text-red-700 dark:text-red-300">
-                            Substituir ficheiro existente
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            O ficheiro atual será eliminado e substituído pelo novo
-                          </p>
-                        </div>
-                      </label>
-
-                      {/* Opção: Renomear */}
-                      <label className={`
-                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
-                        ${resolution?.action === 'rename' 
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' 
-                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-                        }
-                      `}>
-                        <input
-                          type="radio"
-                          name="conflict-action"
-                          checked={resolution?.action === 'rename'}
-                          onChange={() => {
-                            // Selecionar o primeiro nome sugerido automaticamente
-                            const suggested = conflict.suggested_names?.[0]?.filename;
-                            handleConflictResolution('rename', suggested || null);
-                          }}
-                          className="mt-1"
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium text-blue-700 dark:text-blue-300">
-                            Guardar com nome diferente
-                          </p>
-                          <p className="text-sm text-muted-foreground mb-2">
-                            O ficheiro será guardado com um novo nome
-                          </p>
-                          
-                          {/* Seleção de nome */}
-                          {resolution?.action === 'rename' && conflict.suggested_names?.length > 0 && (
-                            <select
-                              value={resolution.customName || ''}
-                              onChange={(e) => handleConflictResolution('rename', e.target.value)}
-                              className="w-full text-sm p-2 border rounded bg-white dark:bg-gray-800"
-                            >
-                              {conflict.suggested_names.map((s, idx) => (
-                                <option key={idx} value={s.filename}>{s.filename}</option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      </label>
-
-                      {/* Opção: Ignorar */}
-                      <label className={`
-                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
-                        ${resolution?.action === 'skip' 
-                          ? 'border-gray-500 bg-gray-50 dark:bg-gray-800' 
-                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-                        }
-                      `}>
-                        <input
-                          type="radio"
-                          name="conflict-action"
-                          checked={resolution?.action === 'skip'}
-                          onChange={() => handleConflictResolution('skip')}
-                          className="mt-1"
-                        />
-                        <div>
-                          <p className="font-medium text-gray-700 dark:text-gray-300">
-                            Ignorar este ficheiro
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            O ficheiro não será enviado e o existente será mantido
-                          </p>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-                );
-              })()}
-            </>
-          )}
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleCancelUpload}
-            >
-              Cancelar Tudo
-            </Button>
-            <Button
-              onClick={handleNextConflict}
-              disabled={!uploadConflictDialog.resolutions?.[uploadConflictDialog.currentConflictIndex]?.action}
-              className="bg-amber-600 hover:bg-amber-700"
-            >
-              {uploadConflictDialog.currentConflictIndex < uploadConflictDialog.conflicts.length - 1 
-                ? 'Próximo' 
-                : 'Continuar Upload'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <UploadConflictDialog
+        open={uploadConflictDialog.open}
+        conflicts={uploadConflictDialog.conflicts}
+        currentIndex={uploadConflictDialog.currentConflictIndex}
+        resolutions={uploadConflictDialog.resolutions}
+        category={uploadConflictDialog.category}
+        onResolve={handleConflictResolution}
+        onNext={handleNextConflict}
+        onCancel={handleCancelUpload}
+      />
 
       {/* Visualizador de Anotações Contextuais */}
       {annotationViewer && (
