@@ -23,17 +23,9 @@ import { Input } from "../components/ui/input";
 import { Badge } from "../components/ui/badge";
 import { Separator } from "../components/ui/separator";
 import { Skeleton } from "../components/ui/skeleton";
-import { Label } from "../components/ui/label";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "../components/ui/resizable";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
 import {
-  Select,
-  SelectGroup,
-  SelectContent,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
 } from "../components/ui/select";
 import {
   Dialog,
@@ -48,7 +40,6 @@ import {
   Send,
   Star,
   FileText,
-  Plus,
   Search,
   RefreshCw,
   Link2,
@@ -58,21 +49,18 @@ import {
   CheckSquare,
   Square,
   Trash2,
-  FolderPlus,
   FolderOpen,
-  Folder,
   FolderInput,
   Pencil,
-  MoreVertical,
 } from "lucide-react";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { format } from "date-fns";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { sanitizeEmailHtml } from "../utils/sanitize";
 import EmailList from "../components/webmail/EmailList";
 import EmailThreadViewer from "../components/webmail/EmailThreadViewer";
 import EmailComposer from "../components/webmail/EmailComposer";
+import FolderNavigation from "../components/webmail/FolderNavigation";
 import {
   formatFullDate,
 } from "../components/webmail/webmailFormatters";
@@ -1524,6 +1512,39 @@ const WebmailPage = () => {
     setComposerOpen(open);
   }, []);
 
+  // ── Intenções da coluna das pastas (Épico 6) ────────────────────────
+  // Cada uma destas era um punhado de `set*` encadeados dentro do onClick
+  // do JSX. Agora o componente diz o QUE aconteceu e a decisão vive aqui.
+  const handleSelectSystemFolder = useCallback((folderId) => {
+    setActiveFolder(folderId);
+    setCurrentPage(1);
+    setSelectedLabel(null);
+    setActiveCustomFolder(null);
+  }, []);
+
+  const handleSelectLabel = useCallback((labelName) => {
+    setSelectedLabel(labelName);
+    setCurrentPage(1);
+    setActiveFolder("inbox");
+  }, []);
+
+  const handleSelectCustomFolder = useCallback((folderId) => {
+    setActiveCustomFolder(folderId);
+    setActiveFolder("inbox");
+    setCurrentPage(1);
+    setSelectedLabel(null);
+  }, []);
+
+  const handleOpenFolderMenu = useCallback((folder, posicao) => {
+    setContextMenuFolder(folder);
+    setContextMenuPosition(posicao);
+  }, []);
+
+  const handleCreateFolderFromNav = useCallback(() => {
+    setContextMenuFolder(null);
+    handleOpenFolderDialog("create");
+  }, [handleOpenFolderDialog]);
+
   const handleComposerFieldChange = useCallback((campo, valor) => {
     setComposerData((d) => ({ ...d, [campo]: valor }));
   }, []);
@@ -1815,237 +1836,30 @@ const WebmailPage = () => {
             className="min-h-0"
             id="webmail-folder-pane"
           >
-          <div
-            className="h-full border-r border-border bg-muted/30 flex flex-col overflow-hidden"
-            data-testid="webmail-folder-pane"
-          >
-            {/* Pacote DR — selector de caixa no topo da coluna 1 */}
-            <div className="p-3 space-y-2 border-b border-border">
-              <Label
-                htmlFor="webmail-mailbox-select"
-                className="text-[11px] uppercase tracking-wide text-muted-foreground"
-              >
-                A ler emails de
-              </Label>
-              <Select
-                value={mailboxValue}
-                onValueChange={handleMailboxChange}
-                disabled={isIndexacao}
-              >
-                <SelectTrigger
-                  id="webmail-mailbox-select"
-                  className="h-9 text-xs"
-                  data-testid="webmail-mailbox-select"
-                >
-                  <SelectValue placeholder="Selecionar caixa" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel className="text-xs text-muted-foreground">Caixas</SelectLabel>
-                    {mailboxOptions.map((option) => (
-                      <SelectItem key={option.value || option.label} value={option.value || "personal:"}>
-                        {option.label}
-                        {option.unread > 0 ? ` (${option.unread})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Nova Mensagem */}
-            <div className="p-3 space-y-2">
-              <Button
-                className="w-full gap-2"
-                onClick={() => openComposer("new")}
-              >
-                <Plus className="h-4 w-4" />
-                Nova Mensagem
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                onClick={handleSyncEmails}
-                disabled={syncing}
-              >
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "A sincronizar..." : "Sincronizar"}
-              </Button>
-            </div>
-
-            <Separator />
-
-            <div className="flex-1 min-h-0 overflow-y-auto">
-            {/* Folders */}
-            <nav className="p-2 space-y-0.5">
-              {FOLDERS.map((folder) => {
-                const Icon = folder.icon;
-                const isActive = activeFolder === folder.id && !selectedLabel && !activeCustomFolder;
-                const folderLabel = folder.label;
-                return (
-                  <button
-                    key={folder.id}
-                    onClick={() => {
-                      setActiveFolder(folder.id);
-                      setCurrentPage(1);
-                      setSelectedLabel(null);
-                      setActiveCustomFolder(null);
-                    }}
-                    className={`
-                      w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm
-                      transition-colors text-left
-                      ${
-                        isActive
-                          ? "bg-accent text-accent-foreground font-medium"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                      }
-                    `}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 truncate">{folderLabel}</span>
-                    {folderCounts[folder.id] > 0 && (
-                      <Badge
-                        variant={folder.id === "inbox" ? "default" : "secondary"}
-                        className={`h-5 min-w-[20px] flex items-center justify-center text-[10px] px-1.5 ${
-                          folder.id === "inbox" ? "bg-primary text-primary-foreground" : ""
-                        }`}
-                      >
-                        {folder.id === "inbox" ? unreadCount || folderCounts[folder.id] : folderCounts[folder.id]}
-                      </Badge>
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-
-            {/* Marcadores (Labels) */}
-            {labels.length > 0 && (
-              <>
-                <Separator />
-                <div className="px-2 pt-2 pb-1">
-                  <div className="flex items-center gap-2 px-3 py-1.5">
-                    <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Marcadores
-                    </span>
-                  </div>
-                  <div className="space-y-0.5">
-                    {labels.map((label) => {
-                      const isLabelActive = selectedLabel === label.name;
-                      return (
-                        <button
-                          key={label.id}
-                          onClick={() => {
-                            setSelectedLabel(isLabelActive ? null : label.name);
-                            setCurrentPage(1);
-                            setActiveFolder("inbox");
-                          }}
-                          className={`
-                            w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm
-                            transition-colors text-left
-                            ${
-                              isLabelActive
-                                ? "bg-accent text-accent-foreground font-medium"
-                                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                            }
-                          `}
-                        >
-                          <span
-                            className="w-3 h-3 rounded-full shrink-0 border border-black/10"
-                            style={{ backgroundColor: label.color || "#6b7280" }}
-                          />
-                          <span className="flex-1 truncate">{label.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Pastas Personalizadas */}
-            <div className="px-2 pt-1 pb-1">
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <div className="flex items-center gap-2">
-                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Pastas
-                  </span>
-                </div>
-                <button
-                  onClick={() => { setContextMenuFolder(null); handleOpenFolderDialog("create"); }}
-                  className="p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
-                  title="Nova pasta"
-                >
-                  <FolderPlus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <div className="space-y-0.5">
-                {customFolders.map((folder) => {
-                  const isFolderActive = activeCustomFolder === folder.id;
-                  return (
-                    <div key={folder.id} className="relative group">
-                      <button
-                        onClick={() => {
-                          setActiveCustomFolder(isFolderActive ? null : folder.id);
-                          setActiveFolder("inbox");
-                          setCurrentPage(1);
-                          setSelectedLabel(null);
-                        }}
-                        className={`
-                          w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm
-                          transition-colors text-left
-                          ${
-                            isFolderActive
-                              ? "bg-accent text-accent-foreground font-medium"
-                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                          }
-                        `}
-                      >
-                        <FolderOpen className={`h-4 w-4 shrink-0 ${isFolderActive ? "text-foreground" : ""}`}
-                          style={isFolderActive ? { color: folder.color } : {}}
-                        />
-                        <span className="flex-1 truncate">{folder.name}</span>
-                        {folder.email_count > 0 && (
-                          <Badge
-                            variant="secondary"
-                            className="h-5 min-w-[20px] flex items-center justify-center text-[10px] px-1.5"
-                          >
-                            {folder.email_count}
-                          </Badge>
-                        )}
-                        {/* Context menu trigger - only visible on hover */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setContextMenuFolder(folder);
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setContextMenuPosition({ x: rect.left, y: rect.bottom });
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent/70 transition-opacity"
-                        >
-                          <MoreVertical className="h-3 w-3" />
-                        </button>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            </div>
-
-            {/* Footer info */}
-            <div className="mt-auto p-3 border-t space-y-1">
-              <p className="text-[10px] text-muted-foreground">
-                {totalEmails} email{totalEmails !== 1 ? "s" : ""}
-              </p>
-              {lastSyncTime && (
-                <p className="text-[10px] text-muted-foreground">
-                  Última sinc: {format(lastSyncTime, "HH:mm:ss")}
-                </p>
-              )}
-            </div>
-          </div>
+            <FolderNavigation
+              folders={FOLDERS}
+              customFolders={customFolders}
+              labels={labels}
+              mailboxOptions={mailboxOptions}
+              activeFolder={activeFolder}
+              activeCustomFolder={activeCustomFolder}
+              selectedLabel={selectedLabel}
+              mailboxValue={mailboxValue}
+              mailboxLocked={isIndexacao}
+              unreadCount={unreadCount}
+              folderCounts={folderCountsData}
+              totalEmails={totalEmails}
+              lastSyncTime={lastSyncTime}
+              syncing={syncing}
+              onSelectFolder={handleSelectSystemFolder}
+              onSelectLabel={handleSelectLabel}
+              onSelectCustomFolder={handleSelectCustomFolder}
+              onOpenFolderMenu={handleOpenFolderMenu}
+              onCreateFolder={handleCreateFolderFromNav}
+              onCompose={() => openComposer("new")}
+              onSync={handleSyncEmails}
+              onMailboxChange={handleMailboxChange}
+            />
           </ResizablePanel>
 
           <ResizableHandle withHandle className="hidden md:flex" />
