@@ -3,6 +3,14 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-22] (8) — Limpeza antes do Staging (2/4): RGPD, portal e ficheiros apagados
+
+### Corrigido
+- **O RGPD do 2.º titular deixa de sair em branco.** O documento para o segundo titular era gerado sem NIF, morada, número e validade do documento — mesmo quando esses dados estavam preenchidos na ficha. Passa a vir completo, com os dados do próprio (nunca os do primeiro titular).
+- **Os documentos pedidos ao cliente aparecem agora no separador Documentos.** Os documentos obrigatórios e opcionais solicitados no registo não eram listados do lado do CRM: o consultor não via o que tinha sido pedido e o cliente via pedidos que a equipa desconhecia.
+- **Um ficheiro apagado no CRM desaparece do Portal do Cliente.** Ficheiros eliminados continuavam visíveis para o cliente e continuavam a contar como entregues — um documento apagado por estar errado deixava o processo avançar à mesma. Se o pedido deixar de estar satisfeito, volta a aparecer ao cliente como pendente.
+- **Eliminar vários ficheiros de uma vez limpa também os registos internos.** Só a eliminação individual o fazia; em massa, os ficheiros apagados continuavam listados com as marcas de análise por IA.
+
 ## [2026-09-22] (7) — Limpeza antes do Staging (1/4): IA, assinaturas e perfis
 
 ### Corrigido

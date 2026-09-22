@@ -21,6 +21,7 @@ from services.document_process_resolve import (
 from services.process_status import INACTIVE_STATUSES
 from services.history import log_history
 from services.s3_storage import s3_service
+from services.document_portal_revoke import revoke_portal_files_on_delete
 
 logger = logging.getLogger(__name__)
 
@@ -164,6 +165,12 @@ async def run_delete_file_s3(
     if doc_metadata:
         await db.document_metadata.delete_one({"s3_path": file_path})
 
+    # O Portal do Cliente guarda o ficheiro noutro sítio (`db.documents`:
+    # status RECEIVED + s3_path + attached_files). Sem isto, o cliente
+    # continuava a ver um documento que já não existe — e um pedido
+    # apagado por estar ERRADO continuava a contar como satisfeito.
+    await revoke_portal_files_on_delete(process.get("id"), [file_path])
+
     await log_history(
         process_id=client_id,
         user=user,
@@ -199,6 +206,7 @@ async def run_bulk_delete_files(
 
     deleted_count = 0
     failed_files: list[str] = []
+    deleted_paths: list[str] = []
 
     for file_path in file_paths:
         if file_path.endswith("/"):
@@ -209,11 +217,26 @@ async def run_bulk_delete_files(
         try:
             if s3_service.delete_file(file_path):
                 deleted_count += 1
+                deleted_paths.append(file_path)
             else:
                 failed_files.append(file_path)
         except Exception as e:
             logger.warning(f"Erro ao eliminar ficheiro {file_path}: {e}")
             failed_files.append(file_path)
+
+    if deleted_paths:
+        # A eliminação individual já limpava o `document_metadata`; esta não
+        # limpava, pelo que os ficheiros apagados em massa continuavam
+        # listados com os seus badges e análises de IA. É o mesmo fantasma,
+        # do lado do CRM.
+        try:
+            await db.document_metadata.delete_many(
+                {"s3_path": {"$in": deleted_paths}}
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao limpar metadados em massa: {e}")
+
+        await revoke_portal_files_on_delete(process.get("id"), deleted_paths)
 
     if deleted_count > 0:
         await log_history(

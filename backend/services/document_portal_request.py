@@ -317,23 +317,94 @@ def serialize_portal_document(doc: dict) -> dict:
     }
 
 
+# Origens de um pedido do Portal. É uma ALLOW-LIST e por isso cresce com o
+# produto: quando o registo público passou a gerar a checklist obrigatória
+# (`mandatory_checklist` / `_optional`), esta lista não acompanhou e os
+# pedidos deixaram de aparecer na aba Documentos do CRM — o consultor não
+# via o que tinha sido pedido ao cliente, e o cliente via pedidos que o
+# consultor não sabia que existiam. Uma origem nova TEM de entrar aqui.
+PORTAL_REQUEST_SOURCES = (
+    "client_portal",
+    "admin_request",
+    "auto_default",
+    "mandatory_checklist",
+    "mandatory_checklist_optional",
+)
+
+
+def clientes_do_processo(process: Optional[dict]) -> list[str]:
+    """Todos os clientes ligados a um processo, sem repetições.
+
+    Os dois titulares e quaisquer clientes associados: é por estes ids que
+    vivem os pedidos criados no registo público, antes de existir processo.
+    """
+    if not process:
+        return []
+    ids: list[str] = []
+    for valor in (
+        process.get("client_id"),
+        process.get("second_client_id"),
+        *(process.get("client_ids") or []),
+    ):
+        if valor and valor not in ids:
+            ids.append(valor)
+    return ids
+
+
+def build_portal_requests_query(
+    process_id: str,
+    client_ids: Optional[list[str]] = None,
+) -> dict:
+    """Consulta dos pedidos do Portal a mostrar no CRM.
+
+    Dois ramos, porque um pedido pode estar ligado ao processo OU ainda só
+    ao cliente: o registo público cria-os por `client_id` antes de existir
+    processo, e só o caminho "checklist completa"
+    (`onboarding_mandatory_config`) os ancora depois. Um processo criado
+    pela Sala de Triagem (`client_assign`) deixa-os órfãos.
+
+    O ramo do cliente exige `process_id` ausente de propósito: sem isso, um
+    pedido do MESMO cliente mas de OUTRO processo entrava nesta lista.
+    """
+    ramos: list[dict] = [{"process_id": process_id}]
+    if client_ids:
+        ramos.append(
+            {
+                "client_id": {"$in": list(client_ids)},
+                "$or": [
+                    {"process_id": None},
+                    {"process_id": ""},
+                    {"process_id": {"$exists": False}},
+                ],
+            }
+        )
+
+    return {
+        "status": {"$in": _PORTAL_LIST_STATUSES},
+        "$or": ramos,
+        "$and": [
+            {
+                "$or": [
+                    {"source": {"$in": list(PORTAL_REQUEST_SOURCES)}},
+                    {"source": {"$exists": False}},
+                ]
+            }
+        ],
+    }
+
+
 async def run_get_portal_document_requests(process_id: str) -> dict:
     """Lista pedidos portal do processo (REQUESTED/PENDING/UPLOADED/RECEIVED)."""
     try:
+        process = await db.processes.find_one(
+            {"id": process_id},
+            {"_id": 0, "client_id": 1, "second_client_id": 1, "client_ids": 1},
+        )
         docs = []
         cursor = db.documents.find(
-            {
-                "process_id": process_id,
-                "status": {"$in": _PORTAL_LIST_STATUSES},
-                "$or": [
-                    {
-                        "source": {
-                            "$in": ["client_portal", "admin_request", "auto_default"]
-                        }
-                    },
-                    {"source": {"$exists": False}},
-                ],
-            },
+            build_portal_requests_query(
+                process_id, clientes_do_processo(process)
+            ),
             {"_id": 0},
         )
         async for doc in cursor:

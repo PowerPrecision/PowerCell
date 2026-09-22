@@ -1,4 +1,29 @@
 ---
+Task ID: limpeza-final-lote-2
+Agent: Cloud Agent
+Task: Missão de Limpeza (2/4) — RGPD do 2.º titular, pedidos do portal invisíveis, ficheiro fantasma
+
+Date: 2026-09-22
+
+Work Log:
+- PONTO 4 (RGPD do 2.º titular em branco). Não era um bug, eram TRÊS, todos da mesma família: tratar "presente mas vazio" como "presente".
+  (1) `_titular_fallback_data` fazia `fallback.setdefault("nif", ...)` sobre o `titular2_data`. O formulário público grava as chaves presentes e VAZIAS (`{"nif": ""}`), e `setdefault` só escreve quando a chave FALTA — portanto o enriquecimento a partir do cliente ligado era um no-op. Os dados estavam na base de dados e nunca chegavam ao documento.
+  (2) Os renderers faziam `consent_data.get("contribuinte", personal_data.get("nif",""))`. Mesmo erro: um `""` submetido no formulário vence o fallback, porque a chave existe.
+  (3) `{{CODIGO_POSTAL}}`, `{{TIPO_DOCUMENTO}}` e `{{NUMERO_DOCUMENTO}}` não tinham fallback NENHUM — e o `documento_id` que o fallback recolhia nunca era usado em lado nenhum.
+- Escrevi 13 casos antes de tocar no código: 7 falharam logo. Pus os helpers canónicos no `rgpd_service` (`_esta_vazio`, `_preencher_se_vazio`, `primeiro_preenchido`, `partes_do_documento`) para que o padrão não volte por outra porta.
+- Um teste meu falhou por assumir demais: assertei que o 1.º titular renderiza "Ana Martins" a partir do processo, e o código nunca tinha usado `process["client_name"]` — nem antes nem depois. Era uma combinação inalcançável em produção (o pedido de RGPD traz sempre o nome). Acrescentei na mesma à cadeia, porque custa nada e fecha um buraco real; mas SÓ para o 1.º titular. Para o 2.º seria o pior defeito possível: o documento legal a identificar a pessoa errada. Há um teste a afirmar isso.
+- PONTO 5 (pedidos do portal invisíveis no CRM). Duas causas independentes, e corrigir só uma não chegava:
+  (a) O registo público cria os pedidos por `client_id`, antes de existir processo. Fui verificar quem os ancora depois: SÓ o `onboarding_mandatory_config`. O `client_assign` e o `process_create` não ancoram nada — um processo criado pela Sala de Triagem deixa-os órfãos para sempre.
+  (b) Mesmo ancorados, a consulta do CRM filtrava por uma allow-list de `source` com três valores, e os da checklist (`mandatory_checklist`, `mandatory_checklist_optional`) não estavam lá.
+- Optei por resolver na LEITURA (`build_portal_requests_query` com dois ramos) em vez de mexer nos caminhos de criação de processo. É contido e fecha o sintoma por inteiro; mexer na criação é risco desproporcionado para o que foi pedido. O ramo do cliente exige `process_id` ausente — sem isso, um pedido do mesmo cliente noutro processo entrava nesta lista, que seria trocar um bug por outro pior.
+- PONTO 6 (ficheiro fantasma). Confirmado por ausência: `document_delete.py` não tinha UMA referência ao portal. Apagava do S3 e do `document_metadata`; `db.documents` — onde o portal guarda `status: RECEIVED`, `s3_path` e `attached_files` — ficava intacto. O cliente via um documento que já não existia, e um pedido apagado por estar ERRADO continuava a contar como satisfeito: o processo avançava com base num ficheiro inexistente.
+- `document_portal_revoke.py` é a operação inversa do `fulfill`. A decisão vive numa função pura (`rebuild_after_removal`) e respeita a mesma regra de contagem do upload: um pedido de 3 recibos com 1 apagado volta a pendente; um pedido de 1 com 2 carregados e 1 apagado continua satisfeito. Nunca bloqueia — quando corre, o ficheiro JÁ saiu do S3, e levantar aqui mostraria um erro sobre uma operação bem sucedida.
+- Encontrei de caminho que a eliminação EM MASSA não limpava o `document_metadata` (só a individual limpava). É o mesmo fantasma do lado do CRM: ficheiros apagados em lote continuavam listados com os badges de IA. Corrigido, e está dito no commit.
+- Pus guardas a afirmar que a revogação é mesmo INVOCADA pelos dois caminhos. Sem elas, o serviço inteiro podia ficar código morto com todos os testes verdes — que é a pior forma de um teste mentir.
+- Testes: 50 novos (27 RGPD + 11 pedidos + 16 revogação). Quatro mutações, quatro apanhadas: repor o `setdefault`, tirar a checklist da allow-list, desligar a revogação do delete, ignorar a contagem ao reabrir.
+- Suites: backend 1986 passed / 8 skipped (era 1932/8); flake8 gate do CI a zero.
+
+---
 Task ID: limpeza-final-lote-1
 Agent: Cloud Agent
 Task: Missão de Limpeza (1/4) — IA que gravava sozinha, assinaturas herdadas, contas no perfil errado
