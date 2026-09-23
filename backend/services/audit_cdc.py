@@ -121,11 +121,18 @@ class CDCListener:
         # Criar índices na coleção de auditoria
         await self._ensure_indexes()
 
+        from services.job_heartbeat import heartbeat
+
         while self._running:
-            for collection_name in WATCHED_COLLECTIONS:
-                if not self._running:
-                    break
-                await self._watch_collection(collection_name)
+            # Monitor de Sinais Vitais (ponto 14). Este laço não tem
+            # cadência fixa — só reinicia quando um change stream cai —,
+            # por isso o batimento aqui diz "o listener está de pé", que é
+            # exactamente a pergunta que o painel faz.
+            async with heartbeat("cdc_audit", interval_seconds=300):
+                for collection_name in WATCHED_COLLECTIONS:
+                    if not self._running:
+                        break
+                    await self._watch_collection(collection_name)
 
             # Se saiu do loop sem _running=False, esperar antes de reiniciar
             if self._running:

@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-23] (12) — Espelho de Automações: ver o motor a trabalhar
+
+### Adicionado
+- **Novo separador "Motor" em Automações.** Mostra, para cada automatismo que corre em segundo plano — sincronização de e-mail, alertas de prazos, cópia de segurança, cruzamento de leads —, se está saudável, quando correu pela última vez, quando volta a correr e quanto demorou. É só leitura: o painel observa, não dispara nada.
+- **Distinção clara entre "desativado" e "avariado".** Vários automatismos estão desligados de propósito fora de produção. O painel diz isso em vez de os mostrar como problemas — um monitor que grita sem motivo deixa de ser lido.
+
+### Corrigido
+- **O menu "Automações" deixa de mostrar só as regras.** As regras são a configuração; o estado real do motor não estava visível em lado nenhum.
+- **A lista de tarefas deixa de poder falhar por causa de uma tarefa automática.** Uma tarefa criada por uma regra de automação podia fazer toda a listagem devolver erro.
+
+### Segurança
+- **O perfil Indexação deixa de deixar rasto em mais três sítios.** A regra de que as ações deste perfil não aparecem no histórico do processo não estava a ser aplicada ao restaurar documentos, ao gravar notas de voz nem quando a pessoa entrava com o perfil de Indexação tendo outro perfil de base. O registo de auditoria para efeitos de conformidade mantém-se intacto, como deve ser.
+- **A página de Automações passa a usar o canal seguro da aplicação.** As chamadas ao servidor não levavam a identificação da empresa e do perfil ativo.
+
 ## [2026-09-23] (11) — Contas com empresa, tarefas sem fantasmas, painel mais leve
 
 ### Adicionado

@@ -1786,10 +1786,13 @@ async def run_email_auto_sync(interval_seconds: Optional[int] = None):
         interval_seconds,
     )
     
+    from services.job_heartbeat import heartbeat
+
     while True:
         try:
-            await service.connect()
-            await service.auto_sync_emails()
+            async with heartbeat("email_auto_sync", interval_seconds=interval_seconds):
+                await service.connect()
+                await service.auto_sync_emails()
         except asyncio.CancelledError:
             logger.info("[Email Auto-Sync] Cancelado, a sair do loop")
             break

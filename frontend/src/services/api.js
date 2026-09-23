@@ -1355,6 +1355,21 @@ export const generateChangelogAI = (data = {}) => api.post("/system/changelog/ge
 export const diagnoseChangelog = () => api.get("/system/changelog/diagnose");
 
 // ===== COMPANIES CRUD (Multi-Tenant — Gestão de Empresas) =====
+// ── Automações (Lote 4, ponto 14) ──────────────────────────────────
+// Pelo cliente Axios, nunca por `fetch`: o interceptor é o único sítio
+// que injecta `X-Company-Id` / `X-Active-Role`, e a página das
+// Automações fazia cinco chamadas cruas — quinta instância do incidente
+// de 2026-09-21.
+export const getAutomationRules = (activeOnly = false) =>
+  api.get("/admin/automation/rules", { params: activeOnly ? { active_only: true } : {} });
+export const createAutomationRule = (data) => api.post("/admin/automation/rules", data);
+export const updateAutomationRule = (id, data) =>
+  api.put(`/admin/automation/rules/${id}`, data);
+export const deleteAutomationRule = (id) => api.delete(`/admin/automation/rules/${id}`);
+// `getWorkflowStatuses` já existe mais acima neste ficheiro — não repetir.
+// Sinais vitais do motor de background (leitura).
+export const getAutomationsEngineStatus = () => api.get("/automations");
+
 export const getCompanies = (search) =>
   api.get("/admin/companies", { params: search ? { search } : {} });
 export const getCompany = (id) => api.get(`/admin/companies/${id}`);

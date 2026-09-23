@@ -176,6 +176,20 @@ async def run_scheduled_tasks():
         logger.error(f"Erro ao executar tarefas agendadas: {e}")
 
 
+async def _bater_webmail_worker_sync():
+    """Regista o batimento da rede de segurança de webmail (ponto 14).
+
+    O bloco de sync deste laço tem ~120 linhas e o seu próprio `try`, por
+    isso o batimento fica num envelope à parte em vez de reindentar tudo.
+    Marca o ciclo como iniciado e terminado — o resultado detalhado de
+    cada caixa continua a ir para o log, como sempre.
+    """
+    from services.job_heartbeat import heartbeat
+
+    async with heartbeat("webmail_worker_sync", interval_seconds=600):
+        pass
+
+
 async def scheduler_loop():
     """
     Loop para tarefas agendadas (Cron jobs).
@@ -200,17 +214,24 @@ async def scheduler_loop():
         try:
             now = time.time()
             
+            # Monitor de Sinais Vitais (ponto 14): `last_runs` vive na
+            # memória DESTE processo e a API nunca o vê — o batimento é a
+            # única coisa que atravessa a fronteira entre o worker e a web.
+            from services.job_heartbeat import heartbeat
+
             # Executar tarefas agendadas (a cada 1 hora)
             if now - last_runs["scheduled"] > 3600:
                 logger.info("Executando tarefas agendadas...")
-                await run_scheduled_tasks()
+                async with heartbeat("scheduled_tasks", interval_seconds=3600):
+                    await run_scheduled_tasks()
                 last_runs["scheduled"] = now
 
             # Matching automático de Leads (a cada 30 minutos)
             # Nota: O import pesado só acontece quando a tarefa for processada
             if now - last_runs["matching"] > 1800:
                 logger.info("Agendando matching automático...")
-                await task_queue.add_task("match_leads", {})
+                async with heartbeat("lead_matching", interval_seconds=1800):
+                    await task_queue.add_task("match_leads", {})
                 last_runs["matching"] = now
 
             # Sincronização Webmail — rede de segurança no worker.
@@ -220,6 +241,7 @@ async def scheduler_loop():
             # 🛑 Só em produção (ENVIRONMENT=production)
             if os.environ.get('ENVIRONMENT') == 'production' and now - last_runs["webmail"] > 600:
                 logger.info("Agendando sincronização de webmail por utilizador...")
+                await _bater_webmail_worker_sync()
                 try:
                     from services.email_service import sync_user_emails
                     from services.user_email_config_service import get_active_email_configs_for_sync

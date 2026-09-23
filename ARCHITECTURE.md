@@ -3152,3 +3152,140 @@ corrigida): apagar qualquer tarefa sem dono; iterar o escalar caracter a
 caracter; empresa deixar de ser obrigatória; não desfazer a conta; desenhar
 sempre a moldura; a órfã deixar de se distinguir; o formulário não exigir
 empresa.
+
+---
+
+## Lote 4, ponto 14 — Espelho de Automações: o batimento dos jobs (Set 2026)
+
+### Onde o coração bate
+
+Não há agendador. Não há APScheduler nem Celery: são laços `asyncio` à mão,
+`while True` + `await asyncio.sleep(n)`, repartidos por **dois processos** do
+`render.yaml`.
+
+| Job | Processo | Onde arranca | Cadência | Condição |
+|---|---|---|---|---|
+| `background_job_monitor` | web | `server.py` | 30 min | sempre, **todos** os workers |
+| `email_auto_sync` | web | `server.py` | 60s + jitter | produção + worker **primário** |
+| `backup_diario` | web | `services/backup.py` | 03:00 UTC | produção + primário |
+| `cdc_audit` | web | `services/audit_cdc.py` | contínuo | produção + primário |
+| `scheduled_tasks` (alertas) | worker | `worker.py` | 1 h | produção |
+| `lead_matching` | worker | `worker.py` | 30 min | produção |
+| `webmail_worker_sync` | worker | `worker.py` | 10 min | produção |
+
+**Nota de diagnóstico:** cheguei a suspeitar que os alertas de prazos não
+corriam, por o `server.py` nunca arrancar `run_daemon`. Correm — no **worker**,
+via `scheduler_loop` → `run_all_tasks`, que é onde vivem
+`check_upcoming_deadlines` e companhia. O motor está vivo; o que não existia
+era forma de o saber.
+
+### Porque é que o estado tem de ser persistido
+
+`worker.py` guardava as últimas execuções assim:
+
+```python
+last_runs = {"scheduled": 0, "matching": 0, "webmail": 0}
+```
+
+Um **dicionário local de uma função**. Morre em cada reinício e a API nunca o
+vê. Do lado web é igual: `_background_tasks` é um `set` do processo e, com
+`UVICORN_WORKERS=2`, um pedido servido pelo worker secundário não sabe nada das
+tarefas do primário — e é o primário que tem o lock.
+
+Um endpoint que lesse o estado local responderia **sobre o processo que
+calhou atender o pedido**, e diria "IMAP em baixo" por desenho. **Um monitor
+que mente com ar de autoridade é pior do que não ter monitor.** Uma colecção
+partilhada (`job_heartbeats`) é a única coisa que os dois processos vêem.
+
+### O que isto não é
+
+Não é um histórico. Guarda-se o **último** batimento por job mais
+`run_count`/`failure_count` — responde às quatro perguntas (vivo? falhou?
+quando correu? quando corre?) sem pôr uma colecção a crescer.
+
+### O batimento observa, não intercepta
+
+`heartbeat()` regista a excepção do ciclo e **re-levanta-a**: engoli-la mudaria
+o comportamento do job para o poder monitorizar, que é o oposto de um monitor.
+Já falhar a **gravar** o batimento nunca propaga — mesma regra do
+`publish_event` e da revogação do Portal.
+
+E o envelope embrulha o **trabalho**, não corre ao lado dele. A primeira versão
+tinha um `async with … : pass` antes do corpo do ciclo, o que registava "ok"
+para um ciclo que rebentasse a seguir. `background_job_monitor` foi
+reestruturado (`_tratar_jobs_bloqueados` extraída) para o envelope não ter de
+indentar 50 linhas.
+
+### Desactivado não é em baixo
+
+É a distinção mais importante do painel. Em dev quase tudo está desligado **de
+propósito** (kill switches por RAM), e um painel a gritar vermelho em dev ensina
+toda a gente a ignorá-lo — tornando-o inútil no dia em que algo parta mesmo.
+`job_esta_activo` lê os mesmos interruptores que os jobs (`ENVIRONMENT`,
+`EMAIL_SYNC_ENABLED`), e `desactivado` não conta para "com problema".
+
+### O registo declarado
+
+A lista sai de `JOBS_DECLARADOS`, não da colecção. Se saísse da colecção, **o
+job mais avariado de todos — o que nunca arrancou — era o único invisível.**
+Há guarda nos dois sentidos: cada entrada do registo tem de ter um emissor no
+código, e cada emissor tem de estar no registo.
+
+Limiar de atraso: **2× o intervalo declarado**. Um ciclo perdido é ruído; dois
+é sinal.
+
+### A regra de ouro do perfil Indexação
+
+O dono reafirmou-a neste lote e ela tinha três furos:
+
+1. **`_is_stealth_user` olhava só para `user["role"]`** — o papel do JWT. Num
+   sistema multi-perfil, quem entra COMO Indexação tem
+   `effective_role == "indexacao"` e um papel base diferente: deixava rasto
+   apesar de estar a trabalhar como indexador. É o caso **mais provável**,
+   porque é assim que o produto quer que as pessoas troquem de chapéu. A regra
+   acrescenta, não substitui.
+2. **`document_portal_request` tinha uma cópia inline** (`user.get("role") !=
+   "indexacao"`), em três sítios: a conclusão certa pela metade, porque ignora
+   o interruptor `track_history=False`.
+3. **`restore_api_document` não tinha guarda nenhuma** (duas escritas), e
+   `voice_note_engine` também não.
+
+Os escritores em `admin_*` **não** são fuga: são endpoints de administração
+(`require_roles([ADMIN, CEO])`) onde um indexador nunca entra. E
+`temp_link_api_public` grava com `created_by: None` — é o cliente, não um
+utilizador com perfil.
+
+O **`audit_trail_service` fica de fora de propósito**: é um trilho de
+conformidade com IP e política de retenção, e tem de manter rastreabilidade
+mesmo quando o mural do processo é silenciado. Há um teste a afirmá-lo, para
+que ninguém o "corrija".
+
+### Achados laterais tratados
+
+`AutomationPage.js` falava por **cinco `fetch` crus** — quinta instância do
+incidente de 2026-09-21 — todos convertidos para o cliente Axios. O
+`API_URL` e o `token` locais desapareceram com eles.
+
+**Rejeitado pelo dono, e por isso não tocado:** o `last_runs` do `worker.py`
+faz todos os jobs dispararem no reinício. São idempotentes; fica como está.
+
+### Uma armadilha do ferramental
+
+Uma declaração duplicada em `services/api.js` (`getWorkflowStatuses`) fez o
+Vitest cair de **707 para 684 testes passados — sem uma única falha**. Os
+ficheiros que importavam o módulo partido não chegaram a ser recolhidos, e a
+bateria deu verde. **O ESLint apanhou-o; a contagem de testes é que o
+denunciou.** Comparar o total entre execuções não é vaidade: é a única coisa
+que distingue "tudo passa" de "metade nem correu".
+
+### Cobertura
+
+| Ficheiro | Casos |
+|---|---|
+| `tests/unit/test_job_heartbeat.py` | 25 |
+| `tests/unit/test_stealth_indexacao.py` | 16 |
+| `components/automation/__tests__/EngineStatusPanel.test.jsx` | 10 |
+
+Mutação (quatro, quatro mataram): um job desligado passar a avariado; o limiar
+de atraso deixar de disparar; o batimento engolir a excepção do ciclo; a guarda
+voltar a ignorar o perfil activo.

@@ -31,8 +31,20 @@ def _is_stealth_user(user: dict) -> bool:
 
     Regras (PACOTE BJ):
     1. role == "indexacao"  →  sempre silencioso (modo fantasma).
+    1b. effective_role == "indexacao"  →  idem (Lote 4).
     2. track_history == False  →  silencioso (switch global por utilizador).
     3. track_history ausente  →  assume-se True (default não-silencioso).
+
+    REGRA 1b — O PERFIL ACTIVO CONTA (Lote 4, restrição de segurança).
+      Num sistema multi-perfil, quem entra COMO Indexação tem
+      ``effective_role == "indexacao"`` e um ``role`` de JWT diferente
+      (`get_current_user` injecta-o a partir do header `X-Active-Role`).
+      Olhar só para o papel base deixava rasto de quem o produto promete
+      manter invisível — e é precisamente assim, trocando de chapéu, que
+      o produto quer que as pessoas trabalhem.
+
+      A regra ACRESCENTA, não substitui: quem é indexador de base
+      continua silencioso mesmo com outro perfil activo.
 
     Args:
         user: Dicionário do utilizador autenticado (pode ser None).
@@ -42,8 +54,12 @@ def _is_stealth_user(user: dict) -> bool:
     """
     if not user:
         return False
-    # Regra 1: indexacao é sempre silenciosa
-    if user.get("role") == "indexacao":
+    # Regra 1 / 1b: indexacao é sempre silenciosa — de base ou em exercício
+    papeis = {
+        str(user.get("role") or "").strip().lower(),
+        str(user.get("effective_role") or "").strip().lower(),
+    }
+    if "indexacao" in papeis:
         return True
     # Regra 2: switch global track_history (default True quando ausente)
     if user.get("track_history", True) is False:

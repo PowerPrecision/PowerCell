@@ -6,6 +6,10 @@ from pathlib import Path
 def test_automation_api_modules_exist():
     services_dir = Path(__file__).resolve().parents[2] / "services"
     expected = [
+        # Lote 4, ponto 14 — telemetria do motor (GET /api/automations).
+        # É deliberadamente um módulo à parte das REGRAS: aquelas são
+        # configuração de administração, esta é leitura do que corre.
+        "automation_api_engine.py",
         "automation_api_meta.py",
         "automation_api_rules.py",
     ]
@@ -16,7 +20,9 @@ def test_automation_api_modules_exist():
 
 
 def test_automation_api_export_run_entrypoints():
-    from services import automation_api_rules, automation_api_meta
+    from services import automation_api_engine, automation_api_rules, automation_api_meta
+
+    assert callable(automation_api_engine.run_get_automations_status)
 
     assert callable(automation_api_rules.run_get_rules)
     assert callable(automation_api_rules.run_get_rule_by_id)

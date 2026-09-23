@@ -572,9 +572,13 @@ async def start_backup_scheduler():
             logger.info(f"[BACKUP SCHEDULER] Próximo backup em {wait_seconds/3600:.1f}h ({next_run.isoformat()})")
             
             await asyncio.sleep(wait_seconds)
-            
-            # Executar backup
-            await scheduled_backup_job()
+
+            # Executar backup (Monitor de Sinais Vitais, ponto 14 — o
+            # batimento embrulha o trabalho e re-levanta a excepção; o
+            # `except` de baixo continua a tratá-la como sempre).
+            from services.job_heartbeat import heartbeat
+            async with heartbeat("backup_diario", interval_seconds=86400):
+                await scheduled_backup_job()
             
             # Pequena pausa para evitar execução dupla
             await asyncio.sleep(60)

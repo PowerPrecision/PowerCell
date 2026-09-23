@@ -43,6 +43,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from database import db
+from services.history import _is_stealth_user
 
 logger = logging.getLogger(__name__)
 
@@ -129,6 +130,11 @@ async def registar_resumo_na_timeline(
     Returns:
         O id da atividade criada, ou ``None`` se a escrita falhar.
     """
+    # Regra de ouro: o perfil Indexação não deixa rasto. Uma nota de voz
+    # é uma acção de utilizador como outra qualquer.
+    if _is_stealth_user(user):
+        return None
+
     activity_id = str(uuid.uuid4())
     try:
         await db.activities.insert_one(

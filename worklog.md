@@ -1,4 +1,31 @@
 ---
+Task ID: limpeza-final-lote-4-ponto-14
+Agent: Cloud Agent
+Task: Lote 4 (3/3) — Espelho de Automações (batimento dos jobs) + regra de ouro do perfil Indexação
+
+Date: 2026-09-23
+
+Work Log:
+- DIAGNÓSTICO. Não há agendador nenhum: são laços `asyncio` à mão repartidos por DOIS processos do render.yaml. O `worker.py` guarda as últimas execuções num `last_runs = {...}` que é um dicionário LOCAL DE UMA FUNÇÃO — morre no reinício e a API nunca o vê. Do lado web, com UVICORN_WORKERS=2, um pedido servido pelo worker secundário não sabe nada das tarefas do primário (e é o primário que tem o lock).
+- Foi essa a conclusão que evitou o desastre: um endpoint que lesse o estado local responderia sobre o processo que calhasse atender o pedido, e diria "IMAP em baixo" por desenho. Um monitor que mente com ar de autoridade é pior do que não ter monitor. Daí a colecção partilhada.
+- CORRECÇÃO A UMA SUSPEITA MINHA, que não reportei como bug: achei que os alertas de prazos não corriam, porque o `server.py` nunca arranca `run_daemon`. Correm — no worker, via `scheduler_loop` → `run_all_tasks`. Verifiquei antes de abrir a boca.
+- ERRO MEU na primeira instrumentação: pus `async with heartbeat(...): pass` ANTES do corpo do ciclo, em vez de embrulhar o trabalho. Registava "ok" para um ciclo que rebentasse a seguir — um monitor que mente, outra vez, desta vez por minha causa. Reestruturei (extraí `_tratar_jobs_bloqueados`) para o envelope não ter de indentar 50 linhas.
+- O batimento observa, não intercepta: re-levanta a excepção do ciclo. Engoli-la mudava o comportamento do job para o poder monitorizar, que é o oposto de monitorizar. Falhar a GRAVAR o batimento, esse sim, nunca propaga.
+- A lista sai do REGISTO DECLARADO, não da colecção: se saísse da colecção, o job mais avariado de todos — o que nunca arrancou — era o único invisível. Guarda nos dois sentidos, registo↔emissor.
+- REGRA DE OURO DO PERFIL INDEXAÇÃO. O dono pediu que garantisse o filtro; encontrei três furos. O principal: `_is_stealth_user` olhava só para `user["role"]` (papel do JWT) e não para o `effective_role`. Num sistema multi-perfil é o caso MAIS provável, porque é assim que o produto quer que as pessoas troquem de chapéu. Além disso, `document_portal_request` tinha uma cópia inline da regra em TRÊS sítios (incompleta: ignorava `track_history=False`) e `restore_api_document` + `voice_note_engine` não tinham guarda nenhuma.
+- O que NÃO é fuga, e disse-o em vez de "corrigir": os escritores em `admin_*` são endpoints de administração onde um indexador nunca entra; o `temp_link_api_public` grava com `created_by: None` (é o cliente). E o `audit_trail_service` fica de fora DE PROPÓSITO — é conformidade, com IP e retenção. Pus um teste a afirmá-lo para ninguém o "corrigir" por engano.
+- Acrescentei `$inc` à `FakeAsyncCollection` (contadores acumulados do batimento). É uma extensão fiel do Mongo real, não um atalho para este teste.
+- Os cinco `fetch` crus da `AutomationPage` convertidos para Axios (quinta instância do incidente de 2026-09-21). O `API_URL` e o `token` locais foram com eles.
+- DOIS ERROS MEUS apanhados pelas ferramentas:
+  (1) O teste de arquitectura `test_automation_api_modules_exist` afirma a lista EXACTA dos módulos `automation_api_*`. Acrescentei um sem o declarar. Corrigi o mapa, não o teste — é para isso que ele serve.
+  (2) Dupliquei `getWorkflowStatuses` no `api.js`. E aqui está a parte que interessa: o Vitest passou de 707 para 684 testes PASSADOS, sem uma única falha — os ficheiros que importavam o módulo partido nem chegaram a ser recolhidos. O ESLint apanhou; a contagem de testes é que denunciou. Comparar o total entre execuções não é vaidade.
+- REJEITADO pelo dono e não tocado: o `last_runs` faz os jobs dispararem todos no reinício do worker. São idempotentes.
+- Testes: 41 novos no backend, 10 no frontend. Quatro mutações, quatro mortes.
+- Suites: backend 2126 passed / 8 skipped (era 2085/8); frontend 707 (era 697); eslint --quiet limpo.
+
+---
+
+---
 Task ID: limpeza-final-lote-4-pontos-11-13
 Agent: Cloud Agent
 Task: Lote 4 (2/2) — Atribuição Rápida, Atribuição Fantasma e UI compacta das Tarefas

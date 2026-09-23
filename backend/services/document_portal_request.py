@@ -13,6 +13,7 @@ from typing import Any, Optional
 from fastapi import HTTPException
 
 from database import db
+from services.history import _is_stealth_user
 from services.document_constants import DOCUMENT_CATEGORY_MAP
 
 logger = logging.getLogger(__name__)
@@ -232,7 +233,7 @@ async def run_create_portal_document_request(
     doc.pop("_id", None)
 
     try:
-        if user and user.get("role") != "indexacao":
+        if user and not _is_stealth_user(user):
             await db.history.insert_one(
                 {
                     "id": str(uuid.uuid4()),
@@ -463,7 +464,7 @@ async def run_update_portal_document_request(
     )
 
     try:
-        if user and user.get("role") != "indexacao":
+        if user and not _is_stealth_user(user):
             await db.history.insert_one(
                 {
                     "id": str(uuid.uuid4()),
@@ -507,7 +508,7 @@ async def run_delete_portal_document_request(
     await db.documents.delete_one({"id": document_id, "process_id": process_id})
 
     now = datetime.now(timezone.utc).isoformat()
-    if user and user.get("role") != "indexacao":
+    if user and not _is_stealth_user(user):
         await db.history.insert_one(
             {
                 "id": str(uuid.uuid4()),

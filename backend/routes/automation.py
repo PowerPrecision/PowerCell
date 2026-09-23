@@ -18,12 +18,30 @@ from services.automation_api_rules import (
     run_update_rule,
     run_delete_rule,
 )
+from services.automation_api_engine import run_get_automations_status
 from services.automation_api_meta import (
     run_list_triggers,
     run_list_actions,
 )
 
 router = APIRouter(prefix="/admin/automation", tags=["Automation"])
+
+# Monitor de Sinais Vitais (Lote 4, ponto 14). Router SEPARADO porque o
+# prefixo é outro: as regras são configuração de administração, o estado
+# do motor é telemetria de leitura para quem gere a operação.
+engine_router = APIRouter(prefix="/automations", tags=["Automation"])
+
+
+@engine_router.get("")
+async def get_automations_status(
+    user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]))
+):
+    """Sinais vitais dos jobs de background (leitura).
+
+    Não expõe acções: o motor corre em dois processos distintos e um
+    disparo a partir da web nunca chegaria ao worker.
+    """
+    return await run_get_automations_status()
 
 
 @router.get("/rules")

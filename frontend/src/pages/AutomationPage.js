@@ -15,6 +15,7 @@
  */
 import { useState, useEffect, useCallback } from "react";
 import DashboardLayout from "../layouts/DashboardLayout";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "../components/ui/tabs";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -25,13 +26,19 @@ import { Switch } from "../components/ui/switch";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogDescription, DialogFooter } from "../components/ui/dialog";
 import { toast } from "sonner";
-import { useAuth } from "../contexts/AuthContext";
+import {
+  getAutomationRules,
+  createAutomationRule,
+  updateAutomationRule,
+  deleteAutomationRule,
+  getWorkflowStatuses,
+} from "../services/api";
+import EngineStatusPanel from "../components/automation/EngineStatusPanel";
 import {
   Zap, Plus, Trash2, Edit2,
   ArrowRight, ChevronRight
 } from "lucide-react";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Labels para os badges da lista de regras (suporta todos os tipos
 // históricos — regras antigas de outros tipos continuam a aparecer).
@@ -67,7 +74,6 @@ const URGENCY_OPTIONS = [
 ];
 
 const AutomationPage = ({ embedded = false }) => {
-  const { token } = useAuth();
   const [rules, setRules] = useState([]);
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
@@ -89,18 +95,16 @@ const AutomationPage = ({ embedded = false }) => {
     is_active: true,
   });
 
-  const headers = { Authorization: `Bearer ${token}`, "Content-Type": "application/json" };
-
+  // Nada de `fetch` cru nesta página: o interceptor do cliente Axios é o
+  // único sítio que injecta `X-Company-Id` / `X-Active-Role`, e sem eles
+  // o backend resolve empresa e perfil errados (incidente 2026-09-21).
   const fetchRules = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/automation/rules`, { headers });
-      if (res.ok) {
-        const data = await res.json();
-        setRules(data.rules || []);
-      }
+      const res = await getAutomationRules();
+      setRules(res.data?.rules || []);
     } catch { /* silent */ }
     setLoading(false);
-  }, [token]);
+  }, []);
 
   // Busca as fases do workflow para o Select do bloco IF.
   // O endpoint /admin/workflow-statuses devolve objetos com
@@ -108,14 +112,11 @@ const AutomationPage = ({ embedded = false }) => {
   // motor compara) e label como texto visível.
   const fetchWorkflowStatuses = useCallback(async () => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/workflow-statuses`, { headers }).catch(() => null);
-      if (res && res.ok) {
-        const data = await res.json();
-        const arr = Array.isArray(data) ? data : (data.statuses || data || []);
-        setWorkflowStatuses(arr);
-      }
+      const res = await getWorkflowStatuses();
+      const data = res.data;
+      setWorkflowStatuses(Array.isArray(data) ? data : (data?.statuses || []));
     } catch { /* silent — o Select aparece vazio se falhar */ }
-  }, [token]);
+  }, []);
 
   useEffect(() => {
     fetchRules();
@@ -164,36 +165,28 @@ const AutomationPage = ({ embedded = false }) => {
     };
 
     try {
-      const url = editingRule
-        ? `${API_URL}/api/admin/automation/rules/${editingRule.id}`
-        : `${API_URL}/api/admin/automation/rules`;
-      const method = editingRule ? "PUT" : "POST";
-
-      const res = await fetch(url, { method, headers, body: JSON.stringify(payload) });
-      if (res.ok) {
-        toast.success(editingRule ? "Regra atualizada" : "Regra criada");
-        setShowDialog(false);
-        setEditingRule(null);
-        resetForm();
-        fetchRules();
+      if (editingRule) {
+        await updateAutomationRule(editingRule.id, payload);
       } else {
-        const err = await res.json();
-        toast.error(extractErrorMessage(err.detail, "Erro ao guardar"));
+        await createAutomationRule(payload);
       }
-    } catch {
-      toast.error("Erro de rede");
+      toast.success(editingRule ? "Regra atualizada" : "Regra criada");
+      setShowDialog(false);
+      setEditingRule(null);
+      resetForm();
+      fetchRules();
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(err.response?.data?.detail, "Erro ao guardar"),
+      );
     }
   };
 
   const handleDelete = async (ruleId, ruleName) => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/automation/rules/${ruleId}`, {
-        method: "DELETE", headers
-      });
-      if (res.ok) {
-        setRules(prev => prev.filter(r => r.id !== ruleId));
-        toast.success(`Regra "${ruleName}" eliminada`);
-      }
+      await deleteAutomationRule(ruleId);
+      setRules(prev => prev.filter(r => r.id !== ruleId));
+      toast.success(`Regra "${ruleName}" eliminada`);
     } catch {
       toast.error("Erro ao eliminar");
     }
@@ -201,14 +194,9 @@ const AutomationPage = ({ embedded = false }) => {
 
   const handleToggle = async (rule) => {
     try {
-      const res = await fetch(`${API_URL}/api/admin/automation/rules/${rule.id}`, {
-        method: "PUT", headers,
-        body: JSON.stringify({ is_active: !rule.is_active })
-      });
-      if (res.ok) {
-        setRules(prev => prev.map(r => r.id === rule.id ? { ...r, is_active: !r.is_active } : r));
-        toast.success(rule.is_active ? "Regra desativada" : "Regra ativada");
-      }
+      await updateAutomationRule(rule.id, { is_active: !rule.is_active });
+      setRules(prev => prev.map(r => r.id === rule.id ? { ...r, is_active: !r.is_active } : r));
+      toast.success(rule.is_active ? "Regra desativada" : "Regra ativada");
     } catch { /* silent */ }
   };
 
@@ -286,6 +274,21 @@ const AutomationPage = ({ embedded = false }) => {
           </Button>
         </div>
 
+        {/* Regras são CONFIGURAÇÃO; o Motor é TELEMETRIA do que corre em
+            background (Lote 4, ponto 14). O menu não reflectia nenhum dos
+            dois: mostrava as regras e chamava-lhes "automações". */}
+        <Tabs defaultValue="regras">
+          <TabsList>
+            <TabsTrigger value="regras" data-testid="automation-tab-regras">Regras</TabsTrigger>
+            <TabsTrigger value="motor" data-testid="automation-tab-motor">Motor</TabsTrigger>
+          </TabsList>
+
+          <TabsContent value="motor" className="mt-4">
+            <EngineStatusPanel />
+          </TabsContent>
+
+          <TabsContent value="regras" className="mt-4 space-y-6">
+
         {/* Rules List */}
         {rules.length === 0 ? (
           <Card className="border-dashed">
@@ -342,6 +345,9 @@ const AutomationPage = ({ embedded = false }) => {
             ))}
           </div>
         )}
+
+          </TabsContent>
+        </Tabs>
 
         {/* ================================================================
             Create/Edit Dialog — Construtor Visual If/Then (Pacote H)
