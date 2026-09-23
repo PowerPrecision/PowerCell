@@ -2505,3 +2505,787 @@ nenhum teste marque um servidor de email real — a origem da intermitência.
   aceita a ligação e nunca responde; o registo tem de responder em menos de 3s. A margem
   entre o limite (3s) e o tempo pendurado (8s) é deliberada — com um limite frouxo o
   teste passava nas duas versões e não provava nada (verificado por mutação).
+
+## Épico 6 — Fortaleza Frontend: Vitest e a divisão do Webmail (Set 2026)
+
+### Porquê
+
+O frontend tinha 276 testes e nenhum de componente: o `node --test` só exercita funções puras. Um ficheiro como o `WebmailPage.jsx`, com 3288 linhas e 49 `useState`, não tinha rede de segurança nenhuma — qualquer refactor de UI era feito às cegas.
+
+### Motor de testes
+
+Vitest + jsdom + React Testing Library. A configuração vive no bloco `test` do `vite.config.js` (não num ficheiro separado) para herdar o alias `@`, o `define` do `process.env` e o loader JSX para ficheiros `.js`, que os testes precisam tanto como o build.
+
+Os 276 testes existentes correm **sem uma linha reescrita**: importam `describe`/`it` de `node:test`, que sob o Vitest devolveria o corredor do próprio Node — os testes registavam-se noutro motor e o Vitest não veria nada, sem sequer falhar. Um alias de `node:test` para `src/test/nodeTestShim.js` resolve-o, e só no ambiente de teste.
+
+O corredor antigo foi **removido**, não mantido em paralelo: dois motores de teste é o mesmo padrão de "dois caminhos" que produziu três incidentes neste repositório.
+
+### Divisão do WebmailPage
+
+`WebmailPage.jsx` passa a **Contentor** (estado, hooks, efeitos, handlers) e a UI vive em `components/webmail/`: `FolderNavigation`, `EmailList`, `EmailThreadViewer`, `EmailComposer` e `webmailFormatters`. Regras e contratos em `FRONTEND_GUIDELINES.md` § 20.
+
+| | Antes | Depois |
+| --- | --- | --- |
+| `WebmailPage.jsx` | 3288 linhas | 2237 (−32%) |
+| Testes de frontend | 276 (0 de componente) | 346 (70 de componente) |
+| Avisos `no-unused-vars` no ficheiro | 9 | 2 |
+
+O Épico 5 (tempo real e conversas) fica intacto por construção: o agrupamento em threads, o `useNewEmailRealtime` e a suspensão do polling continuam no contentor; os componentes só recebem o resultado.
+
+### Dois bugs que a extracção destapou
+
+1. **`<button>` dentro de `<button>`** nas pastas personalizadas: o botão do menu de contexto vivia dentro do botão da pasta. HTML inválido, que cada browser desfaz como entende. Passam a irmãos — o mesmo desenho que a lista de conversas já usava — com teste a trancá-lo.
+2. **JSX com componentes por importar**: `react/jsx-no-undef` estava desligada e o `no-undef` não cobre JSX, por isso um `<Loader2 />` sem import passava no CI e só rebentava no clique do utilizador. A regra passa a `error`; apanhou mais 15 casos reais (`AlertTriangle` no CreditTab, `CheckCircle`/`Trash2`/`Clock` no FinancialTab, `Label`/`Input`/`CheckCircle` no RGPDTab e cinco ícones no SystemEmailsSection), todos corrigidos.
+
+## Épico 7 — O Consultor "Hands-Free": nota de voz → resumo e tarefas (Set 2026)
+
+### O problema
+
+O consultor sai de uma reunião com o cliente e traz na cabeça três ou
+quatro coisas combinadas. Se não as escrever nos minutos seguintes,
+perdem-se — e escrevê-las obriga a parar, abrir o processo e redigir. O
+resultado é histórico incompleto e prazos que ninguém agendou.
+
+### O fluxo
+
+    gravação no browser (ou upload de ficheiro)
+        → POST /api/processes/{id}/voice-notes   (responde de imediato)
+        → arquivo do áudio no S3 (pasta "Notas de Voz" do processo)
+        → tarefa de acompanhamento (TaskLog, tipo VOICE_NOTE)
+        → [background] transcrição (ASR)
+        → [background] extração de resumo + tarefas (LLM)
+        → resumo em `db.activities` (origin="voice_note")
+        → tarefas em `db.tasks` via `task_api_crud.run_create_task`
+        → eventos `task_*` (Redis → WebSocket) → o ecrã actualiza-se sozinho
+
+### A pasta `skills/` NÃO é código do produto
+
+`skills/{ASR,LLM,TTS,…}/` são pacotes de documentação de um fornecedor
+(formato `SKILL.md` + exemplos `.ts`) para o `z-ai-web-dev-sdk`. **Não são
+importáveis por este backend**: são TypeScript, o SDK não está instalado em
+lado nenhum do repositório e nenhum ficheiro do produto os referencia. O
+que o Épico 7 reaproveita é o *contrato* que essa documentação descreve —
+um serviço de transcrição e um serviço de chat com *system prompt*
+rigoroso, isolados do resto da aplicação — implementado em Python sobre o
+cliente OpenAI que o PowerCell já tem (`ai_document.get_openai_client`).
+Quem procurar em `skills/` o motor que corre em produção não o encontra: é
+`services/voice_transcription.py` e `services/voice_extraction.py`.
+
+### Os módulos
+
+| Módulo | Responsabilidade |
+|---|---|
+| `services/voice_transcription.py` | ASR. Escolhe o *provider*, valida o formato, normaliza o nome do ficheiro. Não conhece processos. |
+| `services/voice_extraction.py` | LLM. *System prompt*, parsing defensivo do JSON, resolução de datas relativas, normalização das tarefas. Metade é pura. |
+| `services/voice_note_engine.py` | Orquestração: transcrever → extrair → timeline → tarefas → estado da tarefa. É o único que toca na base de dados. |
+| `services/voice_note_api.py` | Endpoint: valida, arquiva o áudio, cria o TaskLog, lança o background e **devolve**. |
+| `routes/voice_notes.py` | Stubs finos. |
+
+### Dev nunca chama uma API paga
+
+O *provider* vem de `VOICE_ASR_PROVIDER` / `VOICE_LLM_PROVIDER`. **Sem
+variável, só produção COM chave usa o motor real** — qualquer outro caso
+simula (`resolver_provider`, falha fechada). Ter uma chave no `.env` local
+não é autorização para a usar: a nota de voz de um consultor contém dados
+de um cliente real e não sai do ambiente. Um valor desconhecido na variável
+cai no simulado em vez de abrir a porta ao motor real. O modo simulado usa
+uma transcrição realista e uma heurística de palavras-chave, para que o
+fluxo de dev exercite mesmo a criação de tarefas — mas **os testes usam
+duplos explícitos** (`FakeASRService`/`FakeLLMService`), nunca a heurística:
+um teste não pode passar por causa do simulador em vez do código.
+
+O modelo do LLM vem do painel de administração (chave
+`voice_note_extraction` em `AI_CONFIG_DEFAULTS`), não do código.
+
+### Tempo real sem contrato novo
+
+A nota usa um `TaskLog` do tipo `VOICE_NOTE`, pelo que herda os eventos
+`task_started`/`task_progress`/`task_completed`/`task_failed` do Épico 4,
+entregues **apenas ao dono da tarefa**. Inventar um `voice_note_ready`
+obrigaria os dois lados a conhecer dois contratos — o mesmo erro que o
+Épico 5 evitou ao manter o nome `new_email`. O que o cliente precisa para
+se actualizar (`voice_note_id`, `activity_id`, `task_ids`, `aviso`) viaja
+no `result_data` do evento terminal.
+
+**Detalhe que custou um teste vermelho:** `update_progress` sozinho não
+muda o estado da tarefa. Com a tarefa em `pending`, `resolve_event_type`
+traduzia cada actualização num `task_started` — o cliente recebia meia
+dúzia de "começou" e nenhuma barra a andar. O `_progresso` da nota de voz
+escreve `status=PROCESSING` explicitamente.
+
+### Degradação graciosa
+
+A transcrição tem valor por si. Se o LLM falhar depois de o áudio estar
+transcrito, **o texto transcrito entra na timeline** e a tarefa termina com
+aviso (`status: "partial"`), em vez de o consultor perder o que gravou. Só
+uma falha de transcrição termina em `FAILED` — aí não há nada a dizer. O
+arquivo no S3 é acessório: serve para reouvir, e um S3 em baixo não impede
+o processamento.
+
+### As tarefas nascem pelo caminho canónico
+
+`run_create_task` prefixa o título com a referência do processo
+(`[PROC-012]`), regista no histórico e notifica os atribuídos. Escrever
+`db.tasks` directamente daqui criaria tarefas com forma diferente das
+criadas à mão e perderia a notificação sem ninguém reparar. Cada tarefa
+ditada leva `[Nota de voz <id>]` na descrição — é por aí que se identifica
+(e se desfaz em bloco) o que a IA criou.
+
+### Nunca se inventa uma data
+
+`resolver_data_relativa` traduz ISO, `DD/MM/AAAA`, "amanhã", "depois de
+amanhã", "daqui a N dias/semanas", dias da semana, "próxima semana" e
+"final do mês" — e devolve `None` para tudo o resto. Uma tarefa com prazo
+errado é pior do que uma tarefa sem prazo: o consultor confia nela. A
+expressão original fica guardada em `data_original` para ele ver o que
+disse.
+
+### Cobertura
+
+| Ficheiro | Âmbito |
+|---|---|
+| `tests/unit/test_voice_extraction.py` (60) | Parsing do JSON do modelo, datas relativas, normalização |
+| `tests/unit/test_voice_note_providers.py` (42) | Escolha de motor, formatos, garantia de que o modo simulado não toca na rede |
+| `tests/integration/test_e2e_ai_consultant.py` (31) | Fluxo completo com `FakeASRService`/`FakeLLMService` + espião no `publish_event` |
+| `src/utils/voiceNote.test.js` (33) | Lógica pura do frontend |
+| `VoiceNoteRecorder.test.jsx` (20) | Gravador real sobre `MediaRecorder`/`getUserMedia`/`createObjectURL` falsos |
+| `HistoryTab.voiceNote.test.jsx` (7) | A ligação separador ↔ gravador ↔ contentor |
+
+## Épico 8 — A Grande Refatorização: ProcessDetails e S3FileManager (Set 2026)
+
+### Método: medir a superfície de props ANTES de cortar
+
+A lição central deste épico não é sobre React, é sobre decidir. Um bloco de
+JSX grande **não é**, por si, um candidato a extracção: o que decide é
+quantos símbolos do contentor ele usa.
+
+| Bloco | Linhas | Símbolos do contentor | Decisão |
+|---|---|---|---|
+| Diálogos do `S3FileManager` (10) | 980 | 2 a 10 cada | **extrair** |
+| `TitularChoiceDialog` | 88 | 3 | **extrair** |
+| Barra de domínios do processo | 42 | 1 | **extrair** |
+| Vista de grelha do S3 | 436 | ~28 | rever o contrato primeiro |
+| Vista de lista do S3 | 559 | ~55 | rever o contrato primeiro |
+| Cola do separador Resumo | ~230 | **55** | **não extrair** |
+
+A cola do Resumo é o caso a não repetir: 230 linhas que só passam props aos
+separadores JÁ extraídos (`PersonalInfoTab`, `FinancialTab`, …). Envolvê-la
+exigiria um componente com 55 props — isso não é um contrato, é um borrão,
+e prop-drilling não é arquitectura. Ficou onde está, de propósito.
+
+### Bugs que só apareceram porque os testes vieram primeiro
+
+**1. Revisitar um processo dentro de 60 s deixava a página presa no
+esqueleto.** `ProcessDetails` hidrata o formulário num efeito e limpa o
+estado noutro, declarado depois. Na montagem corriam ambos: hidratar e logo
+desfazer. Na primeira visita passava despercebido (a query resolvia a
+seguir, `dataUpdatedAt` mudava, a hidratação repetia-se); numa revisita
+dentro do `staleTime`, o TanStack serve a cache logo no primeiro render,
+`refetchOnMount: true` não dispara nada porque os dados não estão stale, e
+nada volta a hidratar. **Na montagem não há nada a limpar** — o efeito
+passa a distinguir a montagem de uma mudança de processo.
+
+**2. `S3FileManager` falava por `fetch` em 25 chamadas.** Nenhuma levava
+`X-Company-Id`; três levavam `X-Active-Role` escrito à mão. Quarta
+instância do incidente de 2026-09-21. Ver a secção do transporte abaixo.
+
+**3. O "Aplicar" manual da revisão IA lia o valor do DOM** com
+`e.target.parentElement.querySelector("input")`. Um ícone dentro do botão
+faria `e.target` ser o `<svg>` e o clique deixaria de fazer nada, em
+silêncio. O campo é agora controlado.
+
+**4. Quase-acidente:** a primeira tentativa de extrair a barra de domínios
+apanhou a `TabsList` ERRADA — a exterior, de Resumo/Documentos/Histórico,
+porque a classe `grid w-full grid-cols-3` casa com as duas. Seis testes
+ficaram vermelhos no instante seguinte. Sem a página montada num teste,
+isto chegava a produção com os separadores de topo trocados.
+
+### Transporte: o `S3FileManager` passa pelo cliente Axios
+
+As 25 chamadas `fetch` foram convertidas em funções de `services/api.js`
+(`getProcessS3Files`, `uploadProcessS3File`, `getS3FileContent`, …). Três
+armadilhas da conversão, todas tratadas:
+
+- **O 403 passou a honrar `skipErrorToast`** (antes só valia nos 500+). A
+  listagem de ficheiros precisa do contrário do toast global: o PACOTE 11
+  mostra um aviso LOCALIZADO na tab e deixa o resto do processo navegável.
+- **`responseType: "blob"` devolve o corpo de ERRO também como Blob.**
+  `error.response.data.detail` fica `undefined` e a mensagem do servidor
+  desaparece — era o que aconteceria à lista de campos em falta da geração
+  de minutas. `readBlobErrorBody` lê-o como texto.
+- **O proxy do backend mantém-se.** É ele que evita o CORS do bucket;
+  nenhum URL pré-assinado foi introduzido.
+
+Cobertura: `components/s3FileManagerTransport.test.js` — guarda de
+código-fonte (zero `fetch`, zero cabeçalhos à mão, zero
+`REACT_APP_BACKEND_URL`), no molde do `sendDocumentation.test.js`. O guarda
+**ignora comentários**: sem isso, a explicação de porque NÃO se escreve o
+cabeçalho à mão fazia-o ficar vermelho, e a saída óbvia seria apagar a
+explicação.
+
+### Estado
+
+| Ficheiro | Antes | Depois |
+|---|---|---|
+| `pages/ProcessDetails.js` | 3101 | 2916 |
+| `components/S3FileManager.js` | 4302 | **3303** |
+
+Os 10 diálogos do S3 estão extraídos para `components/storage/dialogs/`.
+Fica por fazer, com o número em cima da mesa: as duas VISTAS — lista (559
+linhas, ~55 símbolos do contentor) e grelha (436, ~28). Precisam de
+famílias de props agrupadas (`dragHandlers`, `fileActions`) antes de
+valerem a pena; isso é desenho de contrato, não recorte.
+
+### Uma lição cara: ancorar por texto, nunca por número de linha
+
+A meio da extracção dos diálogos, o ficheiro partiu-se. A causa: cada
+substituição desloca as linhas seguintes, e eu media as fronteiras uma vez
+e reutilizava-as depois de já ter editado. Um recorte apanhou o bloco
+errado e removeu 111 linhas de outro diálogo.
+
+Recuperação: `git checkout` do contentor (os componentes extraídos são
+ficheiros NOVOS e sobrevivem) e religação dos seis num **único passo em
+memória**, com cada bloco localizado pelo seu texto de abertura e pela
+indentação, não por número de linha. É assim que se faz este tipo de
+edição em lote.
+
+---
+
+## Épico 9 — Visão computacional: ler um documento e propor os dados (Set 2026)
+
+### O que já existia (e porque não se criou um motor novo)
+
+O briefing pedia um serviço nativo `services/vision_extraction.py` e um
+diálogo `VLMReviewDialog.jsx`. O levantamento mostrou que ambos já tinham
+equivalente no produto, e construí-los teria produzido duas UIs a fazer o
+mesmo — precisamente o que a norma `AGENTS.md` ("Canonical only. No
+duplicate UI") existe para evitar.
+
+| Peça pedida | O que já existia |
+|---|---|
+| Motor de visão | `ai_document.analyze_with_vision` + `convert_pdf_to_image` + `resize_image_base64` |
+| Prompt JSON por tipo | `get_document_tool_definition` — **JSON Schema** em function calling, mais rigoroso do que um prompt a pedir JSON |
+| Diálogo lado a lado | `AIReviewDialog` (Actual ↔ Extraído, edição manual, guarda de conflitos por resolver) |
+| Revisão humana por ficheiro | PACOTE DJ: `suggested_*` → `apply-ai-review` — mas só para **metadados** |
+
+O que faltava a sério eram quatro coisas, e é só isso que este épico fez.
+
+### 1. O modelo deixou de estar fixo no código
+
+`AI_MODEL = "gpt-4o-mini"` estava no topo de `services/ai_document.py` e era
+usado nas três chamadas ao modelo, apesar de o painel de admin ter uma
+escolha por tarefa (`document_analysis`) e de existir já um resolutor
+canónico — `ai_document_analyzer.resolve_document_analysis_model`. O painel
+estava lá; ninguém o lia.
+
+`ai_document.resolve_ai_model()` delega nesse resolutor (import tardio: o
+`ai_document_analyzer` importa deste módulo e um import no topo fecharia o
+ciclo) e degrada para `AI_MODEL` quando a configuração não está acessível.
+`call_openai_api` aceita o modelo já resolvido; `analyze_with_text` e
+`analyze_with_vision` resolvem **uma vez** e reportam o modelo REAL no
+resultado, não a constante.
+
+Guarda de regressão: `test_nenhuma_chamada_usa_a_constante_fixa` lê o
+código-fonte. Voltar a pôr `"model": AI_MODEL` numa chamada não parte mais
+nada — e era esse o problema.
+
+### 2. A Caderneta Predial tinha mapeador mas não tinha esquema
+
+`build_update_data_from_extraction` já sabia traduzir caderneta → ficha
+(`artigo_matricial`, `valor_patrimonial`, `area`, `localizacao`,
+`tipologia`), mas `get_document_tool_definition` não tinha ramo para o
+tipo: a IA caía no esquema genérico, devolvia texto livre e o mapeador não
+encontrava nada. Extracção "com sucesso", ficha vazia.
+
+Os nomes dos campos do esquema novo **não são livres** — têm de casar
+exactamente com o `field_mapping` do mapeador. Há um teste só para isso.
+
+O prompt distingue explicitamente o VPT do preço de compra e do valor de
+avaliação bancária, que é a confusão que um modelo comete sozinho.
+
+**Bónus encontrado pelo caminho:** o ramo da caderneta no mapeador não
+chamava `track_mapped`, pelo que os cinco campos que ENTRAVAM na ficha eram
+copiados outra vez para `ai_extracted_notes` por `collect_unmapped_data`.
+
+### 3. Extracção por ficheiro, a partir do caminho S3
+
+`POST /api/processes/{id}/documents/extract` (`routes/document_extraction.py`
+→ `services/document_vision_extract.py`) recebe o caminho S3 de um ficheiro
+já arquivado. Antes, extrair dados obrigava o browser a descarregar o
+ficheiro pelo proxy e a reenviá-lo como `FormData`.
+
+A análise **não foi duplicada**: `document_ai_analyze.run_ai_analyze_documents`
+foi partido em dois, e o tronco comum — `run_analysis_on_documents` — serve
+os dois caminhos. O que muda é a ORIGEM dos bytes (upload multipart vs. S3);
+o formato da resposta é o mesmo, que é o contrato que o `AIReviewDialog`
+consome e que o `/ai-apply-suggestions` sabe aplicar.
+
+**Duas guardas de caminho, não uma.** O caminho vem do cliente:
+`assert_path_within_document_root` impede sair da árvore de documentos
+(backups e logótipos vivem no MESMO bucket, sob outros prefixos) e
+`assert_s3_file_belongs_to_process` impede ler o processo do vizinho. Sem a
+segunda, qualquer utilizador com acesso a um processo lia os documentos de
+outro cliente pelo caminho.
+
+Formatos não suportados são recusados **antes** de tocar no S3: um `.docx`
+seguiria para uma chamada paga e voltaria vazio.
+
+### 4. A regra de ouro, e o buraco que ela destapou
+
+> "A IA nunca escreve na base de dados (dados pessoais/financeiros) sem a
+> confirmação do utilizador."
+
+O caminho em lote **não cumpria isto**. `commitAIExtractedData` pré-enche o
+formulário e, quando `conflicts` vem vazio, chama `persistAISuggestions` →
+`POST /ai-apply-suggestions` — uma escrita, sem diálogo nenhum pelo meio.
+E "sem conflitos" não é o caso benigno: é precisamente o caso em que a ficha
+está VAZIA e tudo o que a IA leu vai entrar de novo.
+
+O caminho novo não repete o erro:
+
+1. `S3FileManager` lê o ficheiro e entrega os dados ao contentor. Não grava.
+2. `utils/documentExtraction.prepararRevisaoDaExtraccao` (puro, testado)
+   separa o que foi lido em **conflitos** (a ficha tem outro valor → o
+   consultor escolhe) e **campos a preencher** (a ficha está vazia → nada a
+   escolher, mas à vista).
+3. O diálogo abre **sempre**, mesmo sem conflitos, com o nome do ficheiro
+   de origem no cabeçalho.
+4. Só o clique em "Confirmar Todos" aplica ao formulário e persiste.
+   Fechar descarta a extracção pendente — guardá-la faria a confirmação
+   seguinte escrever dados de um documento já rejeitado.
+
+`AIReviewDialog` ganhou `newValues` e `sourceDocument`, ambos opcionais: o
+caminho em lote continua a funcionar sem alterações (17 testes seus,
+intactos).
+
+**A decisão do consultor tem de sobreviver à confirmação.** Resolver um
+conflito removia-o da lista mas deixava o valor da IA em `extractedData` —
+e é `extractedData` que a confirmação aplica à ficha. Escolher "fica o
+valor existente" fazia desaparecer o conflito do ecrã e gravava o valor da
+IA na mesma: a interface dizia uma coisa e a ficha ficava com outra, que é
+o pior tipo de defeito porque ninguém o vai procurar.
+`aplicarDecisaoNaRevisao` (pura, imutável) regista cada decisão nos dados
+que vão ser gravados.
+
+### Um defeito que a bateria e2e apanhou na primeira execução
+
+Reutilizar o tronco comum trouxe consigo `_mark_documents_ai_analyzed`. Na
+extracção por ficheiro isso marcava o documento como `ai_analyzed` **sem
+nada ter sido aplicado à ficha** — o consultor extraía, fechava o diálogo
+sem confirmar, e o documento ficava invisível para a análise em lote,
+permanentemente. Saltar e marcar são hoje a mesma política (`skip_analyzed`)
+e a extracção por ficheiro não participa em nenhuma das duas.
+
+### Cobertura
+
+| Ficheiro | Casos | O que prova |
+|---|---|---|
+| `tests/unit/test_vision_extraction.py` | 47 | formatos, esquema da caderneta, modelo do painel, guardas de caminho, motor simulado |
+| `tests/integration/test_e2e_vlm_extraction.py` | 19 | cadeia S3 → visão → comparação → revisão; CC, recibo, caderneta, ilegível, S3 em baixo, âmbito, nada escrito |
+| `utils/documentExtraction.test.js` | 25 | a separação conflitos/valores novos, a escolha de titular e o registo das decisões |
+| `AIReviewDialog.extraccao.test.jsx` | 11 | o que o consultor vê e o que só acontece ao confirmar |
+| `S3FileManager.extraccao.test.jsx` | 10 | papel, formato, e que o componente NÃO grava |
+
+Mutação (dez, todas mataram testes): tirar o `track_mapped` da caderneta;
+voltar a fixar o modelo na constante; tirar a guarda de âmbito do processo;
+desactivar o esquema da caderneta; aceitar qualquer formato; entregar dados
+vazios ao contentor; não separar conflitos de valores novos; esconder a
+secção de campos a preencher; não registar a decisão do consultor; mutar a
+revisão em vez de a substituir.
+
+Nota sobre mutação, aprendida aqui: uma mutação que NÃO mata pode ser um
+teste fraco **ou** uma mutação que não chegou ao sítio. A primeira do
+`track_mapped` substituiu a primeira ocorrência do ficheiro — outro ramo,
+não o da caderneta — e eu quase dei o teste por fraco. Verificar qual das
+duas antes de concluir.
+
+Nenhum teste contacta uma API paga — há uma guarda explícita para isso
+(`TestNenhumaChamadaReal`).
+
+---
+
+## Lote 4, ponto 10 — Redes (Grupos Empresariais) e o fim do filtro placebo (Set 2026)
+
+### O diagnóstico não era o enunciado
+
+O enunciado dizia "a listagem/pesquisa global está a mostrar tudo a todos".
+É verdade, mas a causa não estava na listagem.
+
+1. **Não havia filtro de tenant nenhum** nas listagens e pesquisas.
+   `search_api_global`, `search_api_processes`, `search_api_suggestions`,
+   `client_list_filters`, `my_clients_api_helpers`, `process_my_clients` e
+   `task_api_crud`: **zero** ocorrências de `compan`. O Ctrl+K devolvia
+   clientes de outra empresa com o NIF já desencriptado — `run_global_search`
+   chama `decrypt_client_data` antes do `return`. É pesquisa com dados
+   pessoais em claro a atravessar empresas.
+2. `build_role_visibility_conditions` devolve `[]` para `admin`, `ceo`,
+   `administrativo` e `diretor`. Uma Diretora de uma empresa via o pipeline
+   inteiro de outra. `show_all=true` devolve `[]` também.
+3. **O único filtro que existia era um placebo.** `build_company_scope_condition`
+   (usado só em "Os Meus Processos") inclui de propósito
+   `{"company_id": {"$exists": False}}` para não esconder processos legados —
+   e `build_staff_process_doc` **não escrevia campo de empresa nenhum**. Logo
+   *todo* o processo criado pelo CRM casava com o filtro de *qualquer*
+   empresa. Parecia isolar porque o `mine_only` já restringia por atribuição,
+   e era a atribuição a fazer o trabalho todo.
+
+**Consequência de método:** o ponto não era um problema de query, era um
+problema de dados. Acrescentar `network_id` ao filtro sem o carimbar na
+escrita produziria exactamente o mesmo placebo, com outro nome.
+
+### O modelo
+
+A rede vive na **empresa** (`companies.network_id`). Empresas com a mesma
+rede partilham visibilidade sem permissões extra; redes diferentes estão em
+isolamento absoluto. Uma empresa **sem** rede é uma ilha de uma só
+(`rede_implicita` → `rede:<company_id>`): omissão segura, porque uma empresa
+criada hoje tem de nascer isolada — se caísse na rede de omissão veria todo o
+histórico do grupo incumbente, que é a fuga que isto fecha. O formulário de
+empresas deixa o campo em branco por omissão, e há uma guarda sobre o
+código-fonte a impedir que a criação passe a herdar uma rede.
+
+O âmbito é do **utilizador**, não da empresa activa: a empresa activa é uma
+preferência de *vista* (o `company_id` das listagens), a rede é a fronteira
+de *segurança*. Quem trabalha em duas redes vê as duas.
+
+### `TENANT_DEFAULT_NETWORK_ID` — a pilha por carimbar
+
+Os documentos criados antes desta mudança não têm dono legível. Escondê-los
+de toda a gente no dia do deploy seria partir os dados existentes; deixá-los
+visíveis a todos seria manter a fuga. A variável de ambiente decide:
+
+- **Definida** (produção, com a rede do grupo incumbente): quem está nessa
+  rede continua a ver tudo o que via; quem está noutra não vê nada dela.
+- **Por definir** (dev, CI): os documentos sem carimbo ficam visíveis a todas
+  as redes — o comportamento anterior, para não esvaziar as listagens de
+  desenvolvimento nem a bateria. Fica um `warning`, uma vez, no log.
+
+Um documento só conta como "por carimbar" quando **não tem marca nenhuma**:
+nem `network_id`, nem `company_id`, nem `company`, nem `company_name`. Olhar
+só para o `network_id` deixaria a fuga entrar pela cláusula que existe para a
+evitar — um processo criado entre o carimbo na escrita e a migração tem
+empresa mas ainda não tem rede, e passaria a ser visível ao grupo incumbente.
+Há um teste por lado: a outra rede não o vê, **e** a própria vê.
+
+### Fail-closed, sempre
+
+`build_network_scope_condition` nunca devolve `None`. Um âmbito fechado sem
+ramo nenhum devolve `CONDICAO_IMPOSSIVEL` (`{"network_id": {"$in": []}}`),
+porque `None` significaria "sem filtro" e reabria a fuga inteira em silêncio.
+A degradação graciosa segue a mesma direcção: se a colecção `companies` não
+responder, cada empresa passa a valer como ilha própria — **nunca** ampliar o
+âmbito por causa de um erro.
+
+### Onde entra
+
+| Camada | Ficheiro |
+|---|---|
+| 1 — a rede vive na empresa | `models/company.py`, `companies_crud_api_mutate.py`, `CompaniesAdminTab.jsx` |
+| 2 — ponto único | `services/tenant_network.py` |
+| 3 — carimbo na escrita | `process_create.build_staff_process_doc(tenant=…)` |
+| 4 — migração | `scripts/backfill_network_id.py` |
+
+O filtro entra em `run_get_processes` / `run_get_processes_paginated` (as duas
+listagens de processos passam por lá, `show_all=true` incluído), nas três
+pesquisas e nas listagens de clientes. **Nunca reconstruir esta cadeia em
+linha** — foi tê-la duplicada que produziu o incidente da conta de envio de
+2026-09-21. Há uma guarda sobre o código-fonte, com a contraprova ao lado:
+sem ela, apagar a chamada satisfazia o guarda e reabria a fuga.
+
+### A migração não adivinha
+
+`backfill_network_id.py` tem duas fases. `--empresas` é **obrigatória** e
+barata: põe as empresas já existentes na rede de omissão — sem ela, cada
+empresa antiga vale como ilha própria e a Power deixa de ver a Precision,
+que é a regressão que a política existe para evitar. `--documentos` é
+opcional e pesada: deduz o dono de cada documento pela empresa já escrita →
+consenso entre quem lá trabalha → quem o criou.
+
+`rede_consensual` devolve `None` quando há mais do que uma rede candidata.
+Um processo trabalhado por pessoas de redes diferentes não tem dono óbvio, e
+adivinhar aqui é escolher a quem vazar. Fica por carimbar, coberto pela rede
+de omissão. **Nunca escrever uma rede "provável":** um carimbo errado torna
+o documento visível à rede errada para sempre, e o passo 1 da execução
+seguinte aceitá-lo-ia como verdade.
+
+### Guardas sobre o código-fonte: o leitor é partilhado
+
+`tests/unit/helpers_fonte.py` (`codigo_sem_comentarios`) é a terceira
+encarnação da mesma necessidade, agora num sítio só. A armadilha, já apanhada
+duas vezes: uma guarda que leia os comentários acaba por proibir a
+*explicação* do defeito que previne — e a saída óbvia, quando fica vermelha,
+é apagar a explicação, que é a parte que impede a regressão de voltar. Usa
+`tokenize` + `ast`, não expressões regulares: um literal com `#` faria um
+cortador ingénuo truncar código a meio. Nota de utilização: `ast.unparse`
+normaliza as aspas, por isso asserções sobre literais comparam-se sem elas.
+
+### O que fica de fora, de propósito
+
+O **Portal do Cliente** não entra neste eixo: o cliente vê o processo dele
+por `client_id` e propriedade, não por rede.
+
+### Cobertura
+
+`tests/unit/test_tenant_network_isolation.py` (26). Mutação (três, três
+mataram): tirar o `tenant_condition` da listagem; fazer o "por carimbar"
+olhar só para o `network_id`; deixar um âmbito fechado virar "sem filtro".
+
+---
+
+## Lote 4, pontos 11–13 — contas órfãs, tarefas fantasma e cartões dentro de cartões (Set 2026)
+
+### 11. Atribuição Rápida: o problema não era comodidade
+
+`run_create_user` gravava a conta e **nunca criava um UCR**. Escrevia
+`user_doc["company"] = data.company` — que é o **nome** da empresa, não o
+`company_id` — e o formulário nem esse campo enviava: o payload do
+`UserCreateDialog` era `{name, email, phone, role, password}`. O próprio
+diálogo assumia-o na descrição: *"Os acessos por empresa (UCR) definem-se
+depois em Gerir Acessos."*
+
+Entre o "Criar" e esse "depois", a conta não pertencia a lado nenhum — e
+**tudo** lê UCRs: ContextSwitcher, `get_effective_role_async`, config de email
+por empresa e, desde o ponto 10, o isolamento por rede. Ser apanhado pela rede
+de omissão não é pertencer a uma empresa.
+
+Hoje a empresa é **estritamente obrigatória** (excepto parceiros, que são
+contas fantasma sem acesso à plataforma) e a criação é **atómica**:
+`services/user_company_bootstrap.py` normaliza as linhas empresa+cargo e
+`run_create_user` cria conta + UCRs no mesmo acto. Se os UCRs não ficarem
+gravados, **a conta é desfeita**: sem conta, o admin repete; com conta e sem
+acessos, ninguém dá por isso. Encadear duas chamadas no frontend daria o mesmo
+buraco, só que mais difícil de ver.
+
+Detalhe que uma mutação apanhou: `completar_nomes_das_empresas` tem de correr
+**antes** de se montar o documento do utilizador. `users.company` é o NOME da
+empresa e `_find_ucr` casa por ele; escrever lá o `company_id` é a mesma
+confusão id/nome do incidente de 2026-09-21 — e aqui passaria despercebida,
+porque o UCR ficava correcto na mesma.
+
+### 12. Atribuição Fantasma: três defeitos, um deles não estava no enunciado
+
+**(a) A bomba do `$in`.** `workflow_engine` gravava `assigned_to` como
+**escalar** (`process.get("assigned_consultor_id")`) ou `None`; `task_api_crud`
+e `process_assignment` gravam **lista**. `enrich_task` faz
+`{"id": {"$in": task["assigned_to"]}}`, e o Mongo responde `$in needs an
+array` (confirmado contra o Mongo real). Como `run_list_tasks` enriquece num
+ciclo **sem `try`**, *uma* tarefa criada por uma regra de automação fazia a
+listagem **inteira** devolver 500. Não estava adormecido: era uma mina.
+
+`normalizar_assigned_to` desarma à leitura **e** o motor de automação passou a
+gravar lista — normalizar trata o que já existe, deixar de produzir impede que
+volte. Há guarda sobre o código-fonte da origem.
+
+**(b) Ninguém limpava as tarefas quando a atribuição mudava.**
+`_create_post_indexing_tasks` cria tarefas de arranque para quem é atribuído;
+nenhum caminho de atribuição voltava a tocar-lhes (`db.tasks.delete_many` /
+`update_many` só aparece em apagar processo, apagar cliente e limpezas de
+admin). Tirar o consultor deixava as tarefas dele num processo sem ninguém.
+
+**Opção A, decidida pelo dono:** nunca apagar trabalho humano em silêncio. Uma
+tarefa que o **sistema** criou e que **ninguém tocou** desaparece com a
+atribuição que a justificava; tudo o resto fica, perde a atribuição e leva
+`assignment_orphaned`. "Por tocar" = criada pelo sistema, não concluída, e
+`updated_at == created_at` — qualquer interacção muda o `updated_at`.
+
+Uma subtileza que ficou com teste: só fica órfã quando **ninguém sobra**. Tirar
+o consultor de uma tarefa que também é do mediador não a deixa sem dono, e
+apagá-la levaria o trabalho de quem ficou.
+
+O diff é feito sobre o **antes e o depois reais do documento**
+(`ids_atribuidos_do_processo`), não sobre o que o construtor da query julga ter
+mudado. Ligado aos **dois** caminhos: `POST /assign` e `POST /unassign-me`.
+
+**(c) Uma tarefa órfã era indistinguível de uma por atribuir.** Ambas mostravam
+"Sem atribuição", e só a primeira exige uma decisão humana. Hoje leva um
+`Badge` "Sem responsável".
+
+**Correcção ao diagnóstico inicial:** eu disse que o selector oferecia
+`getStaffUsers()` sem relação com o processo. Errado — o `TasksPanel` já
+filtrava para os envolvidos. O que era real: o `catch` caía para **todo** o
+staff avisando só no `console.warn`. Hoje a equipa do processo aparece
+primeiro e o resto fica atrás de "Fora da equipa do processo", que é preciso
+abrir de propósito; quando a equipa não se consegue confirmar, isso é dito em
+vez de a lista fingir ser a equipa. "Todos" passou a significar "a equipa".
+
+### 13. UI das Tarefas: o cartão dentro do cartão
+
+O `TasksPanel` **já é** um `Card` completo — `CardHeader`, `CardTitle
+"Tarefas"`, `Badge` de contagem, `CardDescription` e `ScrollArea` próprio. O
+`ProcessDetails` envolvia-o noutro `Card`, com outro `CardHeader`, outro título
+**"Tarefas"** e outro `ScrollArea max-h-[400px]`. Dois cartões, dois cabeçalhos
+com o mesmo texto, duas áreas de scroll encaixadas — e `compact={false}`, a
+desligar explicitamente o modo compacto que o componente já tinha.
+
+Hoje: `asCard={false}` entrega só o conteúdo, `compact` liga a sério, os
+filtros e a data de criação **não são renderizados** em modo compacto
+(escondê-los por CSS deixava-os acessíveis ao teclado e aos leitores de ecrã),
+e o `ProcessDetails` chama o painel directamente — um cartão, desenhado por
+quem sabe o que tem dentro. Nada foi inventado: a prop `compact` já existia.
+
+**Lição de mutação, a segunda deste género.** `const Moldura = Card` (trocar a
+condição) **não matou** nenhum teste. Desta vez não foi a mutação a falhar o
+alvo — foi o teste a ser fraco: o `data-testid` estava preso à *flag* e não à
+moldura real, por isso desenhava-se um cartão que o teste não conseguia ver. A
+correcção é estrutural, não cosmética: as props derivam agora do **componente
+escolhido** (`Moldura === Card`), não da flag, e assim o marcador e a moldura
+não podem divergir.
+
+### Infraestrutura de testes
+
+`src/test/setup.js` ganhou os *stubs* de Pointer Capture. O `Select` do Radix
+chama `hasPointerCapture` ao abrir a lista e o jsdom não a implementa: sem
+isto, o clique morre em silêncio e o teste falha a dizer que **não encontrou a
+opção** — uma pista que aponta para o sítio errado.
+
+### Cobertura
+
+| Ficheiro | Casos |
+|---|---|
+| `tests/unit/test_task_assignment_hygiene.py` | 21 |
+| `tests/unit/test_user_company_bootstrap.py` | 19 |
+| `components/__tests__/TasksPanel.compacto.test.jsx` | 12 |
+| `components/admin/__tests__/UserCreateDialog.acessos.test.jsx` | 10 |
+
+Mutação (sete, sete mataram — uma delas só depois de a fraqueza do teste ser
+corrigida): apagar qualquer tarefa sem dono; iterar o escalar caracter a
+caracter; empresa deixar de ser obrigatória; não desfazer a conta; desenhar
+sempre a moldura; a órfã deixar de se distinguir; o formulário não exigir
+empresa.
+
+---
+
+## Lote 4, ponto 14 — Espelho de Automações: o batimento dos jobs (Set 2026)
+
+### Onde o coração bate
+
+Não há agendador. Não há APScheduler nem Celery: são laços `asyncio` à mão,
+`while True` + `await asyncio.sleep(n)`, repartidos por **dois processos** do
+`render.yaml`.
+
+| Job | Processo | Onde arranca | Cadência | Condição |
+|---|---|---|---|---|
+| `background_job_monitor` | web | `server.py` | 30 min | sempre, **todos** os workers |
+| `email_auto_sync` | web | `server.py` | 60s + jitter | produção + worker **primário** |
+| `backup_diario` | web | `services/backup.py` | 03:00 UTC | produção + primário |
+| `cdc_audit` | web | `services/audit_cdc.py` | contínuo | produção + primário |
+| `scheduled_tasks` (alertas) | worker | `worker.py` | 1 h | produção |
+| `lead_matching` | worker | `worker.py` | 30 min | produção |
+| `webmail_worker_sync` | worker | `worker.py` | 10 min | produção |
+
+**Nota de diagnóstico:** cheguei a suspeitar que os alertas de prazos não
+corriam, por o `server.py` nunca arrancar `run_daemon`. Correm — no **worker**,
+via `scheduler_loop` → `run_all_tasks`, que é onde vivem
+`check_upcoming_deadlines` e companhia. O motor está vivo; o que não existia
+era forma de o saber.
+
+### Porque é que o estado tem de ser persistido
+
+`worker.py` guardava as últimas execuções assim:
+
+```python
+last_runs = {"scheduled": 0, "matching": 0, "webmail": 0}
+```
+
+Um **dicionário local de uma função**. Morre em cada reinício e a API nunca o
+vê. Do lado web é igual: `_background_tasks` é um `set` do processo e, com
+`UVICORN_WORKERS=2`, um pedido servido pelo worker secundário não sabe nada das
+tarefas do primário — e é o primário que tem o lock.
+
+Um endpoint que lesse o estado local responderia **sobre o processo que
+calhou atender o pedido**, e diria "IMAP em baixo" por desenho. **Um monitor
+que mente com ar de autoridade é pior do que não ter monitor.** Uma colecção
+partilhada (`job_heartbeats`) é a única coisa que os dois processos vêem.
+
+### O que isto não é
+
+Não é um histórico. Guarda-se o **último** batimento por job mais
+`run_count`/`failure_count` — responde às quatro perguntas (vivo? falhou?
+quando correu? quando corre?) sem pôr uma colecção a crescer.
+
+### O batimento observa, não intercepta
+
+`heartbeat()` regista a excepção do ciclo e **re-levanta-a**: engoli-la mudaria
+o comportamento do job para o poder monitorizar, que é o oposto de um monitor.
+Já falhar a **gravar** o batimento nunca propaga — mesma regra do
+`publish_event` e da revogação do Portal.
+
+E o envelope embrulha o **trabalho**, não corre ao lado dele. A primeira versão
+tinha um `async with … : pass` antes do corpo do ciclo, o que registava "ok"
+para um ciclo que rebentasse a seguir. `background_job_monitor` foi
+reestruturado (`_tratar_jobs_bloqueados` extraída) para o envelope não ter de
+indentar 50 linhas.
+
+### Desactivado não é em baixo
+
+É a distinção mais importante do painel. Em dev quase tudo está desligado **de
+propósito** (kill switches por RAM), e um painel a gritar vermelho em dev ensina
+toda a gente a ignorá-lo — tornando-o inútil no dia em que algo parta mesmo.
+`job_esta_activo` lê os mesmos interruptores que os jobs (`ENVIRONMENT`,
+`EMAIL_SYNC_ENABLED`), e `desactivado` não conta para "com problema".
+
+### O registo declarado
+
+A lista sai de `JOBS_DECLARADOS`, não da colecção. Se saísse da colecção, **o
+job mais avariado de todos — o que nunca arrancou — era o único invisível.**
+Há guarda nos dois sentidos: cada entrada do registo tem de ter um emissor no
+código, e cada emissor tem de estar no registo.
+
+Limiar de atraso: **2× o intervalo declarado**. Um ciclo perdido é ruído; dois
+é sinal.
+
+### A regra de ouro do perfil Indexação
+
+O dono reafirmou-a neste lote e ela tinha três furos:
+
+1. **`_is_stealth_user` olhava só para `user["role"]`** — o papel do JWT. Num
+   sistema multi-perfil, quem entra COMO Indexação tem
+   `effective_role == "indexacao"` e um papel base diferente: deixava rasto
+   apesar de estar a trabalhar como indexador. É o caso **mais provável**,
+   porque é assim que o produto quer que as pessoas troquem de chapéu. A regra
+   acrescenta, não substitui.
+2. **`document_portal_request` tinha uma cópia inline** (`user.get("role") !=
+   "indexacao"`), em três sítios: a conclusão certa pela metade, porque ignora
+   o interruptor `track_history=False`.
+3. **`restore_api_document` não tinha guarda nenhuma** (duas escritas), e
+   `voice_note_engine` também não.
+
+Os escritores em `admin_*` **não** são fuga: são endpoints de administração
+(`require_roles([ADMIN, CEO])`) onde um indexador nunca entra. E
+`temp_link_api_public` grava com `created_by: None` — é o cliente, não um
+utilizador com perfil.
+
+O **`audit_trail_service` fica de fora de propósito**: é um trilho de
+conformidade com IP e política de retenção, e tem de manter rastreabilidade
+mesmo quando o mural do processo é silenciado. Há um teste a afirmá-lo, para
+que ninguém o "corrija".
+
+### Achados laterais tratados
+
+`AutomationPage.js` falava por **cinco `fetch` crus** — quinta instância do
+incidente de 2026-09-21 — todos convertidos para o cliente Axios. O
+`API_URL` e o `token` locais desapareceram com eles.
+
+**Rejeitado pelo dono, e por isso não tocado:** o `last_runs` do `worker.py`
+faz todos os jobs dispararem no reinício. São idempotentes; fica como está.
+
+### Uma armadilha do ferramental
+
+Uma declaração duplicada em `services/api.js` (`getWorkflowStatuses`) fez o
+Vitest cair de **707 para 684 testes passados — sem uma única falha**. Os
+ficheiros que importavam o módulo partido não chegaram a ser recolhidos, e a
+bateria deu verde. **O ESLint apanhou-o; a contagem de testes é que o
+denunciou.** Comparar o total entre execuções não é vaidade: é a única coisa
+que distingue "tudo passa" de "metade nem correu".
+
+### Cobertura
+
+| Ficheiro | Casos |
+|---|---|
+| `tests/unit/test_job_heartbeat.py` | 25 |
+| `tests/unit/test_stealth_indexacao.py` | 16 |
+| `components/automation/__tests__/EngineStatusPanel.test.jsx` | 10 |
+
+Mutação (quatro, quatro mataram): um job desligado passar a avariado; o limiar
+de atraso deixar de disparar; o batimento engolir a excepção do ciclo; a guarda
+voltar a ignorar o perfil activo.

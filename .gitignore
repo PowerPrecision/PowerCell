@@ -46,7 +46,11 @@ local-*
 *.log
 dev.log
 dev.out.log
-test
+# NOTA (Set 2026): esta regra era `test` — sem barra, o git ignora QUALQUER
+# ficheiro ou pasta com esse nome em toda a árvore. Engoliu em silêncio o
+# `frontend/src/test/` (setup do Vitest e ponte node:test) e o CI teria
+# falhado a dizer que o ficheiro de setup não existe. Fica ancorada à raiz.
+/test
 prompt
 
 server.log

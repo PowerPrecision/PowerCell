@@ -10,6 +10,7 @@ import logging
 from typing import Any, Optional
 
 from database import db
+from services.tenant_network import build_tenant_condition
 from services.process_my_clients import (
     fetch_unread_messages_map,
     fetch_new_documents_map,
@@ -335,9 +336,15 @@ async def run_get_processes(
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
 
+    # Ponto único do isolamento por Rede: as duas listagens de processos
+    # passam por aqui, logo o filtro entra uma vez só e não há caminho
+    # que o contorne (`show_all=true` incluído).
+    tenant_condition = await build_tenant_condition(user)
+
     query = build_process_list_query(
         user,
         role,
+        tenant_condition=tenant_condition,
         status=status,
         search=search,
         view_mode=view_mode,
@@ -406,9 +413,12 @@ async def run_get_processes_paginated(
     from services.cursor_pagination import CursorPaginator
     from services.process_list_filters import build_process_list_query
 
+    tenant_condition = await build_tenant_condition(user)
+
     query = build_process_list_query(
         user,
         role,
+        tenant_condition=tenant_condition,
         status=status,
         search=search,
         view_mode=view_mode,

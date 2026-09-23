@@ -183,13 +183,27 @@ class TokenResponse(BaseModel):
     user: UserResponse
 
 
+class UserCompanyAssignment(BaseModel):
+    """Uma linha empresa+cargo da Atribuição Rápida (Lote 4, ponto 11)."""
+    company_id: Optional[str] = None
+    company_name: Optional[str] = None
+    # Sem `role`, herda o perfil principal da conta.
+    role: Optional[str] = None
+    is_default: bool = False
+
+
 class UserCreate(BaseModel):
     email: Optional[str] = None  # Opcional para parceiros (ghost user)
     password: Optional[str] = None  # Opcional para parceiros (ghost user)
     name: str
     phone: Optional[str] = None
     role: str
-    company: Optional[str] = None  # Empresa do utilizador
+    company: Optional[str] = None  # Legado: NOME da empresa (ver `companies`)
+    # Atribuição Rápida: empresas e cargos associados no acto da criação.
+    # OBRIGATÓRIO para todos os perfis excepto `parceiro` — uma conta sem
+    # UCR é invisível ao ContextSwitcher, à config de email por empresa e
+    # ao isolamento por rede.
+    companies: Optional[List[UserCompanyAssignment]] = None
     onedrive_folder: Optional[str] = None
     additional_roles: Optional[List[str]] = []
     base_salary: Optional[float] = 0.0  # Vencimento fixo mensal (€) — modelo híbrido

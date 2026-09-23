@@ -29,6 +29,46 @@ def _non_default_company_id(*candidates: Optional[str]) -> Optional[str]:
     return None
 
 
+def _primeiro_pedido_explicito(*candidatos):
+    """Primeiro `company_id` que o cliente realmente indicou (inclui "default")."""
+    for valor in candidatos:
+        if valor is not None and str(valor).strip():
+            return str(valor).strip()
+    return None
+
+
+def resolve_accounts_company_id(
+    pedido: Optional[str],
+    contexto_da_sessao: Optional[str],
+) -> str:
+    """Empresa cujas contas de email listar ou gravar.
+
+    `"default"` é ambíguo: pode ser "não sei" ou pode ser o sentinela de um
+    perfil que REALMENTE não tem empresa associada. `_non_default_company_id`
+    trata-o sempre como o primeiro, e foi isso que produziu a fuga entre
+    perfis: o cartão da Área Pessoal pede `company_id=default` (sem header
+    `X-Company-Id`, porque só o envia quando difere de "default"), o pedido
+    caía no contexto da sessão — `user["company"]` — e o separador de um
+    perfil mostrava as contas de outro.
+
+    Aqui a regra é estreita: **um pedido explícito é uma resposta**, mesmo
+    quando a resposta é "default". O contexto da sessão só decide quando o
+    cliente não disse nada.
+
+    Args:
+        pedido: `company_id` que o cliente pediu (query ou corpo).
+        contexto_da_sessao: empresa activa resolvida do header/utilizador.
+
+    Returns:
+        O `company_id` a usar; `"default"` quando não há melhor informação.
+    """
+    explicito = _primeiro_pedido_explicito(pedido)
+    if explicito:
+        return explicito
+    contexto = _primeiro_pedido_explicito(contexto_da_sessao)
+    return contexto or "default"
+
+
 def _resolve_active_role(request: Request, user_role: str) -> Optional[str]:
     active_role_header = request.headers.get("X-Active-Role", "")
     if active_role_header and active_role_header != user_role:
@@ -185,11 +225,12 @@ async def run_save_my_email_config(
             user_id, exc,
         )
 
-    company_id = _non_default_company_id(
-        getattr(config, "company_id", None),
-        query_company_id,
+    company_id = resolve_accounts_company_id(
+        _primeiro_pedido_explicito(
+            getattr(config, "company_id", None), query_company_id
+        ),
         header_company,
-    ) or "default"
+    )
 
     # ESCREVER NA MESMA CHAVE QUE O ENVIO LÊ.
     #
@@ -542,7 +583,7 @@ async def run_list_my_email_accounts(
         return {"accounts": [], "managed_centralized": True}
 
     header_company = await get_active_company_id_async(request, current_user)
-    active_company_id = _non_default_company_id(company_id, header_company) or "default"
+    active_company_id = resolve_accounts_company_id(company_id, header_company)
     docs = await list_company_email_configs(current_user["id"], active_company_id)
     accounts = [publicize_email_account(doc) for doc in docs]
 
@@ -604,11 +645,12 @@ async def run_add_my_email_account(
     except Exception:
         header_company = None
 
-    company_id = _non_default_company_id(
-        getattr(config, "company_id", None),
-        query_company_id,
+    company_id = resolve_accounts_company_id(
+        _primeiro_pedido_explicito(
+            getattr(config, "company_id", None), query_company_id
+        ),
         header_company,
-    ) or "default"
+    )
 
     encrypted_password = ""
     if config.password:

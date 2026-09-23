@@ -20,23 +20,12 @@ import {
 import useDebounce from "../hooks/useDebounce";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
-import { Textarea } from "../components/ui/textarea";
 import { Badge } from "../components/ui/badge";
-import { ScrollArea } from "../components/ui/scroll-area";
 import { Separator } from "../components/ui/separator";
 import { Skeleton } from "../components/ui/skeleton";
-import { Label } from "../components/ui/label";
 import { ResizablePanelGroup, ResizablePanel, ResizableHandle } from "../components/ui/resizable";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "../components/ui/tooltip";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "../components/ui/collapsible";
 import {
-  Select,
-  SelectGroup,
-  SelectContent,
-  SelectItem,
-  SelectLabel,
-  SelectTrigger,
-  SelectValue,
 } from "../components/ui/select";
 import {
   Dialog,
@@ -51,45 +40,30 @@ import {
   Send,
   Star,
   FileText,
-  Plus,
   Search,
   RefreshCw,
-  Mail,
-  MailOpen,
-  Paperclip,
-  Reply,
-  ReplyAll,
-  Forward,
   Link2,
-  ChevronDown,
-  ChevronRight,
-  X,
   Loader2,
   ArrowLeft,
-  Image,
-  FileSpreadsheet,
-  File,
   Tag,
   CheckSquare,
   Square,
-  Upload,
   Trash2,
-  FolderPlus,
   FolderOpen,
-  Folder,
   FolderInput,
   Pencil,
-  MoreVertical,
-  ExternalLink,
 } from "lucide-react";
 import { toast } from "sonner";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
-import { format, isToday, isYesterday } from "date-fns";
-import { pt } from "date-fns/locale";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { sanitizeEmailHtml, htmlToText } from "../utils/sanitize";
-import { safeString } from "../utils/safeString";
-import { safeFormat } from "../lib/utils";
+import { sanitizeEmailHtml } from "../utils/sanitize";
+import EmailList from "../components/webmail/EmailList";
+import EmailThreadViewer from "../components/webmail/EmailThreadViewer";
+import EmailComposer from "../components/webmail/EmailComposer";
+import FolderNavigation from "../components/webmail/FolderNavigation";
+import {
+  formatFullDate,
+} from "../components/webmail/webmailFormatters";
 import {
   applyMailboxSelection,
   buildMailboxOptions,
@@ -113,47 +87,9 @@ const FOLDERS = [
   { id: "trash", label: "Lixo", icon: Trash2 },
 ];
 
-// Formatar data relativa ou absoluta
-const formatEmailDate = (dateStr) => {
-  if (!dateStr) return "";
-  try {
-    const date = new Date(dateStr);
-    if (isNaN(date.getTime())) return "";
-    if (isToday(date)) {
-      return format(date, "HH:mm", { locale: pt });
-    }
-    if (isYesterday(date)) {
-      return "ontem";
-    }
-    return format(date, "dd/MM/yyyy", { locale: pt });
-  } catch {
-    return "";
-  }
-};
-
-// Formatar data completa
-const formatFullDate = (dateStr) => {
-  if (!dateStr) return "-";
-  return safeFormat(dateStr, "dd 'de' MMMM 'de' yyyy 'às' HH:mm", { locale: pt });
-};
-
-// Formatar tamanho de ficheiro
-const formatFileSize = (bytes) => {
-  if (!bytes) return '';
-  if (bytes < 1024) return bytes + ' B';
-  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + ' KB';
-  return (bytes / (1024 * 1024)).toFixed(1) + ' MB';
-};
-
-// Ícone por tipo de ficheiro
-const getAttachmentIcon = (filename) => {
-  if (!filename) return File;
-  const lower = filename.toLowerCase();
-  if (/\.(jpg|jpeg|png|gif|bmp|webp|svg|ico|tiff?)$/i.test(lower)) return Image;
-  if (/\.(xls|xlsx|csv|ods)$/i.test(lower)) return FileSpreadsheet;
-  if (/\.(doc|docx|pdf|txt|rtf|odt)$/i.test(lower)) return FileText;
-  return File;
-};
+// Os formatadores (data, tamanho, ícone de anexo) vivem em
+// components/webmail/webmailFormatters.js — são usados por mais do que
+// um dos componentes extraídos no Épico 6.
 
 const WebmailPage = () => {
   const { token, user, effectiveRole, activeCompanyId, effectiveCompanyId } = useAuth();
@@ -263,7 +199,6 @@ const WebmailPage = () => {
   // Upload attachments state (composer)
   const [uploadAttachments, setUploadAttachments] = useState([]);
   const [uploadingFiles, setUploadingFiles] = useState(false);
-  const fileInputRef = useRef(null);
 
   // Custom folders state
   const [customFolders, setCustomFolders] = useState([]);
@@ -690,6 +625,36 @@ const WebmailPage = () => {
   const totalPages = webmailData?.pages || 1;
   // Skeleton só na 1ª carga sem cache — refetch de new_email / staleTime é silencioso
   const loading = emailsLoading;
+
+  // ── Dados derivados da coluna da lista (Épico 6) ──────────────────────
+  // O cabeçalho e o estado vazio dependem do filtro activo, que é estado
+  // DESTE contentor; o EmailList recebe-os já resolvidos, em texto.
+  const listHeaderTitle = activeCustomFolder
+    ? customFolders.find((f) => f.id === activeCustomFolder)?.name || "Pasta"
+    : selectedLabel
+    ? labels.find((l) => l.id === selectedLabel)?.name || "Marcador"
+    : FOLDERS.find((f) => f.id === activeFolder)?.label || "";
+
+  const listEmptyMessage = searchQuery
+    ? "Nenhum email encontrado"
+    : selectedLabel
+    ? "Sem emails com este marcador"
+    : "Sem emails nesta pasta";
+
+  // Dois limpadores independentes: escolher uma pasta personalizada limpa o
+  // marcador, mas escolher um marcador NÃO limpa a pasta — os dois filtros
+  // podem coexistir e cada um tem o seu X, como antes da extracção.
+  // O URL do "Novo Separador" depende da pasta e da caixa activas — estado
+  // deste contentor. O painel de leitura só recebe a acção já pronta.
+  const handleOpenEmailInNewTab = useCallback(() => {
+    if (!emailDetail?.id) return;
+    const params = new URLSearchParams({ folder: activeFolder, id: emailDetail.id });
+    if (selectedMailbox) params.set("mailbox", selectedMailbox);
+    window.open(`/webmail?${params.toString()}`, "_blank");
+  }, [emailDetail?.id, activeFolder, selectedMailbox]);
+
+  const handleClearCustomFolder = useCallback(() => setActiveCustomFolder(null), []);
+  const handleClearLabel = useCallback(() => setSelectedLabel(null), []);
 
   useEffect(() => {
     if (typeof webmailData?.unread_count === "number") {
@@ -1536,32 +1501,48 @@ const WebmailPage = () => {
     setUploadingFiles(false);
   }, [token]);
 
-  const handleDropZoneClick = useCallback(() => {
-    fileInputRef.current?.click();
+  // A canalização do upload (input escondido, clique na zona, arrastar e
+  // largar) passou para dentro do EmailComposer — é só DOM. Aqui fica o que
+  // interessa ao domínio: receber os ficheiros e carregá-los.
+  const handleComposerOpenChange = useCallback((open) => {
+    if (!open) {
+      setUploadAttachments([]);
+      setUploadingFiles(false);
+    }
+    setComposerOpen(open);
   }, []);
 
-  const handleFileInputChange = useCallback((e) => {
-    const files = e.target.files;
-    if (files && files.length > 0) {
-      uploadFiles(Array.from(files));
-    }
-    // Reset input so same file can be selected again
-    if (e.target) e.target.value = "";
-  }, [uploadFiles]);
-
-  const handleDragOver = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
+  // ── Intenções da coluna das pastas (Épico 6) ────────────────────────
+  // Cada uma destas era um punhado de `set*` encadeados dentro do onClick
+  // do JSX. Agora o componente diz o QUE aconteceu e a decisão vive aqui.
+  const handleSelectSystemFolder = useCallback((folderId) => {
+    setActiveFolder(folderId);
+    setCurrentPage(1);
+    setSelectedLabel(null);
+    setActiveCustomFolder(null);
   }, []);
 
-  const handleDrop = useCallback((e) => {
-    e.preventDefault();
-    e.stopPropagation();
-    const files = e.dataTransfer?.files;
-    if (files && files.length > 0) {
-      uploadFiles(Array.from(files));
-    }
-  }, [uploadFiles]);
+  const handleSelectLabel = useCallback((labelName) => {
+    setSelectedLabel(labelName);
+    setCurrentPage(1);
+    setActiveFolder("inbox");
+  }, []);
+
+  const handleSelectCustomFolder = useCallback((folderId) => {
+    setActiveCustomFolder(folderId);
+    setActiveFolder("inbox");
+    setCurrentPage(1);
+    setSelectedLabel(null);
+  }, []);
+
+  const handleOpenFolderMenu = useCallback((folder, posicao) => {
+    setContextMenuFolder(folder);
+    setContextMenuPosition(posicao);
+  }, []);
+
+  const handleComposerFieldChange = useCallback((campo, valor) => {
+    setComposerData((d) => ({ ...d, [campo]: valor }));
+  }, []);
 
   const handleRemoveUpload = useCallback((fileId) => {
     setUploadAttachments((prev) => prev.filter((a) => a.id !== fileId));
@@ -1579,6 +1560,16 @@ const WebmailPage = () => {
     }
     setFolderDialogOpen(true);
   }, []);
+
+  // Tem de vir DEPOIS de `handleOpenFolderDialog`: é um `const`, e uma
+  // referência na lista de dependências de um `useCallback` é avaliada no
+  // próprio render. Declarado antes, o render rebentava com
+  // "Cannot access before initialization" — a página inteira ficava em
+  // branco. Coberto por `pages/__tests__/WebmailPage.test.jsx`.
+  const handleCreateFolderFromNav = useCallback(() => {
+    setContextMenuFolder(null);
+    handleOpenFolderDialog("create");
+  }, [handleOpenFolderDialog]);
 
   const handleSaveFolder = useCallback(async () => {
     if (!folderDialogData.name.trim()) {
@@ -1850,242 +1841,39 @@ const WebmailPage = () => {
             className="min-h-0"
             id="webmail-folder-pane"
           >
-          <div
-            className="h-full border-r border-border bg-muted/30 flex flex-col overflow-hidden"
-            data-testid="webmail-folder-pane"
-          >
-            {/* Pacote DR — selector de caixa no topo da coluna 1 */}
-            <div className="p-3 space-y-2 border-b border-border">
-              <Label
-                htmlFor="webmail-mailbox-select"
-                className="text-[11px] uppercase tracking-wide text-muted-foreground"
-              >
-                A ler emails de
-              </Label>
-              <Select
-                value={mailboxValue}
-                onValueChange={handleMailboxChange}
-                disabled={isIndexacao}
-              >
-                <SelectTrigger
-                  id="webmail-mailbox-select"
-                  className="h-9 text-xs"
-                  data-testid="webmail-mailbox-select"
-                >
-                  <SelectValue placeholder="Selecionar caixa" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectGroup>
-                    <SelectLabel className="text-xs text-muted-foreground">Caixas</SelectLabel>
-                    {mailboxOptions.map((option) => (
-                      <SelectItem key={option.value || option.label} value={option.value || "personal:"}>
-                        {option.label}
-                        {option.unread > 0 ? ` (${option.unread})` : ""}
-                      </SelectItem>
-                    ))}
-                  </SelectGroup>
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Nova Mensagem */}
-            <div className="p-3 space-y-2">
-              <Button
-                className="w-full gap-2"
-                onClick={() => openComposer("new")}
-              >
-                <Plus className="h-4 w-4" />
-                Nova Mensagem
-              </Button>
-              <Button
-                variant="outline"
-                className="w-full gap-2"
-                onClick={handleSyncEmails}
-                disabled={syncing}
-              >
-                <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-                {syncing ? "A sincronizar..." : "Sincronizar"}
-              </Button>
-            </div>
-
-            <Separator />
-
-            <div className="flex-1 min-h-0 overflow-y-auto">
-            {/* Folders */}
-            <nav className="p-2 space-y-0.5">
-              {FOLDERS.map((folder) => {
-                const Icon = folder.icon;
-                const isActive = activeFolder === folder.id && !selectedLabel && !activeCustomFolder;
-                const folderLabel = folder.label;
-                return (
-                  <button
-                    key={folder.id}
-                    onClick={() => {
-                      setActiveFolder(folder.id);
-                      setCurrentPage(1);
-                      setSelectedLabel(null);
-                      setActiveCustomFolder(null);
-                    }}
-                    className={`
-                      w-full flex items-center gap-3 px-3 py-2 rounded-md text-sm
-                      transition-colors text-left
-                      ${
-                        isActive
-                          ? "bg-accent text-accent-foreground font-medium"
-                          : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                      }
-                    `}
-                  >
-                    <Icon className="h-4 w-4 shrink-0" />
-                    <span className="flex-1 truncate">{folderLabel}</span>
-                    {folderCounts[folder.id] > 0 && (
-                      <Badge
-                        variant={folder.id === "inbox" ? "default" : "secondary"}
-                        className={`h-5 min-w-[20px] flex items-center justify-center text-[10px] px-1.5 ${
-                          folder.id === "inbox" ? "bg-primary text-primary-foreground" : ""
-                        }`}
-                      >
-                        {folder.id === "inbox" ? unreadCount || folderCounts[folder.id] : folderCounts[folder.id]}
-                      </Badge>
-                    )}
-                  </button>
-                );
-              })}
-            </nav>
-
-            {/* Marcadores (Labels) */}
-            {labels.length > 0 && (
-              <>
-                <Separator />
-                <div className="px-2 pt-2 pb-1">
-                  <div className="flex items-center gap-2 px-3 py-1.5">
-                    <Tag className="h-3.5 w-3.5 text-muted-foreground" />
-                    <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                      Marcadores
-                    </span>
-                  </div>
-                  <div className="space-y-0.5">
-                    {labels.map((label) => {
-                      const isLabelActive = selectedLabel === label.name;
-                      return (
-                        <button
-                          key={label.id}
-                          onClick={() => {
-                            setSelectedLabel(isLabelActive ? null : label.name);
-                            setCurrentPage(1);
-                            setActiveFolder("inbox");
-                          }}
-                          className={`
-                            w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm
-                            transition-colors text-left
-                            ${
-                              isLabelActive
-                                ? "bg-accent text-accent-foreground font-medium"
-                                : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                            }
-                          `}
-                        >
-                          <span
-                            className="w-3 h-3 rounded-full shrink-0 border border-black/10"
-                            style={{ backgroundColor: label.color || "#6b7280" }}
-                          />
-                          <span className="flex-1 truncate">{label.name}</span>
-                        </button>
-                      );
-                    })}
-                  </div>
-                </div>
-              </>
-            )}
-
-            {/* Pastas Personalizadas */}
-            <div className="px-2 pt-1 pb-1">
-              <div className="flex items-center justify-between px-3 py-1.5">
-                <div className="flex items-center gap-2">
-                  <Folder className="h-3.5 w-3.5 text-muted-foreground" />
-                  <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">
-                    Pastas
-                  </span>
-                </div>
-                <button
-                  onClick={() => { setContextMenuFolder(null); handleOpenFolderDialog("create"); }}
-                  className="p-0.5 rounded hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
-                  title="Nova pasta"
-                >
-                  <FolderPlus className="h-3.5 w-3.5" />
-                </button>
-              </div>
-              <div className="space-y-0.5">
-                {customFolders.map((folder) => {
-                  const isFolderActive = activeCustomFolder === folder.id;
-                  return (
-                    <div key={folder.id} className="relative group">
-                      <button
-                        onClick={() => {
-                          setActiveCustomFolder(isFolderActive ? null : folder.id);
-                          setActiveFolder("inbox");
-                          setCurrentPage(1);
-                          setSelectedLabel(null);
-                        }}
-                        className={`
-                          w-full flex items-center gap-3 px-3 py-1.5 rounded-md text-sm
-                          transition-colors text-left
-                          ${
-                            isFolderActive
-                              ? "bg-accent text-accent-foreground font-medium"
-                              : "text-muted-foreground hover:bg-accent/50 hover:text-foreground"
-                          }
-                        `}
-                      >
-                        <FolderOpen className={`h-4 w-4 shrink-0 ${isFolderActive ? "text-foreground" : ""}`}
-                          style={isFolderActive ? { color: folder.color } : {}}
-                        />
-                        <span className="flex-1 truncate">{folder.name}</span>
-                        {folder.email_count > 0 && (
-                          <Badge
-                            variant="secondary"
-                            className="h-5 min-w-[20px] flex items-center justify-center text-[10px] px-1.5"
-                          >
-                            {folder.email_count}
-                          </Badge>
-                        )}
-                        {/* Context menu trigger - only visible on hover */}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setContextMenuFolder(folder);
-                            const rect = e.currentTarget.getBoundingClientRect();
-                            setContextMenuPosition({ x: rect.left, y: rect.bottom });
-                          }}
-                          className="opacity-0 group-hover:opacity-100 p-0.5 rounded hover:bg-accent/70 transition-opacity"
-                        >
-                          <MoreVertical className="h-3 w-3" />
-                        </button>
-                      </button>
-                    </div>
-                  );
-                })}
-              </div>
-            </div>
-            </div>
-
-            {/* Footer info */}
-            <div className="mt-auto p-3 border-t space-y-1">
-              <p className="text-[10px] text-muted-foreground">
-                {totalEmails} email{totalEmails !== 1 ? "s" : ""}
-              </p>
-              {lastSyncTime && (
-                <p className="text-[10px] text-muted-foreground">
-                  Última sinc: {format(lastSyncTime, "HH:mm:ss")}
-                </p>
-              )}
-            </div>
-          </div>
+            <FolderNavigation
+              folders={FOLDERS}
+              customFolders={customFolders}
+              labels={labels}
+              mailboxOptions={mailboxOptions}
+              activeFolder={activeFolder}
+              activeCustomFolder={activeCustomFolder}
+              selectedLabel={selectedLabel}
+              mailboxValue={mailboxValue}
+              mailboxLocked={isIndexacao}
+              unreadCount={unreadCount}
+              folderCounts={folderCountsData}
+              totalEmails={totalEmails}
+              lastSyncTime={lastSyncTime}
+              syncing={syncing}
+              onSelectFolder={handleSelectSystemFolder}
+              onSelectLabel={handleSelectLabel}
+              onSelectCustomFolder={handleSelectCustomFolder}
+              onOpenFolderMenu={handleOpenFolderMenu}
+              onCreateFolder={handleCreateFolderFromNav}
+              onCompose={() => openComposer("new")}
+              onSync={handleSyncEmails}
+              onMailboxChange={handleMailboxChange}
+            />
           </ResizablePanel>
 
           <ResizableHandle withHandle className="hidden md:flex" />
 
-          {/* ========== COLUMN 2: EMAIL LIST ========== */}
+          {/* ========== COLUNA 2: LISTA DE CONVERSAS ========== */}
+          {/* Extraída para components/webmail/EmailList.jsx (Épico 6).
+              O agrupamento em conversas, o tempo real e a paginação ficam
+              AQUI, no contentor; o componente só apresenta e devolve
+              intenções. */}
           <ResizablePanel
             ref={listPanelRef}
             defaultSize={32}
@@ -2096,304 +1884,27 @@ const WebmailPage = () => {
             className="min-h-0"
             id="webmail-list-pane"
           >
-          <div
-            className="h-full border-r border-border flex flex-col bg-background overflow-hidden"
-            data-testid="webmail-list-pane"
-          >
-            {/* List header */}
-            <div className="flex items-center justify-between px-3 py-2 border-b shrink-0">
-              <div className="flex items-center gap-2">
-                <h2 className="text-sm font-semibold">
-                  {activeCustomFolder
-                    ? customFolders.find((f) => f.id === activeCustomFolder)?.name || "Pasta"
-                    : selectedLabel
-                    ? labels.find((l) => l.id === selectedLabel)?.name || "Marcador"
-                    : FOLDERS.find((f) => f.id === activeFolder)?.label}
-                </h2>
-                {activeCustomFolder && (
-                  <button
-                    onClick={() => setActiveCustomFolder(null)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-                {selectedLabel && (
-                  <button
-                    onClick={() => setSelectedLabel(null)}
-                    className="text-muted-foreground hover:text-foreground"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                )}
-              </div>
-              <div className="flex items-center gap-2">
-                {multiSelectMode && (
-                  <button
-                    onClick={handleSelectAll}
-                    className="text-xs text-muted-foreground hover:text-foreground transition-colors"
-                  >
-                    {selectedEmails.size === emails.length && emails.length > 0
-                      ? "Desselecionar"
-                      : "Selecionar tudo"}
-                  </button>
-                )}
-                {totalPages > 1 && (
-                  <span className="text-xs text-muted-foreground">
-                    Página {currentPage} de {totalPages}
-                  </span>
-                )}
-              </div>
-            </div>
-
-            {/* Email list */}
-            <div className="flex-1 overflow-y-auto">
-              {loading ? (
-                // Skeleton loading
-                <div className="divide-y">
-                  {Array.from({ length: 8 }).map((_, i) => (
-                    <div key={i} className="p-3 space-y-2">
-                      <div className="flex items-center gap-2">
-                        <Skeleton className="h-3 w-3 rounded-full" />
-                        <Skeleton className="h-4 w-[140px]" />
-                        <Skeleton className="h-3 w-[40px] ml-auto" />
-                      </div>
-                      <Skeleton className="h-3.5 w-full" />
-                      <Skeleton className="h-3 w-[70%]" />
-                    </div>
-                  ))}
-                </div>
-              ) : emails.length === 0 ? (
-                // Empty state
-                <div className="flex flex-col items-center justify-center h-full text-center p-6">
-                  <MailOpen className="h-10 w-10 text-muted-foreground opacity-40 mb-3" />
-                  <p className="text-sm text-muted-foreground">
-                    {searchQuery
-                      ? "Nenhum email encontrado"
-                      : selectedLabel
-                      ? "Sem emails com este marcador"
-                      : "Sem emails nesta pasta"}
-                  </p>
-                </div>
-              ) : (
-                // Email items
-                <div className="divide-y">
-                  {emailThreads.map((thread) => {
-                    const email = thread.latest;
-                    const isThread = thread.count > 1;
-                    const isExpanded = expandedThreads.has(thread.key);
-                    const isSelected = selectedEmail?.id === email.id;
-                    const isChecked = selectedEmails.has(email.id);
-                    return (
-                      <div key={thread.key}>
-                      <div className="flex items-stretch">
-                      {/* Expandir a conversa é uma acção SEPARADA de abrir a
-                          mensagem — e um <button> não pode viver dentro de
-                          outro <button>, daí os dois lado a lado. */}
-                      {isThread && (
-                        <button
-                          type="button"
-                          onClick={() => toggleThread(thread.key)}
-                          aria-expanded={isExpanded}
-                          aria-label={isExpanded ? "Fechar conversa" : `Expandir conversa com ${thread.count} mensagens`}
-                          className="px-1.5 shrink-0 text-muted-foreground hover:text-foreground hover:bg-accent/50 transition-colors"
-                        >
-                          {isExpanded ? (
-                            <ChevronDown className="h-4 w-4" />
-                          ) : (
-                            <ChevronRight className="h-4 w-4" />
-                          )}
-                        </button>
-                      )}
-                      <button
-                        onClick={() => handleSelectEmail(email)}
-                        className={`
-                          flex-1 min-w-0 text-left p-3 transition-colors hover:bg-accent/50
-                          ${isSelected && !multiSelectMode ? "bg-accent" : ""}
-                        `}
-                      >
-                        <div className="flex items-start gap-2">
-                          {/* Multi-select checkbox */}
-                          {multiSelectMode && (
-                            <span className="mt-1 shrink-0">
-                              {isChecked ? (
-                                <CheckSquare className="h-4 w-4 text-primary" />
-                              ) : (
-                                <Square className="h-4 w-4 text-muted-foreground" />
-                              )}
-                            </span>
-                          )}
-
-                          {/* Unread dot */}
-                          {!multiSelectMode && !email.is_read && (
-                            <span className="bg-primary w-2 h-2 rounded-full mt-1.5 shrink-0" />
-                          )}
-                          {!multiSelectMode && email.is_read && <span className="w-2 shrink-0" />}
-
-                          {/* Content */}
-                          <div className="flex-1 min-w-0">
-                            {/* Top row: sender + date + indicators */}
-                            <div className="flex items-center gap-1.5">
-                              <span
-                                className={`text-sm truncate flex-1 ${
-                                  !email.is_read
-                                    ? "font-semibold text-foreground"
-                                    : "text-muted-foreground"
-                                }`}
-                              >
-                                {email.direction === "sent"
-                                  ? email.to_emails?.[0] || "Destinatário"
-                                  : safeString(email.client_name) || safeString(email.from_email) || "Remetente"}
-                              </span>
-                              {isThread && (
-                                <Badge
-                                  variant="secondary"
-                                  className="h-4 text-[10px] px-1.5 py-0 shrink-0"
-                                  title={`${thread.count} mensagens nesta conversa`}
-                                >
-                                  {thread.count}
-                                </Badge>
-                              )}
-                              <span className="text-[11px] text-muted-foreground whitespace-nowrap shrink-0">
-                                {formatEmailDate(email.sent_at)}
-                              </span>
-                            </div>
-
-                            {/* Subject */}
-                            <p
-                              className={`text-sm truncate mt-0.5 ${
-                                !email.is_read ? "font-medium" : ""
-                              }`}
-                            >
-                              {safeString(email.subject, "(Sem assunto)")}
-                            </p>
-
-                            {/* Preview + indicators */}
-                            <div className="flex items-center gap-1.5 mt-0.5 flex-wrap">
-                              <p className="text-xs text-muted-foreground truncate flex-1 min-w-0">
-                                {safeString(email.preview)}
-                              </p>
-                              {/* Label badges */}
-                              {email.labels?.length > 0 && (
-                                <span className="flex items-center gap-1 shrink-0">
-                                  {email.labels.slice(0, 2).map((lbl) => (
-                                    <span
-                                      key={lbl.id || lbl.name}
-                                      className="rounded-full px-1.5 py-0.5 text-white leading-none"
-                                      style={{
-                                        backgroundColor: lbl.color || "#6b7280",
-                                        fontSize: "10px",
-                                      }}
-                                    >
-                                      {safeString(lbl.name)}
-                                    </span>
-                                  ))}
-                                  {email.labels.length > 2 && (
-                                    <span
-                                      className="rounded-full px-1.5 py-0.5 text-muted-foreground leading-none border"
-                                      style={{ fontSize: "10px" }}
-                                    >
-                                      +{email.labels.length - 2}
-                                    </span>
-                                  )}
-                                </span>
-                              )}
-                              {/* Star */}
-                              {email.is_starred && (
-                                <Star className="h-3 w-3 text-amber-500 fill-amber-500 shrink-0" />
-                              )}
-                              {/* Attachment */}
-                              {email.attachments?.length > 0 && (
-                                <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
-                              )}
-                              {/* Process badge */}
-                              {email.process_id && (
-                                <Badge
-                                  variant="outline"
-                                  className="h-4 text-[9px] px-1 py-0 shrink-0"
-                                >
-                                  Proc.
-                                </Badge>
-                              )}
-                            </div>
-                          </div>
-                        </div>
-                      </button>
-                      </div>
-
-                      {/* Mensagens anteriores da conversa */}
-                      {isThread && isExpanded && (
-                        <div className="divide-y border-l-2 border-border ml-4 bg-muted/30">
-                          {thread.emails.slice(1).map((prev) => (
-                            <button
-                              key={prev.id}
-                              onClick={() => handleSelectEmail(prev)}
-                              className={`w-full text-left px-3 py-2 transition-colors hover:bg-accent/50 ${
-                                selectedEmail?.id === prev.id && !multiSelectMode ? "bg-accent" : ""
-                              }`}
-                            >
-                              <div className="flex items-center gap-1.5">
-                                {!prev.is_read && (
-                                  <span className="bg-primary w-1.5 h-1.5 rounded-full shrink-0" />
-                                )}
-                                <span
-                                  className={`text-xs truncate flex-1 ${
-                                    !prev.is_read ? "font-semibold text-foreground" : "text-muted-foreground"
-                                  }`}
-                                >
-                                  {prev.direction === "sent"
-                                    ? prev.to_emails?.[0] || "Destinatário"
-                                    : safeString(prev.client_name) || safeString(prev.from_email) || "Remetente"}
-                                </span>
-                                {prev.attachments?.length > 0 && (
-                                  <Paperclip className="h-3 w-3 text-muted-foreground shrink-0" />
-                                )}
-                                <span className="text-[10px] text-muted-foreground whitespace-nowrap shrink-0">
-                                  {formatEmailDate(prev.sent_at)}
-                                </span>
-                              </div>
-                              <p className="text-xs text-muted-foreground truncate mt-0.5">
-                                {safeString(prev.preview) || safeString(prev.subject, "(Sem assunto)")}
-                              </p>
-                            </button>
-                          ))}
-                        </div>
-                      )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Pagination */}
-            {totalPages > 1 && (
-              <div className="flex items-center justify-between px-3 py-2 border-t shrink-0">
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={currentPage <= 1}
-                  onClick={() => setCurrentPage((p) => p - 1)}
-                >
-                  Anterior
-                </Button>
-                <span className="text-xs text-muted-foreground">
-                  {currentPage} / {totalPages}
-                </span>
-                <Button
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 px-2 text-xs"
-                  disabled={currentPage >= totalPages}
-                  onClick={() => setCurrentPage((p) => p + 1)}
-                >
-                  Seguinte
-                </Button>
-              </div>
-            )}
-          </div>
+            <EmailList
+              threads={emailThreads}
+              loading={loading}
+              headerTitle={listHeaderTitle}
+              emptyMessage={listEmptyMessage}
+              totalEmails={emails.length}
+              selectedEmailId={selectedEmail?.id || null}
+              selectedEmails={selectedEmails}
+              multiSelectMode={multiSelectMode}
+              expandedThreads={expandedThreads}
+              currentPage={currentPage}
+              totalPages={totalPages}
+              onSelectEmail={handleSelectEmail}
+              onToggleThread={toggleThread}
+              onSelectAll={handleSelectAll}
+              onPageChange={setCurrentPage}
+              onClearFolder={activeCustomFolder ? handleClearCustomFolder : null}
+              onClearLabel={selectedLabel ? handleClearLabel : null}
+            />
           </ResizablePanel>
+
 
           <ResizableHandle withHandle className="hidden md:flex" />
 
@@ -2407,337 +1918,24 @@ const WebmailPage = () => {
             className="min-h-0"
             id="webmail-reading-pane"
           >
-          <div
-            className="h-full flex flex-col bg-background overflow-hidden"
-            data-testid="webmail-reading-pane"
-          >
-            {detailLoading ? (
-              // Loading skeleton
-              <div className="flex-1 p-5 space-y-4">
-                <Skeleton className="h-7 w-[70%]" />
-                <div className="space-y-2">
-                  <Skeleton className="h-4 w-[200px]" />
-                  <Skeleton className="h-4 w-[250px]" />
-                  <Skeleton className="h-4 w-[150px]" />
-                </div>
-                <Separator />
-                <div className="space-y-3">
-                  {Array.from({ length: 6 }).map((_, i) => (
-                    <Skeleton key={i} className="h-4 w-full" />
-                  ))}
-                  <Skeleton className="h-4 w-[80%]" />
-                  <Skeleton className="h-4 w-[60%]" />
-                </div>
-              </div>
-            ) : selectedEmail && emailDetail ? (
-              /* ===== EMAIL DETAIL ===== */
-              <div className="flex-1 flex flex-col overflow-hidden">
-                {/* Header */}
-                <div className="px-5 py-4 border-b shrink-0">
-                  {/* Subject */}
-                  <h2 className="text-lg font-semibold leading-snug break-words">
-                    {safeString(emailDetail.subject, "(Sem assunto)")}
-                  </h2>
-
-                  {/* Meta info */}
-                  <div className="mt-2 space-y-1.5 text-sm">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-muted-foreground shrink-0">De:</span>
-                      <span className="font-medium truncate">
-                        {safeString(emailDetail.from_email, "-")}
-                      </span>
-                    </div>
-                    <div className="flex items-center gap-2 min-w-0">
-                      <span className="text-muted-foreground shrink-0">Para:</span>
-                      <span className="truncate">
-                        {emailDetail.to_emails?.join(", ") || "-"}
-                      </span>
-                    </div>
-                    {emailDetail.cc_emails?.length > 0 && (
-                      <div className="flex items-center gap-2 min-w-0">
-                        <span className="text-muted-foreground shrink-0">CC:</span>
-                        <span className="truncate">
-                          {emailDetail.cc_emails.join(", ")}
-                        </span>
-                      </div>
-                    )}
-                    <div className="flex items-center gap-2 text-muted-foreground">
-                      <span>Data:</span>
-                      <span>{formatFullDate(emailDetail.sent_at)}</span>
-                    </div>
-                    {/* Label badges on detail */}
-                    {emailDetail.labels?.length > 0 && (
-                      <div className="flex items-center gap-1.5 flex-wrap pt-1">
-                        {emailDetail.labels.map((lbl) => (
-                          <span
-                            key={lbl.id || lbl.name}
-                            className="rounded-full px-2 py-0.5 text-white leading-none"
-                            style={{
-                              backgroundColor: lbl.color || "#6b7280",
-                              fontSize: "11px",
-                            }}
-                          >
-                            {safeString(lbl.name)}
-                          </span>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-
-                  {/* Action buttons */}
-                  <div className="flex items-center gap-1.5 mt-3 flex-wrap">
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={() => openComposer("reply", emailDetail)}
-                    >
-                      <Reply className="h-3.5 w-3.5" />
-                      Responder
-                    </Button>
-                    {/* "Responder a Todos" só faz sentido quando há mais
-                        alguém na conversa além de nós e do remetente. */}
-                    {replyAllRecipientCount > 1 && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs gap-1.5"
-                        onClick={() => openComposer("reply_all", emailDetail)}
-                      >
-                        <ReplyAll className="h-3.5 w-3.5" />
-                        Responder a Todos
-                      </Button>
-                    )}
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={() => openComposer("forward", emailDetail)}
-                    >
-                      <Forward className="h-3.5 w-3.5" />
-                      Encaminhar
-                    </Button>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="h-8 text-xs gap-1.5"
-                      onClick={() => handleToggleRead(emailDetail)}
-                    >
-                      {emailDetail.is_read === false ? (
-                        <><MailOpen className="h-3.5 w-3.5" />Marcar como lida</>
-                      ) : (
-                        <><Mail className="h-3.5 w-3.5" />Marcar como não lida</>
-                      )}
-                    </Button>
-                    {/* PACOTE 8 — abrir a visualização do email num novo separador */}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 text-xs gap-1.5"
-                          onClick={() => {
-                            const params = new URLSearchParams({
-                              folder: activeFolder,
-                              id: emailDetail.id,
-                            });
-                            if (selectedMailbox) {
-                              params.set("mailbox", selectedMailbox);
-                            }
-                            window.open(`/webmail?${params.toString()}`, "_blank");
-                          }}
-                          aria-label="Abrir email num novo separador"
-                        >
-                          <ExternalLink className="h-3.5 w-3.5" />
-                          Novo Separador
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Abrir email num novo separador</TooltipContent>
-                    </Tooltip>
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className={`h-8 w-8 p-0 ${
-                            emailDetail.is_starred
-                              ? "text-amber-500"
-                              : "text-muted-foreground"
-                          }`}
-                          onClick={(e) => handleToggleStar(emailDetail, e)}
-                        >
-                          <Star
-                            className={`h-3.5 w-3.5 ${
-                              emailDetail.is_starred ? "fill-amber-500" : ""
-                            }`}
-                          />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>
-                        {emailDetail.is_starred ? "Remover destaque" : "Destacar"}
-                      </TooltipContent>
-                    </Tooltip>
-                    {emailDetail.process_id ? (
-                      <Badge
-                        variant="secondary"
-                        className="h-8 text-xs gap-1.5 cursor-pointer hover:bg-accent"
-                        onClick={() => navigate(`/processo/${emailDetail.process_id}`)}
-                      >
-                        <Link2 className="h-3.5 w-3.5" />
-                        {safeString(emailDetail.client_name) || safeString(emailDetail.process_id)} Associado
-                      </Badge>
-                    ) : (
-                      <Tooltip>
-                        <TooltipTrigger asChild>
-                          <Button
-                            variant="outline"
-                            size="sm"
-                            className="h-8 text-xs gap-1.5"
-                            onClick={handleOpenLinkDialog}
-                          >
-                            <Link2 className="h-3.5 w-3.5" />
-                            Ligar a Processo
-                          </Button>
-                        </TooltipTrigger>
-                        <TooltipContent>Ligar a Processo</TooltipContent>
-                      </Tooltip>
-                    )}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <button
-                          onClick={() => setMoveFolderOpen(true)}
-                          className="p-1.5 rounded-md hover:bg-accent/50 text-muted-foreground hover:text-foreground transition-colors"
-                          title="Mover para pasta"
-                        >
-                          <FolderInput className="h-4 w-4" />
-                        </button>
-                      </TooltipTrigger>
-                      <TooltipContent>Mover para pasta</TooltipContent>
-                    </Tooltip>
-                    {emailDetail.process_id && (
-                      <Button
-                        variant="outline"
-                        size="sm"
-                        className="h-8 text-xs gap-1.5"
-                        onClick={() => navigate(`/processo/${emailDetail.process_id}`)}
-                      >
-                        <FileText className="h-3.5 w-3.5" />
-                        Ver Processo
-                      </Button>
-                    )}
-                    <Tooltip>
-                      <TooltipTrigger asChild>
-                        <Button
-                          variant="outline"
-                          size="sm"
-                          className="h-8 w-8 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                          onClick={handleDeleteSingle}
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </TooltipTrigger>
-                      <TooltipContent>Eliminar email</TooltipContent>
-                    </Tooltip>
-                  </div>
-                </div>
-
-                {/* Body */}
-                <ScrollArea className="flex-1">
-                  <div className="p-5">
-                    {sanitizedBodyHtml ? (
-                      <iframe
-                        srcDoc={sanitizedBodyHtml}
-                        className="w-full border-0 rounded-md"
-                        style={{ minHeight: "200px", maxHeight: "600px" }}
-                        title="Email content"
-                        sandbox="allow-same-origin"
-                        onLoad={(e) => {
-                          const doc = e.target.contentDocument;
-                          if (doc) {
-                            const h = doc.body?.scrollHeight || 200;
-                            e.target.style.height = Math.min(h + 20, 600) + "px";
-                          }
-                        }}
-                      />
-                    ) : (
-                      <pre className="whitespace-pre-wrap font-sans text-sm">
-                        {emailDetail.body || ""}
-                      </pre>
-                    )}
-
-                    {/* Attachments - Visual Cards */}
-                    {emailDetail.attachments?.length > 0 && (
-                      <div className="mt-6 pt-4 border-t">
-                        <h4 className="font-medium text-sm flex items-center gap-2 mb-3">
-                          <Paperclip className="h-4 w-4" />
-                          Anexos ({emailDetail.attachments.length})
-                        </h4>
-                        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                          {emailDetail.attachments.map((attachment, idx) => {
-                            const AttIcon = getAttachmentIcon(attachment.filename);
-                            return (
-                              <div
-                                key={attachment.id || idx}
-                                className="flex items-center gap-3 p-3 rounded-lg border bg-muted/20 hover:bg-muted/40 transition-colors group"
-                              >
-                                <div className="h-9 w-9 rounded-md bg-muted flex items-center justify-center shrink-0">
-                                  <AttIcon className="h-4 w-4 text-muted-foreground" />
-                                </div>
-                                <div className="flex-1 min-w-0">
-                                  <p className="text-sm font-medium truncate">
-                                    {attachment.filename || attachment.file_name || `Anexo ${idx + 1}`}
-                                  </p>
-                                  {(attachment.size || attachment.file_size) && (
-                                    <p className="text-xs text-muted-foreground mt-0.5">
-                                      {formatFileSize(attachment.size || attachment.file_size)}
-                                    </p>
-                                  )}
-                                </div>
-                                <Tooltip>
-                                  <TooltipTrigger asChild>
-                                    <Button
-                                      type="button"
-                                      variant="outline"
-                                      size="icon"
-                                      className="h-8 w-8 shrink-0"
-                                      disabled={downloadingAttachmentId === (attachment.id || `${emailDetail.id}:${idx}`)}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        handleDownloadAttachment(attachment, idx);
-                                      }}
-                                      aria-label={`Abrir ${attachment.filename || "anexo"} num novo separador`}
-                                    >
-                                      {downloadingAttachmentId === (attachment.id || `${emailDetail.id}:${idx}`) ? (
-                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                                      ) : (
-                                        <ExternalLink className="h-3.5 w-3.5" />
-                                      )}
-                                    </Button>
-                                  </TooltipTrigger>
-                                  <TooltipContent>Abrir num novo separador</TooltipContent>
-                                </Tooltip>
-                              </div>
-                            );
-                          })}
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                </ScrollArea>
-              </div>
-            ) : (
-              /* ===== EMPTY STATE ===== */
-              <div className="flex-1 flex flex-col items-center justify-center text-center p-6">
-                <Mail className="h-14 w-14 text-muted-foreground opacity-30 mb-4" />
-                <p className="text-muted-foreground text-sm">
-                  Selecione um email para visualizar
-                </p>
-                <p className="text-xs text-muted-foreground mt-1">
-                  Clique num email da lista à esquerda
-                </p>
-              </div>
-            )}
-          </div>
+            <EmailThreadViewer
+              email={selectedEmail && emailDetail ? emailDetail : null}
+              loading={detailLoading}
+              sanitizedBodyHtml={sanitizedBodyHtml}
+              replyAllRecipientCount={replyAllRecipientCount}
+              downloadingAttachmentId={downloadingAttachmentId}
+              onReply={() => openComposer("reply", emailDetail)}
+              onReplyAll={() => openComposer("reply_all", emailDetail)}
+              onForward={() => openComposer("forward", emailDetail)}
+              onToggleRead={() => handleToggleRead(emailDetail)}
+              onToggleStar={(e) => handleToggleStar(emailDetail, e)}
+              onLinkToProcess={handleOpenLinkDialog}
+              onMoveToFolder={() => setMoveFolderOpen(true)}
+              onDelete={handleDeleteSingle}
+              onOpenProcess={() => navigate(`/processo/${emailDetail?.process_id}`)}
+              onOpenInNewTab={handleOpenEmailInNewTab}
+              onDownloadAttachment={handleDownloadAttachment}
+            />
           </ResizablePanel>
           </ResizablePanelGroup>
         </div>
@@ -2791,274 +1989,30 @@ const WebmailPage = () => {
           </div>
         )}
 
-        {/* ===== EMAIL COMPOSER DIALOG ===== */}
-        <Dialog open={composerOpen} onOpenChange={(open) => {
-          if (!open) {
-            setUploadAttachments([]);
-            setUploadingFiles(false);
-          }
-          setComposerOpen(open);
-        }}>
-          <DialogContent className="max-w-2xl max-h-[90vh] flex flex-col gap-0 p-0 overflow-hidden">
-            <DialogHeader className="px-6 pt-5 pb-3">
-              <DialogTitle>
-                Nova Mensagem
-              </DialogTitle>
-              <DialogDescription>
-                Componha e envie um email
-              </DialogDescription>
-            </DialogHeader>
+        {/* ===== COMPOSITOR ===== */}
+        {/* components/webmail/EmailComposer.jsx (Épico 6). Componente
+            controlado: o rascunho e o envio vivem aqui. */}
+        <EmailComposer
+          open={composerOpen}
+          data={composerData}
+          sending={composerSending}
+          ccExpanded={ccExpanded}
+          bccExpanded={bccExpanded}
+          attachments={uploadAttachments}
+          uploading={uploadingFiles}
+          canUseGlobalAccounts={canUseGlobalAccounts}
+          effectiveRole={effectiveRole}
+          resolvedSignature={resolvedSignature}
+          onOpenChange={handleComposerOpenChange}
+          onFieldChange={handleComposerFieldChange}
+          onToggleCc={setCcExpanded}
+          onToggleBcc={setBccExpanded}
+          onSend={handleSendEmail}
+          onCancel={() => setComposerOpen(false)}
+          onUploadFiles={uploadFiles}
+          onRemoveAttachment={handleRemoveUpload}
+        />
 
-            <div className="flex-1 overflow-y-auto px-6 space-y-3 pb-4">
-              {/* To */}
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium w-12 shrink-0">Para:</label>
-                <Input
-                  placeholder="email@exemplo.com"
-                  value={composerData.to_emails}
-                  onChange={(e) =>
-                    setComposerData((d) => ({ ...d, to_emails: e.target.value }))
-                  }
-                  className="flex-1"
-                />
-              </div>
-
-              {/* CC (collapsible) */}
-              <Collapsible open={ccExpanded} onOpenChange={setCcExpanded}>
-                <CollapsibleTrigger asChild>
-                  <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                    {ccExpanded ? (
-                      <ChevronDown className="h-3 w-3" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3" />
-                    )}
-                    {ccExpanded ? "Ocultar CC" : "Mostrar CC"}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium w-12 shrink-0">CC:</label>
-                    <Input
-                      placeholder="email@exemplo.com (separar por vírgulas)"
-                      value={composerData.cc_emails}
-                      onChange={(e) =>
-                        setComposerData((d) => ({ ...d, cc_emails: e.target.value }))
-                      }
-                      className="flex-1"
-                    />
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-
-              {/* BCC (collapsible) — PACOTE 12 (Eixo 2): cópia oculta,
-                  espelhando a linha do CC */}
-              <Collapsible open={bccExpanded} onOpenChange={setBccExpanded}>
-                <CollapsibleTrigger asChild>
-                  <button className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-                    {bccExpanded ? (
-                      <ChevronDown className="h-3 w-3" />
-                    ) : (
-                      <ChevronRight className="h-3 w-3" />
-                    )}
-                    {bccExpanded ? "Ocultar BCC" : "Mostrar BCC"}
-                  </button>
-                </CollapsibleTrigger>
-                <CollapsibleContent className="mt-2">
-                  <div className="flex items-center gap-2">
-                    <label className="text-sm font-medium w-12 shrink-0">BCC:</label>
-                    <Input
-                      placeholder="email@exemplo.com (separar por vírgulas)"
-                      value={composerData.bcc_emails}
-                      onChange={(e) =>
-                        setComposerData((d) => ({ ...d, bcc_emails: e.target.value }))
-                      }
-                      className="flex-1"
-                    />
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
-
-              {/* Subject */}
-              <div className="flex items-center gap-2">
-                <label className="text-sm font-medium w-12 shrink-0">
-                  Assunto:
-                </label>
-                <Input
-                  placeholder="Assunto do email"
-                  value={composerData.subject}
-                  onChange={(e) =>
-                    setComposerData((d) => ({ ...d, subject: e.target.value }))
-                  }
-                  className="flex-1"
-                />
-              </div>
-
-              {/* Account — só visível para perfis que podem usar contas globais
-                  (admin/CEO/diretor). Os restantes perfis enviam sempre pela sua
-                  conta pessoal (o backend força "personal"), pelo que o seletor
-                  não deve aparecer — o utilizador só tem uma conta útil. */}
-              {canUseGlobalAccounts ? (
-                <div className="flex items-center gap-2">
-                  <label className="text-sm font-medium w-12 shrink-0">Conta:</label>
-                  <Select
-                    value={composerData.account}
-                    onValueChange={(v) =>
-                      setComposerData((d) => ({ ...d, account: v }))
-                    }
-                  >
-                    <SelectTrigger className="flex-1">
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="precision">Precision Crédito</SelectItem>
-                      <SelectItem value="power">Power Real Estate</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              ) : (
-                <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                  <Mail className="h-3.5 w-3.5 shrink-0" />
-                  <span>
-                    {effectiveRole === 'indexacao'
-                      ? 'Envio pela conta partilhada de Indexação.'
-                      : 'Envio pela sua conta pessoal — configure em Perfil > Configuração de Webmail.'}
-                  </span>
-                </div>
-              )}
-
-              {/* Drag & Drop upload zone */}
-              <div
-                onClick={handleDropZoneClick}
-                onDragOver={handleDragOver}
-                onDrop={handleDrop}
-                className={`
-                  border-2 border-dashed rounded-lg p-4 text-center cursor-pointer
-                  transition-colors
-                  ${uploadingFiles
-                    ? "border-primary/50 bg-primary/5"
-                    : "border-muted-foreground/25 hover:border-muted-foreground/50 hover:bg-muted/30"
-                  }
-                `}
-              >
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  multiple
-                  className="hidden"
-                  onChange={handleFileInputChange}
-                />
-                {uploadingFiles ? (
-                  <div className="flex items-center justify-center gap-2 text-sm text-muted-foreground">
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                    A carregar ficheiro(s)...
-                  </div>
-                ) : (
-                  <div className="flex flex-col items-center gap-1.5">
-                    <Upload className="h-5 w-5 text-muted-foreground" />
-                    <p className="text-sm text-muted-foreground">
-                      Arraste ficheiros aqui ou clique para selecionar
-                    </p>
-                  </div>
-                )}
-              </div>
-
-              {/* Uploaded files list — PACOTE 12 (Eixo 2): o upload devolve
-                  file_name/file_size (backend); chips aceitam ambos os
-                  formatos (filename/size legado incluído) */}
-              {uploadAttachments.length > 0 && (
-                <div className="space-y-1.5">
-                  {uploadAttachments.map((file) => {
-                    const displayName = file.filename || file.file_name;
-                    const displaySize = file.size ?? file.file_size;
-                    const UpIcon = getAttachmentIcon(displayName);
-                    return (
-                      <div
-                        key={file.id}
-                        className="flex items-center gap-2 p-2 rounded-md border bg-muted/20"
-                      >
-                        <UpIcon className="h-4 w-4 text-muted-foreground shrink-0" />
-                        <span className="flex-1 text-sm truncate">
-                          {displayName || "Ficheiro"}
-                        </span>
-                        {displaySize ? (
-                          <span className="text-xs text-muted-foreground shrink-0">
-                            {formatFileSize(displaySize)}
-                          </span>
-                        ) : null}
-                        <button
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            handleRemoveUpload(file.id);
-                          }}
-                          className="h-5 w-5 rounded-full hover:bg-accent flex items-center justify-center text-muted-foreground hover:text-foreground shrink-0 transition-colors"
-                        >
-                          <X className="h-3 w-3" />
-                        </button>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-
-              {/* Body */}
-              <div>
-                <Textarea
-                  placeholder="Escreva a sua mensagem..."
-                  value={composerData.body}
-                  onChange={(e) =>
-                    setComposerData((d) => ({ ...d, body: e.target.value }))
-                  }
-                  className="min-h-[200px] resize-y"
-                  rows={12}
-                />
-                {/* Pré-visualização da assinatura que será anexada automaticamente
-                    pelo backend ao enviar. Cada user pode ter uma assinatura por
-                    empresa (UCR) — mostra a da empresa ativa ou a global. */}
-                {resolvedSignature && htmlToText(resolvedSignature).trim() ? (
-                  <div className="mt-2 rounded-md border border-dashed border-muted-foreground/30 bg-muted/20 p-3">
-                    <div className="flex items-center gap-1.5 mb-1.5 text-xs font-medium text-muted-foreground">
-                      <Mail className="h-3.5 w-3.5" />
-                      Assinatura (anexada automaticamente no envio)
-                    </div>
-                    <div
-                      className="text-xs text-muted-foreground/90 prose prose-sm max-w-none [&_a]:text-primary [&_img]:max-w-full [&_img]:h-auto [&_p]:my-1"
-                      dangerouslySetInnerHTML={{
-                        __html: sanitizeEmailHtml(resolvedSignature),
-                      }}
-                    />
-                  </div>
-                ) : (
-                  <p className="mt-2 text-xs text-muted-foreground/70">
-                    Sem assinatura configurada — pode definir a sua em Perfil &gt; Assinatura de Email.
-                  </p>
-                )}
-              </div>
-            </div>
-
-            <DialogFooter className="px-6 py-3 border-t shrink-0">
-              <Button
-                variant="ghost"
-                onClick={() => setComposerOpen(false)}
-                disabled={composerSending}
-              >
-                Cancelar
-              </Button>
-              <Button onClick={handleSendEmail} disabled={composerSending}>
-                {composerSending ? (
-                  <>
-                    <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    A enviar...
-                  </>
-                ) : (
-                  <>
-                    <Send className="h-4 w-4 mr-2" />
-                    Enviar
-                  </>
-                )}
-              </Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
 
         {/* ===== LINK TO PROCESS DIALOG ===== */}
         <Dialog open={linkDialogOpen} onOpenChange={setLinkDialogOpen}>

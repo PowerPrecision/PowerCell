@@ -451,6 +451,37 @@ async def run_ai_analyze_documents(
     file_paths: list[str] | None = None,
 ) -> dict[str, Any]:
     """Analisa múltiplos documentos com IA e devolve comparação/sugestões."""
+    documents = await _read_upload_files(files, file_paths=file_paths)
+    return await run_analysis_on_documents(process_id, documents, user=user)
+
+
+async def run_analysis_on_documents(
+    process_id: str,
+    documents: list[dict],
+    *,
+    user: dict,
+    skip_analyzed: bool = True,
+) -> dict[str, Any]:
+    """Analisa documentos já lidos para memória e devolve comparação/sugestões.
+
+    É o tronco comum a dois caminhos que só diferem na ORIGEM dos bytes:
+    o upload multipart de `/documents/ai-analyze` e a leitura directa do S3
+    de `/processes/{id}/documents/extract` (Épico 9). O formato da resposta
+    é o mesmo nos dois — é o contrato que o `AIReviewDialog` já consome e
+    que o `/ai-apply-suggestions` sabe aplicar; duplicá-lo daria duas UIs
+    a fazer o mesmo.
+
+    Args:
+        process_id: Processo a que os documentos pertencem.
+        documents: `[{content, name, mime_type, source_path}]`.
+        user: Utilizador autenticado (para o log de importação).
+        skip_analyzed: Participa na contabilidade `ai_analyzed` — salta os
+            documentos já marcados E marca os que analisa. Verdadeiro na
+            análise em lote (não repetir trabalho já feito); FALSO na
+            extracção por ficheiro, onde o consultor pediu explicitamente
+            aquele ficheiro (um silêncio seria incompreensível) e onde nada
+            foi aplicado à ficha (marcar esconderia o documento do lote).
+    """
     start_time = time.time()
 
     try:
@@ -486,10 +517,11 @@ async def run_ai_analyze_documents(
         except Exception as e:
             logger.warning(f"Erro ao criar log de importação: {e}")
 
-    documents = await _read_upload_files(files, file_paths=file_paths)
-    documents, skipped_analyzed = await _filter_already_analyzed_documents(
-        process_id, documents
-    )
+    skipped_analyzed = 0
+    if skip_analyzed:
+        documents, skipped_analyzed = await _filter_already_analyzed_documents(
+            process_id, documents
+        )
 
     if not documents:
         if log_id and finalize_ai_import_log:
@@ -540,13 +572,20 @@ async def run_ai_analyze_documents(
         process, extracted_data, document_types, results
     )
 
-    try:
-        marked = await _mark_documents_ai_analyzed(
-            process_id, client_name, documents, document_types
-        )
-    except Exception as e:
-        logger.warning(f"Erro ao marcar documentos como analisados: {e}")
-        marked = 0
+    # Marcar só no caminho que também SALTA analisados: as duas coisas são a
+    # mesma política de contabilidade ("este documento já foi tratado").
+    # Na extracção por ficheiro (Épico 9) nada foi aplicado à ficha — marcar
+    # aqui faria o documento ser saltado para sempre pela análise em lote
+    # depois de o consultor fechar o diálogo sem confirmar.
+    marked = 0
+    if skip_analyzed:
+        try:
+            marked = await _mark_documents_ai_analyzed(
+                process_id, client_name, documents, document_types
+            )
+        except Exception as e:
+            logger.warning(f"Erro ao marcar documentos como analisados: {e}")
+            marked = 0
 
     total_duration = int((time.time() - start_time) * 1000)
     if log_id and finalize_ai_import_log:

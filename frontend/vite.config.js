@@ -160,6 +160,37 @@ export default defineConfig(({ mode }) => {
       // Note: NODE_ENV is set by Vite automatically based on mode
     },
 
+    // ── VITEST (Épico 6) ───────────────────────────────────────────────
+    // Vive aqui, e não num vitest.config.js separado, para herdar o que o
+    // build já define e que os testes PRECISAM: o alias `@`, o `define` do
+    // process.env e — sobretudo — o loader JSX para ficheiros `.js` (neste
+    // projecto há JSX dentro de `.js`, herança do CRA). Duplicar isso num
+    // segundo ficheiro seria a próxima fonte de divergência silenciosa.
+    test: {
+      environment: 'jsdom',
+      globals: true,
+      setupFiles: ['./src/test/setup.js'],
+      css: false,
+      include: ['src/**/*.{test,spec}.{js,jsx}'],
+      exclude: ['node_modules/**', 'dist/**', 'e2e/**', 'plugins/**'],
+      alias: {
+        // Os 276 testes de utilitários importam de `node:test`. Sem esta
+        // ponte registavam-se no corredor do Node e o Vitest não via nada.
+        // Só no ambiente de teste — o build não conhece este alias.
+        'node:test': new URL('./src/test/nodeTestShim.js', import.meta.url).pathname,
+      },
+      coverage: {
+        provider: 'v8',
+        reporter: ['text', 'html', 'lcov'],
+        include: ['src/**/*.{js,jsx}'],
+        exclude: [
+          'src/**/*.{test,spec}.{js,jsx}',
+          'src/test/**',
+          'src/components/ui/**',
+        ],
+      },
+    },
+
     // CSS configuration
     css: {
       devSourcemap: true,

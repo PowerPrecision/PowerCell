@@ -248,21 +248,34 @@ class FakeAsyncCollection:
         for path, value in set_ops.items():
             FakeAsyncCollection._set_path(doc, path, value)
 
+    def _apply_inc(self, doc: dict, inc_ops: dict):
+        """``$inc`` — contadores acumulados (Lote 4, ponto 14: o batimento
+        dos jobs conta execuções e falhas com `run_count`/`failure_count`).
+
+        Como no Mongo real, um campo ausente começa em zero.
+        """
+        for campo, delta in (inc_ops or {}).items():
+            actual = self._lookup_path(doc, campo)
+            self._apply_set(doc, {campo: (actual or 0) + delta})
+
+    def _apply_update(self, doc: dict, update: dict):
+        self._apply_set(doc, update.get("$set", {}))
+        push_ops = update.get("$push")
+        if push_ops:
+            self._apply_push(doc, push_ops)
+        inc_ops = update.get("$inc")
+        if inc_ops:
+            self._apply_inc(doc, inc_ops)
+
     async def update_one(self, query: dict, update: dict, upsert: bool = False):
         matched = [doc for doc in self.docs if self._matches(doc, query)]
         for doc in matched:
-            self._apply_set(doc, update.get("$set", {}))
-            push_ops = update.get("$push")
-            if push_ops:
-                self._apply_push(doc, push_ops)
+            self._apply_update(doc, update)
         if matched:
             return MagicMock(matched_count=len(matched), modified_count=len(matched))
         if upsert:
             new_doc = dict(query)
-            self._apply_set(new_doc, update.get("$set", {}))
-            push_ops = update.get("$push")
-            if push_ops:
-                self._apply_push(new_doc, push_ops)
+            self._apply_update(new_doc, update)
             self.docs.append(new_doc)
             return MagicMock(matched_count=0, modified_count=0, upserted_id="fake-upserted-id")
         return MagicMock(matched_count=0, modified_count=0)

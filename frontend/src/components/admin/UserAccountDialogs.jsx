@@ -3,10 +3,14 @@
  * Usados pela tab Utilizadores do painel de Administração.
  */
 import { useEffect, useState } from "react";
-import { Copy, Eye, EyeOff, Loader2, RefreshCw } from "lucide-react";
+import { Copy, Eye, EyeOff, Loader2, Plus, RefreshCw, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 import { generateTempPassword } from "../../utils/organizationAdmin";
-import { PRIMARY_ROLE_OPTIONS, ROLE_LABELS } from "../../utils/roleUtils";
+import {
+  PRIMARY_ROLE_OPTIONS,
+  ROLE_LABELS,
+  UCR_ASSIGNABLE_ROLES,
+} from "../../utils/roleUtils";
 import { Button } from "../ui/button";
 import {
   Dialog,
@@ -108,14 +112,52 @@ function PasswordField({
   );
 }
 
-export function UserCreateDialog({ open, onOpenChange, onSubmit, saving }) {
+const LINHA_DE_ACESSO_VAZIA = { company_id: "", role: "" };
+
+/**
+ * Atribuição Rápida (Lote 4, ponto 11).
+ *
+ * `companies` é a lista de empresas já carregada pelo separador — o
+ * diálogo não a vai buscar sozinho para não duplicar a query.
+ */
+export function UserCreateDialog({
+  open,
+  onOpenChange,
+  onSubmit,
+  saving,
+  companies = [],
+}) {
   const [form, setForm] = useState({ ...EMPTY_USER_FORM });
+  const [acessos, setAcessos] = useState([{ ...LINHA_DE_ACESSO_VAZIA }]);
   const isParceiro = form.role === "parceiro";
+  const semEmpresas = companies.length === 0;
+
+  const limpar = () => {
+    setForm({ ...EMPTY_USER_FORM });
+    setAcessos([{ ...LINHA_DE_ACESSO_VAZIA }]);
+  };
 
   const handleOpenChange = (next) => {
-    if (!next) setForm({ ...EMPTY_USER_FORM });
+    if (!next) limpar();
     onOpenChange(next);
   };
+
+  const actualizarAcesso = (indice, campo, valor) =>
+    setAcessos((anteriores) =>
+      anteriores.map((linha, i) =>
+        i === indice ? { ...linha, [campo]: valor } : linha,
+      ),
+    );
+
+  const acrescentarAcesso = () =>
+    setAcessos((anteriores) => [...anteriores, { ...LINHA_DE_ACESSO_VAZIA }]);
+
+  const removerAcesso = (indice) =>
+    setAcessos((anteriores) =>
+      anteriores.length === 1
+        ? anteriores
+        : anteriores.filter((_, i) => i !== indice),
+    );
 
   const handleSubmit = async (e) => {
     e.preventDefault();
@@ -125,10 +167,33 @@ export function UserCreateDialog({ open, onOpenChange, onSubmit, saving }) {
       phone: form.phone.trim(),
       role: form.role,
     };
-    if (!isParceiro) payload.password = form.password;
+
+    if (!isParceiro) {
+      payload.password = form.password;
+
+      // Empresa ESTRITAMENTE obrigatória. A mesma guarda existe no
+      // backend; aqui poupa-se a ida e volta e diz-se porquê.
+      const escolhidas = acessos.filter((linha) => linha.company_id);
+      if (escolhidas.length === 0) {
+        toast.error(
+          "Associe pelo menos uma empresa. Só os parceiros podem ficar sem empresa.",
+        );
+        return;
+      }
+      payload.companies = escolhidas.map((linha, indice) => ({
+        company_id: linha.company_id,
+        company_name:
+          companies.find((c) => String(c.id) === String(linha.company_id))?.name ||
+          "",
+        // Sem cargo explícito, herda o perfil principal da conta.
+        role: linha.role || form.role,
+        is_default: indice === 0,
+      }));
+    }
+
     const ok = await onSubmit(payload);
     if (ok) {
-      setForm({ ...EMPTY_USER_FORM });
+      limpar();
       onOpenChange(false);
     }
   };
@@ -139,7 +204,8 @@ export function UserCreateDialog({ open, onOpenChange, onSubmit, saving }) {
         <DialogHeader>
           <DialogTitle>Novo utilizador</DialogTitle>
           <DialogDescription>
-            Crie a conta. Os acessos por empresa (UCR) definem-se depois em Gerir Acessos.
+            Crie a conta e associe já a empresa e o cargo. Pode acrescentar
+            mais acessos depois em Gerir Acessos.
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="space-y-4">
@@ -202,6 +268,90 @@ export function UserCreateDialog({ open, onOpenChange, onSubmit, saving }) {
               </p>
             ) : null}
           </div>
+          {!isParceiro ? (
+            <div className="space-y-2">
+              <Label>
+                Empresa e cargo <span className="text-destructive">*</span>
+              </Label>
+              {semEmpresas ? (
+                <p className="text-xs text-destructive">
+                  Não há empresas configuradas. Crie uma empresa antes de
+                  criar utilizadores — uma conta sem empresa não é visível
+                  em lado nenhum.
+                </p>
+              ) : (
+                <>
+                  {acessos.map((linha, indice) => (
+                    <div key={indice} className="flex items-end gap-2">
+                      <div className="flex-1 space-y-1">
+                        <Select
+                          value={linha.company_id}
+                          onValueChange={(valor) =>
+                            actualizarAcesso(indice, "company_id", valor)
+                          }
+                        >
+                          <SelectTrigger data-testid={`user-create-company-${indice}`}>
+                            <SelectValue placeholder="Empresa" />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {companies.map((empresa) => (
+                              <SelectItem key={empresa.id} value={String(empresa.id)}>
+                                {empresa.name}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="flex-1 space-y-1">
+                        <Select
+                          value={linha.role}
+                          onValueChange={(valor) =>
+                            actualizarAcesso(indice, "role", valor)
+                          }
+                        >
+                          <SelectTrigger data-testid={`user-create-role-${indice}`}>
+                            <SelectValue
+                              placeholder={ROLE_LABELS[form.role] || form.role}
+                            />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {UCR_ASSIGNABLE_ROLES.map((cargo) => (
+                              <SelectItem key={cargo} value={cargo}>
+                                {ROLE_LABELS[cargo] || cargo}
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        aria-label="Remover empresa"
+                        disabled={acessos.length === 1}
+                        onClick={() => removerAcesso(indice)}
+                      >
+                        <Trash2 className="h-4 w-4" aria-hidden="true" />
+                      </Button>
+                    </div>
+                  ))}
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    onClick={acrescentarAcesso}
+                  >
+                    <Plus className="h-4 w-4 mr-1" aria-hidden="true" />
+                    Acrescentar empresa
+                  </Button>
+                  <p className="text-xs text-muted-foreground">
+                    Sem cargo escolhido, cada acesso herda o perfil principal.
+                    A primeira empresa é a que carrega no login.
+                  </p>
+                </>
+              )}
+            </div>
+          ) : null}
           {!isParceiro ? (
             <PasswordField
               value={form.password}

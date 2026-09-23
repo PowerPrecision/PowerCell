@@ -15,6 +15,11 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
+from services.task_assignment_hygiene import (
+    ids_atribuidos_do_processo,
+    limpar_tarefas_orfas,
+    marcar_reatribuidas,
+)
 from models.auth import UserRole
 
 logger = logging.getLogger(__name__)
@@ -619,6 +624,8 @@ async def run_staff_assign_process(
     if not process:
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
+    equipa_antes = ids_atribuidos_do_processo(process)
+
     update_data, newly = await build_staff_assign_update(
         process=process,
         process_id=process_id,
@@ -636,6 +643,19 @@ async def run_staff_assign_process(
     await invalidate_stats_fn(user_id=user.get("id"))
 
     updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+
+    # Atribuição Fantasma (ponto 12): ninguém limpava as tarefas quando a
+    # atribuição mudava, e as tarefas de arranque de quem saía ficavam num
+    # processo que já não tinha ninguém atribuído. O diff é feito sobre o
+    # ANTES e o DEPOIS reais do documento — não sobre o que o construtor
+    # da query julga ter mudado.
+    equipa_depois = ids_atribuidos_do_processo(updated_process)
+    removidos = equipa_antes - equipa_depois
+    if removidos:
+        await limpar_tarefas_orfas(process_id, removidos=removidos)
+    readmitidos = equipa_depois - equipa_antes
+    if readmitidos:
+        await marcar_reatribuidas(process_id, atribuidos=readmitidos)
     await broadcast_fn(
         event_type=WSEventType.PROCESS_ASSIGNED,
         process_id=process_id,
@@ -713,8 +733,18 @@ async def run_unassign_me_from_process(
             "assigned_mediador_ids", user["name"], None,
         )
 
+    equipa_antes = ids_atribuidos_do_processo(process)
+
     inject_cdc_fn(update_data, user)
     await db.processes.update_one({"id": process_id}, {"$set": update_data})
+
+    # Mesmo tratamento do POST /assign: sair de um processo também deixa
+    # tarefas para trás (ponto 12).
+    updated_process = await db.processes.find_one({"id": process_id}, {"_id": 0})
+    removidos = equipa_antes - ids_atribuidos_do_processo(updated_process)
+    if removidos:
+        await limpar_tarefas_orfas(process_id, removidos=removidos)
+
     return {
         "success": True,
         "message": f"Removido como {', '.join(removed_from)}",

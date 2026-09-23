@@ -408,3 +408,231 @@ import { BACKEND_URL, API_BASE_URL } from "@/utils/apiBaseUrl"; // ou caminho re
 - **O job "Frontend CI" corre `yarn test` e falha o pipeline.** Até Set 2026 nenhum job corria estes testes: existiam ~240 e uma regressão em `src/utils` passava despercebida até produção.
 - Assertivas em **`node:assert/strict`** com `describe`/`it` importados de `node:test`. Não usar a API `expect(...)` do Jest: o projecto não tem Jest nem Vitest instalados — três ficheiros escritos assim (`pages/processDetails/*.test.js`) nunca chegaram a correr e só foram recuperados quando convertidos.
 - Imports em ficheiros de teste levam **extensão explícita** (`from "./x.js"`): o ESM puro do Node não resolve extensões omitidas, ao contrário do bundler.
+
+## 20. Vitest + React Testing Library e a divisão do Webmail (Épico 6, Set 2026)
+
+### Motor de testes
+
+- `yarn test` (uma vez), `yarn test:watch`, `yarn test:coverage`. O CI corre `yarn test` e falha o pipeline.
+- Configuração em `vite.config.js`, bloco `test`. Vive lá e não num `vitest.config.js` separado para herdar o que os testes precisam e o build já define: o alias `@`, o `define` do `process.env` e o **loader JSX para ficheiros `.js`** (este projecto tem JSX dentro de `.js`, herança do CRA).
+- Os testes antigos de utilitários continuam a importar `describe`/`it` de `node:test`: um alias (`src/test/nodeTestShim.js`) traduz isso para a API do Vitest. **Código novo importa directamente de `vitest`.**
+- `src/test/setup.js` liga os matchers do `jest-dom`, faz `cleanup()` entre testes e preenche o que o jsdom não traz (`matchMedia`, `ResizeObserver`, `scrollIntoView`).
+
+### Escrever um teste de componente
+
+```jsx
+import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { describe, expect, it, vi } from "vitest";
+```
+
+- Consultar por **papel e nome acessível** (`getByRole("button", { name: "Limpar pasta" })`), não por classe CSS. Um botão sem nome acessível é um bug de acessibilidade **e** um teste impossível de escrever — dar-lhe `aria-label`.
+- Componentes que usam `Tooltip` têm de ser montados dentro de um `<TooltipProvider>`; os testes do Webmail fazem-no num `wrapper`.
+- **Um teste que possa passar sem provar nada é pior do que não existir.** Nada de `if (mock.calls.length) expect(...)`. Se o alvo é difícil de encontrar, o problema está no componente.
+- Confirmar que o teste tem dentes: partir de propósito o que ele afirma e ver vermelho.
+
+### Página/Contentor vs componentes de apresentação
+
+O `WebmailPage.jsx` é o **Contentor**: detém o estado, os hooks (`useWebmailEmails`, `useNewEmailRealtime`), os efeitos e os handlers. Os componentes em `components/webmail/` são de **apresentação**:
+
+| Componente | Responsabilidade |
+| --- | --- |
+| `FolderNavigation.jsx` | Caixas, pastas, marcadores e pastas personalizadas |
+| `EmailList.jsx` | Lista de conversas (recebe as threads JÁ agrupadas) |
+| `EmailThreadViewer.jsx` | Leitura da mensagem (recebe o HTML JÁ sanitizado) |
+| `EmailComposer.jsx` | Compositor (controlado: `onFieldChange(campo, valor)`) |
+| `webmailFormatters.js` | Data, tamanho de ficheiro e ícone de anexo |
+
+Regras para quem continuar o trabalho:
+
+1. **Props explícitas, nunca `{...props}`.** O contrato está em JSDoc no topo de cada componente.
+2. **Nada de `set*` dentro de um componente de apresentação.** O componente diz o que aconteceu (`onSelectFolder(id)`); o contentor decide o que isso implica. Um `onClick` com quatro setters encadeados é lógica de página disfarçada de UI.
+3. **O tempo real não atravessa a fronteira.** O agrupamento em conversas, o WebSocket e a suspensão do polling ficam no contentor — os componentes só vêem o resultado.
+4. **Canalização de DOM fica no componente.** O `input` escondido do upload, o clique na zona e o arrastar-largar vivem no `EmailComposer`; o contentor recebe `File[]`.
+5. Ao extrair, limpar os imports que ficam órfãos na página e confirmar com `npx eslint <ficheiro>` (o `--quiet` não mostra `no-unused-vars`, que é aviso).
+
+### `react/jsx-no-undef` é bloqueante
+
+Um componente ou ícone usado em JSX sem import **não** era apanhado: o `no-undef` não cobre JSX e a regra estava desligada. A regra é agora `error` — foi activada depois de um `<Loader2 />` sem import passar no CI e só rebentar no clique de transferir um anexo. Apanhou logo mais 15 casos reais no código existente.
+
+## 21. Nota de voz do consultor (Épico 7, Set 2026)
+
+**Onde vive.** Botão **Nota de voz** no separador *Histórico* do processo,
+ao lado de *Registar Atividade*. Progressive Disclosure: o ecrã normal tem
+um botão; o gravador só existe dentro do `Dialog`.
+
+**Três peças, três responsabilidades.**
+
+| Ficheiro | O que faz | O que NÃO faz |
+|---|---|---|
+| `utils/voiceNote.js` | Decisões puras: formato a pedir, limites, validação, cronómetro, mensagens | Tocar no browser |
+| `hooks/useAudioRecorder.js` | `getUserMedia`, `MediaRecorder`, libertar o microfone | Decidir formatos ou validar |
+| `components/processDetails/VoiceNoteRecorder.jsx` | Renderizar os estados e entregar o ficheiro por `onEnviar(File)` | Chamar a API, saber o que é um processo |
+
+O estado (diálogo aberto, upload em curso, tarefa em curso) e a chamada à
+API vivem no contentor `ProcessDetails`. O componente diz o que aconteceu;
+o contentor decide o que isso implica — a mesma regra do § 20.
+
+**Os quatro estados visíveis:** repouso → *A gravar...* (cronómetro, com
+aviso a 30 s do limite) → pré-escuta (`<audio controls>`, enviar ou
+descartar) → *A enviar...*; e, depois do upload, *A processar Inteligência
+Artificial...*, ligado aos eventos `task_*` e não a um temporizador.
+
+**Gravar pode simplesmente não ser possível.** Safari antigo sem
+`MediaRecorder`, permissão recusada, browser sem formato compatível, página
+fora de HTTPS. Em qualquer destes casos o componente **oferece o upload de
+ficheiro** e explica porquê — nunca mostra um botão que não faz nada.
+
+**O microfone é sempre libertado.** Cada faixa do `MediaStream` é parada ao
+terminar, ao cancelar e ao desmontar. Sem isso, o indicador de gravação do
+browser fica aceso depois de o diálogo fechar e o utilizador julga — com
+razão — que continua a ser ouvido. Há dois testes só sobre isto.
+
+**A URL de pré-escuta é revogada.** `URL.createObjectURL` sem
+`revokeObjectURL` deixa o áudio inteiro em memória até ao refresh.
+
+**Upload pelo `api` do Axios, nunca por `fetch`.** Regra geral do projecto
+(incidente 2026-09-21): só o interceptor injecta o token e os cabeçalhos de
+empresa/papel.
+
+**O evento é filtrado antes de invalidar.** `eNotaDeVozDoProcesso(payload,
+id)` exige `task_type === "VOICE_NOTE"` **e** o `process_id` desta página.
+Sem o filtro, qualquer tarefa de fundo do CRM (importação Excel, análise em
+massa, geração de PDF) recarregaria a página de detalhes do processo.
+
+**Limites iguais aos do backend** (25 MB, 5 minutos): rejeitar cedo poupa ao
+consultor um upload de 20 MB para receber um 413 no fim.
+
+**Testar APIs de media:** falsear `MediaRecorder`, `getUserMedia` e
+`createObjectURL` — os três — e deixar o hook e o componente reais. Falsear
+o hook deixaria a integração por testar, que é precisamente onde estão os
+bugs.
+
+## 22. Extrair de ficheiros grandes: medir antes de cortar (Épico 8, Set 2026)
+
+**A regra.** Um bloco de JSX grande não é, por si, candidato a extracção. O
+que decide é **quantos símbolos do contentor ele usa**. Antes de mover uma
+linha, conta-os:
+
+```bash
+# Identificadores do bloco que são declarações do contentor
+python3 - <<'PY'
+import re
+linhas = open("pages/ProcessDetails.js").read().split("\n")
+corpo = "\n".join(linhas[:INICIO_DO_JSX])
+declarados = set(re.findall(r"const\s+(\w+)\s*=", corpo))
+for a, b in re.findall(r"const\s+\[\s*(\w+)\s*,\s*(\w+)\s*\]", corpo):
+    declarados |= {a, b}
+bloco = "\n".join(linhas[INICIO:FIM])
+print(sorted(set(re.findall(r"\b([a-zA-Z_]\w*)\b", bloco)) & declarados))
+PY
+```
+
+**O limiar, por experiência deste épico:**
+
+| Símbolos | Decisão |
+|---|---|
+| ≤ 10 | Extrair. Contrato legível, JSDoc cabe num parágrafo. |
+| 10 – 25 | Extrair **se** os símbolos formarem famílias coesas que se possam agrupar (`dragHandlers`, `fileActions`). |
+| > 25 | Não extrair sem redesenhar. Um componente com 50 props não é um contrato, é um borrão. |
+
+**O caso a não repetir:** as ~230 linhas de cola do separador Resumo do
+`ProcessDetails` usam **55** símbolos do contentor e não fazem nada além de
+passar props aos separadores que já estão extraídos. Envolvê-las produziria
+prop-drilling com nome novo. Ficaram onde estão, e está escrito porquê.
+
+**Ordem de trabalho, sem excepção:**
+1. Teste que monta o ecrã inteiro (só fronteiras de rede/sessão falsas);
+2. medir as superfícies;
+3. cortar do menor risco para o maior, **um commit por peça**, com a suite
+   verde entre cada;
+4. teste de componente para cada peça extraída;
+5. mutação, para provar que os testes novos têm dentes.
+
+**Porque é que o passo 1 não é opcional.** Neste épico, o teste da página
+montada apanhou, no primeiro arranque, um bug que estava em produção
+(revisitar um processo dentro de 60 s deixava a página presa no esqueleto)
+e, minutos depois, uma extracção que apanhara a `TabsList` errada — a
+exterior, de Resumo/Documentos/Histórico, porque a classe
+`grid w-full grid-cols-3` casa com duas listas diferentes. Seis testes
+ficaram vermelhos de imediato; sem eles, os separadores de topo chegavam a
+produção trocados.
+
+**O que muda de dono na extracção.** Um `set*` do contentor dentro da UI é
+sinal de fronteira mal posta: `setTitularChoiceDialog(prev => …)` que
+reconstruía a lista de escolhas passou a `onChoose(indice, escolha)`; o
+`toast.success` do "Confirmar Todos" passou para o contentor, que é quem
+sabe que há alterações por gravar.
+
+**Armadilhas de JSDoc.** Documentação errada é pior do que nenhuma. Neste
+épico escrevi duas vezes contratos que não correspondiam ao código
+(`onResolve(indice, decisao)` quando a assinatura é `(accao, nomeProprio)`;
+`filename` quando o campo é `original_filename`). Ambas foram apanhadas por
+testes — escrever o teste a partir da JSDoc, e não do código, é o que as
+expõe.
+
+**Ícones deixam de vir de borla.** `react/jsx-no-undef` (§ 21 e AGENTS.md)
+apanha o que a extracção destapa: dentro de um ficheiro de 4000 linhas, um
+`<AlertCircle />` herdava o import de um vizinho; sozinho num ficheiro novo,
+falha logo.
+
+---
+
+## 23. A IA propõe, o utilizador dispõe (Épico 9, Set 2026)
+
+Sempre que um modelo lê dados **pessoais ou financeiros** de um documento e
+esses dados se destinam à ficha de um cliente, vale uma regra sem excepções:
+
+> **Nada é escrito — nem no formulário, nem na base de dados — antes de um
+> clique explícito de confirmação.**
+
+Não é uma norma de UX, é de segurança de dados: um modelo de visão que leia
+mal um dígito de um NIF ou uma casa decimal de um vencimento produz um erro
+plausível, que ninguém detecta a olho, num campo que alimenta decisões de
+crédito.
+
+### O padrão
+
+1. **O componente que lê não grava.** `S3FileManager` chama o endpoint de
+   extracção e entrega o resultado ao contentor por callback
+   (`onDocumentDataExtracted`). Se alguma vez chamar `ai-apply-suggestions`,
+   a regra caiu — há um teste a prová-lo.
+2. **A decisão vive numa função pura.**
+   `utils/documentExtraction.prepararRevisaoDaExtraccao` separa o que foi
+   lido em conflitos e campos a preencher. Dentro de um componente de 2900
+   linhas esta decisão não se testa; fora dele, testa-se com 17 casos.
+3. **O diálogo abre sempre.** Mesmo sem conflitos — "sem conflitos" quer
+   dizer que a ficha está vazia e que **tudo** vai entrar. Mostrar só os
+   conflitos faria o consultor confirmar às cegas o resto.
+4. **Fechar não é confirmar.** Desistir descarta o que estava pendente.
+   Guardá-lo faria a confirmação seguinte escrever dados de um documento já
+   rejeitado.
+
+### Estender um diálogo existente em vez de criar outro
+
+`AIReviewDialog` já fazia o lado-a-lado "Actual ↔ Extraído" para a análise
+em lote. Ganhou duas props **opcionais** — `newValues` e `sourceDocument` —
+e o caminho antigo continuou a funcionar sem uma linha alterada (os seus 17
+testes ficaram intactos). Criar um `VLMReviewDialog` paralelo teria dado
+dois diálogos a fazer o mesmo, que é o que `AGENTS.md` proíbe em "Canonical
+only. No duplicate UI".
+
+Quando um diálogo novo parecer inevitável, a pergunta certa é: **que props
+opcionais faltam ao que já existe?**
+
+### Só oferecer o botão quando a acção é possível
+
+A extracção aceita imagens e PDF. Um `.docx` com botão seguiria para uma
+chamada **paga** e voltaria vazio. O `podeExtrairDados(nome)` decide pela
+extensão e o botão simplesmente não aparece — dizer que não dá depois de
+gastar dinheiro é a pior das ordens.
+
+O mesmo vale para o papel: é uma ferramenta de gestão e olha para o
+`effectiveRole` (perfil activo), nunca para o papel base (§ 20, AGENTS.md).
+
+### Botões só de ícone precisam de `aria-label`
+
+Os três botões de extracção (vista de lista, grelha "Todos", grelha por
+categoria) levam `aria-label={`Extrair dados de ${file.name}`}`. Sem ele
+não há nome acessível — é um bug de acessibilidade e um teste impossível
+(§ 20). Com ele, o teste consulta por papel e nome, como deve.

@@ -42,6 +42,7 @@ import { TableSkeleton } from "../ui/skeletons";
 
 const EMPTY_FORM = {
   name: "",
+  network_id: "",
   nif: "",
   email: "",
   is_active: true,
@@ -118,6 +119,7 @@ export default function CompaniesAdminTab() {
     setEditing(company);
     setForm({
       name: company.name || "",
+      network_id: company.network_id || "",
       nif: company.nif || "",
       email: company.email || company.contact_email || "",
       is_active: isCompanyActive(company),
@@ -181,6 +183,10 @@ export default function CompaniesAdminTab() {
     try {
       const payload = {
         name: form.name.trim(),
+        // Rede / Grupo Empresarial: vazio significa ILHA (a empresa não
+        // partilha dados com ninguém). Não preencher por omissão — herdar
+        // a rede de outra empresa aqui abriria a fuga na criação.
+        network_id: form.network_id.trim() || null,
         nif: form.nif.trim() || null,
         email: form.email.trim() || null,
         is_active: form.is_active,
@@ -325,6 +331,23 @@ export default function CompaniesAdminTab() {
                   data-testid="company-name-input"
                   required
                 />
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="company-network">Rede / Grupo Empresarial</Label>
+                <Input
+                  id="company-network"
+                  value={form.network_id}
+                  onChange={(e) =>
+                    setForm((p) => ({ ...p, network_id: e.target.value }))
+                  }
+                  placeholder="ex: grupo_power_precision"
+                  data-testid="company-network-input"
+                />
+                <p className="text-xs text-muted-foreground">
+                  Empresas com a mesma rede partilham a visibilidade dos dados.
+                  Em branco, a empresa fica isolada — ninguém de fora vê os
+                  seus processos e clientes.
+                </p>
               </div>
               <div className="space-y-2">
                 <Label htmlFor="company-nif">NIF</Label>

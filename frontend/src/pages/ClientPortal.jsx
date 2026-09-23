@@ -20,6 +20,12 @@
  */
 import { useState, useEffect, useCallback, useRef, useMemo, Suspense } from 'react';
 import { toast } from 'sonner';
+import PortalProfileFields from '../components/portal/PortalProfileFields';
+import {
+  construirPayload,
+  hidratarFormulario,
+  obrigatoriosEmFalta,
+} from '../utils/portalProfile';
 import { extractErrorMessage } from '../utils/extractErrorMessage';
 import useSlidingSession from '../hooks/useSlidingSession';
 import {
@@ -1357,23 +1363,15 @@ function ProfilePanel() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState(null);
   const [saveResult, setSaveResult] = useState(null);
-  const [formData, setFormData] = useState({
-    // Contacto
-    email: '',
-    email_secundario: '',
-    telefone: '',
-    telefone_secundario: '',
-    // Dados Pessoais
-    morada_fiscal: '',
-    estado_civil: '',
-    profissao: '',
-    naturalidade: '',
-    nacionalidade: '',
-    data_nascimento: '',
-    documento_id: '',
-    data_validade_cc: '',
-    sexo: '',
-  });
+  // Sem chaves fixas: os campos vêm do `form_schema` que o backend deriva
+  // do MESMO `form_config` do formulário interno. Uma lista escrita aqui
+  // voltaria a divergir dele — foi assim que o Portal ficou sem
+  // `codigo_postal` nem `niss`.
+  const [formData, setFormData] = useState({});
+  const formSchema = profile?.form_schema || [];
+  // O que falta preencher, dito ao cliente ANTES de gravar — em vez
+  // de um erro depois de carregar no botão.
+  const camposEmFalta = obrigatoriosEmFalta(formSchema, formData);
 
   // ── Fetch profile data ──
   useEffect(() => {
@@ -1397,21 +1395,7 @@ function ProfilePanel() {
         if (cancelled) return;
 
         setProfile(data);
-        setFormData({
-          email: data.contacto?.email || '',
-          email_secundario: data.contacto?.email_secundario || '',
-          telefone: data.contacto?.telefone || '',
-          telefone_secundario: data.contacto?.telefone_secundario || '',
-          morada_fiscal: data.dados_pessoais?.morada_fiscal || '',
-          estado_civil: data.dados_pessoais?.estado_civil || '',
-          profissao: data.dados_pessoais?.profissao || '',
-          naturalidade: data.dados_pessoais?.naturalidade || '',
-          nacionalidade: data.dados_pessoais?.nacionalidade || '',
-          data_nascimento: data.dados_pessoais?.data_nascimento || data.dados_pessoais?.birth_date || '',
-          documento_id: data.dados_pessoais?.documento_id || '',
-          data_validade_cc: data.dados_pessoais?.data_validade_cc || '',
-          sexo: data.dados_pessoais?.sexo || '',
-        });
+        setFormData(hidratarFormulario(data.form_schema, data));
       } catch (err) {
         if (!cancelled) setError(err.message);
       } finally {
@@ -1435,25 +1419,9 @@ function ProfilePanel() {
       const token = getPortalToken();
       if (!token) throw new Error('Sessão expirada.');
 
-      const payload = {
-        contacto: {
-          email: formData.email || null,
-          email_secundario: formData.email_secundario || null,
-          telefone: formData.telefone || null,
-          telefone_secundario: formData.telefone_secundario || null,
-        },
-        dados_pessoais: {
-          morada_fiscal: formData.morada_fiscal || null,
-          estado_civil: formData.estado_civil || null,
-          profissao: formData.profissao || null,
-          naturalidade: formData.naturalidade || null,
-          nacionalidade: formData.nacionalidade || null,
-          data_nascimento: formData.data_nascimento || null,
-          documento_id: formData.documento_id || null,
-          data_validade_cc: formData.data_validade_cc || null,
-          sexo: formData.sexo || null,
-        },
-      };
+      // Construído a partir do esquema: o que se envia é exactamente o
+      // que se mostrou, pelo que o backend não tem nada a descartar.
+      const payload = construirPayload(formSchema, formData);
 
       const res = await fetchWithRetry(`${BACKEND_URL}/portal/me`, {
         method: 'PUT',
@@ -1515,38 +1483,6 @@ function ProfilePanel() {
   }
 
   // ── Field component for consistency ──
-  const Field = ({ label, field, type = 'text', placeholder = '', options = null }) => (
-    <div>
-      <label className="text-xs font-medium text-gray-600 mb-1 block">{label}</label>
-      {options ? (
-        <select
-          value={formData[field]}
-          onChange={(e) => handleChange(field, e.target.value)}
-          disabled={isLocked}
-          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors ${
-            isLocked ? 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed' : 'border-gray-200 bg-white'
-          }`}
-        >
-          <option value="">—</option>
-          {options.map(opt => (
-            <option key={opt.value} value={opt.value}>{opt.label}</option>
-          ))}
-        </select>
-      ) : (
-        <input
-          type={type}
-          value={formData[field]}
-          onChange={(e) => handleChange(field, e.target.value)}
-          placeholder={placeholder}
-          disabled={isLocked}
-          className={`w-full px-3 py-2 text-sm border rounded-lg focus:outline-none focus:ring-2 focus:ring-blue-400 focus:border-transparent transition-colors ${
-            isLocked ? 'bg-gray-50 text-gray-400 border-gray-100 cursor-not-allowed' : 'border-gray-200 bg-white'
-          }`}
-        />
-      )}
-    </div>
-  );
-
   return (
     <div className="space-y-5">
       {/* ── PACOTE BM — Alert de dados confirmados/congelados pela Indexação ── */}
@@ -1613,88 +1549,48 @@ function ProfilePanel() {
         </div>
       )}
 
-      {/* ── Nome (read-only, nunca editável pelo cliente) ── */}
+      {/* ── Identidade — sempre só de leitura ──
+          O nome e o NIF são geridos pela equipa. O NIF nem sequer é
+          devolvido pelo backend (`PROFILE_HIDDEN_FIELDS`) e não entra no
+          `form_schema`: a regra de negócio é que NUNCA é editável pelo
+          cliente, e é aplicada no servidor, não aqui. */}
       <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
         <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
           <User className="w-5 h-5 text-blue-500" />
           Dados Pessoais
         </h3>
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          {/* Nome — read-only */}
-          <div className="sm:col-span-2">
-            <label className="text-xs font-medium text-gray-600 mb-1 block">Nome Completo</label>
-            <input
-              type="text"
-              value={profile?.nome || ''}
-              disabled
-              className="w-full px-3 py-2 text-sm border border-gray-100 rounded-lg bg-gray-50 text-gray-400 cursor-not-allowed"
-            />
-            <p className="text-[10px] text-gray-400 mt-0.5">O nome não pode ser alterado. Contacte o seu consultor se precisar.</p>
-          </div>
-
-          <Field label="Data de Nascimento" field="data_nascimento" type="date" />
-          <Field
-            label="Estado Civil"
-            field="estado_civil"
-            options={[
-              { value: 'solteiro', label: 'Solteiro(a)' },
-              { value: 'casado', label: 'Casado(a)' },
-              { value: 'divorciado', label: 'Divorciado(a)' },
-              { value: 'viuvo', label: 'Viúvo(a)' },
-              { value: 'uniao_de_facto', label: 'União de Facto' },
-              { value: 'separado', label: 'Separado(a)' },
-            ]}
+        <div className="mb-4">
+          <label htmlFor="perfil-nome" className="text-xs font-medium text-gray-600 mb-1 block">
+            Nome Completo
+          </label>
+          <input
+            id="perfil-nome"
+            type="text"
+            value={profile?.nome || ''}
+            disabled
+            className="w-full px-3 py-2 text-sm border border-gray-100 rounded-lg bg-gray-50 text-gray-400 cursor-not-allowed"
           />
-          <Field label="Nacionalidade" field="nacionalidade" placeholder="Portuguesa" />
-          <Field label="Naturalidade" field="naturalidade" placeholder="Lisboa" />
-          <Field label="Profissão" field="profissao" placeholder="Engenheiro(a)" />
-          <Field
-            label="Sexo"
-            field="sexo"
-            options={[
-              { value: 'M', label: 'Masculino' },
-              { value: 'F', label: 'Feminino' },
-            ]}
-          />
+          <p className="text-[10px] text-gray-400 mt-0.5">
+            O nome e o NIF não podem ser alterados aqui. Contacte o seu consultor se precisar.
+          </p>
         </div>
-      </div>
 
-      {/* ── Documento de Identificação ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
-        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
-          <Shield className="w-5 h-5 text-teal-500" />
-          Documento de Identificação
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Nº do Documento (CC/Passaporte)" field="documento_id" placeholder="00000000" />
-          <Field label="Validade do Documento" field="data_validade_cc" type="date" />
-        </div>
-      </div>
+        {/* Campos vindos do formulário interno, com divulgação
+            progressiva: obrigatórios à vista, os restantes atrás de
+            "Preencher mais detalhes". */}
+        <PortalProfileFields
+          schema={formSchema}
+          values={formData}
+          onChange={handleChange}
+          disabled={isLocked}
+        />
 
-      {/* ── Morada ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
-        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
-          <MapPin className="w-5 h-5 text-rose-500" />
-          Morada Fiscal
-        </h3>
-        <div className="grid grid-cols-1 gap-4">
-          <Field label="Morada Fiscal" field="morada_fiscal" placeholder="Rua Exemplo, Nº 1, 1000-001 Lisboa" />
-        </div>
-      </div>
-
-      {/* ── Contactos ── */}
-      <div className="bg-white rounded-2xl shadow-sm border border-gray-100 p-5 sm:p-6">
-        <h3 className="text-base font-bold text-gray-800 mb-4 flex items-center gap-2">
-          <Phone className="w-5 h-5 text-violet-500" />
-          Contactos
-        </h3>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <Field label="Email Principal" field="email" type="email" placeholder="email@exemplo.pt" />
-          <Field label="Email Secundário" field="email_secundario" type="email" placeholder="email2@exemplo.pt" />
-          <Field label="Telefone" field="telefone" type="tel" placeholder="912345678" />
-          <Field label="Telefone Secundário" field="telefone_secundario" type="tel" placeholder="912345678" />
-        </div>
+        {!isLocked && camposEmFalta.length > 0 && (
+          <p className="text-xs text-amber-600 mt-4">
+            Falta preencher: {camposEmFalta.map((c) => c.label).join(', ')}.
+          </p>
+        )}
       </div>
 
       {/* ── Botão Guardar (só visível se NÃO bloqueado) ── */}

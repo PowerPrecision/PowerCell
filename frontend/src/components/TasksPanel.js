@@ -2,7 +2,7 @@
  * TasksPanel - Painel de Tarefas
  * Componente para gerir tarefas (criar, listar, concluir)
  */
-import { useState, useEffect, useCallback } from "react";
+import { Fragment, useState, useEffect, useCallback } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
@@ -52,10 +52,23 @@ const TasksPanel = ({
   showCreateButton = true,
   compact = false,
   maxHeight = "400px",
-  showOnlyMyTasks = false  // Novo: mostrar apenas tarefas atribuídas ao utilizador atual
+  showOnlyMyTasks = false,  // Novo: mostrar apenas tarefas atribuídas ao utilizador atual
+  // Lote 4, ponto 13 — este painel JÁ É um cartão completo (cabeçalho,
+  // título "Tarefas", contagem e área de scroll própria). Quem o embute
+  // noutro cartão fica com dois cabeçalhos iguais e dois scrolls
+  // encaixados; `asCard={false}` entrega só o conteúdo.
+  asCard = true,
 }) => {
   const { user } = useAuth();
   const [tasks, setTasks] = useState([]);
+  // Lote 4, ponto 12 — quem está mesmo atribuído ao processo. O selector
+  // oferece estes primeiro; toda a gente fica atrás de uma secção que é
+  // preciso abrir de propósito. Assim continua a ser possível atribuir
+  // fora da equipa (há casos legítimos), mas deixa de acontecer por
+  // distracção — era assim que nasciam as tarefas fantasma.
+  const [equipaDoProcesso, setEquipaDoProcesso] = useState([]);
+  const [equipaIndisponivel, setEquipaIndisponivel] = useState(false);
+  const [mostrarForaDaEquipa, setMostrarForaDaEquipa] = useState(false);
   const [backgroundJobs, setBackgroundJobs] = useState([]);
   const [users, setUsers] = useState([]);
   const [loading, setLoading] = useState(true);
@@ -190,19 +203,25 @@ const TasksPanel = ({
           // Criador do processo
           if (proc.created_by) involvedUserIds.add(String(proc.created_by));
           
-          // Filtrar utilizadores: apenas os envolvidos + excluir clientes
-          const involvedUsers = filterAssignmentStaff(usersRes.data.filter(u => 
-            involvedUserIds.has(String(u.id))
-          ));
-          setUsers(involvedUsers);
-        } catch (err) {
-          // Fallback: mostrar todos os elegíveis se o processo não carregar
-          console.warn("Não foi possível carregar utilizadores do processo, a usar todos:", err);
+          // Guardar a equipa em vez de filtrar a lista: o selector
+          // precisa das DUAS coisas para as poder distinguir no ecrã.
           setUsers(filterAssignmentStaff(usersRes.data));
+          setEquipaDoProcesso([...involvedUserIds]);
+          setEquipaIndisponivel(false);
+        } catch (err) {
+          // Antes, o catch avisava só no console e passava a oferecer
+          // TODA a gente como se fosse a equipa. Agora a lista continua
+          // completa, mas o utilizador vê que ela não é de confiança.
+          console.warn("Não foi possível carregar a equipa do processo:", err);
+          setUsers(filterAssignmentStaff(usersRes.data));
+          setEquipaDoProcesso([]);
+          setEquipaIndisponivel(true);
         }
       } else {
-        // Sem processo: mostrar todos os utilizadores elegíveis
+        // Sem processo: não há equipa de referência, todos são elegíveis.
         setUsers(filterAssignmentStaff(usersRes.data));
+        setEquipaDoProcesso([]);
+        setEquipaIndisponivel(false);
       }
     } catch (error) {
       console.error("Erro ao carregar tarefas:", error);
@@ -350,8 +369,23 @@ const TasksPanel = ({
   const selectAllUsers = () => {
     setNewTask(prev => ({
       ...prev,
-      assigned_to: users.map(u => u.id)
+      // "Todos" = a equipa do processo. Antes selecionava toda a gente
+      // que estivesse na lista, incluindo quem não trabalha nele.
+      assigned_to: (processId ? daEquipaParaSeleccao() : users).map(u => u.id)
     }));
+  };
+
+  const daEquipaParaSeleccao = () => {
+    const ids = new Set(equipaDoProcesso.map(String));
+    return users.filter((u) => ids.has(String(u.id)));
+  };
+
+  // `assigned_to_names` vem do backend; o `assigned_to` cru ainda pode
+  // ser um escalar em documentos antigos do motor de automação.
+  const nomesAtribuidos = (task) => {
+    const nomes = task.assigned_to_names;
+    if (Array.isArray(nomes)) return nomes.join(", ");
+    return nomes ? String(nomes) : "";
   };
 
   const clearAllUsers = () => {
@@ -477,39 +511,89 @@ const TasksPanel = ({
     );
   }
 
+  // Separação equipa / fora da equipa para o selector de responsáveis.
+  const idsDaEquipa = new Set(equipaDoProcesso.map(String));
+  const daEquipa = processId ? users.filter((u) => idsDaEquipa.has(String(u.id))) : users;
+  const foraDaEquipa = processId ? users.filter((u) => !idsDaEquipa.has(String(u.id))) : [];
+  const temGrupos = Boolean(processId) && foraDaEquipa.length > 0;
+
+  const renderLinhaDeUtilizador = (utilizador) => (
+    <div
+      key={utilizador.id}
+      className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${
+        newTask.assigned_to.includes(utilizador.id)
+          ? "bg-blue-50 border border-blue-200"
+          : "hover:bg-muted"
+      }`}
+      onClick={() => toggleUserSelection(utilizador.id)}
+    >
+      <Checkbox
+        checked={newTask.assigned_to.includes(utilizador.id)}
+        onChange={() => {}}
+      />
+      <div>
+        <p className="font-medium text-sm">{utilizador.name}</p>
+        <p className="text-xs text-muted-foreground">{utilizador.role}</p>
+      </div>
+    </div>
+  );
+
+  const Moldura = asCard ? Card : Fragment;
+  // As props derivam do COMPONENTE escolhido, não da flag. Repetir a
+  // condição deixava o `data-testid` e a moldura poderem divergir — e
+  // foi exactamente isso que uma mutação (trocar `Moldura` por `Card`)
+  // atravessou sem matar nenhum teste: desenhava-se um cartão que o
+  // teste não conseguia ver.
+  const temMoldura = Moldura === Card;
+  const propsDaMoldura = temMoldura
+    ? { className: "border-border", "data-testid": "tasks-panel-card" }
+    : {};
+  const Cabecalho = temMoldura ? CardHeader : Fragment;
+  const propsDoCabecalho = temMoldura ? { className: compact ? "pb-2" : "" } : {};
+  const Corpo = temMoldura ? CardContent : Fragment;
+
   return (
     <>
-      <Card className="border-border">
-        <CardHeader className={compact ? "pb-2" : ""}>
+      <Moldura {...propsDaMoldura}>
+        <Cabecalho {...propsDoCabecalho}>
           <div className="flex items-center justify-between gap-2">
             <div className="min-w-0">
-              <CardTitle className={`flex items-center gap-2 ${compact ? "text-base" : "text-lg"}`}>
-                <ClipboardList className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
-                <span className="truncate">Tarefas</span>
-                {tasks.length > 0 && (
-                  <Badge variant="secondary" className="ml-1 sm:ml-2 text-xs">{tasks.length}</Badge>
-                )}
-              </CardTitle>
-              {!compact && (
-                <CardDescription className="text-xs sm:text-sm">
-                  {processId ? "Tarefas deste processo" : "Todas as tarefas"}
-                </CardDescription>
+              {temMoldura && (
+                <>
+                  <CardTitle className={`flex items-center gap-2 ${compact ? "text-base" : "text-lg"}`}>
+                    <ClipboardList className="h-4 w-4 sm:h-5 sm:w-5 shrink-0" />
+                    <span className="truncate">Tarefas</span>
+                    {tasks.length > 0 && (
+                      <Badge variant="secondary" className="ml-1 sm:ml-2 text-xs">{tasks.length}</Badge>
+                    )}
+                  </CardTitle>
+                  {!compact && (
+                    <CardDescription className="text-xs sm:text-sm">
+                      {processId ? "Tarefas deste processo" : "Todas as tarefas"}
+                    </CardDescription>
+                  )}
+                </>
               )}
             </div>
             {showCreateButton && !hasRole(user, "parceiro") && (
               <Button 
                 size="sm" 
                 onClick={openCreateDialog}
+                aria-label="Nova tarefa"
                 className="bg-teal-600 hover:bg-teal-700 h-8 px-2 sm:px-3 shrink-0"
               >
-                <Plus className="h-3.5 w-3.5 sm:mr-1" />
+                <Plus className="h-3.5 w-3.5 sm:mr-1" aria-hidden="true" />
                 <span className="hidden sm:inline">Nova</span>
               </Button>
             )}
           </div>
-        </CardHeader>
-        <CardContent>
-          {/* Filtros */}
+        </Cabecalho>
+        <Corpo>
+          {/* Filtros — ruído numa coluna estreita: em modo compacto a
+              decisão é ver as tarefas, não filtrá-las. Não renderizados
+              de todo: esconder por CSS deixava as caixas acessíveis ao
+              teclado e aos leitores de ecrã. */}
+          {!compact && (
           <div className="flex flex-col xs:flex-row items-start xs:items-center gap-3 xs:gap-4 mb-4">
             <div className="flex items-center gap-2">
               <Checkbox
@@ -536,6 +620,7 @@ const TasksPanel = ({
               </div>
             )}
           </div>
+          )}
 
           {/* Parceiro: mensagem de apenas visualização */}
           {hasRole(user, "parceiro") && (
@@ -723,16 +808,32 @@ const TasksPanel = ({
                                   ) : null;
                                 })()
                           )}
-                          {/* Atribuídos */}
+                          {/* Atribuídos. Uma tarefa ÓRFÃ (ponto 12) —
+                              alguém trabalhava nela e saiu do processo —
+                              não é o mesmo que uma tarefa por atribuir:
+                              a primeira exige uma decisão humana e as
+                              duas mostravam "Sem atribuição". */}
                           <div className="flex items-center gap-0.5 sm:gap-1 text-[10px] sm:text-xs text-muted-foreground">
                             <User className="h-3 w-3" />
-                            <span className="truncate max-w-[80px] sm:max-w-none">{task.assigned_to_names?.join(", ") || "Sem atribuição"}</span>
+                            <span className="truncate max-w-[80px] sm:max-w-none">{nomesAtribuidos(task) || "Sem atribuição"}</span>
                           </div>
-                          {/* Data de criação - hidden on very small screens */}
-                          <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
-                            <Clock className="h-3 w-3" />
-                            {safeFormat(task.created_at, "dd/MM/yyyy", { locale: pt })}
-                          </div>
+                          {task.assignment_orphaned && !nomesAtribuidos(task) && (
+                            <Badge
+                              variant="outline"
+                              className="text-[10px] sm:text-xs h-4 sm:h-5 border-amber-300 text-amber-700 dark:text-amber-400"
+                            >
+                              Sem responsável
+                            </Badge>
+                          )}
+                          {/* Data de criação — nem sequer renderizada em
+                              modo compacto: numa coluna de 1/3 não se
+                              decide nada com ela. */}
+                          {!compact && (
+                            <div className="hidden sm:flex items-center gap-1 text-xs text-muted-foreground">
+                              <Clock className="h-3 w-3" />
+                              {safeFormat(task.created_at, "dd/MM/yyyy", { locale: pt })}
+                            </div>
+                          )}
                         </div>
                       </div>
 
@@ -774,8 +875,8 @@ const TasksPanel = ({
               )}
             </ScrollArea>
           )}
-        </CardContent>
-      </Card>
+        </Corpo>
+      </Moldura>
 
       {/* Dialog para criar tarefa */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -838,26 +939,34 @@ const TasksPanel = ({
               </div>
               <ScrollArea className="h-[200px] border rounded-md p-2">
                 <div className="space-y-2">
-                  {users.map((user) => (
-                    <div
-                      key={user.id}
-                      className={`flex items-center gap-3 p-2 rounded cursor-pointer transition-colors ${
-                        newTask.assigned_to.includes(user.id)
-                          ? "bg-blue-50 border border-blue-200"
-                          : "hover:bg-muted"
-                      }`}
-                      onClick={() => toggleUserSelection(user.id)}
-                    >
-                      <Checkbox
-                        checked={newTask.assigned_to.includes(user.id)}
-                        onChange={() => {}}
-                      />
-                      <div>
-                        <p className="font-medium text-sm">{user.name}</p>
-                        <p className="text-xs text-muted-foreground">{user.role}</p>
-                      </div>
-                    </div>
-                  ))}
+                  {daEquipa.map(renderLinhaDeUtilizador)}
+
+                  {temGrupos && (
+                    <>
+                      {daEquipa.length === 0 && (
+                        <p className="text-xs text-muted-foreground px-2 py-1">
+                          {equipaIndisponivel
+                            ? "Não foi possível confirmar a equipa deste processo."
+                            : "Este processo ainda não tem ninguém atribuído."}
+                        </p>
+                      )}
+                      <button
+                        type="button"
+                        onClick={() => setMostrarForaDaEquipa((v) => !v)}
+                        aria-expanded={mostrarForaDaEquipa}
+                        aria-controls="tarefa-fora-da-equipa"
+                        className="w-full text-left text-xs text-muted-foreground hover:text-foreground px-2 py-1"
+                      >
+                        {mostrarForaDaEquipa ? "▾" : "▸"} Fora da equipa do processo
+                        {` (${foraDaEquipa.length})`}
+                      </button>
+                      {mostrarForaDaEquipa && (
+                        <div id="tarefa-fora-da-equipa" className="space-y-2">
+                          {foraDaEquipa.map(renderLinhaDeUtilizador)}
+                        </div>
+                      )}
+                    </>
+                  )}
                 </div>
               </ScrollArea>
               {newTask.assigned_to.length > 0 && (

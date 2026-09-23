@@ -115,6 +115,58 @@ async def resolve_second_titular_for_rgpd(process: dict) -> Optional[Dict[str, s
     return {"nome": nome, "email": email}
 
 
+def partes_do_documento(documento_id: Any) -> tuple:
+    """`(tipo, numero)` a partir de um `documento_id` plano ou estruturado.
+
+    O cliente pode ter o documento gravado como string ("11112222 3 ZZ4")
+    ou como `{"type": ..., "number": ...}` — é assim que o PDF
+    pré-preenchido o lê. Os dois têm de servir o template.
+    """
+    if isinstance(documento_id, dict):
+        return (
+            str(documento_id.get("type") or "").strip(),
+            str(documento_id.get("number") or "").strip(),
+        )
+    return "", str(documento_id or "").strip()
+
+
+def _esta_vazio(valor: Any) -> bool:
+    """Um valor que não identifica ninguém.
+
+    "Presente mas vazio" é o caso NORMAL nos dados vindos de formulários:
+    submeter um campo em branco grava `""`, não apaga a chave. Tratá-lo
+    como "presente" foi o que deixou o RGPD do 2.º titular sem dados.
+    """
+    if valor is None:
+        return True
+    if isinstance(valor, str):
+        return not valor.strip()
+    if isinstance(valor, (list, dict, tuple, set)):
+        return len(valor) == 0
+    return False
+
+
+def _preencher_se_vazio(destino: dict, chave: str, valor: Any) -> None:
+    """Escreve `valor` em `destino[chave]` se o que lá está não serve."""
+    if _esta_vazio(valor):
+        return
+    if _esta_vazio(destino.get(chave)):
+        destino[chave] = valor
+
+
+def primeiro_preenchido(*valores: Any, omissao: Any = "") -> Any:
+    """Primeiro valor que identifica alguma coisa.
+
+    Substitui o padrão `d.get(k, fallback)`, que devolve o fallback apenas
+    quando a chave FALTA — e portanto deixava um `""` submetido no
+    formulário vencer o dado real que estava na ficha.
+    """
+    for valor in valores:
+        if not _esta_vazio(valor):
+            return valor
+    return omissao
+
+
 async def _titular_fallback_data(process: dict, titular: str) -> dict:
     """
     PACOTE 5 — dados pessoais (fallback) do TITULAR ALVO para os renderers
@@ -138,16 +190,31 @@ async def _titular_fallback_data(process: dict, titular: str) -> dict:
             try:
                 from services.encryption import decrypt_client_data
                 second_doc = decrypt_client_data(second_doc)
-            except Exception:
-                pass
+            except Exception as e:
+                logger.warning(
+                    f"[RGPD-TITULAR2] Erro ao desencriptar {second_client_id}: {e}"
+                )
             dados_pessoais = second_doc.get("dados_pessoais") or {}
-            fallback.setdefault("nif", dados_pessoais.get("nif"))
-            fallback.setdefault(
-                "morada_fiscal", dados_pessoais.get("morada_fiscal")
-            )
-            fallback.setdefault(
-                "documento_id", dados_pessoais.get("documento_id")
-            )
+
+            # `setdefault` era um no-op aqui. O formulário público grava o
+            # `titular2_data` com as chaves PRESENTES E VAZIAS (`{"nif": ""}`),
+            # e `setdefault` só escreve quando a chave FALTA — por isso os
+            # dados do cliente ligado nunca chegavam ao documento e o RGPD
+            # do 2.º titular saía em branco.
+            for chave, valor in (
+                ("nif", dados_pessoais.get("nif")),
+                ("morada_fiscal", dados_pessoais.get("morada_fiscal")),
+                ("documento_id", dados_pessoais.get("documento_id")),
+                ("data_validade_cc", dados_pessoais.get("data_validade_cc")),
+                ("data_nascimento", dados_pessoais.get("data_nascimento")),
+                ("codigo_postal", dados_pessoais.get("codigo_postal")),
+                ("naturalidade", dados_pessoais.get("naturalidade")),
+                ("nacionalidade", dados_pessoais.get("nacionalidade")),
+                ("estado_civil", dados_pessoais.get("estado_civil")),
+                ("nome", second_doc.get("nome")),
+                ("nome_completo", second_doc.get("nome")),
+            ):
+                _preencher_se_vazio(fallback, chave, valor)
 
     return fallback
 
@@ -1105,8 +1172,26 @@ async def _get_rendered_rgpd_text(
         template_text = "DOCUMENTO DE CONSENTIMENTO RGPD\n" + "=" * 50 + "\n\n"
     
     rendered = template_text
-    client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
-    localidade = consent_data.get("localidade", "")
+    # `documento_id` do titular alvo — nunca era usado no template, pelo que
+    # o número e o tipo do documento saíam em branco no PDF do 2.º titular.
+    doc_tipo, doc_numero = partes_do_documento(personal_data.get("documento_id"))
+
+    # `process["client_name"]` só entra na cadeia do 1.º titular. Para o
+    # 2.º seria o pior defeito possível: o documento legal do 2.º titular
+    # a identificar o 1.º. Há um teste a afirmar exactamente isso.
+    nome_do_processo = (
+        (process or {}).get("client_name") if titular == TITULAR_FIRST else None
+    )
+    client_name = primeiro_preenchido(
+        consent_data.get("nome"),
+        personal_data.get("nome"),
+        personal_data.get("nome_completo"),
+        rgpd_request.get("client_name"),
+        nome_do_processo,
+    )
+    localidade = primeiro_preenchido(
+        consent_data.get("localidade"), personal_data.get("localidade")
+    )
     
     # PACOTE DG-2 — dados legais da empresa lidos ESTRITAMENTE do
     # SystemConfig (fonte oficial onde residem os dados da empresa de
@@ -1132,14 +1217,22 @@ async def _get_rendered_rgpd_text(
     # PACOTE DG-2 — email oficial da empresa (disponível para templates
     # customizados do admin; o template por defeito não o usa).
     rendered = rendered.replace("{{EMAIL_EMPRESA}}", empresa_email)
-    rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
-    rendered = rendered.replace("{{MORADA}}", consent_data.get("morada", personal_data.get("morada_fiscal", "")))
+    rendered = rendered.replace("{{CONTRIBUINTE}}", primeiro_preenchido(
+        consent_data.get("contribuinte"), personal_data.get("nif")))
+    rendered = rendered.replace("{{MORADA}}", primeiro_preenchido(
+        consent_data.get("morada"),
+        personal_data.get("morada_fiscal"),
+        personal_data.get("morada")))
     rendered = rendered.replace("{{LOCALIDADE}}", localidade)
-    rendered = rendered.replace("{{CODIGO_POSTAL}}", consent_data.get("codigo_postal", ""))
-    tipo_documento_label = get_tipo_documento_label(consent_data.get("tipo_documento"))
-    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", tipo_documento_label)
-    rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", consent_data.get("numero_documento", ""))
-    rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", consent_data.get("validade_documento", personal_data.get("data_validade_cc", "")))
+    rendered = rendered.replace("{{CODIGO_POSTAL}}", primeiro_preenchido(
+        consent_data.get("codigo_postal"), personal_data.get("codigo_postal")))
+    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", get_tipo_documento_label(
+        primeiro_preenchido(consent_data.get("tipo_documento"), doc_tipo)))
+    rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", primeiro_preenchido(
+        consent_data.get("numero_documento"), doc_numero))
+    rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", primeiro_preenchido(
+        consent_data.get("validade_documento"),
+        personal_data.get("data_validade_cc")))
     rendered = rendered.replace("{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
     
     return rendered
@@ -1170,8 +1263,26 @@ async def _get_rendered_minuta_text(
         template_text = "MINUTA DE EXCLUSIVIDADE\n"
     
     rendered = template_text
-    client_name = consent_data.get("nome", rgpd_request.get("client_name", ""))
-    localidade = consent_data.get("localidade", "")
+    # `documento_id` do titular alvo — nunca era usado no template, pelo que
+    # o número e o tipo do documento saíam em branco no PDF do 2.º titular.
+    doc_tipo, doc_numero = partes_do_documento(personal_data.get("documento_id"))
+
+    # `process["client_name"]` só entra na cadeia do 1.º titular. Para o
+    # 2.º seria o pior defeito possível: o documento legal do 2.º titular
+    # a identificar o 1.º. Há um teste a afirmar exactamente isso.
+    nome_do_processo = (
+        (process or {}).get("client_name") if titular == TITULAR_FIRST else None
+    )
+    client_name = primeiro_preenchido(
+        consent_data.get("nome"),
+        personal_data.get("nome"),
+        personal_data.get("nome_completo"),
+        rgpd_request.get("client_name"),
+        nome_do_processo,
+    )
+    localidade = primeiro_preenchido(
+        consent_data.get("localidade"), personal_data.get("localidade")
+    )
     
     # PACOTE DG-2 — emissor/responsável lido ESTRITAMENTE do SystemConfig
     # (mesma fonte oficial do RGPD; ver `_get_company_legal_data`). A
@@ -1189,13 +1300,22 @@ async def _get_rendered_minuta_text(
     rendered = rendered.replace("{{NOME}}", client_name)
     rendered = rendered.replace("{{NOME_EMPRESA}}", empresa_nome)
     rendered = rendered.replace("{{NIF_EMPRESA}}", empresa_nif)
-    rendered = rendered.replace("{{CONTRIBUINTE}}", consent_data.get("contribuinte", personal_data.get("nif", "")))
-    rendered = rendered.replace("{{MORADA}}", consent_data.get("morada", personal_data.get("morada_fiscal", "")))
+    rendered = rendered.replace("{{CONTRIBUINTE}}", primeiro_preenchido(
+        consent_data.get("contribuinte"), personal_data.get("nif")))
+    rendered = rendered.replace("{{MORADA}}", primeiro_preenchido(
+        consent_data.get("morada"),
+        personal_data.get("morada_fiscal"),
+        personal_data.get("morada")))
     rendered = rendered.replace("{{LOCALIDADE}}", localidade)
-    rendered = rendered.replace("{{CODIGO_POSTAL}}", consent_data.get("codigo_postal", ""))
-    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", get_tipo_documento_label(consent_data.get("tipo_documento")))
-    rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", consent_data.get("numero_documento", ""))
-    rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", consent_data.get("validade_documento", personal_data.get("data_validade_cc", "")))
+    rendered = rendered.replace("{{CODIGO_POSTAL}}", primeiro_preenchido(
+        consent_data.get("codigo_postal"), personal_data.get("codigo_postal")))
+    rendered = rendered.replace("{{TIPO_DOCUMENTO}}", get_tipo_documento_label(
+        primeiro_preenchido(consent_data.get("tipo_documento"), doc_tipo)))
+    rendered = rendered.replace("{{NUMERO_DOCUMENTO}}", primeiro_preenchido(
+        consent_data.get("numero_documento"), doc_numero))
+    rendered = rendered.replace("{{VALIDADE_DOCUMENTO}}", primeiro_preenchido(
+        consent_data.get("validade_documento"),
+        personal_data.get("data_validade_cc")))
     rendered = rendered.replace("{{DATA_ASSINATURA}}", consent_data.get("data_assinatura", ""))
     rendered = rendered.replace("{{MORADA_EMPRESA}}", empresa_morada)
     rendered = rendered.replace("{{CONTACTO_EMPRESA}}", empresa_contacto)

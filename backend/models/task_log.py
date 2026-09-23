@@ -35,6 +35,7 @@ class TaskType(str, Enum):
     DOCUMENT_CATEGORIZE = "DOC_CATEGORIZE" # Categorização automática
     TEMPLATE_FILL = "TEMPLATE_FILL"        # Preenchimento de templates
     S3_UPLOAD = "S3_UPLOAD"                # Upload para S3
+    VOICE_NOTE = "VOICE_NOTE"              # Nota de voz: transcrição + extracção IA
     CUSTOM = "CUSTOM"                      # Tarefa customizada
 
 

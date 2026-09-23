@@ -73,6 +73,8 @@ from routes.alerts import router as alerts_router
 from routes.websocket import router as websocket_router
 from routes.push_notifications import router as push_notifications_router
 from routes.tasks import router as tasks_router
+from routes.voice_notes import router as voice_notes_router
+from routes.document_extraction import router as document_extraction_router
 from routes.emails import router as emails_router  # doc_router removido - rotas agora no router principal
 from routes.webmail import router as webmail_router
 from routes.ai_bulk import router as ai_bulk_router
@@ -102,6 +104,7 @@ from routes.temp_links import router as temp_links_router
 from routes.admin_encryption import router as admin_encryption_router
 from routes.restore import router as restore_router
 from routes.automation import router as automation_router
+from routes.automation import engine_router as automations_engine_router
 from routes.form_config import router as form_config_router
 from routes.async_jobs import router as async_jobs_router
 from routes.audit import router as audit_router
@@ -564,6 +567,8 @@ app.include_router(alerts_router, prefix="/api")
 app.include_router(websocket_router, prefix="/api")
 app.include_router(push_notifications_router, prefix="/api")
 app.include_router(tasks_router, prefix="/api")
+app.include_router(voice_notes_router, prefix="/api")
+app.include_router(document_extraction_router, prefix="/api")
 # emails_doc_router removido — send-documentation e document-recipients agora no router principal (antes de /{email_id})
 app.include_router(emails_router, prefix="/api")
 app.include_router(webmail_router, prefix="/api")
@@ -593,6 +598,7 @@ app.include_router(rgpd_router, prefix="/api")
 app.include_router(temp_links_router, prefix="/api")
 app.include_router(admin_encryption_router, prefix="/api")
 app.include_router(automation_router, prefix="/api")
+app.include_router(automations_engine_router, prefix="/api")
 app.include_router(form_config_router, prefix="/api")
 app.include_router(restore_router, prefix="/api")
 app.include_router(async_jobs_router, prefix="/api")
@@ -780,57 +786,75 @@ async def background_job_monitor():
     
     logger.info("🔍 Background Job Monitor iniciado - verificação a cada 30 minutos")
     
+    from services.job_heartbeat import heartbeat
+
     while True:
         try:
             await asyncio.sleep(CHECK_INTERVAL_SECONDS)
-            
-            cutoff_time = datetime.now(timezone.utc) - timedelta(hours=STUCK_THRESHOLD_HOURS)
-            cutoff_iso = cutoff_time.isoformat()
-            
-            # Buscar jobs stuck na base de dados
-            stuck_jobs = await db.background_jobs.find({
-                "status": {"$in": ["running", "pending"]},
-                "updated_at": {"$lt": cutoff_iso}
-            }).to_list(100)
-            
-            if stuck_jobs:
-                logger.warning(f"⚠️ Encontrados {len(stuck_jobs)} jobs bloqueados há mais de {STUCK_THRESHOLD_HOURS}h")
-                
-                job_ids = [job.get("id") for job in stuck_jobs]
-                
-                # Marcar como failed
-                await db.background_jobs.update_many(
-                    {"id": {"$in": job_ids}},
-                    {"$set": {
-                        "status": "failed",
-                        "error": f"Job marcado automaticamente como stuck após {STUCK_THRESHOLD_HOURS}h sem actividade",
-                        "auto_cleaned_at": datetime.now(timezone.utc).isoformat()
-                    }}
-                )
-                
-                # Criar notificação de sistema
-                for job in stuck_jobs:
-                    try:
-                        await db.system_notifications.insert_one({
-                            "type": "job_stuck",
-                            "severity": "warning",
-                            "title": "Job bloqueado detectado",
-                            "message": f"Job '{job.get('name', job.get('id'))}' foi automaticamente marcado como falhado após {STUCK_THRESHOLD_HOURS}h sem actividade.",
-                            "job_id": job.get("id"),
-                            "job_type": job.get("job_type"),
-                            "created_at": datetime.now(timezone.utc).isoformat(),
-                            "read": False
-                        })
-                    except (IOError, OSError, ValueError) as notif_err:
-                        logger.error(f"Erro ao criar notificação para job stuck: {notif_err}")
-                
-                # Enviar email para admins
-                await send_stuck_job_email(stuck_jobs)
-                
-                logger.info(f"✅ {len(stuck_jobs)} jobs stuck foram marcados como 'failed'")
-            
+
+            # Monitor de Sinais Vitais (ponto 14): o batimento embrulha o
+            # TRABALHO, não corre ao lado dele — senão registava "ok" para
+            # um ciclo que rebentou a seguir. Vai para uma colecção
+            # partilhada porque a API não vê a memória deste processo,
+            # muito menos a do worker.
+            async with heartbeat("background_job_monitor",
+                                 interval_seconds=CHECK_INTERVAL_SECONDS):
+                cutoff_time = datetime.now(timezone.utc) - timedelta(hours=STUCK_THRESHOLD_HOURS)
+                cutoff_iso = cutoff_time.isoformat()
+
+                # Buscar jobs stuck na base de dados
+                stuck_jobs = await db.background_jobs.find({
+                    "status": {"$in": ["running", "pending"]},
+                    "updated_at": {"$lt": cutoff_iso}
+                }).to_list(100)
+
+                await _tratar_jobs_bloqueados(stuck_jobs, STUCK_THRESHOLD_HOURS)
+
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
+
+
+async def _tratar_jobs_bloqueados(stuck_jobs: list, STUCK_THRESHOLD_HOURS: int):
+    """Marca como falhados os jobs parados e avisa quem de direito.
+
+    Extraído do corpo do ciclo para o envelope do batimento não precisar
+    de indentar 50 linhas — e para o ciclo passar a ler-se de uma vez.
+    """
+    if stuck_jobs:
+        logger.warning(f"⚠️ Encontrados {len(stuck_jobs)} jobs bloqueados há mais de {STUCK_THRESHOLD_HOURS}h")
+        
+        job_ids = [job.get("id") for job in stuck_jobs]
+        
+        # Marcar como failed
+        await db.background_jobs.update_many(
+            {"id": {"$in": job_ids}},
+            {"$set": {
+                "status": "failed",
+                "error": f"Job marcado automaticamente como stuck após {STUCK_THRESHOLD_HOURS}h sem actividade",
+                "auto_cleaned_at": datetime.now(timezone.utc).isoformat()
+            }}
+        )
+        
+        # Criar notificação de sistema
+        for job in stuck_jobs:
+            try:
+                await db.system_notifications.insert_one({
+                    "type": "job_stuck",
+                    "severity": "warning",
+                    "title": "Job bloqueado detectado",
+                    "message": f"Job '{job.get('name', job.get('id'))}' foi automaticamente marcado como falhado após {STUCK_THRESHOLD_HOURS}h sem actividade.",
+                    "job_id": job.get("id"),
+                    "job_type": job.get("job_type"),
+                    "created_at": datetime.now(timezone.utc).isoformat(),
+                    "read": False
+                })
+            except (IOError, OSError, ValueError) as notif_err:
+                logger.error(f"Erro ao criar notificação para job stuck: {notif_err}")
+        
+        # Enviar email para admins
+        await send_stuck_job_email(stuck_jobs)
+        
+        logger.info(f"✅ {len(stuck_jobs)} jobs stuck foram marcados como 'failed'")
 
 # ====================================================================
 # LOGGING / RASTREABILIDADE MIDDLEWARE

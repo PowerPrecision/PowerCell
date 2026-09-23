@@ -18,8 +18,9 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "../../ui/dialog";
-import { History, MessageSquare, Send, Loader2, Plus } from "lucide-react";
+import { History, MessageSquare, Mic, Send, Loader2, Plus } from "lucide-react";
 import ProcessTimeline from "../../ProcessTimeline";
+import VoiceNoteRecorder from "../VoiceNoteRecorder";
 import UnifiedAuditTrail from "../../UnifiedAuditTrail";
 
 export default function HistoryTab({
@@ -35,6 +36,14 @@ export default function HistoryTab({
   handleDeleteComment,
   user,
   isProcessLocked,
+  // ── Nota de voz (Épico 7) ──────────────────────────────────────────
+  // O separador só rende o botão e o diálogo: quem detém o estado e quem
+  // fala com a API é o contentor (`ProcessDetails`).
+  voiceNoteOpen = false,
+  onVoiceNoteOpenChange,
+  onEnviarNotaDeVoz,
+  aEnviarNotaDeVoz = false,
+  aProcessarNotaDeVoz = false,
 }) {
   const [isNoteDialogOpen, setIsNoteDialogOpen] = useState(false);
   const wasSendingRef = useRef(false);
@@ -61,6 +70,18 @@ export default function HistoryTab({
             <History className="h-4 w-4 text-primary" />
             Histórico de Auditoria
           </CardTitle>
+          {!isProcessLocked && onEnviarNotaDeVoz && (
+            <Button
+              size="sm"
+              variant="outline"
+              className="gap-1.5"
+              onClick={() => onVoiceNoteOpenChange?.(true)}
+              data-testid="voice-note-open"
+            >
+              <Mic className="h-3.5 w-3.5" />
+              Nota de voz
+            </Button>
+          )}
           {!isProcessLocked && (
             <Dialog open={isNoteDialogOpen} onOpenChange={setIsNoteDialogOpen}>
               <DialogTrigger asChild>
@@ -127,6 +148,16 @@ export default function HistoryTab({
           />
         </CardContent>
       </Card>
+
+      {onEnviarNotaDeVoz && (
+        <VoiceNoteRecorder
+          open={voiceNoteOpen}
+          onOpenChange={onVoiceNoteOpenChange}
+          onEnviar={onEnviarNotaDeVoz}
+          aEnviar={aEnviarNotaDeVoz}
+          aProcessar={aProcessarNotaDeVoz}
+        />
+      )}
     </div>
   );
 }

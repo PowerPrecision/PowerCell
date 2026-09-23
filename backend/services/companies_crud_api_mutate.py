@@ -31,6 +31,11 @@ async def run_create_company(data: CompanyCreate):
     doc = {
         "id": company_id,
         "name": data.name,
+        # Rede / Grupo Empresarial (Lote 4, ponto 10). Por omissão `None`
+        # — uma empresa nova nasce como ilha de uma só, e é o
+        # administrador que a junta a um grupo. Herdar a rede de outra
+        # empresa aqui seria abrir a fuga no acto da criação.
+        "network_id": data.network_id,
         "nif": data.nif,
         "address": data.address,
         "phone": data.phone,

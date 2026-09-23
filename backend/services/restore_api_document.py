@@ -10,6 +10,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from services.history import _is_stealth_user
 
 
 async def run_restore_document(document_id: str, user: dict):
@@ -35,15 +36,17 @@ async def run_restore_document(document_id: str, user: dict):
             }}
         )
 
-        # Log
-        await db.history.insert_one({
-            "id": str(__import__('uuid').uuid4()),
-            "process_id": document.get("process_id"),
-            "user_id": user["id"],
-            "user_name": user.get("name"),
-            "action": f"Documento restaurado: {document.get('filename', document_id)}",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
+        # Log — silencioso para o perfil Indexação (regra de ouro):
+        # o indexador não deixa rasto no mural do processo.
+        if not _is_stealth_user(user):
+            await db.history.insert_one({
+                "id": str(__import__('uuid').uuid4()),
+                "process_id": document.get("process_id"),
+                "user_id": user["id"],
+                "user_name": user.get("name"),
+                "action": f"Documento restaurado: {document.get('filename', document_id)}",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
 
         updated = await db.documents.find_one({"id": document_id}, {"_id": 0})
 
@@ -69,15 +72,17 @@ async def run_restore_document(document_id: str, user: dict):
         # Remover da coleção de lixo
         await db.deleted_documents.delete_one({"id": document_id})
 
-        # Log
-        await db.history.insert_one({
-            "id": str(__import__('uuid').uuid4()),
-            "process_id": deleted_doc.get("process_id"),
-            "user_id": user["id"],
-            "user_name": user.get("name"),
-            "action": f"Documento restaurado do lixo: {deleted_doc.get('filename', document_id)}",
-            "created_at": datetime.now(timezone.utc).isoformat()
-        })
+        # Log — silencioso para o perfil Indexação (regra de ouro):
+        # o indexador não deixa rasto no mural do processo.
+        if not _is_stealth_user(user):
+            await db.history.insert_one({
+                "id": str(__import__('uuid').uuid4()),
+                "process_id": deleted_doc.get("process_id"),
+                "user_id": user["id"],
+                "user_name": user.get("name"),
+                "action": f"Documento restaurado do lixo: {deleted_doc.get('filename', document_id)}",
+                "created_at": datetime.now(timezone.utc).isoformat()
+            })
 
         if "_id" in restored_doc:
             del restored_doc["_id"]

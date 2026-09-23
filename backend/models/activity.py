@@ -15,6 +15,10 @@ class ActivityResponse(BaseModel):
     user_role: str
     comment: str
     created_at: str
+    # Proveniência da nota: `None` para um comentário escrito à mão,
+    # "voice_note" para o resumo gerado a partir de uma nota de voz
+    # (Épico 7). O frontend usa-o para distinguir as duas na timeline.
+    origin: Optional[str] = None
 
 
 class HistoryResponse(BaseModel):

@@ -10,7 +10,22 @@ import { toast } from "sonner";
 
 const API_URL = process.env.REACT_APP_BACKEND_URL || "";
 
-export function useProcessPortalMessages(processId, { isActive = false } = {}) {
+/**
+ * @param {string} processId
+ * @param {Object} [opcoes]
+ * @param {boolean} [opcoes.isActive=false] - O separador está à vista.
+ * @param {boolean} [opcoes.enabled=true] - `false` desliga TUDO (polling,
+ *   carregamento e refresh manual). Quem sabe que o processo já não
+ *   existe é a página; o `if (notFound) return <...>` dela é um early
+ *   return no RENDER e os hooks correm antes dele, pelo que este hook
+ *   continuava a interrogar o servidor sobre um processo eliminado.
+ *   Desligar à nascença é mais seguro do que cada caminho se defender
+ *   depois do facto — o guard interno só cobria o intervalo.
+ */
+export function useProcessPortalMessages(
+  processId,
+  { isActive = false, enabled = true } = {},
+) {
   const { token } = useAuth();
   const [messages, setMessages] = useState([]);
   const [loading, setLoading] = useState(false);
@@ -33,7 +48,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
   }, []);
 
   const fetchMessages = useCallback(async () => {
-    if (!processId) return;
+    if (!processId || !enabled) return;
     if (isMountedRef.current) setLoading(true);
     try {
       const response = await fetch(`${API_URL}/api/processes/${processId}/portal-messages`, {
@@ -58,10 +73,10 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
     } finally {
       if (isMountedRef.current) setLoading(false);
     }
-  }, [processId, token]);
+  }, [processId, token, enabled]);
 
   const fetchUnreadCount = useCallback(async () => {
-    if (!processId || !token) return;
+    if (!processId || !token || !enabled) return;
     try {
       const response = await fetch(
         `${API_URL}/api/processes/${processId}/portal-messages/unread`,
@@ -79,7 +94,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
     } catch {
       // Silent — erro de rede, tentará novamente no próximo intervalo
     }
-  }, [processId, token]);
+  }, [processId, token, enabled]);
 
   const refresh = useCallback(() => {
     fetchMessages();
@@ -87,7 +102,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
   }, [fetchMessages, fetchUnreadCount]);
 
   const sendMessage = useCallback(async () => {
-    if (!newMessage.trim() || !processId) return;
+    if (!newMessage.trim() || !processId || !enabled) return;
     setSending(true);
     try {
       const response = await fetch(`${API_URL}/api/processes/${processId}/portal-messages`, {
@@ -110,7 +125,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
     } finally {
       if (isMountedRef.current) setSending(false);
     }
-  }, [processId, token, newMessage, fetchMessages]);
+  }, [processId, token, newMessage, fetchMessages, enabled]);
 
   // Buscar mensagens e unread quando o tab fica activo
   useEffect(() => {
@@ -123,7 +138,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
   // Polling unread a cada 30s (desliga em 404/401/403)
   useEffect(() => {
     unreadAvailableRef.current = true;
-    if (!processId || !token) return undefined;
+    if (!processId || !token || !enabled) return undefined;
 
     const interval = setInterval(async () => {
       if (!unreadAvailableRef.current) {
@@ -145,7 +160,7 @@ export function useProcessPortalMessages(processId, { isActive = false } = {}) {
     });
 
     return () => clearInterval(interval);
-  }, [fetchUnreadCount, processId, token]);
+  }, [fetchUnreadCount, processId, token, enabled]);
 
   return {
     messages,

@@ -60,7 +60,9 @@ logger = logging.getLogger(__name__)
 
 EMERGENT_LLM_KEY = os.environ.get('EMERGENT_LLM_KEY', '')
 
-# Modelo a usar - gpt-4o-mini é mais barato e rápido
+# Modelo de OMISSÃO, não o modelo em uso. Quem manda é o painel de IA
+# (tarefa `document_analysis`); ver `resolve_ai_model` mais abaixo. Este valor
+# só vale quando a configuração não está acessível.
 AI_MODEL = "gpt-4o-mini"
 
 # Cliente OpenAI (inicialização preguiçosa/lazy)
@@ -74,6 +76,36 @@ def get_openai_client() -> AsyncOpenAI:
     if _openai_client is None:
         _openai_client = AsyncOpenAI(api_key=EMERGENT_LLM_KEY)
     return _openai_client
+
+
+async def resolve_ai_model() -> str:
+    """Modelo a usar na análise de documentos, segundo o painel de IA.
+
+    O modelo NÃO é uma constante do código: o administrador escolhe-o por
+    tarefa (`document_analysis`) e essa escolha tem de valer também para a
+    leitura por visão. Delega no resolutor canónico
+    (`ai_document_analyzer.resolve_document_analysis_model`) em vez de
+    reconstruir a cadeia `get_ai_config` → `ai_models` → alias — foi ter
+    duas cadeias paralelas que deixou este ficheiro preso ao `gpt-4o-mini`.
+
+    O import é tardio de propósito: `ai_document_analyzer` importa deste
+    módulo (`sanitize_pdf_text`) e um import no topo fecharia o ciclo.
+
+    Nunca levanta: sem configuração acessível, devolve `AI_MODEL`.
+    """
+    try:
+        from services.ai_document_analyzer import resolve_document_analysis_model
+
+        modelo = await resolve_document_analysis_model()
+        if modelo and str(modelo).strip():
+            return str(modelo).strip()
+        logger.warning("Painel de IA devolveu modelo vazio; a usar %s", AI_MODEL)
+    except Exception as e:  # noqa: BLE001 - degradação graciosa
+        logger.warning(
+            "Falha a resolver o modelo de análise de documentos (%s); a usar %s",
+            e, AI_MODEL,
+        )
+    return AI_MODEL
 
 
 def sanitize_email(email: str) -> str:
@@ -603,6 +635,80 @@ def get_document_tool_definition(document_type: str) -> dict:
             }
         }
 
+    elif document_type == "caderneta_predial":
+        return {
+            "type": "function",
+            "function": {
+                "name": "extract_caderneta_predial_data",
+                "description": (
+                    "Extrair dados de uma Caderneta Predial Urbana da Autoridade "
+                    "Tributária (AT). O artigo matricial identifica o prédio na "
+                    "matriz; o VPT é o Valor Patrimonial Tributário determinado "
+                    "pela AT, não o preço de mercado."
+                ),
+                "parameters": {
+                    "type": "object",
+                    "properties": {
+                        "artigo_matricial": {
+                            "type": "string",
+                            "description": "Artigo matricial do prédio, tal como aparece no documento (ex: '1234' ou 'U-1234')"
+                        },
+                        "valor_patrimonial_tributario": {
+                            "type": "number",
+                            "description": "Valor Patrimonial Tributário (VPT) em euros, como número decimal"
+                        },
+                        "ano_inscricao_matriz": {
+                            "type": "string",
+                            "description": "Ano da inscrição na matriz / ano de determinação do VPT"
+                        },
+                        "area_bruta": {
+                            "type": "number",
+                            "description": "Área bruta de construção ou área bruta privativa, em m2"
+                        },
+                        "area_terreno": {
+                            "type": "number",
+                            "description": "Área total do terreno, em m2, se indicada"
+                        },
+                        "tipologia": {
+                            "type": "string",
+                            "description": "Tipologia do fogo (T0, T1, T2, T3, ...) ou afectação (Habitação, Comércio, Serviços)"
+                        },
+                        "localizacao": {
+                            "type": "string",
+                            "description": "Morada completa do prédio (rua, número, andar) tal como consta da caderneta"
+                        },
+                        "freguesia": {"type": "string", "description": "Freguesia do prédio"},
+                        "concelho": {"type": "string", "description": "Concelho do prédio"},
+                        "distrito": {"type": "string", "description": "Distrito do prédio"},
+                        "fraccao": {
+                            "type": "string",
+                            "description": "Letra da fracção autónoma (A, B, C, ...) quando o prédio está em propriedade horizontal"
+                        },
+                        "tipo_predio": {
+                            "type": "string",
+                            "description": "Tipo de prédio: urbano ou rústico"
+                        },
+                        "titulares": {
+                            "type": "array",
+                            "description": "Titulares inscritos na matriz. Extrai TODOS os que constarem do documento.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "nome": {"type": "string", "description": "Nome do titular"},
+                                    "nif": {"type": "string", "description": "NIF do titular (9 dígitos)"},
+                                    "parte": {"type": "string", "description": "Parte/quota do titular (ex: '1/2', '100%')"}
+                                },
+                                "required": ["nome"],
+                                "additionalProperties": True
+                            }
+                        }
+                    },
+                    "required": ["artigo_matricial"],
+                    "additionalProperties": True
+                }
+            }
+        }
+
     else:
         # Tipo genérico / outro
         return {
@@ -969,7 +1075,8 @@ def resize_image_base64(base64_content: str, mime_type: str, max_size: int = MAX
 async def call_openai_api(
     messages: list,
     tool_definition: dict = None,
-    timeout: float = 60.0
+    timeout: float = 60.0,
+    model: Optional[str] = None
 ) -> dict:
     """
     Chamar API OpenAI usando SDK oficial com suporte a Function Calling.
@@ -981,6 +1088,7 @@ async def call_openai_api(
         messages: Lista de mensagens [{role, content}, ...]
         tool_definition: Definição OpenAI tool para function calling
         timeout: Timeout em segundos
+        model: Modelo já resolvido. Se ausente, resolve pelo painel de IA.
     
     Returns:
         Dicionário com dados extraídos da chamada de ferramenta
@@ -990,9 +1098,10 @@ async def call_openai_api(
         Exception: Outros erros
     """
     client = get_openai_client()
-    
+    model_id = model or await resolve_ai_model()
+
     kwargs = {
-        "model": AI_MODEL,
+        "model": model_id,
         "messages": messages,
         "temperature": 0.1,
         "max_tokens": 4096,
@@ -1033,18 +1142,18 @@ async def call_openai_api(
         tool_call = message.tool_calls[0]
         try:
             data = json.loads(tool_call.function.arguments)
-            logger.info(f"[Function Calling] Tool '{tool_call.function.name}' chamado com sucesso")
-            return {"data": data, "method": "function_calling"}
+            logger.info(f"[Function Calling] Tool '{tool_call.function.name}' chamado com sucesso ({model_id})")
+            return {"data": data, "method": "function_calling", "model": model_id}
         except json.JSONDecodeError as e:
             logger.error(f"Falha ao fazer parse dos argumentos da tool call: {e}")
-            return {"data": {}, "method": "function_calling", "error": str(e)}
+            return {"data": {}, "method": "function_calling", "model": model_id, "error": str(e)}
     elif message.content:
         # Fallback: JSON no conteúdo
         content = message.content.strip()
-        return {"data": json.loads(content), "method": "json_content"}
+        return {"data": json.loads(content), "method": "json_content", "model": model_id}
     else:
         logger.error("Sem tool calls e sem conteúdo na resposta")
-        return {"data": {}, "method": "none", "error": "Resposta vazia"}
+        return {"data": {}, "method": "none", "model": model_id, "error": "Resposta vazia"}
 
 
 async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
@@ -1054,7 +1163,8 @@ async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
     """
     system_prompt, _ = get_extraction_prompts(document_type)
     tool_definition = get_document_tool_definition(document_type)
-    
+    model_id = await resolve_ai_model()
+
     try:
         messages = [
             {"role": "system", "content": system_prompt},
@@ -1067,7 +1177,8 @@ async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
         result = await call_openai_api(
             messages=messages,
             tool_definition=tool_definition,
-            timeout=60.0
+            timeout=60.0,
+            model=model_id
         )
         
         extracted_data = result.get("data", {})
@@ -1084,7 +1195,7 @@ async def analyze_with_text(text: str, document_type: str) -> Dict[str, Any]:
             "document_type": document_type,
             "extracted_data": extracted_data,
             "analysis_method": "text",
-            "model": AI_MODEL,
+            "model": result.get("model") or model_id,
             "extraction_mode": result.get("method", "desconhecido"),
             "raw_response": json.dumps(extracted_data, ensure_ascii=False)
         }
@@ -1113,7 +1224,8 @@ async def analyze_with_vision(base64_content: str, mime_type: str, document_type
     """
     system_prompt, _ = get_extraction_prompts(document_type)
     tool_definition = get_document_tool_definition(document_type)
-    
+    model_id = await resolve_ai_model()
+
     # Lógica de redimensionamento de imagem - MANTER EXACTAMENTE COM ESTÁ
     if document_type in ['cc', 'cpcv']:
         resized_base64 = base64_content
@@ -1149,7 +1261,8 @@ async def analyze_with_vision(base64_content: str, mime_type: str, document_type
         result = await call_openai_api(
             messages=messages,
             tool_definition=tool_definition,
-            timeout=120.0
+            timeout=120.0,
+            model=model_id
         )
         
         extracted_data = result.get("data", {})
@@ -1159,7 +1272,7 @@ async def analyze_with_vision(base64_content: str, mime_type: str, document_type
             "document_type": document_type,
             "extracted_data": extracted_data,
             "analysis_method": "vision",
-            "model": AI_MODEL,
+            "model": result.get("model") or model_id,
             "extraction_mode": result.get("method", "desconhecido"),
             "raw_response": json.dumps(extracted_data, ensure_ascii=False)
         }
@@ -1373,6 +1486,19 @@ IMPORTANTE:
 Extrai o saldo e movimentos principais. Valores monetários devem ser números decimais."""
         
         user_prompt = f"Analisa este extrato bancário e extrai todos os dados possíveis."
+
+    elif document_type == "caderneta_predial":
+        system_prompt = """És um assistente especializado em extrair dados de Cadernetas Prediais Urbanas da Autoridade Tributária portuguesa.
+
+IMPORTANTE:
+- O `valor_patrimonial_tributario` (VPT) é o valor determinado pela AT e aparece identificado como "Valor patrimonial actual" ou "VPT". NÃO é o preço de compra nem o valor de avaliação bancária.
+- O `artigo_matricial` é o número do artigo na matriz predial; copia-o tal como está, incluindo o prefixo (ex: "U-1234") quando existir.
+- Áreas em metros quadrados, como números decimais. A "área bruta de construção" e a "área bruta privativa" são ambas aceitáveis para `area_bruta`; prefere a privativa quando ambas existirem.
+- Valores monetários como números decimais, sem símbolo de euro e sem separador de milhares.
+- Extrai TODOS os titulares inscritos na matriz, com a respectiva parte quando indicada.
+- Se um campo não constar do documento, omite-o. NUNCA inventes um valor: uma caderneta sem VPT legível é melhor do que um VPT errado na ficha do processo."""
+
+        user_prompt = f"Analisa esta Caderneta Predial e extrai todos os dados possíveis do prédio e dos seus titulares."
 
     else:
         system_prompt = """És um assistente especializado em extrair dados de documentos.
@@ -2170,6 +2296,10 @@ def build_update_data_from_extraction(
         for src_key, dest_key in field_mapping.items():
             if extracted_data.get(src_key):
                 real_estate_update[dest_key] = extracted_data[src_key]
+                # Sem isto, `collect_unmapped_data` voltava a escrever estes
+                # cinco campos nas observações, duplicando na ficha o que já
+                # tinha entrado em `real_estate_data`.
+                track_mapped(src_key)
         
         if real_estate_update:
             existing_real_estate = existing_data.get("real_estate_data") or {}

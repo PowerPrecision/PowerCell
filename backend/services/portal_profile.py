@@ -17,12 +17,55 @@ from services.process_status import DELETED_STATUS_VALUES
 logger = logging.getLogger(__name__)
 
 
+# LISTAS DE RECURSO, não a fonte de verdade. O que vale é o que sai do
+# `form_config` (ver `carregar_campos_editaveis`); estas só cobrem o caso
+# em que a configuração não está acessível, para o Portal não deixar de
+# gravar por causa de uma falha de leitura.
 PROFILE_UPDATABLE_CONTACT_FIELDS = {"email", "email_secundario", "telefone", "telefone_secundario"}
 PROFILE_UPDATABLE_PERSONAL_FIELDS = {
     "morada_fiscal", "estado_civil", "profissao", "naturalidade",
     "nacionalidade", "data_nascimento", "documento_id", "data_validade_cc",
     "sexo",
 }
+
+
+async def carregar_campos_editaveis() -> dict:
+    """Campos que o Portal pode gravar, derivados do formulário interno.
+
+    O allowlist e o que o Portal MOSTRA saem do mesmo sítio
+    (`portal_profile_schema`), pelo que não podem divergir: era essa
+    divergência que fazia o cliente gravar um campo e o valor desaparecer
+    em silêncio.
+
+    Degradação: se a configuração não estiver acessível, usa as listas de
+    recurso — o Portal continua a gravar o que já gravava.
+    """
+    try:
+        from services.portal_profile_schema import (
+            build_portal_profile_schema,
+            portal_updatable_fields,
+        )
+        from services.public_form_config import load_merged_form_fields
+
+        schema = build_portal_profile_schema(await load_merged_form_fields())
+        campos = portal_updatable_fields(schema)
+        # A validação é sobre `dados_pessoais`: `contacto` vem sempre com
+        # os extras do Portal (email/telefone secundários), pelo que um
+        # esquema VAZIO parecia válido e deixava o Portal sem conseguir
+        # gravar um único campo pessoal.
+        if campos["dados_pessoais"]:
+            return campos
+        logger.warning("[PORTAL PROFILE] Esquema vazio; a usar listas de recurso")
+    except Exception as e:  # noqa: BLE001 - degradação graciosa
+        logger.warning(
+            "[PORTAL PROFILE] Falha a derivar campos do form_config (%s); "
+            "a usar listas de recurso", e,
+        )
+
+    return {
+        "contacto": set(PROFILE_UPDATABLE_CONTACT_FIELDS),
+        "dados_pessoais": set(PROFILE_UPDATABLE_PERSONAL_FIELDS),
+    }
 # Campos SENSÍVEIS que NÃO são devolvidos ao frontend (mesmo encriptados)
 PROFILE_HIDDEN_FIELDS = {"nif", "nome_pai", "nome_mae", "altura"}
 
@@ -69,6 +112,8 @@ def build_portal_profile_mongo_update(
     data: "ClientProfileUpdate",
     existing_client: dict,
     now: str,
+    campos_editaveis: Optional[dict] = None,
+    recusados: Optional[list] = None,
 ) -> dict:
     """
     Constrói o dicionário de atualização MongoDB para o Portal do Cliente.
@@ -89,16 +134,34 @@ def build_portal_profile_mongo_update(
             `field_metadata` sem perder histórico de campos não alterados).
         now: Timestamp ISO 8601 a usar em `updated_at` / `field_metadata`.
 
+    Args (continuação):
+        campos_editaveis: `{"contacto": set, "dados_pessoais": set}` vindo
+            de `carregar_campos_editaveis` (derivado do `form_config`).
+            Sem isto, usa as listas de recurso do módulo.
+        recusados: lista onde são acrescentados os campos DESCARTADOS. O
+            comportamento anterior era descartar em silêncio: o cliente
+            preenchia, gravava, lia "Perfil atualizado com sucesso!" e o
+            valor não existia. Quem chama usa isto para o dizer.
+
     Returns:
         dict: Pronto a ser usado como `{"$set": update}` num `update_one`.
             Vazio (exceto `updated_at`) se não houver campos válidos.
     """
+    permitidos = campos_editaveis or {
+        "contacto": PROFILE_UPDATABLE_CONTACT_FIELDS,
+        "dados_pessoais": PROFILE_UPDATABLE_PERSONAL_FIELDS,
+    }
+    contacto_permitido = permitidos.get("contacto") or set()
+    pessoais_permitidos = permitidos.get("dados_pessoais") or set()
+    fora = recusados if recusados is not None else []
+
     update_fields = {}
 
     contacto_updates = {}
     if data.contacto:
         for key, value in data.contacto.items():
-            if key not in PROFILE_UPDATABLE_CONTACT_FIELDS:
+            if key not in contacto_permitido:
+                fora.append(key)
                 continue
             if key in ("email", "email_secundario") and value:
                 try:
@@ -122,8 +185,12 @@ def build_portal_profile_mongo_update(
     dp_updates = {}
     if data.dados_pessoais:
         for key, value in data.dados_pessoais.items():
-            if key in PROFILE_UPDATABLE_PERSONAL_FIELDS:
+            if key in pessoais_permitidos:
                 dp_updates[key] = value
+            else:
+                # O NIF cai aqui de propósito: está trancado por regra de
+                # negócio e nunca é gravado pelo Portal.
+                fora.append(key)
         if dp_updates:
             update_fields["dados_pessoais"] = dp_updates
 
@@ -263,11 +330,24 @@ async def run_get_client_profile(client_data: dict):
             continue
         clean_contacto[key] = _decrypt_if_needed(value)
 
+    # O Portal renderiza a partir DESTE esquema, derivado do mesmo
+    # `form_config` que alimenta o formulário interno. Enviá-lo daqui é o
+    # que impede as duas listas de voltarem a divergir.
+    form_schema: list = []
+    try:
+        from services.portal_profile_schema import build_portal_profile_schema
+        from services.public_form_config import load_merged_form_fields
+
+        form_schema = build_portal_profile_schema(await load_merged_form_fields())
+    except Exception as e:  # noqa: BLE001 - o perfil abre à mesma
+        logger.warning("[PORTAL PROFILE] Falha a montar o esquema: %s", e)
+
     return {
         "id": client.get("id"),
         "nome": client.get("nome", ""),
         "contacto": clean_contacto,
         "dados_pessoais": clean_dados_pessoais,
+        "form_schema": form_schema,
         "has_process": has_process,
         # PACOTE BM — flag de dados confirmados/congelados pela Indexação.
         # Quando true, o Portal bloqueia todos os campos de input do perfil.
@@ -348,10 +428,27 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
     # completo nem sub-documentos inteiros, por isso `s3_folder`,
     # `process_ids` e outras relações internas nunca são tocados aqui.
     now = datetime.now(timezone.utc).isoformat()
-    mongo_update = build_portal_profile_mongo_update(data, client, now)
+    campos_editaveis = await carregar_campos_editaveis()
+    recusados: list = []
+    mongo_update = build_portal_profile_mongo_update(
+        data, client, now, campos_editaveis=campos_editaveis, recusados=recusados
+    )
+
+    if recusados:
+        # Antes descartava-se em silêncio: o cliente preenchia, gravava e
+        # lia "Perfil atualizado com sucesso!" com o valor perdido.
+        logger.warning(
+            "[PORTAL PROFILE] Cliente %s enviou campos não editáveis: %s",
+            client_id, sorted(set(recusados)),
+        )
 
     if not mongo_update:
-        return {"success": True, "message": "Nenhum campo para atualizar.", "updated_fields": []}
+        return {
+            "success": True,
+            "message": "Nenhum campo para atualizar.",
+            "updated_fields": [],
+            "rejected_fields": sorted(set(recusados)),
+        }
 
     updated_fields = [
         key for key in ("contacto", "dados_pessoais")
@@ -369,6 +466,7 @@ async def run_update_client_profile(data: ClientProfileUpdate, client_data: dict
 
     return {
         "success": True,
+        "rejected_fields": sorted(set(recusados)),
         "message": "Perfil atualizado com sucesso.",
         "updated_fields": updated_fields,
     }

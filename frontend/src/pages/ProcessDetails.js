@@ -94,7 +94,22 @@ import {
   setProcessIndexed,
   // PACOTE 11 (Eixo 4) — restauro rápido do processo eliminado (banner)
   restoreProcess,
+  // ÉPICO 7 — nota de voz do consultor
+  uploadVoiceNote,
 } from "../services/api";
+import ProcessDomainTabsList from "../components/processDetails/ProcessDomainTabsList";
+import AIReviewDialog from "../components/processDetails/dialogs/AIReviewDialog";
+import {
+  aplicarDecisaoNaRevisao,
+  prepararRevisaoDaExtraccao,
+} from "../utils/documentExtraction";
+import RGPDRequestDialog from "../components/processDetails/dialogs/RGPDRequestDialog";
+import TitularChoiceDialog from "../components/processDetails/dialogs/TitularChoiceDialog";
+import useTaskEvents from "../hooks/useTaskEvents";
+import {
+  eNotaDeVozDoProcesso,
+  mensagemDeConclusao,
+} from "../utils/voiceNote";
 import { useProcessMutations } from "../hooks/mutations/useProcessMutations";
 import { sanitizeProcessUpdatePayload } from "./processDetails/processUpdatePayload";
 import ProcessAlerts from "../components/ProcessAlerts";
@@ -129,7 +144,6 @@ import {
   ChevronDown,
   ExternalLink,
   Link as LinkIcon,
-  Users,
   Sparkles,
   Mail,
   Phone,
@@ -252,7 +266,17 @@ const ProcessDetails = () => {
   const [mainTab, setMainTab] = useState(initialTabs.mainTab);
 
   // Mensagens do Portal — estado/polling vivem no hook (badge do tab precisa de unread)
-  const portal = useProcessPortalMessages(id, { isActive: activeTab === "mensagens" });
+  // Declarados ANTES do hook do portal de propósito: o `if (notFound) return`
+  // da página é um early return no RENDER, e os hooks correm antes dele. Sem
+  // isto, a página mostrava "Processo não encontrado" enquanto continuava a
+  // interrogar o servidor sobre o processo eliminado, de 30 em 30 segundos.
+  const [notFound, setNotFound] = useState(false);
+  const [accessDenied, setAccessDenied] = useState(false);
+
+  const portal = useProcessPortalMessages(id, {
+    isActive: activeTab === "mensagens",
+    enabled: !notFound && !accessDenied,
+  });
   portalRefreshRef.current = portal.refresh;
 
   const tabQuery = searchParams.get("tab");
@@ -276,8 +300,6 @@ const ProcessDetails = () => {
   };
 
 
-  const [accessDenied, setAccessDenied] = useState(false);
-  const [notFound, setNotFound] = useState(false);
   
   // Estado de erro de validação do NIF
   const [nifError, setNifError] = useState(null);
@@ -309,6 +331,16 @@ const ProcessDetails = () => {
   // Activity state
   const [newComment, setNewComment] = useState("");
   const [sendingComment, setSendingComment] = useState(false);
+  // ── Nota de voz (Épico 7) ────────────────────────────────────────
+  // Declarado JUNTO DO RESTANTE ESTADO, e não ao pé dos handlers: um
+  // `const` usado por um `useCallback` declarado antes dele fica na zona
+  // morta temporal e rebenta no primeiro render (regressão do Épico 6).
+  // Processo actualmente hidratado — distingue a montagem de uma mudança
+  // de processo no efeito de reset (ver o BUGFIX do Épico 8 abaixo).
+  const processoAnteriorRef = useRef(null);
+  const [voiceNoteOpen, setVoiceNoteOpen] = useState(false);
+  const [aEnviarNotaDeVoz, setAEnviarNotaDeVoz] = useState(false);
+  const [notaDeVozEmCurso, setNotaDeVozEmCurso] = useState(null);
 
   // Deadline dialog
   const [isDeadlineDialogOpen, setIsDeadlineDialogOpen] = useState(false);
@@ -627,6 +659,10 @@ const ProcessDetails = () => {
   const [aiFieldConfidence, setAiFieldConfidence] = useState({});
   const [aiConflicts, setAiConflicts] = useState([]);
   const [showAIReviewDialog, setShowAIReviewDialog] = useState(false);
+  // Épico 9 — extracção por ficheiro à espera de confirmação.
+  // Enquanto isto não for `null`, NADA foi escrito: nem no formulário, nem
+  // na base de dados. É o que separa este caminho do da análise em lote.
+  const [revisaoPendente, setRevisaoPendente] = useState(null);
   const [titularChoiceDialog, setTitularChoiceDialog] = useState({
     open: false,
     items: [],
@@ -742,18 +778,51 @@ const ProcessDetails = () => {
     }
   };
 
+  /**
+   * Entrega a extracção em LOTE ao diálogo de revisão.
+   *
+   * REGRA DE OURO, SEM EXCEPÇÃO: nada é escrito na ficha antes de o
+   * consultor confirmar. Este caminho fazia-o — abria o diálogo quando
+   * havia conflitos e, quando não havia, gravava directamente em
+   * `/ai-apply-suggestions`.
+   *
+   * E "sem conflitos" não era o caso benigno: um conflito só existe
+   * quando a ficha JÁ TEM outro valor. Ficha vazia = zero conflitos =
+   * tudo o que a IA leu entrava de uma vez, sem ninguém ver.
+   *
+   * O diálogo abre agora sempre, e mostra os dois grupos: o que colide
+   * (a decidir) e o que vai preencher campos vazios (a confirmar).
+   */
   const commitAIExtractedData = async (payload, targetTitular) => {
     const { extractedData, fieldConfidence, conflicts, documentsProcessed } = payload;
     if (!extractedData) return;
 
-    applySharedExtractedFields(extractedData);
-    applyPersonalAndFinancialToTitular(extractedData, targetTitular);
+    if (targetTitular === "ignore") {
+      // Só os campos partilhados (imóvel) — nada de identidade nem de
+      // rendimentos, que é o que o "ignorar" quer dizer.
+      applySharedExtractedFields(extractedData);
+    } else {
+      const revisao = prepararRevisaoDaExtraccao({
+        extractedData,
+        conflicts,
+        sourceDocument:
+          documentsProcessed > 1
+            ? `${documentsProcessed} documentos analisados`
+            : "1 documento analisado",
+        targetTitular,
+        documentsProcessed,
+      });
 
-    if (conflicts && conflicts.length > 0 && targetTitular !== "ignore") {
-      setShowAIReviewDialog(true);
-      toast.info(`${conflicts.length} conflito(s) detectado(s). Reveja os valores.`);
-    } else if (targetTitular !== "ignore") {
-      await persistAISuggestions(extractedData, documentsProcessed, targetTitular);
+      if (revisao) {
+        setAiConflicts(revisao.conflicts);
+        setRevisaoPendente(revisao);
+        setShowAIReviewDialog(true);
+        if (revisao.conflicts.length > 0) {
+          toast.info(
+            `${revisao.conflicts.length} conflito(s) detectado(s). Reveja os valores.`,
+          );
+        }
+      }
     }
 
     if (fieldConfidence) {
@@ -769,6 +838,42 @@ const ProcessDetails = () => {
     }
 
     setActiveTab("personal");
+  };
+
+  /**
+   * Épico 9 — dados lidos de UM documento, à espera de revisão.
+   *
+   * REGRA DE OURO: ao contrário da análise em lote (que pré-preenche o
+   * formulário e, quando não há conflitos, chega a gravar sozinha em
+   * `/ai-apply-suggestions`), aqui não se toca em nada antes do "Confirmar".
+   * São dados pessoais e financeiros lidos por um modelo de visão: uma
+   * alucinação sobre um NIF ou um vencimento não pode entrar na ficha sem
+   * um humano a validar.
+   *
+   * O diálogo abre SEMPRE, mesmo sem conflitos — sem conflitos é
+   * precisamente o caso em que a ficha está vazia e tudo o que a IA leu
+   * vai entrar de novo.
+   */
+  const handleDocumentDataExtracted = ({
+    extractedData,
+    conflicts,
+    sourceDocument,
+    titularMatches,
+  }) => {
+    const revisao = prepararRevisaoDaExtraccao({
+      extractedData,
+      conflicts,
+      sourceDocument,
+      titularMatches,
+    });
+    if (!revisao) {
+      toast.warning("A IA não devolveu dados deste documento.");
+      return;
+    }
+
+    setAiConflicts(revisao.conflicts);
+    setRevisaoPendente(revisao);
+    setShowAIReviewDialog(true);
   };
 
   // Handler para dados extraídos pela IA dos documentos
@@ -942,6 +1047,15 @@ const ProcessDetails = () => {
     
     // Remover conflito da lista
     setAiConflicts(prev => prev.filter(c => c.field !== field));
+
+    // Épico 9 — a decisão tem de ficar registada nos dados que a
+    // confirmação vai gravar. Sem isto, escolher "fica o valor existente"
+    // limpava o conflito do ecrã e o `Confirmar` escrevia o valor da IA na
+    // mesma: a interface dizia uma coisa e a ficha ficava com outra.
+    setRevisaoPendente((anterior) =>
+      aplicarDecisaoNaRevisao(anterior, field, chosenValue),
+    );
+
     toast.success(`Campo "${field}" actualizado`);
   };
 
@@ -1074,7 +1188,25 @@ const ProcessDetails = () => {
   }, [queryClient, id, clientId, processBundle.process?.client_id, processBundle.refetchAll]);
 
   // Reset hydration when navigating to another process
+  //
+  // BUGFIX (Épico 8): este efeito é declarado DEPOIS do de hidratação, pelo
+  // que na montagem corriam os dois pela mesma ordem — hidratar e logo a
+  // seguir desfazer. Na primeira visita isso passava despercebido: a query
+  // ainda não tinha resolvido, `dataUpdatedAt` mudava a seguir e a
+  // hidratação voltava a correr. Numa REVISITA dentro do `staleTime` (60 s)
+  // o TanStack serve a cache logo no primeiro render, `dataUpdatedAt` nunca
+  // muda, a hidratação não volta a correr — e a página ficava presa no
+  // esqueleto de carregamento, para sempre.
+  //
+  // Na montagem não há nada a limpar: o estado acabou de nascer. Só uma
+  // MUDANÇA de processo justifica o reset, que é o que o nome do efeito
+  // sempre disse.
   useEffect(() => {
+    if (processoAnteriorRef.current === id) return;
+    const eraMontagem = processoAnteriorRef.current === null;
+    processoAnteriorRef.current = id;
+    if (eraMontagem) return;
+
     lastHydratedAtRef.current = 0;
     setLoading(true);
     setProcess(null);
@@ -1361,6 +1493,104 @@ const ProcessDetails = () => {
       setSendingComment(false);
     }
   };
+
+  // ── Nota de voz (Épico 7) ────────────────────────────────────────
+  // O upload devolve de imediato; o trabalho pesado (transcrição, IA,
+  // escrita na timeline, criação de tarefas) corre em background no
+  // servidor e volta pelos eventos `task_*` do Épico 4.
+  const handleEnviarNotaDeVoz = useCallback(
+    async (ficheiro) => {
+      setAEnviarNotaDeVoz(true);
+      try {
+        const { data } = await uploadVoiceNote(id, ficheiro);
+        setNotaDeVozEmCurso(data?.task_id || null);
+        setVoiceNoteOpen(false);
+        toast.info("Nota enviada. A transcrever e a analisar...");
+      } catch (erro) {
+        toast.error(
+          erro?.response?.data?.detail || "Não foi possível enviar a nota de voz.",
+        );
+      } finally {
+        setAEnviarNotaDeVoz(false);
+      }
+    },
+    [id],
+  );
+
+  // A nota só aparece no ecrã sem refresh porque este handler invalida as
+  // queries do processo quando o evento terminal chega. Sem o filtro por
+  // tipo e processo, QUALQUER tarefa de fundo do CRM (importações, análises
+  // em massa) recarregaria esta página.
+  useTaskEvents(
+    useCallback(
+      (payload, tipoDeEvento) => {
+        if (!eNotaDeVozDoProcesso(payload, id)) return;
+
+        if (tipoDeEvento === "task_completed") {
+          setNotaDeVozEmCurso(null);
+          fetchData();
+          toast.success(mensagemDeConclusao(payload?.result));
+        } else if (tipoDeEvento === "task_failed") {
+          setNotaDeVozEmCurso(null);
+          toast.error(payload?.error || "A nota de voz não pôde ser processada.");
+        }
+      },
+      [id, fetchData],
+    ),
+  );
+
+  // O diálogo de revisão não anuncia nada: diz que o utilizador confirmou
+  // e o contentor é que sabe que isso implica fechar e avisar para guardar.
+  const handleConfirmAIReview = useCallback(async () => {
+    setShowAIReviewDialog(false);
+
+    // Caminho do Épico 9: nada foi aplicado ainda. A confirmação do
+    // consultor é o que autoriza escrever no formulário e na ficha.
+    if (revisaoPendente) {
+      const { extractedData, targetTitular, documentsProcessed } =
+        revisaoPendente;
+      setRevisaoPendente(null);
+      applySharedExtractedFields(extractedData);
+      applyPersonalAndFinancialToTitular(extractedData, targetTitular);
+      await persistAISuggestions(
+        extractedData,
+        documentsProcessed || 1,
+        targetTitular,
+      );
+      setActiveTab("personal");
+      return;
+    }
+
+    // Caminho da análise em lote: os campos já tinham sido pré-preenchidos
+    // antes de o diálogo abrir; só falta avisar que é preciso guardar.
+    toast.success("Campos actualizados. Não esqueça de guardar!");
+  }, [revisaoPendente]);
+
+  // Fechar o diálogo sem confirmar DESCARTA a extracção pendente. Guardá-la
+  // seria pior do que inútil: a próxima confirmação escreveria dados de um
+  // documento que o consultor já tinha rejeitado.
+  const handleAIReviewOpenChange = useCallback((aberto) => {
+    setShowAIReviewDialog(aberto);
+    if (!aberto) setRevisaoPendente(null);
+  }, []);
+
+  // ── Escolha de titular para documentos ambíguos (Épico 8) ────────
+  // O diálogo é de apresentação: diz qual foi a escolha, o contentor é que
+  // sabe que isso significa reconstruir a lista de itens.
+  const handleTitularChoice = useCallback((indice, escolha) => {
+    setTitularChoiceDialog((anterior) => ({
+      ...anterior,
+      items: anterior.items.map((item, i) =>
+        i === indice ? { ...item, choice: escolha } : item,
+      ),
+    }));
+  }, []);
+
+  const handleTitularDialogOpenChange = useCallback((aberto) => {
+    if (!aberto) {
+      setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
+    }
+  }, []);
 
   const handleDeleteComment = async (activityId) => {
     try {
@@ -1971,38 +2201,16 @@ const ProcessDetails = () => {
               actions={
                 <div className="flex flex-wrap items-center gap-1.5 sm:gap-2">
             {/* Dialog RGPD */}
-            <Dialog open={rgpdDialogOpen} onOpenChange={setRgpdDialogOpen}>
-              <DialogContent>
-                <DialogHeader>
-                  <DialogTitle>Solicitar Consentimento RGPD</DialogTitle>
-                  <DialogDescription>
-                    Envie um pedido de consentimento RGPD para <strong>{safeString(process?.client_name)}</strong> ({safeString(process?.client_email)}).
-                  </DialogDescription>
-                </DialogHeader>
-                <div className="py-4">
-                  <label className="text-sm font-medium text-foreground mb-2 block">
-                    Mensagem personalizada <span className="text-muted-foreground font-normal">(opcional)</span>
-                  </label>
-                  <Textarea
-                    placeholder="Adicione uma mensagem personalizada para o cliente..."
-                    value={rgpdCustomMessage}
-                    onChange={(e) => setRgpdCustomMessage(e.target.value)}
-                    rows={3}
-                  />
-                </div>
-                <DialogFooter>
-                  <Button variant="outline" onClick={() => setRgpdDialogOpen(false)}>
-                    Cancelar
-                  </Button>
-                  <Button onClick={handleConfirmRgpd} disabled={rgpdSending}>
-                    {rgpdSending ? (
-                      <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-                    ) : null}
-                    Solicitar RGPD
-                  </Button>
-                </DialogFooter>
-              </DialogContent>
-            </Dialog>
+            <RGPDRequestDialog
+              open={rgpdDialogOpen}
+              onOpenChange={setRgpdDialogOpen}
+              clientName={process?.client_name}
+              clientEmail={process?.client_email}
+              message={rgpdCustomMessage}
+              onMessageChange={setRgpdCustomMessage}
+              onConfirm={handleConfirmRgpd}
+              sending={rgpdSending}
+            />
 
             {/* PACOTE DE — RGPD DropdownMenu: Solicitar + Download PDF (Assinatura Manual) */}
             {userRole !== "indexacao" && (
@@ -2397,48 +2605,7 @@ const ProcessDetails = () => {
                       setActiveTab(v);
                       writeTabQuery(mainTab, v);
                     }}>
-                      <TabsList className="grid w-full grid-cols-3 sm:grid-cols-8 gap-1 h-auto p-1">
-                        {/* ── DADOS DO CLIENTE ── */}
-                        <TabsTrigger value="personal" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-teal-50 dark:bg-teal-900/20 data-[state=active]:bg-teal-100 dark:data-[state=active]:bg-teal-900/40">
-                      <User className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Cliente</span>
-                    </TabsTrigger>
-                    {/* ── DADOS DO PROCESSO/NEGÓCIO ── */}
-                    <TabsTrigger value="financial" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <Briefcase className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Financeiros</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="realestate" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <Building2 className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Imóvel / CPCV</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="credit" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <CreditCard className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Crédito</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="prazos" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2">
-                      <CalendarClock className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      {/* PACOTE DH — Tab label evoluído de "Prazos" para "Agenda" */}
-                      <span className="hidden sm:inline">Agenda</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="emails" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-blue-50 dark:bg-blue-900/20 data-[state=active]:bg-blue-100 dark:data-[state=active]:bg-blue-900/40">
-                      <Send className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Emails</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="visitas" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-emerald-50 dark:bg-emerald-900/20 data-[state=active]:bg-emerald-100 dark:data-[state=active]:bg-emerald-900/40">
-                      <Home className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Visitas</span>
-                    </TabsTrigger>
-                    <TabsTrigger value="mensagens" className="gap-1 text-xs sm:text-sm py-1.5 sm:py-2 bg-violet-50 dark:bg-violet-900/20 data-[state=active]:bg-violet-100 dark:data-[state=active]:bg-violet-900/40 relative">
-                      <MessageSquare className="h-3.5 w-3.5 sm:h-4 sm:w-4" />
-                      <span className="hidden sm:inline">Mensagens</span>
-                      {portal.unreadCount > 0 && (
-                        <span className="absolute -top-1 -right-1 w-4 h-4 bg-red-500 text-white text-[9px] font-bold rounded-full flex items-center justify-center">
-                          {portal.unreadCount > 9 ? '9+' : portal.unreadCount}
-                        </span>
-                      )}
-                    </TabsTrigger>
-                  </TabsList>
+                      <ProcessDomainTabsList unreadMessagesCount={portal.unreadCount} />
 
                   {/* ── FASE 3: Tab Dados do Cliente ── */}
                   <TabsContent value="personal" className="mt-4">
@@ -2695,6 +2862,7 @@ const ProcessDetails = () => {
                   id={id}
                   process={process}
                   handleAIDataExtractedFromDocs={handleAIDataExtractedFromDocs}
+                  handleDocumentDataExtracted={handleDocumentDataExtracted}
                   setDocumentsRefreshKey={setDocumentsRefreshKey}
                 />
               </TabsContent>
@@ -2714,6 +2882,11 @@ const ProcessDetails = () => {
                   handleDeleteComment={handleDeleteComment}
                   user={user}
                   isProcessLocked={isProcessLocked}
+                  voiceNoteOpen={voiceNoteOpen}
+                  onVoiceNoteOpenChange={setVoiceNoteOpen}
+                  onEnviarNotaDeVoz={handleEnviarNotaDeVoz}
+                  aEnviarNotaDeVoz={aEnviarNotaDeVoz}
+                  aProcessarNotaDeVoz={Boolean(notaDeVozEmCurso)}
                 />
               </TabsContent>
             </Tabs>
@@ -2753,26 +2926,20 @@ const ProcessDetails = () => {
               canEditPriority={canEditPersonal && !isProcessLocked}
             />
 
-            {/* Tarefas - visível se tem manage_tasks */}
+            {/* Tarefas - visível se tem manage_tasks.
+                Lote 4, ponto 13: o TasksPanel JÁ É um cartão completo com
+                cabeçalho, contagem e área de scroll próprios. Havia aqui
+                um segundo Card, um segundo título "Tarefas" e um segundo
+                ScrollArea por cima dos dele — e `compact={false}` desligava
+                o modo compacto que o componente já tinha. Um cartão só,
+                desenhado por quem sabe o que tem dentro. */}
             {canManageTasks && (
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Check className="h-5 w-5" />
-                  Tarefas
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {/* PACOTE DD — ScrollArea com altura máxima para evitar expansão infinita da página */}
-                <ScrollArea className="h-fit max-h-[400px]">
-                  <TasksPanel
-                    processId={id}
-                    processName={process?.client_name}
-                    compact={false}
-                  />
-                </ScrollArea>
-              </CardContent>
-            </Card>
+              <TasksPanel
+                processId={id}
+                processName={process?.client_name}
+                compact
+                maxHeight="320px"
+              />
             )}
 
             {/* Accordion para agrupar painéis secundários - visível se tiver manage_tasks */}
@@ -2822,192 +2989,24 @@ const ProcessDetails = () => {
       />
 
       {/* Dialog de Revisão de Conflitos IA */}
-      <Dialog open={showAIReviewDialog} onOpenChange={setShowAIReviewDialog}>
-        <DialogContent className="sm:max-w-2xl w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <AlertTriangle className="h-5 w-5 text-yellow-500" />
-              Revisão de Dados Extraídos
-            </DialogTitle>
-            <DialogDescription>
-              A análise IA detectou valores diferentes para alguns campos. Escolha o valor correcto ou edite manualmente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            {aiConflicts.map((conflict, idx) => (
-              <div key={idx} className="border rounded-lg p-4 space-y-3">
-                <div className="font-medium text-sm">
-                  {conflict.field.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
-                </div>
-                
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                  <div 
-                    className="border rounded p-3 cursor-pointer hover:border-blue-500 hover:bg-blue-50 dark:hover:bg-blue-950"
-                    onClick={() => resolveAIConflict(conflict.field, conflict.existing_value)}
-                  >
-                    <div className="text-xs text-muted-foreground mb-1">Valor Existente</div>
-                    <div className="font-medium">{safeString(conflict.existing_value, "-")}</div>
-                  </div>
-                  
-                  <div 
-                    className="border rounded p-3 cursor-pointer hover:border-green-500 hover:bg-green-50 dark:hover:bg-green-950"
-                    onClick={() => resolveAIConflict(conflict.field, conflict.new_value)}
-                  >
-                    <div className="text-xs text-muted-foreground mb-1 flex items-center gap-1">
-                      <Sparkles className="h-3 w-3" />
-                      Valor Extraído (IA)
-                    </div>
-                    <div className="font-medium text-green-700 dark:text-green-400">{safeString(conflict.new_value, "-")}</div>
-                    {conflict.source && (
-                      <div className="text-xs text-muted-foreground mt-1">Fonte: {safeString(conflict.source)}</div>
-                    )}
-                  </div>
-                </div>
-                
-                <div className="flex items-center gap-2">
-                  <Input
-                    placeholder="Ou edite manualmente..."
-                    className="flex-1 text-sm"
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter' && e.target.value) {
-                        resolveAIConflict(conflict.field, e.target.value);
-                        e.target.value = '';
-                      }
-                    }}
-                  />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={(e) => {
-                      const input = e.target.parentElement.querySelector('input');
-                      if (input?.value) {
-                        resolveAIConflict(conflict.field, input.value);
-                        input.value = '';
-                      }
-                    }}
-                  >
-                    Aplicar
-                  </Button>
-                </div>
-              </div>
-            ))}
-            
-            {aiConflicts.length === 0 && (
-              <div className="text-center py-8 text-muted-foreground">
-                <CheckCircle className="h-12 w-12 mx-auto mb-3 text-green-500" />
-                <p>Todos os conflitos foram resolvidos!</p>
-              </div>
-            )}
-          </div>
-          
-          <DialogFooter>
-            <Button variant="outline" onClick={() => setShowAIReviewDialog(false)}>
-              Fechar
-            </Button>
-            <Button 
-              onClick={() => {
-                setShowAIReviewDialog(false);
-                toast.success("Campos actualizados. Não esqueça de guardar!");
-              }}
-              disabled={aiConflicts.length > 0}
-            >
-              <Check className="h-4 w-4 mr-2" />
-              Confirmar Todos
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AIReviewDialog
+        open={showAIReviewDialog}
+        conflicts={aiConflicts}
+        newValues={revisaoPendente?.newValues || []}
+        sourceDocument={revisaoPendente?.sourceDocument || ""}
+        onOpenChange={handleAIReviewOpenChange}
+        onResolve={resolveAIConflict}
+        onConfirmAll={handleConfirmAIReview}
+      />
 
       {/* Dialog: documento ambíguo → Titular 1 / Titular 2 / Ignorar */}
-      <Dialog
+      <TitularChoiceDialog
         open={titularChoiceDialog.open}
-        onOpenChange={(open) => {
-          if (!open) setTitularChoiceDialog({ open: false, items: [], pendingPayload: null });
-        }}
-      >
-        <DialogContent className="sm:max-w-lg w-[calc(100vw-2rem)] max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Users className="h-5 w-5 text-purple-600" />
-              Este documento é de quem?
-            </DialogTitle>
-            <DialogDescription>
-              A IA não conseguiu associar com confiança. Escolha o titular para aplicar os dados de identidade
-              (o 2º titular já está definido no processo).
-            </DialogDescription>
-          </DialogHeader>
-          <div className="space-y-4 py-2">
-            {titularChoiceDialog.items.map((item, idx) => (
-              <div key={item.key || idx} className="border rounded-lg p-3 space-y-2">
-                <div className="text-sm font-medium truncate">{item.file_name}</div>
-                <div className="flex flex-wrap gap-2">
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.choice === "titular1" ? "default" : "outline"}
-                    onClick={() =>
-                      setTitularChoiceDialog((prev) => ({
-                        ...prev,
-                        items: prev.items.map((it, i) =>
-                          i === idx ? { ...it, choice: "titular1" } : it
-                        ),
-                      }))
-                    }
-                  >
-                    Titular 1{item.titular1_name ? `: ${item.titular1_name}` : ""}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.choice === "titular2" ? "default" : "outline"}
-                    onClick={() =>
-                      setTitularChoiceDialog((prev) => ({
-                        ...prev,
-                        items: prev.items.map((it, i) =>
-                          i === idx ? { ...it, choice: "titular2" } : it
-                        ),
-                      }))
-                    }
-                  >
-                    Titular 2{item.titular2_name ? `: ${item.titular2_name}` : ""}
-                  </Button>
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant={item.choice === "ignore" ? "secondary" : "ghost"}
-                    onClick={() =>
-                      setTitularChoiceDialog((prev) => ({
-                        ...prev,
-                        items: prev.items.map((it, i) =>
-                          i === idx ? { ...it, choice: "ignore" } : it
-                        ),
-                      }))
-                    }
-                  >
-                    Ignorar
-                  </Button>
-                </div>
-              </div>
-            ))}
-          </div>
-          <DialogFooter className="gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setTitularChoiceDialog({ open: false, items: [], pendingPayload: null })}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={confirmTitularChoices}
-              disabled={titularChoiceDialog.items.some((it) => !it.choice)}
-            >
-              <Check className="h-4 w-4 mr-2" />
-              Aplicar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+        items={titularChoiceDialog.items}
+        onOpenChange={handleTitularDialogOpenChange}
+        onChoose={handleTitularChoice}
+        onConfirm={confirmTitularChoices}
+      />
 
       {/* Modal CPCV - Contrato Promessa Compra e Venda */}
       <CPCVModal

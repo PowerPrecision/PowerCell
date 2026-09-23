@@ -7,6 +7,7 @@ from __future__ import annotations
 from typing import List
 
 from database import db
+from services.tenant_network import build_tenant_condition
 from utils.input_sanitization import sanitize_string
 from utils.search_filters import (
     create_accent_insensitive_regex,
@@ -27,9 +28,14 @@ async def run_get_search_suggestions(q: str, user: dict) -> List[str]:
     regex_pattern = create_accent_insensitive_regex(search_term)
     name_filter = build_multiword_search_filter(search_term, "client_name")
 
+    # Isolamento multi-tenant (Lote 4, ponto 10). As sugestões devolvem
+    # NOMES DE CLIENTES: é fuga de dados pessoais mesmo sem chegar a
+    # abrir o processo.
+    tenant_condition = await build_tenant_condition(user)
+
     # Buscar nomes de clientes que começam com o termo
     clients = await db.processes.find(
-        name_filter,
+        {"$and": [tenant_condition, name_filter]},
         {"_id": 0, "client_name": 1}
     ).limit(5).to_list(5)
 
@@ -38,7 +44,7 @@ async def run_get_search_suggestions(q: str, user: dict) -> List[str]:
 
     # Buscar títulos de tarefas
     tasks = await db.tasks.find(
-        {"title": regex_pattern},
+        {"$and": [tenant_condition, {"title": regex_pattern}]},
         {"_id": 0, "title": 1}
     ).limit(3).to_list(3)
 

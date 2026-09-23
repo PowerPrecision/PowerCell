@@ -3,6 +3,148 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-23] (12) — Espelho de Automações: ver o motor a trabalhar
+
+### Adicionado
+- **Novo separador "Motor" em Automações.** Mostra, para cada automatismo que corre em segundo plano — sincronização de e-mail, alertas de prazos, cópia de segurança, cruzamento de leads —, se está saudável, quando correu pela última vez, quando volta a correr e quanto demorou. É só leitura: o painel observa, não dispara nada.
+- **Distinção clara entre "desativado" e "avariado".** Vários automatismos estão desligados de propósito fora de produção. O painel diz isso em vez de os mostrar como problemas — um monitor que grita sem motivo deixa de ser lido.
+
+### Corrigido
+- **O menu "Automações" deixa de mostrar só as regras.** As regras são a configuração; o estado real do motor não estava visível em lado nenhum.
+- **A lista de tarefas deixa de poder falhar por causa de uma tarefa automática.** Uma tarefa criada por uma regra de automação podia fazer toda a listagem devolver erro.
+
+### Segurança
+- **O perfil Indexação deixa de deixar rasto em mais três sítios.** A regra de que as ações deste perfil não aparecem no histórico do processo não estava a ser aplicada ao restaurar documentos, ao gravar notas de voz nem quando a pessoa entrava com o perfil de Indexação tendo outro perfil de base. O registo de auditoria para efeitos de conformidade mantém-se intacto, como deve ser.
+- **A página de Automações passa a usar o canal seguro da aplicação.** As chamadas ao servidor não levavam a identificação da empresa e do perfil ativo.
+
+## [2026-09-23] (11) — Contas com empresa, tarefas sem fantasmas, painel mais leve
+
+### Adicionado
+- **Criar um utilizador passa a associar logo a empresa e o cargo.** O formulário tem agora um bloco **Empresa e cargo**, com possibilidade de acrescentar várias empresas — Consultor numa, Intermediário noutra. A primeira é a que carrega no login.
+
+### Corrigido
+- **Deixa de ser possível criar uma conta sem empresa.** Até aqui a conta nascia sem associação nenhuma e ficava invisível ao seletor de empresas, à configuração de e-mail e às listagens até alguém se lembrar de a associar em "Gerir Acessos". A única exceção continuam a ser os parceiros, que não acedem à plataforma.
+- **As tarefas deixam de ficar penduradas em quem já saiu do processo.** Ao mudar a atribuição, as tarefas automáticas que ninguém chegou a abrir desaparecem e as restantes ficam, mas assinaladas como **Sem responsável** — nenhum trabalho de uma pessoa é apagado. Antes, ficavam todas lá, atribuídas a quem já não trabalhava no processo.
+- **Ao criar uma tarefa, a equipa do processo aparece primeiro.** Quem não trabalha no processo fica numa secção **Fora da equipa do processo**, que é preciso abrir de propósito. E quando não é possível confirmar a equipa, o sistema di-lo em vez de mostrar toda a gente como se fosse a equipa.
+- **A lista de tarefas deixa de poder ficar em branco por causa de uma tarefa automática.** Uma tarefa criada por uma regra de automação podia fazer a listagem inteira falhar.
+
+### Alterado
+- **O painel de Tarefas nos Detalhes do Processo está mais compacto.** Havia dois cartões sobrepostos com o mesmo título "Tarefas" e duas áreas de scroll encaixadas. Passa a ser um só, sem os filtros nem a data de criação, que nesta coluna não ajudavam a decidir nada.
+
+## [2026-09-23] (10) — Isolamento entre empresas: o conceito de Rede
+
+### Segurança
+- **Empresas de grupos diferentes deixam de ver os dados umas das outras.** A listagem de processos, a listagem de clientes e a pesquisa rápida (Ctrl+K) mostravam tudo a toda a gente com acesso ao sistema — incluindo o NIF dos clientes de outra empresa, já legível. Passam a respeitar a **Rede** a que a empresa pertence.
+- **Empresas do mesmo grupo continuam a trabalhar juntas.** Duas empresas na mesma Rede partilham a visibilidade dos dados sem precisarem de permissões extra — é o caso da Power e da Precision. Empresas em Redes diferentes ficam completamente separadas.
+- **Uma empresa nova nasce isolada.** Ao criar uma empresa, o campo **Rede / Grupo Empresarial** fica em branco por omissão: ninguém de fora vê os seus processos e clientes até que a junte deliberadamente a um grupo.
+
+### Adicionado
+- **Campo "Rede / Grupo Empresarial" na gestão de Empresas.** Empresas com a mesma rede partilham dados; em branco, a empresa fica isolada.
+- **Os processos passam a registar a que empresa e rede pertencem** no momento em que são criados. Até aqui não guardavam essa informação de todo.
+
+### Notas para a equipa
+- O histórico criado antes desta mudança não tinha registo de empresa. Continua visível ao grupo que sempre o viu, e invisível a qualquer empresa nova. Não é preciso fazer nada para isso funcionar.
+
+## [2026-09-22] (9) — Limpeza antes do Staging (3/4): perfil do cliente, acessos e 404s
+
+### Adicionado
+- **O perfil no Portal do Cliente passa a ter os mesmos campos do formulário interno.** Os campos que a sua equipa configura no CRM aparecem agora também no Portal, com os obrigatórios assinalados. Para não tornar o formulário pesado, só os obrigatórios estão à vista — os restantes ficam em **"Preencher mais detalhes"**, que o cliente abre se quiser completar a ficha.
+
+### Corrigido
+- **O perfil do cliente deixa de perder dados em silêncio.** Campos que o Portal mostrava mas o sistema não reconhecia eram descartados sem aviso: o cliente preenchia, gravava, via "Perfil atualizado com sucesso" e o valor desaparecia. Faltavam também o Código Postal e o NISS.
+- **O perfil "Diretora" já consegue abrir "Os Meus Clientes".** O menu mostrava a opção e clicar nela devolvia o utilizador ao Dashboard.
+- **O sistema deixa de insistir em processos eliminados.** Ao abrir um processo que já tinha sido removido, a aplicação continuava a contactar o servidor sobre ele a cada 30 segundos, apesar de já mostrar "Processo não encontrado".
+
+### Segurança
+- **O NIF continua a não ser editável pelo cliente.** É o campo que o identifica fiscalmente; só a equipa o altera.
+
+## [2026-09-22] (8) — Limpeza antes do Staging (2/4): RGPD, portal e ficheiros apagados
+
+### Corrigido
+- **O RGPD do 2.º titular deixa de sair em branco.** O documento para o segundo titular era gerado sem NIF, morada, número e validade do documento — mesmo quando esses dados estavam preenchidos na ficha. Passa a vir completo, com os dados do próprio (nunca os do primeiro titular).
+- **Os documentos pedidos ao cliente aparecem agora no separador Documentos.** Os documentos obrigatórios e opcionais solicitados no registo não eram listados do lado do CRM: o consultor não via o que tinha sido pedido e o cliente via pedidos que a equipa desconhecia.
+- **Um ficheiro apagado no CRM desaparece do Portal do Cliente.** Ficheiros eliminados continuavam visíveis para o cliente e continuavam a contar como entregues — um documento apagado por estar errado deixava o processo avançar à mesma. Se o pedido deixar de estar satisfeito, volta a aparecer ao cliente como pendente.
+- **Eliminar vários ficheiros de uma vez limpa também os registos internos.** Só a eliminação individual o fazia; em massa, os ficheiros apagados continuavam listados com as marcas de análise por IA.
+
+## [2026-09-22] (7) — Limpeza antes do Staging (1/4): IA, assinaturas e perfis
+
+### Corrigido
+- **A análise de documentos com IA já não grava sozinha.** Quando a ficha do cliente estava vazia, analisar documentos em lote escrevia tudo o que a IA tinha lido directamente na ficha, sem passar pela janela de revisão. Agora a revisão aparece sempre — com ou sem valores em conflito — e nada é gravado até carregar em **Confirmar**.
+- **E-mails de quem não tem assinatura deixam de sair assinados.** Quem nunca configurou uma assinatura recebia automaticamente a assinatura do sistema (um bloco com logótipo) no fundo dos seus e-mails. Pior: quem tinha assinatura numa empresa e não noutra saía assinado pela empresa errada. Cada e-mail leva agora apenas a assinatura do próprio, do perfil em que está a trabalhar — ou nenhuma.
+- **Contas de e-mail deixam de aparecer no perfil errado.** Na Área Pessoal, o separador de um perfil sem empresa associada mostrava as contas de e-mail de outro perfil. Pelo mesmo motivo, uma conta criada nesse separador era guardada noutro sítio e desaparecia.
+
+## [2026-09-22] (6) — Ler um documento com IA, sem correr riscos com os dados
+
+### Adicionado
+- **Extrair dados de um documento com IA.** Na lista de documentos de um processo, cada imagem ou PDF tem agora um botão **Extrair Dados com IA**. O sistema lê o documento e mostra-lhe o que encontrou — lado a lado com o que já está na ficha — antes de gravar seja o que for.
+- **Nada é gravado sem a sua confirmação.** A janela de revisão abre sempre e mostra duas coisas: os campos em que a IA encontrou um valor diferente do que está na ficha (e onde escolhe qual fica) e os campos que a ficha ainda não tem e que vão ser preenchidos. Só o botão **Confirmar Todos** grava. Fechar a janela não grava nada.
+- **Cadernetas Prediais.** O sistema passa a saber ler cadernetas prediais: artigo matricial, Valor Patrimonial Tributário, áreas, tipologia, morada e titulares. Antes eram tratadas como um documento qualquer e quase nada era aproveitado.
+
+### Corrigido
+- **O modelo de IA escolhido no painel de administração passou a ser respeitado** na análise de documentos. A escolha estava lá, mas a análise usava sempre o mesmo modelo, independentemente do que estivesse configurado.
+- **Dados de cadernetas prediais apareciam duplicados** nas observações do processo, além de já estarem nos campos próprios do imóvel.
+
+## [2026-09-22] (5) — "Ver Processo" no RGPD levava ao Login
+
+### Corrigido
+- **O botão "Ver Processo" nos detalhes de um pedido RGPD abria o ecrã de início de sessão** em vez do processo. O endereço tinha um "s" a mais e não correspondia a nenhuma página; como abre num separador novo, o sintoma parecia sessão expirada. A sessão estava intacta.
+- **Botão sem nome para leitores de ecrã** no diálogo de NIF da empresa (verificação do NIF antes do upload).
+
+### Alterado
+- **Gestor de documentos arrumado.** As dez janelas de confirmação e resultados (eliminar, eliminar vários, renomear, minutas, NIF da empresa, conflitos de nome, resultados da IA) passaram a viver em ficheiros próprios. Nada muda no que o utilizador vê ou faz.
+
+## [2026-09-22] (4) — A página do processo deixou de encravar
+
+### Corrigido
+- **Voltar a um processo visitado há pouco deixava a página a carregar para sempre.** Se abrisse um processo, saísse e voltasse dentro de um minuto, a página ficava no ecrã de carregamento sem nunca mostrar nada — era preciso recarregar o separador. Apanhado pelo primeiro teste automático que abre a página inteira.
+- **O gestor de documentos usava a empresa e o perfil errados em 25 operações.** Carregar, descarregar, eliminar, analisar com IA e renomear não enviavam a empresa activa nem o perfil em que o utilizador está a trabalhar. Quem tem mais do que um perfil podia ver um botão no ecrã e receber "sem permissão" ao carregar nele. Todas as operações passam agora pelo mesmo caminho do resto da aplicação.
+- **Mensagem de erro que desaparecia ao gerar uma minuta.** Quando faltavam dados obrigatórios, o sistema mostrava um erro genérico em vez de dizer que campos faltavam.
+- **Botão "Aplicar" na revisão de dados da IA.** O campo de edição manual podia deixar de funcionar sem qualquer aviso.
+- **Acessibilidade:** as duas caixas de escolha na revisão de dados da IA ("Valor Existente" / "Valor Extraído") não eram alcançáveis por teclado.
+
+### Alterado
+- **Arrumação interna das duas maiores páginas.** A página de detalhes do processo e o gestor de documentos foram divididos em peças mais pequenas e independentes, sem qualquer alteração ao que o utilizador vê ou faz. O objectivo é que uma alteração futura numa delas deixe de poder partir as outras.
+
+## [2026-09-22] (3) — Notas de voz: falar em vez de escrever
+
+### Adicionado
+- **Nota de voz no processo.** No separador *Histórico* há agora um botão **Nota de voz**. O consultor grava directamente no browser (ou carrega um ficheiro de áudio) e o sistema trata do resto: transcreve, escreve um resumo no histórico do processo e cria as tarefas que foram mencionadas, com prazo e prioridade.
+- **Sem esperas.** O envio devolve logo o controlo. O trabalho corre em segundo plano e, quando termina, a nota e as tarefas aparecem no ecrã sozinhas — sem recarregar a página. Enquanto corre, aparece "A processar Inteligência Artificial...".
+- **Prazos deduzidos do que se diz.** "amanhã de manhã", "sexta-feira", "daqui a duas semanas", "final do mês" ou uma data concreta viram prazos reais na tarefa. Quando a expressão é ambígua ("quando o banco responder"), a tarefa fica **sem** prazo em vez de receber uma data inventada.
+- **Funciona sem microfone.** Browser que não grava, permissão recusada ou formato incompatível passam a oferecer o carregamento de um ficheiro, com a explicação do motivo.
+- **O áudio fica guardado** na pasta do processo, para poder ser ouvido outra vez.
+
+### Segurança e ambiente
+- **O ambiente de desenvolvimento não envia voz para fora.** Os motores de transcrição e de análise só usam os serviços externos em produção e com credenciais configuradas; em qualquer outro caso simulam. Ter credenciais na máquina local não basta para as usar.
+- **O modelo de análise é escolhido no painel de administração**, não está fixo no código.
+
+### Robustez
+- **Falhar a análise não faz perder a gravação.** Se a transcrição correr bem mas a análise falhar, o texto transcrito entra na mesma no histórico e o consultor é avisado de que não foram criadas tarefas.
+- **Uma falha do armazenamento não impede a nota.** O arquivo do áudio é um extra, não uma dependência.
+- **As tarefas criadas são identificáveis** como tendo vindo de uma nota de voz.
+
+## [2026-09-22] (2) — Webmail deixava de abrir
+
+### Corrigido
+- **A página do Webmail ficava em branco.** Uma função declarada fora de ordem no ficheiro, introduzida na divisão do Webmail feita hoje, rebentava logo ao abrir a página. Não chegou a produção: foi apanhada pelo primeiro teste que monta a página inteira, escrito a seguir.
+- **Dependências de teste que impediam a instalação.** Duas bibliotecas novas exigiam uma versão de Node mais recente do que a usada para construir a aplicação, o que partia a instalação no CI — e teria partido também a publicação. Fixadas em versões compatíveis.
+
+### Adicionado
+- **Teste da página do Webmail montada** (12 casos): as três colunas ligadas, abrir um email da lista no painel de leitura, marcar como lido, expandir e fechar conversas, mudar de pasta (que volta à primeira página), o compositor e a paginação.
+
+## [2026-09-22] — Testes de interface e divisão do Webmail
+
+### Adicionado
+- **Testes de componente.** O frontend passou a ter Vitest com React Testing Library: até aqui só era possível testar funções puras, e nenhum ecrã tinha rede de segurança. Os 276 testes que já existiam continuam a correr, sem uma linha reescrita, e juntaram-se 70 novos sobre a interface do Webmail.
+- `yarn test`, `yarn test:watch` e `yarn test:coverage`. O CI corre os testes e falha se algum partir.
+
+### Alterado
+- **O Webmail deixou de ser um ficheiro só.** A página tinha 3288 linhas; a lista de conversas, o painel de leitura, o compositor e a navegação de pastas passaram a componentes próprios e a página ficou com 2237. Não há alterações de comportamento: o que o utilizador vê e faz é o mesmo.
+
+### Corrigido
+- **Botão dentro de botão nas pastas personalizadas.** O menu de uma pasta vivia dentro do botão da própria pasta, o que é HTML inválido e cada browser resolve à sua maneira. Passam a ser dois botões lado a lado.
+- **Ecrãs que podiam rebentar por um ícone em falta.** Quinze sítios usavam um ícone ou componente sem o importar — no separador de Crédito, no Financeiro, no RGPD e nos Emails de Sistema. Não davam erro nenhum no CI e só falhavam quando o utilizador chegasse àquela parte do ecrã. Corrigidos, e o CI passa a recusar novos casos.
+
 ## [2026-09-22] — O envio de email deixa de poder pendurar um pedido
 
 ### Corrigido

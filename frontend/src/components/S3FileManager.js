@@ -24,7 +24,10 @@
  * @param {string} [props.clientName] — Nome do cliente (para mapeamento S3)
  * @param {Function} [props.onAIDataExtracted] — Callback quando a IA extrai dados dos documentos
  *
- * @context {AuthContext} — Consome token, user para autenticação e permissões de role
+ * @context {AuthContext} — Consome token, user e effectiveRole para permissões de role.
+ *   Os pedidos vão pelo cliente Axios (`services/api`), que injecta
+ *   `Authorization`, `X-Company-Id` e `X-Active-Role` — um `fetch` cru só
+ *   levaria o que lhe escrevessem à mão (ver AGENTS.md).
  *
  * @example
  * <S3FileManager
@@ -42,6 +45,16 @@ import { useAuth } from "../contexts/AuthContext";
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from "./ui/card";
 import { Button } from "./ui/button";
 import { Badge } from "./ui/badge";
+import AIResultsDialog from "./storage/dialogs/AIResultsDialog";
+import EmpresaNifDialog from "./storage/dialogs/EmpresaNifDialog";
+import MoveConflictDialog from "./storage/dialogs/MoveConflictDialog";
+import DeleteFileDialog from "./storage/dialogs/DeleteFileDialog";
+import BulkDeleteDialog from "./storage/dialogs/BulkDeleteDialog";
+import ManualRenameDialog from "./storage/dialogs/ManualRenameDialog";
+import SmartRenameResultsDialog from "./storage/dialogs/SmartRenameResultsDialog";
+import OrganizeResultsDialog from "./storage/dialogs/OrganizeResultsDialog";
+import GenerateTemplateDialog from "./storage/dialogs/GenerateTemplateDialog";
+import UploadConflictDialog from "./storage/dialogs/UploadConflictDialog";
 import { ScrollArea } from "./ui/scroll-area";
 import { Progress } from "./ui/progress";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "./ui/tabs";
@@ -78,6 +91,7 @@ import DocumentReviewModal from "./DocumentReviewModal";
 import { hasRole, MANAGEMENT_ROLES, canAccessByEffectiveRole } from "../utils/roleUtils";
 import {
   FileText,
+  ScanText,
   Upload,
   Loader2,
   Download,
@@ -123,9 +137,31 @@ import { Input } from "./ui/input";
 import { pt } from "date-fns/locale";
 import { safeDate, safeFormat } from "../lib/utils";
 // PACOTE DJ — helper api.js para o novo endpoint de revisão HITL
-import { analyzeDocumentForReview } from "../services/api";
+import {
+  aiAnalyzeS3Documents,
+  aiApplyS3Suggestions,
+  analyzeDocumentForReview,
+  extractDocumentData,
+  bulkDeleteProcessS3Files,
+  bulkDownloadS3Files,
+  categorizeAllS3Documents,
+  checkEmployerNif,
+  checkS3MoveConflict,
+  checkS3UploadConflict,
+  deleteProcessS3File,
+  generateProcessTemplate,
+  getClientS3Mappings,
+  getProcessS3Files,
+  getS3FileContent,
+  moveS3File,
+  organizeS3Documents,
+  renameAllS3DocumentsSmart,
+  readBlobErrorBody,
+  renameS3DocumentSmart,
+  saveClientS3Mapping,
+  uploadProcessS3File,
+} from "../services/api";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Calcula cor de texto com contraste adequado para a cor de fundo
 const getContrastColor = (bgColor) => {
@@ -183,7 +219,7 @@ const FileIcon = ({ filename }) => {
   return <File className="h-4 w-4 text-gray-500" />;
 };
 
-const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
+const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDataExtracted }) => {
   const { token, user, effectiveRole } = useAuth();
   const queryClient = useQueryClient();
   const [files, setFiles] = useState({});
@@ -223,6 +259,10 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // por ficheiro enquanto o endpoint /ai-analyze-review corre). `reviewModal`
   // controla a abertura do DocumentReviewModal com o doc a rever.
   const [analyzingDocIds, setAnalyzingDocIds] = useState(new Set());
+  // Épico 9 — extracção de dados por ficheiro. Indexado pelo CAMINHO S3
+  // (e não pelo doc_id): ficheiros ainda sem `document_metadata` também
+  // podem ser lidos, e o caminho existe sempre na listagem.
+  const [extractingPaths, setExtractingPaths] = useState(new Set());
   const [reviewModal, setReviewModal] = useState({ open: false, doc: null });
 
   
@@ -379,36 +419,32 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     if (!processId) return;
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/files`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.ok) {
-        const data = await response.json();
-        setFiles(data.files || {});
-        setStats(data.stats || null);
-        setPermissionDenied(false);
-      } else if (response.status === 403) {
+      const { data } = await getProcessS3Files(processId);
+      setFiles(data.files || {});
+      setStats(data.stats || null);
+      setPermissionDenied(false);
+    } catch (error) {
+      const status = error?.response?.status;
+      if (status === 403) {
         // PACOTE 11 — permissão insuficiente: aviso LOCALIZADO à tab (sem
         // toast global), o utilizador continua a navegar no resto do processo.
+        // O `skipErrorToast` da função de API é o que impede o interceptor
+        // de sobrepor aqui o toast genérico "Acesso Negado".
         setPermissionDenied(true);
         setFiles({});
         setStats(null);
-      } else {
-        const error = await response.json();
-        if (error.detail !== "S3 não configurado") {
-          toast.error(extractErrorMessage(error.detail, "Erro ao carregar ficheiros"));
+      } else if (status) {
+        const detalhe = error?.response?.data?.detail;
+        if (detalhe !== "S3 não configurado") {
+          toast.error(extractErrorMessage(detalhe, "Erro ao carregar ficheiros"));
         }
+      } else {
+        console.error("Erro ao carregar ficheiros:", error);
       }
-    } catch (error) {
-      console.error("Erro ao carregar ficheiros:", error);
     } finally {
       setLoading(false);
     }
-  }, [processId, token]);
+  }, [processId]);
 
   useEffect(() => {
     fetchFiles();
@@ -421,22 +457,15 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setLoadingS3Folders(true);
     try {
       // Buscar dados do mapeamento
-      const response = await fetch(
-        `${API_URL}/api/admin/client-s3-mappings?search=${encodeURIComponent(clientName || '')}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.ok) {
-        const data = await response.json();
-        setS3Folders(data.available_folders || []);
-        
-        // Encontrar mapeamento actual deste processo
-        const currentProcess = data.processes?.find(p => p.id === processId);
-        if (currentProcess) {
-          // Backend retorna 's3_folder', não 's3_folder_mapping'
-          setCurrentS3Mapping(currentProcess.s3_folder || null);
-          setSelectedS3Folder(currentProcess.s3_folder || "");
-        }
+      const { data } = await getClientS3Mappings(clientName || "");
+      setS3Folders(data.available_folders || []);
+
+      // Encontrar mapeamento actual deste processo
+      const currentProcess = data.processes?.find(p => p.id === processId);
+      if (currentProcess) {
+        // Backend retorna 's3_folder', não 's3_folder_mapping'
+        setCurrentS3Mapping(currentProcess.s3_folder || null);
+        setSelectedS3Folder(currentProcess.s3_folder || "");
       }
     } catch (error) {
       console.error("Erro ao carregar mapeamento S3:", error);
@@ -451,29 +480,20 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     
     setSavingS3Mapping(true);
     try {
-      const url = selectedS3Folder
-        ? `${API_URL}/api/admin/client-s3-mappings?process_id=${processId}&s3_folder=${encodeURIComponent(selectedS3Folder)}`
-        : `${API_URL}/api/admin/client-s3-mappings?process_id=${processId}`;
-      
-      const response = await fetch(url, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      
-      if (response.ok) {
-        const data = await response.json();
-        toast.success(data.message || "Mapeamento guardado");
-        setCurrentS3Mapping(selectedS3Folder);
-        setS3MappingOpen(false);
-        // Recarregar ficheiros para mostrar os da nova pasta
-        fetchFiles();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao guardar mapeamento"));
-      }
+      const { data } = await saveClientS3Mapping(processId, selectedS3Folder);
+      toast.success(data.message || "Mapeamento guardado");
+      setCurrentS3Mapping(selectedS3Folder);
+      setS3MappingOpen(false);
+      // Recarregar ficheiros para mostrar os da nova pasta
+      fetchFiles();
     } catch (error) {
       console.error("Erro ao guardar mapeamento:", error);
-      toast.error("Erro ao guardar mapeamento");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao guardar mapeamento",
+        ),
+      );
     } finally {
       setSavingS3Mapping(false);
     }
@@ -484,17 +504,8 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Verificar NIF da empresa
   const checkEmpresaNif = async (nif) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/check-employer-nif/${nif}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-      
-      if (response.ok) {
-        return await response.json();
-      }
-      return null;
+      const { data } = await checkEmployerNif(nif);
+      return data;
     } catch (error) {
       console.error("Erro ao verificar NIF:", error);
       return null;
@@ -562,34 +573,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       }
 
       try {
-        const response = await fetch(
-          `${API_URL}/api/documents/client/${processId}/upload`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          }
-        );
-
-        if (response.ok) {
-          successCount++;
-        } else if (response.status === 429) {
-          // Rate limiting - esperar e tentar novamente
-          const retryAfter = response.headers.get("Retry-After") || 60;
+        await uploadProcessS3File(processId, formData);
+        successCount++;
+      } catch (error) {
+        const status = error?.response?.status;
+        if (status === 429) {
+          // Rate limiting. O interceptor do Axios já tentou de novo (3x com
+          // recuo exponencial) antes de chegar aqui; esta espera é a última
+          // linha, mantida do comportamento anterior para que um lote
+          // grande acabe por passar em vez de perder ficheiros.
+          const retryAfter = error?.response?.headers?.["retry-after"] || 60;
           toast.warning(`Aguardar ${retryAfter} segundos antes de continuar...`);
-          // Esperar e tentar novamente o mesmo ficheiro
           await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000));
           i--; // Tentar novamente o mesmo ficheiro
           continue;
-        } else {
-          const error = await response.json();
-          // Mensagem de erro mais amigável
-          const errorMsg = extractErrorMessage(error.detail, `Erro ${response.status}`);
-          toast.error(`${file.name}: ${errorMsg}`);
-          errorCount++;
         }
-      } catch {
-        toast.error(`Erro de conexão ao enviar ${file.name}`);
+        if (status) {
+          const errorMsg = extractErrorMessage(
+            error?.response?.data?.detail,
+            `Erro ${status}`,
+          );
+          toast.error(`${file.name}: ${errorMsg}`);
+        } else {
+          toast.error(`Erro de conexão ao enviar ${file.name}`);
+        }
         errorCount++;
       }
 
@@ -631,26 +638,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   // Verificar conflitos de upload antes de enviar
   const checkUploadConflicts = async (filenames, category) => {
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/check-upload-conflict`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            process_id: processId,
-            filenames: filenames,
-            category: category
-          })
-        }
-      );
-      
-      if (response.ok) {
-        return await response.json();
-      }
-      return { has_conflicts: false, conflicts: [] };
+      const { data } = await checkS3UploadConflict({
+        process_id: processId,
+        filenames: filenames,
+        category: category,
+      });
+      return data;
     } catch (error) {
       console.error("Erro ao verificar conflitos:", error);
       return { has_conflicts: false, conflicts: [] };
@@ -795,31 +788,26 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       }
 
       try {
-        const response = await fetch(
-          `${API_URL}/api/documents/client/${processId}/upload`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          }
-        );
-
-        if (response.ok) {
-          successCount++;
-        } else if (response.status === 429) {
-          const retryAfter = response.headers.get("Retry-After") || 60;
+        await uploadProcessS3File(processId, formData);
+        successCount++;
+      } catch (error) {
+        const status = error?.response?.status;
+        if (status === 429) {
+          const retryAfter = error?.response?.headers?.["retry-after"] || 60;
           toast.warning(`Aguardar ${retryAfter} segundos antes de continuar...`);
           await new Promise(resolve => setTimeout(resolve, parseInt(retryAfter) * 1000));
           i--;
           continue;
-        } else {
-          const error = await response.json();
-          const errorMsg = extractErrorMessage(error.detail, `Erro ${response.status}`);
-          toast.error(`${file.name}: ${errorMsg}`);
-          errorCount++;
         }
-      } catch {
-        toast.error(`Erro de conexão ao enviar ${file.name}`);
+        if (status) {
+          const errorMsg = extractErrorMessage(
+            error?.response?.data?.detail,
+            `Erro ${status}`,
+          );
+          toast.error(`${file.name}: ${errorMsg}`);
+        } else {
+          toast.error(`Erro de conexão ao enviar ${file.name}`);
+        }
         errorCount++;
       }
 
@@ -857,32 +845,89 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
   const handleDownload = async (file) => {
     try {
       // Usar proxy endpoint para evitar CORS do S3
-      const response = await fetch(
-        `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
-
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = file.name || 'download';
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao fazer download"));
-      }
+      const { data: blob } = await getS3FileContent(file.path);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = file.name || 'download';
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
     } catch (error) {
       console.error("Erro ao fazer download:", error);
-      toast.error("Erro ao fazer download");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao fazer download",
+        ),
+      );
     }
   };
+
+  // ── Fechos e edições dos diálogos extraídos (Épico 8) ────────────
+  // Cancelar o NIF limpa também o `input` de ficheiro: sem isso, escolher
+  // o MESMO ficheiro outra vez não dispara `change` e o upload não arranca.
+  const handleCancelEmpresaNif = useCallback(() => {
+    setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
+    setPendingFiles(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = "";
+    }
+  }, []);
+
+  const handleEmpresaNifChange = useCallback((nif) => {
+    setEmpresaNifDialog((anterior) => ({ ...anterior, empresaNif: nif }));
+  }, []);
+
+  // Cancelar o conflito de movimentação limpa também o estado de
+  // arrastamento — senão o próximo "largar" herdaria os ficheiros antigos.
+  const handleCancelMoveConflict = useCallback(() => {
+    setConflictDialog({ open: false, files: [], targetCategory: null, currentIndex: 0, conflicts: [] });
+    setDraggedFile(null);
+    setDraggedFiles([]);
+  }, []);
+
+  // Os diálogos são de apresentação: devolvem a intenção, e é aqui que se
+  // decide o que ela implica ao estado.
+  const handleDeleteDialogOpenChange = useCallback((aberto) => {
+    setDeleteDialog({ open: aberto, file: null });
+  }, []);
+
+  const handleManualRenameOpenChange = useCallback((aberto) => {
+    if (!aberto) setManualRenameDialog({ open: false, file: null, newName: "" });
+  }, []);
+
+  const handleManualRenameNameChange = useCallback((nome) => {
+    setManualRenameDialog((anterior) => ({ ...anterior, newName: nome }));
+  }, []);
+
+  // Fechar preserva os resultados enquanto o diálogo estiver aberto, tal
+  // como antes; ao fechar de vez, limpa-os.
+  const handleRenameDialogOpenChange = useCallback((aberto) => {
+    setRenameDialog((anterior) => ({
+      open: aberto,
+      results: aberto ? anterior.results : null,
+    }));
+  }, []);
+
+  const handleCloseOrganizeResults = useCallback(() => setOrganizeResults(null), []);
+
+  // Fechar o diálogo de minutas limpa a escolha e o erro de validação —
+  // reabrir traz uma folha em branco, como antes.
+  const handleTemplateDialogOpenChange = useCallback((aberto) => {
+    setTemplateDialog({ open: aberto });
+    if (!aberto) {
+      setTemplateError(null);
+      setSelectedTemplate("");
+    }
+  }, []);
+
+  // Escolher um tipo novo limpa o erro do tipo anterior.
+  const handleTemplateChange = useCallback((id) => {
+    setSelectedTemplate(id);
+    setTemplateError(null);
+  }, []);
 
   // Eliminar ficheiro
   const handleDelete = async () => {
@@ -897,23 +942,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
     setDeleting(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/file?file_path=${encodeURIComponent(deleteDialog.file.path)}`,
-        {
-          method: "DELETE",
-          headers: { Authorization: `Bearer ${token}` },
-        }
+      await deleteProcessS3File(processId, deleteDialog.file.path);
+      toast.success("Ficheiro eliminado");
+      fetchFiles();
+    } catch (error) {
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao eliminar ficheiro",
+        ),
       );
-
-      if (response.ok) {
-        toast.success("Ficheiro eliminado");
-        fetchFiles();
-      } else {
-        const error = await response.json().catch(() => ({}));
-        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar ficheiro"));
-      }
-    } catch {
-      toast.error("Erro ao eliminar ficheiro");
     } finally {
       setDeleting(false);
       setDeleteDialog({ open: false, file: null });
@@ -926,41 +964,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
     setBulkDeleting(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/client/${processId}/bulk-delete`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            file_paths: selectedFilesForAI.map((f) => f.path),
-          }),
-        }
+      const { data } = await bulkDeleteProcessS3Files(
+        processId,
+        selectedFilesForAI.map((f) => f.path),
       );
-
-      if (response.ok) {
-        const data = await response.json();
-        const deleted = data.deleted_count || 0;
-        const failed = data.failed_count || 0;
-        if (failed > 0) {
-          toast.warning(
-            `${deleted} ficheiro(s) eliminado(s), ${failed} falhou(aram)`
-          );
-        } else {
-          toast.success(`${deleted} ficheiro(s) eliminado(s) com sucesso`);
-        }
-        setSelectedFilesForAI([]);
-        setBulkDeleteDialog({ open: false });
-        fetchFiles();
+      const deleted = data.deleted_count || 0;
+      const failed = data.failed_count || 0;
+      if (failed > 0) {
+        toast.warning(
+          `${deleted} ficheiro(s) eliminado(s), ${failed} falhou(aram)`
+        );
       } else {
-        const error = await response.json().catch(() => ({}));
-        toast.error(extractErrorMessage(error.detail, "Erro ao eliminar ficheiros"));
+        toast.success(`${deleted} ficheiro(s) eliminado(s) com sucesso`);
       }
+      setSelectedFilesForAI([]);
+      setBulkDeleteDialog({ open: false });
+      fetchFiles();
     } catch (error) {
       console.error("Erro ao eliminar ficheiros em massa:", error);
-      toast.error("Erro ao eliminar ficheiros");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao eliminar ficheiros",
+        ),
+      );
     } finally {
       setBulkDeleting(false);
     }
@@ -977,52 +1004,47 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setTemplateError(null);
 
     try {
-      const response = await fetch(
-        `${API_URL}/api/templates/process/${processId}/generate/${selectedTemplate}/download`,
-        {
-          headers: { Authorization: `Bearer ${token}` },
-        }
-      );
+      const resposta = await generateProcessTemplate(processId, selectedTemplate);
+      const url = window.URL.createObjectURL(resposta.data);
+      const a = document.createElement('a');
+      a.href = url;
 
-      if (response.ok) {
-        // Download do ficheiro
-        const blob = await response.blob();
-        const url = window.URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        
-        // Obter nome do ficheiro do header ou usar default
-        const disposition = response.headers.get('Content-Disposition');
-        let filename = `minuta_${selectedTemplate}.txt`;
-        if (disposition) {
-          const match = disposition.match(/filename="(.+)"/);
-          if (match) filename = match[1];
-        }
-        
-        a.download = filename;
-        document.body.appendChild(a);
-        a.click();
-        window.URL.revokeObjectURL(url);
-        document.body.removeChild(a);
-        
-        toast.success("Minuta gerada com sucesso!");
-        setTemplateDialog({ open: false });
-        setSelectedTemplate("");
-      } else {
-        const error = await response.json();
-        // Se for erro de validação (campos em falta)
-        if (error.detail?.missing_fields) {
-          setTemplateError({
-            message: error.detail.message || "Dados incompletos",
-            missingFields: error.detail.missing_fields
-          });
-        } else {
-          toast.error(extractErrorMessage(error.detail?.message || error.detail, "Erro ao gerar minuta"));
-        }
+      // Obter nome do ficheiro do header ou usar default
+      const disposition = resposta.headers?.["content-disposition"];
+      let filename = `minuta_${selectedTemplate}.txt`;
+      if (disposition) {
+        const match = disposition.match(/filename="(.+)"/);
+        if (match) filename = match[1];
       }
+
+      a.download = filename;
+      document.body.appendChild(a);
+      a.click();
+      window.URL.revokeObjectURL(url);
+      document.body.removeChild(a);
+
+      toast.success("Minuta gerada com sucesso!");
+      setTemplateDialog({ open: false });
+      setSelectedTemplate("");
     } catch (error) {
       console.error("Erro ao gerar template:", error);
-      toast.error("Erro ao gerar minuta");
+      // Com `responseType: "blob"` o corpo de ERRO também vem como Blob:
+      // sem o ler como texto, a lista de campos em falta desaparecia e o
+      // utilizador via só "Erro ao gerar minuta".
+      const corpo = await readBlobErrorBody(error);
+      if (corpo.detail?.missing_fields) {
+        setTemplateError({
+          message: corpo.detail.message || "Dados incompletos",
+          missingFields: corpo.detail.missing_fields,
+        });
+      } else {
+        toast.error(
+          extractErrorMessage(
+            corpo.detail?.message || corpo.detail,
+            "Erro ao gerar minuta",
+          ),
+        );
+      }
     } finally {
       setGeneratingTemplate(false);
     }
@@ -1121,23 +1143,12 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     
     try {
       // Usar proxy endpoint para evitar CORS do S3
-      const response = await fetch(
-        `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      
-      if (response.ok) {
-        const blob = await response.blob();
-        const url = URL.createObjectURL(blob);
-        setPreviewUrl(url);
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao carregar preview"));
-        setPreviewFile(null);
-      }
+      const { data: blob } = await getS3FileContent(file.path);
+      setPreviewUrl(URL.createObjectURL(blob));
     } catch (error) {
       console.error("Erro ao carregar preview:", error);
-      toast.error("Erro ao carregar preview");
+      const corpo = await readBlobErrorBody(error);
+      toast.error(extractErrorMessage(corpo.detail, "Erro ao carregar preview"));
       setPreviewFile(null);
     } finally {
       setPreviewLoading(false);
@@ -1156,6 +1167,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     return ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp'].includes(ext);
   };
   
+  // Épico 9 — o motor de visão só lê imagens e PDF. Um .docx seguiria para
+  // uma chamada PAGA e voltaria vazio; mais vale não oferecer o botão.
+  const podeExtrairDados = (filename) => {
+    const ext = filename?.split('.').pop()?.toLowerCase();
+    return ['pdf', 'jpg', 'jpeg', 'png', 'webp'].includes(ext);
+  };
+
   // Verificar se ficheiro é PDF (para anotações)
   const isPdfFile = (filename) => {
     const ext = filename?.split('.').pop()?.toLowerCase();
@@ -1211,19 +1229,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       for (const file of filesToAnalyze) {
         try {
           // Usar proxy endpoint que faz streaming através do backend (evita CORS)
-          const proxyResponse = await fetch(
-            `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          
-          if (proxyResponse.ok) {
-            const blob = await proxyResponse.blob();
-            formData.append('files', blob, file.name);
-            uploadedPaths.push(file.path);
-          } else {
-            console.warn(`Erro ao obter ficheiro ${file.name} via proxy: ${proxyResponse.status}`);
-            continue;
-          }
+          const { data: blob } = await getS3FileContent(file.path);
+          formData.append('files', blob, file.name);
+          uploadedPaths.push(file.path);
         } catch (e) {
           console.error(`Erro ao obter ficheiro ${file.name}:`, e);
         }
@@ -1236,20 +1244,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       formData.append('file_paths', JSON.stringify(uploadedPaths));
 
       // Enviar para análise
-      const response = await fetch(
-        `${API_URL}/api/documents/ai-analyze/${processId}`,
-        {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
-          },
-          body: formData,
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
+      // O `X-Active-Role` deixa de ser escrito à mão: o interceptor do
+      // Axios injecta-o (e o `X-Company-Id`, que aqui nunca seguia).
+      let result;
+      try {
+        ({ data: result } = await aiAnalyzeS3Documents(processId, formData));
+      } catch (erroAnalise) {
+        const corpo = erroAnalise?.response?.data || {};
+        toast.error(extractErrorMessage(corpo.detail, "Erro na análise IA"));
+        return;
+      }
+      {
 
         if ((result.documents_count || 0) === 0 && (result.skipped_already_analyzed || 0) > 0) {
           toast.info(result.message || "Documentos já analisados pela IA");
@@ -1271,16 +1276,9 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
             }).filter(doc => doc.source_path);
 
             if (docsToOrganize.length > 0) {
-              await fetch(`${API_URL}/api/documents/organize/${processId}`, {
-                method: 'POST',
-                headers: { 
-                  Authorization: `Bearer ${token}`,
-                  'Content-Type': 'application/json'
-                },
-                body: JSON.stringify({
-                  documents: docsToOrganize,
-                  create_folders: true
-                })
+              await organizeS3Documents(processId, {
+                documents: docsToOrganize,
+                create_folders: true,
               });
             }
           } catch (orgError) {
@@ -1310,9 +1308,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         
         // Recarregar ficheiros para ver nova organização + badges "Analisado"
         fetchFiles();
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro na análise IA"));
       }
     } catch (error) {
       console.error("Erro na análise IA:", error);
@@ -1370,6 +1365,67 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     }
   };
 
+  /**
+   * Épico 9 — lê UM ficheiro com IA e entrega os dados ao contentor.
+   *
+   * REGRA DE OURO: isto não grava nada. O endpoint é de leitura e o que
+   * volta vai para o diálogo de revisão, onde o consultor confirma. Uma
+   * alucinação sobre um NIF ou um vencimento não entra na base de dados
+   * sem um humano pelo meio.
+   */
+  const handleExtractDocData = async (file) => {
+    if (!canUseAIDocumentTools) {
+      toast.error("Sem permissão para extrair dados com IA");
+      return;
+    }
+    const caminho = file?.path;
+    if (!caminho) {
+      toast.error("Não foi possível identificar o ficheiro (caminho em falta).");
+      return;
+    }
+    if (!podeExtrairDados(file?.name)) {
+      toast.error("Formato não suportado. A extracção aceita imagens e PDF.");
+      return;
+    }
+
+    setExtractingPaths((prev) => new Set([...prev, caminho]));
+    try {
+      const { data: resultado } = await extractDocumentData(processId, caminho);
+      const extraidos = resultado?.extracted_data || {};
+      if (Object.keys(extraidos).length === 0) {
+        toast.warning("A IA não conseguiu ler dados deste documento.");
+        return;
+      }
+      if (!onDocumentDataExtracted) {
+        // Sem contentor a ouvir não há onde rever; melhor dizê-lo do que
+        // deixar o consultor à espera de um diálogo que nunca abre.
+        toast.info("Dados extraídos, mas não há ecrã de revisão disponível.");
+        return;
+      }
+      onDocumentDataExtracted({
+        extractedData: extraidos,
+        fieldConfidence: resultado?.field_confidence || {},
+        conflicts: resultado?.conflicts || [],
+        sourceDocument: resultado?.source_document?.name || file?.name || "",
+        titularMatches: resultado?.titular_matches || [],
+        needsTitularChoice: !!resultado?.needs_titular_choice,
+      });
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(
+          err?.response?.data?.detail,
+          "Erro ao extrair dados do documento.",
+        ),
+      );
+    } finally {
+      setExtractingPaths((prev) => {
+        const next = new Set(prev);
+        next.delete(caminho);
+        return next;
+      });
+    }
+  };
+
   // PACOTE DJ — Abrir o modal de revisão para um ficheiro que já tem
   // `ai_review_status='pending'` (sugestões gravadas, à espera de decisão).
   // Não chama o endpoint de análise; apenas abre o modal com os dados que
@@ -1378,6 +1434,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     if (!file) return;
     setReviewModal({ open: true, doc: file });
   };
+
+  // Fechar o diálogo de resultados. Reabrir sem resultados limpava-os; o
+  // comportamento anterior preservava-os enquanto o diálogo estivesse
+  // aberto, e é isso que se mantém.
+  const handleAIDialogOpenChange = useCallback((aberto) => {
+    setAiDialog((anterior) => ({
+      open: aberto,
+      results: aberto ? anterior.results : null,
+    }));
+  }, []);
 
   // Aplicar sugestões da análise IA
   const handleApplyAISuggestions = async (suggestions) => {
@@ -1388,29 +1454,17 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
     setApplyingChanges(true);
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/ai-apply-suggestions/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify(suggestions),
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`${result.updated_fields} campo(s) actualizado(s)`);
-        setAiDialog({ open: false, results: null });
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao aplicar sugestões"));
-      }
+      const { data: result } = await aiApplyS3Suggestions(processId, suggestions);
+      toast.success(`${result.updated_fields} campo(s) actualizado(s)`);
+      setAiDialog({ open: false, results: null });
     } catch (error) {
       console.error("Erro ao aplicar sugestões:", error);
-      toast.error("Erro ao aplicar alterações");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao aplicar alterações",
+        ),
+      );
     } finally {
       setApplyingChanges(false);
     }
@@ -1435,33 +1489,26 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     try {
       // 1) Categorizar docs ainda sem categoria (necessário para gerar nomes inteligentes)
       try {
-        await fetch(`${API_URL}/api/documents/categorize-all/${processId}`, {
-          method: 'POST',
-          headers: {
-            Authorization: `Bearer ${token}`,
-            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
-          },
-        });
+        await categorizeAllS3Documents(processId);
       } catch (catErr) {
         console.warn("Categorização prévia falhou (a tentar renomear na mesma):", catErr);
       }
 
       // 2) Renomear com nomes inteligentes baseados na categoria IA
-      const response = await fetch(
-        `${API_URL}/api/documents/rename-all-smart/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json',
-            ...(effectiveRole ? { "X-Active-Role": effectiveRole } : {}),
-          }
+      let result;
+      try {
+        ({ data: result } = await renameAllS3DocumentsSmart(processId));
+      } catch (erroRename) {
+        const detalhe = erroRename?.response?.data?.detail;
+        if (typeof detalhe === "string" && detalhe.includes("categorizado")) {
+          toast.warning("Execute primeiro a análise IA para categorizar os documentos");
+        } else {
+          toast.error(extractErrorMessage(detalhe, "Erro ao renomear documentos"));
         }
-      );
+        return;
+      }
 
-      if (response.ok) {
-        const result = await response.json();
-        
+      {
         if (result.renamed > 0) {
           toast.success(`${result.renamed} documento(s) renomeado(s) com sucesso!`);
           // Recarregar ficheiros para mostrar novos nomes
@@ -1475,13 +1522,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         // Mostrar diálogo com detalhes se houver resultados
         if (result.details && result.details.length > 0) {
           setRenameDialog({ open: true, results: result });
-        }
-      } else {
-        const error = await response.json();
-        if (error.detail?.includes("categorizado")) {
-          toast.warning("Execute primeiro a análise IA para categorizar os documentos");
-        } else {
-          toast.error(extractErrorMessage(error.detail, "Erro ao renomear documentos"));
         }
       }
     } catch (error) {
@@ -1518,34 +1558,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     setManualRenaming(true);
     
     try {
-      const response = await fetch(
-        `${API_URL}/api/documents/rename-smart/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            s3_path: file.path,
-            apply_ai_name: false,
-            novo_nome: newName.trim()
-          })
-        }
-      );
-
-      if (response.ok) {
-        const result = await response.json();
-        toast.success(`Ficheiro renomeado para "${result.new_name}"`);
-        setManualRenameDialog({ open: false, file: null, newName: "" });
-        fetchFiles(); // Recarregar lista
-      } else {
-        const error = await response.json();
-        toast.error(extractErrorMessage(error.detail, "Erro ao renomear ficheiro"));
-      }
+      const { data: result } = await renameS3DocumentSmart(processId, {
+        s3_path: file.path,
+        apply_ai_name: false,
+        novo_nome: newName.trim(),
+      });
+      toast.success(`Ficheiro renomeado para "${result.new_name}"`);
+      setManualRenameDialog({ open: false, file: null, newName: "" });
+      fetchFiles(); // Recarregar lista
     } catch (error) {
       console.error("Erro ao renomear ficheiro:", error);
-      toast.error("Erro ao renomear ficheiro");
+      toast.error(
+        extractErrorMessage(
+          error?.response?.data?.detail,
+          "Erro ao renomear ficheiro",
+        ),
+      );
     } finally {
       setManualRenaming(false);
     }
@@ -1570,36 +1598,25 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       
       for (const file of allFiles) {
         try {
-          const proxyResponse = await fetch(
-            `${API_URL}/api/documents/proxy/${encodeURIComponent(file.path)}`,
-            { headers: { Authorization: `Bearer ${token}` } }
-          );
-          
-          if (proxyResponse.ok) {
-            const blob = await proxyResponse.blob();
-            formData.append('files', blob, file.name);
-          }
+          const { data: blob } = await getS3FileContent(file.path);
+          formData.append('files', blob, file.name);
         } catch (e) {
           console.error(`Erro ao obter ficheiro ${file.name}:`, e);
         }
       }
 
       // Análise IA
-      const analyzeResponse = await fetch(
-        `${API_URL}/api/documents/ai-analyze/${processId}`,
-        {
-          method: 'POST',
-          headers: { Authorization: `Bearer ${token}` },
-          body: formData,
-        }
-      );
-
-      if (!analyzeResponse.ok) {
-        const error = await analyzeResponse.json();
-        throw new Error(extractErrorMessage(error.detail, "Erro na análise IA"));
+      let analyzeResult;
+      try {
+        ({ data: analyzeResult } = await aiAnalyzeS3Documents(processId, formData));
+      } catch (erroAnalise) {
+        throw new Error(
+          extractErrorMessage(
+            erroAnalise?.response?.data?.detail,
+            "Erro na análise IA",
+          ),
+        );
       }
-
-      const analyzeResult = await analyzeResponse.json();
 
       // Passo 2: Organizar documentos nas pastas
       // Juntar source_path dos ficheiros originais com resultados da IA
@@ -1611,24 +1628,22 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
         };
       }).filter(doc => doc.source_path);
 
-      const organizeResponse = await fetch(
-        `${API_URL}/api/documents/organize/${processId}`,
-        {
-          method: 'POST',
-          headers: { 
-            Authorization: `Bearer ${token}`,
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({
-            documents: docsToOrganize,
-            create_folders: true
-          })
-        }
-      );
+      let organizeResult;
+      try {
+        ({ data: organizeResult } = await organizeS3Documents(processId, {
+          documents: docsToOrganize,
+          create_folders: true,
+        }));
+      } catch (erroOrganize) {
+        throw new Error(
+          extractErrorMessage(
+            erroOrganize?.response?.data?.detail,
+            "Erro ao organizar documentos",
+          ),
+        );
+      }
 
-      if (organizeResponse.ok) {
-        const organizeResult = await organizeResponse.json();
-        
+      {
         setOrganizeResults({
           analyzed: analyzeResult.documents_count || allFiles.length,
           organized: organizeResult.organized_count || organizeResult.organized?.length || 0,
@@ -1638,9 +1653,6 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
 
         toast.success(`Organização completa! ${organizeResult.organized_count || 0} documento(s) organizado(s).`);
         fetchFiles(); // Recarregar lista
-      } else {
-        const error = await organizeResponse.json();
-        throw new Error(extractErrorMessage(error.detail, "Erro ao organizar documentos"));
       }
 
     } catch (error) {
@@ -1706,32 +1718,18 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
     
     for (const file of filesToMove) {
       try {
-        const response = await fetch(
-          `${API_URL}/api/documents/check-move-conflict`,
-          {
-            method: 'POST',
-            headers: { 
-              Authorization: `Bearer ${token}`,
-              'Content-Type': 'application/json'
-            },
-            body: JSON.stringify({
-              process_id: processId,
-              source_path: file.path,
-              target_category: targetCategory
-            })
-          }
-        );
-        
-        if (response.ok) {
-          const data = await response.json();
-          if (data.has_conflict) {
-            conflicts.push({
-              file,
-              conflictPath: data.conflict_path,
-              conflictFilename: data.conflict_filename,
-              suggestedNames: data.suggested_names
-            });
-          }
+        const { data } = await checkS3MoveConflict({
+          process_id: processId,
+          source_path: file.path,
+          target_category: targetCategory,
+        });
+        if (data.has_conflict) {
+          conflicts.push({
+            file,
+            conflictPath: data.conflict_path,
+            conflictFilename: data.conflict_filename,
+            suggestedNames: data.suggested_names,
+          });
         }
       } catch (err) {
         console.error(`Erro ao verificar conflito para ${file.name}:`, err);
@@ -1757,24 +1755,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       body.auto_rename = true;
     }
     
-    const response = await fetch(
-      `${API_URL}/api/documents/move-file/${processId}`,
-      {
-        method: 'POST',
-        headers: { 
-          Authorization: `Bearer ${token}`,
-          'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(body)
-      }
-    );
-    
-    if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      throw new Error(errorData.detail?.message || errorData.detail || 'Erro ao mover ficheiro');
+    try {
+      const { data } = await moveS3File(processId, body);
+      return data;
+    } catch (error) {
+      const detalhe = error?.response?.data?.detail;
+      throw new Error(detalhe?.message || detalhe || 'Erro ao mover ficheiro');
     }
-    
-    return response.json();
   };
 
   const handleDrop = async (e, targetCategory) => {
@@ -2570,6 +2557,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                 )}
                               </Button>
                             )}
+                            {canUseAIDocumentTools && !isFolder && podeExtrairDados(file?.name) && (
+                              <Button
+                                variant="ghost"
+                                size="icon"
+                                className="h-5 w-5 flex-shrink-0 text-primary hover:text-primary"
+                                onClick={(e) => {
+                                  e.stopPropagation();
+                                  handleExtractDocData(file);
+                                }}
+                                disabled={extractingPaths.has(file.path)}
+                                title="Extrair Dados com IA"
+                                aria-label={`Extrair dados de ${file.name}`}
+                                data-testid={`vlm-extract-btn-${idx}`}
+                              >
+                                {extractingPaths.has(file.path) ? (
+                                  <Loader2 className="h-3 w-3 animate-spin" />
+                                ) : (
+                                  <ScanText className="h-3 w-3" />
+                                )}
+                              </Button>
+                            )}
                             {isPreviewable(file.name) && (
                               <Button 
                                 variant="ghost" 
@@ -2651,37 +2659,26 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                         className="h-5 text-[10px] bg-emerald-50 hover:bg-emerald-100 border-emerald-200 px-2"
                         onClick={async () => {
                           try {
-                            const response = await fetch(`${API_URL}/api/documents/bulk-download`, {
-                              method: 'POST',
-                              headers: {
-                                Authorization: `Bearer ${token}`,
-                                'Content-Type': 'application/json'
-                              },
-                              body: JSON.stringify({
-                                document_ids: selectedFilesForAI.map(f => f.path),
-                                process_id: processId
-                              })
+                            const { data: blob } = await bulkDownloadS3Files({
+                              document_ids: selectedFilesForAI.map(f => f.path),
+                              process_id: processId,
                             });
-                            
-                            if (response.ok) {
-                              const blob = await response.blob();
-                              const url = URL.createObjectURL(blob);
-                              const a = document.createElement('a');
-                              a.href = url;
-                              a.download = `documentos_${new Date().toISOString().slice(0,10)}.zip`;
-                              document.body.appendChild(a);
-                              a.click();
-                              document.body.removeChild(a);
-                              URL.revokeObjectURL(url);
-                              toast.success(`${selectedFilesForAI.length} documento(s) descarregado(s)`);
-                              setSelectedFilesForAI([]);
-                            } else {
-                              const error = await response.json();
-                              toast.error(extractErrorMessage(error.detail, "Erro ao descarregar documentos"));
-                            }
+                            const url = URL.createObjectURL(blob);
+                            const a = document.createElement('a');
+                            a.href = url;
+                            a.download = `documentos_${new Date().toISOString().slice(0,10)}.zip`;
+                            document.body.appendChild(a);
+                            a.click();
+                            document.body.removeChild(a);
+                            URL.revokeObjectURL(url);
+                            toast.success(`${selectedFilesForAI.length} documento(s) descarregado(s)`);
+                            setSelectedFilesForAI([]);
                           } catch (error) {
                             console.error("Erro no download em massa:", error);
-                            toast.error("Erro ao descarregar documentos");
+                            const corpo = await readBlobErrorBody(error);
+                            toast.error(
+                              extractErrorMessage(corpo.detail, "Erro ao descarregar documentos"),
+                            );
                           }
                         }}
                       >
@@ -2722,40 +2719,13 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
               </div>
 
               {/* Diálogo de confirmação para eliminar selecionados */}
-              <AlertDialog open={bulkDeleteDialog.open} onOpenChange={(open) => { if (!bulkDeleting) setBulkDeleteDialog({ open }); }}>
-                <AlertDialogContent>
-                  <AlertDialogHeader>
-                    <AlertDialogTitle>Eliminar {selectedFilesForAI.length} ficheiro(s)</AlertDialogTitle>
-                    <AlertDialogDescription>
-                      Tem a certeza que pretende eliminar {selectedFilesForAI.length} ficheiro(s) selecionado(s)? 
-                      Esta ação não pode ser revertida. Os ficheiros serão removidos permanentemente do armazenamento.
-                    </AlertDialogDescription>
-                  </AlertDialogHeader>
-                  <AlertDialogFooter>
-                    <AlertDialogCancel disabled={bulkDeleting}>Cancelar</AlertDialogCancel>
-                    <AlertDialogAction
-                      onClick={(e) => {
-                        e.preventDefault();
-                        handleBulkDelete();
-                      }}
-                      disabled={bulkDeleting}
-                      className="bg-red-600 text-white hover:bg-red-700 focus-visible:ring-red-300"
-                    >
-                      {bulkDeleting ? (
-                        <>
-                          <Loader2 className="h-4 w-4 animate-spin mr-1" />
-                          A eliminar...
-                        </>
-                      ) : (
-                        <>
-                          <Trash2 className="h-4 w-4 mr-1" />
-                          Eliminar {selectedFilesForAI.length} ficheiro(s)
-                        </>
-                      )}
-                    </AlertDialogAction>
-                  </AlertDialogFooter>
-                </AlertDialogContent>
-              </AlertDialog>
+              <BulkDeleteDialog
+                open={bulkDeleteDialog.open}
+                count={selectedFilesForAI.length}
+                deleting={bulkDeleting}
+                onOpenChange={(aberto) => setBulkDeleteDialog({ open: aberto })}
+                onConfirm={handleBulkDelete}
+              />
 
               {/* Painel de Preview Lateral */}
               {previewFile && (
@@ -2973,6 +2943,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                     )}
                                   </Button>
                                 )}
+                                {canUseAIDocumentTools && !isFolder && podeExtrairDados(file?.name) && (
+                                  <Button
+                                    variant="ghost"
+                                    size="icon"
+                                    className="h-6 w-6 text-primary hover:text-primary"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleExtractDocData(file);
+                                    }}
+                                    disabled={extractingPaths.has(file.path)}
+                                    title="Extrair Dados com IA"
+                                    aria-label={`Extrair dados de ${file.name}`}
+                                    data-testid={`vlm-extract-btn-all-${idx}`}
+                                  >
+                                    {extractingPaths.has(file.path) ? (
+                                      <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                    ) : (
+                                      <ScanText className="h-3.5 w-3.5" />
+                                    )}
+                                  </Button>
+                                )}
                                 {isPdfFile(file.name) && (
                                   <Button
                                     variant="ghost"
@@ -3160,6 +3151,27 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
                                       )}
                                     </Button>
                                   )}
+                                  {canUseAIDocumentTools && !file?.path?.endsWith('/') && podeExtrairDados(file?.name) && (
+                                    <Button
+                                      variant="ghost"
+                                      size="icon"
+                                      className="h-6 w-6 text-primary hover:text-primary"
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        handleExtractDocData(file);
+                                      }}
+                                      disabled={extractingPaths.has(file.path)}
+                                      title="Extrair Dados com IA"
+                                      aria-label={`Extrair dados de ${file.name}`}
+                                      data-testid={`vlm-extract-btn-cat-${idx}`}
+                                    >
+                                      {extractingPaths.has(file.path) ? (
+                                        <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                                      ) : (
+                                        <ScanText className="h-3.5 w-3.5" />
+                                      )}
+                                    </Button>
+                                  )}
                                   {isPdfFile(file.name) && (
                                     <Button
                                       variant="ghost"
@@ -3309,968 +3321,95 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted }) => {
       </Card>
 
       {/* Dialog de confirmação de eliminação */}
-      <AlertDialog open={deleteDialog.open} onOpenChange={(open) => setDeleteDialog({ open, file: null })}>
-        <AlertDialogContent>
-          <AlertDialogHeader>
-            <AlertDialogTitle>Eliminar ficheiro?</AlertDialogTitle>
-            <AlertDialogDescription>
-              Tem a certeza que deseja eliminar "{deleteDialog.file?.name}"?
-              Esta ação não pode ser revertida.
-            </AlertDialogDescription>
-          </AlertDialogHeader>
-          <AlertDialogFooter>
-            <AlertDialogCancel disabled={deleting}>Cancelar</AlertDialogCancel>
-            <AlertDialogAction
-              onClick={handleDelete}
-              disabled={deleting}
-              className="bg-red-500 hover:bg-red-600"
-            >
-              {deleting ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Trash2 className="h-4 w-4 mr-2" />
-              )}
-              Eliminar
-            </AlertDialogAction>
-          </AlertDialogFooter>
-        </AlertDialogContent>
-      </AlertDialog>
+      <DeleteFileDialog
+        open={deleteDialog.open}
+        fileName={deleteDialog.file?.name}
+        deleting={deleting}
+        onOpenChange={handleDeleteDialogOpenChange}
+        onConfirm={handleDelete}
+      />
 
       {/* Dialog para conflito de nomes ao mover/renomear */}
-      <Dialog open={conflictDialog.open} onOpenChange={(open) => {
-        if (!open) {
-          setConflictDialog({ open: false, files: [], targetCategory: null, currentIndex: 0, conflicts: [] });
-          setDraggedFile(null);
-          setDraggedFiles([]);
-        }
-      }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="h-5 w-5" />
-              Ficheiro com Nome Duplicado
-            </DialogTitle>
-            <DialogDescription>
-              Já existe um ficheiro com o mesmo nome na pasta de destino.
-            </DialogDescription>
-          </DialogHeader>
-          
-          {conflictDialog.conflicts?.length > 0 && (
-            <div className="space-y-4 py-4">
-              {/* Info do ficheiro em conflito */}
-              <div className="bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 rounded-lg p-4">
-                <div className="flex items-center gap-3">
-                  <FileText className="h-8 w-8 text-amber-600" />
-                  <div>
-                    <p className="font-medium text-amber-800 dark:text-amber-200">
-                      {conflictDialog.conflicts[0]?.conflictFilename || conflictDialog.conflicts[0]?.file?.name}
-                    </p>
-                    <p className="text-sm text-amber-600 dark:text-amber-400">
-                      Destino: {conflictDialog.targetCategory}
-                    </p>
-                  </div>
-                </div>
-              </div>
-              
-              {/* Mostrar mais ficheiros se houver múltiplos conflitos */}
-              {conflictDialog.conflicts.length > 1 && (
-                <p className="text-sm text-muted-foreground">
-                  +{conflictDialog.conflicts.length - 1} outro(s) ficheiro(s) com conflito
-                </p>
-              )}
-              
-              {/* Opções de resolução */}
-              <div className="space-y-2">
-                <p className="text-sm font-medium">O que deseja fazer?</p>
-                
-                {/* Sugestões de nomes alternativos */}
-                {conflictDialog.conflicts[0]?.suggestedNames?.length > 0 && (
-                  <div className="bg-muted/50 rounded-lg p-3 mb-3">
-                    <p className="text-xs text-muted-foreground mb-2">Nomes sugeridos:</p>
-                    <div className="flex flex-wrap gap-2">
-                      {conflictDialog.conflicts[0].suggestedNames.slice(0, 3).map((suggestion, idx) => (
-                        <Button
-                          key={idx}
-                          variant="outline"
-                          size="sm"
-                          onClick={() => handleConflictDecision('custom', suggestion.filename)}
-                          className="text-xs"
-                        >
-                          <Save className="h-3 w-3 mr-1" />
-                          {suggestion.filename || suggestion}
-                        </Button>
-                      ))}
-                    </div>
-                  </div>
-                )}
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="outline"
-                    onClick={() => handleConflictDecision('rename')}
-                    className="w-full"
-                  >
-                    <Pencil className="h-4 w-4 mr-2" />
-                    Renomear Automaticamente
-                  </Button>
-                  <Button
-                    variant="destructive"
-                    onClick={() => handleConflictDecision('overwrite')}
-                    className="w-full"
-                  >
-                    <Trash2 className="h-4 w-4 mr-2" />
-                    Substituir Existente
-                  </Button>
-                </div>
-                
-                <div className="grid grid-cols-2 gap-2">
-                  <Button
-                    variant="ghost"
-                    onClick={() => handleConflictDecision('skip')}
-                    className="w-full"
-                  >
-                    <X className="h-4 w-4 mr-2" />
-                    Ignorar Este
-                  </Button>
-                  {conflictDialog.conflicts?.length > 1 && (
-                    <Button
-                      variant="ghost"
-                      onClick={() => handleConflictDecisionForAll('rename')}
-                      className="w-full text-amber-600 hover:text-amber-700"
-                    >
-                      <FolderSync className="h-4 w-4 mr-2" />
-                      Renomear Todos
-                    </Button>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-        </DialogContent>
-      </Dialog>
+      <MoveConflictDialog
+        open={conflictDialog.open}
+        conflicts={conflictDialog.conflicts}
+        targetCategory={conflictDialog.targetCategory}
+        onDecide={handleConflictDecision}
+        onDecideForAll={handleConflictDecisionForAll}
+        onCancel={handleCancelMoveConflict}
+      />
 
       {/* Dialog para geração de minutas */}
-      <Dialog open={templateDialog.open} onOpenChange={(open) => {
-        setTemplateDialog({ open });
-        if (!open) {
-          setTemplateError(null);
-          setSelectedTemplate("");
-        }
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FileDown className="h-5 w-5 text-emerald-600" />
-              Gerar Minuta
-            </DialogTitle>
-            <DialogDescription>
-              Selecione o tipo de documento para gerar automaticamente com os dados do cliente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Tipo de Documento</label>
-              <Select
-                value={selectedTemplate}
-                onValueChange={(value) => {
-                  setSelectedTemplate(value);
-                  setTemplateError(null);
-                }}
-              >
-                <SelectTrigger data-testid="template-select">
-                  <SelectValue placeholder="Selecione o tipo de documento..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {TEMPLATES.map((t) => (
-                    <SelectItem key={t.value} value={t.value}>
-                      {t.label}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-
-            {/* Erro de validação - campos em falta */}
-            {templateError && (
-              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 dark:border-amber-800 dark:bg-amber-950/30">
-                <div className="flex items-start gap-3">
-                  <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                  <div>
-                    <p className="font-medium text-amber-800 dark:text-amber-200">
-                      Não é possível gerar a minuta
-                    </p>
-                    <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                      {templateError.message}
-                    </p>
-                    {templateError.missingFields?.length > 0 && (
-                      <div className="mt-2">
-                        <p className="text-sm font-medium text-amber-800 dark:text-amber-200">
-                          Campos em falta:
-                        </p>
-                        <ul className="mt-1 text-sm text-amber-700 dark:text-amber-300 list-disc list-inside">
-                          {templateError.missingFields.map((field, idx) => (
-                            <li key={idx}>{field}</li>
-                          ))}
-                        </ul>
-                      </div>
-                    )}
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-2">
-                      Preencha os dados em falta na ficha do cliente antes de gerar o documento.
-                    </p>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setTemplateDialog({ open: false })}
-              disabled={generatingTemplate}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleGenerateTemplate}
-              disabled={!selectedTemplate || generatingTemplate}
-              className="bg-emerald-600 hover:bg-emerald-700"
-            >
-              {generatingTemplate ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <FileDown className="h-4 w-4 mr-2" />
-              )}
-              Gerar e Descarregar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <GenerateTemplateDialog
+        open={templateDialog.open}
+        templates={TEMPLATES}
+        selectedTemplate={selectedTemplate}
+        error={templateError}
+        generating={generatingTemplate}
+        onOpenChange={handleTemplateDialogOpenChange}
+        onTemplateChange={handleTemplateChange}
+        onGenerate={handleGenerateTemplate}
+      />
 
       {/* Dialog de Resultados da Análise IA */}
-      <Dialog open={aiDialog.open} onOpenChange={(open) => setAiDialog({ open, results: open ? aiDialog.results : null })}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-hidden flex flex-col">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Brain className="h-5 w-5 text-purple-600" />
-              Resultados da Análise IA
-            </DialogTitle>
-            <DialogDescription>
-              Dados extraídos dos documentos de {clientName || "cliente"}
-            </DialogDescription>
-          </DialogHeader>
-
-          <div className="flex-1 overflow-y-auto py-4 space-y-4">
-            {aiDialog.results?.analysis && (
-              <>
-                {/* Documentos Analisados */}
-                <div className="space-y-2">
-                  <h4 className="font-medium text-sm flex items-center gap-2">
-                    <FileText className="h-4 w-4" />
-                    Documentos Processados ({aiDialog.results.analysis.documents_analyzed?.length || 0})
-                  </h4>
-                  <div className="grid gap-2">
-                    {aiDialog.results.analysis.documents_analyzed?.map((doc, idx) => (
-                      <div key={idx} className="p-2 rounded border bg-muted/30">
-                        <div className="flex items-center justify-between">
-                          <span className="text-sm font-medium">{doc.file_name}</span>
-                          <Badge variant="outline" className="text-xs">
-                            {doc.tipo_documento || "outro"}
-                          </Badge>
-                        </div>
-                        <div className="text-xs text-muted-foreground mt-1">
-                          Confiança: {Math.round((doc.confianca || 0) * 100)}%
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                {/* Campos Vazios (Podem ser Preenchidos) */}
-                {aiDialog.results.analysis.comparison?.empty_fields?.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-sm flex items-center gap-2 text-green-600">
-                      <CheckCircle className="h-4 w-4" />
-                      Campos a Preencher ({aiDialog.results.analysis.comparison.empty_fields.length})
-                    </h4>
-                    <div className="grid gap-2">
-                      {aiDialog.results.analysis.comparison.empty_fields.map((field, idx) => {
-                        // Obter confiança do campo via auto_fill_suggestions
-                        const suggestion = aiDialog.results.analysis.auto_fill_suggestions?.[field.field];
-                        const conf = suggestion?.confidence;
-                        const pct = Math.round((conf || 0) * 100);
-                        const confBadge = conf >= 0.8
-                          ? "bg-green-100 text-green-700"
-                          : conf >= 0.6
-                            ? "bg-amber-100 text-amber-700"
-                            : "bg-red-100 text-red-700";
-                        return (
-                          <div key={idx} className={`p-2 rounded border ${conf < 0.8 ? 'border-amber-300 bg-amber-50 dark:bg-amber-950/30' : 'bg-green-50 dark:bg-green-950/30'}`}>
-                            <div className="flex items-center justify-between">
-                              <span className="text-sm font-medium">{field.field}</span>
-                              <div className="flex gap-1">
-                                <Badge className="bg-green-100 text-green-700">Novo</Badge>
-                                {conf !== undefined && (
-                                  <Badge className={`text-[10px] ${confBadge}`}>
-                                    {pct}%
-                                  </Badge>
-                                )}
-                              </div>
-                            </div>
-                            <p className={`text-sm mt-1 ${conf < 0.8 ? 'text-amber-700 dark:text-amber-300' : 'text-green-700 dark:text-green-300'}`}>
-                              {field.suggested_value}
-                            </p>
-                            {conf < 0.8 && conf !== undefined && (
-                              <p className="text-[10px] text-amber-600 mt-1">⚠️ Baixa confiança — verifique manualmente</p>
-                            )}
-                            <p className="text-xs text-muted-foreground">
-                              Fonte: {field.source}
-                            </p>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  </div>
-                )}
-
-                {/* Campos com Diferenças */}
-                {aiDialog.results.analysis.comparison?.different?.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-sm flex items-center gap-2 text-amber-600">
-                      <AlertCircle className="h-4 w-4" />
-                      Dados Divergentes ({aiDialog.results.analysis.comparison.different.length})
-                    </h4>
-                    <div className="grid gap-2">
-                      {aiDialog.results.analysis.comparison.different.map((field, idx) => (
-                        <div key={idx} className="p-2 rounded border bg-amber-50 dark:bg-amber-950/30">
-                          <div className="text-sm font-medium">{field.field}</div>
-                          <div className="grid grid-cols-2 gap-2 mt-1">
-                            <div className="text-xs">
-                              <span className="text-muted-foreground">Actual:</span>
-                              <p className="font-medium">{field.current_value}</p>
-                            </div>
-                            <div className="text-xs">
-                              <span className="text-muted-foreground">Documento:</span>
-                              <p className="font-medium text-amber-700">{field.document_value}</p>
-                            </div>
-                          </div>
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            className="mt-2 text-xs bg-amber-100 hover:bg-amber-200 border-amber-300"
-                            onClick={() => handleApplyAISuggestions({ [field.field]: field.document_value })}
-                            disabled={applyingChanges}
-                          >
-                            {applyingChanges ? <Loader2 className="h-3 w-3 animate-spin mr-1" /> : <CheckCircle className="h-3 w-3 mr-1" />}
-                            Usar valor do documento
-                          </Button>
-                        </div>
-                      ))}
-                    </div>
-                  </div>
-                )}
-
-                {/* Campos Coincidentes */}
-                {aiDialog.results.analysis.comparison?.matching?.length > 0 && (
-                  <div className="space-y-2">
-                    <h4 className="font-medium text-sm flex items-center gap-2 text-muted-foreground">
-                      <CheckCircle className="h-4 w-4" />
-                      Dados Confirmados ({aiDialog.results.analysis.comparison.matching.length})
-                    </h4>
-                    <div className="flex flex-wrap gap-1">
-                      {aiDialog.results.analysis.comparison.matching.map((field, idx) => (
-                        <Badge key={idx} variant="outline" className="text-xs">
-                          {field.field}: {field.value?.toString().substring(0, 20)}
-                        </Badge>
-                      ))}
-                    </div>
-                  </div>
-                )}
-              </>
-            )}
-          </div>
-
-          <DialogFooter className="flex gap-2 pt-4 border-t">
-            <Button
-              variant="outline"
-              onClick={() => setAiDialog({ open: false, results: null })}
-            >
-              Fechar
-            </Button>
-            {aiDialog.results?.analysis?.auto_fill_suggestions && 
-              Object.keys(aiDialog.results.analysis.auto_fill_suggestions).length > 0 && (
-              <Button
-                onClick={() => handleApplyAISuggestions(
-                  Object.fromEntries(
-                    Object.entries(aiDialog.results.analysis.auto_fill_suggestions)
-                      .map(([k, v]) => [k, v.value])
-                  )
-                )}
-                disabled={applyingChanges}
-                className="bg-purple-600 hover:bg-purple-700"
-              >
-                {applyingChanges ? (
-                  <Loader2 className="h-4 w-4 animate-spin mr-2" />
-                ) : (
-                  <Sparkles className="h-4 w-4 mr-2" />
-                )}
-                Aplicar Sugestões
-              </Button>
-            )}
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <AIResultsDialog
+        open={aiDialog.open}
+        results={aiDialog.results}
+        clientName={clientName}
+        applying={applyingChanges}
+        onOpenChange={handleAIDialogOpenChange}
+        onApplySuggestions={handleApplyAISuggestions}
+      />
 
       {/* Diálogo de resultados de renomeação inteligente */}
-      <Dialog open={renameDialog.open} onOpenChange={(open) => setRenameDialog({ open, results: open ? renameDialog.results : null })}>
-        <DialogContent className="max-w-lg max-h-[80vh] overflow-auto">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Sparkles className="h-5 w-5 text-amber-600" />
-              Renomeação Inteligente
-            </DialogTitle>
-            <DialogDescription>
-              Resultado da renomeação automática dos documentos
-            </DialogDescription>
-          </DialogHeader>
-          
-          {renameDialog.results && (
-            <div className="space-y-4 py-4">
-              {/* Estatísticas resumidas */}
-              <div className="grid grid-cols-4 gap-2">
-                <div className="text-center p-2 bg-muted rounded-lg">
-                  <p className="text-2xl font-bold">{renameDialog.results.total}</p>
-                  <p className="text-xs text-muted-foreground">Total</p>
-                </div>
-                <div className="text-center p-2 bg-green-50 dark:bg-green-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-green-600">{renameDialog.results.renamed}</p>
-                  <p className="text-xs text-green-600">Renomeados</p>
-                </div>
-                <div className="text-center p-2 bg-amber-50 dark:bg-amber-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-amber-600">{renameDialog.results.skipped}</p>
-                  <p className="text-xs text-amber-600">Ignorados</p>
-                </div>
-                <div className="text-center p-2 bg-red-50 dark:bg-red-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-red-600">{renameDialog.results.errors}</p>
-                  <p className="text-xs text-red-600">Erros</p>
-                </div>
-              </div>
-              
-              {/* Lista detalhada */}
-              {renameDialog.results.details && renameDialog.results.details.length > 0 && (
-                <div className="border rounded-lg divide-y max-h-60 overflow-auto">
-                  {renameDialog.results.details.map((item, idx) => (
-                    <div key={idx} className="p-2 flex items-center gap-2 text-sm">
-                      {item.status === "renamed" ? (
-                        <CheckCircle className="h-4 w-4 text-green-500 flex-shrink-0" />
-                      ) : item.status === "skipped" ? (
-                        <AlertCircle className="h-4 w-4 text-amber-500 flex-shrink-0" />
-                      ) : (
-                        <X className="h-4 w-4 text-red-500 flex-shrink-0" />
-                      )}
-                      <div className="flex-1 min-w-0">
-                        <p className="truncate font-medium">{item.file}</p>
-                        {item.new_name && (
-                          <p className="text-xs text-green-600 truncate">→ {item.new_name}</p>
-                        )}
-                        {item.reason && (
-                          <p className="text-xs text-muted-foreground">{item.reason}</p>
-                        )}
-                      </div>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          )}
-          
-          <DialogFooter>
-            <Button onClick={() => setRenameDialog({ open: false, results: null })}>
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <SmartRenameResultsDialog
+        open={renameDialog.open}
+        results={renameDialog.results}
+        onOpenChange={handleRenameDialogOpenChange}
+      />
 
       {/* Dialog para NIF da Empresa (obrigatório para indexacao) */}
-      <Dialog open={empresaNifDialog.open} onOpenChange={(open) => {
-        if (!open) {
-          setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
-          setPendingFiles(null);
-          if (fileInputRef.current) {
-            fileInputRef.current.value = "";
-          }
-        }
-      }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Building2 className="h-5 w-5 text-blue-600" />
-              NIF da Empresa
-            </DialogTitle>
-            <DialogDescription>
-              Para concluir o upload, é obrigatório indicar o NIF da empresa onde o cliente trabalha.
-              <br />
-              <span className="text-sm text-muted-foreground mt-1 block">
-                {empresaNifDialog.files?.length || 0} ficheiro(s) selecionado(s) para upload.
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">NIF da Empresa (9 dígitos)</label>
-              <div className="flex gap-2">
-                <Input
-                  placeholder="Ex: 509123456"
-                  value={empresaNifDialog.empresaNif}
-                  onChange={(e) => setEmpresaNifDialog(prev => ({
-                    ...prev,
-                    empresaNif: e.target.value.replace(/\D/g, '').slice(0, 9)
-                  }))}
-                  maxLength={9}
-                  className="flex-1"
-                />
-                <Button
-                  variant="outline"
-                  onClick={handleVerifyEmpresaNif}
-                  disabled={empresaNifDialog.empresaNif.length !== 9 || empresaNifDialog.checking}
-                >
-                  {empresaNifDialog.checking ? (
-                    <Loader2 className="h-4 w-4 animate-spin" />
-                  ) : (
-                    <Search className="h-4 w-4" />
-                  )}
-                  Verificar
-                </Button>
-              </div>
-            </div>
-
-            {/* Resultado da verificação */}
-            {empresaNifDialog.existingProcesses && (
-              <div className={`rounded-lg border p-4 ${
-                empresaNifDialog.existingProcesses.exists 
-                  ? 'bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-800' 
-                  : 'bg-green-50 border-green-200 dark:bg-green-950/30 dark:border-green-800'
-              }`}>
-                {empresaNifDialog.existingProcesses.exists ? (
-                  <>
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle className="h-5 w-5 text-amber-600 flex-shrink-0 mt-0.5" />
-                      <div>
-                        <p className="font-medium text-amber-800 dark:text-amber-200">
-                          Este NIF já foi utilizado em {empresaNifDialog.existingProcesses.total_count} processo(s)
-                        </p>
-                        <p className="text-sm text-amber-700 dark:text-amber-300 mt-1">
-                          Documentos desta empresa já foram enviados para os seguintes balcões:
-                        </p>
-                      </div>
-                    </div>
-                    
-                    <div className="mt-3 max-h-40 overflow-y-auto space-y-2">
-                      {empresaNifDialog.existingProcesses.processes.map((proc, idx) => (
-                        <div 
-                          key={idx}
-                          className="flex items-center justify-between p-2 rounded bg-white/50 dark:bg-black/20 border border-amber-100 dark:border-amber-900"
-                        >
-                          <div>
-                            <p className="font-medium text-sm">{proc.client_name}</p>
-                            {proc.employer_name && (
-                              <p className="text-xs text-muted-foreground">{proc.employer_name}</p>
-                            )}
-                          </div>
-                          <div className="text-right">
-                            <Badge 
-                              style={{ 
-                                backgroundColor: proc.status_color || '#6B7280',
-                                color: getContrastColor(proc.status_color),
-                                fontSize: '10px'
-                              }}
-                            >
-                              {proc.status_label}
-                            </Badge>
-                            {(proc.consultor_name || proc.mediador_name) && (
-                              <p className="text-xs text-muted-foreground mt-1">
-                                {proc.consultor_name || proc.mediador_name}
-                              </p>
-                            )}
-                          </div>
-                        </div>
-                      ))}
-                    </div>
-                    
-                    <p className="text-xs text-amber-600 dark:text-amber-400 mt-3">
-                      Pode prosseguir com o upload mesmo assim. Este aviso é apenas informativo.
-                    </p>
-                  </>
-                ) : (
-                  <div className="flex items-center gap-3">
-                    <CheckCircle className="h-5 w-5 text-green-600" />
-                    <div>
-                      <p className="font-medium text-green-800 dark:text-green-200">
-                        NIF não registado anteriormente
-                      </p>
-                      <p className="text-sm text-green-700 dark:text-green-300">
-                        Este NIF de empresa ainda não foi utilizado em nenhum processo.
-                      </p>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => {
-                setEmpresaNifDialog({ open: false, files: [], empresaNif: "", checking: false, existingProcesses: null });
-                setPendingFiles(null);
-                if (fileInputRef.current) {
-                  fileInputRef.current.value = "";
-                }
-              }}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleConfirmUploadWithNif}
-              disabled={empresaNifDialog.empresaNif.length !== 9}
-              className="bg-teal-600 hover:bg-teal-700"
-            >
-              <Upload className="h-4 w-4 mr-2" />
-              Confirmar Upload
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <EmpresaNifDialog
+        open={empresaNifDialog.open}
+        files={empresaNifDialog.files}
+        nif={empresaNifDialog.empresaNif}
+        checking={empresaNifDialog.checking}
+        existingProcesses={empresaNifDialog.existingProcesses}
+        contrastColorOf={getContrastColor}
+        onNifChange={handleEmpresaNifChange}
+        onVerify={handleVerifyEmpresaNif}
+        onConfirm={handleConfirmUploadWithNif}
+        onCancel={handleCancelEmpresaNif}
+      />
 
       {/* Diálogo de renomeação manual */}
-      <Dialog open={manualRenameDialog.open} onOpenChange={(open) => {
-        if (!open) {
-          setManualRenameDialog({ open: false, file: null, newName: "" });
-        }
-      }}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <Pencil className="h-5 w-5 text-blue-600" />
-              Renomear Ficheiro
-            </DialogTitle>
-            <DialogDescription>
-              Introduza o novo nome para "{manualRenameDialog.file?.name}".
-              <br />
-              <span className="text-xs text-muted-foreground">
-                A extensão será mantida automaticamente.
-              </span>
-            </DialogDescription>
-          </DialogHeader>
-          
-          <div className="space-y-4 py-4">
-            <div className="space-y-2">
-              <label className="text-sm font-medium">Novo nome</label>
-              <Input
-                placeholder="Introduza o novo nome..."
-                value={manualRenameDialog.newName}
-                onChange={(e) => setManualRenameDialog(prev => ({
-                  ...prev,
-                  newName: e.target.value
-                }))}
-                autoFocus
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter' && manualRenameDialog.newName.trim()) {
-                    handleManualRename();
-                  }
-                }}
-              />
-            </div>
-          </div>
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={() => setManualRenameDialog({ open: false, file: null, newName: "" })}
-              disabled={manualRenaming}
-            >
-              Cancelar
-            </Button>
-            <Button
-              onClick={handleManualRename}
-              disabled={!manualRenameDialog.newName.trim() || manualRenaming}
-              className="bg-blue-600 hover:bg-blue-700"
-            >
-              {manualRenaming ? (
-                <Loader2 className="h-4 w-4 animate-spin mr-2" />
-              ) : (
-                <Pencil className="h-4 w-4 mr-2" />
-              )}
-              Renomear
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <ManualRenameDialog
+        open={manualRenameDialog.open}
+        fileName={manualRenameDialog.file?.name}
+        newName={manualRenameDialog.newName}
+        renaming={manualRenaming}
+        onOpenChange={handleManualRenameOpenChange}
+        onNameChange={handleManualRenameNameChange}
+        onConfirm={handleManualRename}
+      />
 
       {/* Diálogo de resultados da organização */}
-      <Dialog open={!!organizeResults} onOpenChange={(open) => !open && setOrganizeResults(null)}>
-        <DialogContent className="sm:max-w-md">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2">
-              <FolderSync className="h-5 w-5 text-teal-600" />
-              Organização Completa
-            </DialogTitle>
-            <DialogDescription>
-              Os documentos foram analisados e organizados automaticamente.
-            </DialogDescription>
-          </DialogHeader>
-          
-          {organizeResults && (
-            <div className="space-y-4 py-4">
-              {/* Resumo */}
-              <div className="grid grid-cols-2 gap-3">
-                <div className="text-center p-3 bg-muted rounded-lg">
-                  <p className="text-2xl font-bold text-blue-600">{organizeResults.analyzed}</p>
-                  <p className="text-xs text-muted-foreground">Analisados</p>
-                </div>
-                <div className="text-center p-3 bg-teal-50 dark:bg-teal-950/30 rounded-lg">
-                  <p className="text-2xl font-bold text-teal-600">{organizeResults.organized}</p>
-                  <p className="text-xs text-teal-600">Organizados</p>
-                </div>
-              </div>
-
-              {/* Categorias encontradas */}
-              {organizeResults.categories?.length > 0 && (
-                <div className="space-y-2">
-                  <p className="text-sm font-medium">Categorias identificadas:</p>
-                  <div className="flex flex-wrap gap-1">
-                    {organizeResults.categories.map((cat, idx) => (
-                      <Badge key={idx} variant="outline" className="text-xs">
-                        {cat}
-                      </Badge>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Detalhes */}
-              {organizeResults.details?.length > 0 && (
-                <div className="border rounded-lg max-h-40 overflow-x-auto">
-                  <table className="w-full text-xs">
-                    <thead className="bg-muted sticky top-0">
-                      <tr>
-                        <th className="text-left p-2">Ficheiro</th>
-                        <th className="text-left p-2">Pasta</th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y">
-                      {organizeResults.details.slice(0, 10).map((item, idx) => (
-                        <tr key={idx}>
-                          <td className="p-2 truncate max-w-[150px]">{item.filename || item.file_name}</td>
-                          <td className="p-2">{item.target_folder || item.category}</td>
-                        </tr>
-                      ))}
-                      {organizeResults.details.length > 10 && (
-                        <tr>
-                          <td colSpan={2} className="p-2 text-center text-muted-foreground">
-                            +{organizeResults.details.length - 10} mais...
-                          </td>
-                        </tr>
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              )}
-            </div>
-          )}
-
-          <DialogFooter>
-            <Button onClick={() => setOrganizeResults(null)} className="bg-teal-600 hover:bg-teal-700">
-              Fechar
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <OrganizeResultsDialog
+        results={organizeResults}
+        onClose={handleCloseOrganizeResults}
+      />
 
       {/* Diálogo de conflitos de upload (ficheiros duplicados) */}
-      <Dialog open={uploadConflictDialog.open} onOpenChange={(open) => {
-        if (!open) handleCancelUpload();
-      }}>
-        <DialogContent className="sm:max-w-lg">
-          <DialogHeader>
-            <DialogTitle className="flex items-center gap-2 text-amber-600">
-              <AlertTriangle className="h-5 w-5" />
-              Ficheiro Duplicado Detetado
-            </DialogTitle>
-            <DialogDescription>
-              Já existe um ficheiro com o mesmo nome no destino.
-              Escolha como pretende resolver este conflito.
-            </DialogDescription>
-          </DialogHeader>
-
-          {uploadConflictDialog.conflicts.length > 0 && (
-            <>
-              {/* Indicador de progresso */}
-              {uploadConflictDialog.conflicts.length > 1 && (
-                <div className="flex items-center gap-2 text-sm text-muted-foreground mb-2">
-                  <span>
-                    Conflito {uploadConflictDialog.currentConflictIndex + 1} de {uploadConflictDialog.conflicts.length}
-                  </span>
-                  <div className="flex-1 h-2 bg-muted rounded-full overflow-hidden">
-                    <div 
-                      className="h-full bg-amber-500 transition-all"
-                      style={{ 
-                        width: `${((uploadConflictDialog.currentConflictIndex + 1) / uploadConflictDialog.conflicts.length) * 100}%` 
-                      }}
-                    />
-                  </div>
-                </div>
-              )}
-
-              {/* Conflito atual */}
-              {(() => {
-                const conflict = uploadConflictDialog.conflicts[uploadConflictDialog.currentConflictIndex];
-                const resolution = uploadConflictDialog.resolutions?.[uploadConflictDialog.currentConflictIndex];
-                
-                if (!conflict) return null;
-                
-                return (
-                  <div className="space-y-4 py-4">
-                    {/* Info do ficheiro */}
-                    <div className="p-4 bg-amber-50 dark:bg-amber-950/30 rounded-lg border border-amber-200 dark:border-amber-800">
-                      <div className="flex items-start gap-3">
-                        <FileText className="h-8 w-8 text-amber-600 flex-shrink-0" />
-                        <div className="flex-1 min-w-0">
-                          <p className="font-medium text-amber-800 dark:text-amber-200 truncate">
-                            {conflict.original_filename}
-                          </p>
-                          <p className="text-sm text-amber-700 dark:text-amber-300">
-                            Já existe um ficheiro com este nome na categoria "{uploadConflictDialog.category}"
-                          </p>
-                        </div>
-                      </div>
-                    </div>
-
-                    {/* Opções de resolução */}
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium">Escolha uma ação:</p>
-                      
-                      {/* Opção: Substituir */}
-                      <label className={`
-                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
-                        ${resolution?.action === 'overwrite' 
-                          ? 'border-red-500 bg-red-50 dark:bg-red-950/30' 
-                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-                        }
-                      `}>
-                        <input
-                          type="radio"
-                          name="conflict-action"
-                          checked={resolution?.action === 'overwrite'}
-                          onChange={() => handleConflictResolution('overwrite')}
-                          className="mt-1"
-                        />
-                        <div>
-                          <p className="font-medium text-red-700 dark:text-red-300">
-                            Substituir ficheiro existente
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            O ficheiro atual será eliminado e substituído pelo novo
-                          </p>
-                        </div>
-                      </label>
-
-                      {/* Opção: Renomear */}
-                      <label className={`
-                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
-                        ${resolution?.action === 'rename' 
-                          ? 'border-blue-500 bg-blue-50 dark:bg-blue-950/30' 
-                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-                        }
-                      `}>
-                        <input
-                          type="radio"
-                          name="conflict-action"
-                          checked={resolution?.action === 'rename'}
-                          onChange={() => {
-                            // Selecionar o primeiro nome sugerido automaticamente
-                            const suggested = conflict.suggested_names?.[0]?.filename;
-                            handleConflictResolution('rename', suggested || null);
-                          }}
-                          className="mt-1"
-                        />
-                        <div className="flex-1">
-                          <p className="font-medium text-blue-700 dark:text-blue-300">
-                            Guardar com nome diferente
-                          </p>
-                          <p className="text-sm text-muted-foreground mb-2">
-                            O ficheiro será guardado com um novo nome
-                          </p>
-                          
-                          {/* Seleção de nome */}
-                          {resolution?.action === 'rename' && conflict.suggested_names?.length > 0 && (
-                            <select
-                              value={resolution.customName || ''}
-                              onChange={(e) => handleConflictResolution('rename', e.target.value)}
-                              className="w-full text-sm p-2 border rounded bg-white dark:bg-gray-800"
-                            >
-                              {conflict.suggested_names.map((s, idx) => (
-                                <option key={idx} value={s.filename}>{s.filename}</option>
-                              ))}
-                            </select>
-                          )}
-                        </div>
-                      </label>
-
-                      {/* Opção: Ignorar */}
-                      <label className={`
-                        flex items-start gap-3 p-3 rounded-lg border cursor-pointer transition-all
-                        ${resolution?.action === 'skip' 
-                          ? 'border-gray-500 bg-gray-50 dark:bg-gray-800' 
-                          : 'border-gray-200 hover:border-gray-300 dark:border-gray-700'
-                        }
-                      `}>
-                        <input
-                          type="radio"
-                          name="conflict-action"
-                          checked={resolution?.action === 'skip'}
-                          onChange={() => handleConflictResolution('skip')}
-                          className="mt-1"
-                        />
-                        <div>
-                          <p className="font-medium text-gray-700 dark:text-gray-300">
-                            Ignorar este ficheiro
-                          </p>
-                          <p className="text-sm text-muted-foreground">
-                            O ficheiro não será enviado e o existente será mantido
-                          </p>
-                        </div>
-                      </label>
-                    </div>
-                  </div>
-                );
-              })()}
-            </>
-          )}
-
-          <DialogFooter className="flex gap-2">
-            <Button
-              variant="outline"
-              onClick={handleCancelUpload}
-            >
-              Cancelar Tudo
-            </Button>
-            <Button
-              onClick={handleNextConflict}
-              disabled={!uploadConflictDialog.resolutions?.[uploadConflictDialog.currentConflictIndex]?.action}
-              className="bg-amber-600 hover:bg-amber-700"
-            >
-              {uploadConflictDialog.currentConflictIndex < uploadConflictDialog.conflicts.length - 1 
-                ? 'Próximo' 
-                : 'Continuar Upload'}
-            </Button>
-          </DialogFooter>
-        </DialogContent>
-      </Dialog>
+      <UploadConflictDialog
+        open={uploadConflictDialog.open}
+        conflicts={uploadConflictDialog.conflicts}
+        currentIndex={uploadConflictDialog.currentConflictIndex}
+        resolutions={uploadConflictDialog.resolutions}
+        category={uploadConflictDialog.category}
+        onResolve={handleConflictResolution}
+        onNext={handleNextConflict}
+        onCancel={handleCancelUpload}
+      />
 
       {/* Visualizador de Anotações Contextuais */}
       {annotationViewer && (
