@@ -1,4 +1,33 @@
 ---
+Task ID: lote-5-seccao-a
+Agent: Cloud Agent
+Task: Lote 5, Secção A — furos de isolamento e bugs críticos do UAT (pontos 4, 3, 1, 2, 6, 5)
+
+Date: 2026-09-24
+
+Work Log:
+- PONTO 4, e é falha minha do Lote 4. O gatilho corria; o que ele calculava é que estava errado. `ids_atribuidos_do_processo` lê todos os campos canónicos (incluindo `consultor_id`/`consultant_id`) mas o `build_clear_consultor_fields` limpava só quatro dos seis. `removidos = antes - depois` dava vazio e a limpeza nunca era chamada. Provei em bruto antes de mexer.
+- E é maior do que as tarefas: `process_list_filters` usa `consultant_id` em "Os Meus Processos", portanto o consultor removido continuava a VER o processo. Não é uma tarefa pendurada, é acesso.
+- PORQUE É QUE O MEU TESTE DO LOTE 4 NÃO APANHOU: construí os documentos à mão com os campos coerentes, em vez de os passar pelo construtor real. A regra que fica no ficheiro novo: os testes desta área usam SEMPRE os construtores de produção. O `set` e o `clear` derivam agora da mesma constante — era a divergência entre os dois, não o esquecimento, o defeito.
+- PONTO 1. O Kanban não vazou: o isolamento nunca lá chegou. Tem um construtor de query SEPARADO que não passa pelo `build_process_list_query` nem pelo `run_get_processes*`. A lição é de método — fiz um ponto único para a CONDIÇÃO e não fiz o inventário dos sítios que LISTAM. O ficheiro de teste novo é também esse inventário.
+- Ficheiros: decisão do dono (restringir a Admin/CEO, adiar o filtro por pasta). A rota tinha ainda a lista de papéis escrita À MÃO, mais larga do que a constante ao lado dela — passou a usar a constante, com guarda.
+- PONTO 3. O campo que diz o destinatário (`user_id`) existia e era ignorado. O filtro era por VISIBILIDADE DE PROCESSO, com isenção para admin/ceo/diretor (`query = {}`). Corrigido o eixo. A corrigir isto encontrei um segundo defeito: `run_mark_notification_read` não recebia utilizador nenhum — com um id, qualquer pessoa marcava a notificação de outra. Devolve 404 e não 403 de propósito.
+- PONTO 2. O campo de rede era texto livre e fui eu que o pus assim. `datalist` + aviso do efeito. É o AVISO, não a lista, que apanha a gralha: vê-se "rede nova" onde se esperava "junta-se a 2 empresas".
+- PONTO 6. `switchActiveCompany` faz hard reload e funciona; `switchActiveRole` não tocava no TanStack — o comentário no código até prometia o contrário. `clear()` e não `invalidate()`: invalidar continua a MOSTRAR os dados do outro âmbito enquanto o novo pedido não chega.
+- PONTO 5. O `ProfileRoleTab` grava nos dois sítios e lê só um. A global, escrita ao gravar a da Power, saía nos emails da Precision — o `ucr_any` do Lote 1 a entrar pela porta do campo global. Regra: com empresa activa, a global só vale se o utilizador NUNCA tiver configurado assinatura por empresa (aí é mesmo a única dele). Sem regressão para quem só tem a global.
+- Transparência do ponto 5: `/auth/me` devolve a assinatura efectiva resolvida pela MESMA função do envio. Duplicar a cadeia na UI seria recriar o problema com outro nome.
+- LACUNA NA MINHA PRÓPRIA GUARDA: o `App.rotasMenu.test.js` do Lote 3 só iterava diretor/consultor/intermediário. Admin e CEO não têm ramo `if` (o menu deles é o fall-through) e o extractor devolvia lista vazia — como não estavam no ciclo, a lacuna era invisível. Cobertos agora.
+- TRÊS ERROS MEUS nos testes desta sessão, todos apanhados pelas contraprovas:
+  (1) O teste do Kanban passou com o quadro VAZIO — faltava semear as colunas; a contraprova denunciou.
+  (2) Dois testes do campo de rede mediam uma letra: o componente é controlado e o teste não devolvia o valor. " grupo_domus " começa por espaço, `"".trim()` é `""`, e a asserção dava-se por satisfeita.
+  (3) O extractor novo do menu podia tirar itens a mais e ficar cego — acrescentei a contraprova nos dois sentidos.
+- PONTO 7 não tocado, como combinado: a Caixa Geral lê a password de `PRECISION_PASSWORD` no Render, não da BD (não há desencriptação a falhar). E a classificação do erro é por substring: muitos servidores respondem `[AUTHENTICATIONFAILED]` ao BLOQUEAR um IP, portanto uma conta bloqueada aparece como password errada. Fica à espera da confirmação do dono.
+- Testes: 33 novos no backend, 16 no frontend. Sete mutações, sete mortes.
+- Suites: backend 2159 passed / 8 skipped (era 2126/8); frontend 723 (era 707); eslint --quiet limpo.
+
+---
+
+---
 Task ID: limpeza-final-lote-4-ponto-14
 Agent: Cloud Agent
 Task: Lote 4 (3/3) — Espelho de Automações (batimento dos jobs) + regra de ouro do perfil Indexação

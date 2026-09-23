@@ -38,6 +38,7 @@ import {
   TableRow,
 } from "../ui/table";
 import EmptyState from "../ui/EmptyState";
+import CompanyNetworkField from "./CompanyNetworkField";
 import { TableSkeleton } from "../ui/skeletons";
 
 const EMPTY_FORM = {
@@ -332,23 +333,13 @@ export default function CompaniesAdminTab() {
                   required
                 />
               </div>
-              <div className="space-y-2">
-                <Label htmlFor="company-network">Rede / Grupo Empresarial</Label>
-                <Input
-                  id="company-network"
-                  value={form.network_id}
-                  onChange={(e) =>
-                    setForm((p) => ({ ...p, network_id: e.target.value }))
-                  }
-                  placeholder="ex: grupo_power_precision"
-                  data-testid="company-network-input"
-                />
-                <p className="text-xs text-muted-foreground">
-                  Empresas com a mesma rede partilham a visibilidade dos dados.
-                  Em branco, a empresa fica isolada — ninguém de fora vê os
-                  seus processos e clientes.
-                </p>
-              </div>
+              {/* Lote 5, ponto 2: era texto livre, e uma gralha criava
+                  silenciosamente uma rede nova de uma empresa só. */}
+              <CompanyNetworkField
+                value={form.network_id}
+                onChange={(network_id) => setForm((p) => ({ ...p, network_id }))}
+                companies={companies}
+              />
               <div className="space-y-2">
                 <Label htmlFor="company-nif">NIF</Label>
                 <Input

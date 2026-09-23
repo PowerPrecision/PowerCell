@@ -49,12 +49,18 @@ function hrefsDoPerfil(fonte, perfil) {
   // (`["consultor","intermediario"].includes(userRole)`). Ler só a
   // primeira dava zero itens para consultor/intermediário — e um teste
   // que não lê nada passa sempre.
-  const aberturas = [
-    `if (userRole === "${perfil}")`,
-    ...[...fonte.matchAll(/if \(\[([^\]]*)\]\.includes\(userRole\)\)/g)]
-      .filter((m) => m[1].includes(`"${perfil}"`))
-      .map((m) => m[0]),
-  ];
+  // Admin e CEO NÃO têm ramo `if`: o menu deles é o fall-through no fim
+  // da função (`const adminGroups = [...]`). Sem isto o extractor
+  // devolvia lista vazia para os dois — e como o guarda do Lote 3 só
+  // iterava diretor/consultor/intermediário, a lacuna era invisível.
+  const aberturas = ["admin", "ceo"].includes(perfil)
+    ? ["const adminGroups = ["]
+    : [
+        `if (userRole === "${perfil}")`,
+        ...[...fonte.matchAll(/if \(\[([^\]]*)\]\.includes\(userRole\)\)/g)]
+          .filter((m) => m[1].includes(`"${perfil}"`))
+          .map((m) => m[0]),
+      ];
 
   const inicio = aberturas
     .map((abertura) => fonte.indexOf(abertura))
@@ -81,10 +87,47 @@ function hrefsDoPerfil(fonte, perfil) {
       hrefs.add(x[1]);
     }
   }
+
+  // Terceira forma de declarar um item, acrescentada no Lote 5: um
+  // spread condicional dentro de um grupo partilhado —
+  //   ...(["admin","ceo"].includes(userRole) ? [{ href: "/x" }] : [])
+  // É a maneira de um grupo comum ter uma entrada restrita. Sem ler
+  // isto, o item conta como visível para TODOS os perfis que usam o
+  // grupo, e o guarda acusa uma divergência que não existe.
+  for (const spread of fonte.matchAll(
+    /\.\.\.\(\[([^\]]*)\]\.includes\(userRole\)\s*\?([\s\S]*?):\s*\[\]\)/g,
+  )) {
+    const permitidos = spread[1];
+    for (const x of spread[2].matchAll(/href:\s*"([^"]+)"/g)) {
+      if (!permitidos.includes(`"${perfil}"`)) hrefs.delete(x[1]);
+    }
+  }
+
   return [...hrefs];
 }
 
 const ROTAS = rotasComPapeis(APP);
+
+describe("O leitor do spread condicional", () => {
+  // Contraprova do que foi acrescentado no Lote 5: o leitor novo TIRA
+  // itens de perfis. Se tirasse a mais, o guarda ficava cego — passaria
+  // por não ver nada, que é o pior estado possível para uma guarda.
+  it("o item restrito aparece a quem o pode abrir", () => {
+    assert.ok(
+      hrefsDoPerfil(LAYOUT, "admin").includes("/ficheiros"),
+      "o explorador global desapareceu do menu do admin",
+    );
+  });
+
+  it("e desaparece de quem não o pode abrir", () => {
+    for (const perfil of ["consultor", "intermediario", "diretor"]) {
+      assert.ok(
+        !hrefsDoPerfil(LAYOUT, perfil).includes("/ficheiros"),
+        `${perfil} continua a ver o explorador global no menu`,
+      );
+    }
+  });
+});
 
 describe("Coerência entre o menu e as rotas", () => {
   it("a extracção das rotas encontrou alguma coisa", () => {
@@ -93,7 +136,7 @@ describe("Coerência entre o menu e as rotas", () => {
     assert.ok(ROTAS.has("/meus-clientes"), "rota /meus-clientes não encontrada");
   });
 
-  for (const perfil of ["diretor", "consultor", "intermediario"]) {
+  for (const perfil of ["admin", "ceo", "diretor", "consultor", "intermediario"]) {
     it(`o perfil "${perfil}" consegue abrir tudo o que o menu lhe mostra`, () => {
       const hrefs = hrefsDoPerfil(LAYOUT, perfil);
       assert.ok(hrefs.length > 0, `nenhum item de menu lido para ${perfil}`);

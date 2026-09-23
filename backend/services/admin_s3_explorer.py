@@ -20,17 +20,21 @@ logger = logging.getLogger(__name__)
 S3_EXPLORER_BASE_PATH = "Documentação Clientes"
 
 # Roles that can perform file operations
-FILE_OPS_ROLES = [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO]
-# Roles that can view/download files (broader access)
-FILE_VIEW_ROLES = [
-    UserRole.ADMIN,
-    UserRole.CEO,
-    UserRole.DIRETOR,
-    UserRole.ADMINISTRATIVO,
-    UserRole.CONSULTOR,
-    UserRole.INTERMEDIARIO,
-    UserRole.INDEXACAO,
-]
+# ────────────────────────────────────────────────────────────────────
+# EXPLORADOR GLOBAL DE FICHEIROS — só a gestão de topo (Lote 5, ponto 1)
+#
+# Este explorador navega o BUCKET INTEIRO. O bucket está organizado por
+# pasta de CLIENTE, não por empresa, portanto não há um `network_id` num
+# prefixo S3 para filtrar: isolar por rede obrigaria a mapear pasta →
+# processo → rede em cada listagem.
+#
+# Decisão do dono: restringir a página a quem já tem visão global e
+# adiar o filtro por pasta. Com o multi-tenant, as empresas comuns
+# chegam aos ficheiros pela ficha do processo (`/documents/*`), que é
+# outro caminho e mantém o âmbito do processo — não por aqui.
+# ────────────────────────────────────────────────────────────────────
+FILE_OPS_ROLES = [UserRole.ADMIN, UserRole.CEO]
+FILE_VIEW_ROLES = [UserRole.ADMIN, UserRole.CEO]
 
 
 class S3RenameRequest(BaseModel):

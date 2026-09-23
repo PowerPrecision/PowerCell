@@ -61,40 +61,97 @@ async def fetch_user_names(user_ids: list[str]) -> list[str]:
     return names
 
 
+# ────────────────────────────────────────────────────────────────────
+# O CONJUNTO CANÓNICO DE CAMPOS (Lote 5, ponto 4)
+#
+# Quem grava uma atribuição tem de escrever o conjunto COMPLETO — e quem
+# a remove tem de limpar o MESMO conjunto. Ver AGENTS.md, "Atribuição:
+# campos CANÓNICOS"; a referência da forma correcta é `client_assign.py`.
+#
+# O QUE PARTIU: estes construtores tocavam em quatro campos e deixavam
+# `consultor_id` / `consultant_id` (e `mediador_id`) intactos. Duas
+# consequências, e a segunda é pior do que a primeira:
+#   1. `ids_atribuidos_do_processo` lê os campos todos, portanto o diff
+#      "equipa antes − equipa depois" dava VAZIO e a limpeza de tarefas
+#      órfãs (ponto 12 do Lote 4) nunca era chamada;
+#   2. `process_list_filters` usa `consultant_id` em "Os Meus Processos":
+#      o consultor removido CONTINUAVA A VER O PROCESSO.
+#
+# Derivar o `set` e o `clear` da MESMA lista é o que impede os dois de
+# voltarem a divergir — era a divergência, não o esquecimento, o defeito.
+# ────────────────────────────────────────────────────────────────────
+
+#: (campo_do_id_singular, …) → recebem o PRIMEIRO id da lista.
+CONSULTOR_ID_FIELDS: tuple[str, ...] = (
+    "assigned_consultor_id",
+    "consultor_id",
+    "consultant_id",  # legado, lido por `process_list_filters`
+)
+CONSULTOR_NAME_FIELDS: tuple[str, ...] = ("consultor_name",)
+
+MEDIADOR_ID_FIELDS: tuple[str, ...] = (
+    "assigned_mediador_id",
+    "mediador_id",
+)
+MEDIADOR_NAME_FIELDS: tuple[str, ...] = ("mediador_name",)
+
+
+def _build_assignee_fields(
+    ids: list[str],
+    names: list[str],
+    *,
+    ids_field: str,
+    names_field: str,
+    id_fields: tuple[str, ...],
+    name_fields: tuple[str, ...],
+) -> dict[str, Any]:
+    """Conjunto completo de campos de atribuição (vazio = remoção)."""
+    primeiro_id = ids[0] if ids else None
+    primeiro_nome = names[0] if names else None
+    campos: dict[str, Any] = {ids_field: ids, names_field: names}
+    campos.update({campo: primeiro_id for campo in id_fields})
+    campos.update({campo: primeiro_nome for campo in name_fields})
+    return campos
+
+
 def build_clear_consultor_fields() -> dict[str, Any]:
-    return {
-        "assigned_consultor_ids": [],
-        "consultor_names": [],
-        "assigned_consultor_id": None,
-        "consultor_name": None,
-    }
+    return _build_assignee_fields(
+        [], [],
+        ids_field="assigned_consultor_ids",
+        names_field="consultor_names",
+        id_fields=CONSULTOR_ID_FIELDS,
+        name_fields=CONSULTOR_NAME_FIELDS,
+    )
 
 
 def build_clear_mediador_fields() -> dict[str, Any]:
-    return {
-        "assigned_mediador_ids": [],
-        "mediador_names": [],
-        "assigned_mediador_id": None,
-        "mediador_name": None,
-    }
+    return _build_assignee_fields(
+        [], [],
+        ids_field="assigned_mediador_ids",
+        names_field="mediador_names",
+        id_fields=MEDIADOR_ID_FIELDS,
+        name_fields=MEDIADOR_NAME_FIELDS,
+    )
 
 
 def build_set_consultor_fields(ids: list[str], names: list[str]) -> dict[str, Any]:
-    return {
-        "assigned_consultor_ids": ids,
-        "consultor_names": names,
-        "assigned_consultor_id": ids[0],
-        "consultor_name": names[0],
-    }
+    return _build_assignee_fields(
+        ids, names,
+        ids_field="assigned_consultor_ids",
+        names_field="consultor_names",
+        id_fields=CONSULTOR_ID_FIELDS,
+        name_fields=CONSULTOR_NAME_FIELDS,
+    )
 
 
 def build_set_mediador_fields(ids: list[str], names: list[str]) -> dict[str, Any]:
-    return {
-        "assigned_mediador_ids": ids,
-        "mediador_names": names,
-        "assigned_mediador_id": ids[0],
-        "mediador_name": names[0],
-    }
+    return _build_assignee_fields(
+        ids, names,
+        ids_field="assigned_mediador_ids",
+        names_field="mediador_names",
+        id_fields=MEDIADOR_ID_FIELDS,
+        name_fields=MEDIADOR_NAME_FIELDS,
+    )
 
 
 def detect_newly_assigned(

@@ -187,10 +187,7 @@ async def batch_update_process_s3_mappings(
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
     folder_path: str = Query("", description="Caminho da pasta S3 (vazio = raiz)"),
-    user: dict = Depends(require_roles([
-        UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
-        UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO,
-    ]))
+    user: dict = Depends(require_roles(FILE_VIEW_ROLES))
 ):
     return await run_get_s3_folder_contents(folder_path, user)
 

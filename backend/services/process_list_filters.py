@@ -736,9 +736,19 @@ def build_kanban_query(
     parceiro_id: Optional[str] = None,
     view_mode: Optional[str] = "all",
     completed_days: Optional[int] = 30,
+    tenant_condition: Optional[dict] = None,
 ) -> dict:
-    """Query MongoDB completa para o board Kanban."""
+    """Query MongoDB completa para o board Kanban.
+
+    ``tenant_condition`` é o isolamento por Rede (Lote 5, ponto 1). Este
+    construtor é SEPARADO do das listagens e por isso ficou de fora do
+    Lote 4 — um utilizador de uma empresa isolada não via processos na
+    lista e via-os todos aqui. Vem sempre de `services/tenant_network.py`.
+    """
     query = build_kanban_role_base_query(user, role, show_all=show_all)
+
+    if tenant_condition:
+        query = merge_query_and(query, tenant_condition)
 
     assignee_filters = build_kanban_assignee_filters(
         consultor_id=consultor_id,

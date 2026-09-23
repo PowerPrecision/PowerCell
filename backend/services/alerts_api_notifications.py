@@ -8,42 +8,44 @@ from __future__ import annotations
 from fastapi import HTTPException
 
 from database import db
-from models.auth import UserRole
+
+
+def build_notifications_query(user: dict, *, unread_only: bool = False) -> dict:
+    """Notificações de UM utilizador — e só dele.
+
+    O eixo desta consulta estava errado (Lote 5, ponto 3): filtrava por
+    VISIBILIDADE DE PROCESSO e isentava admin/CEO/diretor. Resultado: a
+    gestão recebia tudo o que existia na colecção, um consultor via as
+    notificações do mediador do mesmo processo, e `{"process_id": None}`
+    mandava os avisos sem processo para toda a gente.
+
+    O campo que diz o destinatário — `user_id` — existia e era ignorado.
+    Hoje é o único critério: o cargo não decide visibilidade de dados
+    pessoais, e o isolamento entre redes está acima da conveniência de um
+    painel de sistema (decisão do dono).
+    """
+    user_id = str((user or {}).get("id") or "").strip()
+    if not user_id:
+        # Fail-closed: sem utilizador não há notificações de ninguém.
+        return {"user_id": {"$in": []}}
+
+    query: dict = {"user_id": user_id}
+    if unread_only:
+        query["read"] = False
+    return query
 
 
 async def run_get_notifications(unread_only: bool, user: dict):
-    """Obter notificações do sistema com regras de visibilidade por role."""
-    query = {}
-
-    if unread_only:
-        query["read"] = False
-
-    if user["role"] not in [UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR]:
-        or_conditions = [
-            {"assigned_consultor_id": user["id"]},
-            {"consultor_id": user["id"]},
-            {"assigned_mediador_id": user["id"]},
-            {"intermediario_id": user["id"]},
-            {"assigned_indexacao_id": user["id"]}
-        ]
-
-        processes = await db.processes.find({
-            "$or": or_conditions
-        }, {"id": 1, "_id": 0}).to_list(1000)
-        process_ids = [p["id"] for p in processes]
-
-        query["$and"] = [
-            {"$or": [
-                {"process_id": {"$in": process_ids}},
-                {"process_id": None}
-            ]},
-            {"type": {"$ne": "new_registration"}}
-        ]
+    """Obter as notificações dirigidas ao utilizador autenticado."""
+    query = build_notifications_query(user, unread_only=unread_only)
 
     notifications = await db.notifications.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
 
-    unread_query = {**query, "read": False}
-    total_unread = await db.notifications.count_documents(unread_query)
+    # A contagem segue o MESMO âmbito: um sino com um número que não bate
+    # certo com a lista é pior do que um sino sem número.
+    total_unread = await db.notifications.count_documents(
+        {**query, "read": False}
+    )
 
     return {
         "notifications": notifications,
@@ -52,16 +54,29 @@ async def run_get_notifications(unread_only: bool, user: dict):
     }
 
 
-async def run_mark_notification_read(notification_id: str):
-    """Marcar notificação como lida (idempotente)."""
+async def run_mark_notification_read(notification_id: str, user: dict):
+    """Marcar como lida uma notificação DO PRÓPRIO (idempotente).
+
+    Sem o utilizador no filtro, quem tivesse um id marcava a notificação
+    de outra pessoa — uma escrita na linha de outrem. O caminho WebSocket
+    (`mark_all_read`) já filtrava por `user_id`; este não.
+
+    Devolve 404 (e não 403) quando a notificação é de outro: distinguir
+    "não existe" de "não é tua" confirmaria a existência do id a quem não
+    tem nada que ver com ela.
+    """
+    dono = {"user_id": str((user or {}).get("id") or "").strip()}
+    if not dono["user_id"]:
+        raise HTTPException(status_code=404, detail="Notificação não encontrada")
+
     result = await db.notifications.update_one(
-        {"id": notification_id},
+        {"id": notification_id, **dono},
         {"$set": {"read": True}}
     )
 
     if result.matched_count == 0:
         result = await db.notifications.update_one(
-            {"_id": notification_id},
+            {"_id": notification_id, **dono},
             {"$set": {"read": True}}
         )
 

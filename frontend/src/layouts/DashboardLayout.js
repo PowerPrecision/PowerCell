@@ -313,11 +313,16 @@ const DashboardLayout = ({ children, title }) => {
         },
         // PACOTE BU — Menu temporariamente oculto:
         // { label: "Minutas", icon: FileArchive, href: "/minutas" },
-        {
-          label: "Ficheiros",
-          icon: Database,
-          href: "/ficheiros",
-        },
+        // Explorador global do bucket: só a gestão de topo (ver a rota
+        // em App.js). Um item de menu que leva a um redireccionamento é
+        // o produto a contradizer-se — ver `App.rotasMenu.test.js`.
+        ...(["admin", "ceo"].includes(userRole)
+          ? [{
+              label: "Ficheiros",
+              icon: Database,
+              href: "/ficheiros",
+            }]
+          : []),
         // PACOTE DD — movido para Sheet global (ícone de Calculadora no header)
         // {
         //   label: "Calculadoras",

@@ -3289,3 +3289,160 @@ que distingue "tudo passa" de "metade nem correu".
 Mutação (quatro, quatro mataram): um job desligado passar a avariado; o limiar
 de atraso deixar de disparar; o batimento engolir a excepção do ciclo; a guarda
 voltar a ignorar o perfil activo.
+
+---
+
+## Lote 5, Secção A — furos de isolamento encontrados no UAT (Set 2026)
+
+### 4. Atribuição Fantasma: o gatilho não falhou, foi enganado
+
+O gatilho do Lote 4 corria. O que ele calculava é que estava errado.
+
+`ids_atribuidos_do_processo` lê **todos** os campos canónicos, incluindo
+`consultor_id` e `consultant_id`. Mas `build_clear_consultor_fields` limpava
+só quatro dos seis:
+
+```
+ATRIBUÍDO  → ['u-rita']
+REMOVIDO   → ['u-rita']       ← devia ser []
+campos que sobraram: ['consultor_id', 'consultant_id']
+```
+
+`removidos = antes − depois` dava conjunto vazio e a limpeza nunca era
+chamada. **E era maior do que as tarefas:** `process_list_filters` usa
+`consultant_id` em "Os Meus Processos" — o consultor removido continuava a
+ver o processo. Não é uma tarefa pendurada, é acesso a dados.
+
+**Porque é que o meu teste do Lote 4 não apanhou:** construí os documentos à
+mão, com os campos coerentes, em vez de os passar pelo construtor real. A
+regra que fica: os testes desta área usam **sempre** os construtores de
+produção.
+
+Hoje o `set` e o `clear` derivam da **mesma** constante
+(`CONSULTOR_ID_FIELDS` / `MEDIADOR_ID_FIELDS`) — era a divergência entre os
+dois, não o esquecimento, o defeito.
+
+### 1. Kanban e Ficheiros: o isolamento nunca lá chegou
+
+**Kanban:** tem um construtor de query **separado** (`build_kanban_query`).
+O Lote 4 ligou a condição de rede ao `build_process_list_query` e ao
+`run_get_processes*`; o Kanban não passa por nenhum dos dois. Um utilizador
+de uma empresa isolada não via processos na lista e via-os todos no quadro.
+
+A lição é de método: fiz um ponto único para a **condição** e não fiz o
+inventário dos sítios que **listam**. `test_kanban_files_isolation.py` é
+também esse inventário, com um teste por superfície.
+
+**Ficheiros (`/ficheiros`):** o explorador navega o bucket inteiro, e o
+bucket está organizado por pasta de **cliente**, não por empresa — não há
+`network_id` num prefixo S3. Decisão do dono: restringir a Admin e CEO e
+adiar o filtro por pasta; as empresas comuns chegam aos ficheiros pela ficha
+do processo (`/documents/*`), que mantém o âmbito. A rota tinha ainda a lista
+de papéis escrita **à mão**, mais larga do que a constante ao lado dela.
+
+### 3. Notificações: o eixo do filtro estava errado
+
+As notificações **têm `user_id`** — quem as deve receber — e
+`run_get_notifications` nunca o usava. Filtrava por **visibilidade de
+processo** e isentava admin/CEO/diretor (`query = {}`).
+
+Consequências: a gestão recebia tudo o que existia na colecção; um consultor
+via as notificações dirigidas ao mediador do mesmo processo; e
+`{"process_id": None}` mandava os avisos sem processo para toda a gente.
+
+Decisão do dono: **corta tudo o que não seja dirigido ao utilizador.** Um
+administrador prefere não ver avisos de sistema avulsos a arriscar que um
+consultor leia as notificações de quem está do outro lado da parede da rede.
+
+**Segundo defeito, encontrado a corrigir o primeiro:**
+`run_mark_notification_read` não recebia utilizador nenhum — com um id,
+qualquer pessoa marcava a notificação de outra como lida. O caminho WebSocket
+(`mark_all_read`) já filtrava por `user_id`; o REST não. Devolve 404 e não
+403: distinguir "não existe" de "não é tua" confirmaria o id a quem não tem
+nada que ver com ele.
+
+### 2. Rede: de texto livre a autocomplete
+
+O campo era um `Input` — e fui eu que o pus assim. `grupo_power` em vez de
+`grupo_power_precision` não dá erro: cria silenciosamente uma rede nova de
+uma empresa só. O isolamento quebra **ao contrário**, escondendo dados de
+quem os devia ver, e o sintoma aparece dias depois sem nada que o ligue ao
+engano.
+
+`<datalist>` (nativo, acessível, não impede escrever uma rede nova) mais um
+aviso sobre o efeito do valor actual. **É o aviso, não a lista, que apanha a
+gralha:** o utilizador vê "rede nova" onde esperava "junta-se a 2 empresas".
+O valor é aparado no `onChange` — um espaço à direita é outra rede, e a
+diferença é invisível no ecrã.
+
+### 6. Context Switch: trocar de empresa funcionava, trocar de perfil não
+
+`switchActiveCompany` termina em `window.location.reload()`. `switchActiveRole`
+escrevia no storage e no estado e **não tocava no TanStack Query** — o
+comentário no código chegava a prometer que as páginas voltavam a pedir a API
+"sem hard-reload", mas nada as fazia pedir.
+
+`queryClient.clear()` e **não** `invalidateQueries()`: invalidar continua a
+*mostrar* os dados antigos enquanto o novo pedido não chega, e numa troca de
+perfil isso é renderizar dados de outro âmbito. A limpeza vem **depois** de
+gravar o perfil novo, para o refetch partir com os headers certos.
+
+### 5. A assinatura: o campo global atravessava empresas
+
+`ProfileRoleTab` grava nos **dois** sítios (UCR da empresa activa e
+`users.email_signature`, "backward compat") e lê **só um**. Configurar a
+assinatura na Power enchia também a global; ao mudar para a Precision, a UI
+mostrava vazio e o envio caía no nível 2, assinando um email da Precision com
+a identidade da Power. É o `ucr_any` que o Lote 1 fechou, a entrar pela porta
+do campo global.
+
+**A regra:** com empresa activa, a global só vale se o utilizador **nunca**
+tiver configurado uma assinatura por empresa — aí ela é mesmo a única dele, e
+não a de outro perfil. Sem isso, quem já usa o sistema por empresa não herda
+nada de lado nenhum, e quem só tem a global não sofre regressão.
+
+**A transparência:** `/auth/me` devolve agora `email_signature_effective` e
+`email_signature_source`, resolvidos pela **mesma função do envio**. Duplicar
+a cadeia na UI seria recriar o problema com outro nome.
+
+### Uma lacuna na minha própria guarda
+
+`App.rotasMenu.test.js` (Lote 3) só iterava diretor, consultor e
+intermediário. **Admin e CEO não têm ramo `if`** — o menu deles é o
+fall-through no fim da função — e o extractor devolvia lista vazia para os
+dois. Como não estavam no ciclo, a lacuna era invisível. Cobertos agora, e o
+extractor aprendeu a terceira forma de declarar um item (spread condicional
+dentro de um grupo partilhado), com contraprova: o item restrito **aparece** a
+quem o pode abrir e **desaparece** de quem não pode.
+
+### Cobertura
+
+| Ficheiro | Casos |
+|---|---|
+| `tests/unit/test_assignment_canonical_fields.py` | 11 |
+| `tests/unit/test_notifications_scope.py` | 12 |
+| `tests/unit/test_kanban_files_isolation.py` | 7 |
+| `test_email_signature_fallback.py` (+3) | 16 |
+| `CompanyNetworkField.test.jsx` | 9 |
+| `AuthContext.switchRole.test.jsx` | 3 |
+
+Mutação (sete, sete mataram): o campo legado por limpar; o Kanban sem filtro
+de rede; o consultor a recuperar o explorador; as notificações sem
+destinatário; marcar a notificação de outro; a global a atravessar empresas;
+a troca de perfil sem limpar a cache.
+
+### Ponto 7 (IMAP) — por confirmar
+
+`geral@precisioncredito.pt` é a **Caixa Geral**, e essa conta não lê a
+password da base de dados: vem de `PRECISION_PASSWORD` / `PRECISION_IMAP_SERVER`
+no ambiente do Render. Não há desencriptação a falhar — não há nada
+encriptado neste caminho.
+
+A segunda hipótese é plausível ao mesmo tempo: a classificação do erro é por
+substring, e muitos servidores IMAP respondem `[AUTHENTICATIONFAILED]` ao
+**bloquear um IP** por excesso de ligações — uma conta bloqueada é reportada
+como password errada. A carga justifica-o: `email_auto_sync` a cada 60 s no
+processo web (duas caixas por ciclo, ≈120 ligações/hora) mais o
+`webmail_worker_sync` de 10 em 10 minutos no worker.
+
+Fica por tocar até o dono confirmar as variáveis no Render.

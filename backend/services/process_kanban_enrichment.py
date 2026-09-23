@@ -309,10 +309,19 @@ async def run_get_kanban_board(
     )
     from services.process_list_filters import build_kanban_query
 
+    # Isolamento por Rede (Lote 5, ponto 1). O Kanban tem um construtor
+    # de query SEPARADO do das listagens, e por isso ficou de fora do
+    # Lote 4: um utilizador de uma empresa isolada não via processos na
+    # lista e via-os todos no quadro. A condição vem do mesmo ponto único.
+    from services.tenant_network import build_tenant_condition
+
+    tenant_condition = await build_tenant_condition(user)
+
     user_id = user["id"]
     query = build_kanban_query(
         user,
         role,
+        tenant_condition=tenant_condition,
         show_all=bool(show_all),
         consultor_id=consultor_id,
         mediador_id=mediador_id,

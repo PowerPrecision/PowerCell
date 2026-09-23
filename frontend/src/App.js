@@ -911,11 +911,17 @@ function App() {
             }
           />
           
-          {/* Ficheiros - File Explorer (S3) */}
+          {/* Ficheiros — Explorador global do bucket S3.
+              Lote 5, ponto 1: navega o bucket INTEIRO e o bucket está
+              organizado por pasta de cliente, não por empresa — não há
+              por onde aplicar o filtro de Rede sem mapear pasta →
+              processo → rede em cada listagem. Fica com quem já tem
+              visão global; as empresas comuns chegam aos ficheiros pela
+              ficha do processo. */}
           <Route
             path="/ficheiros"
             element={
-              <ProtectedRoute allowedRoles={STAFF_ROLES}>
+              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
                 <RouteBoundary name="Explorador de Ficheiros">
                   <FilesExplorerPage />
                 </RouteBoundary>
