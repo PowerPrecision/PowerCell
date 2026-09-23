@@ -3029,3 +3029,126 @@ por `client_id` e propriedade, não por rede.
 `tests/unit/test_tenant_network_isolation.py` (26). Mutação (três, três
 mataram): tirar o `tenant_condition` da listagem; fazer o "por carimbar"
 olhar só para o `network_id`; deixar um âmbito fechado virar "sem filtro".
+
+---
+
+## Lote 4, pontos 11–13 — contas órfãs, tarefas fantasma e cartões dentro de cartões (Set 2026)
+
+### 11. Atribuição Rápida: o problema não era comodidade
+
+`run_create_user` gravava a conta e **nunca criava um UCR**. Escrevia
+`user_doc["company"] = data.company` — que é o **nome** da empresa, não o
+`company_id` — e o formulário nem esse campo enviava: o payload do
+`UserCreateDialog` era `{name, email, phone, role, password}`. O próprio
+diálogo assumia-o na descrição: *"Os acessos por empresa (UCR) definem-se
+depois em Gerir Acessos."*
+
+Entre o "Criar" e esse "depois", a conta não pertencia a lado nenhum — e
+**tudo** lê UCRs: ContextSwitcher, `get_effective_role_async`, config de email
+por empresa e, desde o ponto 10, o isolamento por rede. Ser apanhado pela rede
+de omissão não é pertencer a uma empresa.
+
+Hoje a empresa é **estritamente obrigatória** (excepto parceiros, que são
+contas fantasma sem acesso à plataforma) e a criação é **atómica**:
+`services/user_company_bootstrap.py` normaliza as linhas empresa+cargo e
+`run_create_user` cria conta + UCRs no mesmo acto. Se os UCRs não ficarem
+gravados, **a conta é desfeita**: sem conta, o admin repete; com conta e sem
+acessos, ninguém dá por isso. Encadear duas chamadas no frontend daria o mesmo
+buraco, só que mais difícil de ver.
+
+Detalhe que uma mutação apanhou: `completar_nomes_das_empresas` tem de correr
+**antes** de se montar o documento do utilizador. `users.company` é o NOME da
+empresa e `_find_ucr` casa por ele; escrever lá o `company_id` é a mesma
+confusão id/nome do incidente de 2026-09-21 — e aqui passaria despercebida,
+porque o UCR ficava correcto na mesma.
+
+### 12. Atribuição Fantasma: três defeitos, um deles não estava no enunciado
+
+**(a) A bomba do `$in`.** `workflow_engine` gravava `assigned_to` como
+**escalar** (`process.get("assigned_consultor_id")`) ou `None`; `task_api_crud`
+e `process_assignment` gravam **lista**. `enrich_task` faz
+`{"id": {"$in": task["assigned_to"]}}`, e o Mongo responde `$in needs an
+array` (confirmado contra o Mongo real). Como `run_list_tasks` enriquece num
+ciclo **sem `try`**, *uma* tarefa criada por uma regra de automação fazia a
+listagem **inteira** devolver 500. Não estava adormecido: era uma mina.
+
+`normalizar_assigned_to` desarma à leitura **e** o motor de automação passou a
+gravar lista — normalizar trata o que já existe, deixar de produzir impede que
+volte. Há guarda sobre o código-fonte da origem.
+
+**(b) Ninguém limpava as tarefas quando a atribuição mudava.**
+`_create_post_indexing_tasks` cria tarefas de arranque para quem é atribuído;
+nenhum caminho de atribuição voltava a tocar-lhes (`db.tasks.delete_many` /
+`update_many` só aparece em apagar processo, apagar cliente e limpezas de
+admin). Tirar o consultor deixava as tarefas dele num processo sem ninguém.
+
+**Opção A, decidida pelo dono:** nunca apagar trabalho humano em silêncio. Uma
+tarefa que o **sistema** criou e que **ninguém tocou** desaparece com a
+atribuição que a justificava; tudo o resto fica, perde a atribuição e leva
+`assignment_orphaned`. "Por tocar" = criada pelo sistema, não concluída, e
+`updated_at == created_at` — qualquer interacção muda o `updated_at`.
+
+Uma subtileza que ficou com teste: só fica órfã quando **ninguém sobra**. Tirar
+o consultor de uma tarefa que também é do mediador não a deixa sem dono, e
+apagá-la levaria o trabalho de quem ficou.
+
+O diff é feito sobre o **antes e o depois reais do documento**
+(`ids_atribuidos_do_processo`), não sobre o que o construtor da query julga ter
+mudado. Ligado aos **dois** caminhos: `POST /assign` e `POST /unassign-me`.
+
+**(c) Uma tarefa órfã era indistinguível de uma por atribuir.** Ambas mostravam
+"Sem atribuição", e só a primeira exige uma decisão humana. Hoje leva um
+`Badge` "Sem responsável".
+
+**Correcção ao diagnóstico inicial:** eu disse que o selector oferecia
+`getStaffUsers()` sem relação com o processo. Errado — o `TasksPanel` já
+filtrava para os envolvidos. O que era real: o `catch` caía para **todo** o
+staff avisando só no `console.warn`. Hoje a equipa do processo aparece
+primeiro e o resto fica atrás de "Fora da equipa do processo", que é preciso
+abrir de propósito; quando a equipa não se consegue confirmar, isso é dito em
+vez de a lista fingir ser a equipa. "Todos" passou a significar "a equipa".
+
+### 13. UI das Tarefas: o cartão dentro do cartão
+
+O `TasksPanel` **já é** um `Card` completo — `CardHeader`, `CardTitle
+"Tarefas"`, `Badge` de contagem, `CardDescription` e `ScrollArea` próprio. O
+`ProcessDetails` envolvia-o noutro `Card`, com outro `CardHeader`, outro título
+**"Tarefas"** e outro `ScrollArea max-h-[400px]`. Dois cartões, dois cabeçalhos
+com o mesmo texto, duas áreas de scroll encaixadas — e `compact={false}`, a
+desligar explicitamente o modo compacto que o componente já tinha.
+
+Hoje: `asCard={false}` entrega só o conteúdo, `compact` liga a sério, os
+filtros e a data de criação **não são renderizados** em modo compacto
+(escondê-los por CSS deixava-os acessíveis ao teclado e aos leitores de ecrã),
+e o `ProcessDetails` chama o painel directamente — um cartão, desenhado por
+quem sabe o que tem dentro. Nada foi inventado: a prop `compact` já existia.
+
+**Lição de mutação, a segunda deste género.** `const Moldura = Card` (trocar a
+condição) **não matou** nenhum teste. Desta vez não foi a mutação a falhar o
+alvo — foi o teste a ser fraco: o `data-testid` estava preso à *flag* e não à
+moldura real, por isso desenhava-se um cartão que o teste não conseguia ver. A
+correcção é estrutural, não cosmética: as props derivam agora do **componente
+escolhido** (`Moldura === Card`), não da flag, e assim o marcador e a moldura
+não podem divergir.
+
+### Infraestrutura de testes
+
+`src/test/setup.js` ganhou os *stubs* de Pointer Capture. O `Select` do Radix
+chama `hasPointerCapture` ao abrir a lista e o jsdom não a implementa: sem
+isto, o clique morre em silêncio e o teste falha a dizer que **não encontrou a
+opção** — uma pista que aponta para o sítio errado.
+
+### Cobertura
+
+| Ficheiro | Casos |
+|---|---|
+| `tests/unit/test_task_assignment_hygiene.py` | 21 |
+| `tests/unit/test_user_company_bootstrap.py` | 19 |
+| `components/__tests__/TasksPanel.compacto.test.jsx` | 12 |
+| `components/admin/__tests__/UserCreateDialog.acessos.test.jsx` | 10 |
+
+Mutação (sete, sete mataram — uma delas só depois de a fraqueza do teste ser
+corrigida): apagar qualquer tarefa sem dono; iterar o escalar caracter a
+caracter; empresa deixar de ser obrigatória; não desfazer a conta; desenhar
+sempre a moldura; a órfã deixar de se distinguir; o formulário não exigir
+empresa.

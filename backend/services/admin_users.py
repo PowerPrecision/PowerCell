@@ -14,6 +14,13 @@ from fastapi import HTTPException, Query, Request, BackgroundTasks
 from pydantic import BaseModel
 
 from database import db
+from services.user_company_bootstrap import (
+    assert_acessos_obrigatorios,
+    completar_nomes_das_empresas,
+    criar_acessos_iniciais,
+    empresa_por_omissao,
+    normalizar_acessos,
+)
 from models.auth import UserRole, UserCreate, UserUpdate, UserResponse
 from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, WorkflowStatusResponse
 from models.email_config import EmailConfigCreate, EmailConfigResponse
@@ -165,6 +172,15 @@ async def run_create_user(data: UserCreate, user: dict):
     
     # PARCEIRO é um "ghost user" - apenas precisa do nome
     is_parceiro = data.role == UserRole.PARCEIRO
+
+    # ── Atribuição Rápida (Lote 4, ponto 11) ──
+    # A empresa é obrigatória para todos os perfis excepto parceiro. A
+    # recusa tem de vir ANTES do insert: criar e só depois rejeitar
+    # deixaria exactamente a conta órfã que isto existe para evitar.
+    acessos = normalizar_acessos(data.companies, papel_principal=data.role)
+    assert_acessos_obrigatorios(data.role, acessos)
+    await completar_nomes_das_empresas(acessos)
+    empresa_omissao = empresa_por_omissao(acessos) or (data.company or None)
     
     if is_parceiro:
         # Para parceiros: nome é obrigatório, email/password não são necessários
@@ -218,7 +234,9 @@ async def run_create_user(data: UserCreate, user: dict):
         "name": clean_name,
         "phone": clean_phone,
         "role": data.role,
-        "company": data.company or None,  # Empresa do utilizador (ex: "Power Real Estate", "Precision Crédito")
+        # Campo LEGADO (NOME da empresa): `_find_ucr` e várias listagens
+        # ainda casam por nome. A verdade passou a estar nos UCRs.
+        "company": empresa_omissao,
         "additional_roles": data.additional_roles or [],
         "is_active": True,
         "onedrive_folder": data.onedrive_folder or clean_name,
@@ -227,7 +245,27 @@ async def run_create_user(data: UserCreate, user: dict):
     }
     
     await db.users.insert_one(user_doc)
-    await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "additional_roles": data.additional_roles, "name": clean_name, "company": data.company})
+
+    # Conta e acessos no mesmo acto. Se os UCRs não ficarem gravados, a
+    # conta é desfeita: sem conta, o admin repete; com conta e sem
+    # acessos, ninguém dá por isso.
+    try:
+        await criar_acessos_iniciais(user_id, acessos)
+    except Exception as exc:
+        logger.error(
+            f"[UTILIZADORES] Falha a criar acessos de {clean_email}; "
+            f"a desfazer a conta {user_id}: {exc}"
+        )
+        await db.users.delete_one({"id": user_id})
+        raise HTTPException(
+            status_code=500,
+            detail=(
+                "Não foi possível associar as empresas indicadas. "
+                "A conta não chegou a ser criada — tente novamente."
+            ),
+        )
+
+    await _audit_log("user_created", "user", user_id, user, {"email": clean_email, "role": data.role, "additional_roles": data.additional_roles, "name": clean_name, "company": empresa_omissao, "acessos": len(acessos)})
     
     # Enviar email de boas-vindas com dados de acesso
     try:

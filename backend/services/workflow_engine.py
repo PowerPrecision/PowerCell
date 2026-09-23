@@ -22,6 +22,7 @@ from datetime import datetime, timezone, timedelta
 from typing import Optional
 
 from database import db
+from services.task_assignment_hygiene import normalizar_assigned_to
 
 logger = logging.getLogger(__name__)
 
@@ -347,7 +348,10 @@ async def execute_action(rule: dict, context: dict) -> bool:
                 "id": str(uuid.uuid4()),
                 "title": title,
                 "description": f"Tarefa criada automaticamente pela regra '{rule['name']}' (urgência: {urgency})",
-                "assigned_to": assigned_to,
+                # Lista SEMPRE — o valor resolvido acima é um escalar (ou
+                # None) e `enrich_task` faz `$in` sobre este campo. Ver
+                # services/task_assignment_hygiene.py.
+                "assigned_to": normalizar_assigned_to(assigned_to),
                 "process_id": context.get("process_id"),
                 "due_date": due_date_iso,
                 "urgency": urgency,

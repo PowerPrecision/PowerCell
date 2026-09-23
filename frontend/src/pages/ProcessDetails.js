@@ -2926,26 +2926,20 @@ const ProcessDetails = () => {
               canEditPriority={canEditPersonal && !isProcessLocked}
             />
 
-            {/* Tarefas - visível se tem manage_tasks */}
+            {/* Tarefas - visível se tem manage_tasks.
+                Lote 4, ponto 13: o TasksPanel JÁ É um cartão completo com
+                cabeçalho, contagem e área de scroll próprios. Havia aqui
+                um segundo Card, um segundo título "Tarefas" e um segundo
+                ScrollArea por cima dos dele — e `compact={false}` desligava
+                o modo compacto que o componente já tinha. Um cartão só,
+                desenhado por quem sabe o que tem dentro. */}
             {canManageTasks && (
-            <Card className="border-border">
-              <CardHeader>
-                <CardTitle className="text-lg flex items-center gap-2">
-                  <Check className="h-5 w-5" />
-                  Tarefas
-                </CardTitle>
-              </CardHeader>
-              <CardContent>
-                {/* PACOTE DD — ScrollArea com altura máxima para evitar expansão infinita da página */}
-                <ScrollArea className="h-fit max-h-[400px]">
-                  <TasksPanel
-                    processId={id}
-                    processName={process?.client_name}
-                    compact={false}
-                  />
-                </ScrollArea>
-              </CardContent>
-            </Card>
+              <TasksPanel
+                processId={id}
+                processName={process?.client_name}
+                compact
+                maxHeight="320px"
+              />
             )}
 
             {/* Accordion para agrupar painéis secundários - visível se tiver manage_tasks */}

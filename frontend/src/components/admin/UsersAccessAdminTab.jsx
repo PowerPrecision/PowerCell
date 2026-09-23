@@ -572,6 +572,7 @@ export default function UsersAccessAdminTab() {
         onOpenChange={setCreateOpen}
         onSubmit={handleCreateUser}
         saving={saving}
+        companies={companies}
       />
       <UserEditDialog
         open={editOpen}

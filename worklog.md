@@ -1,4 +1,32 @@
 ---
+Task ID: limpeza-final-lote-4-pontos-11-13
+Agent: Cloud Agent
+Task: Lote 4 (2/2) — Atribuição Rápida, Atribuição Fantasma e UI compacta das Tarefas
+
+Date: 2026-09-23
+
+Work Log:
+- PONTO 12, e o que não estava no enunciado. O enunciado falava de tarefas atribuídas a consultores num processo sem ninguém atribuído. Encontrei isso e mais duas coisas.
+  (a) A BOMBA DO `$in`. `workflow_engine` grava `assigned_to` como escalar ou `None`; toda a gente grava lista. O `enrich_task` faz `{"id": {"$in": <valor>}}` e o Mongo responde `$in needs an array` — corri-o contra o Mongo real para não ficar na teoria. `run_list_tasks` enriquece num ciclo sem `try`, portanto UMA tarefa de automação derrubava a listagem inteira com um 500. Não é defeito adormecido, é mina.
+  (b) Ninguém limpava as tarefas ao mudar a atribuição. Procurei `db.tasks.delete_many`/`update_many`: aparece em apagar processo, apagar cliente, restaurar e limpezas de admin — em nenhum caminho de atribuição.
+  (c) Uma tarefa órfã e uma tarefa por atribuir mostravam as duas "Sem atribuição". Só a primeira exige uma decisão de alguém.
+- Opção A implementada como o dono decidiu. O critério de "imaculada" é: criada pelo sistema, não concluída, e `updated_at == created_at`. Qualquer interacção muda o `updated_at`. Fica com teste para os dois lados — a já tocada e a já concluída NÃO se apagam.
+- Subtileza que ficou com teste próprio: só fica órfã quando ninguém sobra. Tirar o consultor de uma tarefa que também é do mediador não a deixa sem dono, e apagá-la levaria o trabalho de quem ficou.
+- O diff de quem saiu é feito sobre o ANTES e o DEPOIS reais do documento, não sobre o que o `build_staff_assign_update` julga ter mudado. Ligado aos DOIS caminhos (`/assign` e `/unassign-me`) — tratar só um deixava metade do defeito de pé, e há guarda sobre o código-fonte para cada.
+- CORRECÇÃO AO MEU PRÓPRIO RAIO-X: disse ao dono que o selector de responsáveis oferecia `getStaffUsers()` sem relação com o processo. Errado — o `TasksPanel` já filtrava para os envolvidos. O que era real: o `catch` caía para TODO o staff avisando só no `console.warn`. Corrigi a afirmação e o comportamento: equipa primeiro, resto atrás de "Fora da equipa do processo" (divulgação progressiva, a norma do projecto), e quando a equipa não se confirma isso é DITO em vez de a lista fingir ser a equipa.
+- PONTO 11. `run_create_user` nunca criava um UCR — confirmei que as únicas referências a `user_company_roles` no ficheiro são preferências de notificação. E o formulário nem `company` enviava. O diálogo até o assumia na descrição ("os acessos definem-se depois"), que era documentar o buraco em vez de o fechar.
+- Criação atómica, com desfazer. Se os UCRs falharem, a conta é apagada: sem conta o admin repete, com conta e sem acessos ninguém dá por isso. Encadear duas chamadas no frontend dava o mesmo buraco, só mais difícil de ver.
+- ERRO MEU apanhado pelo teste: `users.company` ficou com o company_id em vez do NOME. É a mesma confusão id/nome do incidente de 2026-09-21, e aqui passaria despercebida porque o UCR ficava correcto à mesma. Extraí `completar_nomes_das_empresas` para correr ANTES de se montar o documento.
+- PONTO 13. O `TasksPanel` já É um cartão completo e o `ProcessDetails` embrulhava-o noutro: dois cartões, dois cabeçalhos "Tarefas", dois ScrollAreas, e `compact={false}` a desligar o modo compacto que já existia. Não inventei nada — liguei o que lá estava e acrescentei `asCard`.
+- Filtros e data de criação passaram a NÃO SER RENDERIZADOS em modo compacto. A primeira versão escondia-os por CSS e o teste apanhou-a: no jsdom o texto continua lá, e num browser continuariam acessíveis ao teclado e aos leitores de ecrã. Esconder não é o mesmo que não ter.
+- SEGUNDA LIÇÃO DE MUTAÇÃO DO PROJECTO. `const Moldura = Card` não matou nenhum teste. Desta vez não foi a mutação a falhar o alvo (como no Épico 9) — foi o teste a ser fraco: o `data-testid` estava preso à flag e não à moldura real, portanto desenhava-se um cartão que o teste não via. A correcção é estrutural: as props derivam agora do componente escolhido (`Moldura === Card`). Repeti a mutação e matou.
+- Infra de testes: `src/test/setup.js` ganhou os stubs de Pointer Capture. O `Select` do Radix chama `hasPointerCapture` ao abrir e o jsdom não a tem — o clique morre em silêncio e o teste queixa-se de "não encontrei a opção", que aponta para o sítio errado. Perdi uns minutos nisso; fica resolvido para todos os testes de Select seguintes.
+- Testes: 40 novos no backend, 22 no frontend. Sete mutações, sete mortes (uma só depois de corrigir a fraqueza do teste).
+- Suites: backend 2085 passed / 8 skipped (era 2045/8); frontend 697 (era 675); eslint --quiet limpo; flake8 limpo nas regras do CI.
+
+---
+
+---
 Task ID: limpeza-final-lote-4-ponto-10
 Agent: Cloud Agent
 Task: Lote 4 (1/2) — isolamento multi-tenant por Rede (`network_id`), camadas 1 a 4

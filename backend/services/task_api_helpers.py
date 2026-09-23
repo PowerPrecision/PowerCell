@@ -11,6 +11,7 @@ from datetime import datetime, timezone
 from fastapi import HTTPException
 
 from database import db
+from services.task_assignment_hygiene import normalizar_assigned_to
 
 
 def block_parceiro(user: dict) -> None:
@@ -37,10 +38,17 @@ async def get_user_names(user_ids: List[str]) -> dict:
 
 async def enrich_task(task: dict) -> dict:
     """Adicionar nomes de utilizadores, processo e info de prazo à tarefa."""
-    # Obter nomes dos utilizadores atribuídos
-    if task.get("assigned_to"):
-        user_names = await get_user_names(task["assigned_to"])
-        task["assigned_to_names"] = [user_names.get(uid, "Desconhecido") for uid in task["assigned_to"]]
+    # Obter nomes dos utilizadores atribuídos.
+    # `assigned_to` chega em DUAS formas: lista (task_api_crud,
+    # process_assignment) e escalar/None (motor de automação, antes do
+    # ponto 12). `{"id": {"$in": "u-1"}}` faz o Mongo responder
+    # `$in needs an array` — e como a listagem enriquece num ciclo sem
+    # `try`, UMA tarefa dessas derrubava a lista INTEIRA com um 500.
+    atribuidos = normalizar_assigned_to(task.get("assigned_to"))
+    task["assigned_to"] = atribuidos
+    if atribuidos:
+        user_names = await get_user_names(atribuidos)
+        task["assigned_to_names"] = [user_names.get(uid, "Desconhecido") for uid in atribuidos]
 
     # Obter nome do criador
     if task.get("created_by"):

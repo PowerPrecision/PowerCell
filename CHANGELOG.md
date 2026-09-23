@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-23] (11) — Contas com empresa, tarefas sem fantasmas, painel mais leve
+
+### Adicionado
+- **Criar um utilizador passa a associar logo a empresa e o cargo.** O formulário tem agora um bloco **Empresa e cargo**, com possibilidade de acrescentar várias empresas — Consultor numa, Intermediário noutra. A primeira é a que carrega no login.
+
+### Corrigido
+- **Deixa de ser possível criar uma conta sem empresa.** Até aqui a conta nascia sem associação nenhuma e ficava invisível ao seletor de empresas, à configuração de e-mail e às listagens até alguém se lembrar de a associar em "Gerir Acessos". A única exceção continuam a ser os parceiros, que não acedem à plataforma.
+- **As tarefas deixam de ficar penduradas em quem já saiu do processo.** Ao mudar a atribuição, as tarefas automáticas que ninguém chegou a abrir desaparecem e as restantes ficam, mas assinaladas como **Sem responsável** — nenhum trabalho de uma pessoa é apagado. Antes, ficavam todas lá, atribuídas a quem já não trabalhava no processo.
+- **Ao criar uma tarefa, a equipa do processo aparece primeiro.** Quem não trabalha no processo fica numa secção **Fora da equipa do processo**, que é preciso abrir de propósito. E quando não é possível confirmar a equipa, o sistema di-lo em vez de mostrar toda a gente como se fosse a equipa.
+- **A lista de tarefas deixa de poder ficar em branco por causa de uma tarefa automática.** Uma tarefa criada por uma regra de automação podia fazer a listagem inteira falhar.
+
+### Alterado
+- **O painel de Tarefas nos Detalhes do Processo está mais compacto.** Havia dois cartões sobrepostos com o mesmo título "Tarefas" e duas áreas de scroll encaixadas. Passa a ser um só, sem os filtros nem a data de criação, que nesta coluna não ajudavam a decidir nada.
+
 ## [2026-09-23] (10) — Isolamento entre empresas: o conceito de Rede
 
 ### Segurança
