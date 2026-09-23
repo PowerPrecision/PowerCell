@@ -53,6 +53,7 @@ import { useMoveProcessMutation } from '../hooks/mutations/useProcessMutations';
 // Importar componentes refatorados
 import KanbanColumn from './kanban/KanbanColumn';
 import KanbanHeader from './kanban/KanbanHeader';
+import { getProcessLabels } from '../services/api';
 import KanbanSkeleton from './kanban/KanbanSkeleton';
 import SearchResultsList from './kanban/SearchResultsList';
 import ProcessDetailsModal from './kanban/ProcessDetailsModal';
@@ -114,6 +115,26 @@ const KanbanBoard = ({
   const [searchTerm, setSearchTerm] = useState('');
   const [dateFilter, setDateFilter] = useState('all');
   const [urgencyFilter, setUrgencyFilter] = useState('all');
+  // Ponto 15 — etiquetas. Vive aqui (no contentor) e não no
+  // `KanbanHeader`: o cabeçalho apresenta, o quadro é que sabe que isto
+  // é um parâmetro do pedido e não um filtro em memória.
+  const [labelsFilter, setLabelsFilter] = useState([]);
+  const [labelsLogic, setLabelsLogic] = useState('OR');
+  const [etiquetasDisponiveis, setEtiquetasDisponiveis] = useState([]);
+
+  useEffect(() => {
+    let cancelado = false;
+    getProcessLabels()
+      .then((res) => {
+        if (!cancelado) setEtiquetasDisponiveis(res?.data?.labels || []);
+      })
+      .catch(() => {
+        if (!cancelado) setEtiquetasDisponiveis([]);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
   const [viewMode, setViewMode] = useState('kanban');
   const [scrollPosition, setScrollPosition] = useState(0);
 
@@ -159,7 +180,7 @@ const KanbanBoard = ({
 
   // === REACT QUERY - DATA FETCHING (QUERIES SEPARADAS) ===
   // Memoize filters to prevent infinite re-renders in dependent hooks
-  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter]);
+  const filters = useMemo(() => ({ consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labels: labelsFilter, labelsLogic }), [consultorFilter, mediadorFilter, indexacaoFilter, parceiroFilter, indexStatusFilter, labelsFilter, labelsLogic]);
 
   // QUERY 1: Colunas ACTIVAS (sem completedDays — não re-fetch quando o filtro muda)
   const {
@@ -490,6 +511,11 @@ const KanbanBoard = ({
         onDateFilterChange={setDateFilter}
         urgencyFilter={urgencyFilter}
         onUrgencyFilterChange={setUrgencyFilter}
+        etiquetasDisponiveis={etiquetasDisponiveis}
+        labelsFilter={labelsFilter}
+        onLabelsChange={setLabelsFilter}
+        labelsLogic={labelsLogic}
+        onLabelsLogicChange={setLabelsLogic}
         completedDays={completedDays}
         onCompletedDaysChange={setCompletedDays}
         onScrollLeft={() => scrollContainer('left')}

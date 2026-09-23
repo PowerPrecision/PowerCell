@@ -49,6 +49,17 @@ const fetchKanbanData = async (token, filters) => {
     params.append('parceiro_id', parceiroFilter === 'none' ? 'none' : parceiroFilter);
   }
 
+  // Ponto 15 — etiquetas. O Kanban tem construtor de query SEPARADO no
+  // backend (foi assim que ficou de fora do isolamento no Lote 4), por
+  // isso o filtro tem de ser ligado aqui de propósito: inventariar os
+  // sítios que LISTAM, não só a condição.
+  for (const etiqueta of filters.labels || []) {
+    params.append('labels', etiqueta);
+  }
+  if ((filters.labels || []).length > 1 && filters.labelsLogic === 'AND') {
+    params.append('labels_logic', 'AND');
+  }
+
   const response = await fetch(`${API_URL}/api/processes/kanban?${params.toString()}`, {
     headers: { Authorization: `Bearer ${token}` },
   });

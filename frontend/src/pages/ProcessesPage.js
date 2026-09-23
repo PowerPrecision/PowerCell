@@ -10,6 +10,8 @@
 import { useState, useEffect, useCallback, useRef, useMemo } from "react";
 import { useNavigate, useSearchParams, useLocation } from "react-router-dom";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import { normalizarEtiquetas } from "../utils/processLabels";
+import ProcessLabelFilter from "../components/processDetails/ProcessLabelFilter";
 import DashboardLayout from "../layouts/DashboardLayout";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "../components/ui/card";
 import { Button } from "../components/ui/button";
@@ -24,7 +26,9 @@ import {
   Flame, X, ClipboardCheck, CheckCircle2, Download, RotateCcw, Trash2
 } from "lucide-react";
 import { toast } from "sonner";
-import { getProcesses, getMyProcesses, markProcessIndexed, restoreProcess } from "../services/api";
+import { getProcesses, getMyProcesses, markProcessIndexed, restoreProcess ,
+  getProcessLabels,
+} from "../services/api";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 // PACOTE CX — ClientDetailsModal para popup de detalhes ao clicar no nome
@@ -115,6 +119,29 @@ const ProcessesPage = () => {
   // PACOTE FK — filtros lógicos de processos (estado, tipo, atribuído a)
   const statusFilter = searchParams.get("status") || "";
   const processTypeFilter = searchParams.get("process_type") || "";
+  // Ponto 15 — etiquetas no URL, como os outros filtros: partilhar um
+  // link já filtrado é metade da utilidade da segmentação.
+  const labelsParam = searchParams.get("labels") || "";
+  const labelsFilter = useMemo(
+    () => normalizarEtiquetas(labelsParam),
+    [labelsParam],
+  );
+  const labelsLogicFilter = searchParams.get("labels_logic") === "AND" ? "AND" : "OR";
+  const [etiquetasDisponiveis, setEtiquetasDisponiveis] = useState([]);
+  useEffect(() => {
+    let cancelado = false;
+    getProcessLabels()
+      .then((res) => {
+        if (!cancelado) setEtiquetasDisponiveis(res?.data?.labels || []);
+      })
+      .catch(() => {
+        // Sem catálogo o filtro esconde-se; a listagem continua a abrir.
+        if (!cancelado) setEtiquetasDisponiveis([]);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
   const assignedUserIdsParam =
     searchParams.get("assigned_user_ids") ||
     searchParams.get("assigned_user_id") ||
@@ -161,6 +188,8 @@ const ProcessesPage = () => {
       next.delete("assigned_user_id");
       next.delete("assigned_user_ids");
       next.delete("assigned_logic");
+      next.delete("labels");
+      next.delete("labels_logic");
       next.set("page", "1");
       return next;
     }, { replace: true });
@@ -194,6 +223,7 @@ const ProcessesPage = () => {
         ...(isGlobalView ? { show_all: true } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
+        ...(labelsFilter.length ? { labels: labelsFilter, labels_logic: labelsLogicFilter } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -283,7 +313,7 @@ const ProcessesPage = () => {
     } finally {
       setExporting(false);
     }
-  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter, effectiveCompanyId]);
+  }, [searchTerm, showCompleted, sortField, sortOrder, isGlobalView, indexStatusFilter, statusFilter, processTypeFilter, assignedUserIdsFilter, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter, effectiveCompanyId]);
 
   const handleMarkIndexed = useCallback(async (e, processId) => {
     e.stopPropagation();
@@ -394,6 +424,7 @@ const ProcessesPage = () => {
            indexStatusFilter === 'pending' ? { is_indexed: false } : {}),
         ...(statusFilter ? { status: statusFilter } : {}),
         ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
+        ...(labelsFilter.length ? { labels: labelsFilter, labels_logic: labelsLogicFilter } : {}),
         ...(assignedUserIdsFilter.length
           ? {
               assigned_user_ids: assignedUserIdsFilter.join(","),
@@ -430,7 +461,7 @@ const ProcessesPage = () => {
         setLoading(false);
       }
     }
-  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter]);
+  }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter]);
   
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
   const handleViewModeChange = (newMode) => {
@@ -778,6 +809,18 @@ const ProcessesPage = () => {
                 onAssignedLogicChange={(v) => updateProcessFilter("assigned_logic", v === "AND" ? "AND" : "OR")}
                 onReset={resetProcessFilters}
               />
+              {/* Ponto 15 — o mesmo filtro que o Kanban usa. */}
+              <div className="mt-2">
+                <ProcessLabelFilter
+                  disponiveis={etiquetasDisponiveis}
+                  seleccionadas={labelsFilter}
+                  logica={labelsLogicFilter}
+                  onChange={(etiquetas) =>
+                    updateProcessFilter("labels", etiquetas.length ? etiquetas.join(",") : "all")
+                  }
+                  onLogicaChange={(v) => updateProcessFilter("labels_logic", v === "AND" ? "AND" : "OR")}
+                />
+              </div>
             </div>
             
             {!showCompleted && (

@@ -9,9 +9,19 @@ import { Textarea } from "../ui/textarea";
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import { EmptyState } from "../ui/EmptyState";
+import { Badge } from "../ui/badge";
 import { Loader2, StickyNote, Plus } from "lucide-react";
 import { formatDateTime } from "../../lib/utils";
 import { resolveProcessObservationNotes } from "../../utils/processObservationNotes";
+
+/**
+ * De onde veio cada nota. O feed é o caso normal e não leva crachá —
+ * marcar tudo seria ruído; marcam-se as origens que surpreendem.
+ */
+const ORIGENS = {
+  legacy: "Quadro",
+  ai: "IA",
+};
 
 export default function ProcessObservationsCard({
   process,
@@ -57,9 +67,19 @@ export default function ProcessObservationsCard({
                   className="rounded-md border border-border bg-muted/30 p-2.5"
                 >
                   <p className="text-sm whitespace-pre-wrap">{note.text}</p>
-                  <p className="text-[11px] text-muted-foreground mt-1">
-                    {note.user_name ? `${note.user_name} · ` : ""}
-                    {note.created_at ? formatDateTime(note.created_at) : ""}
+                  <p className="text-[11px] text-muted-foreground mt-1 flex items-center gap-1.5 flex-wrap">
+                    {/* Ponto 14: as notas vêm de três sítios e o leitor
+                        precisa de saber qual. Uma nota lida pela IA não
+                        tem o mesmo peso que uma escrita pelo consultor. */}
+                    {ORIGENS[note.origin] && (
+                      <Badge variant="outline" className="text-[10px] px-1 py-0 font-normal">
+                        {ORIGENS[note.origin]}
+                      </Badge>
+                    )}
+                    <span>
+                      {note.user_name ? `${note.user_name} · ` : ""}
+                      {note.created_at ? formatDateTime(note.created_at) : ""}
+                    </span>
                   </p>
                 </li>
               ))}

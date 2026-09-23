@@ -92,6 +92,7 @@ from services.process_kanban_enrichment import (
     run_get_kanban_board,
 )
 from services.process_kanban_diagnose import run_kanban_diagnose
+from services.process_labels import run_get_process_labels
 from services.process_kanban_move import (
     run_move_process_kanban,
 )
@@ -269,6 +270,8 @@ async def get_processes(
     assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
     assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
+    labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
+    labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); limita a Lista Global à empresa explicitamente enviada"),
     user: dict = Depends(get_current_user)
 ):
@@ -294,6 +297,8 @@ async def get_processes(
         assigned_user_ids=assigned_user_ids,
         assigned_logic=assigned_logic,
         process_type=process_type,
+        labels=labels,
+        labels_logic=labels_logic,
     )
 
 
@@ -312,6 +317,8 @@ async def get_my_processes(
     assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
     assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
+    labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
+    labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     company_id: Optional[str] = Query(None, description="PACOTE FN — Empresa activa seleccionada no ContextSwitcher (Header); tem prioridade sobre o header X-Company-Id quando enviada explicitamente"),
     user: dict = Depends(get_current_user),
 ):
@@ -357,6 +364,8 @@ async def get_my_processes(
         assigned_user_ids=assigned_user_ids,
         assigned_logic=assigned_logic,
         process_type=process_type,
+        labels=labels,
+        labels_logic=labels_logic,
     )
 
 
@@ -373,6 +382,8 @@ async def get_processes_paginated(
     assigned_user_ids: Optional[List[str]] = Query(None, description="PACOTE FL — Filtrar por um ou mais utilizadores atribuídos"),
     assigned_logic: Optional[str] = Query("OR", description="PACOTE FL — AND ou OR (default OR)"),
     process_type: Optional[str] = Query(None, description="PACOTE FK — Filtrar por tipo de processo"),
+    labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
+    labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     user: dict = Depends(get_current_user)
 ):
     """Listar processos com paginação cursor-based."""
@@ -392,7 +403,19 @@ async def get_processes_paginated(
         assigned_user_ids=assigned_user_ids,
         assigned_logic=assigned_logic,
         process_type=process_type,
+        labels=labels,
+        labels_logic=labels_logic,
     )
+
+
+@router.get("/labels")
+async def get_process_labels(user: dict = Depends(get_current_user)):
+    """Catálogo de etiquetas em uso, para o filtro das listagens.
+
+    Declarada ANTES de `/{process_id}` de propósito: a seguir, o FastAPI
+    leria "labels" como um id de processo e devolveria 404.
+    """
+    return await run_get_process_labels(user)
 
 
 @router.get("/kanban/diagnose")
@@ -423,6 +446,8 @@ async def get_kanban_board(
     view_mode: Optional[str] = Query("all", description="Modo de visualização: active_only, all"),
     show_all: Optional[bool] = Query(False, description="Visão global: ignorar filtro de utilizador"),
     completed_days: Optional[int] = Query(30, description="Limitar concluídos/desistências aos últimos N dias (0 = sem limite)"),
+    labels: Optional[List[str]] = Query(None, description="Ponto 15 — Filtrar por etiquetas"),
+    labels_logic: Optional[str] = Query("OR", description="Ponto 15 — AND (todas) ou OR (qualquer uma)"),
     user: dict = Depends(require_staff())
 ):
     """Kanban por status com filtros de assignee / view_mode / completed_days."""
@@ -436,6 +461,8 @@ async def get_kanban_board(
         parceiro_id=parceiro_id,
         view_mode=view_mode,
         completed_days=completed_days,
+        labels=labels,
+        labels_logic=labels_logic,
         decrypt_list_fn=decrypt_processes_list,
         kanban_projection=PROCESS_KANBAN_PROJECTION,
     )

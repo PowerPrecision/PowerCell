@@ -9,6 +9,7 @@
  * - Fornecer controlos de navegação horizontal
  */
 import { memo, useCallback, useState } from 'react';
+import ProcessLabelFilter from '../processDetails/ProcessLabelFilter';
 import { Input } from '../ui/input';
 import { Button } from '../ui/button';
 import { 
@@ -50,6 +51,14 @@ const KanbanHeader = memo(({
   onDateFilterChange,
   urgencyFilter,
   onUrgencyFilterChange,
+  // Ponto 15 — etiquetas. O cabeçalho APRESENTA; quem sabe que isto é
+  // um parâmetro do pedido (e não um filtro em memória como a data e a
+  // urgência) é o `KanbanBoard`.
+  etiquetasDisponiveis = [],
+  labelsFilter = [],
+  onLabelsChange,
+  labelsLogic = 'OR',
+  onLabelsLogicChange,
   completedDays,
   onCompletedDaysChange,
   onScrollLeft,
@@ -121,8 +130,9 @@ const KanbanHeader = memo(({
   const handleClearFilters = useCallback(() => {
     onDateFilterChange?.('all');
     onUrgencyFilterChange?.('all');
+    onLabelsChange?.([]);
     onCompletedDaysChange?.(30);
-  }, [onDateFilterChange, onUrgencyFilterChange, onCompletedDaysChange]);
+  }, [onDateFilterChange, onUrgencyFilterChange, onLabelsChange, onCompletedDaysChange]);
 
   return (
     <>
@@ -217,6 +227,14 @@ const KanbanHeader = memo(({
 
       {/* Filters Row */}
       <div className="flex flex-wrap items-center gap-2" data-testid="kanban-filters">
+        <ProcessLabelFilter
+          disponiveis={etiquetasDisponiveis}
+          seleccionadas={labelsFilter}
+          onChange={onLabelsChange}
+          logica={labelsLogic}
+          onLogicaChange={onLabelsLogicChange}
+        />
+
         <Select value={dateFilter} onValueChange={onDateFilterChange}>
           <SelectTrigger className="h-8 w-full sm:w-[130px] text-xs" data-testid="kanban-date-filter" aria-label="Filtrar por data">
             <Calendar className="h-3 w-3 mr-1" />

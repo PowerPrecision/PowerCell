@@ -3570,3 +3570,100 @@ Seis, seis mataram: a falha por documento a morrer dentro do ciclo; a porta
 truthy do `{}`; o ramo sem revisão outra vez mudo; o alias a vencer o motor
 (depois de corrigido o teste fraco); os dias a contar sempre até hoje; o
 funil a deitar fora o que não conhece.
+
+## Lote 5, Secção B — pontos 14 e 15 (Set 2026)
+
+### Ponto 14 — há TRÊS campos de texto livre e o Resumo lia um e meio
+
+O cartão `ProcessObservationsCard` já estava no Resumo. O problema não
+era a falta de cartão: era o texto estar espalhado por três campos com um
+só leitor, que escolhia em vez de juntar.
+
+| Campo | Quem escreve | Aparecia no Resumo? |
+|---|---|---|
+| `observation_notes` (feed) | Cartão do Resumo | sim |
+| `notes` / `observations` (escalar) | **Modal do Kanban** | só com o feed VAZIO |
+| `ai_extracted_notes` | IA | **nunca** — só no modal do Kanban |
+
+`resolveProcessObservationNotes` fazia `if (feed.length > 0) return feed;`
+— tratava o escalar como FALLBACK. Bastava alguém acrescentar uma nota no
+Resumo para o que tinha sido escrito no Kanban desaparecer de vez. Não se
+apagava nada; deixava-se de ler.
+
+**Regra: juntar, não escolher.** Cada nota diz de onde vem (`origin`:
+`feed` / `legacy` / `ai`), a duplicação é apanhada pelo texto normalizado
+e nada é descartado em silêncio. O cartão marca as origens que
+surpreendem (crachás "Quadro" e "IA"); o feed, que é o caso normal, não
+leva crachá — marcar tudo seria ruído.
+
+**Caminho de corrupção fechado ao mesmo tempo.** O modal do Kanban
+pré-preenchia a textarea de `notes` com `process.notes || últimaNota.text`.
+Abrir o modal num processo sem `notes`, mexer noutro campo qualquer e
+gravar **copiava a nota de outra pessoa** para o campo escalar, sem autor
+e sem data. O feed lê-se no Resumo; não se edita por baixo da mesa.
+
+### Ponto 15 — Sistema de Etiquetas: o armazenamento existia, faltava tudo o resto
+
+`labels: Optional[List[str]]` está no modelo do processo desde sempre,
+persiste em `process_update` e vem nas projecções. O que **não** existia:
+
+- **Editor nenhum.** O comentário no `ProcessDetails` dizia que a edição
+  tinha sido "movida para um Dialog accionado pelo botão +" — esse Dialog
+  nunca foi construído. O PACOTE DD removeu o cartão de Etiquetas e o
+  substituto ficou por fazer, o que deixou o campo só acessível pela API.
+  O comentário era uma promessa deixada para trás por um refactor.
+- **Filtragem nenhuma**: nem `build_process_list_query` nem
+  `build_kanban_query` conheciam o campo.
+
+**Continuam a ser strings.** Passar a objectos obrigava a migrar os dados
+e a mexer em todas as projecções, e a única coisa que davam a mais era a
+cor — que se deriva do texto, deterministicamente
+(`utils/processLabels.corDaEtiqueta`). "VIP" é da mesma cor em todos os
+ecrãs porque é a mesma palavra, não porque alguém a configurou igual em
+dois sítios. A paleta usa tokens semânticos do Shadcn: um crachá com
+`bg-blue-500` fica ilegível em dark mode.
+
+**Normalizar à ESCRITA, nunca à leitura.** "VIP", "vip" e " VIP " são a
+mesma etiqueta para quem segmenta e três para o Mongo. Com a normalização
+na leitura, cada filtro teria de a repetir — e o primeiro que se
+esquecesse devolvia uma lista a menos sem ninguém reparar. Os **dois**
+caminhos de escrita (`process_update` e `process_service`) normalizam, com
+guarda sobre o código-fonte e contraprova.
+
+**O catálogo tem âmbito de tenant, e isso não é opcional.** Para filtrar é
+preciso saber que etiquetas existem, e a fonte honesta é o que está nos
+processos. Um `distinct` sem a condição de rede seria uma fuga nova, da
+família das do Lote 4/5: o nome de uma campanha da concorrência no
+dropdown de quem não a devia ver. `GET /processes/labels` usa o mesmo
+`build_tenant_condition` das listagens — o âmbito é do UTILIZADOR (a
+rede), não da empresa activa, que é uma vista.
+
+**O filtro foi ligado nos DOIS construtores.** O Kanban tem construtor de
+query separado — foi assim que ficou de fora do isolamento no Lote 4 e no
+Lote 5 ponto 1. Inventariar os sítios que LISTAM, não só a condição; há um
+teste por cada, nos dois sentidos (com etiquetas filtra, sem etiquetas não
+ganha ramo nenhum — um filtro sempre presente esconderia os processos sem
+etiqueta, que são a maioria).
+
+`labels_logic` (AND/OR) espelha o `assigned_logic` que já existia no
+ficheiro. A UI só pergunta a lógica com duas ou mais etiquetas
+seleccionadas: "corresponder a todas" de uma só é a mesma coisa que
+"qualquer uma", e a escolha só confundiria.
+
+### Achado lateral por tratar: o Kanban fala por `fetch` cru
+
+`hooks/queries/useKanbanQuery.js`, `useKanbanCompletedQuery.js` e
+`pages/KanbanPage.js` chamam `/processes/kanban` com
+`headers: { Authorization }` e mais nada — **quinta instância** do
+incidente de 2026-09-21. O isolamento por rede aguenta (vem de
+`build_tenant_condition(user)`, que não depende do header), mas
+`X-Company-Id` e `X-Active-Role` não seguem. Junta-se a isso que
+`get_kanban_board` usa `user["role"]` em vez de `get_effective_role`: quem
+tem vários perfis vê o quadro do papel BASE, não do activo. Fica anotado
+como trabalho próprio — não se alarga este commit.
+
+### Mutação
+
+Quatro, quatro mataram: o catálogo sem isolamento de rede; o Kanban a
+ignorar as etiquetas; a normalização fora de cada um dos dois caminhos de
+escrita.

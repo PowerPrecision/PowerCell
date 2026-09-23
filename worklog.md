@@ -5091,3 +5091,86 @@ Toast verde + diálogo de revisão calado. Três pontos a engolir a falha:
 - `eslint --quiet src/` → 0 erros. `vite build` verde.
 - flake8 gate CI (`E9,F63,F7,F82`) → 0.
 - Mutação: **seis, seis mataram** (depois de corrigido o teste fraco).
+
+---
+
+# Iteração — Lote 5, Secção B: pontos 14 (Resumo) e 15 (Etiquetas) (Set 2026)
+
+## Ponto 14 — texto livre no Resumo
+
+**Diagnóstico:** o cartão já existia; havia três campos e um leitor que
+escolhia em vez de juntar.
+
+- `utils/processObservationNotes.js` reescrito: JUNTA `observation_notes`
+  + `notes`/`observations` + `ai_extracted_notes`, deduplica pelo texto
+  normalizado, marca a origem e ordena cronologicamente.
+- `ProcessObservationsCard`: crachás "Quadro" / "IA" nas origens que
+  surpreendem (o feed não leva crachá — marcar tudo é ruído).
+- `kanban/ProcessDetailsModal.jsx`: deixa de pré-preencher `notes` com a
+  última nota do feed — mexer noutro campo e gravar copiava a nota de
+  outra pessoa para o escalar, sem autor nem data.
+
+## Ponto 15 — Sistema de Etiquetas
+
+**Diagnóstico:** `labels` já existia no modelo e persistia; faltava o
+editor (o Dialog que o PACOTE DD prometeu e nunca construiu) e a
+filtragem (zero ocorrências nos dois construtores de query).
+
+Backend:
+- **NOVO** `services/process_labels.py`: `normalizar_etiquetas`,
+  `build_labels_condition`, `listar_etiquetas_em_uso`,
+  `run_get_process_labels`. Catálogo com âmbito de rede.
+- `process_list_filters.py`: `labels` + `labels_logic` em
+  `build_process_list_query` **e** `build_kanban_query`.
+- `process_update.py` / `process_service.py`: normalização nos DOIS
+  caminhos de escrita.
+- `routes/processes.py`: `GET /processes/labels` (antes de
+  `/{process_id}`) + parâmetros nos 4 endpoints de listagem/quadro.
+- `tests/unit/conftest.py`: `distinct` no `FakeAsyncCollection`.
+
+Frontend:
+- **NOVO** `utils/processLabels.js` (normalização espelho do backend, cor
+  derivada do texto com tokens semânticos, `podeAcrescentar` com motivo).
+- **NOVO** `components/processDetails/ProcessLabelsEditor.jsx` (Dialog,
+  Progressive Disclosure, `datalist` de sugestões).
+- **NOVO** `components/processDetails/ProcessLabelFilter.jsx` (partilhado
+  pela Lista e pelo Kanban).
+- `ProcessDetails.js`: crachás read-only → editor ligado ao
+  `handleSaveOrganization` (`allowEmptyArrays: ["labels"]`).
+- `ProcessesPage.js`: filtro no URL (partilhar um link já filtrado).
+- `KanbanBoard.js` / `KanbanHeader.jsx` / `useKanbanQuery` /
+  `useKanbanCompletedQuery`: filtro + entrada na queryKey.
+- `services/api.js`: `getProcessLabels`.
+
+## Testes
+
+- **NOVO** `tests/unit/test_process_labels.py` (28)
+- **NOVO** `utils/processLabels.test.js` (18)
+- **NOVO** `ProcessLabelsEditor.test.jsx` (10)
+- **NOVO** `ProcessLabelFilter.test.jsx` (9)
+- `utils/processObservationNotes.test.js`: 3 → 13, migrado de
+  `node:test` para Vitest.
+
+## Erros meus, reportados
+
+1. O import do `build_labels_condition` caiu dentro de um bloco
+   `from ... import (` multi-linha e partiu o módulo.
+2. Uma guarda sobre o código-fonte comparava `@router.get("/labels")` com
+   aspas — `ast.unparse` normaliza-as (o AGENTS.md avisa disto).
+3. O teste do `datalist` consultou o `container`; o Dialog do Radix
+   renderiza num PORTAL.
+
+## Achado lateral (não tratado neste commit)
+
+O Kanban chama `/processes/kanban` por `fetch` cru em três sítios, sem
+`X-Company-Id` nem `X-Active-Role` — 5.ª instância do incidente de
+2026-09-21. E `get_kanban_board` usa `user["role"]` em vez de
+`get_effective_role`. Documentado no `ARCHITECTURE.md`.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2015 passed** (baseline 1987 + 28).
+- `yarn test` → **814 passed / 72 ficheiros** (baseline 767 / 69).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- flake8 gate CI → 0.
+- Mutação: **quatro, quatro mataram**.

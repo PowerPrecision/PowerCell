@@ -299,7 +299,9 @@ async def run_get_kanban_board(
     parceiro_id: Optional[str],
     view_mode: Optional[str],
     completed_days: Optional[int],
-    decrypt_list_fn,
+    labels: Optional[Any] = None,
+    labels_logic: Optional[str] = "OR",
+    decrypt_list_fn=None,
     kanban_projection: dict,
 ) -> dict[str, Any]:
     """Orquestra GET /kanban."""
@@ -329,6 +331,8 @@ async def run_get_kanban_board(
         parceiro_id=parceiro_id,
         view_mode=view_mode,
         completed_days=completed_days,
+        labels=labels,
+        labels_logic=labels_logic,
     )
     if str(role).lower() == "indexacao":
         logger.info(

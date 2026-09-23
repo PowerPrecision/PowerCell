@@ -14,6 +14,7 @@ from database import db
 from models.auth import UserRole
 from services.encryption import generate_nif_hash, generate_email_hash
 from services.process_status import INACTIVE_STATUSES
+from services.process_labels import normalizar_etiquetas
 
 logger = logging.getLogger(__name__)
 
@@ -478,7 +479,10 @@ def apply_cpcv_and_metadata_fields(update_data: dict, data: Any) -> None:
             )
         update_data["prioridade"] = data.prioridade
     if data.labels is not None:
-        update_data["labels"] = data.labels
+        # Ponto 15: normalizar à ESCRITA. "VIP", "vip" e " VIP " são a
+        # mesma etiqueta para quem segmenta e três para o Mongo; com a
+        # normalização na leitura, cada filtro teria de a repetir.
+        update_data["labels"] = normalizar_etiquetas(data.labels)
     # PACOTE 5 (Fast-Track / Via Verde) — bypass à fase de Indexação:
     # permite ativar/desativar o flag num processo existente (ex.: qualificar
     # um Lead em pré-registo com Via Verde). None/omisso mantém o valor atual.

@@ -332,6 +332,8 @@ async def run_get_processes(
     assigned_user_ids: Optional[list] = None,
     assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
+    labels: Optional[Any] = None,
+    labels_logic: Optional[str] = "OR",
 ) -> dict:
     """Orquestra GET /processes (offset pagination)."""
     from services.process_list_filters import build_process_list_query
@@ -358,6 +360,8 @@ async def run_get_processes(
         assigned_user_ids=assigned_user_ids,
         assigned_logic=assigned_logic,
         process_type=process_type,
+        labels=labels,
+        labels_logic=labels_logic,
     )
 
     status_order = await load_workflow_status_order()
@@ -408,6 +412,8 @@ async def run_get_processes_paginated(
     assigned_user_ids: Optional[list] = None,
     assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
+    labels: Optional[Any] = None,
+    labels_logic: Optional[str] = "OR",
 ) -> dict:
     """Orquestra GET /processes/paginated (cursor-based)."""
     from services.cursor_pagination import CursorPaginator
@@ -427,6 +433,8 @@ async def run_get_processes_paginated(
         assigned_user_ids=assigned_user_ids,
         assigned_logic=assigned_logic,
         process_type=process_type,
+        labels=labels,
+        labels_logic=labels_logic,
     )
 
     order = -1 if sort_order.lower() == "desc" else 1

@@ -696,3 +696,61 @@ Terceira ocorrência do padrão "mutação perdida ≠ teste fraco". Um
 reescrita, porque "CPCV" também era etiqueta de um nó da timeline. A
 asserção tem de apontar ao elemento cujo conteúdo a regra decide
 (`data-testid="fase-actual"`), não ao contentor que por acaso o inclui.
+
+## 25. Etiquetas e texto livre (Lote 5, Secção B, Set 2026)
+
+### 25.1 Vários escritores, um leitor: juntar, não escolher
+
+Quando o mesmo conceito tem mais do que um campo na base de dados —
+porque foi crescendo — o leitor não pode escolher um. O texto livre do
+processo vivia em `observation_notes`, `notes`/`observations` e
+`ai_extracted_notes`, e o Resumo lia o primeiro "se não estiver vazio".
+Bastava uma nota nova para o que tinha sido escrito noutro ecrã
+desaparecer.
+
+- **Juntar, deduplicar pelo valor normalizado, marcar a origem.** Nada
+  desaparece, e quem lê sabe de onde veio cada coisa.
+- **Marcar só as origens que surpreendem.** O caso normal não leva
+  crachá; se tudo for marcado, nada está marcado.
+- **Um campo escalar não se pré-preenche com o conteúdo de outro.** O
+  modal do Kanban semeava a textarea de `notes` com a última nota do
+  feed: gravar copiava a nota de outra pessoa, sem autor nem data.
+
+### 25.2 Derivar em vez de guardar
+
+A cor de uma etiqueta deriva do seu texto (hash → paleta de tokens
+semânticos). A alternativa era uma colecção de definições de etiqueta ou
+mudar o campo para objectos, migrando dados e projecções — para garantir
+uma coisa que a derivação garante de graça: "VIP" é da mesma cor em todos
+os ecrãs porque é a mesma palavra, não porque alguém a configurou igual
+em dois sítios.
+
+A paleta usa tokens do Shadcn (`bg-primary/10`, `bg-destructive/10`, …) e
+nunca cores Tailwind cruas — há um teste a afirmá-lo, porque a regra
+ESLint do PACOTE 11 é `warn` e o CI só falha em `error`.
+
+### 25.3 Normalizar à escrita, espelhar no cliente
+
+"VIP", "vip" e " VIP " são a mesma etiqueta para quem segmenta e três
+para a base de dados. A normalização vive na escrita, no backend, em
+**todos** os caminhos — e o frontend espelha-a, senão o editor aceita o
+que a API recusa.
+
+### 25.4 Um filtro novo liga-se em todos os sítios que LISTAM
+
+O Kanban tem construtor de query separado do das listagens. Foi assim que
+ficou de fora do isolamento por rede duas vezes. Um filtro novo precisa
+de um inventário de superfícies e de um teste por cada, **nos dois
+sentidos**: com o filtro filtra, sem o filtro não ganha ramo nenhum. Um
+ramo sempre presente esconde os registos sem valor — que costumam ser a
+maioria.
+
+E o filtro vai no URL: partilhar um link já filtrado é metade da
+utilidade da segmentação.
+
+### 25.5 Perguntar só o que tem significado
+
+O selector AND/OR só aparece com duas ou mais etiquetas escolhidas.
+"Corresponder a todas" de uma só etiqueta é a mesma coisa que "qualquer
+uma": a escolha não muda nada e só dá ao utilizador uma decisão a tomar
+sem consequência.

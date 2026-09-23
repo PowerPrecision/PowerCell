@@ -96,6 +96,8 @@ import {
   restoreProcess,
   // ÉPICO 7 — nota de voz do consultor
   uploadVoiceNote,
+  // Ponto 15 — catálogo de etiquetas para as sugestões do editor
+  getProcessLabels,
 } from "../services/api";
 import ProcessDomainTabsList from "../components/processDetails/ProcessDomainTabsList";
 import AIReviewDialog from "../components/processDetails/dialogs/AIReviewDialog";
@@ -196,6 +198,7 @@ import PortalMessagesTab from "../components/processDetails/tabs/PortalMessagesT
 import DeadlinesTab from "../components/processDetails/tabs/DeadlinesTab";
 import HistoryTab from "../components/processDetails/tabs/HistoryTab";
 import ProcessObservationsCard from "../components/processDetails/ProcessObservationsCard";
+import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEditor";
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
 import { StatusBadge } from "../components/shared/StatusBadge";
@@ -1493,6 +1496,39 @@ const ProcessDetails = () => {
     }
   };
 
+  // ── Etiquetas (ponto 15) ───────────────────────────────────────────
+  // O catálogo alimenta as sugestões do editor. Falhar a lê-lo não é
+  // motivo para bloquear nada: sem sugestões continua a poder escrever-se
+  // a etiqueta à mão.
+  const [sugestoesDeEtiquetas, setSugestoesDeEtiquetas] = useState([]);
+  const [aGravarEtiquetas, setAGravarEtiquetas] = useState(false);
+
+  useEffect(() => {
+    let cancelado = false;
+    getProcessLabels()
+      .then((res) => {
+        if (!cancelado) setSugestoesDeEtiquetas(res?.data?.labels || []);
+      })
+      .catch(() => {
+        if (!cancelado) setSugestoesDeEtiquetas([]);
+      });
+    return () => {
+      cancelado = true;
+    };
+  }, []);
+
+  const handleGuardarEtiquetas = async (etiquetas) => {
+    setAGravarEtiquetas(true);
+    try {
+      // `handleSaveOrganization` já trata do `allowEmptyArrays: ["labels"]`
+      // — limpar todas as etiquetas tem de chegar ao servidor como [].
+      setProcess((anterior) => (anterior ? { ...anterior, labels: etiquetas } : anterior));
+      await handleSaveOrganization({ labels: etiquetas });
+    } finally {
+      setAGravarEtiquetas(false);
+    }
+  };
+
   // Função principal de save que verifica créditos ativos
   const handleSave = async () => {
     // Bloquear guarda se o processo está em status terminal
@@ -2227,11 +2263,17 @@ const ProcessDetails = () => {
                     </a>
                   ) : null}
                   {headerConsultor ? <span>Consultor: {headerConsultor}</span> : null}
-                  {Array.isArray(process?.labels) && process.labels.map((label, idx) => (
-                    <Badge key={`lbl-${idx}`} variant="secondary" className="text-xs">
-                      {safeString(label)}
-                    </Badge>
-                  ))}
+                  {/* Ponto 15 — as etiquetas deixam de ser só crachás.
+                      O PACOTE DD removeu o cartão de Etiquetas e prometeu
+                      um Dialog no botão "+" que nunca foi construído: o
+                      campo ficou só acessível pela API. É este. */}
+                  <ProcessLabelsEditor
+                    labels={process?.labels}
+                    sugestoes={sugestoesDeEtiquetas}
+                    disabled={isViewMode || isProcessLocked}
+                    saving={aGravarEtiquetas}
+                    onChange={handleGuardarEtiquetas}
+                  />
                 </span>
               }
               actions={

@@ -560,6 +560,13 @@ export const isAuthenticated = () => {
 
 // Processes
 export const getProcesses = (params = {}) => api.get("/processes", { params });
+
+/**
+ * Catálogo de etiquetas em uso (ponto 15) — alimenta o `datalist` do
+ * editor e o filtro das listagens. O âmbito de rede é aplicado no
+ * servidor: uma lista de etiquetas sem isolamento seria uma fuga nova.
+ */
+export const getProcessLabels = () => api.get("/processes/labels");
 export const getMyProcesses = (params = {}) => api.get("/processes/me", { params });
 export const getProcessesPaginated = (params = {}) => api.get("/processes/paginated", { params });
 export const getProcess = (id) => api.get(`/processes/${id}`);

@@ -319,6 +319,26 @@ class FakeAsyncCollection:
     async def count_documents(self, query: dict) -> int:
         return sum(1 for doc in self.docs if self._matches(doc, query))
 
+    async def distinct(self, key: str, query: dict = None):
+        """Valores distintos de um campo, achatando listas como o Mongo.
+
+        Acrescentado para o catálogo de etiquetas (ponto 15): a alternativa
+        era ler a colecção inteira em Python, que em produção seria outra
+        coisa da que o teste prova.
+        """
+        vistos = []
+        for doc in self.docs:
+            if query and not self._matches(doc, query):
+                continue
+            valor = doc.get(key)
+            if valor is None:
+                continue
+            candidatos = valor if isinstance(valor, list) else [valor]
+            for item in candidatos:
+                if item not in vistos:
+                    vistos.append(item)
+        return vistos
+
     def find(self, query: dict, projection: dict = None):
         """Cursor com sort/skip/limit/to_list (PACOTE 8) — matcher igualdade/$ne/$in."""
         matched = [dict(doc) for doc in self.docs if self._matches(doc, query)]

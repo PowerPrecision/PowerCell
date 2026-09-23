@@ -26,6 +26,7 @@ from utils.search_filters import (
     create_accent_insensitive_regex,
     build_multiword_search_filter,
 )
+from services.process_labels import build_labels_condition
 
 
 def normalize_id_for_match(value: Any) -> Optional[str]:
@@ -483,6 +484,8 @@ def build_process_list_query(
     assigned_user_ids: Optional[Union[str, Sequence[str]]] = None,
     assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
+    labels: Optional[Union[str, Sequence[str]]] = None,
+    labels_logic: Optional[str] = "OR",
     tenant_condition: Optional[dict] = None,
 ) -> dict[str, Any]:
     """
@@ -555,6 +558,14 @@ def build_process_list_query(
     type_cond = build_process_type_condition(process_type)
     if type_cond:
         and_conditions.append(type_cond)
+
+    # Etiquetas (ponto 15). Junta-se em $and como todos os outros: um
+    # filtro novo nunca pode anular o isolamento de rede que entrou
+    # primeiro. `None` = não filtrar — um ramo sempre presente esconderia
+    # os processos sem etiqueta nenhuma, que são a maioria.
+    labels_cond = build_labels_condition(labels, labels_logic)
+    if labels_cond:
+        and_conditions.append(labels_cond)
 
     search_cond = build_process_search_condition(search, mode=search_mode)
     if search_cond:
@@ -736,6 +747,8 @@ def build_kanban_query(
     parceiro_id: Optional[str] = None,
     view_mode: Optional[str] = "all",
     completed_days: Optional[int] = 30,
+    labels: Optional[Union[str, Sequence[str]]] = None,
+    labels_logic: Optional[str] = "OR",
     tenant_condition: Optional[dict] = None,
 ) -> dict:
     """Query MongoDB completa para o board Kanban.
@@ -767,6 +780,13 @@ def build_kanban_query(
     )
     if view_filter:
         query = merge_query_and(query, view_filter)
+
+    # Etiquetas (ponto 15). O quadro tem construtor SEPARADO — foi assim
+    # que ficou de fora do isolamento do Lote 4 e do Lote 5 ponto 1.
+    # Inventariar os sítios que LISTAM, não só a condição.
+    labels_cond = build_labels_condition(labels, labels_logic)
+    if labels_cond:
+        query = merge_query_and(query, labels_cond)
 
     # Pré-registo sempre excluído do Kanban (todos os roles)
     query = merge_query_and(query, {"status": {"$nin": LEAD_STATUS_VALUES}})
