@@ -2901,3 +2901,131 @@ duas antes de concluir.
 
 Nenhum teste contacta uma API paga — há uma guarda explícita para isso
 (`TestNenhumaChamadaReal`).
+
+---
+
+## Lote 4, ponto 10 — Redes (Grupos Empresariais) e o fim do filtro placebo (Set 2026)
+
+### O diagnóstico não era o enunciado
+
+O enunciado dizia "a listagem/pesquisa global está a mostrar tudo a todos".
+É verdade, mas a causa não estava na listagem.
+
+1. **Não havia filtro de tenant nenhum** nas listagens e pesquisas.
+   `search_api_global`, `search_api_processes`, `search_api_suggestions`,
+   `client_list_filters`, `my_clients_api_helpers`, `process_my_clients` e
+   `task_api_crud`: **zero** ocorrências de `compan`. O Ctrl+K devolvia
+   clientes de outra empresa com o NIF já desencriptado — `run_global_search`
+   chama `decrypt_client_data` antes do `return`. É pesquisa com dados
+   pessoais em claro a atravessar empresas.
+2. `build_role_visibility_conditions` devolve `[]` para `admin`, `ceo`,
+   `administrativo` e `diretor`. Uma Diretora de uma empresa via o pipeline
+   inteiro de outra. `show_all=true` devolve `[]` também.
+3. **O único filtro que existia era um placebo.** `build_company_scope_condition`
+   (usado só em "Os Meus Processos") inclui de propósito
+   `{"company_id": {"$exists": False}}` para não esconder processos legados —
+   e `build_staff_process_doc` **não escrevia campo de empresa nenhum**. Logo
+   *todo* o processo criado pelo CRM casava com o filtro de *qualquer*
+   empresa. Parecia isolar porque o `mine_only` já restringia por atribuição,
+   e era a atribuição a fazer o trabalho todo.
+
+**Consequência de método:** o ponto não era um problema de query, era um
+problema de dados. Acrescentar `network_id` ao filtro sem o carimbar na
+escrita produziria exactamente o mesmo placebo, com outro nome.
+
+### O modelo
+
+A rede vive na **empresa** (`companies.network_id`). Empresas com a mesma
+rede partilham visibilidade sem permissões extra; redes diferentes estão em
+isolamento absoluto. Uma empresa **sem** rede é uma ilha de uma só
+(`rede_implicita` → `rede:<company_id>`): omissão segura, porque uma empresa
+criada hoje tem de nascer isolada — se caísse na rede de omissão veria todo o
+histórico do grupo incumbente, que é a fuga que isto fecha. O formulário de
+empresas deixa o campo em branco por omissão, e há uma guarda sobre o
+código-fonte a impedir que a criação passe a herdar uma rede.
+
+O âmbito é do **utilizador**, não da empresa activa: a empresa activa é uma
+preferência de *vista* (o `company_id` das listagens), a rede é a fronteira
+de *segurança*. Quem trabalha em duas redes vê as duas.
+
+### `TENANT_DEFAULT_NETWORK_ID` — a pilha por carimbar
+
+Os documentos criados antes desta mudança não têm dono legível. Escondê-los
+de toda a gente no dia do deploy seria partir os dados existentes; deixá-los
+visíveis a todos seria manter a fuga. A variável de ambiente decide:
+
+- **Definida** (produção, com a rede do grupo incumbente): quem está nessa
+  rede continua a ver tudo o que via; quem está noutra não vê nada dela.
+- **Por definir** (dev, CI): os documentos sem carimbo ficam visíveis a todas
+  as redes — o comportamento anterior, para não esvaziar as listagens de
+  desenvolvimento nem a bateria. Fica um `warning`, uma vez, no log.
+
+Um documento só conta como "por carimbar" quando **não tem marca nenhuma**:
+nem `network_id`, nem `company_id`, nem `company`, nem `company_name`. Olhar
+só para o `network_id` deixaria a fuga entrar pela cláusula que existe para a
+evitar — um processo criado entre o carimbo na escrita e a migração tem
+empresa mas ainda não tem rede, e passaria a ser visível ao grupo incumbente.
+Há um teste por lado: a outra rede não o vê, **e** a própria vê.
+
+### Fail-closed, sempre
+
+`build_network_scope_condition` nunca devolve `None`. Um âmbito fechado sem
+ramo nenhum devolve `CONDICAO_IMPOSSIVEL` (`{"network_id": {"$in": []}}`),
+porque `None` significaria "sem filtro" e reabria a fuga inteira em silêncio.
+A degradação graciosa segue a mesma direcção: se a colecção `companies` não
+responder, cada empresa passa a valer como ilha própria — **nunca** ampliar o
+âmbito por causa de um erro.
+
+### Onde entra
+
+| Camada | Ficheiro |
+|---|---|
+| 1 — a rede vive na empresa | `models/company.py`, `companies_crud_api_mutate.py`, `CompaniesAdminTab.jsx` |
+| 2 — ponto único | `services/tenant_network.py` |
+| 3 — carimbo na escrita | `process_create.build_staff_process_doc(tenant=…)` |
+| 4 — migração | `scripts/backfill_network_id.py` |
+
+O filtro entra em `run_get_processes` / `run_get_processes_paginated` (as duas
+listagens de processos passam por lá, `show_all=true` incluído), nas três
+pesquisas e nas listagens de clientes. **Nunca reconstruir esta cadeia em
+linha** — foi tê-la duplicada que produziu o incidente da conta de envio de
+2026-09-21. Há uma guarda sobre o código-fonte, com a contraprova ao lado:
+sem ela, apagar a chamada satisfazia o guarda e reabria a fuga.
+
+### A migração não adivinha
+
+`backfill_network_id.py` tem duas fases. `--empresas` é **obrigatória** e
+barata: põe as empresas já existentes na rede de omissão — sem ela, cada
+empresa antiga vale como ilha própria e a Power deixa de ver a Precision,
+que é a regressão que a política existe para evitar. `--documentos` é
+opcional e pesada: deduz o dono de cada documento pela empresa já escrita →
+consenso entre quem lá trabalha → quem o criou.
+
+`rede_consensual` devolve `None` quando há mais do que uma rede candidata.
+Um processo trabalhado por pessoas de redes diferentes não tem dono óbvio, e
+adivinhar aqui é escolher a quem vazar. Fica por carimbar, coberto pela rede
+de omissão. **Nunca escrever uma rede "provável":** um carimbo errado torna
+o documento visível à rede errada para sempre, e o passo 1 da execução
+seguinte aceitá-lo-ia como verdade.
+
+### Guardas sobre o código-fonte: o leitor é partilhado
+
+`tests/unit/helpers_fonte.py` (`codigo_sem_comentarios`) é a terceira
+encarnação da mesma necessidade, agora num sítio só. A armadilha, já apanhada
+duas vezes: uma guarda que leia os comentários acaba por proibir a
+*explicação* do defeito que previne — e a saída óbvia, quando fica vermelha,
+é apagar a explicação, que é a parte que impede a regressão de voltar. Usa
+`tokenize` + `ast`, não expressões regulares: um literal com `#` faria um
+cortador ingénuo truncar código a meio. Nota de utilização: `ast.unparse`
+normaliza as aspas, por isso asserções sobre literais comparam-se sem elas.
+
+### O que fica de fora, de propósito
+
+O **Portal do Cliente** não entra neste eixo: o cliente vê o processo dele
+por `client_id` e propriedade, não por rede.
+
+### Cobertura
+
+`tests/unit/test_tenant_network_isolation.py` (26). Mutação (três, três
+mataram): tirar o `tenant_condition` da listagem; fazer o "por carimbar"
+olhar só para o `network_id`; deixar um âmbito fechado virar "sem filtro".

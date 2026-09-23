@@ -15,6 +15,7 @@ from services.encryption import (
     generate_telefone_hash,
     decrypt_client_data,  # PACOTE DD — desencriptar clientes na pesquisa global
 )
+from services.tenant_network import build_tenant_condition
 from utils.input_sanitization import sanitize_string
 from utils.search_filters import (
     create_accent_insensitive_regex,
@@ -71,6 +72,15 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
         "tasks": []
     }
 
+    # Isolamento multi-tenant (Lote 4, ponto 10). O Ctrl+K não tinha
+    # filtro de empresa NENHUM e devolvia clientes de outras empresas com
+    # o NIF já desencriptado (`decrypt_client_data`, mais abaixo). É
+    # pesquisa com dados pessoais em claro a atravessar redes.
+    tenant_condition = await build_tenant_condition(user)
+
+    def com_isolamento(query: dict) -> dict:
+        return {"$and": [tenant_condition, query]}
+
     try:
         # Pesquisar processos - usar blind indexes quando apropriado
         name_filter_processes = build_multiword_search_filter(search_term, "client_name")
@@ -101,7 +111,7 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
             process_search_conditions.append({"personal_data.email": simple_regex})
             process_search_conditions.append({"client_email": simple_regex})
 
-        process_query = {"$or": process_search_conditions}
+        process_query = com_isolamento({"$or": process_search_conditions})
 
         processes = await db.processes.find(
             process_query,
@@ -153,7 +163,9 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
             client_search_conditions.append({"contacto.telefone": simple_regex})
 
         # PACOTE DG — excluir clientes eliminados (soft-delete) da pesquisa global.
-        client_query = {"$or": client_search_conditions, "is_deleted": {"$ne": True}}
+        client_query = com_isolamento(
+            {"$or": client_search_conditions, "is_deleted": {"$ne": True}}
+        )
 
         clients = await db.clients.find(
             client_query,
@@ -206,13 +218,13 @@ async def run_global_search(q: str, limit: int, user: dict) -> Dict[str, Any]:
 
         # Pesquisar tarefas
         name_filter_tasks = build_multiword_search_filter(search_term, "client_name")
-        task_query = {
+        task_query = com_isolamento({
             "$or": [
                 {"title": regex_pattern},
                 {"description": regex_pattern},
                 name_filter_tasks,
             ]
-        }
+        })
 
         tasks = await db.tasks.find(
             task_query,

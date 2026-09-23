@@ -1,4 +1,33 @@
 ---
+Task ID: limpeza-final-lote-4-ponto-10
+Agent: Cloud Agent
+Task: Lote 4 (1/2) — isolamento multi-tenant por Rede (`network_id`), camadas 1 a 4
+
+Date: 2026-09-23
+
+Work Log:
+- DIAGNÓSTICO. O enunciado era "a listagem mostra tudo a todos". É verdade, mas encontrei três coisas e só a primeira estava no enunciado.
+  (1) Não havia filtro de tenant NENHUM nas listagens e pesquisas — `search_api_*`, `client_list_filters`, `my_clients_api_helpers`, `process_my_clients`, `task_api_crud`: zero ocorrências de "compan". E o Ctrl+K devolve clientes com o NIF já desencriptado (`decrypt_client_data` antes do return), portanto era fuga de dados pessoais em claro, não só de nomes.
+  (2) `build_role_visibility_conditions` devolve `[]` para admin/ceo/administrativo/diretor.
+  (3) O ÚNICO filtro que existia era um placebo. Corri `build_company_scope_condition("empresa_domus")` e `build_staff_process_doc` lado a lado: o primeiro inclui `{"company_id": {"$exists": False}}` e o segundo imprime "campos de empresa no processo novo: NENHUM". Todo o processo criado pelo CRM casava com o filtro de qualquer empresa. Parecia isolar porque o `mine_only` já restringia por atribuição.
+- Daí a consequência de método que levei ao dono antes de escrever: isto não é um problema de query, é um problema de dados. Acrescentar `network_id` ao filtro sem o carimbar na escrita daria o mesmo placebo com outro nome. Foi por isso que o plano ficou em cinco camadas e não em "acrescentar um filtro".
+- Antes de corrigir, demonstrei a fuga em bruto contra o código de então: Bruno (Diretor da Domus) via "Silva da Power" com NIF, "Silva Antigo", e os quatro processos. Guardei o cenário nos testes para a demonstração ser repetível.
+- CAMADA 5 (decisão do dono, aprovada): `TENANT_DEFAULT_NETWORK_ID`. Definida em produção com a rede do grupo incumbente → o incumbente não sofre regressão e a ilha nova não vê o histórico. Por definir (dev/CI) → comportamento de hoje + um `warning`. Sem isto, a bateria e a base de dev esvaziavam-se: "partir os dados existentes" pela porta do lado.
+- A ARMADILHA que quase me escapou e que ficou com teste dos DOIS lados: um documento só conta como "por carimbar" se não tiver marca NENHUMA. Se o ramo do legado olhasse só para o `network_id`, um processo da Domus criado entre a camada 3 e a migração (tem `company_id`, ainda não tem rede) passava a ser visível ao grupo incumbente — a fuga a entrar pela cláusula que existe para a evitar. Testei também o inverso: a própria Domus TEM de continuar a vê-lo, senão a migração esconde trabalho a quem o fez.
+- Fail-closed por desenho: `build_network_scope_condition` nunca devolve `None`. Um âmbito fechado sem ramos devolve uma condição impossível, porque `None` significaria "sem filtro". A mesma direcção na degradação graciosa: se `companies` não responder, cada empresa vale como ilha — nunca ampliar o âmbito por causa de um erro.
+- Uma empresa nova nasce ILHA, não na rede de omissão. Se herdasse, veria o histórico inteiro do incumbente no acto da criação. Há guarda sobre o código-fonte da criação de empresa.
+- O filtro entra em `run_get_processes`/`run_get_processes_paginated` (as duas listagens passam por lá, `show_all=true` incluído), nas três pesquisas e nas listagens de clientes — e sempre vindo de `tenant_network`. Guarda sobre o código-fonte + a CONTRAPROVA ao lado: sem ela, apagar a chamada satisfazia o guarda. E de facto o guarda sozinho passou VERDE contra o código antigo, porque `network_id` ainda não existia em lado nenhum — exactamente o tipo de teste que passa sem provar nada que já me mordeu no Lote 1.
+- Extraí `tests/unit/helpers_fonte.py`. Era a terceira vez que precisava do leitor de código-fonte sem comentários; passou a viver num sítio só e o teste da assinatura de email delega nele (13 testes continuam verdes). Nota apanhada a correr: `ast.unparse` normaliza as aspas, por isso asserções sobre literais comparam-se sem elas.
+- ERRO MEU, apanhado pelo próprio teste: assertei que a pesquisa por "Cliente" devolvia `p-domus-sem-rede` — mas esse processo chama-se "Outro da Domus" e não casa com o termo. A falha era da expectativa, não do código. Corrigi e acrescentei o teste que aquela asserção devia ter sido: procurar "Outro" e provar que a Domus o vê e a Power não.
+- MIGRAÇÃO (`scripts/backfill_network_id.py`): `--empresas` obrigatória e barata, `--documentos` opcional e pesada. `rede_consensual` devolve `None` quando há mais do que uma rede candidata — um processo trabalhado por pessoas de redes diferentes não tem dono óbvio, e adivinhar é escolher a quem vazar. Nunca escrever uma rede "provável": o carimbo errado é permanente e a execução seguinte aceitá-lo-ia como verdade.
+- Acrescentei o campo Rede ao formulário de Empresas. O dono pediu backend, mas um campo que ninguém consegue definir é meia funcionalidade — são ~20 linhas e o `network_id` deixa de precisar de um `curl`.
+- Testes: 26 novos no backend. Três mutações, três mortes (tirar o filtro da listagem; "por carimbar" a olhar só para o `network_id`; âmbito fechado a virar "sem filtro").
+- Suites: backend 2045 passed / 8 skipped (era 2019/8); frontend 675 (inalterado); eslint --quiet limpo; flake8 limpo nas regras do CI.
+- Portal do Cliente fora do eixo, como combinado: isola por `client_id` + propriedade.
+
+---
+
+---
 Task ID: limpeza-final-lote-3
 Agent: Cloud Agent
 Task: Missão de Limpeza (3/4) — perfil do Portal ligado ao form_config, RBAC do diretor, polling de processos apagados

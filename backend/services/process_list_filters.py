@@ -483,6 +483,7 @@ def build_process_list_query(
     assigned_user_ids: Optional[Union[str, Sequence[str]]] = None,
     assigned_logic: Optional[str] = "OR",
     process_type: Optional[str] = None,
+    tenant_condition: Optional[dict] = None,
 ) -> dict[str, Any]:
     """
     Query MongoDB completa para listagens de processos.
@@ -497,6 +498,15 @@ def build_process_list_query(
     view_mode). ``assigned_user_id`` mantém-se como alias legado.
     """
     and_conditions: list[dict] = []
+
+    # Isolamento multi-tenant por Rede (Lote 4, ponto 10). Entra ANTES de
+    # tudo o resto e em TODOS os caminhos — `show_all`, `mine_only` e a
+    # visibilidade por cargo incluídos. `build_role_visibility_conditions`
+    # devolve `[]` para admin/ceo/diretor/administrativo: sem esta
+    # condição, uma Diretora de uma empresa via o pipeline inteiro de
+    # outra. A condição vem sempre de `services/tenant_network.py`.
+    if tenant_condition:
+        and_conditions.append(tenant_condition)
 
     and_conditions.append(build_is_deleted_filter(status=status, view_mode=view_mode))
     if mine_only:

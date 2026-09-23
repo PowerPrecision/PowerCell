@@ -103,9 +103,22 @@ def build_staff_process_doc(
     process_type: Any,
     initial_status: Optional[str],
     is_lead: bool,
+    tenant: Optional[dict] = None,
 ) -> dict[str, Any]:
-    """Documento base do processo criado por staff (antes de 2º titular / role)."""
-    return {
+    """Documento base do processo criado por staff (antes de 2º titular / role).
+
+    ``tenant`` é o carimbo multi-tenant (`company_id` / `company_name` /
+    `network_id`) resolvido por `tenant_network.resolve_tenant_stamp`.
+    Até esta mudança o documento não levava campo de empresa NENHUM, e
+    era por isso que o filtro de isolamento era um placebo: todo o
+    processo criado pelo CRM casava com o filtro de qualquer empresa.
+
+    Sem contexto de empresa (``tenant=None``) o documento fica POR
+    CARIMBAR em vez de levar uma rede adivinhada — carimbar a rede
+    errada torná-lo-ia visível à rede errada para sempre, e a migração
+    (`scripts/backfill_network_id.py`) já sabe resolver o que ficou.
+    """
+    doc: dict[str, Any] = {
         "id": process_id,
         "process_number": process_number,
         "client_ids": [client_id] if client_id else [],
@@ -126,6 +139,9 @@ def build_staff_process_doc(
         "observations": "",
         "observation_notes": [],
     }
+    if tenant:
+        doc.update(tenant)
+    return doc
 
 
 def apply_creator_role_assignment(process_doc: dict, user: dict) -> None:
@@ -514,7 +530,12 @@ async def send_portal_welcome_email_from_process(
         )
 
 
-async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
+async def assemble_staff_create_bundle(
+    data: Any,
+    user: dict,
+    *,
+    active_company_id: Optional[str] = None,
+) -> dict[str, Any]:
     """
     Valida role/client_id, resolve status, carrega cliente e monta process_doc
     (ainda sem encriptar / inserir).
@@ -522,6 +543,7 @@ async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
     Returns dict com keys usadas pela rota create-client.
     """
     from services.process_service import get_next_process_number
+    from services.tenant_network import resolve_tenant_stamp
 
     # PACOTE 9 — validar com o cargo EFECTIVO (multi-perfil).
     assert_can_create_staff_process(user.get("effective_role") or user.get("role", ""))
@@ -539,6 +561,12 @@ async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
     now = datetime.now(timezone.utc).isoformat()
 
     client_fields = await load_existing_client_for_process(data.client_id)
+
+    # Carimbo multi-tenant (Lote 4, ponto 10): o processo nasce a saber a
+    # que rede pertence. Sem isto, o filtro de isolamento das listagens
+    # não tem por onde pegar — foi exactamente essa a fuga.
+    tenant = await resolve_tenant_stamp(user, active_company_id=active_company_id)
+
     process_doc = build_staff_process_doc(
         process_id=process_id,
         process_number=process_number,
@@ -551,6 +579,7 @@ async def assemble_staff_create_bundle(data: Any, user: dict) -> dict[str, Any]:
         process_type=data.process_type,
         initial_status=initial_status,
         is_lead=is_lead,
+        tenant=tenant,
     )
     second_client_id = await attach_second_client_on_create(
         process_doc,

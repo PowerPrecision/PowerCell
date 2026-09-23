@@ -3,6 +3,20 @@
 Todas as mudanças notáveis neste projeto serão documentadas neste arquivo.
 O formato é baseado em [Keep a Changelog](https://keepachangelog.com/pt-BR/1.0.0/).
 
+## [2026-09-23] (10) — Isolamento entre empresas: o conceito de Rede
+
+### Segurança
+- **Empresas de grupos diferentes deixam de ver os dados umas das outras.** A listagem de processos, a listagem de clientes e a pesquisa rápida (Ctrl+K) mostravam tudo a toda a gente com acesso ao sistema — incluindo o NIF dos clientes de outra empresa, já legível. Passam a respeitar a **Rede** a que a empresa pertence.
+- **Empresas do mesmo grupo continuam a trabalhar juntas.** Duas empresas na mesma Rede partilham a visibilidade dos dados sem precisarem de permissões extra — é o caso da Power e da Precision. Empresas em Redes diferentes ficam completamente separadas.
+- **Uma empresa nova nasce isolada.** Ao criar uma empresa, o campo **Rede / Grupo Empresarial** fica em branco por omissão: ninguém de fora vê os seus processos e clientes até que a junte deliberadamente a um grupo.
+
+### Adicionado
+- **Campo "Rede / Grupo Empresarial" na gestão de Empresas.** Empresas com a mesma rede partilham dados; em branco, a empresa fica isolada.
+- **Os processos passam a registar a que empresa e rede pertencem** no momento em que são criados. Até aqui não guardavam essa informação de todo.
+
+### Notas para a equipa
+- O histórico criado antes desta mudança não tinha registo de empresa. Continua visível ao grupo que sempre o viu, e invisível a qualquer empresa nova. Não é preciso fazer nada para isso funcionar.
+
 ## [2026-09-22] (9) — Limpeza antes do Staging (3/4): perfil do cliente, acessos e 404s
 
 ### Adicionado

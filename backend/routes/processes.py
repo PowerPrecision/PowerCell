@@ -216,12 +216,25 @@ async def create_process(data: ProcessCreate, user: dict = Depends(get_current_u
 
 
 @router.post("/create-client", response_model=ProcessResponse)
-async def create_client_process(data: ProcessCreate, user: dict = Depends(get_current_user)):
+async def create_client_process(
+    request: Request,
+    data: ProcessCreate,
+    user: dict = Depends(get_current_user),
+):
     """
     Criar processo staff associado a cliente existente (client_id obrigatório).
     Intermediário fica automaticamente atribuído quando é o criador.
+
+    O `Request` existe para resolver a empresa activa (`X-Company-Id`) e
+    carimbar a rede no processo — ver `services/tenant_network.py`.
     """
-    bundle = await assemble_staff_create_bundle(data, user)
+    try:
+        active_company_id = await get_active_company_id_async(request, user)
+    except Exception:
+        active_company_id = user.get("company")
+    bundle = await assemble_staff_create_bundle(
+        data, user, active_company_id=active_company_id,
+    )
     return await persist_and_finalize_staff_create(
         bundle,
         user,

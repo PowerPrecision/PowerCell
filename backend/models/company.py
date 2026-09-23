@@ -33,6 +33,10 @@ class CompanyCreate(BaseModel):
     """Payload para criar uma empresa."""
     name: str = Field(..., min_length=1, max_length=200, description="Nome da empresa")
     nif: Optional[str] = Field(None, max_length=20, description="NIF da empresa")
+    network_id: Optional[str] = Field(
+        None, max_length=100,
+        description="Rede / Grupo Empresarial. Empresas com a mesma rede partilham visibilidade de dados; redes diferentes estão em isolamento absoluto. Sem rede, a empresa é uma ilha de uma só."
+    )
     address: Optional[str] = Field(None, max_length=500, description="Morada")
     phone: Optional[str] = Field(None, max_length=30, description="Telefone principal")
     email: Optional[str] = Field(None, max_length=200, description="Email de contacto")
@@ -59,6 +63,10 @@ class CompanyUpdate(BaseModel):
     """Payload para atualizar uma empresa (todos os campos opcionais)."""
     name: Optional[str] = Field(None, min_length=1, max_length=200)
     nif: Optional[str] = Field(None, max_length=20)
+    network_id: Optional[str] = Field(
+        None, max_length=100,
+        description="Rede / Grupo Empresarial. Empresas com a mesma rede partilham visibilidade de dados; redes diferentes estão em isolamento absoluto. Sem rede, a empresa é uma ilha de uma só."
+    )
     address: Optional[str] = Field(None, max_length=500)
     phone: Optional[str] = Field(None, max_length=30)
     email: Optional[str] = Field(None, max_length=200)
@@ -87,6 +95,7 @@ class CompanyResponse(BaseModel):
 
     id: str
     name: str
+    network_id: Optional[str] = None
     nif: Optional[str] = None
     address: Optional[str] = None
     phone: Optional[str] = None

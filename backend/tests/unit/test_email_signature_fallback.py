@@ -30,29 +30,13 @@ def _codigo_sem_comentarios(funcao) -> str:
     """Código de uma função, sem comentários nem docstrings.
 
     Uma guarda sobre o código-fonte que leia os comentários acaba por
-    proibir a explicação do próprio defeito que previne.
+    proibir a explicação do próprio defeito que previne. O leitor vive
+    em `tests/unit/helpers_fonte.py` — é a terceira guarda do projecto
+    a precisar dele.
     """
-    import ast
-    import inspect
-    import io as _io
-    import textwrap
-    import tokenize
+    from tests.unit.helpers_fonte import codigo_da_funcao_sem_comentarios
 
-    fonte = textwrap.dedent(inspect.getsource(funcao))
-
-    sem_comentarios = []
-    for token in tokenize.generate_tokens(_io.StringIO(fonte).readline):
-        if token.type == tokenize.COMMENT:
-            continue
-        sem_comentarios.append(token[:2])
-    limpo = tokenize.untokenize(sem_comentarios)
-
-    # Remover a docstring (é uma expressão string solta no corpo).
-    arvore = ast.parse(textwrap.dedent(limpo))
-    for no in ast.walk(arvore):
-        if isinstance(no, (ast.FunctionDef, ast.AsyncFunctionDef)) and ast.get_docstring(no):
-            no.body = no.body[1:]
-    return ast.unparse(arvore)
+    return codigo_da_funcao_sem_comentarios(funcao)
 
 
 ASSINATURA_POWER = "<p>Ana — Power</p>"

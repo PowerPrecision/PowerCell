@@ -42,6 +42,7 @@ from utils.input_sanitization import (
     sanitize_string, sanitize_url, log_sanitization_rejection,
 )
 from utils.search_filters import create_accent_insensitive_regex, build_multiword_search_filter
+from services.tenant_network import build_tenant_condition
 from services.client_list_filters import (
     build_client_entity_query,
     client_doc_to_list_item,
@@ -88,6 +89,19 @@ def _merge_entity_client_docs(
     return clients
 
 
+def com_isolamento(tenant_condition: dict, query: Optional[dict]) -> dict:
+    """Junta a condição de Rede a uma query de listagem (Lote 4, ponto 10).
+
+    A listagem e a pesquisa de clientes não tinham filtro de empresa
+    NENHUM: um consultor de uma empresa via a carteira de clientes de
+    outra. O `$and` preserva a query original intacta — os filtros de
+    fonte/tipo/estado continuam a valer, só deixam de atravessar redes.
+    """
+    if not query:
+        return dict(tenant_condition)
+    return {"$and": [tenant_condition, query]}
+
+
 async def _enrich_clients_fonte(clients: list) -> list:
     """Preenche ``fonte`` / ``tipo_cliente`` a partir da colecção clients."""
     ids = [c.get("id") for c in clients if c.get("id")]
@@ -130,7 +144,10 @@ async def run_search_clients(
     ]
 
     # PACOTE DG — excluir clientes eliminados (soft-delete) do autocomplete.
-    query = {"$or": or_conditions, "is_deleted": {"$ne": True}}
+    query = com_isolamento(
+        await build_tenant_condition(user),
+        {"$or": or_conditions, "is_deleted": {"$ne": True}},
+    )
 
     clients = await db.clients.find(
         query,
@@ -208,11 +225,12 @@ async def run_list_clients(
 
     # PACOTE FK — filtros da entidade Cliente (independentes do processo).
     client_entity_query = build_client_entity_query(fonte=fonte, tipo=tipo, status=status)
+    tenant_condition = await build_tenant_condition(user)
     matching_client_ids = None
     extra_client_docs: list[dict] = []
     if client_entity_query:
         extra_client_docs = await db.clients.find(
-            client_entity_query,
+            com_isolamento(tenant_condition, client_entity_query),
             {
                 "_id": 0, "id": 1, "nome": 1, "contacto": 1, "dados_pessoais": 1,
                 "process_ids": 1, "fonte": 1, "created_at": 1, "updated_at": 1,
@@ -389,7 +407,7 @@ async def run_list_clients(
         # FIX (Pacote K): adicionado is_deleted à projection para o cálculo de
         # "cliente ativo" poder filtrar processos eliminados.
         processes = await db.processes.find(
-            process_query,
+            com_isolamento(tenant_condition, process_query),
             {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
              "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1,
              "assigned_consultor_id": 1, "assigned_mediador_id": 1,
@@ -597,7 +615,7 @@ async def run_list_clients(
     # FIX (Pacote K): adicionado is_deleted à projection para o cálculo de
     # "cliente ativo" poder filtrar processos eliminados.
     processes = await db.processes.find(
-        process_query,
+        com_isolamento(tenant_condition, process_query),
         {"_id": 0, "id": 1, "client_name": 1, "client_email": 1, "client_phone": 1, 
          "personal_data": 1, "status": 1, "process_number": 1, "client_id": 1, "created_at": 1,
          "is_deleted": 1,

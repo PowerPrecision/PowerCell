@@ -8,6 +8,7 @@ import re
 from typing import Any, Dict, List, Optional
 
 from database import db
+from services.tenant_network import build_tenant_condition
 from utils.input_sanitization import sanitize_string
 from utils.search_filters import (
     create_accent_insensitive_regex,
@@ -48,6 +49,9 @@ async def run_search_processes(
 
     if process_type:
         query["process_type"] = process_type
+
+    # Isolamento multi-tenant (Lote 4, ponto 10) — ver tenant_network.
+    query = {"$and": [await build_tenant_condition(user), query]}
 
     processes = await db.processes.find(
         query,
