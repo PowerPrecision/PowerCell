@@ -49,6 +49,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 
 from database import db
+from services.email_sync_cadence import get_email_auto_sync_interval_seconds
 
 logger = logging.getLogger(__name__)
 
@@ -85,7 +86,10 @@ JOBS_DECLARADOS: list[dict[str, Any]] = [
         "chave": "email_auto_sync",
         "nome": "Sincronização de e-mail (IMAP)",
         "descricao": "Traz o correio novo das caixas configuradas e emite os avisos em tempo real.",
-        "interval_seconds": 60,
+        # Derivado do mesmo sítio que o laço (`email_sync_cadence`): um
+        # número escrito aqui à mão ficaria para trás no dia em que a
+        # cadência mudasse, e o painel anunciaria um horário que já não é.
+        "interval_seconds": get_email_auto_sync_interval_seconds(),
         "processo": "web",
         "so_em_producao": True,
     },
@@ -174,6 +178,32 @@ def job_esta_activo(declarado: dict) -> bool:
     return False
 
 
+def _intervalo_efectivo(declarado: dict, registo: Optional[dict]) -> int:
+    """Segundos entre ciclos — o do BATIMENTO manda, o declarado é recurso.
+
+    `JOBS_DECLARADOS` é a EXPECTATIVA (o que o painel mostra a um job que
+    ainda não bateu); o batimento traz o `interval_seconds` que o laço usou
+    de facto. Quando os dois discordam — porque alguém afinou
+    `EMAIL_AUTO_SYNC_INTERVAL_SECONDS` no Render, ou porque a omissão do
+    laço mudou antes da constante — é o laço que tem razão. Ler a constante
+    punha o monitor a gritar `atrasado` a um job que está a cumprir o seu
+    horário, e um monitor que mente com ar de autoridade é pior do que não
+    ter monitor.
+    """
+    if registo:
+        real = registo.get("interval_seconds")
+        try:
+            real = int(real or 0)
+        except (TypeError, ValueError):
+            real = 0
+        if real > 0:
+            return real
+    try:
+        return int(declarado.get("interval_seconds") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
 def estado_do_job(
     declarado: dict,
     registo: Optional[dict],
@@ -203,7 +233,7 @@ def estado_do_job(
         # cada ciclo está pior do que um que se atrasou.
         return ESTADO_FALHOU
 
-    intervalo = int(declarado.get("interval_seconds") or 0)
+    intervalo = _intervalo_efectivo(declarado, registo)
     if intervalo > 0:
         limite = timedelta(seconds=intervalo * FACTOR_DE_ATRASO)
         if momento_agora - fim > limite:
@@ -221,7 +251,7 @@ def proxima_execucao(declarado: dict, registo: Optional[dict]) -> Optional[str]:
     if not job_esta_activo(declarado) or not registo:
         return None
     fim = _para_datetime(registo.get("finished_at"))
-    intervalo = int(declarado.get("interval_seconds") or 0)
+    intervalo = _intervalo_efectivo(declarado, registo)
     if not fim or intervalo <= 0:
         return None
     return (fim + timedelta(seconds=intervalo)).isoformat()
@@ -233,7 +263,7 @@ async def heartbeat(chave: str, *, interval_seconds: Optional[int] = None):
 
     Uso::
 
-        async with heartbeat("email_auto_sync", interval_seconds=60):
+        async with heartbeat("email_auto_sync", interval_seconds=300):
             await fazer_o_trabalho()
 
     Emissores são pontos de estrangulamento, não código espalhado — a

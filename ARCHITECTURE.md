@@ -3446,3 +3446,127 @@ processo web (duas caixas por ciclo, ≈120 ligações/hora) mais o
 `webmail_worker_sync` de 10 em 10 minutos no worker.
 
 Fica por tocar até o dono confirmar as variáveis no Render.
+
+## Lote 5, Prioridade 0 — duas interceções críticas + fecho do ponto 7 (Set 2026)
+
+### Ponto 7 (IMAP) — confirmado e fechado
+
+O dono confirmou `PRECISION_PASSWORD` / `PRECISION_IMAP_SERVER` no Render. A
+segunda hipótese era a boa: **rate limit / bloqueio de IP** em alojamento
+partilhado, reportado como `[AUTHENTICATIONFAILED]`.
+
+A cadência vive agora em `services/email_sync_cadence.py` — módulo LEVE, de
+propósito. Precisam do mesmo número dois sítios que não se podem importar um
+ao outro: o laço que dorme (`scheduled_tasks.run_email_auto_sync`, módulo
+pesado) e o `JOBS_DECLARADOS` do Monitor de Sinais Vitais, importado no
+arranque do `server.py` **e** do `worker.py`.
+
+- Omissão **60 s → 300 s**; clamp **30–300 → 120–1800**. O chão é a
+  protecção: uma variável mal posta reabriria o bloqueio que isto veio fechar.
+- Jitter **proporcional** (até 1/4 do ciclo) em vez do tecto fixo de 15 s —
+  5 % de um ciclo de 5 minutos não desencontra dois workers que arranquem
+  juntos, que é precisamente o caso que o alojamento lê como abuso.
+- O `webmail_worker_sync` do worker fica nos 10 minutos: as duas cadências
+  estão deliberadamente desencontradas.
+
+**O efeito cruzado que quase passou.** `estado_do_job` lia o intervalo de
+`JOBS_DECLARADOS` — uma CONSTANTE. Abrandar o laço sem mexer nela punha o
+painel do ponto 14 a declarar `atrasado` um job que está a cumprir o horário
+novo (limiar de 2×60 s contra ciclos de 5 min). **Regra: o intervalo do
+BATIMENTO manda, o declarado é recurso** (`_intervalo_efectivo`) — o
+batimento traz o valor que o laço usou de facto; o declarado só vale para
+quem nunca bateu. Sem isto, abrandar o motor era ensinar o monitor a mentir.
+
+### Bug 1 — "VLM no Escuro": a análise em lote acabava em silêncio
+
+Clicar em "Analisar Documentos" processava e não devolvia nada à UI: toast
+**verde** ("Análise completa! 3 documento(s) processado(s)") e o Diálogo de
+Revisão Humana calado. Sem erro, sem aviso, sem nada para dizer ao suporte.
+
+Três pontos a engolir, e **nenhum errado sozinho**:
+
+1. `ai_document_analyzer.analyze_multiple_documents` — o documento cuja
+   análise devolve `{"success": False, "error": …}` (chave da OpenAI em
+   falta, quota esgotada, formato recusado) era SALTADO, com o motivo a ir só
+   para o log de importação. O agregado voltava vazio, sem excepção.
+2. `document_ai_analyze.run_analysis_on_documents` — `"success": True`
+   escrito à mão e `documents_count: len(documents)`, os documentos
+   **ENVIADOS**. Para o frontend, três documentos falhados eram
+   indistinguíveis de três sem nada a preencher.
+3. Frontend — `if (onAIDataExtracted && result.extracted_data)`, e **`{}` é
+   truthy em JavaScript**, por isso o resultado vazio passava a porta e
+   apanhava o toast verde. Do outro lado, `commitAIExtractedData` tinha um
+   `return` mudo à cabeça e um `if (revisao) { … }` **sem `else`**.
+
+**A resposta passa a dizer a verdade**: `documents_succeeded` (o que a IA leu
+mesmo) e `documents_failed` (`[{file_name, error}]`). O contrato
+`success: True` mantém-se — o pedido HTTP correu bem; o que falhou foi o
+trabalho, e isso é conteúdo da resposta, não código de estado.
+
+**Três desfechos, nunca quatro.** `utils/analiseEmLoteFeedback.js`
+(`resumirAnaliseEmLote`) decide: `sucesso` (leu e há o que rever) · `aviso`
+(correu mas não há nada para preencher, ou parte falhou) · `erro` (não leu
+nada). O silêncio não é um valor possível, e há um teste a afirmá-lo. Quem
+ANUNCIA é o `ProcessDetails` — o `S3FileManager` deixou de celebrar por conta
+própria, porque duas vozes sobre o mesmo evento davam um verde por cima de um
+diálogo que nunca abriu.
+
+Cobertura: `tests/unit/test_vlm_nao_fica_no_escuro.py`,
+`utils/analiseEmLoteFeedback.test.js`,
+`pages/processDetails/vlmSilencioGuard.test.js` (guarda sobre o código-fonte,
+com contraprova ao lado).
+
+### Bug 2 — "UI de Fases Mentirosa": o motor estava certo, a UI é que inventava
+
+As fases vêm de `workflow_statuses` (o admin cria, renomeia, reordena,
+apaga). A UI recebia-as e passava-lhes por cima. Três defeitos:
+
+**(a) Aliases a mandar no motor.** `ProcessTimeline` tinha um mapa cravado
+(`cpcv → fase_escritura`, `escriturado → concluidos`, …) aplicado ao estado
+ACTUAL e ao histórico, e **nunca** à lista de fases. Basta o admin criar uma
+fase chamada `cpcv` — nome natural num CRM de crédito — para o processo que
+lá está ser reescrito para outra: a fase actual deixava de existir no mapa, o
+crachá do cabeçalho sumia e, porque `currentPhaseInfo?.order || 0` caía para
+0, **todas** as fases passavam a ler-se como futuras. **Regra: o alias é um
+RECURSO para dados antigos — só se aplica quando o motor não conhece o
+original E conhece o destino. Nunca ao contrário.**
+
+**(b) Os dias eram sempre contra HOJE.** `differenceInDays(agora, entrada)`
+para cada fase concluída: uma fase que durou 2 dias há seis meses mostrava
+"180d", e o cabeçalho somava tudo ("5 fases • 812 dias" num processo com 6
+meses). Uma fase dura da sua entrada até à entrada na **seguinte**; só a
+última conta até hoje.
+
+**(c) O funil do dashboard deitava processos fora.** `FUNNEL_MACRO` era uma
+lista cravada no `ConsultorDashboard` e a contagem um `filter` por grupo: um
+processo numa fase que nenhum grupo listasse **não contava para lado nenhum**
+— a soma das colunas ficava abaixo do total, sem nada no ecrã a dizê-lo, e um
+consultor com processos numa fase nova via o funil a dizer que não tinha
+trabalho. `escritura` estava ainda em DOIS grupos.
+
+A lógica saiu dos componentes para `utils/processTimeline.js` e
+`utils/funilDeFases.js`, onde se testa. O funil mantém os grupos como
+**classificação conhecida** (o motor não tem campo de macro-fase; derivá-la da
+`order` seria outra mentira, com ar automático) e o que a classificação não
+cobre cai em "Outras fases" — que só aparece quando tem conteúdo. Há um teste
+a afirmar que **a soma do funil é sempre o total de processos**.
+
+Cobertura: `utils/processTimeline.test.js`, `utils/funilDeFases.test.js`,
+`components/__tests__/ProcessTimeline.test.jsx`.
+
+### Terceira ocorrência: mutação perdida ≠ mutação que não matou
+
+A mutação que repunha o alias a vencer o motor matou **1** teste de 2. O
+teste de componente afirmava `expect(cartão).toHaveTextContent("CPCV")` — e
+"CPCV" também aparece como **etiqueta de um nó**, por isso a asserção passava
+com a fase actual já reescrita. Corrigido com um marcador no crachá
+(`data-testid="fase-actual"`), que é o elemento cujo conteúdo a regra decide.
+**Quando o texto procurado existe em mais do que um sítio do ecrã, a asserção
+tem de nomear o sítio.**
+
+### Mutação
+
+Seis, seis mataram: a falha por documento a morrer dentro do ciclo; a porta
+truthy do `{}`; o ramo sem revisão outra vez mudo; o alias a vencer o motor
+(depois de corrigido o teste fraco); os dias a contar sempre até hoje; o
+funil a deitar fora o que não conhece.

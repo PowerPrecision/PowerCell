@@ -4,15 +4,15 @@
  * 
  * Usa as fases dinâmicas da BD (workflow_statuses) em vez de dados hardcoded.
  */
-import React, { useState, useEffect, useCallback, useMemo } from "react";
+import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "./ui/card";
 import { Badge } from "./ui/badge";
 import { ScrollArea, ScrollBar } from "./ui/scroll-area";
 import { Loader2, CheckCircle, Clock, Circle, ArrowRight } from "lucide-react";
-import { differenceInDays } from "date-fns";
 import { pt } from "date-fns/locale";
 import { safeLabel } from "./dashboard/DashboardShared";
-import { safeFormat, safeDate, safeParseISO } from "../lib/utils";
+import { safeFormat } from "../lib/utils";
+import { construirTimeline } from "../utils/processTimeline";
 
 // Cores de fallback mapeadas a partir do nome da cor da BD
 const COLOR_MAP = {
@@ -30,29 +30,11 @@ const getColor = (colorName) => {
   return COLOR_MAP[colorName.toLowerCase()] || "#6B7280";
 };
 
-// Normalizar status (mapear variantes antigas para o nome atual na BD)
-const normalizeStatus = (status) => {
-  if (!status) return status;
-  const statusMap = {
-    "clientes_em_espera": "clientes_espera",
-    "enviado_ao_bruno": "enviado_bruno",
-    "enviado_ao_luis": "enviado_luis",
-    "banco_em_analise": "fase_bancaria",
-    "aprovado_pelo_banco": "ch_aprovado",
-    "cpcv": "fase_escritura",
-    "a_escriturar": "escritura_agendada",
-    "escriturado": "concluidos",
-    "recusado": "desistencias",
-    "desistiu": "desistencias",
-  };
-  return statusMap[status] || status;
-};
-
 // Componente de nó da timeline (compacto)
 // PACOTE CY: adicionado isSkipped para fases saltadas (sem registo no histórico)
 const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, isSkipped, date, daysInPhase }) => {
   const nodeColor = phaseInfo ? getColor(phaseInfo.color) : "#9CA3AF";
-  const label = phaseInfo?.label || "Desconhecida";
+  const label = phaseInfo?.label || phaseInfo?.name || "Desconhecida";
 
   return (
     <div className="flex flex-col items-center min-w-[80px]">
@@ -91,7 +73,7 @@ const TimelineNode = ({ phaseInfo, isCompleted, isCurrent, isSkipped, date, days
           </p>
         )}
         {isSkipped && (
-          <p className="text-[8px] text-gray-400 italic">Saltada</p>
+          <p data-testid="fase-saltada" className="text-[8px] text-gray-400 italic">Saltada</p>
         )}
         {daysInPhase !== undefined && daysInPhase > 0 && (
           <Badge variant="outline" className="text-[9px] mt-0.5 px-1 py-0">
@@ -120,139 +102,23 @@ const TimelineConnector = ({ isCompleted }) => (
 );
 
 const ProcessTimeline = ({ currentStatus, history, workflowStatuses }) => {
-  const [timelineData, setTimelineData] = useState([]);
-  const [loading, setLoading] = useState(true);
+  // "UI de Fases Mentirosa" (Lote 5, P0): a decisão sobre o que está
+  // concluído, saltado ou pendente — e quanto tempo cada fase durou —
+  // mudou para `utils/processTimeline.js`, onde se consegue testar.
+  // Aqui dentro não se testava, e era aqui que a UI passava por cima do
+  // motor de workflow com um mapa de aliases cravado em código.
+  const timelineData = useMemo(
+    () =>
+      construirTimeline({
+        fases: workflowStatuses,
+        estadoActual: currentStatus,
+        historico: history,
+      }),
+    [workflowStatuses, currentStatus, history],
+  );
 
-  // Construir mapa de fases a partir dos workflowStatuses dinâmicos
-  const phasesMap = useMemo(() => {
-    if (!workflowStatuses || workflowStatuses.length === 0) return {};
-    const map = {};
-    workflowStatuses.forEach(s => {
-      map[s.name] = {
-        id: s.name,
-        label: s.label || s.name,
-        color: getColor(s.color),
-        order: s.order || 0,
-      };
-    });
-    return map;
-  }, [workflowStatuses]);
-
-  // Lista de fases ordenada
-  const sortedPhases = useMemo(() => {
-    return Object.values(phasesMap).sort((a, b) => a.order - b.order);
-  }, [phasesMap]);
-
-  // Normalizar o status atual
-  const normalizedCurrentStatus = normalizeStatus(currentStatus);
-
-  // Encontrar a fase atual (declarado ANTES do useCallback para evitar temporal dead zone)
-  const currentPhaseInfo = phasesMap[normalizedCurrentStatus];
-  const currentOrder = currentPhaseInfo?.order || 0;
-
-  // Processar histórico para construir timeline
-  // PACOTE CY: Uma fase só é "Concluída" se existir registo explícito no
-  // histórico. Fases anteriores à atual sem registo = "Saltada" (não Concluída).
-  const buildTimeline = useCallback(() => {
-
-    // Se não há fases carregadas, não mostrar nada
-    if (sortedPhases.length === 0) {
-      setTimelineData([]);
-      setLoading(false);
-      return;
-    }
-
-    // ============================================================
-    // PACOTE CY — Construir set de fases alcançadas a partir do histórico
-    // ============================================================
-    // O histórico (db.history) tem entradas com:
-    //   action: "Moveu processo" | "Alterou estado" | "Criou processo"
-    //   field: "status" (quando é mudança de status)
-    //   new_value: <novo status>
-    // Uma fase X foi alcançada se há entrada com new_value === X.
-    // O status atual conta sempre como alcançado (mesmo sem histórico).
-    // ============================================================
-    const reachedStatuses = new Set();
-    reachedStatuses.add(normalizedCurrentStatus); // status atual conta sempre
-
-    // Map: status → data do registo histórico (primeira ocorrência)
-    const statusDates = {};
-
-    if (history && history.length > 0) {
-      // Ordenar histórico por data
-      const sortedHistory = [...history].sort((a, b) => {
-        const dateA = safeDate(a.timestamp || a.created_at);
-        const dateB = safeDate(b.timestamp || b.created_at);
-        if (!dateA && !dateB) return 0;
-        if (!dateA) return 1;
-        if (!dateB) return -1;
-        return dateA - dateB;
-      });
-
-      sortedHistory.forEach((entry) => {
-        // PACOTE CY: ler o campo correto — new_value (não new_status)
-        const status = normalizeStatus(entry.new_value || entry.new_status || entry.status);
-        if (status) {
-          reachedStatuses.add(status);
-          if (!statusDates[status]) {
-            statusDates[status] = entry.timestamp || entry.created_at;
-          }
-        }
-      });
-    }
-
-    // ============================================================
-    // Construir timeline iterando sobre TODAS as fases (sortedPhases),
-    // não sobre o histórico. Isto garante que fases saltadas aparecem.
-    // ============================================================
-    const timeline = sortedPhases.map(p => {
-      const isReached = reachedStatuses.has(p.id);
-      const isCurrent = p.id === normalizedCurrentStatus;
-      const isBefore = p.order < currentOrder;
-      const isAfter = p.order > currentOrder;
-
-      // Determinar estado da fase:
-      // - Alcançada e não atual → Concluída (com data do histórico)
-      // - Atual → Atual
-      // - NÃO alcançada e antes da atual → Saltada (sem data inventada)
-      // - NÃO alcançada e depois da atual → Pendente
-      const isCompleted = isReached && !isCurrent;
-      const isSkipped = !isReached && isBefore;
-      const isPendente = !isReached && isAfter;
-
-      // Data: só se a fase foi alcançada (registo explícito no histórico)
-      const date = isReached ? (statusDates[p.id] || null) : null;
-
-      // daysInPhase: só para fases alcançadas e não-atuais
-      let daysInPhase = undefined;
-      if (isCompleted && date) {
-        // Calcular dias entre esta fase e a próxima alcançada (ou hoje)
-        const parsedEntry = safeParseISO(date);
-        const now = new Date();
-        if (parsedEntry) {
-          daysInPhase = differenceInDays(now, parsedEntry);
-        }
-      }
-
-      return {
-        phase: p.id,
-        phaseInfo: p,
-        date,
-        isCurrent,
-        isCompleted,
-        isSkipped,
-        isPendente,
-        daysInPhase,
-      };
-    });
-
-    setTimelineData(timeline);
-    setLoading(false);
-  }, [history, normalizedCurrentStatus, phasesMap, sortedPhases, currentPhaseInfo, currentOrder]);
-
-  useEffect(() => {
-    buildTimeline();
-  }, [buildTimeline]);
+  const loading = !Array.isArray(workflowStatuses);
+  const faseActual = timelineData.find((f) => f.isCurrent)?.phaseInfo || null;
 
   if (loading) {
     return (
@@ -264,7 +130,9 @@ const ProcessTimeline = ({ currentStatus, history, workflowStatuses }) => {
     );
   }
 
-  // Calcular estatísticas
+  // Estatísticas do cabeçalho. O total de dias já não soma a mesma
+  // janela de tempo várias vezes: cada fase mede da sua entrada até à
+  // entrada na seguinte, por isso a soma é o tempo real decorrido.
   const completedPhases = timelineData.filter(t => t.isCompleted).length;
   const totalDays = timelineData.reduce((acc, t) => acc + (t.daysInPhase || 0), 0);
 
@@ -277,19 +145,20 @@ const ProcessTimeline = ({ currentStatus, history, workflowStatuses }) => {
             Timeline
           </CardTitle>
           <div className="flex items-center gap-2">
-            {currentPhaseInfo && (
-              <Badge 
+            {faseActual && (
+              <Badge
+                data-testid="fase-actual"
                 className="text-[10px] px-1.5 py-0"
-                style={{ backgroundColor: getColor(currentPhaseInfo.color), color: '#fff' }}
+                style={{ backgroundColor: getColor(faseActual.color), color: '#fff' }}
               >
-                {safeLabel(currentPhaseInfo.label)}
+                {safeLabel(faseActual.label || faseActual.name)}
               </Badge>
             )}
           </div>
         </div>
         {totalDays > 0 && (
           <p className="text-[10px] text-muted-foreground">
-            {completedPhases} fases • {totalDays} dias
+            {completedPhases} fases concluídas • {totalDays} dias no processo
           </p>
         )}
       </CardHeader>

@@ -190,6 +190,40 @@ def process_ai_analyze_results(
     return extracted_data, conflicts, document_types
 
 
+def resumo_da_analise(
+    results: Optional[dict],
+    documents: list[dict],
+) -> dict[str, Any]:
+    """Quantos documentos a IA leu mesmo, e quais falharam e porquê.
+
+    `documents_count` na resposta conta os documentos ENVIADOS — é o que
+    o utilizador seleccionou. Não serve para decidir se há alguma coisa
+    para mostrar: com a chave da OpenAI em falta ou a quota esgotada,
+    três documentos enviados são três documentos falhados e a contagem
+    continua a dizer "3". Daí este resumo separado.
+
+    Degrada com elegância: um agregado antigo (ou um duplo de teste) sem
+    a chave `documents_failed` devolve zero falhas em vez de levantar.
+    """
+    vazio = {"documents_succeeded": 0, "documents_failed": []}
+    if not results or not isinstance(results, dict):
+        return vazio
+
+    lidos = results.get("documents_analyzed") or []
+    falhas = results.get("documents_failed") or []
+    return {
+        "documents_succeeded": len(lidos),
+        "documents_failed": [
+            {
+                "file_name": f.get("file_name", ""),
+                "error": f.get("error", "Erro desconhecido"),
+            }
+            for f in falhas
+            if isinstance(f, dict)
+        ],
+    }
+
+
 def should_skip_ai_analysis(metadata: dict | None) -> bool:
     """Docs já analisados pela IA (extração) não precisam de nova análise."""
     return bool(metadata and metadata.get("ai_analyzed"))
@@ -594,11 +628,18 @@ async def run_analysis_on_documents(
         except Exception as e:
             logger.warning(f"Erro ao finalizar log: {e}")
 
+    # "VLM no Escuro": `documents_count` é o que foi ENVIADO; o resumo diz
+    # o que a IA leu mesmo e o que falhou. Sem isto a UI não consegue
+    # distinguir "nada a preencher" de "a IA nem chegou a ler".
+    resumo = resumo_da_analise(results, documents)
+
     return {
         "success": True,
         "process_id": process_id,
         "client_name": client_name,
         "documents_count": len(documents),
+        "documents_succeeded": resumo["documents_succeeded"],
+        "documents_failed": resumo["documents_failed"],
         "skipped_already_analyzed": skipped_analyzed,
         "marked_analyzed": marked,
         "log_id": log_id,

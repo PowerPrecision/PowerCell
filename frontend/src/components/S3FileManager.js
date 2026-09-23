@@ -84,6 +84,7 @@ import {
   SelectValue,
 } from "./ui/select";
 import { toast } from "sonner";
+import { resumirAnaliseEmLote } from "../utils/analiseEmLoteFeedback";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import PDFAnnotationViewer from "./PDFAnnotationViewer";
 // PACOTE DJ — Modal de revisão Human-in-the-Loop de sugestões IA por documento
@@ -1262,8 +1263,16 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
           return;
         }
         
-        // Se temos callback, passar os dados para pré-preencher a ficha
-        if (onAIDataExtracted && result.extracted_data) {
+        // "VLM no Escuro" (Lote 5, P0): o teste era
+        // `if (onAIDataExtracted && result.extracted_data)` — e `{}` é
+        // truthy em JavaScript, por isso um resultado VAZIO (chave da
+        // OpenAI em falta, quota esgotada) entrava aqui na mesma, seguia
+        // para o pai e apanhava o toast verde em baixo. Quem decide o
+        // desfecho passa a ser `resumirAnaliseEmLote`; quem o ANUNCIA é
+        // o `ProcessDetails`, que é quem sabe se sobrou algo para rever.
+        // Duas vozes sobre o mesmo evento davam um verde por cima de um
+        // diálogo que nunca abriu.
+        if (onAIDataExtracted) {
           // Organizar documentos em pastas (mover ficheiros no S3)
           try {
             // Juntar source_path (S3 path) dos ficheiros originais com os resultados da IA
@@ -1291,19 +1300,30 @@ const S3FileManager = ({ processId, clientName, onAIDataExtracted, onDocumentDat
             fieldConfidence: result.field_confidence || {},
             conflicts: result.conflicts || [],
             documentsProcessed: result.documents_count,
+            // O que a IA leu MESMO e o que falhou, com o motivo. Sem
+            // isto o pai não distingue "nada a preencher" de "a IA nem
+            // chegou a ler" — e foi essa confusão que deu o silêncio.
+            documentsSucceeded: result.documents_succeeded,
+            documentsFailed: result.documents_failed || [],
             suggestions: result.suggestions || [],
             titularMatches: result.titular_matches || [],
             needsTitularChoice: !!result.needs_titular_choice,
           });
-          
-          toast.success(`Análise completa! ${result.documents_count} documento(s) processado(s). Verifique os campos pré-preenchidos.`);
-          
-          // Não mostrar popup se temos callback
+
+          // O toast é do `ProcessDetails` (ver comentário acima).
           setSelectedFilesForAI([]);
         } else {
           // Fallback: mostrar popup com resultados
           setAiDialog({ open: true, results: result });
-          toast.success(`Análise completa: ${result.documents_count} documento(s) processado(s)`);
+          const { tipo, texto } = resumirAnaliseEmLote({
+            documentsCount: result.documents_count,
+            documentsSucceeded: result.documents_succeeded,
+            documentsFailed: result.documents_failed,
+            temRevisao: Object.keys(result.extracted_data || {}).length > 0,
+          });
+          if (tipo === "erro") toast.error(texto);
+          else if (tipo === "aviso") toast.warning(texto);
+          else toast.success(texto);
         }
         
         // Recarregar ficheiros para ver nova organização + badges "Analisado"

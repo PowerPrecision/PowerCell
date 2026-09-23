@@ -38,20 +38,28 @@ def test_build_new_email_ws_message_shape():
 
 
 def test_get_email_auto_sync_interval_seconds(monkeypatch):
+    """Cadência do auto-sync IMAP.
+
+    Os valores mudaram no Lote 5 (fecho do ponto 7): o ciclo de 60s com
+    clamp 30–300s era o que estava a apanhar rate limit / bloqueio de IP
+    no alojamento partilhado. Passou a 5 minutos, com o chão em 2 min
+    para que uma variável mal posta não reabra o bloqueio. Ver
+    `services/email_sync_cadence.py` e `tests/unit/test_imap_cadencia.py`.
+    """
     monkeypatch.delenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", raising=False)
-    assert get_email_auto_sync_interval_seconds() == 60
-
-    monkeypatch.setenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", "90")
-    assert get_email_auto_sync_interval_seconds() == 90
-
-    monkeypatch.setenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", "5")
-    assert get_email_auto_sync_interval_seconds() == 30
-
-    monkeypatch.setenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", "9999")
     assert get_email_auto_sync_interval_seconds() == 300
 
+    monkeypatch.setenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", "600")
+    assert get_email_auto_sync_interval_seconds() == 600
+
+    monkeypatch.setenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", "5")
+    assert get_email_auto_sync_interval_seconds() == 120
+
+    monkeypatch.setenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", "9999")
+    assert get_email_auto_sync_interval_seconds() == 1800
+
     monkeypatch.setenv("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", "nope")
-    assert get_email_auto_sync_interval_seconds() == 60
+    assert get_email_auto_sync_interval_seconds() == 300
 
 
 # ====================================================================
@@ -144,8 +152,19 @@ def test_api_startup_uses_configurable_email_sync_interval():
     server = Path(__file__).resolve().parents[2].joinpath("server.py").read_text()
     assert "get_email_auto_sync_interval_seconds" in server
     assert "interval_seconds=180" not in server
+    # A cadência vive agora em `email_sync_cadence` (ponto único partilhado
+    # com o Monitor de Sinais Vitais, que não pode importar o módulo pesado
+    # de tarefas agendadas). O `scheduled_tasks` re-exporta-a.
     tasks = Path(__file__).resolve().parents[2].joinpath(
         "services", "scheduled_tasks.py"
     ).read_text()
-    assert "_DEFAULT_EMAIL_AUTO_SYNC_INTERVAL = 60" in tasks
-    assert "random.randint(0, 60)" not in tasks
+    assert "from services.email_sync_cadence import" in tasks
+    assert "jitter_do_auto_sync(interval_seconds)" in tasks, (
+        "o jitter tem de ser proporcional ao ciclo; um tecto fixo de 15s "
+        "num ciclo de 5 min não desencontra os workers"
+    )
+    cadencia = Path(__file__).resolve().parents[2].joinpath(
+        "services", "email_sync_cadence.py"
+    ).read_text()
+    assert "DEFAULT_INTERVAL_SECONDS = 300" in cadencia
+    assert "MIN_INTERVAL_SECONDS = 120" in cadencia

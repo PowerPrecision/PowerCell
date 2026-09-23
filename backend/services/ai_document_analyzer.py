@@ -653,6 +653,11 @@ async def analyze_multiple_documents(
     
     results = {
         "documents_analyzed": [],
+        # "VLM no Escuro" (Lote 5, P0): a falha POR DOCUMENTO ia só para o
+        # log de importação e o documento era saltado — o agregado voltava
+        # vazio e indistinguível de um lote sem nada a preencher. Quem
+        # chama precisa de saber o que falhou para o poder DIZER.
+        "documents_failed": [],
         "comparison": {
             "matching": [],
             "different": [],
@@ -812,10 +817,17 @@ async def analyze_multiple_documents(
                 "applied_fields": [e["field"] for e in comparison["empty_fields"]]
             })
         else:
+            motivo = analysis.get("error") or "Erro desconhecido"
             # Actualizar log com erro
             doc_result.update({
                 "status": "error",
-                "error_message": analysis.get("error", "Erro desconhecido")
+                "error_message": motivo
+            })
+            # E devolver o motivo a quem chamou: o log de importação é
+            # para auditoria, não é um canal para a UI.
+            results["documents_failed"].append({
+                "file_name": doc["name"],
+                "error": motivo,
             })
         
         # Actualizar log se existir

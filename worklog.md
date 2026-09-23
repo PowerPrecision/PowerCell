@@ -5004,3 +5004,90 @@ O primeiro `find_one` estendido do conftest aplicava projecções literalmente �
 ## Commit
 
 `Fix: Comprehensive UX polish, email rendering fixes, strict RBAC, and assignment logic refinement`
+
+---
+
+# Iteração — Lote 5, Prioridade 0: VLM no Escuro, UI de Fases, cadência IMAP (Set 2026)
+
+## Contexto
+
+Duas interceções críticas reportadas pelo dono depois da Secção A, mais o
+fecho do ponto 7 (IMAP) com as variáveis do Render já confirmadas.
+
+## Ponto 7 — cadência do IMAP
+
+**Diagnóstico confirmado:** não era autenticação. Era rate limit / bloqueio
+de IP em alojamento partilhado, que muitos servidores IMAP reportam como
+`[AUTHENTICATIONFAILED]` — uma password certa a falhar repetidamente.
+
+- **NOVO** `services/email_sync_cadence.py` — ponto único da cadência.
+  Omissão 60 s → **300 s**; clamp 30–300 → **120–1800**; jitter proporcional
+  (até 1/4 do ciclo) em vez do tecto fixo de 15 s.
+- `scheduled_tasks.py` re-exporta (os chamadores antigos não mudam);
+  `random` deixou de ser usado lá.
+- `job_heartbeat.py`: **`_intervalo_efectivo`** — o intervalo do BATIMENTO
+  vence o declarado. Sem isto, abrandar o laço punha o Monitor de Sinais
+  Vitais a gritar `atrasado` a um job que está a cumprir o horário novo.
+  `JOBS_DECLARADOS["email_auto_sync"]` deriva agora da mesma função do laço.
+- `.env.example`: `EMAIL_AUTO_SYNC_INTERVAL_SECONDS` documentado com o motivo.
+- Guardas antigas (`test_email_realtime.py`) actualizadas: afirmavam a
+  cadência anterior.
+
+## Bug 1 — VLM no Escuro
+
+Toast verde + diálogo de revisão calado. Três pontos a engolir a falha:
+
+- `ai_document_analyzer.analyze_multiple_documents`: **NOVO**
+  `results["documents_failed"]` — a falha por documento deixa de morrer no
+  ciclo (ia só para o log de importação).
+- `document_ai_analyze`: **NOVO** `resumo_da_analise()`; a resposta ganha
+  `documents_succeeded` + `documents_failed`. `documents_count` continua a
+  contar os ENVIADOS — é o que o utilizador seleccionou.
+- **NOVO** `utils/analiseEmLoteFeedback.js` (`resumirAnaliseEmLote`): três
+  desfechos, nunca quatro. O silêncio não é um valor possível.
+- `S3FileManager`: porta deixa de ser `result.extracted_data` (`{}` é truthy);
+  encaminha os campos novos; deixou de dar o toast (duas vozes sobre o mesmo
+  evento).
+- `ProcessDetails.commitAIExtractedData`: os dois `return` mudos passam a
+  anunciar o desfecho.
+
+## Bug 2 — UI de Fases Mentirosa
+
+- **NOVO** `utils/processTimeline.js` (`normalizarEstado` /
+  `construirTimeline`): o alias legado só se aplica quando o motor **não**
+  conhece o original e conhece o destino; a duração de cada fase mede-se até
+  à entrada na seguinte; `null` (e não 0) quando a fase actual é desconhecida.
+- `ProcessTimeline.js`: 200 → ~150 linhas, delega tudo; `data-testid`
+  `fase-actual` / `fase-saltada`.
+- **NOVO** `utils/funilDeFases.js` (`agruparEmFunil`): nenhum processo
+  desaparece (grupo "Outras fases", só quando tem conteúdo); `escritura`
+  deixa de estar em dois grupos.
+- `ConsultorDashboard.js`: `FUNNEL_MACRO` sai do ficheiro.
+
+## Testes
+
+- **NOVO** `tests/unit/test_imap_cadencia.py` (9)
+- **NOVO** `tests/unit/test_vlm_nao_fica_no_escuro.py` (6)
+- **NOVO** `utils/analiseEmLoteFeedback.test.js` (8)
+- **NOVO** `pages/processDetails/vlmSilencioGuard.test.js` (8, com contraprova)
+- **NOVO** `utils/processTimeline.test.js` (14)
+- **NOVO** `utils/funilDeFases.test.js` (10)
+- **NOVO** `components/__tests__/ProcessTimeline.test.jsx` (4)
+
+## Erros meus, reportados
+
+1. Aritmética errada num teste (11 Mar → 23 Set são 196 dias, não 195). O
+   código estava certo.
+2. O teste de componente contou a legenda ("Saltada" aparece lá também).
+3. **Teste fraco**, terceira ocorrência do padrão: a asserção sobre o cartão
+   inteiro passava com a fase actual já reescrita pelo alias, porque "CPCV"
+   também é etiqueta de um nó. A mutação matou 1 de 2 — foi isso que o
+   denunciou.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **1987 passed** (baseline 1972 + 15 novos).
+- `yarn test` → **767 passed / 69 ficheiros** (baseline 723 / 65).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- flake8 gate CI (`E9,F63,F7,F82`) → 0.
+- Mutação: **seis, seis mataram** (depois de corrigido o teste fraco).

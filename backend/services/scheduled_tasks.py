@@ -25,7 +25,6 @@ Uso:
 import asyncio
 import logging
 import argparse
-import random
 from datetime import datetime, timezone, timedelta
 from typing import List, Dict, Any, Optional
 import uuid
@@ -47,25 +46,18 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Pacote EC — intervalo do loop de auto-sync IMAP no processo API (WebSocket).
-# 60s + jitter curto ≈ 1–2 min entre ciclos (o sleep corre DEPOIS do sync).
-_DEFAULT_EMAIL_AUTO_SYNC_INTERVAL = 60
-_MIN_EMAIL_AUTO_SYNC_INTERVAL = 30
-_MAX_EMAIL_AUTO_SYNC_INTERVAL = 300
-
-
-def get_email_auto_sync_interval_seconds(default: int = _DEFAULT_EMAIL_AUTO_SYNC_INTERVAL) -> int:
-    """Intervalo entre ciclos de auto-sync IMAP (segundos).
-
-    Override: ``EMAIL_AUTO_SYNC_INTERVAL_SECONDS``. Clamp 30–300s para evitar
-    martelar o IMAP ou voltar aos intervalos longos de 3–15 minutos.
-    """
-    raw = os.environ.get("EMAIL_AUTO_SYNC_INTERVAL_SECONDS", str(default))
-    try:
-        value = int(raw)
-    except (TypeError, ValueError):
-        value = default
-    return max(_MIN_EMAIL_AUTO_SYNC_INTERVAL, min(value, _MAX_EMAIL_AUTO_SYNC_INTERVAL))
+# Lote 5 (fecho do ponto 7) — a cadência do auto-sync IMAP mudou de casa.
+# Vive em `services/email_sync_cadence.py` porque o Monitor de Sinais
+# Vitais precisa do mesmo número e não pode importar este módulo (pesado)
+# no arranque do `server.py`/`worker.py`. Re-exportado aqui para os
+# chamadores antigos (`server.py`) não terem de saber disso.
+from services.email_sync_cadence import (  # noqa: F401
+    DEFAULT_INTERVAL_SECONDS as _DEFAULT_EMAIL_AUTO_SYNC_INTERVAL,
+    MAX_INTERVAL_SECONDS as _MAX_EMAIL_AUTO_SYNC_INTERVAL,
+    MIN_INTERVAL_SECONDS as _MIN_EMAIL_AUTO_SYNC_INTERVAL,
+    get_email_auto_sync_interval_seconds,
+    jitter_do_auto_sync,
+)
 
 
 class ScheduledTasksService:
@@ -1801,10 +1793,11 @@ async def run_email_auto_sync(interval_seconds: Optional[int] = None):
         finally:
             await service.disconnect()
         
-        # Jitter curto (até 15s ou 1/4 do intervalo) para evitar thundering herd
-        # sem empurrar o ciclo para os 3–4 minutos do intervalo antigo de 180s.
-        jitter = random.randint(0, min(15, max(1, interval_seconds // 4)))
-        await asyncio.sleep(interval_seconds + jitter)
+        # Jitter proporcional (até 1/4 do ciclo): é o que desencontra os
+        # workers que arrancam juntos e as várias caixas configuradas. O
+        # tecto fixo de 15s que aqui estava era 5% de um ciclo de 5 min —
+        # não chegava, e o alojamento partilhado lia isso como abuso.
+        await asyncio.sleep(interval_seconds + jitter_do_auto_sync(interval_seconds))
 
 
 async def run_daemon(interval_hours: int = 24):

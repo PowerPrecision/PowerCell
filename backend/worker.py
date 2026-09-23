@@ -235,9 +235,11 @@ async def scheduler_loop():
                 last_runs["matching"] = now
 
             # Sincronização Webmail — rede de segurança no worker.
-            # O sync FREQUENTE (1 min) corre no processo API via
-            # run_email_auto_sync para poder emitir WebSocket new_email.
-            # Este ciclo (10 min) cobre o caso do API worker primário estar em baixo.
+            # O sync do processo API (via run_email_auto_sync, ~5 min desde
+            # o Lote 5) é o que emite o WebSocket new_email; este ciclo de
+            # 10 min cobre o caso de o worker primário da API estar em baixo.
+            # As duas cadências estão deliberadamente desencontradas para
+            # não caírem em cima uma da outra no mesmo servidor IMAP.
             # 🛑 Só em produção (ENVIRONMENT=production)
             if os.environ.get('ENVIRONMENT') == 'production' and now - last_runs["webmail"] > 600:
                 logger.info("Agendando sincronização de webmail por utilizador...")

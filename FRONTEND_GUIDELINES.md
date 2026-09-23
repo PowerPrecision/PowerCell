@@ -636,3 +636,63 @@ Os três botões de extracção (vista de lista, grelha "Todos", grelha por
 categoria) levam `aria-label={`Extrair dados de ${file.name}`}`. Sem ele
 não há nome acessível — é um bug de acessibilidade e um teste impossível
 (§ 20). Com ele, o teste consulta por papel e nome, como deve.
+
+## 24. A UI nunca é uma segunda verdade (Lote 5, P0, Set 2026)
+
+Duas interceções críticas, o mesmo padrão: um ecrã que sabe mais do que o
+motor lhe disse, ou que não diz o que sabe.
+
+### 24.1 O silêncio não é um desfecho
+
+Uma operação que o utilizador lançou **tem** de acabar em palavras. A análise
+em lote de documentos tinha um quarto caminho — não abria o diálogo, não dava
+erro, não dava aviso — e ficava indistinguível da aplicação avariada.
+
+Regras:
+
+- **`{}` é truthy.** `if (resposta.dados)` não prova que há dados. Quando o
+  que interessa é haver CONTEÚDO, conta-se: `Object.keys(x).length > 0`.
+- **Um `if` que decide se o utilizador vê alguma coisa precisa de `else`.**
+  Um `return` sem mensagem, dentro de um componente grande, é invisível na
+  revisão e invisível em produção.
+- **Uma voz por evento.** Se o componente filho já celebrou, o pai não tem
+  como desdizer: o verde fica no ecrã por cima do diálogo que não abriu.
+  Quem sabe o desfecho é quem anuncia.
+- **A decisão vive num módulo puro**, não no componente: `sucesso` / `aviso` /
+  `erro` é testável (`utils/analiseEmLoteFeedback.js`), e um teste afirma que
+  não há um quarto valor possível.
+
+### 24.2 Contagens: dizer o que se está a contar
+
+`documents_count` contava os documentos ENVIADOS e a UI lia-o como
+"processados". Com a IA em baixo, "3 documento(s) processado(s)" era
+literalmente falso. **Um número no ecrã tem de nomear o que mede**; quando
+há dois números (enviados vs. lidos), a resposta traz os dois.
+
+### 24.3 Mapeamentos: o motor manda, o alias é recurso
+
+As fases vêm de `workflow_statuses` e são configuráveis. Um mapa de nomes
+antigos cravado no frontend **só** se aplica quando o motor não conhece o
+original **e** conhece o destino. Aplicá-lo sempre faz o ecrã reescrever uma
+fase que existe mesmo — e nada dá erro.
+
+Corolários:
+
+- **Aplicar a normalização aos DOIS lados ou a nenhum.** Normalizar o estado
+  actual e o histórico, mas não a lista de fases, garante que um dia deixam
+  de casar.
+- **`?.campo || 0` não distingue "zero" de "não existe".** Use-se `null` para
+  o desconhecido: com 0, tudo o que vem depois parece futuro.
+- **Um agrupamento que o motor não sabe fazer não se inventa.** Derivar
+  macro-fases da `order` seria outra mentira, com ar automático. Os grupos
+  ficam como classificação conhecida e o que não couber é DITO ("Outras
+  fases"), nunca deitado fora. Há um teste a afirmar que a soma do gráfico é
+  o total de itens.
+
+### 24.4 Quando o texto procurado existe em dois sítios, a asserção nomeia o sítio
+
+Terceira ocorrência do padrão "mutação perdida ≠ teste fraco". Um
+`expect(cartão).toHaveTextContent("CPCV")` passava com a fase actual já
+reescrita, porque "CPCV" também era etiqueta de um nó da timeline. A
+asserção tem de apontar ao elemento cujo conteúdo a regra decide
+(`data-testid="fase-actual"`), não ao contentor que por acaso o inclui.

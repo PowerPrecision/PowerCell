@@ -103,6 +103,7 @@ import {
   aplicarDecisaoNaRevisao,
   prepararRevisaoDaExtraccao,
 } from "../utils/documentExtraction";
+import { resumirAnaliseEmLote } from "../utils/analiseEmLoteFeedback";
 import RGPDRequestDialog from "../components/processDetails/dialogs/RGPDRequestDialog";
 import TitularChoiceDialog from "../components/processDetails/dialogs/TitularChoiceDialog";
 import useTaskEvents from "../hooks/useTaskEvents";
@@ -794,8 +795,36 @@ const ProcessDetails = () => {
    * (a decidir) e o que vai preencher campos vazios (a confirmar).
    */
   const commitAIExtractedData = async (payload, targetTitular) => {
-    const { extractedData, fieldConfidence, conflicts, documentsProcessed } = payload;
-    if (!extractedData) return;
+    const {
+      extractedData,
+      fieldConfidence,
+      conflicts,
+      documentsProcessed,
+      documentsSucceeded,
+      documentsFailed,
+    } = payload;
+
+    // "VLM no Escuro" (Lote 5, P0): aqui havia um `return` mudo. Com a
+    // chave da OpenAI em falta a resposta chegava com `extracted_data`
+    // vazio, este `if` disparava e a UI ficava sem nada — depois de um
+    // toast VERDE dado pelo `S3FileManager`. Um desfecho sem palavra
+    // nenhuma é indistinguível de a aplicação estar avariada.
+    const dizerODesfecho = (temRevisao) => {
+      const { tipo, texto } = resumirAnaliseEmLote({
+        documentsCount: documentsProcessed,
+        documentsSucceeded,
+        documentsFailed,
+        temRevisao,
+      });
+      if (tipo === "erro") toast.error(texto);
+      else if (tipo === "aviso") toast.warning(texto);
+      else toast.success(texto);
+    };
+
+    if (!extractedData || Object.keys(extractedData).length === 0) {
+      dizerODesfecho(false);
+      return;
+    }
 
     if (targetTitular === "ignore") {
       // Só os campos partilhados (imóvel) — nada de identidade nem de
@@ -813,6 +842,11 @@ const ProcessDetails = () => {
         documentsProcessed,
       });
 
+      // O segundo `return` mudo vivia aqui: sem `else`, um `revisao`
+      // nulo (a IA leu mas não reconheceu campo nenhum) não abria o
+      // diálogo nem dizia porquê.
+      dizerODesfecho(!!revisao);
+
       if (revisao) {
         setAiConflicts(revisao.conflicts);
         setRevisaoPendente(revisao);
@@ -822,6 +856,8 @@ const ProcessDetails = () => {
             `${revisao.conflicts.length} conflito(s) detectado(s). Reveja os valores.`,
           );
         }
+      } else {
+        return;
       }
     }
 
