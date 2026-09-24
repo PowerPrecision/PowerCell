@@ -5580,3 +5580,84 @@ aberto quando o cliente retomou um rascunho com dados lá dentro.
 - `eslint --quiet src/` → 0 erros. `vite build` verde.
 - Mutação: **7 aplicadas, 7 mataram** (5 no módulo puro, 2 na página —
   painel colapsado para "tudo primário" e separação a ignorar o config).
+
+---
+
+# Iteração — Ponto 8, Fase 1: a Parede de Betão no Webmail (Set 2026)
+
+## O buraco, em números
+
+`services/email_webmail.py`: **zero** ocorrências de `network_id` ou
+`tenant`. E `resolve_ucr_mailbox_filter` devolvia `None` em **três**
+caminhos, com o chamador a fazer `if ucr_filter:` — ali `None` não era
+"sem empresa", era **sem filtro nenhum**. Somado ao `can_see_all` de
+admin/ceo/diretor e ao `query = {}` quando não sobrava condição
+nenhuma, a Diretora da Domus a abrir a Caixa Geral lia a colecção
+`emails` inteira.
+
+É o mesmo `None` que o `build_network_scope_condition` foi escrito para
+nunca produzir (Lote 4, ponto 10). Terceira superfície da família, a
+seguir ao Kanban (ponto 1) e às notificações (ponto 3) — e a mais
+sensível das três.
+
+## O que mudou
+
+- **NOVO** `backend/services/webmail_scope.py` — ponto único do âmbito:
+  `empresas_do_webmail`, `assert_empresa_no_ambito` (**404**),
+  `contas_pessoais_da_empresa`, `conta_da_caixa_geral`,
+  `build_company_mailbox_condition` (**nunca `None`**),
+  `build_webmail_scope`.
+- `services/email_webmail.py` — `resolve_ucr_mailbox_filter`,
+  `run_webmail_list` e `run_webmail_stats` aceitam `company_id`; com ele,
+  o âmbito é obrigatório e não há `None`.
+- `routes/emails.py` — `company_id` nos dois endpoints + **NOVO**
+  `GET /emails/webmail/companies` (os separadores).
+- **NOVO** `scripts/backfill_email_company_id.py`.
+
+## Três decisões que vale a pena guardar
+
+1. **O carimbo explícito manda sobre a dedução pelo endereço.** O ramo
+   que resgata a pilha por carimbar exige `sem company_id`. Sem isso, um
+   email carimbado para a Domus aparecia no separador da Power sempre
+   que o mesmo endereço estivesse nas duas empresas.
+2. **Não juntei o `build_tenant_condition`** — e isso é deliberado, não
+   esquecimento. Um separador É uma empresa, e a empresa é validada
+   contra os UCRs (404): é estritamente mais apertado do que a rede.
+   Juntá-lo só acrescentaria um caso — esconder emails por carimbar cujo
+   endereço já prova a que empresa pertencem. Está documentado no topo
+   do módulo para ninguém "corrigir" a ausência.
+3. **O `run_webmail_stats` tinha um furo à parte**: o filtro só era
+   resolvido dentro de `if request is not None`. O âmbito por empresa
+   não precisa do pedido HTTP — lá dentro, qualquer chamador interno
+   passava sem filtro.
+
+## Erros meus, reportados
+
+1. Afirmei sobre o **texto** da query (`"geral@precision.pt" in repr(...)`)
+   e o `re.escape` escapa o ponto. Passei a afirmar sobre o
+   COMPORTAMENTO (o documento casa ou não casa) — que é o que interessa
+   e não parte quando a query muda de forma.
+2. Os meus emails de teste não tinham `is_general`/`shared_role`, que a
+   caixa `general` exige. Amostra minha errada, não o código.
+
+## Testes
+
+- **NOVO** `tests/unit/test_webmail_tenant_isolation.py` (29) — inclui
+  o teste do ENDPOINT a sério: com o separador da Power, nem o email
+  carimbado nem o por carimbar da Domus aparecem.
+- **NOVO** `tests/unit/test_backfill_email_company.py` (10)
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2160 passed** (baseline 2121).
+- flake8 gate → 0.
+- Mutação: **5 aplicadas, 5 mataram** (`None` de volta no construtor;
+  ramo do `account` sem exigir "por carimbar"; `assert_empresa_no_ambito`
+  a aceitar tudo; `company_id` ignorado no resolvedor; Caixa Geral a cair
+  nas contas pessoais).
+
+## A seguir
+
+Fase 2 — os **28 `fetch` crus** do `WebmailPage` (6.ª instância do
+incidente de 2026-09-21) e o `API_URL = process.env.REACT_APP_BACKEND_URL`
+sem passar pelo `utils/apiBaseUrl.js`. Fase 3 — os separadores.

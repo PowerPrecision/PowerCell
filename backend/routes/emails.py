@@ -417,13 +417,14 @@ async def webmail_list(
     custom_folder: Optional[str] = None,
     box: Optional[str] = None,
     mailbox: Optional[str] = None,
+    company_id: Optional[str] = Query(None, description="Ponto 8 — empresa do separador. Valida contra os UCRs do utilizador (404) e impõe o âmbito da caixa."),
     current_user: dict = Depends(get_current_user)
 ):
     return await run_webmail_list(
         request, current_user,
         folder=folder, page=page, limit=limit, account=account,
         search=search, label=label, custom_folder=custom_folder, box=box,
-        mailbox=mailbox,
+        mailbox=mailbox, company_id=company_id,
     )
 
 
@@ -432,11 +433,37 @@ async def webmail_stats(
     request: Request,
     box: Optional[str] = None,
     mailbox: Optional[str] = None,
+    company_id: Optional[str] = Query(None, description="Ponto 8 — empresa do separador"),
     current_user: dict = Depends(get_current_user)
 ):
     return await run_webmail_stats(
         current_user, box=box, request=request, mailbox=mailbox,
+        company_id=company_id,
     )
+
+
+@router.get("/webmail/companies")
+async def webmail_companies(current_user: dict = Depends(get_current_user)):
+    """
+    Ponto 8 — as empresas do utilizador: um separador por cada.
+
+    É esta lista que define o que ele pode sequer PEDIR ao
+    `GET /emails/webmail?company_id=`. Uma empresa fora dela devolve 404.
+    """
+    from services.webmail_scope import empresas_do_webmail
+
+    empresas = await empresas_do_webmail(current_user)
+    return {
+        "companies": [
+            {
+                "company_id": e.company_id,
+                "company_name": e.company_name,
+                "roles": sorted(e.papeis),
+                "has_caixa_geral": e.tem_caixa_geral,
+            }
+            for e in empresas
+        ],
+    }
 
 
 @router.post("/webmail/sync")

@@ -172,12 +172,27 @@ async def resolve_ucr_mailbox_filter(
     current_user: dict,
     box: Optional[str] = None,
     mailbox: Optional[str] = None,
+    company_id: Optional[str] = None,
 ) -> Optional[dict]:
-    """Resolve o filtro UCR a partir do header X-Company-Id + config de email.
+    """Resolve o filtro da caixa.
 
-    Caixas partilhadas (geral / indexação) não são scoped por UCR pessoal.
-    Se ``mailbox`` for dado (Pacote DN.4), filtra só essa conta IMAP.
+    PONTO 8, FASE 1 — quando o cliente diz de que EMPRESA é o separador
+    (`company_id`), o âmbito vem de `services/webmail_scope.py` e é
+    obrigatório: a empresa é validada contra os UCRs do utilizador (404)
+    e a condição devolvida NUNCA é `None`. É esse caminho que fecha o
+    buraco — `None` aqui significava, no chamador, *sem filtro nenhum*,
+    e a Caixa Geral devolvia a colecção inteira.
+
+    Sem `company_id` mantém-se o comportamento legado (header
+    X-Company-Id + config de email), para os clientes que ainda não
+    foram migrados. A Fase 2/3 passa a enviá-lo sempre.
     """
+    pedida = (company_id or "").strip()
+    if pedida:
+        from services.webmail_scope import build_webmail_scope
+
+        return await build_webmail_scope(current_user, pedida, box=box)
+
     if box in ("general", "shared_indexacao"):
         return None
     from services.auth import get_active_company_id_async, get_effective_role_async
@@ -282,7 +297,7 @@ async def run_get_configured_accounts(current_user: dict):
     ]
 
 
-async def run_webmail_list(request: Request, current_user: dict, folder: str = "inbox", page: int = 1, limit: int = 30, account: Optional[str] = None, search: Optional[str] = None, label: Optional[str] = None, custom_folder: Optional[str] = None, box: Optional[str] = None, mailbox: Optional[str] = None):
+async def run_webmail_list(request: Request, current_user: dict, folder: str = "inbox", page: int = 1, limit: int = 30, account: Optional[str] = None, search: Optional[str] = None, label: Optional[str] = None, custom_folder: Optional[str] = None, box: Optional[str] = None, mailbox: Optional[str] = None, company_id: Optional[str] = None):
     """
     Listar emails no formato Webmail por pasta.
     
@@ -376,7 +391,7 @@ async def run_webmail_list(request: Request, current_user: dict, folder: str = "
     # === MULTI-EMPRESA (Pacote DN.2 + DN.4): filtrar pela mailbox do UCR / conta ──
     # Estrito: só emails da empresa/conta IMAP do perfil escolhido no Header.
     ucr_filter = await resolve_ucr_mailbox_filter(
-        request, current_user, box=box, mailbox=mailbox,
+        request, current_user, box=box, mailbox=mailbox, company_id=company_id,
     )
     if ucr_filter:
         and_conditions.append(ucr_filter)
@@ -691,6 +706,7 @@ async def run_webmail_stats(
     box: Optional[str] = None,
     request: Optional[Request] = None,
     mailbox: Optional[str] = None,
+    company_id: Optional[str] = None,
 ):
     """
     Estatísticas de Webmail para o utilizador logado.
@@ -714,8 +730,15 @@ async def run_webmail_stats(
     can_see_all = effective_role in (UserRole.ADMIN, UserRole.CEO, UserRole.DIRETOR)
     if request is not None:
         box, mailbox = await rewrite_box_for_caixa_geral(request, current_user, box, mailbox)
+    # O âmbito por EMPRESA não depende do `request` — é o separador que
+    # diz qual é. Deixá-lo dentro do `if request is not None` mantinha o
+    # buraco aberto para qualquer chamador interno sem pedido HTTP.
     ucr_filter = None
-    if request is not None:
+    if (company_id or "").strip():
+        ucr_filter = await resolve_ucr_mailbox_filter(
+            None, current_user, box=box, mailbox=mailbox, company_id=company_id,
+        )
+    elif request is not None:
         ucr_filter = await resolve_ucr_mailbox_filter(
             request, current_user, box=box, mailbox=mailbox,
         )

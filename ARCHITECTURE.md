@@ -4062,3 +4062,99 @@ tem, por isso, risco de negócio — e não foi preciso mexer no backend.
 regra, escolhida no Lote 3 (ponto 7). O `PortalProfileFields` só ganhou
 o texto do convite, partilhado com o formulário público: as duas
 superfícies que o cliente vê passam a falar igual.
+
+## Ponto 8, Fase 1 — o Webmail entra na Parede de Betão (Set 2026)
+
+### O buraco
+
+`services/email_webmail.py` não tinha **uma única** ocorrência de
+`network_id` ou `tenant`. O Webmail ficou inteiramente fora do
+isolamento multi-tenant erguido no Lote 4 — e é a superfície mais
+sensível de todas, porque o corpo de um email traz tudo.
+
+Pior do que a ausência: `resolve_ucr_mailbox_filter` devolvia `None` em
+**três** caminhos (caixa `general`, caixa `shared_indexacao`, e âmbito
+sem cláusulas) e o chamador fazia `if ucr_filter:`. Ali, `None` não
+significava "sem empresa" — significava **sem filtro nenhum**. Com o
+`can_see_all = effective_role in (ADMIN, CEO, DIRETOR)` por cima, e com
+`query = {}` quando não sobrava nenhuma condição, uma Diretora da Domus
+a abrir a Caixa Geral lia a colecção `emails` inteira.
+
+É exactamente o `None` = "sem filtro" que o `build_network_scope_condition`
+foi escrito para nunca produzir (Lote 4, ponto 10).
+
+### A regra: um separador é uma empresa
+
+`services/webmail_scope.py` é o ponto único. O âmbito de um separador é,
+no máximo:
+
+```
+company_id == <empresa>
+OU  (account ∈ <contas dessa empresa>  E  sem company_id)
+```
+
+O segundo ramo existe só para a **pilha por carimbar** — o
+`email_service` grava `company_id` condicionalmente (`if company_id:`),
+por isso há emails cuja única prova de pertença é o endereço da caixa
+que os sincronizou. Exige `sem company_id` de propósito: **um carimbo
+explícito manda sempre sobre a dedução pelo endereço**, senão um email
+carimbado para a Domus apareceria no separador da Power sempre que o
+mesmo endereço estivesse configurado nas duas.
+
+`build_company_mailbox_condition` **nunca devolve `None`**: um âmbito
+vazio devolve `CONDICAO_IMPOSSIVEL`, e há um teste com a contraprova de
+que essa condição não casa com documento nenhum — sem ela, bastaria a
+constante ser `{}` para o teste passar com a porta escancarada.
+
+### A Caixa Geral não atravessa empresas
+
+Regra de tolerância zero, confirmada pelo dono do produto: o
+administrador da Domus, no separador da Domus, vê `geral@domus.pt` e
+**nunca** `geral@power.pt`, mesmo que tenha cargo de gestão nas duas
+redes. `build_webmail_scope(..., box="general")` resolve a Caixa Geral
+**daquela** empresa e de mais nenhuma.
+
+### Porque NÃO se junta aqui o `build_tenant_condition`
+
+Seria redundante e, pior, perigoso:
+
+1. Um separador **é** uma empresa, e uma empresa pertence a uma rede.
+   Filtrar por empresa é **estritamente mais apertado** do que filtrar
+   por rede.
+2. A empresa pedida é validada contra os UCRs do utilizador
+   (`assert_empresa_no_ambito` → **404**, não 403: um 403 confirmaria
+   que aquele id de empresa existe). Nenhum separador pode sequer nomear
+   uma empresa de outra rede.
+3. Juntar a condição de rede por cima só acrescentaria um caso —
+   esconder a pilha por carimbar a quem não detém a rede de omissão, ou
+   seja, emails cujo endereço da conta **já prova** a que empresa
+   pertencem.
+
+O isolamento de rede fica garantido por construção e transitivamente, e
+nenhum email legítimo desaparece. Há testes para as duas metades.
+
+### Superfície nova
+
+- `GET /emails/webmail/companies` — as empresas do utilizador (os
+  separadores). É esta lista que define o que ele pode **pedir**.
+- `GET /emails/webmail?company_id=` e `/webmail-stats?company_id=` — o
+  âmbito passa a ser um **parâmetro explícito do separador**, não o
+  header `X-Company-Id`. Deixa de depender do Context Switcher, que era
+  metade do problema de UX do Ponto 8.
+- Sem `company_id`, o comportamento legado mantém-se (clientes por
+  migrar). As Fases 2/3 passam a enviá-lo sempre.
+
+**Atenção ao `run_webmail_stats`:** o filtro só era resolvido dentro de
+`if request is not None`. O âmbito por empresa não depende do pedido
+HTTP — deixá-lo lá dentro mantinha o buraco aberto para qualquer
+chamador interno.
+
+### Migração
+
+`scripts/backfill_email_company_id.py`, no molde do
+`backfill_network_id.py`. Deduz o dono pelo `account` (a prova mais
+forte: o email entrou por aquela caixa) e, só depois, pela empresa de um
+utilizador que tenha **uma só**. Um endereço configurado em duas
+empresas **não é dedutível** e fica por resolver — carimbar por maioria
+prenderia o email à empresa errada para sempre, porque o carimbo passa a
+mandar sobre a dedução.
