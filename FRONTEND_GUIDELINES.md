@@ -934,3 +934,41 @@ serializado por omissão dá `labels=VIP,Urgente` e o servidor procura uma
 etiqueta chamada "VIP,Urgente" — zero resultados, zero erros. É o mesmo
 defeito que o `Object.fromEntries` ia introduzindo no Kanban. Constrói-se
 o `URLSearchParams` com `append` por valor e passa-se **intacto**.
+
+## 29. Formulários que o cliente preenche sozinho (Ponto 9, Set 2026)
+
+### 29.1 "Obrigatório" tem UMA fonte, e é a que bloqueia
+
+Um formulário com uma lista de campos obrigatórios para validar e outra
+para a barra de progresso vai divergir — não é uma hipótese, é uma
+questão de tempo. E quando diverge, a barra exige coisas que o botão
+deixa passar, ou promete um avanço que o botão recusa. A fonte é a
+configuração que o `validateStep` lê; tudo o resto deriva dela.
+
+### 29.2 Esconder um campo que continua a bloquear é pior do que mostrá-lo
+
+Divulgação progressiva num formulário público só funciona se o que fica
+escondido for mesmo opcional. Caso contrário o cliente carrega em
+"Próximo", recebe um erro sobre um campo que não está a ver, e não tem
+como o encontrar. Por isso a divisão deriva da MESMA flag que bloqueia,
+e não de uma lista de "campos que me parecem secundários".
+
+### 29.3 Um passo sem obrigatórios mostra tudo
+
+Se a divisão fosse cega, um passo em que todos os campos são opcionais
+abria visualmente vazio, com a totalidade atrás de um botão. Um ecrã em
+branco assusta mais do que uma lista longa: não há nada a esconder
+quando não há nada a exigir.
+
+### 29.4 Quem retomou um rascunho vê o que escreveu
+
+O painel de campos adicionais abre já aberto quando algum dos campos lá
+dentro tem valor. Esconder o que o cliente escreveu na sessão anterior
+lê-se como trabalho perdido.
+
+### 29.5 O convite diz o que se ganha, nunca o que falta
+
+Nada de "obrigatório", "em falta", "tem de", "erro". O rótulo diz o que
+aqueles campos servem, e o corpo diz, por palavras, que se pode
+continuar sem eles. Há um teste a varrer as palavras proibidas — porque
+copy é comportamento, e regride tão facilmente como código.

@@ -24,6 +24,7 @@
  */
 import { useState } from "react";
 import { ChevronDown, ChevronUp } from "lucide-react";
+import { textoDoPainelSecundario } from "../../utils/formularioPublicoCampos";
 
 /**
  * @typedef {Object} CampoDoEsquema
@@ -131,6 +132,7 @@ export default function PortalProfileFields({
 }) {
   const [maisAberto, setMaisAberto] = useState(false);
   const { principais, adicionais } = separarPorVisibilidade(schema);
+  const textoDoPainel = textoDoPainelSecundario(adicionais.length);
 
   if (principais.length === 0 && adicionais.length === 0) {
     return null;
@@ -164,8 +166,15 @@ export default function PortalProfileFields({
             ) : (
               <ChevronDown className="w-4 h-4" />
             )}
-            Preencher mais detalhes ({adicionais.length})
+            {textoDoPainel?.titulo || "Informação adicional importante"} (
+            {adicionais.length})
           </button>
+          {/* Ponto 9 — o convite diz o que o cliente ganha e deixa claro
+              que pode seguir sem isto. O mesmo texto do formulário
+              público, para as duas superfícies falarem igual. */}
+          <p className="text-xs text-gray-500 mt-1">
+            {textoDoPainel?.ajuda}
+          </p>
 
           {maisAberto && (
             <div

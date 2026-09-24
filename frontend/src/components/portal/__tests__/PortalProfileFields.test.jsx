@@ -6,7 +6,8 @@
  *      lista escrita à mão. Um campo novo configurado pelo admin aparece
  *      sem tocar neste componente.
  *   2. Os obrigatórios estão à vista e SINALIZADOS; os restantes vivem
- *      atrás de "Preencher mais detalhes".
+ *      atrás de "Informação adicional importante" (Ponto 9: o
+ *      convite diz o que se ganha, nunca o que falta).
  *   3. O NIF não aparece. A regra de negócio é que nunca é editável pelo
  *      cliente — e o componente não a trata como caso especial: o backend
  *      simplesmente não o envia. O teste afirma o resultado.
@@ -50,7 +51,7 @@ function montar(props = {}) {
 }
 
 const expansor = () =>
-  screen.getByRole("button", { name: /Preencher mais detalhes/ });
+  screen.getByRole("button", { name: /Informação adicional importante/i });
 
 describe("Campos obrigatórios", () => {
   it("estão à vista sem abrir nada", () => {
@@ -92,7 +93,7 @@ describe("Divulgação progressiva", () => {
 
   it("o expansor diz quantos campos esconde", () => {
     montar();
-    expect(expansor()).toHaveTextContent("Preencher mais detalhes (3)");
+    expect(expansor()).toHaveTextContent("Informação adicional importante (3)");
   });
 
   it("abrir revela-os", async () => {
@@ -119,7 +120,7 @@ describe("Divulgação progressiva", () => {
   it("sem campos secundários não há expansor", () => {
     montar({ schema: ESQUEMA.filter((c) => c.is_primary) });
     expect(
-      screen.queryByRole("button", { name: /Preencher mais detalhes/ }),
+      screen.queryByRole("button", { name: /Informação adicional importante/i }),
     ).not.toBeInTheDocument();
   });
 });
@@ -207,5 +208,25 @@ describe("Helpers", () => {
 
   it("aguenta um esquema que não é lista", () => {
     expect(separarPorVisibilidade(null).principais).toEqual([]);
+  });
+});
+
+
+describe("O convite não pode soar a exigência (Ponto 9)", () => {
+  it("não escreve 'obrigatório' nem 'em falta' no expansor", () => {
+    // O Portal e o formulário público partilham o mesmo texto: as duas
+    // superfícies que o cliente vê têm de falar igual.
+    montar();
+    const expansor = screen.getByRole("button", {
+      name: /Informação adicional importante/i,
+    });
+    const texto = expansor.textContent.toLowerCase();
+    expect(texto).not.toContain("obrigat");
+    expect(texto).not.toContain("em falta");
+  });
+
+  it("diz que se pode preencher mais tarde, sem impedir nada", () => {
+    montar();
+    expect(screen.getByText(/impede.*continuar/i)).toBeInTheDocument();
   });
 });

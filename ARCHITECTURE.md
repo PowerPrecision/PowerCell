@@ -3997,3 +3997,68 @@ guarda sobre o código-fonte de que a permissão não volta a ler
 `user["role"]` — com a comparação feita **sem aspas**, porque o
 `ast.unparse` as normaliza e a guarda escrita com aspas duplas passava
 com a brecha aberta.
+
+## Lote 5, Secção B — ponto 9: Portal do Cliente stress-free (Set 2026)
+
+### Havia TRÊS listas de "obrigatório", e divergiam
+
+O formulário público (`PublicClientForm.js`, 64 campos em 6 passos)
+decidia "obrigatório" em três sítios:
+
+1. **`form_config` do administrador** (`is_required`) — o que BLOQUEIA
+   mesmo. É o que `validateStep` e `canProceed` sempre leram.
+2. **`HARDCODED_REQUIRED_BY_STEP`** — uma lista fixa no ficheiro, usada
+   **só** pela barra de progresso.
+3. A **união** das duas, que era o que a barra realmente contava.
+
+As duas primeiras não concordavam em quase nenhum passo:
+
+| Passo | Obrigatórios no config | A barra contava |
+|---|---|---|
+| 2 — 2.º titular | **0** | **10** |
+| 3 — Imóvel | 1 | 3 |
+| 4 — Profissional | inclui `chave_movel_digital` | inclui `employer_name` |
+| 5 — Bancos | 3 | **0** |
+
+Um cliente que comprasse com outra pessoa via a barra a exigir dez
+campos do 2.º titular que **não bloqueiam nada**. Metade da ansiedade do
+formulário era o produto a mentir sobre o que faltava. A lista fixa foi
+apagada; a barra lê agora a mesma fonte que bloqueia.
+
+### Divulgação progressiva: primário = o que bloqueia
+
+`utils/formularioPublicoCampos.js` é a regra pura, e é uma só:
+**primário = obrigatório no `form_config`**. Não é uma lista nova —
+é o painel que o administrador já controla, e é o mesmo campo que
+`RequiredLabel` lê para desenhar (ou não) o asterisco. Por construção,
+**um campo no painel secundário nunca tem asterisco**.
+
+`components/portal/CamposDoPasso.jsx` desenha os primários à vista e os
+restantes num `Collapsible` fechado. Duas regras que não se podem perder:
+
+- **Um passo sem campos obrigatórios mostra tudo.** É o caso do 2.º
+  titular (10 campos, zero obrigatórios): escondê-los todos deixava o
+  ecrã em branco, e um ecrã vazio assusta mais do que uma lista longa.
+- **O painel abre já aberto quando o cliente retomou o rascunho e já lá
+  tinha escrito.** Esconder o que ele escreveu dava a sensação de ter
+  perdido o trabalho.
+
+O texto (`textoDoPainelSecundario`) nunca diz "obrigatório", "em falta"
+nem "tem de", e diz explicitamente que nada ali impede de continuar —
+há um teste a afirmá-lo sobre as palavras proibidas.
+
+### O backend pede quatro campos
+
+`PublicClientRegistration` exige `name`, `email`, `phone` e
+`process_type`; `personal_data`, `real_estate_data`, `titular2_data` e
+`custom_fields` são todos `Optional`. A rede de segurança já existia: o
+processo só nasce quando a `mandatory_checklist` fica completa, e o
+Portal recolhe o resto depois. Tornar os secundários não-bloqueantes não
+tem, por isso, risco de negócio — e não foi preciso mexer no backend.
+
+### O perfil do Portal já cumpria a regra
+
+`portal_profile_schema` deriva `is_primary = is_required` — a mesma
+regra, escolhida no Lote 3 (ponto 7). O `PortalProfileFields` só ganhou
+o texto do convite, partilhado com o formulário público: as duas
+superfícies que o cliente vê passam a falar igual.

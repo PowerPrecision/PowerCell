@@ -5508,3 +5508,75 @@ uma divergência tem de morrer com ela.
 - Mutação: **5 aplicadas, 5 mataram** (papel do JWT de volta, perfil
   activo sem o colapso do `__all_roles__`, `__all_roles__` sem recuo,
   bloqueio terminal pelo papel base, ramo do staff sem a conta).
+
+---
+
+# Iteração — Lote 5, Secção B: ponto 9 (Portal do Cliente stress-free)
+
+## Diagnóstico antes de tocar em código
+
+**1. Havia TRÊS listas de "obrigatório", e divergiam.** O que bloqueia
+vem do `form_config` (`is_required`), lido por `validateStep` e
+`canProceed`. Mas a barra de progresso somava, em UNIÃO, uma lista fixa
+no ficheiro (`HARDCODED_REQUIRED_BY_STEP`). As duas não concordavam em
+quase nenhum passo — o do 2.º titular tem **zero** obrigatórios no
+config e a lista fixa declarava **dez**; o dos bancos tem três e a lista
+declarava nenhum. Metade da ansiedade era o produto a mentir sobre o
+que faltava. Não era estética: era defeito.
+
+**2. O backend pede quatro campos.** `PublicClientRegistration` exige
+`name`, `email`, `phone`, `process_type`; o resto é `Optional`. E o
+processo só nasce quando a `mandatory_checklist` fica completa, com o
+Portal a recolher o resto depois. Logo, nenhum risco de negócio em
+tornar os secundários não-bloqueantes — e nenhuma alteração ao backend.
+
+**3. Esconder sem desbloquear seria pior.** Daí a regra não precisar de
+decisão nova: **primário = obrigatório no `form_config`**, a mesma flag
+que bloqueia e a mesma que o `RequiredLabel` lê para o asterisco. Por
+construção, um campo no painel nunca tem asterisco.
+
+## O que mudou
+
+- **NOVO** `frontend/src/utils/formularioPublicoCampos.js` —
+  `separarCamposPorPrioridade`, `estaPreenchido`,
+  `contarProgressoObrigatorios`, `textoDoPainelSecundario`.
+- **NOVO** `frontend/src/components/portal/CamposDoPasso.jsx` —
+  primários à vista, restantes num `Collapsible` fechado.
+- `PublicClientForm.js` — os cinco passos passam por `CamposDoPasso`;
+  **apagada** a `HARDCODED_REQUIRED_BY_STEP`; barra de progresso a ler a
+  mesma fonte que bloqueia.
+- `PortalProfileFields.jsx` — já fazia divulgação progressiva com a
+  MESMA regra (`is_primary = is_required`, Lote 3 ponto 7); ganhou o
+  texto do convite, partilhado com o formulário público.
+
+Duas regras que só aparecem quando se testa a sério: um passo **sem**
+obrigatórios mostra tudo (senão abria em branco), e o painel abre já
+aberto quando o cliente retomou um rascunho com dados lá dentro.
+
+## Testes
+
+- **NOVO** `src/utils/formularioPublicoCampos.test.js` (18)
+- **NOVO** `src/components/portal/__tests__/CamposDoPasso.test.jsx` (7)
+- **NOVO** `src/pages/__tests__/PublicClientForm.stressFree.test.jsx` (6)
+  — monta a PÁGINA, porque é só aí que se prova o que interessa ao
+  cliente: que **se avança sem preencher nada do painel**.
+- `PortalProfileFields.test.jsx` — guardas do Lote 3 actualizadas ao
+  novo nome do expansor (mudança deliberada) + 2 testes novos sobre as
+  palavras proibidas no convite.
+
+## Erros meus, reportados
+
+1. No teste do painel escrevi `/não.*impede.*continuar/` e o texto real
+   é "Nada aqui o impede de continuar". Expectativa minha errada, não o
+   código.
+2. Procurei o botão por `/seguinte|continuar/` quando se chama
+   "Próximo". Idem.
+
+## Validação
+
+- `yarn test` → **982 passed / 85 ficheiros** (baseline 949 / 82).
+- `pytest tests/unit --no-cov` → **2121 passed** (sem alterações ao
+  backend neste ponto).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **7 aplicadas, 7 mataram** (5 no módulo puro, 2 na página —
+  painel colapsado para "tudo primário" e separação a ignorar o config).
