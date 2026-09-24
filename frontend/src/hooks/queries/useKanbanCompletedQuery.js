@@ -26,8 +26,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { getKanbanBoard } from '../../services/api';
 
 /**
  * Fetcher function para dados dos Concluídos
@@ -73,23 +72,19 @@ const fetchKanbanCompletedData = async (token, filters) => {
     params.append('labels_logic', 'AND');
   }
 
-  const response = await fetch(`${API_URL}/api/processes/kanban?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) {
-    // PACOTE AE-2: extrair a mensagem de erro do backend para diagnóstico
-    let errorDetail = 'Failed to fetch completed kanban data';
-    try {
-      const errorData = await response.json();
-      errorDetail = errorData?.detail || errorData?.message || errorDetail;
-    } catch {
-      errorDetail = `${response.status} ${response.statusText}`;
-    }
-    throw new Error(errorDetail);
+  // Pelo cliente Axios: o interceptor injecta `X-Company-Id` e
+  // `X-Active-Role`, sem os quais o backend responde sobre o papel BASE.
+  try {
+    const { data } = await getKanbanBoard(params);
+    return data;
+  } catch (error) {
+    const corpo = error?.response?.data;
+    throw new Error(
+      corpo?.detail || corpo?.message ||
+      (error?.response ? `${error.response.status} ${error.response.statusText}` : null) ||
+      'Failed to fetch completed kanban data'
+    );
   }
-
-  return response.json();
 };
 
 /**

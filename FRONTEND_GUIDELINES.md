@@ -754,3 +754,48 @@ O selector AND/OR só aparece com duas ou mais etiquetas escolhidas.
 "Corresponder a todas" de uma só etiqueta é a mesma coisa que "qualquer
 uma": a escolha não muda nada e só dá ao utilizador uma decisão a tomar
 sem consequência.
+
+## 26. Contexto de empresa/perfil e transporte (Lote 5, Secção B, Set 2026)
+
+### 26.1 Quinta instância: `fetch` cru continua a aparecer
+
+O Kanban chamava `/processes/kanban` por `fetch` em três sítios, com
+`Authorization` e mais nada. O interceptor que injecta `X-Company-Id` e
+`X-Active-Role` vive no cliente **Axios**; um `fetch` só leva o que lhe
+escreverem à mão.
+
+**Qualquer chamada que dependa de contexto de empresa ou de perfil vai
+pelo `api` do Axios.** Não é uma preferência de estilo — é a diferença
+entre o backend responder sobre o perfil activo ou sobre o papel base.
+Os sintomas desta família são sempre os mesmos: funciona para quem tem
+um perfil só, e falha silenciosamente para quem tem vários.
+
+Quando um endpoint ganha uma função em `services/api.js`, o
+`URLSearchParams` passa **intacto** — um `Object.fromEntries` perde as
+chaves repetidas, e filtros multi-valor (etiquetas, ids atribuídos)
+passam a ver só a última.
+
+### 26.2 Um componente que se esconde não serve de fonte
+
+O `ContextSwitcher` resolvia o nome da empresa activa, mas devolve
+`null` quando não há nada para alternar — ou seja, exactamente para quem
+tem uma empresa só. Reutilizar lógica de um componente com regras de
+visibilidade próprias é reutilizar também o seu silêncio: a lógica sobe
+para `utils/`, o componente fica com a apresentação.
+
+### 26.3 Um id nunca aparece no ecrã como se fosse nome
+
+`getDistinctCompanies` faz `company_name || company_id` — um UCR sem
+nome mostra o identificador em bruto. Numa dropdown passa por um nome
+estranho; num rótulo permanente é a confusão id/nome de 2026-09-21 à
+vista todos os dias. **Vale mais não mostrar nada do que mostrar um
+identificador**, e melhor ainda cair para outro campo que seja
+comprovadamente um nome.
+
+### 26.4 Quem perde o trabalho também é avisado
+
+Reatribuir uma tarefa notificava quem entrava e não quem saía. A pessoa
+anterior ficava com ela na lista até ao refresh seguinte, sem saber que
+deixou de ser dela. **Uma transferência tem dois lados** — e o registo no
+histórico tem de dizer o que mudou (o responsável), não repetir o título
+da tarefa, senão reatribuir e renomear ficam indistinguíveis.

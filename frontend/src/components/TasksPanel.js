@@ -4,6 +4,7 @@
  */
 import { Fragment, useState, useEffect, useCallback } from "react";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import TaskAssigneeDialog from "./tasks/TaskAssigneeDialog";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "./ui/card";
 import { Button } from "./ui/button";
 import { Input } from "./ui/input";
@@ -31,11 +32,11 @@ import {
 import { 
   ClipboardList, Plus, Check, RotateCcw, Trash2, Loader2, 
   MoreVertical, User, Clock, CheckCircle2, Circle, Calendar, AlertTriangle,
-  ExternalLink, Send, MessageSquare, XCircle, Activity, CheckCheck
+  ExternalLink, Send, MessageSquare, XCircle, Activity, CheckCheck, UserCog
 } from "lucide-react";
 import { toast } from "sonner";
 import { pt } from "date-fns/locale";
-import { getTasks, getMyTasks, getProcessTasks, createTask, completeTask, reopenTask, deleteTask, getStaffUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
+import { getTasks, getMyTasks, getProcessTasks, createTask, updateTask, completeTask, reopenTask, deleteTask, getStaffUsers, getProcess, getActiveBackgroundTasks, acknowledgeBackgroundTask, cancelBackgroundTask } from "../services/api";
 import { useAuth } from "../contexts/AuthContext";
 import { hasRole, filterAssignmentStaff } from "../utils/roleUtils";
 import { safeFormat, safeDate } from "../lib/utils";
@@ -79,6 +80,10 @@ const TasksPanel = ({
   
   // Estado para modal de detalhes da tarefa
   const [selectedTask, setSelectedTask] = useState(null);
+  // Ponto 10 — reatribuição. O backend já aceitava `assigned_to` no
+  // `PUT /tasks/{id}`; o que faltava era forma de lá chegar.
+  const [reatribuirAberto, setReatribuirAberto] = useState(false);
+  const [aReatribuir, setAReatribuir] = useState(false);
   const [isDetailModalOpen, setIsDetailModalOpen] = useState(false);
   const [taskResponse, setTaskResponse] = useState("");
   const [submittingResponse, setSubmittingResponse] = useState(false);
@@ -538,6 +543,23 @@ const TasksPanel = ({
     </div>
   );
 
+  const handleReatribuir = async (responsaveis) => {
+    setAReatribuir(true);
+    try {
+      const { data } = await updateTask(selectedTask.id, { assigned_to: responsaveis });
+      // O backend devolve a tarefa já enriquecida (`assigned_to_names`)
+      // — usá-la evita o ecrã mostrar ids enquanto o refetch não chega.
+      setSelectedTask((anterior) => (anterior ? { ...anterior, ...data } : anterior));
+      toast.success("Responsável actualizado");
+      setReatribuirAberto(false);
+      await fetchData();
+    } catch (error) {
+      toast.error(extractErrorMessage(error?.response?.data?.detail, "Erro ao mudar o responsável"));
+    } finally {
+      setAReatribuir(false);
+    }
+  };
+
   const Moldura = asCard ? Card : Fragment;
   // As props derivam do COMPONENTE escolhido, não da flag. Repetir a
   // condição deixava o `data-testid` e a moldura poderem divergir — e
@@ -876,7 +898,17 @@ const TasksPanel = ({
             </ScrollArea>
           )}
         </Corpo>
-      </Moldura>
+        <TaskAssigneeDialog
+        open={reatribuirAberto}
+        onOpenChange={setReatribuirAberto}
+        task={selectedTask}
+        users={users}
+        equipaDoProcesso={equipaDoProcesso}
+        onConfirm={handleReatribuir}
+        saving={aReatribuir}
+      />
+
+    </Moldura>
 
       {/* Dialog para criar tarefa */}
       <Dialog open={isCreateDialogOpen} onOpenChange={setIsCreateDialogOpen}>
@@ -1055,10 +1087,25 @@ const TasksPanel = ({
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Atribuído a</Label>
-                <p className="mt-1 text-sm flex items-center gap-1">
-                  <User className="h-3 w-3" />
-                  {selectedTask?.assigned_to_names?.join(", ") || "Sem atribuição"}
-                </p>
+                <div className="mt-1 flex items-center gap-1.5 flex-wrap">
+                  <p className="text-sm flex items-center gap-1">
+                    <User className="h-3 w-3" />
+                    {selectedTask?.assigned_to_names?.join(", ") || "Sem atribuição"}
+                  </p>
+                  {!selectedTask?.completed && (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="sm"
+                      className="h-6 px-1.5 text-xs gap-1 text-muted-foreground hover:text-foreground"
+                      onClick={() => setReatribuirAberto(true)}
+                      data-testid="abrir-reatribuir"
+                    >
+                      <UserCog className="h-3 w-3" aria-hidden="true" />
+                      Mudar
+                    </Button>
+                  )}
+                </div>
               </div>
               <div>
                 <Label className="text-xs text-muted-foreground">Prazo</Label>

@@ -5174,3 +5174,85 @@ O Kanban chama `/processes/kanban` por `fetch` cru em três sítios, sem
 - `eslint --quiet src/` → 0 erros. `vite build` verde.
 - flake8 gate CI → 0.
 - Mutação: **quatro, quatro mataram**.
+
+---
+
+# Iteração — Lote 5, Secção B: bug do Kanban, pontos 12 e 10 (Set 2026)
+
+## 1. Bug lateral do Kanban (crítico) — duas causas independentes
+
+Sintoma reportado pelo dono: multi-perfil troca de cargo e o quadro não
+acompanha.
+
+- `routes/processes.py`: `get_kanban_board` recebe `request` e usa
+  `get_effective_role(request, user)`. Era o ÚNICO endpoint de listagem
+  a ler `user["role"]`.
+- **NOVO** `process_kanban_enrichment.resolver_papel_do_quadro`:
+  `__all_roles__` recua para o papel do JWT. O
+  `build_kanban_role_base_query` não o conhece e cairia no ramo de
+  gestão — quem tem `indexacao` como base passaria a ver o quadro
+  inteiro. Alargamento evitado.
+- `services/api.js`: `getKanbanBoard(params)` aceita `URLSearchParams`
+  e passa-o INTACTO (um `Object.fromEntries` perdia as chaves repetidas
+  e partia o filtro de etiquetas do ponto 15).
+- `useKanbanQuery` / `useKanbanCompletedQuery` / `KanbanPage`:
+  `fetch` cru → Axios. Quinta instância do incidente de 2026-09-21.
+
+## 2. Ponto 12 — nome da empresa no menu
+
+- **NOVO** `utils/userProfiles.resolveActiveCompanyName` — ponto único.
+  O `ContextSwitcher` já resolvia o nome mas esconde-se por inteiro
+  quando há um só perfil e uma só empresa: quem tem uma empresa só nunca
+  via o nome dela.
+- **Não herda** o `company_name || company_id` do `getDistinctCompanies`
+  (um UCR sem nome mostrava o ID em bruto). Sem nome explícito cai para
+  `user.company`, que é o NOME; um id nunca sai dali.
+- `DashboardLayout.js`: linha com ícone e nome, por baixo do perfil.
+- `ContextSwitcher.jsx`: passa a usar a mesma função.
+
+## 3. Ponto 10 — reatribuição de tarefas
+
+Backend (já aceitava `assigned_to`; faltavam três coisas):
+- **NOVO** `task_assignment_hygiene.diff_de_responsaveis` +
+  `DiffDeResponsaveis` — normaliza os DOIS lados. `set("u1")` é
+  `{'u','1'}`: a bomba do Lote 4 estava por desarmar neste caminho.
+- `task_api_crud.run_update_task`: grava lista normalizada, avisa quem
+  SAI (`task_unassigned`) e regista "Reatribuiu tarefa" no histórico com
+  os nomes — antes era indistinguível de renomear a tarefa.
+
+Frontend:
+- **NOVO** `utils/taskAssignees.agruparResponsaveis` (equipa do processo
+  primeiro; equipa por confirmar é DITA, regra do Lote 4 ponto 13).
+- **NOVO** `components/tasks/TaskAssigneeDialog.jsx`.
+- `TasksPanel.js`: "Atribuído a" ganha botão "Mudar".
+
+## Testes
+
+- **NOVO** `tests/unit/test_kanban_perfil_activo.py` (9)
+- **NOVO** `tests/unit/test_task_reatribuicao.py` (15)
+- **NOVO** `components/kanbanTransport.test.js` (8)
+- **NOVO** `utils/taskAssignees.test.js` (8)
+- **NOVO** `tasks/__tests__/TaskAssigneeDialog.test.jsx` (9)
+- `utils/userProfiles.test.js`: 14 → 20
+
+## Erros meus, reportados
+
+1. **Teste fraco, quarta ocorrência.** A mutação que repunha
+   `role=user["role"]` não matou nada: a guarda comparava aspas que o
+   `ast.unparse` normaliza (**terceira vez** que caio nisto) e a janela
+   de 1600 caracteres apanhava o endpoint seguinte. Guarda reescrita a
+   contar parênteses.
+2. **Lacuna na minha cobertura.** Os testes do ponto 10 usavam todos
+   `process_id: None`, pelo que o ramo do histórico nunca corria — a
+   bateria ficou verde sobre código que rebentava (`get_user_names` sem
+   import). Foi o **flake8** (F821) que o denunciou. Coberto desde então.
+3. `Object.fromEntries` no `getKanbanBoard` perdia as chaves repetidas —
+   apanhado antes de sair, mas teria partido o filtro do ponto 15.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2036 passed** (baseline 2015 + 24 − 3
+  substituídos).
+- `yarn test` → **845 passed / 75 ficheiros** (baseline 814 / 72).
+- `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
+- Mutação: **cinco, cinco mataram** (uma só depois de corrigir a guarda).

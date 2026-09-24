@@ -288,6 +288,25 @@ def build_kanban_board_payload(
     }
 
 
+def resolver_papel_do_quadro(papel_efectivo, user: dict) -> str:
+    """Papel a usar no quadro, a partir do perfil ACTIVO do utilizador.
+
+    `__all_roles__` (o perfil "all" do ContextSwitcher) é um conceito das
+    LISTAGENS: lá, `all_roles=` faz a união das visibilidades. O
+    `build_kanban_role_base_query` não o conhece e cairia no ramo de
+    gestão, sem filtro nenhum — o que para quem tem `indexacao` como
+    papel base seria um ALARGAMENTO: hoje vê a fila da Indexação,
+    passaria a ver o quadro inteiro.
+
+    O quadro não suporta união de âmbitos, por isso `__all_roles__` recua
+    para o papel do JWT. A escolha conservadora nunca alarga.
+    """
+    papel = str(papel_efectivo or "").strip()
+    if not papel or papel == "__all_roles__":
+        return str(user.get("role") or "")
+    return papel
+
+
 async def run_get_kanban_board(
     *,
     user: dict,
@@ -322,7 +341,9 @@ async def run_get_kanban_board(
     user_id = user["id"]
     query = build_kanban_query(
         user,
-        role,
+        # Perfil ACTIVO, não o do JWT (achado lateral do ponto 15): este
+        # era o único endpoint de listagem a ler `user["role"]`.
+        resolver_papel_do_quadro(role, user),
         tenant_condition=tenant_condition,
         show_all=bool(show_all),
         consultor_id=consultor_id,

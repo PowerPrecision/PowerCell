@@ -15,8 +15,7 @@
 
 import { useQuery } from '@tanstack/react-query';
 import { queryKeys } from '../../lib/queryClient';
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+import { getKanbanBoard } from '../../services/api';
 
 /**
  * Fetcher function para dados do Kanban
@@ -60,24 +59,22 @@ const fetchKanbanData = async (token, filters) => {
     params.append('labels_logic', 'AND');
   }
 
-  const response = await fetch(`${API_URL}/api/processes/kanban?${params.toString()}`, {
-    headers: { Authorization: `Bearer ${token}` },
-  });
-
-  if (!response.ok) {
-    // PACOTE AE-2: extrair a mensagem de erro do backend para diagnóstico
-    let errorDetail = 'Failed to fetch kanban data';
-    try {
-      const errorData = await response.json();
-      errorDetail = errorData?.detail || errorData?.message || errorDetail;
-    } catch {
-      // Se não for JSON, usar o status text
-      errorDetail = `${response.status} ${response.statusText}`;
-    }
-    throw new Error(errorDetail);
+  // Pelo cliente Axios: o interceptor injecta `X-Company-Id` e
+  // `X-Active-Role`. Com o `fetch` cru que aqui estava (só
+  // `Authorization`), o backend respondia sobre o papel BASE — o
+  // ContextSwitcher mudava de cargo e o quadro não acompanhava.
+  try {
+    const { data } = await getKanbanBoard(params);
+    return data;
+  } catch (error) {
+    // PACOTE AE-2: manter a mensagem do backend para diagnóstico.
+    const corpo = error?.response?.data;
+    throw new Error(
+      corpo?.detail || corpo?.message ||
+      (error?.response ? `${error.response.status} ${error.response.statusText}` : null) ||
+      'Failed to fetch kanban data'
+    );
   }
-
-  return response.json();
 };
 
 /**

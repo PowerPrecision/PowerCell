@@ -10,6 +10,7 @@ import {
   collectUserRoles,
   getDistinctCompanies,
   getUserCompanyRecords,
+  resolveActiveCompanyName,
   resolveCompanyIdFromUser,
 } from "./userProfiles.js";
 
@@ -191,5 +192,79 @@ describe("resolveCompanyIdFromUser", () => {
       resolveCompanyIdFromUser({ role: "consultor", company: "Precision Crédito" }, "Precision Crédito", "consultor"),
       null,
     );
+  });
+});
+
+
+/**
+ * ────────────────────────────────────────────────────────────────────
+ * Ponto 12 — o nome da empresa activa, junto ao nome e ao perfil.
+ * ────────────────────────────────────────────────────────────────────
+ *
+ * O PEDIDO: mostrar a empresa actual no canto inferior esquerdo, ao pé
+ * do Nome/Perfil.
+ *
+ * PORQUE É QUE NÃO BASTAVA LER O `ContextSwitcher`
+ *   Ele já resolvia o nome — mas devolve `null` quando o utilizador tem
+ *   um só perfil E uma só empresa (`if (!hasMultipleRoles &&
+ *   !showCompanySwitcher) return null;`). Ou seja: quem tem uma empresa
+ *   só, que é a maioria, nunca via o nome dela em lado nenhum. O menu
+ *   tem de o mostrar SEMPRE, e por isso a resolução saiu do componente
+ *   para aqui — duplicar a cadeia de fallback daria dois sítios a
+ *   divergir, que é a raiz do incidente de 2026-09-21.
+ *
+ * `user.company` É O NOME, `company_id` É O ID
+ *   A confusão entre os dois é o incidente de 2026-09-21. Aqui
+ *   queremos mesmo o NOME, e `user.company` é o último recurso
+ *   legítimo — mas só isso: um `company_id` nunca pode acabar no ecrã
+ *   como se fosse nome.
+ */
+describe("resolveActiveCompanyName — ponto 12", () => {
+  const utilizador = {
+    company: "Power Real Estate",
+    user_company_roles: [
+      { company_id: "c1", company_name: "Power Real Estate", role: "consultor" },
+      { company_id: "c2", company_name: "Precision Crédito", role: "intermediario" },
+    ],
+  };
+
+  it("devolve o nome da empresa activa", () => {
+    assert.equal(resolveActiveCompanyName(utilizador, "c2"), "Precision Crédito");
+  });
+
+  it("com uma empresa só continua a devolver o nome", () => {
+    // O caso que o ContextSwitcher não cobria: é ele que esconde tudo
+    // quando não há nada para alternar.
+    const umaSo = {
+      company: "Power Real Estate",
+      user_company_roles: [
+        { company_id: "c1", company_name: "Power Real Estate", role: "consultor" },
+      ],
+    };
+    assert.equal(resolveActiveCompanyName(umaSo, "c1"), "Power Real Estate");
+  });
+
+  it("sem empresa activa escolhida cai no nome do utilizador", () => {
+    assert.equal(resolveActiveCompanyName(utilizador, null), "Power Real Estate");
+  });
+
+  it("uma empresa activa desconhecida não inventa nome", () => {
+    // Melhor não dizer nada do que dizer a empresa errada no ecrã.
+    const semFallback = { user_company_roles: [{ company_id: "c1", company_name: "A" }] };
+    assert.equal(resolveActiveCompanyName(semFallback, "cX"), "");
+  });
+
+  it("NUNCA devolve um company_id como se fosse nome", () => {
+    // A confusão id/nome é o incidente de 2026-09-21. Um id no ecrã é
+    // um sintoma silencioso: parece um nome estranho, não um erro.
+    const semNome = { user_company_roles: [{ company_id: "c1", role: "consultor" }] };
+    const resultado = resolveActiveCompanyName(semNome, "c1");
+    assert.notEqual(resultado, "c1");
+  });
+
+  it("sem dados nenhuns devolve string vazia e não rebenta", () => {
+    assert.equal(resolveActiveCompanyName(null, null), "");
+    assert.equal(resolveActiveCompanyName(undefined, "c1"), "");
+    assert.equal(resolveActiveCompanyName({}, null), "");
   });
 });

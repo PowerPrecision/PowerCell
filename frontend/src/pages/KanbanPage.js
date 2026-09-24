@@ -14,15 +14,13 @@ import { Button } from "../components/ui/button";
 import { Label } from "../components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "../components/ui/select";
 import { Loader2, LayoutGrid, Plus, Download } from "lucide-react";
-import { getUsers } from "../services/api";
+import { getKanbanBoard, getUsers } from "../services/api";
 import { toast } from "sonner";
 import CreateClientModal from "../components/kanban/CreateClientModal";
 import { filterByAnyRole, filterByRole, hasRole } from "../utils/roleUtils";
 import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
 
 const BACKEND_URL = RESOLVED_BACKEND_URL;
-const API_URL = BACKEND_URL + "/api";
-
 const KanbanPage = () => {
   const { token, user } = useAuth();
   const [searchParams, setSearchParams] = useSearchParams();
@@ -73,11 +71,10 @@ const KanbanPage = () => {
       if (indexacaoFilter !== 'all') params.set('indexacao', indexacaoFilter);
       if (parceiroFilter !== 'all') params.set('parceiro', parceiroFilter);
 
-      const res = await fetch(`${API_URL}/processes/kanban?${params.toString()}`, {
-        headers: { Authorization: `Bearer ${token}` },
-      });
-      if (!res.ok) throw new Error('Erro ao obter dados');
-      const data = await res.json();
+      // Pelo cliente Axios: sem `X-Company-Id` / `X-Active-Role` a
+      // exportação saía com o âmbito do papel BASE, e não com o do
+      // perfil activo que o utilizador tem no ecrã à frente.
+      const { data } = await getKanbanBoard(params);
       // Extract processes from columns
       let allProcesses = (data.columns || []).flatMap(col =>
         (col.processes || col.items || []).map(p => ({

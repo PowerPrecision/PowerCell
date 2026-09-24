@@ -37,6 +37,7 @@ import { ROLE_LABELS, ROLE_ICONS } from "../../utils/roleUtils";
 import {
   buildUserProfileItems,
   getDistinctCompanies,
+  resolveActiveCompanyName,
 } from "../../utils/userProfiles";
 
 const ContextSwitcher = () => {
@@ -50,10 +51,10 @@ const ContextSwitcher = () => {
   const companies = getDistinctCompanies(user);
   const profileItems = buildUserProfileItems(user, { effectiveCompanyId });
 
-  // Encontrar o nome da empresa ativa
-  const activeCompanyName = companies.find(c => c.company_id === effectiveCompanyId)?.company_name
-    || user?.company
-    || "";
+  // Ponto 12 — a cadeia mudou para `utils/userProfiles`, porque o menu
+  // lateral precisa dela e este componente esconde-se por inteiro quando
+  // não há nada para alternar.
+  const activeCompanyName = resolveActiveCompanyName(user, effectiveCompanyId);
 
   // Visibilidade: mostrar selector de Role se tem múltiplos perfis
   const hasMultipleRoles = profileItems.length > 1;

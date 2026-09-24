@@ -601,7 +601,23 @@ export const assignProcess = (id, {
   }
   return api.post(`/processes/${id}/assign`, null, { params });
 };
-export const getKanbanBoard = () => api.get("/processes/kanban");
+/**
+ * Quadro Kanban.
+ *
+ * Passa pelo cliente Axios de propósito: o interceptor injecta
+ * `X-Company-Id` e `X-Active-Role`, sem os quais o backend responde
+ * sobre o papel BASE do utilizador e não sobre o perfil ACTIVO. Três
+ * `fetch` crus chamavam este endpoint — quinta instância do incidente
+ * de 2026-09-21. Guarda: `components/kanbanTransport.test.js`.
+ *
+ * @param {URLSearchParams|object} [params] — filtros do quadro.
+ */
+export const getKanbanBoard = (params) =>
+  // `URLSearchParams` segue INTACTO: o Axios serializa-o como está. Um
+  // `Object.fromEntries` aqui perdia as chaves repetidas — e `labels`
+  // é enviado uma vez por etiqueta, pelo que o filtro do ponto 15
+  // passaria a ver só a última.
+  api.get("/processes/kanban", { params });
 export const moveProcessKanban = (processId, newStatus) => 
   api.put(`/processes/kanban/${processId}/move`, null, {
     params: { new_status: newStatus }

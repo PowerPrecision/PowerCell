@@ -3667,3 +3667,104 @@ como trabalho próprio — não se alarga este commit.
 Quatro, quatro mataram: o catálogo sem isolamento de rede; o Kanban a
 ignorar as etiquetas; a normalização fora de cada um dos dois caminhos de
 escrita.
+
+## Lote 5, Secção B — bug do Kanban + pontos 12 e 10 (Set 2026)
+
+### O Kanban ignorava o perfil activo — DUAS causas independentes
+
+Sintoma reportado: utilizadores multi-perfil trocam de cargo no
+ContextSwitcher e o quadro não acompanha.
+
+1. **`get_kanban_board` era o ÚNICO endpoint de listagem a ler
+   `user["role"]`** — o papel do JWT. Todos os outros (`/processes`,
+   `/processes/me`, `/processes/paginated`, `/my-clients`) já usavam
+   `get_effective_role(request, user)`. O handler nem recebia `request`.
+2. **O frontend chamava `/processes/kanban` por `fetch` cru em três
+   sítios** (`useKanbanQuery`, `useKanbanCompletedQuery`, `KanbanPage`),
+   com `Authorization` e mais nada — **quinta instância** do incidente de
+   2026-09-21. O interceptor que injecta `X-Company-Id` / `X-Active-Role`
+   vive no cliente Axios.
+
+Corrigir só uma não resolvia nada: sem header o backend não tem o que
+ler; sem `get_effective_role` o header não é lido. Guarda:
+`components/kanbanTransport.test.js` (os três ficheiros, com contraprova
+de que continuam a chamar o Kanban).
+
+**`__all_roles__` não é um papel, e no quadro não pode passar.** O perfil
+"all" do ContextSwitcher resolve para `__all_roles__`, que as LISTAGENS
+entendem (`all_roles=` faz a união das visibilidades).
+`build_kanban_role_base_query` não o conhece: cairia no ramo de gestão,
+sem filtro nenhum. Para quem tem `indexacao` como papel base isso era um
+**alargamento** — hoje vê a fila da Indexação, passaria a ver o quadro
+inteiro. O quadro não sabe unir âmbitos, por isso
+`resolver_papel_do_quadro` recua para o papel do JWT: a escolha
+conservadora nunca alarga.
+
+**`getKanbanBoard(params)` recebe o `URLSearchParams` INTACTO.** Um
+`Object.fromEntries` ali perdia as chaves repetidas — e `labels` é
+enviado uma vez por etiqueta, pelo que o filtro do ponto 15 passaria a
+ver só a última. Apanhado antes de sair.
+
+### Ponto 12 — o nome da empresa activa no menu
+
+O `ContextSwitcher` já resolvia o nome, mas **devolve `null` quando o
+utilizador tem um só perfil E uma só empresa** — ou seja, quem tem uma
+empresa só, que é a maioria, nunca via o nome dela em lado nenhum. A
+cadeia mudou para `utils/userProfiles.resolveActiveCompanyName`, ponto
+único usado pelo switcher e pelo menu lateral.
+
+**Não herda o fallback do `getDistinctCompanies`.** Esse faz
+`company_name || company_id`: um UCR sem nome mostra o **id em bruto**
+como se fosse nome. Na dropdown do switcher passa por um nome estranho;
+num rótulo permanente é a confusão id/nome de 2026-09-21 a aparecer no
+ecrã todos os dias. `resolveActiveCompanyName` usa
+`normalizeCompanyRecord` directamente e, sem nome explícito, cai para
+`user.company` (que é o NOME) — nunca para o id. Vale mais não dizer
+nada do que pôr a empresa errada no ecrã.
+
+### Ponto 10 — reatribuição de tarefas
+
+O backend **já aceitava** `assigned_to` no `PUT /tasks/{id}` e notificava
+os novos responsáveis. Faltava a UI — o diálogo da tarefa mostrava
+"Atribuído a" como TEXTO, e uma tarefa que caísse na pessoa errada só se
+resolvia apagando-a e criando outra, o que perde o histórico e o prefixo
+`[PROC-012]`. E faltavam três coisas no backend:
+
+1. **A bomba do Lote 4 estava por desarmar neste caminho.**
+   `set(task_data.assigned_to) - set(task.get("assigned_to", []))` —
+   `set("u1")` em Python é `{'u','1'}`, itera os CARACTERES. O ponto 12
+   do Lote 4 normalizou a LEITURA e pôs o motor de automação a gravar
+   lista; `run_update_task` continuava a gravar o que lhe dessem e a
+   fazer o diff com `set` cru. Hoje: `normalizar_assigned_to` na escrita
+   e `diff_de_responsaveis` (que normaliza os DOIS lados) no diff.
+2. **Quem sai não era avisado.** O novo responsável recebia notificação;
+   o anterior ficava com a tarefa na lista até ao refresh seguinte e sem
+   saber que deixou de ser dele. Numa equipa é trabalho a cair no chão.
+   Novo tipo `task_unassigned`.
+3. **A reatribuição não deixava rasto.** `log_history` registava
+   "Atualizou tarefa" com o TÍTULO em old/new — mudar o responsável e
+   renomear a tarefa eram indistinguíveis. Hoje "Reatribuiu tarefa" com
+   os nomes de quem saiu e de quem entrou. O rasto passa por
+   `log_history`, que já aplica a regra de ouro do perfil Indexação.
+
+### Uma lacuna na minha própria cobertura
+
+O ramo do histórico só corre quando a tarefa tem `process_id`. Os meus
+testes usavam todos `process_id: None` e por isso nunca o exercitavam —
+a bateria ficou **verde sobre código que rebentava em produção**
+(`get_user_names` não estava importado). Foi o **flake8** (`F821`) que o
+denunciou, não os testes. Uma tarefa de processo é o caso NORMAL: está
+coberta desde então, nos dois sentidos.
+
+### Mutação
+
+Cinco, cinco mataram — mas uma delas só depois de eu corrigir a guarda.
+
+**Quarta ocorrência de "mutação perdida ≠ teste fraco".** A mutação que
+repunha `role=user["role"]` no Kanban não matou nada, por DUAS razões
+somadas: (a) a guarda comparava `role=user["role"]` com aspas duplas e o
+`ast.unparse` normaliza-as para simples — **terceira vez que caio nisto**;
+(b) o `ast.unparse` colapsa a chamada numa linha só, e a minha janela de
+1600 caracteres a partir do `def` apanhava o endpoint SEGUINTE, que
+também chama `get_effective_role`. A guarda passa agora a extrair os
+argumentos de UMA chamada contando parênteses, e compara sem aspas.

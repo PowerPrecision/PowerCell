@@ -439,6 +439,7 @@ async def diagnose_kanban(
 
 @router.get("/kanban")
 async def get_kanban_board(
+    request: Request,
     consultor_id: Optional[str] = None,
     mediador_id: Optional[str] = None,
     indexacao_id: Optional[str] = None,
@@ -453,7 +454,13 @@ async def get_kanban_board(
     """Kanban por status com filtros de assignee / view_mode / completed_days."""
     return await run_get_kanban_board(
         user=user,
-        role=user["role"],
+        # Perfil ACTIVO (achado lateral do ponto 15). Este era o ÚNICO
+        # endpoint de listagem a ler o papel do JWT: quem trocava de
+        # cargo no ContextSwitcher continuava a ver o quadro do papel
+        # base. `__all_roles__` recua para o do JWT dentro do serviço —
+        # o quadro não sabe unir âmbitos e deixá-lo passar alargaria o
+        # da Indexação.
+        role=get_effective_role(request, user),
         show_all=bool(show_all),
         consultor_id=consultor_id,
         mediador_id=mediador_id,
