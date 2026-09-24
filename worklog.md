@@ -5322,3 +5322,112 @@ fazia o ecrã parecer avariado eram três silêncios e a falta de isolamento.
 - `yarn test` → **863 passed / 77 ficheiros** (baseline 845 / 75).
 - `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
 - Mutação: **três, três mataram**.
+
+---
+
+# Iteração — Lote 5, Secção B: pontos 16 e 17 (Set 2026)
+
+## Diagnóstico antes de tocar em código
+
+**Ponto 16 — o endpoint importa mais do que o dropdown.** O `PUT
+/processes/{id}` é quem escreve o histórico (e portanto respeita o
+silêncio do perfil `indexacao`), o audit trail, dispara
+`process_status_changed` e notifica o cliente. Qualquer atalho furava os
+quatro em silêncio. A edição inline chama-o tal e qual.
+
+**Ponto 17 — o raio-x mudou o plano.** `ProcessesPage` **não usa o
+TanStack Query**: `const [processes, setProcesses] = useState([])` e
+fetch manual. Não havia cache de listagem para ler. Daí as três camadas
+(`state` → `sessionStorage` → endpoint de fronteira), com zero pedidos
+no caso comum.
+
+**E um segundo achado, dentro do 17:** a listagem **não ordena no
+Mongo** — `run_get_processes` traz até 5000 documentos e ordena em
+Python (`sort_process_list`: peso de prioridade → ordem do workflow →
+nome). O plano inicial de projectar `{id: 1}` no endpoint de vizinhos
+estava **errado**: daria a ordem natural do Mongo e a seta apontaria ao
+processo errado, sem erro nenhum. A projecção passou a ser a mínima que
+preserva a ordenação, e a ordenação é a **mesma função** da listagem.
+
+## O que mudou
+
+### Ponto 16
+
+- **NOVO** `frontend/src/utils/inlinePhaseEdit.js` — `podeEditarFase`
+  (perfil activo **e** papel base), `opcoesDeFase`, `deveGravarNovaFase`,
+  `precisaDeRecarregar`.
+- **NOVO** `frontend/src/components/processes/ProcessPhaseCell.jsx`.
+- `ProcessesPage` — `handleMudarFase` optimista com reversão no erro;
+  catálogo de fases pela `useWorkflowStatusesQuery` já existente (sem
+  pedido novo, `staleTime` de 5 min, degrada para lista vazia).
+
+### Ponto 17
+
+- **NOVO** `backend/services/process_navigation.py` —
+  `PROCESS_NAV_PROJECTION`, `vizinhos_na_lista`,
+  `run_get_process_neighbours` (reaproveita `build_process_list_query`,
+  `build_tenant_condition` e `sort_process_list`; **404**, não 403).
+- `backend/routes/processes.py` — `GET /{process_id}/neighbours`.
+- **NOVO** `frontend/src/utils/processNavigation.js` — as três camadas.
+- **NOVO** `frontend/src/hooks/useProcessNeighbours.js`.
+- **NOVO** `frontend/src/components/processDetails/ProcessNavigator.jsx`.
+- `services/api.js` — `getProcessNeighbours` (params **intactos**).
+
+## Testes
+
+- **NOVO** `tests/unit/test_process_navigation.py` (35)
+- **NOVO** `src/utils/inlinePhaseEdit.test.js` (31)
+- **NOVO** `src/utils/processNavigation.test.js` (32)
+- **NOVO** `src/hooks/__tests__/useProcessNeighbours.test.jsx` (9)
+- **NOVO** `src/components/processes/__tests__/ProcessPhaseCell.test.jsx` (9)
+- **NOVO** `src/components/processDetails/__tests__/ProcessNavigator.test.jsx` (6)
+
+## Erros meus, reportados
+
+1. **TESTE FRACO, 5.ª ocorrência.** "Não chama `onChange` ao reescolher a
+   mesma fase" passava com o guarda **removido** — é o Radix que não
+   reemite o item já seleccionado. O teste provava a biblioteca, não o
+   produto. A regra mudou-se para `deveGravarNovaFase` no módulo puro,
+   onde é atacável de frente, e o teste de componente foi renomeado para
+   dizer o que realmente prova.
+2. **TESTE FRACO, 6.ª ocorrência.** A mutação que apagava `prioridade`
+   de `PROCESS_NAV_PROJECTION` **sobreviveu**: os meus processos de teste
+   só tinham `priority` (EN) e nunca `prioridade` (PT), que
+   `get_priority_weight` lê primeiro. A amostra passou a alternar os dois
+   campos; a mutação passou a matar 20 testes.
+3. **Aritmética minha, duas vezes.** `asc["position"] + desc["position"]
+   == total + 1` — falso, porque `sort_process_list` aplica um segundo
+   sort estável por prioridade que domina o campo escolhido; e `(8-1)*3
+   + 1 + 1` é 23, não 22. Nos dois casos o código estava certo e o teste
+   errado; a expectativa passou a derivar da própria função de ordenação
+   em vez de uma conta minha.
+4. `codigo_da_funcao_sem_comentarios` recebe a **função**, não
+   `(caminho, nome)`.
+5. Uma das minhas mutações rebentou a sintaxe do módulo e a "morte" não
+   contou como tal — repetida em condições válidas.
+6. A suite completa do backend correu em paralelo com o laço de mutações
+   e leu o ficheiro ainda mutado (8 falsos negativos). Repetida limpa.
+
+## Achado lateral — por decidir
+
+`run_update_process` resolve `can_update_status` por `user["role"]` (o
+papel base do JWT) e **não** por `get_effective_role`. Para um
+utilizador multi-perfil isso diverge nos dois sentidos: quem entra COMO
+Indexação com papel base de consultor **pode** mudar a fase pela API,
+apesar de o produto dizer que está de outro chapéu; e o inverso também.
+É o mesmo padrão que foi fechado no Kanban (ponto 12) e no
+`_is_stealth_user` (Lote 4). Não foi alterado aqui: é uma decisão de
+produto/segurança, não um defeito de implementação. A UI da edição
+inline exige **os dois** papéis, portanto nunca promete o que o servidor
+recusa — mas a API continua aberta ao primeiro caso.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2102 passed** (baseline 2067).
+- `yarn test` → **950 passed / 82 ficheiros** (baseline 863 / 77).
+- `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
+- Mutação: **22 aplicadas** — 8 no `process_navigation.py` (isolamento,
+  ordenação, projecção, 404, índices), 7 no `inlinePhaseEdit`/
+  `ProcessPhaseCell`, 4 no `processNavigation.js`, 3 no
+  `useProcessNeighbours`. **Duas sobreviveram** (as duas descritas em
+  "Erros meus"); depois de corrigidos os testes, **as 22 mataram**.

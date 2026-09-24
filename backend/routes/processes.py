@@ -106,6 +106,10 @@ from services.process_list_enrichment import (
     load_workflow_status_map,
     slice_page,
 )
+# Ponto 17 — Navegação Contígua. Vive num serviço próprio mas reaproveita
+# `build_process_list_query` e `sort_process_list`: a seta tem de levar ao
+# vizinho da MESMA listagem, com os mesmos filtros e o mesmo isolamento.
+from services.process_navigation import run_get_process_neighbours
 from services.process_staff_assignment import (
     run_staff_assign_process,
     run_assign_me_to_process,
@@ -568,6 +572,63 @@ async def add_observation_note(
         log_history_fn=log_history,
         populate_fn=populate_client_data,
         decrypt_fn=decrypt_sensitive_data,
+    )
+
+
+@router.get("/{process_id}/neighbours")
+async def get_process_neighbours(
+    process_id: str,
+    request: Request,
+    mine_only: Optional[bool] = Query(False, description="Ponto 17 — a listagem de origem era 'Os Meus Processos' (GET /processes/me)"),
+    status: Optional[str] = Query(None, description="Filtrar por status"),
+    search: Optional[str] = Query(None, description="Pesquisar por nome/email"),
+    view_mode: Optional[str] = Query("active_only", description="Modo de visualização: active_only, all, historical, deleted"),
+    sort_field: Optional[str] = Query(None, description="Campo de ordenação da listagem de origem"),
+    sort_order: Optional[str] = Query("asc", description="Ordem: asc ou desc"),
+    show_all: Optional[bool] = Query(False, description="Visão global (/lista-processos)"),
+    is_indexed: Optional[bool] = Query(None, description="Filtrar por estado de indexação"),
+    assigned_user_id: Optional[str] = Query(None, description="Filtrar por utilizador atribuído (legado)"),
+    assigned_user_ids: Optional[List[str]] = Query(None, description="Filtrar por um ou mais utilizadores atribuídos"),
+    assigned_logic: Optional[str] = Query("OR", description="AND ou OR (default OR)"),
+    process_type: Optional[str] = Query(None, description="Filtrar por tipo de processo"),
+    labels: Optional[List[str]] = Query(None, description="Filtrar por etiquetas"),
+    labels_logic: Optional[str] = Query("OR", description="AND (todas) ou OR (qualquer uma)"),
+    company_id: Optional[str] = Query(None, description="Empresa activa do ContextSwitcher"),
+    user: dict = Depends(get_current_user),
+):
+    """
+    Ponto 17 — vizinhos deste processo na listagem de onde o utilizador veio.
+
+    Só é chamado na FRONTEIRA DA PÁGINA: dentro da página aberta o
+    frontend já tem os ids ordenados e resolve as setas sem pedido
+    nenhum. Devolve `{previous_id, next_id, position, total}` — ids, não
+    processos: a projecção traz só o que a ordenação da listagem lê.
+
+    Recebe os mesmos filtros da listagem de origem porque o vizinho tem
+    de ser o vizinho DENTRO do que o utilizador está a ver.
+    """
+    role = get_effective_role(request, user)
+    return await run_get_process_neighbours(
+        user=user,
+        role=role,
+        process_id=process_id,
+        decrypt_list_fn=decrypt_processes_list,
+        status=status,
+        search=search,
+        view_mode=view_mode,
+        sort_field=sort_field,
+        sort_order=sort_order,
+        show_all=bool(show_all),
+        is_indexed=is_indexed,
+        all_roles=get_all_user_roles(user) if role == "__all_roles__" else None,
+        mine_only=bool(mine_only),
+        company_id=company_id,
+        assigned_user_id=assigned_user_id,
+        assigned_user_ids=assigned_user_ids,
+        assigned_logic=assigned_logic,
+        process_type=process_type,
+        labels=labels,
+        labels_logic=labels_logic,
     )
 
 

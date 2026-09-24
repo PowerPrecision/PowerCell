@@ -201,6 +201,11 @@ import ProcessObservationsCard from "../components/processDetails/ProcessObserva
 import ProcessLabelsEditor from "../components/processDetails/ProcessLabelsEditor";
 import ProcessSummaryTimeline from "../components/processDetails/ProcessSummaryTimeline";
 import { PageHeader } from "../components/shared/PageHeader";
+// Ponto 17 — Navegação Contígua. O hook resolve os vizinhos a partir do
+// contexto que a listagem trouxe (zero pedidos) e só pergunta ao
+// servidor na fronteira da página.
+import ProcessNavigator from "../components/processDetails/ProcessNavigator";
+import { useProcessNeighbours } from "../hooks/useProcessNeighbours";
 import { StatusBadge } from "../components/shared/StatusBadge";
 import { resolveProcessTabsFromQuery } from "../utils/processDeepLink";
 
@@ -214,6 +219,16 @@ const ProcessDetails = () => {
   const [searchParams, setSearchParams] = useSearchParams();
   const { user, token, effectiveRole } = useAuth();
   const queryClient = useQueryClient();
+
+  // Ponto 17 — vizinhos na listagem de origem.
+  const vizinhos = useProcessNeighbours(id);
+  const irParaProcesso = useCallback((destinoId) => {
+    // O contexto viaja com a seta: sem isto, o primeiro clique
+    // consumia-o e o segundo já não teria vizinhança nenhuma.
+    navigate(`/process/${destinoId}`, {
+      state: { contextoDeNavegacao: vizinhos.contexto },
+    });
+  }, [navigate, vizinhos.contexto]);
 
   // Live TanStack queries (process + client + side panels)
   const processBundle = useProcessFullData(id);
@@ -2227,6 +2242,23 @@ const ProcessDetails = () => {
           <Button variant="ghost" size="icon" onClick={() => navigate(-1)} aria-label="Voltar" className="mt-0.5 shrink-0">
             <ArrowLeft className="h-5 w-5" />
           </Button>
+          {/* Ponto 17 — setas Anterior/Seguinte. Só aparecem quando há
+              mesmo uma listagem de origem: um processo aberto por
+              pesquisa global ou por link não tem vizinhos, e uma seta a
+              apontar para os vizinhos de outra lista seria pior do que
+              seta nenhuma. */}
+          {vizinhos.disponivel && (
+            <div className="mt-0.5">
+              <ProcessNavigator
+                anteriorId={vizinhos.anteriorId}
+                seguinteId={vizinhos.seguinteId}
+                posicao={vizinhos.posicao}
+                total={vizinhos.total}
+                aCarregar={vizinhos.aCarregar}
+                onNavegar={irParaProcesso}
+              />
+            </div>
+          )}
           <div className="flex-1 min-w-0">
             <PageHeader
               title={`Processo #${safeString(process?.process_number || "")}`}

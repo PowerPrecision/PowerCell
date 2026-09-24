@@ -574,6 +574,17 @@ export const createProcess = (data) => api.post("/processes", data);
 export const searchClients = (q, limit = 10) => api.get("/clients/search", { params: { q, limit } });
 export const createClientProcess = (data) => api.post("/processes/create-client", data);
 export const updateProcess = (id, data) => api.put(`/processes/${id}`, data);
+/**
+ * Ponto 17 — vizinhos de um processo na listagem de origem (Camada 3).
+ *
+ * Só é chamado na FRONTEIRA da página: dentro da página aberta o
+ * contexto que veio da listagem já responde sem pedido nenhum.
+ * `params` é um `URLSearchParams` e vai INTACTO — um
+ * `Object.fromEntries` perderia as chaves repetidas (`labels`), e a
+ * vizinhança passaria a ser calculada sobre outro filtro, em silêncio.
+ */
+export const getProcessNeighbours = (id, params) =>
+  api.get(`/processes/${id}/neighbours`, { params });
 export const assignProcess = (id, {
   consultorIds,
   mediadorIds,

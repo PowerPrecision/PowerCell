@@ -845,3 +845,81 @@ paginada, esconde correspondências que o servidor colocou noutra página.
 
 E uma pesquisa de pessoas procura por **empresa** também, não só por
 nome e email — é assim que um administrador procura alguém.
+
+## 28. Edição inline e navegação contígua (Lote 5, Secção B, Set 2026)
+
+### 28.1 Um controlo dentro de uma linha clicável começa por travar o clique
+
+A linha da tabela de processos navega para os Detalhes no seu `onClick`.
+Qualquer controlo posto dentro dela — dropdown, checkbox, botão — tem de
+fazer `stopPropagation`, ou abrir o controlo leva o utilizador embora
+antes de ele chegar a usá-lo. É um defeito que não dá erro nenhum: só
+parece que "o dropdown não funciona".
+
+```jsx
+<div onClick={(e) => e.stopPropagation()} onKeyDown={(e) => e.stopPropagation()}>
+  <Select …/>
+</div>
+```
+
+O `onKeyDown` também, e pela mesma razão: quem navega por teclado abre o
+dropdown com Enter, e o Enter subiria para a linha.
+
+### 28.2 Editar em linha usa o endpoint oficial, não um atalho
+
+Um controlo pequeno convida a um endpoint pequeno. Não. A gravação
+inline chama exactamente o que a página de Detalhes chama — é lá que
+vivem o histórico, a auditoria, as automações e as regras de silêncio
+por perfil. Um endpoint "leve" só para a listagem seria uma porta das
+traseiras a todos eles, e ninguém daria por isso durante meses.
+
+### 28.3 A permissão de um controlo inline espelha o backend, e pelo lado mais apertado
+
+Mostrar um controlo a quem o servidor vai recusar com 403 é prometer uma
+acção que não existe. Quando o frontend e o backend resolvem a permissão
+por campos diferentes (o perfil ACTIVO aqui, o papel do JWT lá), exige-se
+**os dois** — nunca se escolhe o mais permissivo para "não chatear".
+
+### 28.4 Uma actualização optimista desfaz-se quando o servidor recusa
+
+Deixar o valor novo no ecrã depois de um erro é a pior das saídas: o
+utilizador sai convencido de que gravou. O valor anterior guarda-se
+ANTES de mutar o estado e repõe-se no `catch`.
+
+### 28.5 Uma seta que pode apontar para o sítio errado não se desenha
+
+Nas setas Anterior/Seguinte dos Detalhes, a ausência de contexto de
+navegação (o processo foi aberto por pesquisa global, por link, por
+notificação) resolve-se **escondendo o controlo**, não adivinhando.
+Adivinhar aqui é pior do que não oferecer: não dá erro, não deixa rasto,
+e o utilizador só percebe depois de editar a ficha errada.
+
+Já um vizinho que *existe* mas está do outro lado da página desenha-se
+**desactivado**, não ausente — esconder o botão fá-lo-ia saltar de sítio
+no primeiro e no último processo, e perder o alvo do rato a meio de uma
+revisão de 40 processos é o atrito que a funcionalidade veio remover.
+
+### 28.6 Estado que atravessa páginas: `state` do router, sessão, e só depois a rede
+
+Por esta ordem, e nunca ao contrário:
+
+1. `location.state` — o que a página de origem sabe, de graça.
+2. `sessionStorage` — a mesma coisa, a sobreviver a um F5. Sobrevive ao
+   refresh e **não** sobrevive a um separador novo, que é exactamente o
+   comportamento certo.
+3. Um pedido ao servidor — só para o que nenhuma das duas pode saber.
+
+O `state` manda sobre a sessão: uma sessão velha de outra listagem não
+pode sequestrar a navegação da listagem de onde o utilizador acabou de
+vir. E toda a leitura/escrita de `sessionStorage` vai dentro de
+`try/catch`: janela privada, quota cheia e cookies bloqueados são
+normais, e um controlo de conveniência nunca pode impedir a página de
+abrir.
+
+### 28.7 Filtros de vários valores viajam em `URLSearchParams`, nunca num objecto
+
+`labels` é `List[str]` no backend. Um `{labels: ["VIP","Urgente"]}`
+serializado por omissão dá `labels=VIP,Urgente` e o servidor procura uma
+etiqueta chamada "VIP,Urgente" — zero resultados, zero erros. É o mesmo
+defeito que o `Object.fromEntries` ia introduzindo no Kanban. Constrói-se
+o `URLSearchParams` com `append` por valor e passa-se **intacto**.

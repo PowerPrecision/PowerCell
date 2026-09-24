@@ -27,8 +27,21 @@ import {
 } from "lucide-react";
 import { toast } from "sonner";
 import { getProcesses, getMyProcesses, markProcessIndexed, restoreProcess ,
-  getProcessLabels,
+  getProcessLabels, updateProcess,
 } from "../services/api";
+// Ponto 16 — Edição Inline de Fases. A gravação usa `updateProcess`
+// (PUT /processes/{id}), o MESMO endpoint dos Detalhes: é ele que
+// escreve o histórico, o audit trail e dispara `process_status_changed`.
+import ProcessPhaseCell from "../components/processes/ProcessPhaseCell";
+import { precisaDeRecarregar } from "../utils/inlinePhaseEdit";
+// Ponto 17 — Navegação Contígua: a listagem leva consigo os ids já
+// ordenados da página aberta, para as setas dos Detalhes custarem zero
+// pedidos dentro da página.
+import {
+  construirContextoDeNavegacao,
+  guardarContexto,
+} from "../utils/processNavigation";
+import { useWorkflowStatusesQuery } from "../hooks/queries/useProcessQuery";
 import { TableSkeleton } from "../components/ui/skeletons";
 import CreateProcessModal from "../components/CreateProcessModal";
 // PACOTE CX — ClientDetailsModal para popup de detalhes ao clicar no nome
@@ -194,6 +207,15 @@ const ProcessesPage = () => {
       return next;
     }, { replace: true });
   }, [setSearchParams]);
+  // Ponto 16 — fases em gravação (uma linha pode estar a gravar enquanto
+  // as outras continuam editáveis).
+  const [mudandoFaseIds, setMudandoFaseIds] = useState(new Set());
+  // Catálogo de fases: query partilhada do TanStack (staleTime 5 min) —
+  // a listagem não faz pedido nenhum próprio, reaproveita a cache que os
+  // Detalhes e o Kanban já enchem. Degrada para lista vazia em erro, e
+  // aí a célula volta a ser um crachá não editável.
+  const { workflowStatuses } = useWorkflowStatusesQuery();
+
   // Estado para tracking de mark-indexed em cada processo
   const [markingProcessIds, setMarkingProcessIds] = useState(new Set());
   const [exporting, setExporting] = useState(false);
@@ -463,6 +485,100 @@ const ProcessesPage = () => {
     }
   }, [pagination.page, pagination.size, viewMode, sortField, sortOrder, location.pathname, indexStatusFilter, activeRole, activeCompanyId, effectiveCompanyId, statusFilter, processTypeFilter, assignedUserIdsParam, assignedLogicFilter, labelsParam, labelsFilter, labelsLogicFilter]);
   
+  /**
+   * Ponto 16 — muda a fase de um processo a partir da listagem.
+   *
+   * Actualização optimista: a linha muda já, e só se desfaz se o
+   * servidor recusar. O `PUT /processes/{id}` é o endpoint oficial —
+   * não há atalho — por isso a auditoria, o histórico e as automações
+   * comportam-se exactamente como se a mudança viesse dos Detalhes.
+   */
+  const handleMudarFase = useCallback(async (processId, novaFase) => {
+    let faseAnterior;
+    setProcesses((prev) => prev.map((p) => {
+      if (p.id !== processId) return p;
+      faseAnterior = p.status;
+      return { ...p, status: novaFase };
+    }));
+    setMudandoFaseIds((prev) => new Set(prev).add(processId));
+
+    try {
+      await updateProcess(processId, { status: novaFase });
+      toast.success(`Fase alterada para "${novaFase.replace(/_/g, " ")}"`);
+      if (precisaDeRecarregar({ novaFase, statusFilter, viewMode })) {
+        // A linha deixou de pertencer a esta listagem (saiu do filtro de
+        // estado, ou passou a terminal numa vista só de activos).
+        // Mantê-la visível seria mentir sobre o filtro activo.
+        fetchProcesses();
+      }
+    } catch (error) {
+      // Desfaz a actualização optimista: deixar a fase nova no ecrã
+      // depois de o servidor recusar é a pior das saídas — o
+      // utilizador sai convencido de que gravou.
+      setProcesses((prev) => prev.map((p) => (
+        p.id === processId ? { ...p, status: faseAnterior } : p
+      )));
+      toast.error(extractErrorMessage(error, "Erro ao alterar a fase do processo"));
+    } finally {
+      setMudandoFaseIds((prev) => {
+        const next = new Set(prev);
+        next.delete(processId);
+        return next;
+      });
+    }
+  }, [statusFilter, viewMode, fetchProcesses]);
+
+  /**
+   * Ponto 17 — abre um processo LEVANDO a listagem consigo.
+   *
+   * Os ids seguem pela ordem em que estão no ecrã (`sortedProcesses`) —
+   * é essa a ordem que o utilizador vê, e é essa que as setas têm de
+   * respeitar. Viajam de duas maneiras: no `state` do router (o caminho
+   * normal) e em `sessionStorage` (que sobrevive a um F5 e não
+   * sobrevive a um separador novo, o que é o comportamento certo).
+   *
+   * Os filtros seguem junto para o endpoint de fronteira poder repetir
+   * EXACTAMENTE a mesma listagem quando a seta sai da página.
+   */
+  const abrirProcesso = useCallback((processId) => {
+    const contexto = construirContextoDeNavegacao({
+      ids: sortedProcesses.map((p) => p.id),
+      page: pagination.page,
+      size: pagination.size,
+      total: pagination.total,
+      origem: location.pathname + location.search,
+      params: {
+        view_mode: viewMode,
+        sort_field: sortField,
+        sort_order: sortOrder,
+        ...(isGlobalView ? { show_all: true } : { mine_only: true }),
+        ...(effectiveCompanyId ? { company_id: effectiveCompanyId } : {}),
+        ...(searchTermRef.current ? { search: searchTermRef.current } : {}),
+        ...(indexStatusFilter === "completed" ? { is_indexed: true } :
+           indexStatusFilter === "pending" ? { is_indexed: false } : {}),
+        ...(statusFilter ? { status: statusFilter } : {}),
+        ...(processTypeFilter ? { process_type: processTypeFilter } : {}),
+        ...(labelsFilter.length
+          ? { labels: labelsFilter, labels_logic: labelsLogicFilter }
+          : {}),
+        ...(assignedUserIdsFilter.length
+          ? {
+              assigned_user_ids: assignedUserIdsFilter.join(","),
+              assigned_logic: assignedLogicFilter,
+            }
+          : {}),
+      },
+    });
+    guardarContexto(contexto);
+    navigate(`/process/${processId}`, { state: { contextoDeNavegacao: contexto } });
+  }, [
+    sortedProcesses, pagination.page, pagination.size, pagination.total,
+    location.pathname, location.search, viewMode, sortField, sortOrder,
+    isGlobalView, effectiveCompanyId, indexStatusFilter, statusFilter,
+    processTypeFilter, labelsFilter, labelsLogicFilter,
+    assignedUserIdsFilter, assignedLogicFilter, navigate,
+  ]);
+
   // FIX (Pacote K): Handler para mudança de filtro de vista (Select)
   const handleViewModeChange = (newMode) => {
     setViewMode(newMode);
@@ -891,7 +1007,7 @@ const ProcessesPage = () => {
                               ? 'bg-red-50/50 dark:bg-red-950/10 border-l-[4px] border-l-red-500' 
                               : ''
                           }`}
-                          onClick={() => navigate(`/process/${process.id}`)}
+                          onClick={() => abrirProcesso(process.id)}
                         >
                           <TableCell>
                             <div>
@@ -999,17 +1115,20 @@ const ProcessesPage = () => {
                               </Badge>
                             )}
                           </TableCell>
+                          {/* Ponto 16 — coluna da fase editável via dropdown.
+                              A célula grava pelo endpoint oficial; quem não
+                              pode mudar a fase (Indexação, parceiro, estados
+                              terminais) continua a ver um crachá. */}
                           <TableCell>
-                            {process.is_deleted || process.status === "eliminado" ? (
-                              <Badge variant="destructive" className="gap-0.5">
-                                <Trash2 className="h-3 w-3" />
-                                Eliminado
-                              </Badge>
-                            ) : (
-                              <Badge variant="outline" className="capitalize">
-                                {process.status?.replace(/_/g, ' ')}
-                              </Badge>
-                            )}
+                            <ProcessPhaseCell
+                              status={process.status}
+                              role={effectiveRole}
+                              baseRole={user?.role}
+                              workflowStatuses={workflowStatuses}
+                              isDeleted={process.is_deleted}
+                              saving={mudandoFaseIds.has(process.id)}
+                              onChange={(novaFase) => handleMudarFase(process.id, novaFase)}
+                            />
                           </TableCell>
                           <TableCell className="text-right">
                             <div className="flex items-center justify-end gap-1">
@@ -1054,7 +1173,7 @@ const ProcessesPage = () => {
                                 size="icon"
                                 onClick={(e) => {
                                   e.stopPropagation();
-                                  navigate(`/process/${process.id}`);
+                                  abrirProcesso(process.id);
                                 }}
                               >
                                 <Eye className="h-4 w-4" />

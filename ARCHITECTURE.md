@@ -3877,3 +3877,82 @@ Numa fronteira de segurança, falhar alto é o correcto.
 Três, três mataram: o âmbito vazio a deixar de ser fail-closed; o guarda
 de rede fora do `delete` das regras; o total a voltar a ser o da página
 em vez do do âmbito.
+
+## Lote 5, Secção B — pontos 16 e 17 (Set 2026)
+
+### Ponto 16 — Edição Inline de Fases: o endpoint é o oficial, sempre
+
+Mudar a fase de um processo obrigava a abrir os Detalhes, gravar e
+voltar atrás. A coluna da fase na listagem passou a ser um dropdown
+(`components/processes/ProcessPhaseCell.jsx`), **mas a gravação continua
+a ser `PUT /processes/{id}`** — o mesmo dos Detalhes.
+
+Isso não é uma preferência de estilo. É esse endpoint que:
+
+- escreve no histórico por `log_history` (e portanto respeita as regras
+  de silêncio do perfil `indexacao`, fechadas no Lote 4);
+- escreve no `audit_trail_service`;
+- dispara `process_trigger("process_status_changed", …)`;
+- notifica o cliente por email.
+
+Um `update_one` directo, ou um endpoint novo "só para a listagem",
+furava os quatro de uma vez — e em silêncio, que é a parte pior.
+
+**Dois papéis na permissão, de propósito.** O produto decide o que se
+pode fazer pelo perfil ACTIVO (`effectiveRole`), mas o
+`run_update_process` resolve `can_update_status` a partir de
+`user["role"]` — o papel base do JWT. Para um utilizador multi-perfil os
+dois divergem **nos dois sentidos**. `utils/inlinePhaseEdit.js` exige os
+dois: é a leitura mais restritiva e nunca promete uma acção que o
+servidor devolva com 403. A divergência de fundo fica **por decidir**
+(ver `worklog.md`, achado lateral) — não foi alterada aqui porque é uma
+decisão de produto, não um bug de implementação.
+
+A listagem **não recarrega** depois de gravar, salvo nos dois casos em
+que a linha deixou de pertencer à listagem aberta
+(`precisaDeRecarregar`): saiu do filtro de estado activo, ou passou a
+terminal numa vista só de activos. Manter a linha visível nesses casos
+seria mentir sobre o filtro.
+
+### Ponto 17 — Navegação Contígua: três camadas, zero pedidos no caso comum
+
+**O achado que desenhou tudo o resto:** `ProcessesPage` **não usa o
+TanStack Query**. Guarda os resultados em `useState` e vai buscá-los à
+mão com um `AbortController`. A `queryKeys.processes.list` existe na
+fábrica mas ninguém a usa nesta página. Não há, portanto, cache de
+listagem para ler — a opção óbvia não existia.
+
+| Camada | Onde vive | Cobre | Custo |
+|---|---|---|---|
+| 1 | `location.state` | dentro da página aberta | **zero pedidos** |
+| 2 | `sessionStorage` | o mesmo, depois de um F5 | **zero pedidos** |
+| 3 | `GET /processes/{id}/neighbours` | a fronteira da página | 1 pedido, 2 ids |
+
+A camada 2 sobrevive ao refresh e **não** sobrevive a um separador novo,
+que é o comportamento certo: quem abre o link directo não veio de
+listagem nenhuma. Quando nenhuma camada se aplica, as setas **não
+aparecem** — nunca se mostra uma seta que possa levar ao sítio errado.
+
+**`services/process_navigation.py` reaproveita `build_process_list_query`
+e `sort_process_list`.** As duas, não uma:
+
+1. A query tem de ser a mesma para os filtros e o **isolamento por Rede**
+   serem os mesmos. Um construtor próprio repetiria o defeito do Kanban
+   (Lote 4/5), que teve o seu e ficou meses fora do isolamento.
+2. A ordenação tem de ser a mesma porque **a listagem não ordena no
+   Mongo** — ordena em Python, por peso de prioridade + ordem do
+   workflow + nome. Um vizinho calculado por ordem natural do Mongo
+   estaria errado sem dar erro.
+
+`PROCESS_NAV_PROJECTION` é a projecção mínima que preserva essa
+ordenação: `id` mais os campos que `sort_process_list` e
+`get_priority_weight` lêem — **incluindo `prioridade` (PT) e `priority`
+(EN), que são campos distintos e ambos usados em produção**. Há um teste
+que o prova por equivalência (ordena a lista completa e a lista reduzida
+e exige a mesma sequência de ids), e não por uma lista de campos escrita
+à mão, que envelheceria mal.
+
+O endpoint devolve **404** para um processo fora do âmbito, não 403 —
+mesma regra do CRUD de automações (Lote 5, ponto 13): distinguir "não
+existe" de "não é teu" confirmaria a existência de processos de outra
+Rede.
