@@ -27,8 +27,14 @@ describe("Pacote FJ org-admin query factory", () => {
   it("defines orgAdmin keys in the official factory", () => {
     assert.match(queryClientSource, /orgAdmin:\s*\{/);
     assert.match(queryClientSource, /companiesAll:\s*\(\)\s*=>/);
-    assert.match(queryClientSource, /companies:\s*\(search\)\s*=>/);
+    // Ponto 11 — a PÁGINA entra na chave. Sem ela o TanStack servia a
+    // página anterior enquanto o pedido novo não chegava.
+    assert.match(queryClientSource, /companies:\s*\(search,\s*page\)\s*=>/);
     assert.match(queryClientSource, /users:\s*\(\)\s*=>/);
+    assert.match(
+      queryClientSource,
+      /usersPaginated:\s*\(search,\s*page,\s*companyId\)\s*=>/,
+    );
     assert.match(queryClientSource, /ucrs:\s*\(\)\s*=>/);
     assert.match(queryClientSource, /ucrByUser:\s*\(userId\)\s*=>/);
   });

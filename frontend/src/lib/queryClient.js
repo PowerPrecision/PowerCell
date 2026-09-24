@@ -248,8 +248,13 @@ export const queryKeys = {
   orgAdmin: {
     all: ['org-admin'],
     companiesAll: () => [...queryKeys.orgAdmin.all, 'companies'],
-    companies: (search) => [...queryKeys.orgAdmin.companiesAll(), search ?? ''],
+    companies: (search, page) =>
+      [...queryKeys.orgAdmin.companiesAll(), search ?? '', page ?? 1],
     users: () => [...queryKeys.orgAdmin.all, 'users'],
+    // Ponto 11 — a página e a pesquisa ENTRAM na chave: sem isso o
+    // TanStack serve a página anterior enquanto o pedido novo não chega.
+    usersPaginated: (search, page, companyId) =>
+      [...queryKeys.orgAdmin.all, 'users', 'paginated', search ?? '', page ?? 1, companyId ?? ''],
     ucrs: () => [...queryKeys.orgAdmin.all, 'ucrs'],
     ucrByUser: (userId) => [...queryKeys.orgAdmin.ucrs(), userId],
   },

@@ -201,18 +201,37 @@ def test_list_companies_escapes_regex_search():
         def sort(self, *args, **kwargs):
             return self
 
+        def skip(self, *args, **kwargs):
+            return self
+
+        def limit(self, *args, **kwargs):
+            return self
+
         async def to_list(self, n):
             return []
 
+    async def _contar(*_a, **_kw):
+        return 0
+
+    async def _sem_tenant(_user):
+        # Ponto 11: a listagem passou a ter isolamento por Rede. Este
+        # teste é sobre o ESCAPE do regex; o âmbito é falseado como
+        # aberto para não trazer outra coisa para dentro dele.
+        return {}
+
     mock_db = MagicMock()
     mock_db.companies.find = MagicMock(return_value=_Cursor())
+    mock_db.companies.count_documents = _contar
 
-    with patch.object(listing, "db", mock_db):
+    with patch.object(listing, "db", mock_db), \
+            patch.object(listing, "build_tenant_condition", _sem_tenant):
         asyncio.run(listing.run_list_companies(search="Power.*(+"))
 
     query = mock_db.companies.find.call_args[0][0]
-    name_regex = query["$or"][0]["name"]["$regex"]
-    nif_regex = query["$or"][1]["nif"]["$regex"]
+    # A pesquisa é agora um dos ramos do `$and` com o âmbito.
+    pesquisa = query["$or"] if "$or" in query else query["$and"][-1]["$or"]
+    name_regex = pesquisa[0]["name"]["$regex"]
+    nif_regex = pesquisa[1]["nif"]["$regex"]
     assert name_regex == r"Power\.\*\(\+"
     assert nif_regex == name_regex
     assert name_regex != "Power.*(+"

@@ -799,3 +799,49 @@ anterior ficava com ela na lista até ao refresh seguinte, sem saber que
 deixou de ser dela. **Uma transferência tem dois lados** — e o registo no
 histórico tem de dizer o que mudou (o responsável), não repetir o título
 da tarefa, senão reatribuir e renomear ficam indistinguíveis.
+
+## 27. Listagens que crescem, e erros que se disfarçam (Lote 5, Set 2026)
+
+### 27.1 A ordem dos ramos é parte da correção
+
+Acrescentar um ramo de erro **depois** do estado vazio não corrige nada:
+
+```jsx
+{lista.length === 0 ? <Vazio/> : erro ? <Erro/> : <Lista/>}   // continua a mentir
+{erro ? <Erro/> : lista.length === 0 ? <Vazio/> : <Lista/>}   // certo
+```
+
+Uma leitura falhada quase sempre devolve zero itens, por isso o estado
+vazio à frente engole o erro. É o defeito do "VLM no Escuro" escrito
+noutra forma — e escrevi-o mal à primeira, num ecrã onde o estava
+precisamente a corrigir.
+
+### 27.2 Ações destrutivas pedem confirmação, e dizem o que se perde
+
+Apagar uma regra de negócio fazia-se com um clique. A confirmação diz o
+NOME do que vai desaparecer e a consequência ("as automações que
+dependem dela param"), não um "Tem a certeza?" genérico.
+
+### 27.3 Paginação: o total é do âmbito, e a página fora do intervalo é um caso
+
+- **Mostrar sempre o total** ("1–25 de 132"). Sem ele, o utilizador não
+  distingue "são estes" de "são os primeiros" — que era o defeito do
+  tecto silencioso de 200.
+- **O total é o do âmbito do utilizador**, nunca o da coleção: um total
+  global diz a uma rede quantos registos a outra tem.
+- **Apertar a pesquisa estando numa página alta** devolve uma lista
+  vazia que parece "não há resultados". Reiniciar a página a cada
+  mudança de filtro, e `calcularPaginacao` devolve `foraDoIntervalo`
+  para quem precise de reagir.
+- **`placeholderData: (anterior) => anterior`** ao mudar de página —
+  sem isso a tabela pisca toda para o esqueleto a cada clique.
+
+### 27.4 Filtrar no cliente o que o servidor já filtrou esconde resultados
+
+A pesquisa de utilizadores era `users.filter(...)` sobre a página
+inteira trazida de uma vez. Ao passar a pesquisa para o servidor, o
+filtro em memória tem de SAIR: aplicado por cima de uma lista já
+paginada, esconde correspondências que o servidor colocou noutra página.
+
+E uma pesquisa de pessoas procura por **empresa** também, não só por
+nome e email — é assim que um administrador procura alguém.

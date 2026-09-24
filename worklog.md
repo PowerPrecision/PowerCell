@@ -5256,3 +5256,69 @@ Frontend:
 - `yarn test` → **845 passed / 75 ficheiros** (baseline 814 / 72).
 - `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
 - Mutação: **cinco, cinco mataram** (uma só depois de corrigir a guarda).
+
+---
+
+# Iteração — Lote 5, Secção B: pontos 13 (Automações) e 11 (Admin) (Set 2026)
+
+## Ponto 13 — CRUD de Automações
+
+**Diagnóstico:** o CRUD existia inteiro (rotas, serviços, botões). O que
+fazia o ecrã parecer avariado eram três silêncios e a falta de isolamento.
+
+- `AutomationPage.js`: `fetchRules` deixa de engolir o erro (mostrava
+  "Criar primeira regra" numa leitura falhada); `handleToggle` diz o que
+  correu mal; `handleDelete` exige `AlertDialog` de confirmação.
+  **A ordem dos ramos importa**: o erro vem ANTES do estado vazio.
+- `workflow_engine.list_rules(tenant_condition=...)` — opcional, porque
+  o caminho de execução corre sem utilizador.
+- `automation_api_rules`: `_regra_no_ambito` (404, nunca 403) guarda o
+  editar e o apagar; `run_create_rule` carimba `network_id`.
+- `routes/automation.py`: `user` propagado aos quatro handlers.
+
+## Ponto 11 — Escalabilidade e isolamento do Admin
+
+- **NOVO** `services/admin_users_scope.py`: `empresas_do_ambito`,
+  `build_users_scope_query`, `build_users_search_condition`.
+- `companies_crud_api_list`: **NOVO** `contar_utilizadores_por_empresa`
+  (agregação `$group` — mata o N+1); `run_list_companies` ganha
+  isolamento, `page`/`size` e `total` do ÂMBITO.
+- `admin_users`: isolamento em `run_get_users` (inclui `for_assignment`)
+  + **NOVO** `run_get_users_paginated` com pesquisa por nome, email e
+  empresa.
+- `routes/admin.py`: **NOVO** `GET /admin/users/paginated` (separado do
+  partilhado, que as dropdowns precisam inteiro).
+- **NOVO** `utils/paginacao.js` + `components/shared/Paginacao.jsx`.
+- `CompaniesAdminTab` / `UsersAccessAdminTab`: paginação, pesquisa
+  server-side, `placeholderData` para não piscar o esqueleto.
+- `tests/unit/conftest.py`: `aggregate` (`$match` + `$group`) no duplo.
+
+## Testes
+
+- **NOVO** `tests/unit/test_automation_rules_tenant.py` (9)
+- **NOVO** `tests/unit/test_admin_escalabilidade.py` (19)
+- **NOVO** `src/pages/__tests__/AutomationPage.test.jsx` (8)
+- **NOVO** `src/utils/paginacao.test.js` (10)
+- Guardas antigas actualizadas: `test_admin_extraction_helpers.py` (2),
+  `test_companies_crud_extraction_helpers.py`, `queryClient.orgAdmin`.
+
+## Erros meus, reportados
+
+1. A troca de ordem dos ramos no `AutomationPage` **não chegou a
+   aplicar-se** — o teste novo apanhou-o. O ramo de erro estava escrito
+   depois do estado vazio, portanto nunca aparecia.
+2. **Lacuna de desenho:** filtrar `users` pelas empresas do âmbito
+   escondia as contas SEM empresa, e uma conta escondida nunca mais
+   podia ser associada a uma. Corrigido com `inclui_sem_empresa`.
+3. Patchei `automation_api_rules.db` mas `delete_rule` usa
+   `workflow_engine.db` — "Event loop is closed". É a regra do AGENTS.md
+   sobre patchar CADA módulo da cadeia, que eu saltei.
+4. `escape_regex` vive em `utils/input_sanitization`, não em
+   `utils/search_filters`.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2067 passed** (baseline 2039).
+- `yarn test` → **863 passed / 77 ficheiros** (baseline 845 / 75).
+- `eslint --quiet src/` → 0 erros. `vite build` verde. flake8 gate → 0.
+- Mutação: **três, três mataram**.

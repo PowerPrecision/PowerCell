@@ -35,8 +35,18 @@ import {
 } from "../services/api";
 import EngineStatusPanel from "../components/automation/EngineStatusPanel";
 import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "../components/ui/alert-dialog";
+import {
   Zap, Plus, Trash2, Edit2,
-  ArrowRight, ChevronRight
+  ArrowRight, ChevronRight, AlertTriangle
 } from "lucide-react";
 
 
@@ -78,6 +88,11 @@ const AutomationPage = ({ embedded = false }) => {
   const [loading, setLoading] = useState(true);
   const [showDialog, setShowDialog] = useState(false);
   const [editingRule, setEditingRule] = useState(null);
+  // Ponto 13 — um erro de leitura tem de se ver no ecrã, não só num
+  // toast que passa.
+  const [erroAoCarregar, setErroAoCarregar] = useState("");
+  const [regraAApagar, setRegraAApagar] = useState(null);
+  const [aApagar, setAApagar] = useState(false);
   // Fases do workflow para popular o Select do bloco IF.
   const [workflowStatuses, setWorkflowStatuses] = useState([]);
 
@@ -98,11 +113,24 @@ const AutomationPage = ({ embedded = false }) => {
   // Nada de `fetch` cru nesta página: o interceptor do cliente Axios é o
   // único sítio que injecta `X-Company-Id` / `X-Active-Role`, e sem eles
   // o backend resolve empresa e perfil errados (incidente 2026-09-21).
+  // Ponto 13 — o `catch { /* silent */ }` que aqui estava fazia um erro
+  // de leitura cair no estado vazio "Criar primeira regra": o
+  // administrador via "não há regras" e concluía que o CRUD não
+  // funcionava. É o padrão do Bug 1 (VLM no Escuro) noutro ecrã — um
+  // erro renderizado como sucesso vazio.
   const fetchRules = useCallback(async () => {
     try {
       const res = await getAutomationRules();
       setRules(res.data?.rules || []);
-    } catch { /* silent */ }
+      setErroAoCarregar("");
+    } catch (err) {
+      const mensagem = extractErrorMessage(
+        err?.response?.data?.detail,
+        "Não foi possível carregar as regras de automação.",
+      );
+      setErroAoCarregar(mensagem);
+      toast.error(mensagem);
+    }
     setLoading(false);
   }, []);
 
@@ -182,13 +210,22 @@ const AutomationPage = ({ embedded = false }) => {
     }
   };
 
-  const handleDelete = async (ruleId, ruleName) => {
+  // Ponto 13 — eliminar uma regra de negócio é irreversível e apagava-se
+  // com UM clique, sem confirmação. A confirmação é obrigatória.
+  const handleDelete = async () => {
+    if (!regraAApagar) return;
+    setAApagar(true);
     try {
-      await deleteAutomationRule(ruleId);
-      setRules(prev => prev.filter(r => r.id !== ruleId));
-      toast.success(`Regra "${ruleName}" eliminada`);
-    } catch {
-      toast.error("Erro ao eliminar");
+      await deleteAutomationRule(regraAApagar.id);
+      setRules(prev => prev.filter(r => r.id !== regraAApagar.id));
+      toast.success(`Regra "${regraAApagar.name}" eliminada`);
+      setRegraAApagar(null);
+    } catch (err) {
+      toast.error(
+        extractErrorMessage(err?.response?.data?.detail, "Não foi possível eliminar a regra."),
+      );
+    } finally {
+      setAApagar(false);
     }
   };
 
@@ -197,7 +234,12 @@ const AutomationPage = ({ embedded = false }) => {
       await updateAutomationRule(rule.id, { is_active: !rule.is_active });
       setRules(prev => prev.map(r => r.id === rule.id ? { ...r, is_active: !r.is_active } : r));
       toast.success(rule.is_active ? "Regra desativada" : "Regra ativada");
-    } catch { /* silent */ }
+    } catch (err) {
+      // Sem isto o interruptor saltava para trás e ninguém dizia porquê.
+      toast.error(
+        extractErrorMessage(err?.response?.data?.detail, "Não foi possível alterar o estado da regra."),
+      );
+    }
   };
 
   // ================================================================
@@ -290,7 +332,18 @@ const AutomationPage = ({ embedded = false }) => {
           <TabsContent value="regras" className="mt-4 space-y-6">
 
         {/* Rules List */}
-        {rules.length === 0 ? (
+        {/* Ponto 13 — o ERRO vem PRIMEIRO. Com o estado vazio à frente,
+            uma leitura falhada continuava a dizer "Nenhuma regra criada":
+            o mesmo defeito escrito de outra maneira. */}
+        {erroAoCarregar ? (
+          <Card className="border-destructive/40">
+            <CardContent className="p-6 text-center space-y-3" data-testid="automation-erro">
+              <AlertTriangle className="h-8 w-8 mx-auto text-destructive" aria-hidden="true" />
+              <p className="text-sm text-muted-foreground">{erroAoCarregar}</p>
+              <Button variant="outline" onClick={fetchRules}>Tentar novamente</Button>
+            </CardContent>
+          </Card>
+        ) : rules.length === 0 ? (
           <Card className="border-dashed">
             <CardContent className="py-12 text-center">
               <Zap className="h-12 w-12 mx-auto text-muted-foreground/30 mb-4" />
@@ -335,7 +388,7 @@ const AutomationPage = ({ embedded = false }) => {
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => openEdit(rule)} aria-label="Editar regra">
                         <Edit2 className="h-3.5 w-3.5" />
                       </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => handleDelete(rule.id, rule.name)} aria-label="Eliminar regra">
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => setRegraAApagar(rule)} aria-label="Eliminar regra">
                         <Trash2 className="h-3.5 w-3.5" />
                       </Button>
                     </div>
@@ -559,6 +612,35 @@ const AutomationPage = ({ embedded = false }) => {
             </DialogFooter>
           </DialogContent>
         </Dialog>
+
+        {/* Ponto 13 — confirmação OBRIGATÓRIA. Apagar uma regra de
+            negócio é irreversível e fazia-se com UM clique. */}
+        <AlertDialog
+          open={Boolean(regraAApagar)}
+          onOpenChange={(aberto) => !aberto && setRegraAApagar(null)}
+        >
+          <AlertDialogContent>
+            <AlertDialogHeader>
+              <AlertDialogTitle>Eliminar esta regra?</AlertDialogTitle>
+              <AlertDialogDescription>
+                A regra <strong>{regraAApagar?.name}</strong> deixa de existir e
+                as automações que dependem dela param. Esta ação não pode ser
+                anulada.
+              </AlertDialogDescription>
+            </AlertDialogHeader>
+            <AlertDialogFooter>
+              <AlertDialogCancel disabled={aApagar}>Cancelar</AlertDialogCancel>
+              <AlertDialogAction
+                onClick={(e) => { e.preventDefault(); handleDelete(); }}
+                disabled={aApagar}
+                className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                data-testid="confirmar-eliminar-regra"
+              >
+                {aApagar ? "A eliminar…" : "Eliminar"}
+              </AlertDialogAction>
+            </AlertDialogFooter>
+          </AlertDialogContent>
+        </AlertDialog>
       </div>
   );
 

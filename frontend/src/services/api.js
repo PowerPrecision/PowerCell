@@ -975,6 +975,17 @@ export const getAdminUsers = (role, { forAssignment } = {}) =>
 /** Lista completa para a Tab Utilizadores da Administração (Pacote EB).
  *  Sem `for_assignment` — inclui admin, indexação e inativos. */
 export const getAllAdminUsers = () => api.get("/admin/users");
+
+/**
+ * Painel de administração: utilizadores paginados, com pesquisa
+ * server-side por nome, email ou empresa (ponto 11).
+ *
+ * Endpoint SEPARADO de `/admin/users` de propósito — esse serve também
+ * as dropdowns de atribuição, que precisam da lista inteira. Paginar o
+ * partilhado partia-as em silêncio.
+ */
+export const getAdminUsersPaginated = (params = {}) =>
+  api.get("/admin/users/paginated", { params });
 export const createAdminUser = (data) => api.post("/admin/users", data);
 export const updateAdminUser = (id, data) => api.put(`/admin/users/${id}`, data);
 export const deleteAdminUser = (id) => api.delete(`/admin/users/${id}`);
@@ -1393,8 +1404,20 @@ export const deleteAutomationRule = (id) => api.delete(`/admin/automation/rules/
 // Sinais vitais do motor de background (leitura).
 export const getAutomationsEngineStatus = () => api.get("/automations");
 
-export const getCompanies = (search) =>
-  api.get("/admin/companies", { params: search ? { search } : {} });
+/**
+ * Empresas do âmbito do utilizador (a sua REDE), paginadas.
+ *
+ * O `page`/`size` fecha o tecto de 200 que truncava em silêncio: à
+ * empresa 201 a UI respondia que ela não existe (ponto 11).
+ */
+export const getCompanies = (search, { page, size } = {}) =>
+  api.get("/admin/companies", {
+    params: {
+      ...(search ? { search } : {}),
+      ...(page ? { page } : {}),
+      ...(size ? { size } : {}),
+    },
+  });
 export const getCompany = (id) => api.get(`/admin/companies/${id}`);
 export const createCompany = (data) => api.post("/admin/companies", data);
 export const updateCompany = (id, data) => api.put(`/admin/companies/${id}`, data);

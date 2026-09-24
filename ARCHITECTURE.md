@@ -3768,3 +3768,112 @@ somadas: (a) a guarda comparava `role=user["role"]` com aspas duplas e o
 1600 caracteres a partir do `def` apanhava o endpoint SEGUINTE, que
 também chama `get_effective_role`. A guarda passa agora a extrair os
 argumentos de UMA chamada contando parênteses, e compara sem aspas.
+
+## Lote 5, Secção B — pontos 13 e 11 (Set 2026)
+
+### Ponto 13 — o CRUD existia; o que faltava era deixar de mentir
+
+Rotas, serviços e UI de edição/eliminação estavam todos lá. O que fazia
+o ecrã parecer avariado eram **três silêncios**:
+
+1. `fetchRules` tinha `catch { /* silent */ }` seguido de
+   `setLoading(false)`. Uma leitura falhada — 403, rede, o que fosse —
+   caía no estado vazio **"Criar primeira regra"**: o administrador via
+   "não há regras" e concluía que o CRUD não funcionava. É o padrão do
+   Bug 1 (VLM no Escuro) noutro ecrã: **um erro renderizado como sucesso
+   vazio**.
+2. `handleToggle` engolia o erro; o interruptor saltava para trás sem
+   explicação.
+3. `handleDelete` apagava uma regra de NEGÓCIO com um clique, sem
+   confirmação, e descartava a mensagem do backend.
+
+**A ORDEM DOS RAMOS É PARTE DA CORREÇÃO.** Acrescentar um ramo de erro
+depois de `rules.length === 0` não resolve nada: uma leitura falhada
+continua a dizer "Nenhuma regra criada". O erro vem PRIMEIRO. (Escrevi-o
+mal à primeira e foi o teste novo que o apanhou.)
+
+### Ponto 13 — as regras pertencem à REDE
+
+Decisão do dono: "A Domus é uma ilha. O Administrador da Domus nunca
+pode ver nem tocar nas regras do grupo Power/Precision."
+
+`list_rules` fazia `find(query)` sem filtro e `create_rule` não
+carimbava nada. E o efeito atravessa mesmo a fronteira: uma regra não é
+um registo decorativo — **cria TAREFAS em processos**, pelo que uma
+regra da rede A visível à rede B punha trabalho de uma empresa na lista
+de outra.
+
+- `list_rules(tenant_condition=...)` — **opcional de propósito**. O
+  caminho de EXECUÇÃO (`check_trigger_conditions`) corre a partir de um
+  processo concreto, sem utilizador: não há âmbito de sessão para
+  aplicar, e exigir a condição daria um motor que não dispara em
+  background.
+- `_regra_no_ambito` guarda o editar e o apagar, e devolve **404 e não
+  403**: confirmar que existe já diria à Domus que a Power tem uma regra
+  com aquele id (mesma escolha do Lote 5, ponto 3).
+- O carimbo é `None` sem contexto de empresa. Carimbar a rede errada é
+  pior do que não carimbar — a regra ficaria visível à rede errada para
+  sempre.
+
+### Ponto 11 — três defeitos distintos
+
+**O N+1.** `_count_company_users` era chamado DENTRO do ciclo da
+listagem: uma query por empresa. 50 empresas = 51 idas à base; 200 =
+201. Passou a `contar_utilizadores_por_empresa`, uma agregação com
+`$group` que conta pelo `company_id` **e** pelo `company_name` (os UCRs
+antigos guardam o nome; ignorá-los diria "0 utilizadores" numa empresa
+cheia).
+
+**O tecto silencioso.** `.to_list(200)` sem paginação e sem dizer que
+truncou: à empresa 201 a UI respondia que ela não existe. Há agora
+`page`/`size` e um `total` contado **dentro do âmbito** — um total
+global diria à Domus quantas empresas a Power tem.
+
+**A pesquisa dos utilizadores era no cliente.** `filteredUsers`
+filtrava em memória sobre `name`/`email`, depois de trazer a tabela
+inteira (`ADMIN_USERS_LIST_LIMIT = 10000`), e não procurava por
+EMPRESA — que é como um administrador procura alguém.
+
+### Ponto 11 — porque é que o utilizador se filtra pelas EMPRESAS
+
+A colecção `users` não tem `network_id` e nunca teve. O que liga um
+utilizador à rede são os UCRs (`user_company_roles.company_id`) e o
+campo legado `users.company`, que é o **NOME** (a confusão id/nome de
+2026-09-21 mora aqui). O âmbito resolve-se em dois passos: **rede →
+empresas → utilizadores dessas empresas**.
+
+Aplicar `{"network_id": ...}` directamente a `users` devolveria SEMPRE
+vazio — e um painel vazio parece uma base de dados vazia, não um filtro
+errado. Seria um defeito silencioso do pior tipo.
+
+O âmbito aplica-se também ao `for_assignment=True`: atribuir um processo
+a alguém de outra rede seria a mesma fuga pela porta do lado.
+
+**Endpoint SEPARADO para o painel.** `/admin/users` serve também as
+dropdowns de atribuição, que precisam da lista inteira; paginar o
+partilhado parti-las-ia em silêncio. O painel usa
+`/admin/users/paginated`.
+
+### Uma lacuna do meu próprio desenho, apanhada antes de sair
+
+Filtrar `users` pelas empresas do âmbito deixava de fora quem **não tem
+empresa nenhuma** — tipicamente contas de administração antigas,
+exactamente as que a Atribuição Rápida do Lote 4 veio impedir de nascer.
+E o defeito fechava-se sobre si mesmo: uma conta que desaparece do
+painel nunca mais pode ser associada a uma empresa, porque deixa de se
+ver. A pilha por carimbar segue agora a MESMA regra dos documentos:
+pertence a quem detém a rede de omissão (`inclui_sem_empresa`).
+
+### Fail-closed, mas alto
+
+`empresas_do_ambito` **não** tem `try/except`. Engolir a falha devolvia
+um âmbito vazio, o âmbito vazio devolve zero utilizadores (fail-closed),
+e o painel ficava em branco sem dizer porquê — a falha de leitura
+disfarçada de "não há nada", que é o defeito do ponto 13 noutro sítio.
+Numa fronteira de segurança, falhar alto é o correcto.
+
+### Mutação
+
+Três, três mataram: o âmbito vazio a deixar de ser fail-closed; o guarda
+de rede fora do `delete` das regras; o total a voltar a ser o da página
+em vez do do âmbito.

@@ -26,6 +26,10 @@ import {
   DialogTitle,
 } from "../ui/dialog";
 import { Input } from "../ui/input";
+import Paginacao from "../shared/Paginacao";
+
+/** Ponto 11 — espelha a omissão do backend. */
+const TAMANHO_DA_PAGINA = 25;
 import { Label } from "../ui/label";
 import { ScrollArea } from "../ui/scroll-area";
 import { Switch } from "../ui/switch";
@@ -89,22 +93,45 @@ export default function CompaniesAdminTab() {
   const [saving, setSaving] = useState(false);
   const [testingConnection, setTestingConnection] = useState(false);
 
+  // Ponto 11 — paginação server-side. O `.to_list(200)` do backend
+  // truncava em SILÊNCIO: à empresa 201 a UI respondia que ela não
+  // existe.
+  const [pagina, setPagina] = useState(1);
+
   const {
-    data: companies = [],
+    data: pagemento,
     isLoading,
     isError,
   } = useQuery({
-    queryKey: queryKeys.orgAdmin.companies(debouncedSearch),
+    queryKey: queryKeys.orgAdmin.companies(debouncedSearch, pagina),
     queryFn: async () => {
-      const res = await getCompanies(debouncedSearch || undefined);
-      return normalizeCompaniesPayload(res.data);
+      const res = await getCompanies(debouncedSearch || undefined, {
+        page: pagina,
+        size: TAMANHO_DA_PAGINA,
+      });
+      return {
+        empresas: normalizeCompaniesPayload(res.data),
+        total: Number(res.data?.total) || 0,
+      };
     },
+    // Sem isto, mudar de página pisca a tabela toda para o esqueleto.
+    placeholderData: (anterior) => anterior,
   });
+
+  const companies = pagemento?.empresas ?? [];
+  const total = pagemento?.total ?? 0;
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedSearch(searchInput), 300);
     return () => clearTimeout(timer);
   }, [searchInput]);
+
+  // Apertar a pesquisa estando numa página alta devolvia uma lista
+  // VAZIA, que parece "não há resultados" e não "estás na página
+  // errada".
+  useEffect(() => {
+    setPagina(1);
+  }, [debouncedSearch]);
 
   useEffect(() => {
     if (isError) toast.error("Erro ao carregar empresas.");
@@ -305,6 +332,16 @@ export default function CompaniesAdminTab() {
           </Table>
         </ScrollArea>
       )}
+
+      {/* Ponto 11 — o total é o do ÂMBITO, não o da colecção: um total
+          global diria à Domus quantas empresas a Power tem. */}
+      <Paginacao
+        total={total}
+        page={pagina}
+        size={TAMANHO_DA_PAGINA}
+        onPageChange={setPagina}
+        etiqueta="empresas"
+      />
 
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent data-testid="company-form-dialog">

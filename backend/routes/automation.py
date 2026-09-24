@@ -50,7 +50,7 @@ async def get_rules(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Listar todas as regras de automação."""
-    return await run_get_rules(active_only)
+    return await run_get_rules(active_only, user)
 
 
 @router.get("/rules/{rule_id}")
@@ -59,7 +59,7 @@ async def get_rule_by_id(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Obter uma regra específica."""
-    return await run_get_rule_by_id(rule_id)
+    return await run_get_rule_by_id(rule_id, user)
 
 
 @router.post("/rules")
@@ -78,7 +78,7 @@ async def update_rule_endpoint(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Actualizar uma regra."""
-    return await run_update_rule(rule_id, data)
+    return await run_update_rule(rule_id, data, user)
 
 
 @router.delete("/rules/{rule_id}")
@@ -87,7 +87,7 @@ async def delete_rule_endpoint(
     user: dict = Depends(require_roles([UserRole.ADMIN, UserRole.CEO]))
 ):
     """Eliminar uma regra."""
-    return await run_delete_rule(rule_id)
+    return await run_delete_rule(rule_id, user)
 
 
 @router.get("/triggers")

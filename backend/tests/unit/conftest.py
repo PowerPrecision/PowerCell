@@ -319,6 +319,47 @@ class FakeAsyncCollection:
     async def count_documents(self, query: dict) -> int:
         return sum(1 for doc in self.docs if self._matches(doc, query))
 
+    def aggregate(self, pipeline: list):
+        """Pipeline mínimo: `$match` + `$group` com `$sum`.
+
+        Acrescentado para a contagem de utilizadores por empresa (ponto
+        11), que mata um N+1 com uma agregação. Testar isso contra um
+        ciclo em Python provaria outra coisa que não o que corre em
+        produção.
+        """
+        docs = [dict(d) for d in self.docs]
+        grupos = None
+
+        for etapa in pipeline or []:
+            if "$match" in etapa:
+                docs = [d for d in docs if self._matches(d, etapa["$match"])]
+            elif "$group" in etapa:
+                spec = etapa["$group"]
+                chave_spec = spec.get("_id")
+                grupos = {}
+                for doc in docs:
+                    if isinstance(chave_spec, dict):
+                        chave = {
+                            nome: doc.get(str(campo).lstrip("$"))
+                            for nome, campo in chave_spec.items()
+                        }
+                        assinatura = tuple(sorted(chave.items(), key=lambda kv: kv[0]))
+                    else:
+                        chave = doc.get(str(chave_spec).lstrip("$")) if chave_spec else None
+                        assinatura = chave
+                    linha = grupos.setdefault(assinatura, {"_id": chave})
+                    for nome, acumulador in spec.items():
+                        if nome == "_id" or not isinstance(acumulador, dict):
+                            continue
+                        if "$sum" in acumulador:
+                            incremento = acumulador["$sum"]
+                            if isinstance(incremento, str):
+                                incremento = doc.get(incremento.lstrip("$"), 0) or 0
+                            linha[nome] = linha.get(nome, 0) + incremento
+                docs = list(grupos.values())
+
+        return FakeAsyncCursor(docs, None)
+
     async def distinct(self, key: str, query: dict = None):
         """Valores distintos de um campo, achatando listas como o Mongo.
 

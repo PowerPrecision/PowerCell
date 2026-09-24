@@ -19,7 +19,7 @@ from models.company import (
     CompanyListResponse,
     CompanyEmailConnectionTest,
 )
-from services.auth import require_admin
+from services.auth import get_current_user, require_admin
 from services.companies_crud_api_list import (
     run_list_companies,
     run_list_available_companies,
@@ -43,9 +43,16 @@ router = APIRouter(
 @router.get("", response_model=CompanyListResponse)
 async def list_companies(
     search: Optional[str] = Query(None, description="Pesquisa por nome ou NIF"),
+    page: int = Query(1, ge=1),
+    size: int = Query(25, ge=1, le=100),
+    user: dict = Depends(get_current_user),
 ):
-    """Lista todas as empresas configuradas no sistema."""
-    return await run_list_companies(search)
+    """Empresas que o utilizador pode administrar.
+
+    Isolamento por Rede (ponto 11) e paginação: o `.to_list(200)` que
+    aqui estava truncava em silêncio.
+    """
+    return await run_list_companies(search, user=user, page=page, size=size)
 
 
 @router.get("/available", response_model=list)

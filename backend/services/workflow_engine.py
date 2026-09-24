@@ -49,9 +49,27 @@ VALID_ACTIONS = [
 
 # ============== CRUD ==============
 
-async def list_rules(active_only: bool = False) -> list:
-    """Listar todas as regras de automação."""
-    query = {"is_active": True} if active_only else {}
+async def list_rules(
+    active_only: bool = False,
+    *,
+    tenant_condition: Optional[dict] = None,
+) -> list:
+    """Listar regras de automação.
+
+    ``tenant_condition`` é o isolamento por Rede (ponto 13): as regras
+    pertencem à REDE, não ao sistema. Uma regra não é um registo
+    decorativo — cria TAREFAS em processos, pelo que uma regra da rede A
+    visível à rede B punha trabalho de uma empresa na lista de outra.
+
+    É OPCIONAL de propósito. O caminho de EXECUÇÃO
+    (`check_trigger_conditions`) corre a partir de um processo concreto,
+    sem utilizador: não há âmbito de sessão para aplicar, e exigir a
+    condição aqui daria um motor que não dispara em background. Quem lê
+    para MOSTRAR passa-a sempre.
+    """
+    query: dict = {"is_active": True} if active_only else {}
+    if tenant_condition:
+        query = {"$and": [query, tenant_condition]} if query else dict(tenant_condition)
     rules = await db.automation_rules.find(query, {"_id": 0}).sort("created_at", -1).to_list(100)
     return rules
 
