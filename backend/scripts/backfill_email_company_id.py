@@ -97,7 +97,7 @@ async def mapa_endereco_para_empresa(db) -> dict[str, Optional[str]]:
     await juntar(db.company_email_configs, "email_address", "company_id")
 
     return {
-        endereco: sorted(empresas)[0]
+        endereco: (empresas.pop() if len(empresas) == 1 else None)
         for endereco, empresas in (
             (e, set(v)) for e, v in por_endereco.items()
         )

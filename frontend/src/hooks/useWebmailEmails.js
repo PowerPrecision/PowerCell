@@ -6,8 +6,10 @@
  */
 import { keepPreviousData, useQuery } from "@tanstack/react-query";
 import { queryKeys } from "../lib/queryClient";
-
-const API_URL = process.env.REACT_APP_BACKEND_URL;
+// Ponto 8, Fase 2 — pelo cliente Axios, nunca por `fetch` cru. É o
+// interceptor que injecta `X-Company-Id` e `X-Active-Role`, e sem eles a
+// caixa mostrada passa a ser a de outro perfil (incidente 2026-09-21).
+import { getWebmailEmails } from "../services/api";
 
 /** 1 minuto — cache instantânea ao abrir o Webmail, validação em fundo. */
 export const WEBMAIL_STALE_TIME_MS = 60 * 1000;
@@ -17,7 +19,6 @@ export function buildWebmailQueryKey(filters = {}) {
 }
 
 export async function fetchWebmailEmails({
-  headers,
   folder = "inbox",
   page = 1,
   search = "",
@@ -28,40 +29,31 @@ export async function fetchWebmailEmails({
   companyId = "",
   mailbox = "",
 } = {}) {
-  const actualFolder = customFolderId ? "custom" : folder;
-  const params = new URLSearchParams({
-    folder: actualFolder,
-    page: String(page || 1),
-    limit: "30",
+  const params = {
+    folder: customFolderId ? "custom" : folder,
+    page: page || 1,
+    limit: 30,
     account: account || "",
-  });
-  if (search && String(search).trim()) {
-    params.append("search", String(search).trim());
-  }
-  if (label) {
-    params.append("label", label);
-  }
-  if (customFolderId) {
-    params.append("custom_folder", customFolderId);
-  }
-  if (box) {
-    params.append("box", box);
-  }
-  if (companyId) {
-    params.append("company_id", companyId);
-  }
-  if (mailbox) {
-    params.append("mailbox", mailbox);
-  }
+  };
+  if (search && String(search).trim()) params.search = String(search).trim();
+  if (label) params.label = label;
+  if (customFolderId) params.custom_folder = customFolderId;
+  if (box) params.box = box;
+  // Ponto 8, Fase 1 — o separador manda. Vai como parâmetro e não como
+  // header: o âmbito da caixa deixa de depender do Context Switcher.
+  if (companyId) params.company_id = companyId;
+  if (mailbox) params.mailbox = mailbox;
 
-  const response = await fetch(`${API_URL}/api/emails/webmail?${params.toString()}`, {
-    headers,
-  });
-  if (!response.ok) {
-    const errorData = await response.json().catch(() => ({}));
-    throw new Error(errorData.detail || `Erro ${response.status} ao carregar emails`);
+  try {
+    const { data } = await getWebmailEmails(params);
+    return data;
+  } catch (error) {
+    // A mensagem do servidor é a que diz "empresa não encontrada" (404
+    // do âmbito) ou "acesso à caixa não permitido" — perdê-la deixaria o
+    // utilizador com um "Erro" mudo.
+    const detalhe = error?.response?.data?.detail;
+    throw new Error(detalhe || error?.message || "Erro ao carregar emails");
   }
-  return response.json();
 }
 
 export function patchWebmailEmail(queryClient, emailId, patch, unreadDelta = 0) {
@@ -80,7 +72,6 @@ export function patchWebmailEmail(queryClient, emailId, patch, unreadDelta = 0) 
 
 export function useWebmailEmails({
   token,
-  headers,
   folder,
   page,
   search,
@@ -106,7 +97,7 @@ export function useWebmailEmails({
 
   return useQuery({
     queryKey: buildWebmailQueryKey(filters),
-    queryFn: () => fetchWebmailEmails({ headers, ...filters }),
+    queryFn: () => fetchWebmailEmails(filters),
     enabled: Boolean(token) && enabled !== false,
     staleTime: WEBMAIL_STALE_TIME_MS,
     placeholderData: keepPreviousData,

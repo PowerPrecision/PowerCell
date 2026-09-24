@@ -4158,3 +4158,53 @@ utilizador que tenha **uma só**. Um endereço configurado em duas
 empresas **não é dedutível** e fica por resolver — carimbar por maioria
 prenderia o email à empresa errada para sempre, porque o carimbo passa a
 mandar sobre a dedução.
+
+## Ponto 8, Fase 2 — o Webmail fala por Axios (Set 2026)
+
+**Sexta instância do incidente de 2026-09-21.** `WebmailPage.jsx` fazia
+**28** chamadas `fetch` cruas e o `useWebmailEmails` mais uma. Todas
+passavam por um `webmailHeaders()` que escrevia `Authorization`,
+`X-Company-Id` e `X-Active-Role` à mão — **uma função inteira a
+reimplementar o interceptor do Axios**, que é o sinal mais claro de que
+o transporte estava no sítio errado.
+
+No Webmail o custo é maior do que nas cinco instâncias anteriores: sem
+`X-Company-Id`, `get_active_company_id_async` cai em `user.company` (o
+NOME da empresa, não o id), a config de email por empresa não é
+encontrada, e a caixa mostrada passa a ser a de outro perfil. Foi
+exactamente esse o sintoma do incidente original — o email de teste
+funcionava (ia por Axios) e o envio para balcões falhava (ia por
+`fetch`), com a mesma conta.
+
+Hoje: **zero `fetch`** na página e no hook, `webmailHeaders()` apagado,
+e `const API_URL = process.env.REACT_APP_BACKEND_URL` (sem fallback
+nenhum — um build sem a variável pedia a `undefined/api/...`) também.
+As ~22 funções vivem em `services/api.js`.
+
+Três detalhes que não se podem perder:
+
+1. **`downloadWebmailAttachment` pede `responseType: "blob"`**, e por
+   isso o corpo de ERRO vem também como Blob: é lido com
+   `readBlobErrorBody`, senão a mensagem do servidor ("Anexo não
+   encontrado") desaparecia.
+2. **`uploadEmailAttachment` não escreve `Content-Type`** — o Axios tem
+   de o gerar com o `boundary` do FormData.
+3. **`cancelEmailSend` devolve o rascunho a restaurar** no composer. A
+   primeira versão da migração deixou cair a resposta e o ESLint apanhou
+   o `res` órfão.
+
+`getWebmailStats` mantém a assinatura antiga (uma string solta = a
+caixa) e aceita também um objecto, para os chamadores que já existiam
+não partirem.
+
+**Guarda:** `src/pages/webmailTransport.test.js` afirma sobre o
+código-fonte — um teste de comportamento com o transporte falseado não
+vê a diferença entre um `fetch` e um `api.get`, e a diferença é o ponto.
+Ignora comentários de propósito: senão a explicação da regra fazia o
+guarda ficar vermelho.
+
+**Consequência no teste de integração:** a fronteira falsa do
+`WebmailPage.test.jsx` era o `globalThis.fetch`. Sem `fetch` na página,
+o stub deixou de interceptar e o jsdom tentava ligar-se ao
+`localhost:8001` a sério. A fronteira passou a ser o módulo
+`services/api` — que é onde ela sempre devia ter estado.

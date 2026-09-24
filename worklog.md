@@ -5661,3 +5661,40 @@ sensível das três.
 Fase 2 — os **28 `fetch` crus** do `WebmailPage` (6.ª instância do
 incidente de 2026-09-21) e o `API_URL = process.env.REACT_APP_BACKEND_URL`
 sem passar pelo `utils/apiBaseUrl.js`. Fase 3 — os separadores.
+
+---
+
+# Iteração — Ponto 8, Fase 2: o Webmail fala por Axios (Set 2026)
+
+## O que mudou
+
+- `services/api.js` — bloco novo com ~22 funções de transporte do
+  Webmail (lista, stats, empresas, sync, jobs, etiquetas, pastas, marcar,
+  enviar, cancelar, anexos, associar).
+- `pages/WebmailPage.jsx` — **28 `fetch` → 0**. `webmailHeaders()` e
+  `API_URL` apagados.
+- `hooks/useWebmailEmails.js` — o pedido mais importante do ecrã (a
+  lista) também passou a Axios; já aceitava `companyId`, que agora vai
+  como parâmetro para o âmbito da Fase 1.
+- **NOVO** `src/pages/webmailTransport.test.js` (16) — guarda sobre o
+  código-fonte, com contraprova de que as funções existem mesmo.
+- `pages/__tests__/WebmailPage.test.jsx` — a fronteira falsa deixou de
+  ser o `globalThis.fetch` e passou a ser `services/api`.
+
+## Erros meus, reportados
+
+1. Na migração do "cancelar envio" deixei cair a resposta, que traz o
+   rascunho a restaurar no composer — ficou um `res` órfão. O ESLint
+   (`no-undef`) apanhou-o antes de qualquer teste.
+2. O teste de integração da página passou a tentar ligar-se ao
+   `localhost:8001` a sério: o stub do `fetch` deixou de interceptar
+   quando deixou de haver `fetch`. Não é regressão do produto, é a
+   fronteira do teste a ter de acompanhar — mas só dei por isso ao
+   correr o teste, não ao planear a migração.
+
+## Validação
+
+- `yarn test` → **998 passed / 86 ficheiros** (baseline 982 / 85).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **3 aplicadas, 3 mataram** (marcar-lido sem chamada;
+  `responseType: "blob"` removido; `getWebmailCompanies` apagada).

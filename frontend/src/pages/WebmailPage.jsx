@@ -54,6 +54,34 @@ import {
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
+// Ponto 8, Fase 2 — TUDO pelo cliente Axios. Só o interceptor injecta os
+// cabeçalhos de empresa/papel, e sem eles a caixa mostrada passa a ser a
+// de outro perfil (AGENTS.md, incidente 2026-09-21).
+import {
+  getWebmailStats,
+  getEmailJobStatus,
+  getPersonalEmailAccounts,
+  getEmailLabels,
+  getEmailFolders,
+  createEmailFolder,
+  updateEmailFolder,
+  deleteEmailFolder,
+  moveEmailsToFolder,
+  applyEmailLabels,
+  getWebmailEmail,
+  markEmail,
+  deleteEmail,
+  deleteEmailPermanent,
+  associateEmailToProcess,
+  sendWebmailEmail,
+  cancelEmailSend,
+  uploadEmailAttachment,
+  downloadWebmailAttachment,
+  syncWebmail,
+  syncWebmailUser,
+  getProcesses,
+  readBlobErrorBody,
+} from "../services/api";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { sanitizeEmailHtml } from "../utils/sanitize";
@@ -76,7 +104,6 @@ import {
   draftToComposerFields,
 } from "../utils/webmailSendQueue";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // Configuração das pastas
 const FOLDERS = [
@@ -110,15 +137,12 @@ const WebmailPage = () => {
   // Pacote DN.2: empresa do Header (ContextSwitcher), não o user.company_id estático.
   const companyId = activeCompanyId || effectiveCompanyId || "";
 
-  const webmailHeaders = useCallback((extra = {}) => {
-    const headers = {
-      Authorization: `Bearer ${token}`,
-      ...extra,
-    };
-    if (companyId) headers["X-Company-Id"] = companyId;
-    if (effectiveRole) headers["X-Active-Role"] = effectiveRole;
-    return headers;
-  }, [token, companyId, effectiveRole]);
+  // Ponto 8, Fase 2 — o `webmailHeaders()` que vivia aqui escrevia
+  // `Authorization`, `X-Company-Id` e `X-Active-Role` à mão, para 28
+  // chamadas `fetch`. Uma função inteira a reimplementar o interceptor do
+  // Axios é o sinal mais claro de que o transporte estava no sítio
+  // errado: era a sexta instância do incidente de 2026-09-21. Hoje tudo
+  // passa por `services/api.js` e os cabeçalhos são do interceptor.
 
   // ── Loading guard: prevent premature "not configured" toast ────
   const [isLoadingConfig, setIsLoadingConfig] = useState(true);
@@ -361,13 +385,8 @@ const WebmailPage = () => {
     if (!token) return;
     setLabelsLoading(true);
     try {
-      const res = await fetch(`${API_URL}/api/emails/labels`, {
-        headers: webmailHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setLabels(Array.isArray(data) ? data : data.labels || []);
-      }
+      const { data } = await getEmailLabels();
+      setLabels(Array.isArray(data) ? data : data.labels || []);
     } catch {
       // Silently fail — labels are non-critical
     } finally {
@@ -385,13 +404,8 @@ const WebmailPage = () => {
   const fetchCustomFolders = useCallback(async () => {
     if (!token) return;
     try {
-      const res = await fetch(`${API_URL}/api/emails/folders`, {
-        headers: webmailHeaders(),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setCustomFolders(Array.isArray(data.folders) ? data.folders : []);
-      }
+      const { data } = await getEmailFolders();
+      setCustomFolders(Array.isArray(data.folders) ? data.folders : []);
     } catch (error) {
       console.error("Erro ao carregar pastas personalizadas:", error);
     }
@@ -417,12 +431,7 @@ const WebmailPage = () => {
     let cancelled = false;
     const loadAccounts = async () => {
       try {
-        const res = await fetch(
-          `${API_URL}/api/users/me/email-accounts?scope=all`,
-          { headers: webmailHeaders() },
-        );
-        if (!res.ok) return;
-        const data = await res.json();
+        const { data } = await getPersonalEmailAccounts();
         const list = data.accounts || [];
         if (cancelled) return;
         setPersonalAccounts(list);
@@ -441,7 +450,7 @@ const WebmailPage = () => {
     };
     loadAccounts();
     return () => { cancelled = true; };
-  }, [token, webmailHeaders]);
+  }, [token]);
 
   // ============================================================
   // FETCH UNREAD COUNTS (for tab badges)
@@ -454,12 +463,12 @@ const WebmailPage = () => {
     if (['admin', 'ceo', 'diretor', 'administrativo'].includes(role)) {
       // Fetch both personal and general unread counts
       try {
-        const [personalRes, generalRes] = await Promise.all([
-          fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: webmailHeaders() }),
-          fetch(`${API_URL}/api/emails/webmail-stats?box=general`, { headers: webmailHeaders() }),
+        const [pessoal, geral] = await Promise.all([
+          getWebmailStats({ box: "personal" }),
+          getWebmailStats({ box: "general" }),
         ]);
-        const pData = personalRes.ok ? await personalRes.json() : {};
-        const gData = generalRes.ok ? await generalRes.json() : {};
+        const pData = pessoal?.data || {};
+        const gData = geral?.data || {};
         setUnreadByBox({ personal: pData.unread_count || 0, general: gData.unread_count || 0 });
         // Save folder counts from the active box stats
         const folderCounts = pData.folder_counts || {};
@@ -476,45 +485,39 @@ const WebmailPage = () => {
       }
     } else if (effectiveRole === 'indexacao') {
       try {
-        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=shared_indexacao`, { headers: webmailHeaders() });
-        if (res.ok) {
-          const data = await res.json();
-          setUnreadByBox({ personal: 0, general: 0, shared_indexacao: data.unread_count || 0 });
-          const folderCounts = data.folder_counts || {};
-          setFolderCountsData(prev => ({
-            ...prev,
-            inbox: folderCounts.inbox || 0,
-            sent: folderCounts.sent || 0,
-            starred: folderCounts.starred || 0,
-            drafts: folderCounts.drafts || 0,
-            trash: folderCounts.trash || 0,
-          }));
-        }
+        const { data } = await getWebmailStats({ box: "shared_indexacao" });
+        setUnreadByBox({ personal: 0, general: 0, shared_indexacao: data.unread_count || 0 });
+        const folderCounts = data.folder_counts || {};
+        setFolderCountsData(prev => ({
+          ...prev,
+          inbox: folderCounts.inbox || 0,
+          sent: folderCounts.sent || 0,
+          starred: folderCounts.starred || 0,
+          drafts: folderCounts.drafts || 0,
+          trash: folderCounts.trash || 0,
+        }));
       } catch {
         // Silently fail
       }
     } else {
       // For consultor/intermediario, fetch personal stats
       try {
-        const res = await fetch(`${API_URL}/api/emails/webmail-stats?box=personal`, { headers: webmailHeaders() });
-        if (res.ok) {
-          const data = await res.json();
-          setUnreadCount(data.unread_count || 0);
-          const folderCounts = data.folder_counts || {};
-          setFolderCountsData(prev => ({
-            ...prev,
-            inbox: folderCounts.inbox || 0,
-            sent: folderCounts.sent || 0,
-            starred: folderCounts.starred || 0,
-            drafts: folderCounts.drafts || 0,
-            trash: folderCounts.trash || 0,
-          }));
-        }
+        const { data } = await getWebmailStats({ box: "personal" });
+        setUnreadCount(data.unread_count || 0);
+        const folderCounts = data.folder_counts || {};
+        setFolderCountsData(prev => ({
+          ...prev,
+          inbox: folderCounts.inbox || 0,
+          sent: folderCounts.sent || 0,
+          starred: folderCounts.starred || 0,
+          drafts: folderCounts.drafts || 0,
+          trash: folderCounts.trash || 0,
+        }));
       } catch {
         // Silently fail
       }
     }
-  }, [token, user?.role, effectiveRole, companyId, webmailHeaders]);
+  }, [token, user?.role, effectiveRole, companyId]);
 
   // O polling das contagens foi movido para baixo do `useNewEmailRealtime`:
   // precisa de saber se o WebSocket está ligado para se suspender.
@@ -532,7 +535,6 @@ const WebmailPage = () => {
     isFetched: emailsFetched,
   } = useWebmailEmails({
     token,
-    headers: webmailHeaders(),
     folder: activeCustomFolder ? "custom" : activeFolder,
     page: currentPage,
     search: debouncedSearch,
@@ -727,14 +729,15 @@ const WebmailPage = () => {
         return;
       }
       try {
-        const res = await fetch(`${API_URL}/api/emails/jobs/${jobId}`, {
-          headers: webmailHeaders(),
-        });
-        if (!res.ok) {
-          // 502/503 = backend unavailable; stop instead of hammering
-          if (res.status >= 500 || attempts >= MAX_ATTEMPTS) {
+        let res;
+        try {
+          res = await getEmailJobStatus(jobId);
+        } catch (erro) {
+          // 502/503 = backend em baixo; parar em vez de martelar.
+          const estado = erro?.response?.status || 0;
+          if (estado >= 500 || attempts >= MAX_ATTEMPTS) {
             setSyncing(false);
-            if (res.status >= 500) {
+            if (estado >= 500) {
               toast.error("Serviço de email indisponível (verifique a configuração IMAP em dev).");
             }
             return;
@@ -743,7 +746,7 @@ const WebmailPage = () => {
           return;
         }
         networkErrors = 0;
-        const job = await res.json();
+        const job = res.data || {};
         if (job.status === 'completed') {
           const synced = job.result?.synced || 0;
           toast.success(synced > 0
@@ -769,7 +772,7 @@ const WebmailPage = () => {
       }
     };
     setTimeout(poll, 3000); // First check after 3s
-  }, [token, handleRefresh, webmailHeaders]);
+  }, [token, handleRefresh]);
 
   const handleSyncEmails = useCallback(async () => {
     if (!token || syncing) return;
@@ -781,32 +784,22 @@ const WebmailPage = () => {
       const isGeneralSync = (activeBox === 'general' && showTabs) || isCaixaGeralMailbox;
       const isPersonalSync = !isGeneralSync;
 
-      const syncEndpoint = isGeneralSync
-        ? `${API_URL}/api/emails/webmail/sync`
-        : `${API_URL}/api/emails/webmail/sync-user`;
+      const params = { days: 7 };
+      if (account && !isGeneralSync) params.account = account;
+      if (selectedMailbox && isPersonalSync) params.mailbox = selectedMailbox;
+      // ── Multi-Tenant: a empresa do separador vai nos params ────
+      if (companyId) params.company_id = companyId;
 
-      const params = new URLSearchParams({ days: "7" });
-      if (account && !isGeneralSync) {
-        params.append("account", account);
-      }
-      if (selectedMailbox && isPersonalSync) {
-        params.append("mailbox", selectedMailbox);
-      }
-      // ── Multi-Tenant: incluir company_id nos params ────────────
-      if (companyId) {
-        params.append("company_id", companyId);
-      }
-      const response = await fetch(
-        `${syncEndpoint}?${params.toString()}`,
-        {
-          method: "POST",
-          headers: webmailHeaders(),
-        }
-      );
-      const data = await response.json().catch(() => ({}));
-
-      if (!response.ok) {
-        toast.error(extractErrorMessage(data.detail, "Erro na sincronização"));
+      let data;
+      try {
+        const resposta = isGeneralSync
+          ? await syncWebmail(params)
+          : await syncWebmailUser(params);
+        data = resposta?.data || {};
+      } catch (erro) {
+        toast.error(
+          extractErrorMessage(erro?.response?.data?.detail, "Erro na sincronização"),
+        );
         setSyncing(false);
         return;
       }
@@ -819,16 +812,10 @@ const WebmailPage = () => {
         // automatically fallback to global sync
         if (isPersonalSync && showTabs) {
           try {
-            const fallbackParams = new URLSearchParams({ days: "7" });
-            if (companyId) fallbackParams.append("company_id", companyId);
-            const fallbackResponse = await fetch(
-              `${API_URL}/api/emails/webmail/sync?${fallbackParams.toString()}`,
-              {
-                method: "POST",
-                headers: webmailHeaders(),
-              }
-            );
-            const fallbackData = await fallbackResponse.json().catch(() => ({}));
+            const fallbackParams = { days: 7 };
+            if (companyId) fallbackParams.company_id = companyId;
+            const fallbackResposta = await syncWebmail(fallbackParams);
+            const fallbackData = fallbackResposta?.data || {};
 
             if (fallbackData.success === false) {
               if (!wasInitialLoad) toast.error(fallbackData.error || "Erro na sincronização global");
@@ -860,7 +847,7 @@ const WebmailPage = () => {
       toast.error("Erro de ligação ao servidor");
       setSyncing(false);
     }
-  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus, companyId, webmailHeaders, selectedMailbox, personalAccounts]);
+  }, [token, account, syncing, handleRefresh, activeBox, showTabs, pollJobStatus, companyId, selectedMailbox, personalAccounts]);
 
   // ============================================================
   // SELECT EMAIL & MARK AS READ
@@ -886,24 +873,13 @@ const WebmailPage = () => {
     // Carregar detalhe completo
     setDetailLoading(true);
     try {
-      const response = await fetch(`${API_URL}/api/emails/${email.id}`, {
-        headers: webmailHeaders(),
-      });
-      if (!response.ok) {
-        const errData = await response.json().catch(() => ({}));
-        throw new Error(errData.detail || `Erro ${response.status} ao carregar email`);
-      }
-      const data = await response.json();
+      const { data } = await getWebmailEmail(email.id);
       setEmailDetail(data);
 
       // Marcar como lido se necessário
       if (!email.is_read) {
         try {
-          await fetch(`${API_URL}/api/emails/${email.id}/mark`, {
-            method: "POST",
-            headers: webmailHeaders({ "Content-Type": "application/json" }),
-            body: JSON.stringify({ type: "read" }),
-          });
+          await markEmail(email.id, { type: "read" });
           // Atualizar lista local
           patchWebmailEmail(queryClient, email.id, { is_read: true }, -1);
           setUnreadCount((prev) => Math.max(0, prev - 1));
@@ -917,7 +893,7 @@ const WebmailPage = () => {
     } finally {
       setDetailLoading(false);
     }
-  }, [token, multiSelectMode, webmailHeaders, queryClient]);
+  }, [token, multiSelectMode, queryClient]);
 
   // ============================================================
   // TOGGLE LIDO / NÃO LIDO
@@ -935,12 +911,7 @@ const WebmailPage = () => {
     setUnreadCount((prev) => Math.max(0, prev + (nextRead ? -1 : 1)));
 
     try {
-      const res = await fetch(`${API_URL}/api/emails/${email.id}/mark`, {
-        method: "POST",
-        headers: webmailHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ type: nextRead ? "read" : "unread" }),
-      });
-      if (!res.ok) throw new Error(`Erro ${res.status}`);
+      await markEmail(email.id, { type: nextRead ? "read" : "unread" });
     } catch {
       patchWebmailEmail(queryClient, email.id, { is_read: !nextRead }, nextRead ? 1 : -1);
       setEmailDetail((prev) =>
@@ -949,7 +920,7 @@ const WebmailPage = () => {
       setUnreadCount((prev) => Math.max(0, prev + (nextRead ? 1 : -1)));
       toast.error("Não foi possível alterar o estado de leitura");
     }
-  }, [queryClient, webmailHeaders]);
+  }, [queryClient]);
 
   // Quantos interlocutores existem além de nós — decide se o botão
   // "Responder a Todos" tem sentido nesta mensagem.
@@ -966,11 +937,7 @@ const WebmailPage = () => {
     e?.stopPropagation();
     try {
       const newStarred = !email.is_starred;
-      await fetch(`${API_URL}/api/emails/${email.id}/mark`, {
-        method: "POST",
-        headers: webmailHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ type: "starred" }),
-      });
+      await markEmail(email.id, { type: "starred" });
 
       // Atualizar lista local
       patchWebmailEmail(queryClient, email.id, { is_starred: newStarred });
@@ -981,7 +948,7 @@ const WebmailPage = () => {
     } catch {
       toast.error("Erro ao alterar destaque");
     }
-  }, [token, emailDetail, queryClient, webmailHeaders]);
+  }, [token, emailDetail, queryClient]);
 
   // ============================================================
   // COMPOSER
@@ -1141,27 +1108,18 @@ const WebmailPage = () => {
         uploadAttachments,
       });
 
-      const response = await fetch(
-        `${API_URL}/api/emails/send?account=${effectiveAccount}`,
-        {
-          method: "POST",
-          headers: webmailHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify(bodyPayload),
-        }
-      );
-
-      if (!response.ok) {
-        // Preservar a mensagem útil do backend (ex.: 403 "Configuração de email
-        // pessoal não encontrada. Vá ao seu Perfil > Configuração de Webmail
-        // para configurar o seu email antes de enviar.").
-        let detail = "Erro ao enviar email";
-        try {
-          const errData = await response.json();
-          detail = errData.detail || errData.message || errData.error || detail;
-        } catch {
-          /* resposta sem corpo JSON — manter mensagem genérica */
-        }
-        throw new Error(detail);
+      let corpoDoEnvio;
+      try {
+        const resposta = await sendWebmailEmail(bodyPayload, effectiveAccount);
+        corpoDoEnvio = resposta?.data ?? null;
+      } catch (erro) {
+        // Preservar a mensagem útil do backend (ex.: 403 "Configuração de
+        // email pessoal não encontrada. Vá ao seu Perfil > Configuração de
+        // Webmail para configurar o seu email antes de enviar.").
+        const dados = erro?.response?.data || {};
+        throw new Error(
+          dados.detail || dados.message || dados.error || "Erro ao enviar email",
+        );
       }
 
       // ============================================================
@@ -1171,30 +1129,28 @@ const WebmailPage = () => {
       // pending e agenda o envio real para o fim da janela. Dentro dela o
       // utilizador pode cancelar (POST /emails/{send_id}/cancel-send) e
       // regressar ao modo de edição do rascunho.
-      const sendResult = parseSendResponse(await response.json().catch(() => null));
+      const sendResult = parseSendResponse(corpoDoEnvio);
 
       if (sendResult.queued && sendResult.sendId && sendResult.undoWindowMs > 0) {
         setComposerOpen(false); // fecha o composer (estilo Gmail)
 
         const cancelSend = async () => {
           try {
-            const res = await fetch(
-              `${API_URL}/api/emails/${sendResult.sendId}/cancel-send`,
-              { method: "POST", headers: webmailHeaders() }
-            );
-            if (!res.ok) {
-              let detail = "Não foi possível cancelar o envio.";
-              try {
-                const errData = await res.json();
-                detail = errData.detail || detail;
-              } catch { /* sem corpo JSON */ }
-              toast.error(detail, { duration: 8000 });
+            let cancelData;
+            try {
+              const resposta = await cancelEmailSend(sendResult.sendId);
+              // A resposta traz o rascunho a restaurar no composer.
+              cancelData = resposta?.data || {};
+            } catch (erro) {
+              toast.error(
+                erro?.response?.data?.detail || "Não foi possível cancelar o envio.",
+                { duration: 8000 },
+              );
               return;
             }
             // Envio abortado no backend — regressar ao modo de edição do
             // rascunho com o snapshot intacto (dados + anexos temporários,
             // que o backend ainda não moveu porque nada foi enviado).
-            const cancelData = await res.json().catch(() => ({}));
             const restoredFields = draftToComposerFields(
               cancelData.draft || sendSnapshot.composerData
             );
@@ -1272,14 +1228,7 @@ const WebmailPage = () => {
       }
       setLinkSearchLoading(true);
       try {
-        const response = await fetch(
-          `${API_URL}/api/processes?search=${encodeURIComponent(query.trim())}&size=10`,
-          {
-            headers: webmailHeaders(),
-          }
-        );
-        if (!response.ok) throw new Error("Erro na pesquisa");
-        const data = await response.json();
+        const { data } = await getProcesses({ search: query.trim(), size: 10 });
         const items = data.items || data || [];
         setLinkSearchResults(items.map(p => ({
           id: p.id,
@@ -1301,15 +1250,10 @@ const WebmailPage = () => {
       if (!selectedEmail || !processId) return;
       setLinkSaving(true);
       try {
-        const response = await fetch(`${API_URL}/api/emails/associate`, {
-          method: "POST",
-          headers: webmailHeaders({ "Content-Type": "application/json" }),
-          body: JSON.stringify({
-            email_id: selectedEmail.id,
-            process_id: processId,
-          }),
+        await associateEmailToProcess({
+          email_id: selectedEmail.id,
+          process_id: processId,
         });
-        if (!response.ok) throw new Error("Erro ao associar");
         toast.success("Email associado ao processo com sucesso");
         setLinkDialogOpen(false);
         // Atualizar email detalhe e lista
@@ -1326,7 +1270,7 @@ const WebmailPage = () => {
         setLinkSaving(false);
       }
     },
-    [token, selectedEmail, queryClient, webmailHeaders]
+    [token, selectedEmail, queryClient]
   );
 
   // ============================================================
@@ -1353,15 +1297,11 @@ const WebmailPage = () => {
   const handleApplyLabelToSelected = useCallback(async (labelId) => {
     if (selectedEmails.size === 0 || !labelId) return;
     try {
-      const response = await fetch(`${API_URL}/api/emails/labels/apply`, {
-        method: "POST",
-        headers: webmailHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          email_ids: Array.from(selectedEmails),
-          label_id: labelId,
-        }),
+      const response = await applyEmailLabels({
+        email_ids: Array.from(selectedEmails),
+        label_id: labelId,
       });
-      if (response.ok) {
+      if (response) {
         toast.success("Marcador aplicado com sucesso");
         setLabelDropdownOpen(false);
         setSelectedEmails(new Set());
@@ -1385,10 +1325,7 @@ const WebmailPage = () => {
         const ids = Array.from(selectedEmails);
         await Promise.all(
           ids.map((id) =>
-            fetch(`${API_URL}/api/emails/${id}/permanent`, {
-              method: "DELETE",
-              headers: webmailHeaders(),
-            })
+            deleteEmailPermanent(id)
           )
         );
         toast.success(`${ids.length} email${ids.length !== 1 ? "s" : ""} eliminado${ids.length !== 1 ? "s" : ""} permanentemente`);
@@ -1408,10 +1345,7 @@ const WebmailPage = () => {
         const ids = Array.from(selectedEmails);
         await Promise.all(
           ids.map((id) =>
-            fetch(`${API_URL}/api/emails/${id}`, {
-              method: "DELETE",
-              headers: webmailHeaders(),
-            })
+            deleteEmail(id)
           )
         );
         toast.success(`${ids.length} email${ids.length !== 1 ? "s" : ""} movido${ids.length !== 1 ? "s" : ""} para o Lixo`);
@@ -1434,11 +1368,7 @@ const WebmailPage = () => {
     if (activeFolder === "trash") {
       if (!confirm("Tem a certeza que deseja eliminar este email permanentemente? Esta ação não pode ser desfeita.")) return;
       try {
-        const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}/permanent`, {
-          method: "DELETE",
-          headers: webmailHeaders(),
-        });
-        if (!response.ok) throw new Error("Erro ao eliminar permanentemente");
+        await deleteEmailPermanent(selectedEmail.id);
         toast.success("Email eliminado permanentemente");
         setSelectedEmail(null);
         setEmailDetail(null);
@@ -1450,11 +1380,7 @@ const WebmailPage = () => {
     } else {
       if (!confirm("Tem a certeza que deseja mover este email para o Lixo?")) return;
       try {
-        const response = await fetch(`${API_URL}/api/emails/${selectedEmail.id}`, {
-          method: "DELETE",
-          headers: webmailHeaders(),
-        });
-        if (!response.ok) throw new Error("Erro ao mover para o lixo");
+        await deleteEmail(selectedEmail.id);
         toast.success("Email movido para o Lixo");
         setSelectedEmail(null);
         setEmailDetail(null);
@@ -1476,13 +1402,9 @@ const WebmailPage = () => {
       const formData = new FormData();
       formData.append("files", file);
       try {
-        const res = await fetch(`${API_URL}/api/emails/attachments/upload`, {
-          method: "POST",
-          headers: webmailHeaders(),
-          body: formData,
-        });
-        if (res.ok) {
-          const data = await res.json();
+        const res = await uploadEmailAttachment(formData);
+        if (res) {
+          const data = res.data || {};
           // PACOTE AO: extração correta da resposta do backend.
           // O backend devolve { attachments: [...] } mas o código anterior
           // usava data.files || [data] que resultava em objetos mal formatados.
@@ -1578,21 +1500,15 @@ const WebmailPage = () => {
     }
     setFolderDialogSaving(true);
     try {
-      const url = folderDialogMode === "create"
-        ? `${API_URL}/api/emails/folders`
-        : `${API_URL}/api/emails/folders/${contextMenuFolder?.id}`;
-      const method = folderDialogMode === "create" ? "POST" : "PUT";
-      
-      const res = await fetch(url, {
-        method,
-        headers: webmailHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          name: folderDialogData.name.trim(),
-          color: folderDialogData.color,
-        }),
-      });
+      const corpo = {
+        name: folderDialogData.name.trim(),
+        color: folderDialogData.color,
+      };
+      const res = folderDialogMode === "create"
+        ? await createEmailFolder(corpo)
+        : await updateEmailFolder(contextMenuFolder?.id, corpo);
 
-      if (res.ok) {
+      if (res) {
         toast.success(folderDialogMode === "create" ? "Pasta criada" : "Pasta atualizada");
         setFolderDialogOpen(false);
         fetchCustomFolders();
@@ -1610,11 +1526,8 @@ const WebmailPage = () => {
   const handleDeleteFolder = useCallback(async (folder) => {
     if (!folder) return;
     try {
-      const res = await fetch(`${API_URL}/api/emails/folders/${folder.id}`, {
-        method: "DELETE",
-        headers: webmailHeaders(),
-      });
-      if (res.ok) {
+      const res = await deleteEmailFolder(folder.id);
+      if (res) {
         toast.success(`Pasta "${folder.name}" eliminada`);
         if (activeCustomFolder === folder.id) {
           setActiveCustomFolder(null);
@@ -1638,16 +1551,12 @@ const WebmailPage = () => {
     if (emailIds.length === 0) return;
 
     try {
-      const res = await fetch(`${API_URL}/api/emails/emails/move-to-folder`, {
-        method: "POST",
-        headers: webmailHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({
-          email_ids: emailIds,
-          folder_id: folderId || null,
-        }),
+      const res = await moveEmailsToFolder({
+        email_ids: emailIds,
+        folder_id: folderId || null,
       });
 
-      if (res.ok) {
+      if (res) {
         const folderName = folderId
           ? customFolders.find(f => f.id === folderId)?.name || "Pasta"
           : "Caixa de Entrada";
@@ -1690,16 +1599,19 @@ const WebmailPage = () => {
     // Abrir o separador ANTES do await — mantém o user-gesture do clique.
     const newTab = window.open("", "_blank");
     try {
-      const params = new URLSearchParams({ email_id: emailDetail.id });
-      const res = await fetch(
-        `${API_URL}/api/webmail/attachments/${encodeURIComponent(attId)}?${params.toString()}`,
-        { headers: webmailHeaders() }
-      );
-      if (!res.ok) {
-        const err = await res.json().catch(() => ({}));
-        throw new Error(err.detail || "Anexo não encontrado");
+      let blob;
+      try {
+        const res = await downloadWebmailAttachment(attId, {
+          email_id: emailDetail.id,
+        });
+        blob = res.data;
+      } catch (erro) {
+        // `responseType: "blob"` faz o corpo de ERRO vir também como
+        // Blob: sem o `readBlobErrorBody` a mensagem do servidor
+        // desaparecia e ficava só "Erro".
+        const corpo = await readBlobErrorBody(erro);
+        throw new Error(corpo.detail || "Anexo não encontrado");
       }
-      const blob = await res.blob();
       const url = URL.createObjectURL(blob);
       if (newTab) {
         newTab.location.href = url;
@@ -1722,7 +1634,7 @@ const WebmailPage = () => {
     } finally {
       setDownloadingAttachmentId(null);
     }
-  }, [emailDetail?.id, token, webmailHeaders]);
+  }, [emailDetail?.id, token]);
 
   // Sanitized HTML body
   const sanitizedBodyHtml = useMemo(() => {

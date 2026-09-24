@@ -8,9 +8,16 @@
  * O que é falso aqui, e porquê:
  * - `DashboardLayout` — arrastava a app inteira (sidebar, notificações,
  *   WebSockets); um passthrough chega para o que se testa;
- * - `AuthContext`, `useWebmailEmails`, `useNewEmailRealtime` e o `fetch` —
- *   são as fronteiras de rede/sessão. Falsear estas quatro é o suficiente:
- *   o estado, os handlers e TODOS os componentes extraídos são os reais.
+ * - `AuthContext`, `useWebmailEmails`, `useNewEmailRealtime` e
+ *   `services/api` — são as fronteiras de rede/sessão. Falsear estas
+ *   quatro é o suficiente: o estado, os handlers e TODOS os componentes
+ *   extraídos são os reais.
+ *
+ * NOTA (Ponto 8, Fase 2): a fronteira era o `globalThis.fetch`. Com a
+ * migração para o cliente Axios deixou de haver `fetch` nenhum na
+ * página, e um stub dele já não interceptava nada — o jsdom tentava
+ * ligar-se ao `localhost:8001` a sério. A fronteira passou a ser o
+ * módulo de transporte, que é onde ela sempre devia ter estado.
  */
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { render, screen, waitFor, within } from "@testing-library/react";
@@ -61,6 +68,45 @@ vi.mock("../../hooks/useNewEmailRealtime", () => ({
   invalidateEmailQueries: vi.fn(),
 }));
 
+// ── O transporte (Ponto 8, Fase 2) ───────────────────────────────────
+// Tudo devolve `{ data: {} }` por omissão; cada teste substitui o que
+// precisa. `chamadasDaApi` regista o que foi pedido, para os testes que
+// afirmam sobre a chamada e não sobre o ecrã.
+const apiFalsa = vi.hoisted(() => ({ chamadas: [] }));
+
+vi.mock("../../services/api", () => {
+  const vazio = () => Promise.resolve({ data: {} });
+  const registar = (nome) => vi.fn((...args) => {
+    apiFalsa.chamadas.push({ nome, args });
+    return (apiFalsa[nome] || vazio)(...args);
+  });
+  return {
+    getWebmailStats: registar("getWebmailStats"),
+    getEmailJobStatus: registar("getEmailJobStatus"),
+    getPersonalEmailAccounts: registar("getPersonalEmailAccounts"),
+    getEmailLabels: registar("getEmailLabels"),
+    getEmailFolders: registar("getEmailFolders"),
+    createEmailFolder: registar("createEmailFolder"),
+    updateEmailFolder: registar("updateEmailFolder"),
+    deleteEmailFolder: registar("deleteEmailFolder"),
+    moveEmailsToFolder: registar("moveEmailsToFolder"),
+    applyEmailLabels: registar("applyEmailLabels"),
+    getWebmailEmail: registar("getWebmailEmail"),
+    markEmail: registar("markEmail"),
+    deleteEmail: registar("deleteEmail"),
+    deleteEmailPermanent: registar("deleteEmailPermanent"),
+    associateEmailToProcess: registar("associateEmailToProcess"),
+    sendWebmailEmail: registar("sendWebmailEmail"),
+    cancelEmailSend: registar("cancelEmailSend"),
+    uploadEmailAttachment: registar("uploadEmailAttachment"),
+    downloadWebmailAttachment: registar("downloadWebmailAttachment"),
+    syncWebmail: registar("syncWebmail"),
+    syncWebmailUser: registar("syncWebmailUser"),
+    getProcesses: registar("getProcesses"),
+    readBlobErrorBody: vi.fn(async () => ({})),
+  };
+});
+
 import WebmailPage from "../WebmailPage";
 
 // ── Dados ────────────────────────────────────────────────────────────
@@ -104,9 +150,10 @@ beforeEach(() => {
   estadoDaLista.valor = respostaDaLista([email()]);
   estadoDaLista.ultimosFiltros = null;
   // Qualquer chamada de rede que escape responde vazio em vez de rebentar.
-  globalThis.fetch = vi.fn(() =>
-    Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) }),
-  );
+  apiFalsa.chamadas.length = 0;
+  for (const chave of Object.keys(apiFalsa)) {
+    if (chave !== "chamadas") delete apiFalsa[chave];
+  }
 });
 
 afterEach(() => {
@@ -145,20 +192,10 @@ describe("WebmailPage — as três colunas ligadas", () => {
 describe("WebmailPage — abrir um email (lista → painel de leitura)", () => {
   it("clicar na conversa carrega o detalhe e mostra-o", async () => {
     const utilizador = userEvent.setup();
-    globalThis.fetch = vi.fn((url) => {
-      if (String(url).includes("/api/emails/e1")) {
-        return Promise.resolve({
-          ok: true,
-          status: 200,
-          json: () =>
-            Promise.resolve({
-              ...email(),
-              body: "Confirmamos a pré-aprovação do crédito.",
-            }),
-        });
-      }
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve({}) });
-    });
+    apiFalsa.getWebmailEmail = () =>
+      Promise.resolve({
+        data: { ...email(), body: "Confirmamos a pré-aprovação do crédito." },
+      });
 
     montar();
     await utilizador.click(await screen.findByText("Proposta do banco"));
@@ -175,18 +212,16 @@ describe("WebmailPage — abrir um email (lista → painel de leitura)", () => {
     const utilizador = userEvent.setup();
     estadoDaLista.valor = respostaDaLista([email({ is_read: false })]);
 
-    const chamadas = [];
-    globalThis.fetch = vi.fn((url, opcoes) => {
-      chamadas.push({ url: String(url), metodo: opcoes?.method || "GET" });
-      return Promise.resolve({ ok: true, status: 200, json: () => Promise.resolve(email()) });
-    });
+    apiFalsa.getWebmailEmail = () => Promise.resolve({ data: email() });
 
     montar();
     await utilizador.click(await screen.findByText("Proposta do banco"));
 
     await waitFor(() =>
       expect(
-        chamadas.some((c) => c.url.includes("/mark") && c.metodo === "POST"),
+        apiFalsa.chamadas.some(
+          (c) => c.nome === "markEmail" && c.args[1]?.type === "read",
+        ),
       ).toBe(true),
     );
   });

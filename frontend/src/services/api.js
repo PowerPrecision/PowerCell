@@ -1048,9 +1048,85 @@ export const deleteAutoDraft = (draftId) => api.delete(`/emails/drafts/${draftId
 export const createAutoDraft = (processId, docType) =>
   api.post("/emails/drafts/create", { process_id: processId, doc_type: docType });
 
-// Webmail Stats (per-user, isolated). Pass box='personal' to filter personal emails only.
-export const getWebmailStats = (box) =>
-  api.get("/emails/webmail-stats", { params: box ? { box } : {} });
+// ====================================================================
+// WEBMAIL (Ponto 8, Fase 2) — TUDO pelo Axios, zero `fetch` cru
+// ====================================================================
+//
+// O `WebmailPage` tinha 28 chamadas `fetch` com um `webmailHeaders()` a
+// escrever `Authorization`, `X-Company-Id` e `X-Active-Role` à mão —
+// SEXTA instância do incidente de 2026-09-21. O interceptor que injecta
+// esses cabeçalhos vive no cliente Axios; um `fetch` cru só leva o que
+// lhe escreverem, e o que lá faltar muda silenciosamente a conta de
+// email usada e o âmbito da caixa.
+//
+// `company_id` (Fase 1) vai em `params` como qualquer outro filtro: é o
+// separador que manda, não o header.
+
+export const getWebmailEmails = (params) =>
+  api.get("/emails/webmail", { params });
+
+// `box`/`company_id` opcionais. Mantém a assinatura antiga (uma string
+// solta = a caixa) para não partir os chamadores que já existiam.
+export const getWebmailStats = (boxOuParams) => {
+  const params =
+    typeof boxOuParams === "string"
+      ? (boxOuParams ? { box: boxOuParams } : {})
+      : (boxOuParams || {});
+  return api.get("/emails/webmail-stats", { params });
+};
+
+/** Ponto 8 — as empresas do utilizador: um separador por cada. */
+export const getWebmailCompanies = () => api.get("/emails/webmail/companies");
+
+export const syncWebmail = (params) =>
+  api.post("/emails/webmail/sync", null, { params });
+export const syncWebmailUser = (params) =>
+  api.post("/emails/webmail/sync-user", null, { params });
+export const getEmailJobStatus = (jobId) => api.get(`/emails/jobs/${jobId}`);
+
+export const getPersonalEmailAccounts = () =>
+  api.get("/users/me/email-accounts", { params: { scope: "all" } });
+
+// ── Etiquetas e pastas ──
+export const getEmailLabels = () => api.get("/emails/labels");
+export const getEmailFolders = () => api.get("/emails/folders");
+export const createEmailFolder = (data) => api.post("/emails/folders", data);
+export const updateEmailFolder = (folderId, data) =>
+  api.put(`/emails/folders/${folderId}`, data);
+export const deleteEmailFolder = (folderId) =>
+  api.delete(`/emails/folders/${folderId}`);
+export const moveEmailsToFolder = (data) =>
+  api.post("/emails/emails/move-to-folder", data);
+export const applyEmailLabels = (data) => api.post("/emails/labels/apply", data);
+
+// ── Um email ──
+export const getWebmailEmail = (emailId) => api.get(`/emails/${emailId}`);
+export const markEmail = (emailId, data) =>
+  api.post(`/emails/${emailId}/mark`, data);
+export const deleteEmailPermanent = (emailId) =>
+  api.delete(`/emails/${emailId}/permanent`);
+export const associateEmailToProcess = (data) =>
+  api.post("/emails/associate", data);
+
+// ── Envio ──
+export const sendWebmailEmail = (payload, account) =>
+  api.post("/emails/send", payload, { params: account ? { account } : {} });
+export const cancelEmailSend = (sendId) =>
+  api.post(`/emails/${sendId}/cancel-send`);
+
+// O Content-Type é deliberadamente omitido: o Axios tem de o gerar com o
+// `boundary` do FormData. Escrevê-lo à mão parte o multipart.
+export const uploadEmailAttachment = (formData) =>
+  api.post("/emails/attachments/upload", formData);
+
+// `responseType: "blob"` faz o corpo de ERRO vir também como Blob — ler
+// com `readBlobErrorBody`, senão a mensagem do servidor desaparece.
+export const downloadWebmailAttachment = (attachmentId, params) =>
+  api.get(`/webmail/attachments/${encodeURIComponent(attachmentId)}`, {
+    params,
+    responseType: "blob",
+    skipErrorToast: true,
+  });
 
 // Clients
 export const getClients = (params = {}) => {
