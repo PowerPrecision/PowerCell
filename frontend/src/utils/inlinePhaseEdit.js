@@ -58,27 +58,25 @@ function normalizar(valor) {
 /**
  * A célula da fase desta linha é editável?
  *
- * DOIS papéis, de propósito. O produto inteiro decide o que se pode
- * fazer pelo perfil ACTIVO (`effectiveRole`), mas o `PUT /processes/{id}`
- * resolve `can_update_status` a partir de `user["role"]` — o papel base
- * do JWT. Para um utilizador multi-perfil os dois divergem nos DOIS
- * sentidos, e mostrar o dropdown a quem o servidor vai recusar com 403
- * é prometer uma acção que não existe. Exigimos os dois: é a leitura
- * mais restritiva das duas, e nunca promete de mais.
+ * UM papel só: o perfil ACTIVO (`effectiveRole`). Durante um curto
+ * período esta função exigiu também o papel base do JWT, porque o
+ * `run_update_process` resolvia `can_update_status` por `user["role"]`
+ * e os dois divergiam. Essa brecha foi fechada no backend — o PUT segue
+ * agora `get_effective_role`, como o resto do produto — e manter aqui a
+ * dupla condição deixou de ser prudência: passou a ESCONDER uma acção
+ * legítima a quem é, por exemplo, indexador numa empresa e consultor
+ * noutra. Uma permissão espelha-se num sítio só, e esse sítio é o
+ * perfil activo.
  *
  * @param {object} args
  * @param {string} args.role — papel efectivo (perfil activo)
- * @param {string} [args.baseRole] — papel base do JWT, se conhecido
  * @param {string} args.status — estado actual do processo
  * @param {boolean} [args.isDeleted] — soft-delete (`is_deleted`)
  * @returns {boolean}
  */
-export function podeEditarFase({ role, baseRole, status, isDeleted } = {}) {
+export function podeEditarFase({ role, status, isDeleted } = {}) {
   const papel = normalizar(role);
   if (!papel || !PAPEIS_QUE_MUDAM_FASE.includes(papel)) return false;
-
-  const papelBase = normalizar(baseRole);
-  if (papelBase && !PAPEIS_QUE_MUDAM_FASE.includes(papelBase)) return false;
 
   // Um processo eliminado tem caminho próprio (Restaurar). Mudar-lhe a
   // fase a partir da listagem ressuscitava-o sem restauro nem rasto.
@@ -86,11 +84,8 @@ export function podeEditarFase({ role, baseRole, status, isDeleted } = {}) {
 
   const estado = normalizar(status);
   if (FASES_TERMINAIS.includes(estado)) {
-    // `assert_process_editable_for_role` também lê o papel base.
-    return (
-      PAPEIS_ACIMA_DO_BLOQUEIO.includes(papel) &&
-      (!papelBase || PAPEIS_ACIMA_DO_BLOQUEIO.includes(papelBase))
-    );
+    // `assert_process_editable_for_role` lê o mesmo perfil activo.
+    return PAPEIS_ACIMA_DO_BLOQUEIO.includes(papel);
   }
   return true;
 }

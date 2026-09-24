@@ -30,7 +30,6 @@ import {
  * @param {object} props
  * @param {string} props.status — fase actual do processo
  * @param {string} props.role — papel efectivo do utilizador
- * @param {string} [props.baseRole] — papel base do JWT (`user.role`)
  * @param {Array<{name: string, label?: string, color?: string}>} props.workflowStatuses
  * @param {boolean} [props.isDeleted] — soft-delete (`is_deleted`)
  * @param {boolean} [props.saving] — gravação em curso nesta linha
@@ -39,7 +38,6 @@ import {
 export default function ProcessPhaseCell({
   status,
   role,
-  baseRole,
   workflowStatuses,
   isDeleted = false,
   saving = false,
@@ -56,7 +54,7 @@ export default function ProcessPhaseCell({
     );
   }
 
-  const editavel = podeEditarFase({ role, baseRole, status, isDeleted });
+  const editavel = podeEditarFase({ role, status, isDeleted });
   if (!editavel) {
     return (
       <StatusBadge

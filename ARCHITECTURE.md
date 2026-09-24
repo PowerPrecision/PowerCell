@@ -3898,15 +3898,11 @@ Isso não é uma preferência de estilo. É esse endpoint que:
 Um `update_one` directo, ou um endpoint novo "só para a listagem",
 furava os quatro de uma vez — e em silêncio, que é a parte pior.
 
-**Dois papéis na permissão, de propósito.** O produto decide o que se
-pode fazer pelo perfil ACTIVO (`effectiveRole`), mas o
-`run_update_process` resolve `can_update_status` a partir de
-`user["role"]` — o papel base do JWT. Para um utilizador multi-perfil os
-dois divergem **nos dois sentidos**. `utils/inlinePhaseEdit.js` exige os
-dois: é a leitura mais restritiva e nunca promete uma acção que o
-servidor devolva com 403. A divergência de fundo fica **por decidir**
-(ver `worklog.md`, achado lateral) — não foi alterada aqui porque é uma
-decisão de produto, não um bug de implementação.
+**A permissão segue o perfil activo, dos dois lados.** À entrega deste
+ponto havia uma divergência: o produto decidia pelo perfil ACTIVO mas o
+`run_update_process` resolvia `can_update_status` por `user["role"]`.
+Foi fechada logo a seguir (ver a secção seguinte); `inlinePhaseEdit.js`
+espelha agora um único papel — o activo.
 
 A listagem **não recarrega** depois de gravar, salvo nos dois casos em
 que a linha deixou de pertencer à listagem aberta
@@ -3956,3 +3952,48 @@ O endpoint devolve **404** para um processo fora do âmbito, não 403 —
 mesma regra do CRUD de automações (Lote 5, ponto 13): distinguir "não
 existe" de "não é teu" confirmaria a existência de processos de outra
 Rede.
+
+
+## Permissões de escrita seguem o PERFIL ACTIVO (Set 2026)
+
+`run_update_process` resolvia `role = user["role"]` — o papel base do
+JWT — e daí tirava `build_role_update_permissions` (incluindo
+`can_update_status`) e `assert_process_editable_for_role`. Quem trocasse
+para o perfil de **Indexação** no ContextSwitcher continuava a escrever
+com os direitos do papel base: mudar a fase, editar secções de negócio e
+passar por cima do bloqueio de estado terminal.
+
+É o terceiro sítio com o mesmo padrão — o Kanban (Lote 5, ponto 12) e o
+`_is_stealth_user` (Lote 4) foram os anteriores — e o mais grave dos
+três: nos outros era ver a mais, aqui era **escrever**.
+
+Hoje: `role = resolve_concrete_role(get_effective_role(request, user), user)`.
+
+**`services/auth.resolve_concrete_role` é o PONTO ÚNICO** que colapsa o
+perfil activo num papel concreto. `__all_roles__` (o perfil "Todos") é
+um conceito das LISTAGENS — lá `all_roles=` faz a união das
+visibilidades — e não significa nada para decidir uma escrita: não
+existe união de permissões num PUT. Recua para o papel do JWT, que nunca
+alarga. `resolver_papel_do_quadro` (Kanban) delega aqui em vez de manter
+a sua cópia; foi ter a mesma condição em três sítios que deixou
+`document_portal_request` a ignorar `track_history=False`.
+
+Duas propriedades que não se podem perder:
+
+1. **Fail-closed por construção.** `get_effective_role` só honra o
+   header `X-Active-Role` quando a cache UCR o validou, ou quando
+   coincide com o papel do JWT. Um header inventado **nunca** alarga —
+   recua para o papel base e regista um `warning`. O único caminho para
+   um papel diferente do JWT é um perfil realmente detido.
+2. **A conta de cliente não é um chapéu.** O ramo que aplica alterações
+   de negócio testa `role == cliente_role or user["role"] == cliente_role`
+   — a CONTA, não só o perfil activo. Mesmo critério de
+   `assert_cliente_owns_process`, que já lia a conta: a identidade de um
+   cliente do Portal é a conta dele, e uma cache de perfil errada não a
+   pode transformar em staff.
+
+Cobertura: `tests/unit/test_process_update_perfil_activo.py`, incluindo
+guarda sobre o código-fonte de que a permissão não volta a ler
+`user["role"]` — com a comparação feita **sem aspas**, porque o
+`ast.unparse` as normaliza e a guarda escrita com aspas duplas passava
+com a brecha aberta.

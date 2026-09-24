@@ -5431,3 +5431,80 @@ recusa — mas a API continua aberta ao primeiro caso.
   `ProcessPhaseCell`, 4 no `processNavigation.js`, 3 no
   `useProcessNeighbours`. **Duas sobreviveram** (as duas descritas em
   "Erros meus"); depois de corrigidos os testes, **as 22 mataram**.
+
+---
+
+# Iteração — Brecha de permissões: escrita seguia o papel do JWT (Set 2026)
+
+Fecho do achado lateral reportado no fim dos pontos 16/17, por decisão
+explícita: **o sistema respeita sempre o chapéu posto**.
+
+## O que estava errado
+
+`run_update_process` fazia `role = user["role"]` e daí tirava
+`build_role_update_permissions` (incluindo `can_update_status`) e
+`assert_process_editable_for_role`. Um consultor que trocasse para o
+perfil de **Indexação** continuava a poder, pela API, mudar a fase de um
+processo, editar secções de negócio e passar por cima do bloqueio de
+estado terminal.
+
+Terceiro sítio com o mesmo padrão (Kanban ponto 12, `_is_stealth_user`
+Lote 4) e o mais grave: nos outros era ver a mais, aqui era escrever.
+
+## O que mudou
+
+- `services/auth.py` — **NOVO** `resolve_concrete_role`: ponto ÚNICO que
+  colapsa o perfil activo num papel concreto. `__all_roles__` recua para
+  o papel do JWT (não existe união de permissões num PUT).
+- `services/process_kanban_enrichment.py` — `resolver_papel_do_quadro`
+  passa a DELEGAR nessa função em vez de manter a sua cópia da regra.
+- `services/process_update.py` —
+  `role = resolve_concrete_role(get_effective_role(request, user), user)`.
+- `services/process_update.py` — o ramo do staff passa a olhar para a
+  CONTA (`role == cliente_role or user["role"] == cliente_role`), não só
+  para o chapéu.
+- `frontend/src/utils/inlinePhaseEdit.js` — **removida** a dupla condição
+  que eu tinha posto no ponto 16.
+
+## Descoberta durante o teste
+
+`get_effective_role` já era **fail-closed**: sem cache UCR, o header
+`X-Active-Role` só é honrado quando COINCIDE com o papel do JWT — um
+header inventado recua para o papel base e regista um `warning`. O meu
+primeiro teste simulava a troca de perfil pelo header e, por isso,
+testava um cenário impossível. O caminho real (e o único em que a brecha
+era alcançável) é a cache UCR em `request.state`, escrita pelo
+`get_current_user` depois de validar o perfil na base de dados. Os
+testes passaram a usar os dois caminhos, e a distinguí-los.
+
+## Efeito colateral que tive de desfazer
+
+A dupla condição do ponto 16 (exigir perfil activo **e** papel base)
+fazia sentido enquanto os dois lados divergiam. Com a divergência
+fechada, passou a **esconder uma acção legítima**: quem é indexador numa
+empresa e consultor noutra deixava de ver o dropdown apesar de o
+servidor aceitar. Removida. Uma condição defensiva montada por cima de
+uma divergência tem de morrer com ela.
+
+## Erros meus, reportados
+
+1. A guarda de código-fonte `'user["role"]' not in fonte` **passou com a
+   brecha aberta**: o `ast.unparse` normaliza as aspas e o que lá está é
+   `user['role']`. É a armadilha que o AGENTS.md documenta e em que já
+   tropecei antes. Comparação passou a ser sem aspas nenhumas.
+2. Lancei o laço de mutações em segundo plano e editei o mesmo ficheiro
+   entretanto — a restauração final do laço apagou a minha edição.
+   Reaplicada e reverificada. (Segunda vez que misturo mutações com
+   trabalho em paralelo no mesmo ficheiro; da primeira foi a suite
+   completa a ler o ficheiro mutado.)
+3. Uma substituição por índices no ficheiro de testes duplicou três
+   blocos `describe` em vez de os trocar. Apanhado pelos próprios testes.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2121 passed** (baseline 2102).
+- `yarn test` → **949 passed / 82 ficheiros**.
+- `eslint --quiet src/` → 0 erros. flake8 gate → 0.
+- Mutação: **5 aplicadas, 5 mataram** (papel do JWT de volta, perfil
+  activo sem o colapso do `__all_roles__`, `__all_roles__` sem recuo,
+  bloqueio terminal pelo papel base, ramo do staff sem a conta).

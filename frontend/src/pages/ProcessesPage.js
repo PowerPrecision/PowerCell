@@ -1123,7 +1123,6 @@ const ProcessesPage = () => {
                             <ProcessPhaseCell
                               status={process.status}
                               role={effectiveRole}
-                              baseRole={user?.role}
                               workflowStatuses={workflowStatuses}
                               isDeleted={process.is_deleted}
                               saving={mudandoFaseIds.has(process.id)}

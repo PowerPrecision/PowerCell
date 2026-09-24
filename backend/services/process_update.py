@@ -13,6 +13,7 @@ from typing import Any, Optional
 from database import db
 from models.auth import UserRole
 from services.encryption import generate_nif_hash, generate_email_hash
+from services.auth import get_effective_role, resolve_concrete_role
 from services.process_status import INACTIVE_STATUSES
 from services.process_labels import normalizar_etiquetas
 
@@ -879,7 +880,24 @@ async def run_update_process(
         raise HTTPException(status_code=404, detail="Processo não encontrado")
 
     process = decrypt_process_doc_or_500(process, process_id, decrypt_fn)
-    role = user["role"]
+
+    # O PERFIL ACTIVO manda, não o papel do JWT.
+    #
+    # Isto lia `user["role"]` e era uma brecha de permissões: quem
+    # trocasse para o perfil de Indexação no ContextSwitcher continuava a
+    # escrever com os direitos do papel base (mudar a fase, editar
+    # secções de negócio, passar por cima do bloqueio de estado
+    # terminal), apesar de o produto inteiro — menus, botões, Kanban,
+    # regras de silêncio do histórico — já decidir pelo chapéu posto.
+    # Mesmo padrão fechado no Kanban (ponto 12) e no `_is_stealth_user`
+    # (Lote 4); aqui era pior, porque não era ver a mais, era escrever.
+    #
+    # `get_effective_role` é fail-closed: sem cache UCR a validar, o
+    # header `X-Active-Role` só vale se coincidir com o papel do JWT —
+    # um header inventado nunca alarga. E `resolve_concrete_role` colapsa
+    # o perfil "Todos" (`__all_roles__`) no papel base, porque não existe
+    # união de permissões que faça sentido num PUT.
+    role = resolve_concrete_role(get_effective_role(request, user), user)
 
     raw_body = {}
     try:
@@ -925,7 +943,17 @@ async def run_update_process(
     can_update_status = perms["can_update_status"]
 
     assert_cliente_owns_process(process, user)
-    if role != cliente_role:
+    # O ramo do staff olha para a CONTA e não só para o chapéu: uma
+    # conta de cliente do Portal nunca tem perfis de staff, e o perfil
+    # activo passou agora a poder diferir do papel do JWT. Se um dia uma
+    # cache de perfil ficasse errada, isto impede que o caminho de
+    # escrita de negócio abra a um cliente. Mesmo critério de
+    # `assert_cliente_owns_process`, que também lê a conta: a identidade
+    # de um cliente é a conta dele, não um chapéu que ele escolha.
+    e_conta_de_cliente = (
+        role == cliente_role or user.get("role") == cliente_role
+    )
+    if not e_conta_de_cliente:
         await apply_staff_business_updates(
             process=process,
             process_id=process_id,

@@ -873,12 +873,23 @@ vivem o histórico, a auditoria, as automações e as regras de silêncio
 por perfil. Um endpoint "leve" só para a listagem seria uma porta das
 traseiras a todos eles, e ninguém daria por isso durante meses.
 
-### 28.3 A permissão de um controlo inline espelha o backend, e pelo lado mais apertado
+### 28.3 A permissão de um controlo inline espelha o backend — e num campo só
 
 Mostrar um controlo a quem o servidor vai recusar com 403 é prometer uma
-acção que não existe. Quando o frontend e o backend resolvem a permissão
-por campos diferentes (o perfil ACTIVO aqui, o papel do JWT lá), exige-se
-**os dois** — nunca se escolhe o mais permissivo para "não chatear".
+acção que não existe. Mas a resposta certa quando o frontend e o backend
+resolvem a permissão por campos DIFERENTES não é exigir os dois: é
+**corrigir a divergência**.
+
+Foi o que aconteceu aqui. A edição inline nasceu a exigir o perfil
+activo **e** o papel base do JWT, porque o `PUT /processes/{id}` decidia
+pelo segundo. Assim que o backend passou a seguir `get_effective_role`
+como o resto do produto, a dupla condição deixou de ser prudência e
+passou a **esconder uma acção legítima** — a de quem é indexador numa
+empresa e consultor noutra. Uma permissão espelha-se num sítio só.
+
+A lição: uma condição defensiva montada por cima de uma divergência tem
+de ser removida quando a divergência desaparece. Ficar lá "por
+segurança" é código morto que mente ao utilizador.
 
 ### 28.4 Uma actualização optimista desfaz-se quando o servidor recusa
 

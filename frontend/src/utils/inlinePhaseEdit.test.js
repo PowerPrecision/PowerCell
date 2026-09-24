@@ -192,39 +192,35 @@ describe("precisaDeRecarregar", () => {
   });
 });
 
-describe("podeEditarFase — perfil activo vs papel base do JWT", () => {
-  it("recusa quando o perfil activo pode mas o papel base não", () => {
-    // Um indexador a actuar como Consultor: a UI deixaria, o
-    // `PUT /processes/{id}` recusa com 403 porque lê `user["role"]`.
+describe("podeEditarFase — um papel só: o perfil activo", () => {
+  it("decide pelo perfil activo mesmo quando o papel base é outro", () => {
+    // Um indexador que também é consultor noutra empresa: com o chapéu
+    // de consultor posto (e o UCR a confirmá-lo), pode mudar a fase. O
+    // backend segue a mesma regra desde que a brecha do
+    // `can_update_status` foi fechada — resolve por `get_effective_role`.
+    expect(podeEditarFase({ role: "consultor", status: "cpcv" })).toBe(true);
+  });
+
+  it("recusa quem tem o chapéu de Indexação posto", () => {
+    // Ainda que o papel base seja consultor: o produto respeita o
+    // chapéu, e o servidor também.
+    expect(podeEditarFase({ role: "indexacao", status: "cpcv" })).toBe(false);
+  });
+
+  it("ignora qualquer papel extra que lhe passem", () => {
+    // Contraprova de que a dupla condição foi mesmo removida: um
+    // `baseRole` sem permissão já não pode vetar o perfil activo.
     expect(
       podeEditarFase({ role: "consultor", baseRole: "indexacao", status: "cpcv" }),
-    ).toBe(false);
-  });
-
-  it("recusa quando o papel base pode mas o perfil activo não", () => {
-    // O contrário: um consultor a actuar COMO Indexação. O servidor
-    // deixaria passar, mas o produto diz que ele está de outro chapéu.
-    expect(
-      podeEditarFase({ role: "indexacao", baseRole: "consultor", status: "cpcv" }),
-    ).toBe(false);
-  });
-
-  it("aceita quando os dois podem", () => {
-    expect(
-      podeEditarFase({ role: "diretor", baseRole: "consultor", status: "cpcv" }),
     ).toBe(true);
   });
 
-  it("num estado terminal exige que os DOIS sejam admin/CEO", () => {
+  it("num estado terminal basta o perfil activo ser admin ou CEO", () => {
     expect(
       podeEditarFase({ role: "admin", baseRole: "consultor", status: "concluido" }),
-    ).toBe(false);
-    expect(
-      podeEditarFase({ role: "admin", baseRole: "ceo", status: "concluido" }),
     ).toBe(true);
-  });
-
-  it("sem papel base conhecido decide só pelo perfil activo", () => {
-    expect(podeEditarFase({ role: "consultor", status: "cpcv" })).toBe(true);
+    expect(
+      podeEditarFase({ role: "consultor", baseRole: "admin", status: "concluido" }),
+    ).toBe(false);
   });
 });

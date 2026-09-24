@@ -538,6 +538,33 @@ def get_effective_role(request: Request, user: dict) -> str:
     return jwt_role
 
 
+def resolve_concrete_role(effective_role, user: dict) -> str:
+    """
+    Colapsa o perfil ACTIVO num papel concreto, para decisões de permissão.
+
+    `get_effective_role` pode devolver `__all_roles__` — o perfil "Todos"
+    do ContextSwitcher. Isso é um conceito das LISTAGENS (onde
+    `all_roles=` faz a UNIÃO das visibilidades) e não significa nada para
+    quem tem de decidir se uma escrita é permitida: não há "união de
+    permissões" que faça sentido num PUT.
+
+    Nesse caso recua para o papel do JWT, que é a identidade base do
+    utilizador. A escolha conservadora nunca alarga — e alargar aqui era
+    exactamente o risco: quem tem `indexacao` como papel base passaria a
+    escrever como gestão só por ter o ContextSwitcher em "Todos".
+
+    Ponto ÚNICO desta regra. O quadro Kanban
+    (`resolver_papel_do_quadro`) delega aqui; qualquer superfície nova
+    que decida permissões pelo perfil activo faz o mesmo em vez de
+    reescrever a condição — foi ter a regra em três sítios que deixou
+    `document_portal_request` a ignorar `track_history=False`.
+    """
+    papel = str(effective_role or "").strip()
+    if not papel or papel == "__all_roles__":
+        return str((user or {}).get("role") or "")
+    return papel
+
+
 def get_all_user_roles(user: dict) -> list:
     """
     Retorna todos os cargos de um utilizador (primário + adicionais), sem duplicados.

@@ -298,13 +298,13 @@ def resolver_papel_do_quadro(papel_efectivo, user: dict) -> str:
     papel base seria um ALARGAMENTO: hoje vê a fila da Indexação,
     passaria a ver o quadro inteiro.
 
-    O quadro não suporta união de âmbitos, por isso `__all_roles__` recua
-    para o papel do JWT. A escolha conservadora nunca alarga.
+    A regra vive em `services.auth.resolve_concrete_role`, que é o ponto
+    único partilhado com as decisões de permissão de escrita. Esta função
+    mantém-se como o nome que o quadro usa.
     """
-    papel = str(papel_efectivo or "").strip()
-    if not papel or papel == "__all_roles__":
-        return str(user.get("role") or "")
-    return papel
+    from services.auth import resolve_concrete_role
+
+    return resolve_concrete_role(papel_efectivo, user)
 
 
 async def run_get_kanban_board(
