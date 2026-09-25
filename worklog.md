@@ -5903,3 +5903,79 @@ falha que não era real: o laço tinha o `redis_pubsub.py` mutado nesse
 instante. **Segunda vez que faço isto nesta série.** A bateria de validação
 só vale com o laço parado e os `.bak` todos restaurados — foi assim que os
 2551 acima foram obtidos.
+
+---
+
+# Iteração — Épico 10, Fase 3 + o cabeçalho que destruía os uploads (Set 2026)
+
+## Fase 3 — o polling volta a ser recurso
+
+`utils/realtimeFallback.js` (puro, testado): com o WebSocket de pé não há
+intervalo nenhum; quando ele cai, o intervalo regressa. **Não foi apagado —
+adormeceu.** Um WebSocket cai (rede móvel, portátil a adormecer, deploy), e
+ficar sem rede de segurança seria trocar um defeito por outro.
+
+**Correcção ao roteiro: o Kanban não tinha polling para cortar.** Vive de
+`staleTime: 60s` + `refetchOnWindowFocus`; não existia `setInterval` nenhum.
+O que lhe faltava era o oposto — os eventos emitidos com o socket em baixo
+perderam-se e nada os repete. `precisaDeRecuperar` dispara uma invalidação
+única na volta da ligação. Sem ela o quadro fica calado E desactualizado, que
+é pior do que estar visivelmente offline: parece funcionar.
+
+Medido no teste que monta o componente real: dez minutos de relógio simulado
+com o WS ligado passaram de **20 pedidos a 0**.
+
+## O bug do upload — e a hipótese estava invertida
+
+O diagnóstico partia de "falta o cabeçalho `multipart/form-data`". É o
+contrário: **é a predefinição da instância que o destrói.**
+
+O `transformRequest` do Axios 1.x converte um `FormData` em JSON quando vê
+`application/json` no cabeçalho — e a nossa instância declara-o por omissão.
+Provei contra um `http.createServer` real: o corpo chegava como
+`{"file":{},"category":"Financeiros"}`, o ficheiro reduzido a `{}`. Daí os
+**dois** campos em falta no 422, que é a assinatura de um corpo não analisável,
+não de um campo esquecido.
+
+**Três funções partidas, e as três saíram das minhas refactorizações:**
+`uploadProcessS3File` e `aiAnalyzeS3Documents` (Épico 8) e
+`uploadEmailAttachment` (Ponto 8, Fase 2). Todas omitiam o cabeçalho — que era
+exactamente o que eu tinha escrito em comentário como sendo a forma correcta.
+O comentário estava errado e propagou-se.
+
+Mais irónico ainda: as funções que escreviam `multipart/form-data` à mão
+**funcionavam**, porque o Axios o limpa lá dentro quando o corpo é FormData num
+browser. O padrão que parecia errado era o que estava a salvar-nos.
+
+Correcção num **interceptor**, não função a função: uma regra que depende de
+cada autor se lembrar dela já falhou três vezes. Excepção preservada e testada:
+`createTempLink` passa um objecto e deixa o Axios convertê-lo.
+
+`uploadClientS3File` removida — duplicava `uploadProcessS3File` para o mesmo
+endpoint, nunca teve chamador (confirmei com `git log -S`) e guardava o mesmo
+defeito enquanto a irmã era corrigida.
+
+## Erros meus
+
+- **O comentário que eu próprio escrevi no Épico 8** ("Content-Type
+  deliberadamente ausente: o Axios tem de o gerar com o boundary") estava
+  errado, e foi copiado para o Ponto 8 Fase 2. Omitir não limpa a predefinição
+  da instância. A regra do `AGENTS.md` sobre FormData é necessária mas
+  incompleta, e ficou agora corrigida nos documentos.
+- **Uma mutação sobreviveu** (`F8`): apagar os `delete` do cabeçalho não partia
+  nada, porque o `setContentType` já fazia o trabalho. Fui verificar qual das
+  linhas carregava o peso e **ambas funcionavam sozinhas** — redundância a
+  fingir de defesa. Separei em `if/else` por forma de cabeçalho, com um teste
+  para cada ramo; as duas mutações passaram a morrer.
+- O `src/test/setup.js` assumia `window` e rebentava a RECOLHA de qualquer
+  ficheiro em ambiente `node`, com uma mensagem sobre `matchMedia` que aponta
+  para o sítio errado. Passou a ser tolerante.
+
+## Validação
+
+- `yarn test` → **1064 passed / 93 ficheiros** (baseline 1032 / 88).
+- `pytest tests/unit --no-cov` → **2551 passed** (inalterado; sem backend nesta
+  iteração).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **12 aplicadas, 12 mortas** (5 no recurso de polling, 4 no
+  transporte de FormData, 1 no interceptor, 1 no Kanban, 1 no sino).

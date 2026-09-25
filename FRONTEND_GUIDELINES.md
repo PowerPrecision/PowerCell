@@ -1056,3 +1056,32 @@ retomar quando o WS cai — nunca apagar o intervalo.
 de `manager.is_user_connected`, que só conhece o worker que atendeu o pedido.
 Não construir funcionalidade em cima dele (atribuir só a quem está online, por
 exemplo) enquanto não houver um registo de presença partilhado.
+
+## 32. Uploads: o `Content-Type` e a predefinição da instância (Set 2026)
+
+**32.1 — Omitir o `Content-Type` num upload NÃO é limpá-lo.** A instância
+Axios declara `application/json` por omissão, e o `transformRequest` do Axios
+converte um `FormData` em JSON quando vê esse cabeçalho: o ficheiro vira `{}` e
+o servidor devolve 422 `Field required` em TODOS os campos do formulário. Três
+funções tinham este defeito e nenhuma parecia errada.
+
+**32.2 — Não escrever `Content-Type` nenhum em chamadas com FormData.** O
+interceptor de `utils/formDataTransport.js` anula-o. Escrever
+`"multipart/form-data"` à mão funciona por acidente (o Axios limpa-o lá
+dentro), e um acidente não é uma regra.
+
+**32.3 — Passar um objecto com `multipart/form-data` é outra coisa, e é
+legítima.** O Axios converte o objecto em FormData. `createTempLink` usa-o de
+propósito; o interceptor não lhe toca porque, nesse momento, `config.data`
+ainda não é FormData.
+
+**32.4 — Duas funções para o mesmo endpoint é uma a mais.** `uploadClientS3File`
+duplicava `uploadProcessS3File`, nunca teve chamador e guardava o defeito
+enquanto a irmã era corrigida. Antes de acrescentar um helper de API, procurar
+o endpoint no ficheiro.
+
+**32.5 — Um teste de transporte vale contra um servidor a sério.** 
+`services/__tests__/formDataTransport.test.js` corre em `// @vitest-environment
+node`, levanta um `http.createServer` e lê os bytes que chegam. Um duplo do
+adaptador do Axios teria "confirmado" o comportamento errado, porque o defeito
+está no `transformRequest` — antes do adaptador.

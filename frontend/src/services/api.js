@@ -50,6 +50,7 @@ import {
   isSessionInvalid,
 } from "./sessionExpiry";
 import { BACKEND_URL as RESOLVED_BACKEND_URL } from "../utils/apiBaseUrl";
+import { normalizarCabecalhosDeFormData } from "../utils/formDataTransport";
 
 // ====================================================================
 // CONFIGURAÇÃO
@@ -64,6 +65,11 @@ const api = axios.create({
   baseURL: API_URL,
   timeout: 90000, // 90 segundos - aumentado para operações longas como sincronização de email
   headers: {
+    // ATENÇÃO: esta predefinição aplica-se TAMBÉM aos pedidos com FormData,
+    // e nesse caso o `transformRequest` do Axios converte o FormData em
+    // JSON — o ficheiro vira `{}` e o servidor devolve 422. É por isso que
+    // o interceptor abaixo anula este cabeçalho quando o corpo é FormData.
+    // Ver `utils/formDataTransport.js`.
     "Content-Type": "application/json",
   },
 });
@@ -154,6 +160,12 @@ api.interceptors.request.use(
     if (isSessionInvalid()) {
       return Promise.reject(new axios.CanceledError("Session expired"));
     }
+
+    // FormData: anular o `Content-Type` para o browser gerar o `boundary`.
+    // Omitir NÃO chega — a predefinição da instância é `application/json` e
+    // o Axios converteria o FormData em JSON. Ponto único de propósito:
+    // três funções tinham este defeito e nenhuma parecia errada.
+    normalizarCabecalhosDeFormData(config);
 
     // Adicionar token de autenticação se existir
     const token = localStorage.getItem("token");
@@ -778,8 +790,10 @@ export const getProcessS3Files = (processId) =>
   api.get(`/documents/client/${processId}/files`, { skipErrorToast: true });
 export const uploadProcessS3File = (processId, formData) =>
   api.post(`/documents/client/${processId}/upload`, formData, {
-    // Content-Type deliberadamente ausente: o Axios tem de o gerar com o
-    // `boundary` do FormData. Escrevê-lo à mão parte o multipart.
+    // O `Content-Type` é tratado pelo interceptor (`formDataTransport`):
+    // omiti-lo aqui NÃO bastava, porque a predefinição da instância é
+    // `application/json` e o Axios convertia o FormData em JSON — era esta
+    // a origem do 422 `Field required` em `file` e `category`.
     skipErrorToast: true,
   });
 export const deleteProcessS3File = (processId, filePath) =>
@@ -898,7 +912,10 @@ export const uploadVoiceNote = (processId, file, onProgress) => {
   const formData = new FormData();
   formData.append("file", file);
   return api.post(`/processes/${processId}/voice-notes`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
+    // Sem `Content-Type` à mão: o interceptor anula-o e o browser gera o
+    // `boundary`. Escrever "multipart/form-data" sem boundary só funcionava
+    // porque o Axios o limpava lá dentro — depender disso é depender de um
+    // pormenor interno da biblioteca.
     onUploadProgress: (evento) => {
       if (!onProgress || !evento.total) return;
       onProgress(Math.round((evento.loaded * 100) / evento.total));
@@ -911,11 +928,10 @@ export const getVoiceNotes = (processId) =>
 // S3 Document Storage (Current)
 export const getClientS3Files = (processId) => 
   api.get(`/documents/client/${processId}/files`);
-export const uploadClientS3File = (processId, formData, onProgress) => 
-  api.post(`/documents/client/${processId}/upload`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-    onUploadProgress: onProgress
-  });
+// `uploadClientS3File` foi REMOVIDA: duplicava `uploadProcessS3File` para o
+// mesmo endpoint, não tinha um único chamador (nem na história do
+// repositório) e escrevia o `Content-Type` à mão. Uma segunda porta para o
+// mesmo sítio é onde o defeito seguinte se instala sem ser visto.
 export const deleteClientS3File = (processId, filePath) => 
   api.delete(`/documents/client/${processId}/file`, { params: { file_path: filePath } });
 export const getS3DownloadUrl = (processId, filePath) => 
@@ -1115,7 +1131,7 @@ export const cancelEmailSend = (sendId) =>
   api.post(`/emails/${sendId}/cancel-send`);
 
 // O Content-Type é deliberadamente omitido: o Axios tem de o gerar com o
-// `boundary` do FormData. Escrevê-lo à mão parte o multipart.
+// `boundary` — ver `utils/formDataTransport.js` e o interceptor de pedido.
 export const uploadEmailAttachment = (formData) =>
   api.post("/emails/attachments/upload", formData);
 
@@ -1513,9 +1529,7 @@ export const deleteCompany = (id) => api.delete(`/admin/companies/${id}`);
 export const uploadCompanyLogo = (id, file) => {
   const formData = new FormData();
   formData.append("file", file);
-  return api.post(`/admin/companies/${id}/logo`, formData, {
-    headers: { "Content-Type": "multipart/form-data" },
-  });
+  return api.post(`/admin/companies/${id}/logo`, formData);
 };
 
 // ===== USER COMPANY ROLES (UCR — acessos multi-empresa) =====

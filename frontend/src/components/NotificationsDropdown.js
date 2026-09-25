@@ -39,6 +39,12 @@ import { getNotifications, markNotificationRead } from "../services/api";
 import { toast } from "sonner";
 import { safeDateStr } from "../lib/utils";
 import { playNotificationBeep } from "../utils/notificationSound";
+import {
+  INTERVALO_BASE_MS,
+  aplicarRecuoPorRateLimit,
+  intervaloEfectivo,
+  precisaDeRecuperar,
+} from "../utils/realtimeFallback";
 
 
 const notificationIcons = {
@@ -78,9 +84,13 @@ const notificationColors = {
 };
 
 // Polling interval for real-time notifications (30 seconds - increased to reduce server load)
-const BASE_POLLING_INTERVAL = 30000;
-const BACKOFF_MULTIPLIER = 2;
-const MAX_POLLING_INTERVAL = 300000; // 5 minutes max backoff
+// Deriva do módulo partilhado: dois "30000" escritos em sítios diferentes
+// divergem, e a divergência aqui seria invisível (o ecrã continua a
+// funcionar, só sonda ao ritmo errado).
+const BASE_POLLING_INTERVAL = INTERVALO_BASE_MS;
+// O recuo por rate limiting vive em `utils/realtimeFallback.js`, testado à
+// parte: duas constantes soltas aqui eram a metade fácil de uma regra cuja
+// metade difícil (quando NÃO sondar) ninguém tinha escrito.
 const BACKOFF_RESET_SUCCESS_COUNT = 3; // Reset after N consecutive successes
 
 const NotificationsDropdown = () => {
@@ -135,7 +145,7 @@ const NotificationsDropdown = () => {
   // Complementa o polling: o polling cobre o caso de o WebSocket falhar,
   // enquanto o WebSocket fornece updates instantâneos.
   // ====================================================================
-  useWebSocket({
+  const { isConnected } = useWebSocket({
     autoConnect: true,
     onNotification: useCallback((notification) => {
       if (!notification) return;
@@ -272,9 +282,8 @@ const NotificationsDropdown = () => {
       // On 429, increase polling interval with exponential backoff
       if (is429) {
         consecutiveSuccessRef.current = 0;
-        pollingIntervalRef.current = Math.min(
-          pollingIntervalRef.current * BACKOFF_MULTIPLIER,
-          MAX_POLLING_INTERVAL
+        pollingIntervalRef.current = aplicarRecuoPorRateLimit(
+          pollingIntervalRef.current
         );
         console.warn(
           `[Notifications] Rate limited. Backing off to ${Math.round(pollingIntervalRef.current / 1000)}s polling interval`
@@ -292,13 +301,40 @@ const NotificationsDropdown = () => {
     }
   }, [navigate, playNotificationSound]);
 
+  // ÉPICO 10, FASE 3 — o polling passa a RECURSO.
+  // Enquanto o WebSocket estiver de pé não há intervalo nenhum: desde que a
+  // entrega passou pelo Redis (Fase 1), o evento chega a qualquer worker.
+  // Antes disso este `setInterval` era o que de facto entregava metade das
+  // notificações, porque `is_user_connected` mente com dois workers — por
+  // isso o intervalo NÃO é apagado, só adormece.
   useEffect(() => {
     fetchNotifications();
-    intervalRef.current = setInterval(fetchNotifications, pollingIntervalRef.current);
+  }, [fetchNotifications]);
+
+  useEffect(() => {
+    const intervalo = intervaloEfectivo({
+      isConnected,
+      intervaloActual: pollingIntervalRef.current,
+    });
+    if (intervalo === null) return undefined;
+
+    intervalRef.current = setInterval(fetchNotifications, intervalo);
     return () => {
       if (intervalRef.current) clearInterval(intervalRef.current);
     };
-  }, [fetchNotifications]);
+  }, [isConnected, fetchNotifications]);
+
+  // Os eventos emitidos com o socket em baixo perderam-se — não há
+  // repetição. Sem esta leitura na volta da ligação, o ecrã fica calado E
+  // desactualizado, que é pior do que estar visivelmente offline.
+  const ligacaoAnteriorRef = useRef(null);
+  useEffect(() => {
+    if (precisaDeRecuperar({ anterior: ligacaoAnteriorRef.current, actual: isConnected })) {
+      pollingIntervalRef.current = INTERVALO_BASE_MS;
+      fetchNotifications();
+    }
+    ligacaoAnteriorRef.current = isConnected;
+  }, [isConnected, fetchNotifications]);
 
   const handleNotificationClick = async (notification) => {
     try {

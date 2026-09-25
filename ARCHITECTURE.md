@@ -4436,3 +4436,77 @@ que fechou a brecha do `can_update_status`.
 É o passo seguinte, e só é seguro agora que a conduta existe: suspender o
 `setInterval` quando `isConnected` e retomá-lo se o WS cair, como o Webmail e
 o `TasksContext` já fazem.
+
+## Épico 10, Fase 3 — o polling volta a ser recurso (Set 2026)
+
+Só agora é seguro. Até às Fases 1 e 2, `send_realtime_notification` decidia a
+entrega por `manager.is_user_connected`, que mente com `UVICORN_WORKERS=2`:
+quem entregava metade das notificações era o `setInterval` de 30 s do
+`NotificationsDropdown`. Com a entrega pelo Redis, o intervalo pode dormir.
+
+**O intervalo não foi apagado, foi adormecido.** `utils/realtimeFallback.js`
+(puro): `intervaloEfectivo({isConnected})` devolve `null` com o socket de pé e
+o intervalo quando ele cai. Um valor inválido cai no base — falhar para "sem
+rede de segurança" seria o pior dos dois lados.
+
+**O Kanban não tinha polling para cortar.** Vive de `staleTime: 60s` +
+`refetchOnWindowFocus`; não havia `setInterval` nenhum. O que lhe faltava era o
+outro lado: os eventos emitidos enquanto o socket esteve em baixo perderam-se e
+**nada os repete**. `precisaDeRecuperar({anterior, actual})` dispara uma
+invalidação única na volta da ligação — sem ela o quadro fica calado E
+desactualizado, que é pior do que estar visivelmente offline: parece funcionar.
+A primeira ligação não conta (a montagem já leu).
+
+---
+
+## O cabeçalho que destruía os uploads (Set 2026)
+
+**Sintoma:** `POST /api/documents/client/{id}/upload` devolvia **422** com
+`Field required` para `body.file` **e** `body.category`. Os dois campos ao
+mesmo tempo é a assinatura de um corpo que o servidor não conseguiu analisar
+como multipart — não de um campo esquecido.
+
+**Causa.** A instância Axios de `services/api.js` declara
+`Content-Type: application/json` como predefinição, e o `transformRequest` do
+Axios 1.x faz, literalmente:
+
+```js
+if (isFormData) {
+  return hasJSONContentType ? JSON.stringify(formDataToJSON(data)) : data;
+}
+```
+
+Com JSON no cabeçalho, **o FormData é convertido em JSON** e o ficheiro vira
+`{}`. Só depois, já dentro do adaptador, é que o Axios limparia o cabeçalho
+para o browser gerar o `boundary` — e a essa altura já não há FormData. **A
+ordem é que decide.** Verificado contra um servidor HTTP real:
+
+```
+Content-Type: application/json
+{"file":{},"category":"Financeiros"}
+```
+
+**A lição inverte a regra que seguíamos.** "Não escrever o `Content-Type` à
+mão" é necessário, mas **NÃO é suficiente**: omitir não limpa nada, deixa
+entrar a predefinição da instância. É preciso ANULÁ-LO. E, ironicamente, as
+funções que escreviam `multipart/form-data` à mão funcionavam — porque o Axios
+o limpa lá dentro quando o corpo é FormData num browser. Depender disso é
+depender de um pormenor interno da biblioteca.
+
+**Três funções estavam partidas**, todas saídas das refactorizações
+recentes: `uploadProcessS3File` (Épico 8), `aiAnalyzeS3Documents` (Épico 8) e
+`uploadEmailAttachment` (Ponto 8, Fase 2). Cada uma omitia o cabeçalho, que
+era o que se julgava correcto.
+
+**A correcção é um interceptor, não uma emenda por função**
+(`utils/formDataTransport.js` + `api.interceptors.request`). Uma regra que
+depende de cada autor se lembrar dela já falhou três vezes; num ponto único
+não há onde falhar. Excepção legítima preservada: `createTempLink` passa um
+**objecto** e deixa o Axios convertê-lo por causa do cabeçalho — no momento
+do interceptor ainda não é FormData, por isso não lhe tocamos, e há um teste
+a afirmá-lo.
+
+`uploadClientS3File` foi **removida**: duplicava `uploadProcessS3File` para o
+mesmo endpoint, nunca teve um único chamador (nem na história do repositório)
+e carregava o mesmo defeito. Uma segunda porta para o mesmo sítio é onde o
+defeito seguinte se instala sem ser visto.

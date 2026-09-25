@@ -13,8 +13,14 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+// Alguns ficheiros correm em ambiente `node` (`// @vitest-environment node`)
+// para exercitar transporte HTTP a sério — aí não há `window`, e tocar-lhe
+// aqui rebentava a RECOLHA desse ficheiro inteiro, com uma mensagem sobre
+// `matchMedia` que não aponta para o problema real.
+const temDOM = typeof window !== "undefined";
+
 // jsdom não implementa estes; vários componentes Radix/Shadcn tocam-lhes.
-if (!window.matchMedia) {
+if (temDOM && !window.matchMedia) {
   window.matchMedia = (query) => ({
     matches: false,
     media: query,
@@ -27,7 +33,7 @@ if (!window.matchMedia) {
   });
 }
 
-if (!window.ResizeObserver) {
+if (temDOM && !window.ResizeObserver) {
   window.ResizeObserver = class {
     observe() {}
     unobserve() {}
@@ -35,7 +41,7 @@ if (!window.ResizeObserver) {
   };
 }
 
-if (!Element.prototype.scrollIntoView) {
+if (temDOM && !Element.prototype.scrollIntoView) {
   Element.prototype.scrollIntoView = () => {};
 }
 
@@ -43,7 +49,7 @@ if (!Element.prototype.scrollIntoView) {
 // chama-a ao abrir a lista: sem isto, `hasPointerCapture is not a
 // function` faz o clique morrer em silêncio e o teste falha a dizer que
 // não encontrou a opção — uma pista que aponta para o sítio errado.
-if (!Element.prototype.hasPointerCapture) {
+if (temDOM && !Element.prototype.hasPointerCapture) {
   Element.prototype.hasPointerCapture = () => false;
   Element.prototype.setPointerCapture = () => {};
   Element.prototype.releasePointerCapture = () => {};
