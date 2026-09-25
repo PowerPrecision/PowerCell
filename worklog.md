@@ -6041,7 +6041,8 @@ cabeçalho do script.
 ## Validação
 
 - `pytest tests/unit --no-cov` → **2603 passed** (baseline 2551, +52).
-- `flake8 --select=E9,F63,F7,F82` → 0.
+- `flake8 --select=E9,F63,F7,F82` → 0. `yarn test` → **1071 passed / 93 ficheiros**
+  (inalterado — não toquei em código do frontend).
 - Mutação: **13 aplicadas, 13 mortas** (5 na contenção, 5 no explorador
   incluindo a paginação, 3 na medição).
 
@@ -6118,3 +6119,95 @@ contrário.
 - `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `vite build` verde.
 - Mutação: **13 aplicadas, 13 mortas** (7 no âmbito, 3 no religamento, 3 no
   explorador).
+
+---
+
+# Iteração — Estado & Workflow, Passo Zero: medir antes de tocar (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+Épico 10, Parte 3. O pedido era refinar o agrupamento das fases no funil de
+negócio. O raio-x mostrou que o funil não era o problema — o vocabulário é.
+
+## A premissa que estava errada
+
+`workflow_statuses` **não tem campo de macro-fase**. Sabe `name`, `label`,
+`order`, `color`, `portal_label`, `visible_in_portal` e cinco flags de
+comportamento. As macro-fases vivem numa lista cravada em
+`frontend/src/utils/funilDeFases.js`, e o cabeçalho desse ficheiro — escrito
+por mim no Lote 5 — diz exactamente isso. O agrupamento não é um refinamento
+de configuração: é um campo que ainda não existe.
+
+## Cinco vocabulários de fases, dois deles inexistentes
+
+| Onde | O que declara |
+|---|---|
+| Motor (`seed.py`) | 14 fases reais |
+| `STATUS_VALUE_ALIASES` (backend) | singular/plural dos terminais |
+| `ALIASES_LEGADOS` (`utils/processTimeline.js`) | 10 nomes antigos |
+| `MACRO_FASES` (`utils/funilDeFases.js`) | 4 grupos |
+| `stats_branches` + `scheduled_tasks` + `admin_dev_ops` | `documentacao`, `analise`, `pre_aprovacao`, `credito_aprovado`, `cpcv`, `minuta`, `escritura`… |
+
+A última linha é a séria: o **dashboard BI de balcões** mede sobre nomes que o
+motor não tem. `_COMPLETED_STATUSES = ["concluido", "arquivo"]` quando a fase
+terminal do produto se chama `concluidos`. O tempo de fecho estava a ser
+calculado sobre conjunto vazio.
+
+Também há três definições simultâneas de "terminal": a flag dinâmica
+`is_active` (Kanban/move, a correcta), `INACTIVE_STATUSES` (Portal) e
+`ARCHIVED_STATUSES` (filtro de vista do Kanban).
+
+Uma nota justa: `status` **já está indexado** — `idx_status` mais três
+compostos em `db_indexes.py`. Essa preocupação já estava resolvida.
+
+## O quadro perde cartões que o contador conta
+
+`group_processes_by_status` agrupa por igualdade EXACTA; o contador do
+cabeçalho (`build_active_inactive_count_queries`) conta por `$in` **com** os
+aliases. Um processo em `concluido` (singular), numa fase apagada ou com um
+espaço a mais no nome não aparece em coluna nenhuma e continua a somar para o
+número lido por cima do quadro. Sem erro, sem log.
+
+`tests/unit/test_kanban_cartoes_perdidos.py` prende o defeito. Afirma o
+comportamento **errado**, que é o que está em produção hoje, com contraprova
+ao lado; quando a Parte 1 fechar o buraco, estas asserções invertem-se — e a
+inversão é a prova de que a correcção mordeu.
+
+## O que este passo entrega
+
+- `services/workflow_status_coverage.py` — lógica **pura** da medição.
+  Funde as duas tabelas de alias que hoje vivem em lados opostos da aplicação
+  (`escriturado` do frontend e `concluido` do backend passam a ser o mesmo
+  grupo). Classifica cada status órfão em **resolúvel / ambíguo /
+  desconhecido** pela disciplina do `rede_consensual`: mais do que um
+  candidato → ninguém escolhe. Detecta gralhas invisíveis (capitalização,
+  espaço à direita, hífen) e mede as listas cravadas importando-as dos
+  módulos **reais**, privadas incluídas — uma cópia local mediria a cópia.
+- `scripts/medir_status_producao.py` — script fino, **só leitura**. Sem
+  `--aplicar` e sem o vir a ter: o passo seguinte é uma decisão de produto,
+  não uma correspondência inequívoca. Uma agregação única sobre `idx_status`.
+  Não chama o `env_guard` de propósito — o guarda existe para impedir um seed
+  de escrever em produção, e é contra produção que isto tem de correr; o que o
+  torna seguro é a guarda sobre o código-fonte que afirma que nenhuma operação
+  de escrita aparece no ficheiro, com contraprova de que lê mesmo as duas
+  colecções.
+- Guarda de paridade: a cópia portada de `ALIASES_LEGADOS` é comparada com o
+  original em `processTimeline.js`. Duas cópias da mesma tabela em linguagens
+  diferentes divergem em silêncio; a Parte 1 mata a duplicação, até lá fica
+  vigiada.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2725 passed** (baseline 2660, +65).
+- `flake8 --select=E9,F63,F7,F82` → 0. `yarn test` → **1071 passed / 93 ficheiros**
+  (inalterado — não toquei em código do frontend).
+- Ensaio ponta-a-ponta contra Mongo local com dados sintéticos (órfão
+  resolúvel, órfão desconhecido, gralha, leads sem status, eliminados):
+  relatório e JSON corridos, base de ensaio apagada no fim.
+
+## O que ainda não sabemos
+
+Os números de produção. O motor diz 14 fases, o `stats_branches` diz outras
+13, e o ambiente de dev é mockado — recusei-me a inventar a distribuição, pela
+mesma razão que recusei inventar a cobertura do S3. O backfill das macro-fases
+parte do JSON que o script devolver, não do seed.

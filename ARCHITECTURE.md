@@ -4712,3 +4712,92 @@ não pesava; num endpoint cujo RESULTADO depende do contexto, pesa. Seis funçõ
 em `services/api.js`, guarda em `pages/filesExplorerTransport.test.js`. A página
 distingue **404** (pasta fora da rede) de **403** (sem acesso à página): dizer
 "sem permissões" a um 404 confirmaria que a pasta existe.
+
+---
+
+## Estado do processo × workflow × Kanban — o retrato (Set 2026)
+
+### O campo `status` é o eixo, e continua a ser
+
+`processes.status` é lido em ~94 sítios e está indexado (`idx_status` +
+`idx_status_consultor`, `idx_status_mediador`, `idx_status_created`). Mover a
+verdade para um campo novo seria uma migração de raio inaceitável. O que muda
+não é onde a verdade vive: é **quem tem direito a ter uma lista de nomes de
+fases**.
+
+### As fases são configuráveis — e cinco sítios fingem que não
+
+| Fonte | Declara |
+|---|---|
+| `workflow_statuses` (motor) | as fases reais, por `order` |
+| `process_status.STATUS_VALUE_ALIASES` | singular/plural dos terminais |
+| `utils/processTimeline.js::ALIASES_LEGADOS` | 10 nomes antigos |
+| `utils/funilDeFases.js::MACRO_FASES` | 4 grupos do funil |
+| `stats_branches`, `scheduled_tasks`, `admin_dev_ops` | um vocabulário que **não existe no motor** |
+
+O último é o que custa dinheiro: o dashboard BI de balcões procura
+`concluido`/`arquivo` quando a fase terminal se chama `concluidos`, e o tempo
+médio de fecho sai de um conjunto vazio. **Uma métrica de negócio medida
+contra fases inexistentes não é imprecisa — é sobre nada.**
+
+"Terminal" também tem três definições em simultâneo: a flag dinâmica
+`is_active` (Kanban/move — a correcta), `INACTIVE_STATUSES` (Portal) e
+`ARCHIVED_STATUSES` (filtro de vista do Kanban).
+
+### O quadro perde cartões que o contador conta
+
+`group_processes_by_status` agrupa por igualdade EXACTA da string;
+`build_kanban_columns` só lê as chaves com fase configurada. O contador do
+cabeçalho conta por `$in` **com** os aliases. Um processo em `concluido`
+(singular), numa fase apagada, ou com um espaço a mais, fica **invisível no
+quadro** e continua a somar para o número por cima dele. Sem erro, sem log.
+
+A origem mecânica está em `run_delete_workflow_status`: move os processos com
+`update_many({"status": nome_exacto})` — as variantes ficam para trás — e não
+dispara automação nenhuma nem escreve `is_active`. Uma mudança de estado em
+massa, invisível ao motor.
+
+### `services/workflow_status_coverage.py` + `scripts/medir_status_producao.py`
+
+A medição, antes de qualquer intervenção. O serviço é **puro** e funde as duas
+tabelas de alias que vivem em lados opostos da aplicação. A regra do alias é a
+que a timeline já usa e é a única segura: **um alias só vence quando o motor
+não conhece o nome gravado E conhece o destino** — e com mais do que um
+destino possível não se escolhe, a disciplina do `rede_consensual` (Lote 4) e
+do `_propor_correspondencias` (Gestor S3).
+
+Classifica cada órfão em **resolúvel / ambíguo / desconhecido**, separa
+gralhas invisíveis (capitalização, espaço à direita, hífen) dos nomes
+legítimos antigos, e mede as listas cravadas **importando-as dos módulos
+reais, privadas incluídas** — uma cópia local mediria a cópia.
+
+O script é **só leitura** e não vai ter `--aplicar`: o passo seguinte é uma
+decisão de produto (que macro-fase leva cada fase), não uma correspondência
+que uma máquina feche sozinha. Não chama o `env_guard` de propósito — esse
+guarda existe para impedir um seed de escrever em produção, e é contra
+produção que este script tem de correr. O que o torna seguro é a guarda sobre
+o código-fonte que afirma que nenhuma operação de escrita aparece no ficheiro,
+com contraprova de que lê mesmo as duas colecções.
+
+### O desenho aprovado (por executar)
+
+1. **`macro_fase` passa a campo da fase**, com enum fechado
+   (`novo|analise|aprovado|concluido|perdido`) editável no `WorkflowEditor`.
+   Fechado porque texto livre cria um grupo novo com uma gralha e o funil
+   parte-se em silêncio — a lição do Campo de Rede (Lote 5, ponto 2). Semeado
+   uma vez pelo padrão idempotente do `ensure_workflow_purpose_flags_backfill`:
+   a semântica fica **na base de dados**, o runtime só lê.
+2. **Um resolvedor, um dialecto** (`workflow_phases.py`). As cinco listas
+   passam a ler dali; as duas tabelas de alias fundem-se numa.
+3. **Coluna "Fases desconhecidas"** no Kanban, visível a `ADMIN`/`CEO` — a
+   mesma política das pastas S3 órfãs: não adivinhar, mostrar a quem
+   reconcilia. Invariante em teste: **soma dos cartões = contador do
+   cabeçalho**.
+4. **`run_delete_workflow_status` recusa apagar uma fase com processos.** Um
+   `update_many` que dispare automações em centenas de processos é um acidente
+   pior do que uma recusa; o administrador move-os no quadro, e aí o motor
+   reage como deve.
+
+**A macro-fase é para LEITURA** (funil, Portal, BI). As `trigger_*` continuam
+a ser a única coisa que as automações lêem — fundi-las faria uma edição do
+funil mudar o que dispara.

@@ -1111,3 +1111,39 @@ partidas — vale a pena dizê-lo ao utilizador em vez de celebrar sucesso.
 "Ficheiros" no `DashboardLayout` e as `allowedRoles` da rota em `App.js` são
 lidas e cruzadas por `App.rotasMenu.test.js`. Abrir um sem o outro dá um item de
 menu que redirecciona — o produto a contradizer-se, sem erro em lado nenhum.
+
+---
+
+## 34. Nomes de fases do workflow no frontend (Épico 10, Set 2026)
+
+As fases do processo são **configuráveis pelo administrador**. O frontend não
+tem autoridade sobre elas — tem, hoje, três listas que fingem o contrário.
+
+**34.1 — Uma lista de nomes de fases no frontend é dívida, não configuração.**
+Existem três: `ALIASES_LEGADOS` (`utils/processTimeline.js`), `MACRO_FASES`
+(`utils/funilDeFases.js`) e os literais `'concluidos'` / `'desistencias'`
+espalhados pelo `KanbanBoard`, `KanbanColumn`, `KanbanCard` e
+`useKanbanCompletedQuery`. Nenhuma cresce: quem lê fases novas é o motor.
+**Código novo não acrescenta a nenhuma delas.**
+
+**34.2 — A regra do alias, quando for preciso aplicá-la.** Um nome antigo só
+vence quando o motor **não** conhece o nome gravado **e** conhece o destino.
+Nunca ao contrário — basta o admin criar uma fase com o nome antigo para a
+tradução passar a reescrever processos correctos. Está escrita no cabeçalho do
+`processTimeline.js` e vale para toda a gente.
+
+**34.3 — `ALIASES_LEGADOS` tem agora um gémeo em Python.**
+`services/workflow_status_coverage.py` porta a mesma tabela para a medição de
+produção, e `tests/unit/test_workflow_status_coverage.py` lê o ficheiro JS e
+exige que os dois sejam o mesmo conjunto. **Editar um obriga a editar o
+outro** — até a Parte 2, que muda a fonte para a base de dados e mata a
+duplicação.
+
+**34.4 — Uma fase que nenhum grupo cobre aparece; não desaparece.** É a regra
+do `agruparEmFunil` e mantém-se: o que não couber vai para "Outras fases", com
+o nome, em vez de ser deitado fora em silêncio. Um agrupamento que perde
+processos mente com ar de relatório.
+
+**34.5 — Terminal não se decide por lista.** Uma fase é terminal quando o
+motor diz `is_active: false`. Um `status === 'concluidos'` num componente é a
+mesma dívida do 34.1 com outra forma.
