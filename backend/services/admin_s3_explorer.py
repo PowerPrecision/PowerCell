@@ -13,11 +13,17 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from models.auth import UserRole
+from services.s3_explorer_paths import (
+    RAIZ_DO_EXPLORADOR,
+    assert_dentro_da_raiz,
+)
 
 logger = logging.getLogger(__name__)
 
-# Base path do explorador de ficheiros — pasta raiz virtual do S3
-S3_EXPLORER_BASE_PATH = "Documentação Clientes"
+# Base path do explorador — reexportado de `s3_explorer_paths`, que é quem
+# manda. Duas constantes com o mesmo valor divergem, e a divergência aqui
+# seria uma fronteira de segurança a discordar de si própria.
+S3_EXPLORER_BASE_PATH = RAIZ_DO_EXPLORADOR
 
 # Roles that can perform file operations
 # ────────────────────────────────────────────────────────────────────
@@ -53,24 +59,16 @@ class S3CreateFolderRequest(BaseModel):
 
 
 def _resolve_explorer_path(path: str) -> str:
-    """
-    Resolve o caminho S3 para operações do File Explorer.
+    """Resolve e CONTÉM o caminho dentro da raiz do explorador.
 
-    Se o caminho estiver vazio, retorna o base path ("Documentação Clientes").
-    Se o caminho já contiver o base path, retorna como está.
-    Se o caminho não contiver o base path, prefixa com ele.
+    Antes fazia só `path.startswith(S3_EXPLORER_BASE_PATH)`, o que dava por
+    bom `Documentação Clientes/../backups` (o `..` nunca era resolvido) e
+    `Documentação Clientes_outro/` (prefixo de texto não é fronteira de
+    segmento). Os backups da base de dados vivem no mesmo bucket.
 
-    Isto garante que as operações de criação/upload respeitem
-    a pasta actual onde o utilizador navegou, corrigindo o bug
-    onde pastas criadas na raiz do explorador iam parar à raiz
-    do bucket S3 em vez de dentro de "Documentação Clientes/".
+    Levanta 400 para um caminho que saia da raiz.
     """
-    path = path.strip()
-    if not path:
-        return S3_EXPLORER_BASE_PATH
-    if path.startswith(S3_EXPLORER_BASE_PATH):
-        return path
-    return f"{S3_EXPLORER_BASE_PATH}/{path}"
+    return assert_dentro_da_raiz(path)
 
 
 async def run_get_s3_folder_contents(folder_path: str, user: dict):
@@ -85,34 +83,65 @@ async def run_get_s3_folder_contents(folder_path: str, user: dict):
 
     try:
         list_prefix = prefix if prefix.endswith("/") else f"{prefix}/"
-        response = s3_service.s3_client.list_objects_v2(
-            Bucket=s3_service.bucket_name,
-            Prefix=list_prefix,
-            Delimiter="/"
-        )
 
+        # PAGINAÇÃO (Épico 10) — `list_objects_v2` devolve no MÁXIMO 1000
+        # entradas por chamada. Havia aqui uma única chamada, sem
+        # `ContinuationToken`: uma raiz com mais de mil pastas de cliente
+        # ficava truncada **em silêncio**, e o utilizador não tinha como
+        # distinguir "é só isto" de "o resto não coube". O `delete` e o
+        # `rename` já paginavam; a listagem, que é a que toda a gente vê,
+        # não. Com o filtro por rede do Passo 3 por cima, uma truncagem
+        # invisível passaria a parecer isolamento a funcionar.
         subfolders = []
-        for common_prefix in response.get("CommonPrefixes", []):
-            subfolder_path = common_prefix.get("Prefix", "")
-            parts = subfolder_path.rstrip("/").split("/")
-            subfolder_name = parts[-1] if parts else ""
-            if subfolder_name:
-                subfolders.append({
-                    "path": subfolder_path.rstrip("/"),
-                    "name": subfolder_name
-                })
-
         files = []
-        for obj in response.get("Contents", []):
-            key = obj.get("Key", "")
-            if key != list_prefix and not key.endswith("/"):
-                file_name = key.split("/")[-1]
-                files.append({
-                    "path": key,
-                    "name": file_name,
-                    "size": obj.get("Size", 0),
-                    "last_modified": obj.get("LastModified").isoformat() if obj.get("LastModified") else None
-                })
+        continuation_token = None
+        paginas = 0
+
+        while True:
+            kwargs = {
+                "Bucket": s3_service.bucket_name,
+                "Prefix": list_prefix,
+                "Delimiter": "/",
+            }
+            if continuation_token:
+                kwargs["ContinuationToken"] = continuation_token
+
+            response = s3_service.s3_client.list_objects_v2(**kwargs)
+            paginas += 1
+
+            for common_prefix in response.get("CommonPrefixes", []):
+                subfolder_path = common_prefix.get("Prefix", "")
+                parts = subfolder_path.rstrip("/").split("/")
+                subfolder_name = parts[-1] if parts else ""
+                if subfolder_name:
+                    subfolders.append({
+                        "path": subfolder_path.rstrip("/"),
+                        "name": subfolder_name
+                    })
+
+            for obj in response.get("Contents", []):
+                key = obj.get("Key", "")
+                if key != list_prefix and not key.endswith("/"):
+                    file_name = key.split("/")[-1]
+                    files.append({
+                        "path": key,
+                        "name": file_name,
+                        "size": obj.get("Size", 0),
+                        "last_modified": obj.get("LastModified").isoformat() if obj.get("LastModified") else None
+                    })
+
+            if not response.get("IsTruncated"):
+                break
+            continuation_token = response.get("NextContinuationToken")
+            if not continuation_token:
+                # Defesa contra um ciclo infinito se o S3 disser "truncado"
+                # sem dar o cursor: melhor uma listagem incompleta com aviso
+                # do que um pedido que nunca termina.
+                logger.warning(
+                    "[S3-EXPLORER] Listagem truncada sem NextContinuationToken "
+                    "em '%s' após %d página(s)", list_prefix, paginas,
+                )
+                break
 
         return {
             "folder_path": folder_path,
@@ -133,11 +162,17 @@ async def run_s3_rename(data: S3RenameRequest, user: dict):
     if not s3_service.is_configured():
         raise HTTPException(status_code=503, detail="S3 não configurado")
 
-    old_path = data.old_path
-    new_name = data.new_name.strip()
-
-    if not old_path or not new_name:
+    if not data.old_path or not data.new_name.strip():
         raise HTTPException(status_code=400, detail="Caminho original e novo nome são obrigatórios")
+
+    # Recebia a chave CRUA: `old_path="backups/"` movia os backups da base
+    # de dados. Contido antes de tocar no S3.
+    old_path = _resolve_explorer_path(data.old_path)
+    new_name = data.new_name.strip()
+    if "/" in new_name:
+        # O novo nome é um SEGMENTO, não um caminho: senão renomear era
+        # outra forma de escrever uma chave arbitrária.
+        raise HTTPException(status_code=400, detail="O nome não pode conter '/'")
 
     # Build the new path: replace the last segment with the new name
     path_parts = old_path.rstrip("/").split("/")
@@ -199,9 +234,12 @@ async def run_s3_delete(data: S3DeleteRequest, user: dict):
     if not s3_service.is_configured():
         raise HTTPException(status_code=503, detail="S3 não configurado")
 
-    path = data.path
-    if not path:
+    if not data.path:
         raise HTTPException(status_code=400, detail="Caminho é obrigatório")
+
+    # Recebia a chave CRUA: `path="backups/"` + `is_folder=True` apagava
+    # todos os backups da base de dados, sem `../` nenhum.
+    path = _resolve_explorer_path(data.path)
 
     if data.is_folder:
         try:
@@ -345,6 +383,10 @@ async def run_s3_download(path: str, user: dict):
 
     if not path:
         raise HTTPException(status_code=400, detail="Caminho é obrigatório")
+
+    # Recebia a chave CRUA e fazia `get_object`: `backups/dump.gz` devolvia
+    # a base de dados inteira em streaming.
+    path = _resolve_explorer_path(path)
 
     try:
         response = s3_service.s3_client.get_object(

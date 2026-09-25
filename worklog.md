@@ -5979,3 +5979,68 @@ defeito enquanto a irmã era corrigida.
 - `eslint --quiet src/` → 0 erros. `vite build` verde.
 - Mutação: **12 aplicadas, 12 mortas** (5 no recurso de polling, 4 no
   transporte de FormData, 1 no interceptor, 1 no Kanban, 1 no sino).
+
+---
+
+# Iteração — Gestor de Ficheiros S3, Passos 1 e 2 (Set 2026)
+
+## Correcção ao meu próprio raio-x
+
+Reportei "travessia de caminho por `../`". Ao ler as seis operações, a
+realidade era mais simples e mais grave: **três delas nem passavam pela
+função de resolução.** `run_s3_download`, `run_s3_delete` e `run_s3_rename`
+recebiam uma chave S3 **crua**. Não era preciso `../` — bastava escrever
+`backups/`, e os backups da base de dados vivem no mesmo bucket.
+
+O download fazia `get_object(Key=path)` sem contenção nenhuma: a base de dados
+inteira, em streaming, para quem escrevesse o caminho.
+
+## Passo 1 — contenção e paginação
+
+`services/s3_explorer_paths.py` (puro): normaliza (`.`, `..`, barras
+repetidas) e exige que o resultado caia dentro da raiz. Fronteira de
+**segmento**, não prefixo de texto — `Documentação Clientes_outro` deixou de
+passar por parecença.
+
+A propriedade é "não SAIR da raiz", não "recusar o que pareça suspeito":
+`backups/dump.gz` relativo é prefixado e fica contido numa chave inofensiva;
+só sobe-acima-da-raiz e caminho absoluto são recusados com 400. Ligada às
+**seis** operações, com `rename` a exigir que o nome novo seja um segmento.
+
+A listagem passou a paginar. O `delete` e o `rename` já o faziam; a listagem,
+que é a que toda a gente vê, fazia uma só chamada e truncava em silêncio acima
+de 1000 entradas.
+
+## Passo 2 — o medidor
+
+`services/s3_folder_coverage.py` + `scripts/medir_cobertura_s3.py`. Conta
+pastas no S3, mapeadas, órfãs, ambíguas e ligações partidas. O `--aplicar` só
+mapeia onde há **um único** candidato.
+
+## Erros meus
+
+- **Escrevi os testes de contenção com a especificação errada.** Pedi recusa
+  (400) para `backups/dump.gz` relativo, quando a contenção já basta e é o
+  comportamento que não parte o uso legítimo. Seis testes vermelhos, e o
+  código é que estava certo. Reescrevi a classe para afirmar a propriedade
+  real: a chave que chega ao S3 nunca é a do backup.
+- Repeti o mesmo engano em duas asserções do inventário (`../backups` é
+  recusado, não contido).
+
+## O que NÃO consigo entregar daqui
+
+**Os números da cobertura.** Este ambiente não tem credenciais S3 nem base de
+dados viva — dev opera com mocks por desenho, e é regra do projecto não tentar
+resolver rede de serviços externos aqui. O script recusa-se a correr e diz
+porquê, em vez de reportar zeros: um relatório de cobertura falso levaria a
+uma decisão de produto errada.
+
+Os números têm de sair do ambiente real, com o comando documentado no
+cabeçalho do script.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2603 passed** (baseline 2551, +52).
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação: **13 aplicadas, 13 mortas** (5 na contenção, 5 no explorador
+  incluindo a paginação, 3 na medição).

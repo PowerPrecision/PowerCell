@@ -4510,3 +4510,92 @@ a afirmá-lo.
 mesmo endpoint, nunca teve um único chamador (nem na história do repositório)
 e carregava o mesmo defeito. Uma segunda porta para o mesmo sítio é onde o
 defeito seguinte se instala sem ser visto.
+
+## Gestor de Ficheiros S3 — Passos 1 e 2 (Set 2026)
+
+### O que estava aberto era pior do que travessia de caminho
+
+O raio-x começou por apontar `_resolve_explorer_path`, que só fazia
+`path.startswith("Documentação Clientes")` — e portanto dava por bom
+`Documentação Clientes/../backups` (o `..` nunca era resolvido) e
+`Documentação Clientes_outro/` (prefixo de TEXTO não é fronteira de SEGMENTO).
+
+Ao ler as seis operações, o quadro era mais grave: **três delas nem sequer
+passavam por essa função.**
+
+| Operação | O que recebia | Consequência |
+|---|---|---|
+| `run_s3_download(path)` | chave crua → `get_object` | `backups/dump.gz` — a base de dados inteira, em streaming |
+| `run_s3_delete(data.path)` | prefixo cru | `path="backups/"` + `is_folder=True` apagava todos os backups |
+| `run_s3_rename(old_path)` | prefixo cru | mover qualquer coisa para qualquer sítio |
+
+Não era preciso `../`: bastava escrever `backups/`. Os backups da base de
+dados vivem no mesmo bucket (`services/backup.py`, prefixo `backups/`).
+
+Enquanto a página esteve trancada a `[ADMIN, CEO]` isto ficou contido — mas um
+engano de quem escreve um caminho apagava os backups, e abrir a página a
+utilizadores normais sem fechar isto seria pôr a fechadura depois da porta.
+
+### A contenção: fronteira de segmento, não prefixo de texto
+
+`services/s3_explorer_paths.py` (puro). Todo o caminho é normalizado
+(`posixpath.normpath` resolve `.`, `..` e barras repetidas) e tem de cair
+dentro da raiz **depois** de resolvido.
+
+A propriedade é **"não SAIR da raiz"**, não "recusar tudo o que pareça
+suspeito". Um caminho relativo como `backups/dump.gz` é prefixado e fica
+contido em `Documentação Clientes/backups/dump.gz` — uma chave inexistente
+dentro da área de clientes, inofensiva, e é o comportamento que `create` e
+`upload` já tinham. Só é recusado (400) quem **sobe** acima da raiz ou entra
+por caminho absoluto.
+
+`rename` ganhou ainda a regra de que o nome novo é um **segmento**: com `/`
+era outra forma de escrever uma chave arbitrária.
+
+`tests/unit/test_s3_explorer_containment.py` é também o **inventário das seis
+operações**, uma asserção por cada — a lição do Lote 5, ponto 1, onde o Kanban
+tinha construtor próprio e ficou de fora do isolamento por não haver
+inventário. As asserções são sobre as **chaves que chegam ao cliente S3**, não
+sobre o código de estado: um teste que só verificasse o 400 não provaria que,
+no caminho que passa, a chave certa é usada.
+
+### A listagem não paginava
+
+`list_objects_v2` devolve no máximo 1000 entradas. O `delete` e o `rename` já
+seguiam o `ContinuationToken`; a **listagem**, que é a que toda a gente vê,
+fazia uma só chamada. Uma raiz com mais de mil pastas ficava truncada em
+silêncio — e, com o filtro por rede do Passo 3 por cima, essa truncagem
+passaria a parecer isolamento a funcionar. Corrigido, com defesa contra um
+`IsTruncated` sem cursor (listagem incompleta com aviso, nunca um pedido que
+não termina).
+
+### Passo 2 — medir antes de isolar
+
+`services/s3_folder_coverage.py` (puro) + `scripts/medir_cobertura_s3.py`.
+
+O isolamento resolve-se por pasta → `processes.s3_folder` →
+`processes.network_id`. Uma pasta que nenhum processo reclame não tem rede e
+**falha fechada**: invisível a todos menos admin/CEO. Correcto em segurança,
+potencialmente péssimo em produto — daí medir primeiro.
+
+| Número | O que significa |
+|---|---|
+| **pastas no S3** | o denominador real, não o que a BD julga |
+| **mapeadas** | com pelo menos um processo a apontar-lhes |
+| **órfãs** | invisíveis após o Passo 3 — o número que decide |
+| **ambíguas** | reclamadas por processos de redes DIFERENTES |
+| **ligações partidas** | `s3_folder` aponta para pasta inexistente (sintoma de `rename`) |
+
+Uma pasta ambígua não pode ser mostrada a **nenhuma** das redes: mostrar à
+"primeira" seria escolher à sorte qual das redes vê os documentos da outra.
+Dois processos da MESMA rede são o caso normal e não são ambiguidade; um
+processo **por carimbar** também não — ausência de carimbo não é "outra rede".
+
+O `--aplicar` preenche `s3_folder` apenas onde o nome do cliente corresponde a
+**um único** processo sem pasta. Recusa-se a escolher entre vários — mesma
+regra do `rede_consensual` do Lote 4: um mapeamento errado torna a pasta
+visível à rede errada, e a execução seguinte aceitá-lo-ia como verdade. Nunca
+apaga, nunca reescreve um mapeamento existente, nunca toca no S3.
+
+O script **recusa-se a correr sem S3 configurado** em vez de reportar zeros:
+um relatório de cobertura falso levaria a uma decisão de produto errada.
