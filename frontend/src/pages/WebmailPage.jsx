@@ -54,6 +54,9 @@ import {
   Pencil,
 } from "lucide-react";
 import { toast } from "sonner";
+import WebmailCompanyTabs from "../components/webmail/WebmailCompanyTabs";
+import { useWebmailCompaniesQuery } from "../hooks/queries/useWebmailCompaniesQuery";
+import { resolverEmpresaActiva } from "../utils/webmailEmpresas";
 // Ponto 8, Fase 2 — TUDO pelo cliente Axios. Só o interceptor injecta os
 // cabeçalhos de empresa/papel, e sem eles a caixa mostrada passa a ser a
 // de outro perfil (AGENTS.md, incidente 2026-09-21).
@@ -122,7 +125,7 @@ const WebmailPage = () => {
   const { token, user, effectiveRole, activeCompanyId, effectiveCompanyId } = useAuth();
   const queryClient = useQueryClient();
   const navigate = useNavigate();
-  const [searchParams] = useSearchParams();
+  const [searchParams, setSearchParams] = useSearchParams();
   const initialFolder = FOLDERS.some((f) => f.id === searchParams.get("folder"))
     ? searchParams.get("folder")
     : "inbox";
@@ -134,8 +137,33 @@ const WebmailPage = () => {
   const composeToFromUrl = (searchParams.get("to") || "").trim();
   const composeProcessIdFromUrl = searchParams.get("process_id");
 
-  // Pacote DN.2: empresa do Header (ContextSwitcher), não o user.company_id estático.
-  const companyId = activeCompanyId || effectiveCompanyId || "";
+  // ============================================================
+  // PONTO 8, FASE 3 — a empresa é o SEPARADOR, não o Context Switcher
+  // ============================================================
+  // A empresa era um estado escondido no cabeçalho do CRM: para ver a
+  // caixa da outra empresa era preciso trocar de perfil. Passa a ser o
+  // sítio onde se está. Fica no URL (`?company_id=`) para o separador
+  // sobreviver a um F5 e para um link levar alguém à caixa certa.
+  const { empresas: empresasDoWebmail } = useWebmailCompaniesQuery();
+  const empresaPedida =
+    (searchParams.get("company_id") || "").trim() || activeCompanyId || "";
+  const empresaActiva = useMemo(
+    () => resolverEmpresaActiva(empresasDoWebmail, empresaPedida),
+    [empresasDoWebmail, empresaPedida],
+  );
+  // Enquanto a lista de empresas não chega (ou se falhar), mantém-se o
+  // comportamento anterior — a página abre na mesma, sem separadores.
+  const companyId =
+    empresaActiva?.company_id || activeCompanyId || effectiveCompanyId || "";
+
+  const handleSelectCompany = useCallback((novaEmpresa) => {
+    if (!novaEmpresa) return;
+    setSearchParams((prev) => {
+      const proximo = new URLSearchParams(prev);
+      proximo.set("company_id", novaEmpresa);
+      return proximo;
+    }, { replace: true });
+  }, [setSearchParams]);
 
   // Ponto 8, Fase 2 — o `webmailHeaders()` que vivia aqui escrevia
   // `Authorization`, `X-Company-Id` e `X-Active-Role` à mão, para 28
@@ -464,8 +492,8 @@ const WebmailPage = () => {
       // Fetch both personal and general unread counts
       try {
         const [pessoal, geral] = await Promise.all([
-          getWebmailStats({ box: "personal" }),
-          getWebmailStats({ box: "general" }),
+          getWebmailStats({ box: "personal", company_id: companyId }),
+          getWebmailStats({ box: "general", company_id: companyId }),
         ]);
         const pData = pessoal?.data || {};
         const gData = geral?.data || {};
@@ -485,7 +513,9 @@ const WebmailPage = () => {
       }
     } else if (effectiveRole === 'indexacao') {
       try {
-        const { data } = await getWebmailStats({ box: "shared_indexacao" });
+        const { data } = await getWebmailStats({
+          box: "shared_indexacao", company_id: companyId,
+        });
         setUnreadByBox({ personal: 0, general: 0, shared_indexacao: data.unread_count || 0 });
         const folderCounts = data.folder_counts || {};
         setFolderCountsData(prev => ({
@@ -502,7 +532,9 @@ const WebmailPage = () => {
     } else {
       // For consultor/intermediario, fetch personal stats
       try {
-        const { data } = await getWebmailStats({ box: "personal" });
+        const { data } = await getWebmailStats({
+          box: "personal", company_id: companyId,
+        });
         setUnreadCount(data.unread_count || 0);
         const folderCounts = data.folder_counts || {};
         setFolderCountsData(prev => ({
@@ -1735,6 +1767,21 @@ const WebmailPage = () => {
           )}
         </div>
 
+        {/* ===== PONTO 8, FASE 3 — separadores por Empresa ===== */}
+        {/* Ao nível mais alto de propósito: a empresa não é um filtro
+            dentro da caixa, é a caixa. Com uma empresa só a barra
+            esconde-se (zero ruído) e fica só o rótulo. O indicador de
+            sincronização vive aqui, no lugar do botão de largura total
+            que ocupava a barra lateral. */}
+        <WebmailCompanyTabs
+          empresas={empresasDoWebmail}
+          empresaActivaId={empresaActiva?.company_id || ""}
+          onSelectCompany={handleSelectCompany}
+          syncing={syncing}
+          ultimaSinc={lastSyncTime}
+          onSync={handleSyncEmails}
+        />
+
         {/* ===== THREE PANE LAYOUT (Outlook) ===== */}
         <div className="flex-1 overflow-hidden min-h-0">
           <ResizablePanelGroup
@@ -1766,15 +1813,12 @@ const WebmailPage = () => {
               unreadCount={unreadCount}
               folderCounts={folderCountsData}
               totalEmails={totalEmails}
-              lastSyncTime={lastSyncTime}
-              syncing={syncing}
               onSelectFolder={handleSelectSystemFolder}
               onSelectLabel={handleSelectLabel}
               onSelectCustomFolder={handleSelectCustomFolder}
               onOpenFolderMenu={handleOpenFolderMenu}
               onCreateFolder={handleCreateFolderFromNav}
               onCompose={() => openComposer("new")}
-              onSync={handleSyncEmails}
               onMailboxChange={handleMailboxChange}
             />
           </ResizablePanel>

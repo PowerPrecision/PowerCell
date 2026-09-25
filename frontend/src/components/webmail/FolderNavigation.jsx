@@ -11,10 +11,8 @@
  * ficaram no contentor: são modais em portal, com estado próprio, e
  * arrastá-los para aqui aumentaria o risco sem reduzir acoplamento.
  *
- * REQUISITO: montado dentro de um `<TooltipProvider>`.
  */
-import { Folder, FolderOpen, FolderPlus, MoreVertical, Plus, RefreshCw, Tag } from "lucide-react";
-import { format } from "date-fns";
+import { Folder, FolderOpen, FolderPlus, MoreVertical, Plus, Tag } from "lucide-react";
 
 import { Badge } from "../ui/badge";
 import { Button } from "../ui/button";
@@ -29,7 +27,6 @@ import {
   SelectTrigger,
   SelectValue,
 } from "../ui/select";
-import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
 
 /**
  * @param {object} props
@@ -45,15 +42,12 @@ import { Tooltip, TooltipContent, TooltipTrigger } from "../ui/tooltip";
  * @param {number} [props.unreadCount] Não lidas da Caixa de Entrada.
  * @param {object} [props.folderCounts] Contagens por pasta do sistema.
  * @param {number} [props.totalEmails]
- * @param {Date|null} [props.lastSyncTime]
- * @param {boolean} [props.syncing]
  * @param {(folderId: string) => void} props.onSelectFolder
  * @param {(labelName: string|null) => void} props.onSelectLabel
  * @param {(folderId: string|null) => void} props.onSelectCustomFolder
  * @param {(folder: object, posicao: {x: number, y: number}) => void} props.onOpenFolderMenu
  * @param {() => void} props.onCreateFolder
  * @param {() => void} props.onCompose
- * @param {() => void} props.onSync
  * @param {(mailbox: string) => void} props.onMailboxChange
  */
 const FolderNavigation = ({
@@ -69,15 +63,12 @@ const FolderNavigation = ({
   unreadCount = 0,
   folderCounts = {},
   totalEmails = 0,
-  lastSyncTime = null,
-  syncing = false,
   onSelectFolder,
   onSelectLabel,
   onSelectCustomFolder,
   onOpenFolderMenu,
   onCreateFolder,
   onCompose,
-  onSync,
   onMailboxChange,
 }) => {
   return (
@@ -128,15 +119,13 @@ const FolderNavigation = ({
           <Plus className="h-4 w-4" />
           Nova Mensagem
         </Button>
-        <Button
-          variant="outline"
-          className="w-full gap-2"
-          onClick={onSync}
-          disabled={syncing}
-        >
-          <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} />
-          {syncing ? "A sincronizar..." : "Sincronizar"}
-        </Button>
+        {/* Ponto 8, Fase 3 — o botão "Sincronizar" de largura total que
+            vivia aqui saiu. A sincronização é uma operação de FUNDO: o
+            que o utilizador precisa de saber é se a caixa está
+            actualizada, e isso cabe numa linha no cabeçalho do
+            separador da empresa (`WebmailCompanyTabs`). Ocupar uma
+            fatia permanente da barra lateral com uma acção que se usa
+            uma vez por sessão era o "painel intrusivo". */}
       </div>
 
       <Separator />
@@ -298,11 +287,6 @@ const FolderNavigation = ({
         <p className="text-[10px] text-muted-foreground">
           {totalEmails} email{totalEmails !== 1 ? "s" : ""}
         </p>
-        {lastSyncTime && (
-          <p className="text-[10px] text-muted-foreground">
-            Última sinc: {format(lastSyncTime, "HH:mm:ss")}
-          </p>
-        )}
       </div>
     </div>  );
 };

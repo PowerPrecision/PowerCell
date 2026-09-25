@@ -82,6 +82,7 @@ vi.mock("../../services/api", () => {
   });
   return {
     getWebmailStats: registar("getWebmailStats"),
+    getWebmailCompanies: registar("getWebmailCompanies"),
     getEmailJobStatus: registar("getEmailJobStatus"),
     getPersonalEmailAccounts: registar("getPersonalEmailAccounts"),
     getEmailLabels: registar("getEmailLabels"),
@@ -133,18 +134,27 @@ const respostaDaLista = (emails, extra = {}) => ({
   refetch: vi.fn(),
 });
 
-function montar() {
+function montar(rota = "/webmail") {
   const queryClient = new QueryClient({
     defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
   });
   return render(
     <QueryClientProvider client={queryClient}>
-      <MemoryRouter initialEntries={["/webmail"]}>
+      <MemoryRouter initialEntries={[rota]}>
         <WebmailPage />
       </MemoryRouter>
     </QueryClientProvider>,
   );
 }
+
+const DUAS_EMPRESAS = {
+  data: {
+    companies: [
+      { company_id: "power", company_name: "Power Real Estate", roles: ["consultor"] },
+      { company_id: "domus", company_name: "Domus", roles: ["consultor"] },
+    ],
+  },
+};
 
 beforeEach(() => {
   estadoDaLista.valor = respostaDaLista([email()]);
@@ -320,5 +330,81 @@ describe("WebmailPage — paginação", () => {
     await utilizador.click(await screen.findByRole("button", { name: "Seguinte" }));
 
     await waitFor(() => expect(estadoDaLista.ultimosFiltros.page).toBe(2));
+  });
+});
+
+
+describe("WebmailPage — separadores por Empresa (Ponto 8, Fase 3)", () => {
+  it("desenha um separador por empresa do utilizador", async () => {
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar();
+
+    expect(
+      await screen.findByRole("tab", { name: /Power Real Estate/ }),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Domus/ })).toBeInTheDocument();
+  });
+
+  it("a empresa do separador viaja em cada pedido da lista", async () => {
+    // É o que torna o isolamento da Fase 1 efectivo: sem o `companyId`
+    // nos filtros, o backend caía no caminho legado (header) e o
+    // separador não mandava em nada.
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar("/webmail?company_id=domus");
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("domus"),
+    );
+  });
+
+  it("trocar de separador muda a empresa dos pedidos", async () => {
+    const utilizador = userEvent.setup();
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar();
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("power"),
+    );
+    await utilizador.click(screen.getByRole("tab", { name: /Domus/ }));
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("domus"),
+    );
+  });
+
+  it("uma empresa pedida que já não existe cai na primeira", async () => {
+    // Acesso revogado ou link antigo: insistir no id dava 404 no
+    // backend e uma caixa vazia sem explicação nenhuma.
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar("/webmail?company_id=empresa-que-saiu");
+
+    await waitFor(() =>
+      expect(estadoDaLista.ultimosFiltros?.companyId).toBe("power"),
+    );
+  });
+
+  it("com UMA empresa não desenha separador nenhum", async () => {
+    apiFalsa.getWebmailCompanies = () =>
+      Promise.resolve({
+        data: { companies: [DUAS_EMPRESAS.data.companies[0]] },
+      });
+    montar();
+
+    expect(await screen.findByTestId("webmail-empresa-unica")).toHaveTextContent(
+      "Power Real Estate",
+    );
+    expect(screen.queryAllByRole("tab")).toHaveLength(0);
+  });
+
+  it("o indicador de sincronização substitui o painel da barra lateral", async () => {
+    apiFalsa.getWebmailCompanies = () => Promise.resolve(DUAS_EMPRESAS);
+    montar();
+
+    expect(await screen.findByTestId("webmail-estado-sinc")).toBeInTheDocument();
+    // E na barra lateral já não há botão de largura total.
+    const barraLateral = screen.getByTestId("webmail-folder-pane");
+    expect(
+      within(barraLateral).queryByRole("button", { name: /^sincronizar$/i }),
+    ).toBeNull();
   });
 });

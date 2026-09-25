@@ -153,6 +153,10 @@ export const queryKeys = {
     // emails de processo, drafts, stats ou monitored.
     webmailAll: () => [...queryKeys.emails.all, 'webmail'],
     webmail: (filters) => [...queryKeys.emails.all, 'webmail', filters],
+    // Ponto 8, Fase 3 — as empresas do utilizador (os separadores).
+    // Fora do prefixo `webmail` de propósito: um email novo invalida a
+    // LISTA, e não a lista de empresas, que quase nunca muda.
+    companies: () => [...queryKeys.emails.all, 'companies'],
     byProcess: (processId, direction) => [...queryKeys.emails.all, 'process', processId, { direction }],
     stats: (processId) => [...queryKeys.emails.all, 'stats', processId],
     monitored: (processId) => [...queryKeys.emails.all, 'monitored', processId],

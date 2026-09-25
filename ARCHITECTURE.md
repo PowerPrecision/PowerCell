@@ -4208,3 +4208,63 @@ guarda ficar vermelho.
 o stub deixou de interceptar e o jsdom tentava ligar-se ao
 `localhost:8001` a sério. A fronteira passou a ser o módulo
 `services/api` — que é onde ela sempre devia ter estado.
+
+## Ponto 8, Fase 3 — a Caixa de Correio Dedicada (Set 2026)
+
+### A empresa é o sítio onde se está, não um estado escondido
+
+O Webmail misturava as empresas num dropdown de contas e obrigava a
+trocar de perfil no Context Switcher para chegar à caixa certa — um
+estado invisível, no cabeçalho do CRM, a decidir o que se via no ecrã.
+`components/webmail/WebmailCompanyTabs.jsx` põe a empresa ao nível mais
+alto: clica-se no separador e a caixa é aquela.
+
+A lista vem de `GET /emails/webmail/companies` (Fase 1) e **não** do
+`user.companies` do AuthContext, de propósito: é o mesmo cálculo que
+autoriza os pedidos (`assert_empresa_no_ambito` → 404), e derivá-la no
+cliente abria a porta a mostrar um separador que o servidor recusa.
+
+O separador activo vive no **URL** (`?company_id=`): sobrevive a um F5 e
+um link leva alguém à caixa certa.
+
+### Zero ruído, e a regra não está solta no JSX
+
+Com uma empresa só, `deveMostrarSeparadores` devolve `false` e a barra
+não desenha separador nenhum — fica só o nome, discreto. Um separador
+solitário é uma escolha que não existe, e rouba uma linha de ecrã à
+caixa. A decisão vive no módulo puro (`utils/webmailEmpresas.js`), não
+num `length > 1` no meio do JSX.
+
+`resolverEmpresaActiva` recusa uma empresa pedida que já não conste da
+lista e cai na primeira: um `company_id` guardado de um acesso revogado
+levaria a pedidos que o backend devolve com 404, e o utilizador via uma
+caixa vazia sem perceber porquê.
+
+### Fim do painel intrusivo
+
+O botão **"Sincronizar"** de largura total que ocupava a barra lateral,
+e a linha "Última sinc." no rodapé, saíram do `FolderNavigation`. A
+sincronização é uma operação de FUNDO: o que interessa saber é se a
+caixa está actualizada, e isso cabe numa linha no cabeçalho do separador
+(`estadoDaSincronizacao` → "Actualizado há 5 min" / "A sincronizar…" /
+"Por sincronizar"), com um ícone de 28px ao lado.
+
+**"Por sincronizar" não se pinta de alarme.** É o estado normal ao abrir
+a página, e um indicador que grita ensina toda a gente a ignorá-lo — a
+lição do Monitor de Sinais Vitais (Lote 4, ponto 14).
+
+As props `syncing` / `lastSyncTime` / `onSync` foram **removidas** do
+`FolderNavigation`, e não deixadas a apodrecer: um contrato de props que
+menciona o que já não existe é um contrato que mente.
+
+### Notas
+
+- As estatísticas (`/webmail-stats`) levam o mesmo `company_id` da
+  lista. Contagens de um separador sobre os emails de outro seriam uma
+  fuga por outra porta — mais discreta, e por isso pior.
+- `minutosDesde` pode devolver negativos (relógio do cliente adiantado)
+  e isso cai de propósito no ramo "Actualizado agora". Tive ali uma
+  guarda `diff < 0 → 0` que **nenhuma mutação conseguia matar**, porque
+  não mudava nada: `minutos < 1` já o cobria. Código defensivo que nenhum
+  teste pode derrubar é código morto, e código morto mente sobre o que o
+  programa faz.

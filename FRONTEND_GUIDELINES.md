@@ -972,3 +972,47 @@ Nada de "obrigatório", "em falta", "tem de", "erro". O rótulo diz o que
 aqueles campos servem, e o corpo diz, por palavras, que se pode
 continuar sem eles. Há um teste a varrer as palavras proibidas — porque
 copy é comportamento, e regride tão facilmente como código.
+
+## 30. Separadores que representam um âmbito de dados (Ponto 8, Set 2026)
+
+### 30.1 Um separador solitário nunca se desenha
+
+Se só há uma opção, não há escolha — há uma linha de ecrã desperdiçada e
+um controlo que não faz nada. Mostra-se o rótulo (saber onde se está não
+é ruído) e a barra desaparece. A regra vive num módulo puro, testada nos
+dois sentidos, e não num `length > 1` dentro do JSX.
+
+### 30.2 O âmbito do separador viaja em cada pedido
+
+Um separador que mude só o que está no ecrã, sem mudar o que se pede ao
+servidor, é uma ilusão. O identificador do âmbito vai como **parâmetro**
+de cada chamada — e não como header, nem como estado global — para que a
+autorização do lado do servidor tenha alguma coisa em que pegar.
+
+### 30.3 A lista de separadores vem de quem autoriza
+
+Derivá-la do contexto do cliente (o utilizador em sessão) parece
+equivalente e não é: o cliente pode mostrar um separador que o servidor
+recusa, e o utilizador fica com uma caixa vazia sem explicação. A lista
+vem do mesmo sítio que decide o 404.
+
+### 30.4 Um âmbito pedido que já não existe cai no primeiro
+
+URLs antigos e sessões guardadas sobrevivem a acessos revogados.
+Insistir no identificador pedido dá um erro do servidor onde devia haver
+uma caixa; cair no primeiro âmbito válido é o comportamento que o
+utilizador espera.
+
+### 30.5 Uma operação de fundo não merece um painel
+
+Sincronizar, importar, recalcular: usa-se uma vez por sessão e o
+resultado interessa mais do que o botão. Uma linha de estado no
+cabeçalho ("Actualizado há 5 min") com um ícone ao lado substitui um
+painel permanente — e o estado "ainda não correu" não se pinta de
+alarme, porque é o estado normal ao abrir a página.
+
+### 30.6 Prop que deixou de ser usada sai do contrato
+
+Quando o comportamento muda de componente, as props que o serviam saem
+do que ficou para trás — da assinatura, do JSDoc e dos testes. Uma prop
+morta é um contrato que mente, e o próximo a ler acredita nele.

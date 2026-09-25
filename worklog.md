@@ -5698,3 +5698,74 @@ sem passar pelo `utils/apiBaseUrl.js`. Fase 3 — os separadores.
 - `eslint --quiet src/` → 0 erros. `vite build` verde.
 - Mutação: **3 aplicadas, 3 mataram** (marcar-lido sem chamada;
   `responseType: "blob"` removido; `getWebmailCompanies` apagada).
+
+---
+
+# Iteração — Ponto 8, Fase 3: a Caixa de Correio Dedicada (Set 2026)
+
+## O que mudou
+
+- **NOVO** `frontend/src/utils/webmailEmpresas.js` — `deveMostrarSeparadores`,
+  `resolverEmpresaActiva`, `rotuloDaEmpresa`, `estadoDaSincronizacao`.
+- **NOVO** `frontend/src/components/webmail/WebmailCompanyTabs.jsx` —
+  a barra de Empresas + o indicador de sincronização.
+- **NOVO** `frontend/src/hooks/queries/useWebmailCompaniesQuery.js` —
+  lê `GET /emails/webmail/companies` (staleTime 10 min, degrada para
+  lista vazia).
+- `lib/queryClient.js` — chave `emails.companies()`, **fora** do prefixo
+  `webmail`: um email novo invalida a LISTA, não a lista de empresas.
+- `pages/WebmailPage.jsx` — a empresa passa a vir do separador
+  (`?company_id=` no URL) e não do Context Switcher; vai também nas
+  estatísticas.
+- `components/webmail/FolderNavigation.jsx` — **removido** o botão
+  "Sincronizar" de largura total e a linha "Última sinc." do rodapé,
+  com as props `syncing`/`lastSyncTime`/`onSync` a sair do contrato.
+
+## Erro meu — e desta vez a correcção foi no CÓDIGO
+
+Uma mutação **sobreviveu**: apagar a guarda `diff < 0 → return 0` de
+`minutosDesde` não partia teste nenhum. Fui ver porquê e a resposta não
+era um teste fraco: a guarda era **redundante**, porque o ramo
+`minutos < 1` já apanhava todos os negativos. Era código defensivo que
+nenhum teste podia derrubar — ou seja, código morto a mentir sobre o que
+o programa faz. Removi-o, e a nova mutação (fazer o ramo `< 1` deixar de
+aceitar negativos) morre.
+
+Foi a primeira vez nesta série em que a mutação sobrevivente apontou
+para o código e não para o teste. Vale a pena guardar a distinção:
+mutação que não mata = ou o teste é fraco, ou a linha não faz nada.
+
+## Testes que mudaram de sítio (não desapareceram)
+
+Dois testes do `FolderNavigation` cobriam o botão de sincronizar. O
+comportamento não foi removido — mudou de componente. Os testes foram
+substituídos por um que afirma que aquele botão **já não está ali**, com
+o porquê, e a cobertura do comportamento vive agora no
+`WebmailCompanyTabs.test.jsx`.
+
+## Testes
+
+- **NOVO** `src/utils/webmailEmpresas.test.js` (20)
+- **NOVO** `src/components/webmail/__tests__/WebmailCompanyTabs.test.jsx` (8)
+- `src/pages/__tests__/WebmailPage.test.jsx` — +6 com a PÁGINA montada:
+  os separadores, a empresa a viajar nos filtros da lista, a troca de
+  separador, o `company_id` inválido a cair na primeira empresa, a
+  empresa única sem barra, e o indicador a substituir o painel.
+
+## Validação
+
+- `yarn test` → **1032 passed / 88 ficheiros** (baseline 998 / 86).
+- `pytest tests/unit --no-cov` → **2160 passed** (sem alterações ao
+  backend nesta fase).
+- `eslint --quiet src/` → 0 erros. `vite build` verde.
+- Mutação: **9 aplicadas, 9 mataram** (4 no módulo puro — incluindo a
+  que obrigou a apagar código morto —, 2 no componente, 3 na ligação da
+  página).
+
+## Ponto 8 fechado — as três fases
+
+| Fase | O que fez |
+|---|---|
+| 1 | A Parede: `webmail_scope.py`, `None` eliminado, 404 por empresa, backfill |
+| 2 | 28 `fetch` → 0, `webmailHeaders()` e `API_URL` apagados |
+| 3 | Separadores por Empresa, painel intrusivo → indicador discreto |
