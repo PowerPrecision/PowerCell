@@ -5769,3 +5769,137 @@ o porquê, e a cobertura do comportamento vive agora no
 | 1 | A Parede: `webmail_scope.py`, `None` eliminado, 404 por empresa, backfill |
 | 2 | 28 `fetch` → 0, `webmailHeaders()` e `API_URL` apagados |
 | 3 | Separadores por Empresa, painel intrusivo → indicador discreto |
+
+---
+
+# Iteração — Épico 10, Fases 1 e 2: a Parede no Envelope (Set 2026)
+
+## Diagnóstico
+
+Raio-x ao tempo real antes de escrever código. Três achados:
+
+1. **Duas condutas, e a blindada levava 2 de 35 emissores.** Só os `task_*`
+   (Épico 4) e o `new_email` (Épico 5) passavam pelo Redis. Os outros **33
+   pontos, em 12 módulos**, escreviam no `ConnectionManager` em memória, e
+   `render.yaml` fixa `UVICORN_WORKERS=2`: metade dos eventos morria na
+   fronteira do worker, sem erro nenhum.
+
+2. **`manager.broadcast()` não conhecia a Parede de Betão.** O delta de
+   processo leva `client_name` e ia para TODOS os sockets. Segui a cadeia até
+   ao ecrã: `process_kanban_move:272` → `useKanbanRealtime.handleProcessCreated`
+   → `processes.unshift({client_name})` + toast. Um processo da Power inseria
+   um cartão com o nome do cliente no Kanban de quem estivesse na **Domus**.
+
+3. **O polling das notificações não era redundância, era suporte de vida.**
+   `send_realtime_notification` decidia por `manager.is_user_connected`, que
+   mente com vários workers; quem entregava era o `setInterval` de 30 s.
+   Cortá-lo primeiro — o Ponto 1 do roteiro — teria apagado metade das
+   notificações em produção.
+
+Ordem acordada: **conduta → parede → corte**. As Fases 1 e 2 estão feitas; a
+Fase 3 (cortar o polling) fica para o passo seguinte, e só agora é segura.
+
+## O desenho
+
+O evento não sabe para quem vai: **declara a audiência**, e quem decide é o
+socket, que conhece o seu `TenantScope` desde o handshake. O custo passa de
+*uma query por evento* para **uma query por ligação**, porque o emissor já tem
+o documento do processo em mãos (o carimbo do Lote 4 está lá) e o socket já
+tem o `user` do `verify_websocket_token`.
+
+Três formas de endereço, nenhuma delas "toda a gente": `user_id`, `audience`,
+`room`. As salas eram o terceiro caso escondido — a lista de membros é local
+a cada worker, a mesma falésia noutra forma.
+
+## O que se fez
+
+**Módulos novos:** `services/realtime_audience.py` (puro — `Audiencia`,
+`audiencia_do_processo`, `alcanca`) e `services/realtime_delivery.py` (a
+conduta única).
+
+**Transporte:** `build_event_envelope` ganha `audiencia` / `room` /
+`exclude_user_id`; `is_deliverable` passa de `user_id` para
+`user_id OU audience OU room`; `route_system_event` ganha
+`_route_por_audiencia` e `_route_por_sala`; o `ConnectionManager` guarda o
+`TenantScope` por ligação (`register_scope` / `get_scope` / `clear_scope`), e
+o handshake resolve-o uma vez.
+
+**33 pontos migrados**, em 12 módulos: `process_broadcast`,
+`process_kanban_move`, `realtime_notifications`, `chat_messages` (10),
+`chat_groups` (4), `chat_presence` (2), `portal_gov_fetch` (4),
+`portal_client_messages`, `portal_client_visits`, `process_portal_messages`,
+`visit_helpers`, `websocket_api_notifications` (4). Zero `manager.broadcast*`
+ou `send_personal_message` fora do gestor.
+
+## Erros meus, e o que os apanhou
+
+**O `FakeAsyncCollection` não era fiel ao Mongo, e isso teria feito o teste
+central mentir.** `{"assigned_consultor_ids": "u1"}` casa, no Mongo real,
+quando o array **contém** o valor; o fake comparava por identidade e dava
+`False`. Como a Camada 2 é toda sobre campos de atribuição (arrays), o
+alinhamento dos dialectos ter-se-ia "confirmado" sobre uma semântica falsa.
+Corrigido em `_igual` (igualdade, `$in`, `$nin`, `$ne`), com a bateria inteira
+antes e depois: **2160 → 2160**, zero regressões.
+
+**O teste dos dois dialectos apanhou um defeito meu à primeira execução.**
+`str(UserRoleEnum.CONSULTOR)` devolve `'UserRoleEnum.CONSULTOR'` no Python
+3.11, não `'consultor'`. A minha normalização destruía o papel e `alcanca`
+devolvia `False` para toda a gente: 105 dos 315 casos da matriz falharam de
+imediato. Falha fechada, mas o tempo real ficaria mudo. `_texto` desembrulha
+Enums desde então.
+
+**Uma guarda de código-fonte do Pacote FG ficou vermelha, e com razão.**
+`test_lock_events_broadcast_to_process_room_not_globally` afirmava
+`broadcast_to_room` nos blocos dos locks. A intenção ("vai à sala, nunca ao
+mundo, e só depois da ACL") não mudou; mudou o mecanismo. Actualizei o nome e
+**apertei** a guarda: hoje afirma também que `manager.broadcast(` não existe
+em lado nenhum do ficheiro.
+
+**Quatro mutações sobreviveram à primeira passagem, e três eram lacunas
+minhas** — comportamentos que escrevi e não afirmei: a presença a alcançar
+quem não tem carteira (`toda_a_rede`), o âmbito ausente a falhar fechado, e a
+exclusão do autor numa sala. Testes acrescentados. A quarta era uma mutação
+**preservadora de comportamento**: a guarda do registo e a guarda de `scope
+is None` protegem a mesma coisa em camadas, e substituir uma por um valor
+válido não produz defeito nenhum. Reformulada para provar que pelo menos uma
+das duas é mesmo necessária.
+
+## Dois casos que a audiência do documento não cobria
+
+- **Quem sai da equipa** (`extra_user_ids`): a audiência sai do documento
+  *novo* e o consultor removido seria o único a não saber que saiu.
+  `process_staff_assignment` passa `tambem_para=removidos`. Dispensa a Camada
+  2, nunca a Camada 1.
+- **Presença** (`toda_a_rede`): `USER_ONLINE`/`USER_OFFLINE` levavam o nome de
+  um admin/CEO a todos os sockets. Hoje ficam dentro das redes do próprio; o
+  âmbito é lido **antes** do `disconnect`, que é quem o apaga.
+
+## Achados laterais (assinalados, não corrigidos)
+
+- **`is_notified`** é escrito em `db.notifications` e não é lido em lado
+  nenhum. O comentário prometia prevenir re-emissão no polling; não previne.
+- **A presença local mente com vários workers** (`chat_presence.is_online`, e
+  a decisão de enviar *push*). Precisa de um registo de presença partilhado.
+- **O âmbito em cache envelhece** até à reconexão. Um TTL é o passo seguinte;
+  o conteúdo continua a vir pelo HTTP, que reverifica sempre.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2551 passed** (baseline 2160, +391).
+- `yarn test` → **1032 passed / 88 ficheiros**, baseline intacta (sem
+  alterações ao frontend nestas fases).
+- `flake8 services/ routes/ tests/unit/ --select=E9,F63,F7,F82` → 0.
+- Mutação: **13 aplicadas, 12 mortas.** A sobrevivente (`M11b`) é
+  **preservadora de comportamento**, não um defeito: substituir a guarda
+  `if not registo: continue` por um valor válido não muda nada, porque o
+  `scope is None` de jusante devolve `False` na mesma — e esse está provado
+  vivo pela `M9b`, que morreu. Duas camadas sobre o mesmo risco: uma evita
+  desempacotar `None`, a outra falha fechada. Nenhuma é morta.
+
+## Nota de método
+
+Corri a bateria completa com o laço de mutação ainda activo e apanhei uma
+falha que não era real: o laço tinha o `redis_pubsub.py` mutado nesse
+instante. **Segunda vez que faço isto nesta série.** A bateria de validação
+só vale com o laço parado e os `.bak` todos restaurados — foi assim que os
+2551 acima foram obtidos.

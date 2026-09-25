@@ -1016,3 +1016,43 @@ alarme, porque é o estado normal ao abrir a página.
 Quando o comportamento muda de componente, as props que o serviam saem
 do que ficou para trás — da assinatura, do JSDoc e dos testes. Uma prop
 morta é um contrato que mente, e o próximo a ler acredita nele.
+
+## 31. Eventos de tempo real: o que o cliente pode e não pode assumir (Épico 10, Set 2026)
+
+Até ao Épico 10, um evento de processo chegava por `manager.broadcast()` — a
+**todos** os sockets ligados. O `useKanbanRealtime` inseria o cartão que lhe
+chegasse, e por isso um processo da Power aparecia, com o nome do cliente, no
+quadro de quem estava na Domus. O filtro passou a existir no servidor
+(`services/realtime_audience.py`); estas regras existem para que o cliente não
+volte a depender de não haver filtro nenhum.
+
+**31.1 — Um evento que chega já foi autorizado; um evento que não chega não é
+um erro.** O servidor entrega a quem a audiência do processo alcança. Um
+quadro que receba menos eventos do que antes está correcto, não partido. Nunca
+compensar uma ausência com um pedido extra "para o caso de".
+
+**31.2 — O tempo real não é a fonte da verdade, é um atalho.** O delta traz
+campos leves (`client_name`, `status`, `updated_at`), nunca o processo. Quem
+precisa do processo pede-o ao HTTP, que reverifica as permissões a cada
+pedido. Não alargar o payload de um evento para evitar um `GET`: seria pôr
+dados de negócio a atravessar um canal que não faz query nenhuma.
+
+**31.3 — Ignorar o eco do próprio utilizador é responsabilidade do cliente.**
+O `PROCESS_MOVED` deixou de excluir o autor no servidor (a audiência inclui-o,
+naturalmente). O `useKanbanRealtime` já faz `if (payload.user_id === userId)
+return;` porque a actualização optimista tratou do assunto. Quem escrever um
+handler novo tem de fazer o mesmo — caso contrário o cartão salta duas vezes.
+
+**31.4 — `event_id` serve para desduplicar.** Cada envelope traz um `id`, e o
+cliente pode recebê-lo duas vezes numa reconexão. Handlers de inserção têm de
+ser idempotentes (procurar antes de inserir), como os do Kanban já são.
+
+**31.5 — O polling continua a ser o recurso, e ainda não foi cortado.** As
+Fases 1 e 2 arrumaram a entrega; a Fase 3 é que suspende os intervalos. O
+padrão é o do Webmail e do `TasksContext`: parar quando `isConnected` e
+retomar quando o WS cai — nunca apagar o intervalo.
+
+**31.6 — Um indicador de presença mente com vários workers.** `is_online` vem
+de `manager.is_user_connected`, que só conhece o worker que atendeu o pedido.
+Não construir funcionalidade em cima dele (atribuir só a quem está online, por
+exemplo) enquanto não houver um registo de presença partilhado.

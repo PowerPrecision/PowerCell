@@ -10,7 +10,8 @@ from fastapi import HTTPException
 
 from database import db
 from models.chat import TypingIndicator
-from services.websocket_manager import manager, create_ws_message
+from services.websocket_manager import manager
+from services.realtime_delivery import entregar_a_utilizador
 from services.chat_helpers import _block_parceiro
 
 
@@ -32,25 +33,27 @@ async def run_send_typing_indicator(typing: TypingIndicator, user: dict):
         for member in is_member.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
-                await manager.send_personal_message(
-                    create_ws_message("chat_typing", {
+                await entregar_a_utilizador(
+                    member_id,
+                    "chat_typing",
+                    {
                         "user_id": user_id,
                         "user_name": user.get("name", ""),
                         "group_id": typing.group_id,
                         "is_typing": typing.is_typing
-                    }),
-                    member_id
+                    },
                 )
 
     elif typing.receiver_id:
-        await manager.send_personal_message(
-            create_ws_message("chat_typing", {
+        await entregar_a_utilizador(
+            typing.receiver_id,
+            "chat_typing",
+            {
                 "user_id": user_id,
                 "user_name": user.get("name", ""),
                 "receiver_id": typing.receiver_id,
                 "is_typing": typing.is_typing
-            }),
-            typing.receiver_id
+            },
         )
 
     return {"success": True}

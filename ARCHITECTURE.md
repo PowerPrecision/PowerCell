@@ -4268,3 +4268,171 @@ menciona o que já não existe é um contrato que mente.
   não mudava nada: `minutos < 1` já o cobria. Código defensivo que nenhum
   teste pode derrubar é código morto, e código morto mente sobre o que o
   programa faz.
+
+## Épico 10, Fases 1 e 2 — a Parede no Envelope (Set 2026)
+
+### O tempo real tinha duas condutas, e a blindada levava 2 de 35 emissores
+
+O Épico 4 (`task_*`) e o Épico 5 (`new_email`) passaram a emitir por
+`redis_pubsub.publish_event`. Mais nada foi. Os outros **33 pontos de emissão,
+em 12 módulos**, continuaram a escrever directamente no `ConnectionManager`
+em memória — e `render.yaml` fixa `UVICORN_WORKERS=2`. Um evento emitido no
+worker A para um socket no worker B não chega, e não dá erro nenhum: é a
+mesma falésia do Épico 5, que nunca foi generalizada.
+
+Consequência que explica todo o resto: **o polling das notificações não era
+redundância, era suporte de vida.** `send_realtime_notification` decidia a
+entrega por `manager.is_user_connected(user_id)`, uma pergunta que mente com
+vários workers; quem entregava a notificação, na prática, era o `setInterval`
+de 30 s do `NotificationsDropdown`. Cortar o polling antes desta migração
+teria apagado metade das notificações em produção, com ar de melhoria de
+performance.
+
+### A fuga: `manager.broadcast()` não conhece a Parede de Betão
+
+`broadcast_process_delta` dizia-o na própria docstring — *"broadcast a
+lightweight process delta to **all connected WebSocket clients**"*. O delta
+transporta `client_name` e `process_number`. A cadeia completa:
+
+```
+process_kanban_move   manager.broadcast(moved_message)      # sem filtro
+useKanbanRealtime     handleProcessCreated(payload)
+                      processes.unshift({client_name: …})
+                      onNotification(`Novo processo: ${client_name}`)
+```
+
+Um processo criado na Power inseria um cartão, com o nome do cliente, no
+Kanban de quem estivesse ligado na **Domus**, e disparava um toast com esse
+nome. O isolamento do Lote 4/5 vive inteiro nas *queries*; o WebSocket não faz
+query nenhuma, e foi por aí que passou. `realtime_notifications` tinha o mesmo
+defeito, com um comentário ao lado a garantir "sem dados sensíveis" sobre um
+payload que levava o `client_name`.
+
+### A regra: o evento declara audiência, o socket decide
+
+Um desenho ingénuo pergunta "quem pode ver este processo?" e paga uma query
+por cartão arrastado. Este inverte a pergunta:
+
+```
+emissor → audiencia_do_processo(process)   ← 0 I/O: o carimbo do Lote 4 já
+                                             está no documento que ele leu
+        → publish_event(…, audiencia=)     ← UM envelope, não N
+        → alcanca(aud, ambito_em_cache)    ← 0 I/O, em cada worker
+```
+
+O custo passa de *uma query por evento* para **uma query por ligação**:
+`resolve_tenant_scope` corre uma vez no handshake
+(`websocket_api_notifications`) e o `TenantScope` — um `frozen dataclass` —
+fica em `manager.user_scopes`, saindo com a última ligação.
+
+### Duas camadas, e têm de passar ambas
+
+`services/realtime_audience.py`:
+
+1. **Rede** — a fronteira de segurança. Espelha
+   `tenant_network.build_network_scope_condition`.
+2. **Necessidade de saber** — espelha
+   `process_list_filters.build_kanban_role_base_query`. Não é segurança: é
+   impedir que apareça no quadro de um consultor um cartão que o `GET` nunca
+   lhe devolveria e que desapareceria ao recarregar.
+
+São um **E**: estar atribuído não fura a rede, e pertencer à rede não dá
+acesso à carteira alheia.
+
+### Dois dialectos da mesma regra — e um teste que os alinha
+
+`alcanca` fala Python; `build_network_scope_condition` +
+`build_kanban_role_base_query` falam Mongo. Uma divergência silenciosa reabre
+a fuga, por isso `TestOsDoisDialectos` corre **as duas** sobre a mesma matriz
+(9 processos × 5 âmbitos × 7 papéis = 315 casos) e exige o mesmo veredicto,
+com contraprova de que a matriz exercita os dois valores — uma matriz só de
+`False` alinharia por acaso.
+
+Única diferença legítima, escrita no teste para ninguém a "corrigir":
+`is_deleted` é retirado do lado Mongo. Filtra o que o quadro **lista**, não
+quem tem direito a **saber**; quem via o processo tem de receber o evento que
+o apaga, senão fica com um cartão fantasma até ao F5.
+
+**Este teste apanhou um defeito real à primeira execução:**
+`str(UserRoleEnum.CONSULTOR)` devolve `'UserRoleEnum.CONSULTOR'` no Python
+3.11, não `'consultor'`. A normalização do papel destruía-o e `alcanca`
+devolvia `False` para toda a gente — falha fechada, mas o tempo real ficava
+mudo. `_texto` desembrulha Enums desde então.
+
+### Três formas de endereço, e nenhuma é "toda a gente"
+
+A invariante do transporte foi **alargada**, que é o ponto mais sensível do
+Épico:
+
+```
+antes:  entregável ⇔ user_id
+agora:  entregável ⇔ user_id  OU  audience  OU  room     (nunca nenhum)
+```
+
+| Forma | Quando | Quem decide |
+|---|---|---|
+| `user_id` | destinatário único (tarefas, email novo) | `send_personal_message` |
+| `audience` | quem tem direito a ver aquele processo | `_route_por_audiencia`, em memória |
+| `room` | quem está naquele ecrã | `_route_por_sala`; a ACL já foi feita à ENTRADA |
+
+As salas eram o terceiro caso escondido: `broadcast_to_room` entrega à lista
+de membros, que é **local a cada worker** — a mesma falésia noutra forma.
+
+O que mantém isto fechado é `build_event_envelope` **não gravar uma audiência
+sem alcance**: uma `Audiencia()` vazia nunca chega ao `is_deliverable` como
+endereço válido. Sem isso, bastava um emissor distraído para reabrir o
+broadcast por omissão de campo. É a mesma lei do `CONDICAO_IMPOSSIVEL` e do
+`resolve_ucr_mailbox_filter` que devolvia `None`.
+
+### Dois casos que a audiência do documento não cobria sozinha
+
+* **Quem sai da equipa** (`extra_user_ids`). A audiência sai do documento
+  *novo*; o consultor acabado de remover já não está lá e seria o único a não
+  saber que saiu, ficando com um cartão fantasma. `process_staff_assignment`
+  passa `tambem_para=removidos`. Dispensa a Camada 2, **nunca** a Camada 1.
+* **Presença** (`toda_a_rede`). `USER_ONLINE`/`USER_OFFLINE` levavam o *nome*
+  de um admin/CEO a todos os sockets, incluindo os de outra rede.
+  `entregar_as_redes` emite uma audiência por rede do próprio; sem rede
+  resolvida não emite nada. O âmbito é lido **antes** do `disconnect`, que é
+  quem o apaga.
+
+### A conduta única, e a guarda que a mantém
+
+`services/realtime_delivery.py` é o ponto por onde todos os emissores passam
+(`entregar_a_utilizador` / `entregar_a_processo` / `entregar_a_audiencia` /
+`entregar_na_sala` / `entregar_as_redes`). `tests/unit/test_realtime_delivery.py`
+afirma sobre o **código-fonte** dos 12 módulos que nenhum volta a escrever em
+`manager.*`, com a contraprova ao lado (cada um importa mesmo a conduta) —
+sem ela, apagar a entrega satisfaria a guarda. A guarda ignora comentários de
+propósito: vários destes ficheiros explicam hoje "isto era um
+`manager.broadcast()`", e uma guarda que lesse comentários tornaria essa
+explicação vermelha.
+
+### O socket não tem chapéu
+
+Não há `X-Active-Role` num handshake WebSocket. O âmbito de segurança vem do
+**JWT**, lado servidor; um perfil activo declarado pelo cliente só poderia
+ESTREITAR a vista, nunca alargá-la — a mesma regra do `resolve_concrete_role`
+que fechou a brecha do `can_update_status`.
+
+### Limitações conhecidas (deliberadas, não esquecidas)
+
+* **O âmbito em cache envelhece.** Um UCR revogado com o socket aberto só
+  produz efeito na reconexão. Atenuantes: trocar de empresa já faz `reload()`
+  (Lote 5, ponto 6), e o delta leva `client_name`, não o processo — o conteúdo
+  continua a vir pelo HTTP, que reverifica sempre. Um TTL no âmbito é o passo
+  seguinte.
+* **A presença local continua a mentir.** `chat_presence` usa
+  `manager.is_user_connected` para o indicador "online", e a decisão de enviar
+  *push* em `send_realtime_notification` também. Um registo de presença
+  partilhado resolveria ambos; não foi feito aqui para não mudar o
+  comportamento do push sem pedido. Não é regressão: é o que já acontecia.
+* **`is_notified`** é escrito em `db.notifications` e **não é lido em lado
+  nenhum** — o comentário original prometia prevenir re-emissão no polling, e
+  não previne nada. Fica assinalado.
+
+### Fase 3 (cortar o polling) NÃO foi feita
+
+É o passo seguinte, e só é seguro agora que a conduta existe: suspender o
+`setInterval` quando `isConnected` e retomá-lo se o WS cair, como o Webmail e
+o `TasksContext` já fazem.

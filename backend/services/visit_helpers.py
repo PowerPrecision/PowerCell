@@ -110,7 +110,8 @@ async def _update_portal_visit_status(visit: dict, new_status: str, scheduled_da
 
         # Notificar via WebSocket para a sala do processo
         try:
-            from services.websocket_manager import manager, WSEventType, create_ws_message
+            from services.websocket_manager import WSEventType
+            from services.realtime_delivery import entregar_na_sala, sala_do_processo
             ws_data = {
                 "visit_id": visit_id,
                 "status": new_status,
@@ -119,11 +120,11 @@ async def _update_portal_visit_status(visit: dict, new_status: str, scheduled_da
             if scheduled_date:
                 ws_data["scheduled_date"] = scheduled_date
 
-            ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
-                "type": "visit_status_update",
-                **ws_data,
-            })
-            await manager.broadcast_to_room(f"process_{process_id}", ws_message)
+            await entregar_na_sala(
+                sala_do_processo(process_id),
+                WSEventType.PORTAL_MESSAGE,
+                {"type": "visit_status_update", **ws_data},
+            )
         except Exception as ws_err:
             logger.debug(f"[VISITS] Erro ao notificar portal via WS: {ws_err}")
 

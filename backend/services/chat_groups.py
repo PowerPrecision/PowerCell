@@ -11,7 +11,7 @@ from fastapi import HTTPException
 
 from database import db
 from models.chat import ChatGroupCreate, ChatGroupUpdate
-from services.websocket_manager import manager, create_ws_message
+from services.realtime_delivery import entregar_a_utilizador
 from utils.input_sanitization import sanitize_string
 from services.chat_helpers import _block_parceiro
 
@@ -68,13 +68,14 @@ async def run_create_group(group_data: ChatGroupCreate, user: dict):
     # Notificar membros adicionados
     for member in members:
         if member["user_id"] != user_id:
-            await manager.send_personal_message(
-                create_ws_message("chat_group_created", {
+            await entregar_a_utilizador(
+                member["user_id"],
+                "chat_group_created",
+                {
                     "group_id": group_doc["id"],
                     "group_name": group_doc["name"],
                     "created_by": user.get("name", "")
-                }),
-                member["user_id"]
+                },
             )
 
     group_doc.pop("_id", None)
@@ -162,13 +163,14 @@ async def run_update_group(group_id: str, update_data: ChatGroupUpdate, user: di
                     {"$push": {"members": new_member}}
                 )
                 # Notificar novo membro
-                await manager.send_personal_message(
-                    create_ws_message("chat_group_created", {
+                await entregar_a_utilizador(
+                    mid,
+                    "chat_group_created",
+                    {
                         "group_id": group_id,
                         "group_name": group.get("name", ""),
                         "added_by": user.get("name", "")
-                    }),
-                    mid
+                    },
                 )
 
     # Remover membros
@@ -179,12 +181,13 @@ async def run_update_group(group_id: str, update_data: ChatGroupUpdate, user: di
         )
 
         for mid in update_data.remove_members:
-            await manager.send_personal_message(
-                create_ws_message("chat_group_removed", {
+            await entregar_a_utilizador(
+                mid,
+                "chat_group_removed",
+                {
                     "group_id": group_id,
                     "group_name": group.get("name", "")
-                }),
-                mid
+                },
             )
 
     updated_group = await db.chat_groups.find_one({"id": group_id}, {"_id": 0})
@@ -207,12 +210,13 @@ async def run_delete_group(group_id: str, user: dict):
     # Notificar membros
     for member in group.get("members", []):
         if member.get("user_id") != user_id:
-            await manager.send_personal_message(
-                create_ws_message("chat_group_deleted", {
+            await entregar_a_utilizador(
+                member["user_id"],
+                "chat_group_deleted",
+                {
                     "group_id": group_id,
                     "group_name": group.get("name", "")
-                }),
-                member["user_id"]
+                },
             )
 
     # Apagar grupo e mensagens

@@ -427,6 +427,7 @@ async def broadcast_assignment_delta(
             assigned_mediador_ids=fresh.get("assigned_mediador_ids"),
             mediador_names=fresh.get("mediador_names"),
             updated_at=fresh.get("updated_at"),
+            process=fresh or process,
         )
     except Exception as ws_err:
         logger.debug(
@@ -469,6 +470,7 @@ async def run_mark_indexed_side_effects(
             status=next_status or current_status,
             old_status=current_status,
             updated_at=now,
+            process=process,
         )
     except Exception as ws_err:
         logger.debug(f"Erro ao broadcast indexação concluída via WS: {ws_err}")
@@ -727,6 +729,7 @@ async def run_set_process_indexed_flag(
             status=process.get("status"),
             old_status=process.get("status"),
             updated_at=now,
+            process=process,
         )
     except Exception as ws_err:
         logger.debug(f"Erro ao broadcast reversão de indexação via WS: {ws_err}")

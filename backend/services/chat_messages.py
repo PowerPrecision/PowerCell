@@ -16,7 +16,7 @@ from database import db
 from models.chat import (
     ChatMessageCreate, ChatMessageReaction, ChatMessageEdit, ChatSearchQuery
 )
-from services.websocket_manager import manager, create_ws_message
+from services.realtime_delivery import entregar_a_utilizador
 from utils.input_sanitization import sanitize_string
 from services.chat_helpers import (
     _block_parceiro, MAX_ATTACHMENT_SIZE, ALLOWED_ATTACHMENT_TYPES
@@ -88,12 +88,13 @@ async def run_get_messages(
         )
 
         # Notificar via WebSocket
-        await manager.send_personal_message(
-            create_ws_message("chat_messages_read", {
+        await entregar_a_utilizador(
+            conversation_id,
+            "chat_messages_read",
+            {
                 "reader_id": user_id,
                 "conversation_with": conversation_id
-            }),
-            conversation_id
+            },
         )
 
     # Enriquecer mensagens com dados de reply_to
@@ -154,8 +155,10 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
-                await manager.send_personal_message(
-                    create_ws_message("new_chat_message", {
+                await entregar_a_utilizador(
+                    member_id,
+                    "new_chat_message",
+                    {
                         "id": msg_doc["id"],
                         "sender_id": user_id,
                         "sender_name": user.get("name", ""),
@@ -163,8 +166,7 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
                         "group_name": group["name"],
                         "content": message.content[:100],
                         "created_at": msg_doc["created_at"]
-                    }),
-                    member_id
+                    },
                 )
 
     elif message.receiver_id:
@@ -192,8 +194,10 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
         await db.chat_messages.insert_one(msg_doc)
 
         # Notificar destinatário
-        await manager.send_personal_message(
-            create_ws_message("new_chat_message", {
+        await entregar_a_utilizador(
+            message.receiver_id,
+            "new_chat_message",
+            {
                 "id": msg_doc["id"],
                 "sender_id": user_id,
                 "sender_name": user.get("name", ""),
@@ -201,8 +205,7 @@ async def run_send_message(message: ChatMessageCreate, user: dict):
                 "content": message.content[:100],
                 "process_id": message.process_id,
                 "created_at": msg_doc["created_at"]
-            }),
-            message.receiver_id
+            },
         )
     else:
         raise HTTPException(status_code=400, detail="Deve especificar receiver_id ou group_id")
@@ -275,8 +278,10 @@ async def run_upload_message_with_attachment(
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
-                await manager.send_personal_message(
-                    create_ws_message("new_chat_message", {
+                await entregar_a_utilizador(
+                    member_id,
+                    "new_chat_message",
+                    {
                         "id": msg_doc["id"],
                         "sender_id": user_id,
                         "sender_name": user.get("name", ""),
@@ -284,8 +289,7 @@ async def run_upload_message_with_attachment(
                         "has_attachment": True,
                         "content": sanitized_content[:100] if sanitized_content else f"📎 {file.filename}",
                         "created_at": msg_doc["created_at"]
-                    }),
-                    member_id
+                    },
                 )
 
     elif receiver_id:
@@ -309,8 +313,10 @@ async def run_upload_message_with_attachment(
 
         await db.chat_messages.insert_one(msg_doc)
 
-        await manager.send_personal_message(
-            create_ws_message("new_chat_message", {
+        await entregar_a_utilizador(
+            receiver_id,
+            "new_chat_message",
+            {
                 "id": msg_doc["id"],
                 "sender_id": user_id,
                 "sender_name": user.get("name", ""),
@@ -318,8 +324,7 @@ async def run_upload_message_with_attachment(
                 "has_attachment": True,
                 "content": sanitized_content[:100] if sanitized_content else f"📎 {file.filename}",
                 "created_at": msg_doc["created_at"]
-            }),
-            receiver_id
+            },
         )
     else:
         raise HTTPException(status_code=400, detail="Deve especificar receiver_id ou group_id")
@@ -382,12 +387,13 @@ async def run_react_to_message(reaction: ChatMessageReaction, user: dict):
     # Notificar outros participantes
     notify_user_id = msg.get("sender_id")
     if notify_user_id and notify_user_id != user_id:
-        await manager.send_personal_message(
-            create_ws_message("chat_message_reaction", {
+        await entregar_a_utilizador(
+            notify_user_id,
+            "chat_message_reaction",
+            {
                 "message_id": reaction.message_id,
                 "reactions": reactions
-            }),
-            notify_user_id
+            },
         )
 
     return {"success": True, "reactions": reactions}
@@ -426,22 +432,24 @@ async def run_edit_message(edit_data: ChatMessageEdit, user: dict):
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
-                await manager.send_personal_message(
-                    create_ws_message("chat_message_edited", {
+                await entregar_a_utilizador(
+                    member_id,
+                    "chat_message_edited",
+                    {
                         "message_id": edit_data.message_id,
                         "content": sanitized_edit_content,
                         "edited": True
-                    }),
-                    member_id
+                    },
                 )
     elif msg.get("receiver_id"):
-        await manager.send_personal_message(
-            create_ws_message("chat_message_edited", {
+        await entregar_a_utilizador(
+            msg["receiver_id"],
+            "chat_message_edited",
+            {
                 "message_id": edit_data.message_id,
                 "content": sanitized_edit_content,
                 "edited": True
-            }),
-            msg["receiver_id"]
+            },
         )
 
     return {"success": True}
@@ -468,14 +476,16 @@ async def run_delete_message(message_id: str, user: dict):
         for member in group.get("members", []):
             member_id = member.get("user_id")
             if member_id and member_id != user_id:
-                await manager.send_personal_message(
-                    create_ws_message("chat_message_deleted", {"message_id": message_id}),
-                    member_id
+                await entregar_a_utilizador(
+                    member_id,
+                    "chat_message_deleted",
+                    {"message_id": message_id},
                 )
     elif msg.get("receiver_id"):
-        await manager.send_personal_message(
-            create_ws_message("chat_message_deleted", {"message_id": message_id}),
-            msg["receiver_id"]
+        await entregar_a_utilizador(
+            msg["receiver_id"],
+            "chat_message_deleted",
+            {"message_id": message_id},
         )
 
     return {"success": True}

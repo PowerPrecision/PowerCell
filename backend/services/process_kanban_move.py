@@ -233,7 +233,8 @@ async def run_kanban_move_side_effects(
     from services.history import log_history
     from services.trello_service import sync_process_to_trello
     from services.redis_cache import invalidate_stats_cache
-    from services.websocket_manager import manager, WSEventType, create_ws_message
+    from services.websocket_manager import WSEventType
+    from services.realtime_delivery import entregar_a_processo
 
     _trello_move_proc = {
         **process,
@@ -255,9 +256,16 @@ async def run_kanban_move_side_effects(
         status=new_status,
         old_status=old_status,
         updated_at=datetime.now(timezone.utc).isoformat(),
+        process=process,
     )
 
-    moved_message = create_ws_message(
+    # ÉPICO 10, FASE 2 — este ponto fazia `manager.broadcast()`: o nome do
+    # cliente de um processo da Power aparecia no quadro de quem estivesse
+    # ligado na Domus. Hoje vai para a audiência do processo, e o autor do
+    # movimento é excluído porque já actualizou o seu quadro de forma
+    # optimista.
+    await entregar_a_processo(
+        process,
         WSEventType.PROCESS_MOVED,
         {
             "process_id": str(process_id),
@@ -269,7 +277,6 @@ async def run_kanban_move_side_effects(
             "user_name": user.get("name", "Unknown"),
         },
     )
-    await manager.broadcast(moved_message, exclude_user=str(user.get("id", "")))
 
     if flags["trigger_finance"]:
         try:

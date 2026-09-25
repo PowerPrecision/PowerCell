@@ -127,6 +127,23 @@ class FakeAsyncCollection:
         current[parts[-1]] = value
 
     @staticmethod
+    def _igual(value, expected) -> bool:
+        """Igualdade com a semântica do Mongo sobre ARRAYS.
+
+        No Mongo, ``{"campo": x}`` casa quando o campo É ``x`` **ou** quando
+        é um array que CONTÉM ``x``. O fake comparava só por identidade, pelo
+        que `{"assigned_consultor_ids": "u1"}` não casava com
+        `["u1", "u2"]` — o oposto do servidor real. Um teste sobre uma query
+        de atribuição (que são todas sobre arrays) provava assim o contrário
+        do que se passa em produção.
+        """
+        if value == expected:
+            return True
+        if isinstance(value, (list, tuple)) and not isinstance(expected, (list, tuple)):
+            return expected in value
+        return False
+
+    @staticmethod
     def _matches(doc: dict, query: dict) -> bool:
         """Matcher: igualdade, ``$ne``, ``$in``, ``$regex``, ``$exists``,
         ``$or``/``$and`` recursivos (PACOTE 8 — os filtros do Webmail usam
@@ -150,16 +167,22 @@ class FakeAsyncCollection:
                 matched_operator = False
                 if "$ne" in expected:
                     matched_operator = True
-                    if value == expected["$ne"]:
+                    if FakeAsyncCollection._igual(value, expected["$ne"]):
                         return False
                 if "$in" in expected:
                     matched_operator = True
-                    if value not in expected["$in"]:
+                    if not any(
+                        FakeAsyncCollection._igual(value, alvo)
+                        for alvo in expected["$in"]
+                    ):
                         return False
                 # PACOTE 11 — $nin (queries como {"logo_url": {"$nin": [None, ""]}})
                 if "$nin" in expected:
                     matched_operator = True
-                    if value in expected["$nin"]:
+                    if any(
+                        FakeAsyncCollection._igual(value, alvo)
+                        for alvo in expected["$nin"]
+                    ):
                         return False
                 if "$exists" in expected:
                     matched_operator = True
@@ -197,9 +220,9 @@ class FakeAsyncCollection:
                             return False
                     except re.error:
                         return False
-                if not matched_operator and value != expected:
+                if not matched_operator and not FakeAsyncCollection._igual(value, expected):
                     return False
-            elif value != expected:
+            elif not FakeAsyncCollection._igual(value, expected):
                 return False
         return True
 

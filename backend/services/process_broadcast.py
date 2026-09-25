@@ -1,14 +1,29 @@
-"""
-Broadcast WebSocket de deltas de processo (Kanban / realtime).
+"""Deltas de processo em tempo real (Kanban / realtime).
 
 Extraído de `routes/processes.py`.
+
+ÉPICO 10, FASE 2 — o que aqui mudou, e porquê
+=============================================
+Esta função fazia ``manager.broadcast()`` e a sua própria docstring dizia
+"*to all connected WebSocket clients*". O delta transporta ``client_name`` e
+``process_number``: um processo criado na Power inseria um cartão, com o nome
+do cliente, no Kanban de quem estivesse ligado na **Domus** — e ainda disparava
+um toast com esse nome. O isolamento do Lote 4/5 vive todo nas *queries*, e o
+WebSocket não faz query nenhuma; foi por aí que a fuga passou.
+
+Hoje o delta é endereçado à **audiência do processo**
+(``services/realtime_audience.py``), resolvida a partir do documento que o
+emissor já tem em mãos. Por isso o parâmetro ``process`` é obrigatório na
+prática: sem ele não há audiência, o transporte recusa o envelope e **não se
+entrega nada**. Falha fechada — um chamador distraído produz silêncio, nunca
+uma difusão geral.
 """
 from __future__ import annotations
 
 import logging
 from typing import Any, Optional
 
-from services.websocket_manager import manager, create_ws_message
+from services.realtime_delivery import entregar_a_processo
 
 logger = logging.getLogger(__name__)
 
@@ -66,8 +81,17 @@ async def broadcast_process_delta(
     prioridade: str = None,
     process_type: str = None,
     updated_at: str = None,
+    process: dict = None,
+    tambem_para: list = None,
 ) -> None:
-    """Broadcast a lightweight process delta to all connected WebSocket clients."""
+    """Entrega um delta leve a quem tem direito a ver este processo.
+
+    Args:
+        process: O documento do processo, de onde sai a audiência (carimbo
+            de rede/empresa + atribuições). **Sem ele não há entrega**: um
+            delta sem audiência seria um broadcast, que é precisamente o
+            defeito que este módulo deixou de ter.
+    """
     try:
         delta = build_process_delta_payload(
             process_id=process_id,
@@ -84,8 +108,16 @@ async def broadcast_process_delta(
             process_type=process_type,
             updated_at=updated_at,
         )
-        message = create_ws_message(event_type, delta)
-        await manager.broadcast(message)
-        logger.debug(f"Broadcast {event_type} for process {process_id}")
+        if not process:
+            logger.warning(
+                "[RT] Delta '%s' do processo %s sem documento de origem — "
+                "não entregue (sem audiência não há difusão)",
+                event_type, process_id,
+            )
+            return
+        await entregar_a_processo(
+            process, event_type, delta, tambem_para=tambem_para or ()
+        )
+        logger.debug(f"Delta {event_type} entregue à audiência de {process_id}")
     except Exception as e:
         logger.error(f"Error broadcasting process delta: {e}")

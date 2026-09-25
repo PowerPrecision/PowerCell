@@ -746,6 +746,7 @@ async def persist_and_finalize_staff_create(
         consultor_names=consultor_names,
         mediador_names=mediador_names,
         updated_at=now,
+        process=process_doc,
     )
 
     response_doc = decrypt_fn(process_doc)
@@ -812,6 +813,7 @@ async def persist_and_finalize_client_self_create(
         status=initial_status,
         process_type=data.process_type,
         updated_at=now,
+        process=process_doc,
     )
 
     await send_to_admins_fn(

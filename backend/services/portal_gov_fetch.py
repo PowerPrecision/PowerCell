@@ -19,7 +19,8 @@ from database import db
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.notification_service import send_notification_with_preference_check
 from services.s3_storage import s3_service
-from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.websocket_manager import WSEventType
+from services.realtime_delivery import entregar_na_sala, sala_do_processo
 
 logger = logging.getLogger(__name__)
 
@@ -74,13 +75,14 @@ async def _run_financas_background(nif: str, password: str, process_id: str, cli
             # Notificar equipa via WebSocket
             await _notify_assigned_team_fetch(process, "Portal das Finanças", docs_count)
             try:
-                await manager.broadcast_to_room(
-                    f"process_{process_id}",
-                    create_ws_message(WSEventType.DOCUMENT_UPLOADED, {
+                await entregar_na_sala(
+                    sala_do_processo(process_id),
+                    WSEventType.DOCUMENT_UPLOADED,
+                    {
                         "process_id": process_id,
                         "source": "auto_financas",
                         "documents_count": docs_count,
-                    })
+                    },
                 )
             except Exception as ws_err:
                 logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
@@ -138,13 +140,14 @@ async def _run_financas_background(nif: str, password: str, process_id: str, cli
 
             # Notificar via WebSocket sobre o erro
             try:
-                await manager.broadcast_to_room(
-                    f"process_{process_id}",
-                    create_ws_message(WSEventType.DOCUMENT_UPLOADED, {
+                await entregar_na_sala(
+                    sala_do_processo(process_id),
+                    WSEventType.DOCUMENT_UPLOADED,
+                    {
                         "process_id": process_id,
                         "source": "auto_financas_error",
                         "error": error_type,
-                    })
+                    },
                 )
             except Exception:
                 pass
@@ -221,13 +224,14 @@ async def _run_seguranca_social_background(niss: str, password: str, process_id:
             # Notificar equipa
             await _notify_assigned_team_fetch(process, "Segurança Social", docs_count)
             try:
-                await manager.broadcast_to_room(
-                    f"process_{process_id}",
-                    create_ws_message(WSEventType.DOCUMENT_UPLOADED, {
+                await entregar_na_sala(
+                    sala_do_processo(process_id),
+                    WSEventType.DOCUMENT_UPLOADED,
+                    {
                         "process_id": process_id,
                         "source": "auto_seguranca_social",
                         "documents_count": docs_count,
-                    })
+                    },
                 )
             except Exception as ws_err:
                 logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
@@ -281,13 +285,14 @@ async def _run_seguranca_social_background(niss: str, password: str, process_id:
                 pass
 
             try:
-                await manager.broadcast_to_room(
-                    f"process_{process_id}",
-                    create_ws_message(WSEventType.DOCUMENT_UPLOADED, {
+                await entregar_na_sala(
+                    sala_do_processo(process_id),
+                    WSEventType.DOCUMENT_UPLOADED,
+                    {
                         "process_id": process_id,
                         "source": "auto_seguranca_social_error",
                         "error": error_type,
-                    })
+                    },
                 )
             except Exception:
                 pass

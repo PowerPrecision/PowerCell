@@ -722,6 +722,7 @@ async def run_process_update_side_effects(
         priority=updated.get("prioridade") or updated.get("priority"),
         prioridade=updated.get("prioridade"),
         updated_at=updated.get("updated_at"),
+        process=updated,
     )
 
     if data.status and can_update_status:

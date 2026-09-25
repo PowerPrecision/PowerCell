@@ -35,6 +35,11 @@ class ConnectionManager:
         self.rooms: Dict[str, Set[str]] = {}
         # user_id → conjunto de room_names em que o utilizador está
         self.user_rooms: Dict[str, Set[str]] = {}
+        # ── Âmbito de tenant por utilizador (Épico 10, Fase 2) ──
+        # user_id → (TenantScope, papel). Resolvido UMA vez, no handshake:
+        # é o que permite encaminhar um evento por audiência sem pagar uma
+        # query por evento. Sai com a última ligação do utilizador.
+        self.user_scopes: Dict[str, tuple] = {}
     
     async def connect(self, websocket: WebSocket, user_id: str):
         """Aceitar uma nova ligação WebSocket."""
@@ -59,6 +64,11 @@ class ConnectionManager:
             if not self.active_connections[user_id]:
                 del self.active_connections[user_id]
                 
+                # O âmbito é da LIGAÇÃO: mantê-lo depois da saída deixaria
+                # uma fronteira de segurança decidida por dados de um socket
+                # que já não existe.
+                self.clear_scope(user_id)
+
                 # ── Auto-cleanup: sair de todas as rooms quando sem conexões ──
                 if user_id in self.user_rooms:
                     for room_name in list(self.user_rooms[user_id]):
@@ -178,6 +188,30 @@ class ConnectionManager:
         """Verificar se um utilizador está conectado."""
         return user_id in self.active_connections and len(self.active_connections[user_id]) > 0
 
+    # ── Âmbito de tenant da ligação (Épico 10, Fase 2) ───────────────
+
+    def register_scope(self, user_id: str, scope, *, role: str) -> None:
+        """Guarda o âmbito de dados desta ligação, resolvido no handshake.
+
+        É este valor em cache que torna o encaminhamento por audiência
+        gratuito: sem ele, cada delta de processo custaria uma leitura das
+        empresas do utilizador.
+        """
+        self.user_scopes[user_id] = (scope, role)
+
+    def get_scope(self, user_id: str):
+        """``(TenantScope, papel)`` desta ligação, ou ``None``.
+
+        ``None`` significa "não sei" e o router trata isso como "não
+        entrega" — falha fechada. Adivinhar um âmbito seria adivinhar uma
+        fronteira de segurança.
+        """
+        return self.user_scopes.get(user_id)
+
+    def clear_scope(self, user_id: str) -> None:
+        """Esquece o âmbito quando o utilizador fica sem ligações."""
+        self.user_scopes.pop(user_id, None)
+
 
 # Instância global do gestor de ligações
 manager = ConnectionManager()
@@ -279,12 +313,20 @@ def create_ws_message(event_type: str, data: dict, timestamp: Optional[str] = No
 # eventos publicados neste mesmo processo quando o Redis está em baixo).
 #
 # TENANT-SAFETY — a regra central deste módulo:
-#   A entrega é SEMPRE dirigida ao `user_id` do envelope, através de
-#   `send_personal_message`, que só escreve nos sockets desse utilizador.
-#   Um envelope sem `user_id` é DESCARTADO, nunca difundido. Não existe
-#   aqui nenhum caminho que faça fan-out de um evento de tarefa para
-#   outros utilizadores — nem por omissão de campo, nem por erro de
-#   payload. Falha fechada, nunca aberta.
+#   A entrega é SEMPRE endereçada. Um envelope diz para quem vai de UMA de
+#   duas formas, e um envelope sem nenhuma é DESCARTADO, nunca difundido:
+#
+#   1. `user_id` — destinatário único (tarefas, email novo). Entrega por
+#      `send_personal_message`, que só escreve nos sockets desse utilizador.
+#   2. `audience` — um predicado (Épico 10, Fase 2), quando enumerar os
+#      destinatários custaria uma query por evento. `_route_por_audiencia`
+#      avalia-o em memória contra o `TenantScope` que cada ligação trouxe do
+#      handshake, e uma ligação sem âmbito conhecido não recebe.
+#
+#   Não existe aqui nenhum caminho que faça fan-out para TODOS — nem por
+#   omissão de campo, nem por erro de payload. Falha fechada, nunca aberta.
+#   `manager.broadcast()` continua a existir para os eventos de presença
+#   (USER_ONLINE), que não transportam dados de nenhum inquilino.
 
 
 async def route_system_event(envelope: dict) -> bool:
@@ -308,14 +350,23 @@ async def route_system_event(envelope: dict) -> bool:
 
     user_id = envelope.get("user_id")
     event_type = envelope.get("type")
+    audiencia_bruta = envelope.get("audience")
 
-    # Tenant-safety: sem destinatário explícito não há entrega possível.
-    if not user_id or not event_type:
+    # Tenant-safety: sem ENDEREÇO não há entrega possível. Endereço é um
+    # destinatário explícito ou uma audiência — nunca a ausência de ambos.
+    if not event_type or not (user_id or audiencia_bruta or envelope.get("room")):
         logger.warning(
-            "[WS-ROUTER] Evento descartado sem destinatário "
+            "[WS-ROUTER] Evento descartado sem destinatário, audiência ou sala "
             f"(type={event_type!r}) — nunca difundido"
         )
         return False
+
+    # Um envelope endereçado a uma audiência ou a uma sala nunca passa pelo
+    # caminho dirigido: são ramos de um `if`, não fallbacks.
+    if not user_id:
+        if audiencia_bruta:
+            return await _route_por_audiencia(event_type, audiencia_bruta, envelope)
+        return await _route_por_sala(event_type, envelope)
 
     if not manager.is_user_connected(user_id):
         # Normal em multi-worker: o socket vive noutro processo.
@@ -344,3 +395,91 @@ async def route_system_event(envelope: dict) -> bool:
             f"{type(e).__name__}: {e}"
         )
         return False
+
+
+async def _route_por_audiencia(
+    event_type: str, audiencia_bruta: dict, envelope: dict
+) -> bool:
+    """Entrega um evento a todas as ligações DESTE worker que a audiência
+    alcance.
+
+    Decide em memória, contra o ``TenantScope`` que cada ligação trouxe do
+    handshake: zero queries, por muitos eventos que passem. Uma ligação sem
+    âmbito conhecido NÃO recebe — falha fechada, porque adivinhar um âmbito
+    é adivinhar uma fronteira de segurança.
+    """
+    from services.realtime_audience import Audiencia, alcanca
+
+    audiencia = Audiencia.do_envelope(audiencia_bruta)
+    if audiencia is None or not audiencia.tem_alcance():
+        logger.warning(
+            f"[WS-ROUTER] '{event_type}' com audiência ilegível ou vazia "
+            "— descartado (nunca difundido)"
+        )
+        return False
+
+    mensagem = _mensagem_do_envelope(event_type, envelope)
+
+    entregue = False
+    for user_id in list(manager.get_connected_users()):
+        registo = manager.get_scope(user_id)
+        if not registo:
+            continue
+        scope, role = registo
+        if not alcanca(audiencia, scope, user_id=user_id, role=role):
+            continue
+        try:
+            await manager.send_personal_message(mensagem, user_id)
+            entregue = True
+        except Exception as e:
+            # Um socket morto não pode impedir a entrega aos restantes.
+            logger.warning(
+                f"[WS-ROUTER] Falha ao entregar '{event_type}' a {user_id}: "
+                f"{type(e).__name__}: {e}"
+            )
+
+    return entregue
+
+
+def _mensagem_do_envelope(event_type: str, envelope: dict) -> dict:
+    """Mensagem WebSocket a partir do envelope (comum aos três ramos)."""
+    mensagem = create_ws_message(
+        event_type,
+        envelope.get("payload") or {},
+        timestamp=envelope.get("published_at"),
+    )
+    # `event_id` permite ao cliente descartar duplicados (reconexões).
+    if envelope.get("id"):
+        mensagem["event_id"] = envelope["id"]
+    return mensagem
+
+
+async def _route_por_sala(event_type: str, envelope: dict) -> bool:
+    """Entrega aos membros DESTE worker que estão na sala do envelope.
+
+    A autorização já aconteceu à entrada da sala
+    (`authorize_process_room_access`): o que faltava era a sala atravessar a
+    fronteira do worker. A lista de membros é local a cada processo uvicorn,
+    pelo que um `broadcast_to_room` no worker A nunca chegava a um socket no
+    worker B — a mesma falésia do Épico 5, noutra forma.
+    """
+    sala = envelope.get("room")
+    if not sala:
+        return False
+
+    excluido = envelope.get("exclude_user_id")
+    mensagem = _mensagem_do_envelope(event_type, envelope)
+
+    entregue = False
+    for user_id in manager.get_room_members(sala):
+        if excluido and user_id == excluido:
+            continue
+        try:
+            await manager.send_personal_message(mensagem, user_id)
+            entregue = True
+        except Exception as e:
+            logger.warning(
+                f"[WS-ROUTER] Falha ao entregar '{event_type}' na sala "
+                f"'{sala}' a {user_id}: {type(e).__name__}: {e}"
+            )
+    return entregue

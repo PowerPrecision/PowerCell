@@ -14,7 +14,8 @@ from fastapi import HTTPException, BackgroundTasks
 from database import db
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.notification_service import send_notification_with_preference_check
-from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.websocket_manager import WSEventType
+from services.realtime_delivery import entregar_na_sala, sala_do_processo
 
 logger = logging.getLogger(__name__)
 
@@ -133,7 +134,7 @@ async def _background_visit_scraper_and_notify(visit_id: str, url: str, process_
     
     # ── Broadcast WebSocket ──
     try:
-        ws_message = create_ws_message(WSEventType.PORTAL_MESSAGE, {
+        await entregar_na_sala(sala_do_processo(process_id), WSEventType.PORTAL_MESSAGE, {
             "id": visit_id,
             "process_id": process_id,
             "type": "visit_request",
@@ -142,7 +143,6 @@ async def _background_visit_scraper_and_notify(visit_id: str, url: str, process_
             "url": url,
             "created_at": datetime.now(timezone.utc).isoformat(),
         })
-        await manager.broadcast_to_room(f"process_{process_id}", ws_message)
     except Exception as ws_err:
         logger.debug(f"[PORTAL-BG] Erro ao broadcast pedido de visita via WS: {ws_err}")
 

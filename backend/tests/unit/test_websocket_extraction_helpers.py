@@ -89,7 +89,16 @@ def test_websocket_api_export_acl_helpers():
 
 
 def test_lock_events_broadcast_to_process_room_not_globally():
-    """Pacote FG / C2: process_locked/unlocked go to process_{id} only."""
+    """Pacote FG / C2: process_locked/unlocked go to process_{id} only.
+
+    ÉPICO 10 — a entrega deixou de ser `manager.broadcast_to_room` e passou
+    a ser `entregar_na_sala`, para a sala atravessar a fronteira do worker
+    (a lista de membros é local a cada processo uvicorn). A INTENÇÃO desta
+    guarda não mudou nada: o evento vai à sala do processo, nunca ao mundo,
+    e só depois da ACL. O que se actualiza aqui é o nome do mecanismo — e
+    a afirmação de que NENHUM caminho global sobrevive nestes blocos
+    continua palavra por palavra.
+    """
     path = Path(__file__).resolve().parents[2] / "services" / "websocket_api_notifications.py"
     text = path.read_text()
 
@@ -101,13 +110,18 @@ def test_lock_events_broadcast_to_process_room_not_globally():
     locked_block = text[locked_idx:unlocked_idx]
     unlocked_block = text[unlocked_idx:join_idx]
     for block in (locked_block, unlocked_block):
-        assert "broadcast_to_room" in block
+        assert "entregar_na_sala" in block
         assert "process_room_name" in block
         assert "authorize_process_room_access" in block
         assert "manager.broadcast(" not in block
+        assert "broadcast_to_room" not in block
 
-    # Remaining global broadcasts are presence (admin/ceo online/offline)
-    assert text.count("await manager.broadcast(") == 2
+    # ÉPICO 10: a presença deixou de ser global. Levava o NOME de um
+    # admin/CEO a TODOS os sockets, incluindo os de outra rede; hoje vai
+    # por `entregar_as_redes`, que a limita às redes do próprio. Não
+    # sobrevive aqui nenhum caminho de difusão geral.
+    assert "manager.broadcast(" not in text
+    assert text.count("await entregar_as_redes(") == 2
     assert "authorize_process_room_access" in text[join_idx:]
     assert "room_join_denied" in text[join_idx:]
     assert "manager.join_room" in text[join_idx:]

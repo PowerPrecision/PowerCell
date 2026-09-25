@@ -725,6 +725,10 @@ async def run_staff_assign_process(
         mediador_names=updated_process.get("mediador_names", []),
         prioridade=updated_process.get("prioridade"),
         updated_at=updated_process.get("updated_at"),
+        process=updated_process,
+        # Quem saiu da equipa tem de saber que saiu: é o único a quem a
+        # audiência do documento NOVO já não alcança.
+        tambem_para=sorted(removidos),
     )
 
     schedule_assignment_emails(
