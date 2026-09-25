@@ -810,6 +810,23 @@ async def background_job_monitor():
 
                 await _tratar_jobs_bloqueados(stuck_jobs, STUCK_THRESHOLD_HOURS)
 
+                # Higiene do ZSET de presença (Ponto 2). As LEITURAS já
+                # filtram por score, portanto isto não corrige nada — só
+                # impede o conjunto de crescer com todos os utilizadores
+                # que alguma vez se ligaram. Boleia neste ciclo em vez de
+                # um temporizador novo; corre em todos os workers e é
+                # idempotente (quem já saiu, já saiu).
+                try:
+                    from services.presenca import limpar_expirados
+
+                    saidos = await limpar_expirados()
+                    if saidos:
+                        logger.debug(
+                            f"[PRESENCA] {saidos} entrada(s) expirada(s) removida(s)"
+                        )
+                except Exception:
+                    pass
+
         except (IOError, OSError, ValueError, KeyError) as monitor_err:
             logger.error(f"Erro no background job monitor: {monitor_err}")
 

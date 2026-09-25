@@ -10,7 +10,6 @@ from fastapi import HTTPException
 
 from database import db
 from models.chat import TypingIndicator
-from services.websocket_manager import manager
 from services.realtime_delivery import entregar_a_utilizador
 from services.chat_helpers import _block_parceiro
 
@@ -105,7 +104,12 @@ async def run_get_online_users(user: dict):
     Obter lista de utilizadores online.
     """
     _block_parceiro(user)
-    connected_ids = manager.get_connected_users()
+    # Presença GLOBAL: `manager.get_connected_users()` só conhecia as
+    # ligações DESTE worker, portanto metade da equipa aparecia offline
+    # conforme o worker que atendesse o pedido (Ponto 2).
+    from services.presenca import todos_online
+
+    connected_ids = sorted(await todos_online())
 
     if not connected_ids:
         return {"users": []}
@@ -141,8 +145,13 @@ async def run_get_chat_users(user: dict, search: Optional[str] = None):
         {"_id": 0, "id": 1, "name": 1, "role": 1, "email": 1}
     ).sort("name", 1).limit(50).to_list(50)
 
-    # Adicionar status online
+    # Presença GLOBAL numa só leitura (Ponto 2). Era um
+    # `is_user_connected` por utilizador dentro do ciclo — e cada um
+    # respondia só pelo worker que atendesse o pedido.
+    from services.presenca import online_entre
+
+    online = await online_entre(u["id"] for u in users)
     for u in users:
-        u["is_online"] = manager.is_user_connected(u["id"])
+        u["is_online"] = u["id"] in online
 
     return {"users": users}

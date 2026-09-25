@@ -6483,3 +6483,91 @@ que já me apanhou no M14.**
 legado** — `perdido`/`cancelado`/`arquivo`, que existem em dados reais e não
 são fases. Os 13 usos que já eram `async` e os que sobram lêem-no por omissão
 quando ninguém injecta, o que é o comportamento correcto e não dívida.
+
+---
+
+# Iteração — Limpeza Estrutural, Pontos 2 e 3: presença global e o campo morto (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+## O defeito custava um push no bolso
+
+`manager.is_user_connected` responde pela memória DESTE processo. Com
+`UVICORN_WORKERS=2`, um utilizador com o socket no worker B lê-se como
+desligado no worker A — e em `realtime_notifications` era essa a pergunta que
+decidia o **push no telemóvel**. Quem estava a olhar para a aplicação levava
+notificação no telefone porque a emissão calhou no worker vizinho.
+
+## `services/presenca.py` — um ZSET
+
+`presenca:online`, membro = `user_id`, score = instante de expiração.
+
+- `esta_online` → `ZSCORE` > agora, O(1)
+- `online_entre` / `todos_online` → **um** `ZRANGEBYSCORE`
+
+O lote é o ponto: `chat_presence` e `chat_conversations` perguntavam **dentro
+de um ciclo**. Ficou mais barato do que a memória local que substituiu — há
+um teste a contar as idas ao Redis para 50 utilizadores: **uma**.
+
+O batimento já existia (`ping` de 30s do `useWebSocket`); TTL de 90s tolera
+um ping perdido. A ligação marca logo, sem esperar pelo primeiro ping.
+
+**A desconexão não remove**, de propósito: se o worker A removesse, o worker
+B — que ainda tem um separador aberto — só repunha no batimento seguinte, e
+nesse intervalo o utilizador apanhava push estando online. Deixando expirar,
+a entrada só morre quando NENHUM worker a renova: zero fantasmas depois de um
+crash, ao preço de até 90s de "online" a mais. O erro é para o lado seguro.
+
+## A degradação é ABERTA, ao contrário da minha regra habitual
+
+Redis em baixo → responde o manager local. É o contrário do que faço no
+isolamento por rede, e a razão está escrita no módulo: presença **não é
+fronteira de segurança**. Uma leitura falhada que respondesse "ninguém está
+online" partia o Chat e enchia telemóveis de push.
+
+Um caso subtil: quando o `ZSCORE` devolve `None`, consulta-se **na mesma** o
+manager local — uma ligação acabada de abrir cuja escrita falhou existe de
+facto, e dizer "offline" mandava push a quem está mesmo online.
+
+## A falésia, simulada
+
+Não simulei o processo: simulei o que o distingue. Cada "worker" tem o SEU
+`ConnectionManager` e os dois partilham UM Redis falso. Trocar qual está
+activo é exactamente a diferença entre atender no worker A ou no B. O
+ficheiro afirma o **defeito** e a **correcção**.
+
+## Ponto 3 — `is_notified` extinto
+
+Escrito em dois sítios, lido em zero. A escrita saiu; o `$unset` dos
+documentos antigos vive em `scripts/limpar_is_notified.py`, que só conta sem
+`--aplicar` e trabalha em lotes — um `update_many` sobre centenas de milhares
+de documentos segura o servidor, e esta colecção é lida pelo sino de toda a
+gente.
+
+## Erros meus
+
+- **Q13 — guarda fraca.** Escrevi uma guarda a procurar
+  `manager.is_user_connected`, uma **grafia**. A mutação escreveu
+  `_m.is_user_connected` — outro nome para o mesmo objecto — e passou por
+  baixo. Uma guarda sobre o código-fonte que casa um nome de variável está a
+  testar ortografia. Apertei-a para o método, e acrescentei os testes de
+  **comportamento** de `run_get_chat_users` e `run_get_online_users`, que era
+  o que faltava de verdade.
+- Deixei uma linha sem sentido num teste
+  (`await presenca.markar_online if False else None`) — resíduo de edição,
+  removida.
+- Voltei a cair na normalização de aspas do `ast.unparse` numa guarda de
+  código-fonte. Está escrito no `AGENTS.md`, escrito por mim.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3352 passed, 5 skipped** (baseline 3310).
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação dirigida ao serviço, aos consumidores e ao ponto de ligação:
+  **14 aplicadas, 14 mortas** (1 sobreviveu à primeira passagem).
+
+## A fazer em produção
+
+`python -m scripts.limpar_is_notified` (conta) e depois `--aplicar`. A
+presença entra sozinha no arranque seguinte; se `REDIS_URL` não estiver
+definido, tudo continua a funcionar pela memória local, como hoje.

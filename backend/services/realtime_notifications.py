@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 import uuid
 
 from database import db
-from services.websocket_manager import manager, WSEventType, create_ws_message
+from services.websocket_manager import WSEventType
 from services.realtime_delivery import entregar_a_processo, entregar_a_utilizador
 from services.push_notifications import send_push_notification
 
@@ -114,7 +114,6 @@ async def send_realtime_notification(
         "link": link,
         "process_id": process_id,
         "read": False,
-        "is_notified": False,
         "created_at": datetime.now(timezone.utc).isoformat()
     }
     
@@ -134,25 +133,19 @@ async def send_realtime_notification(
     # notificações em produção.
     await entregar_a_utilizador(user_id, WSEventType.NEW_NOTIFICATION, notification)
 
-    if manager.is_user_connected(user_id):
-        # NOTA: `is_notified` é escrito aqui e não é lido em lado nenhum do
-        # código — não previne re-emissão nenhuma, ao contrário do que o
-        # comentário original afirmava. Fica por ser inofensivo; remover é
-        # trabalho de limpeza, não deste Épico.
-        if save_to_db:
-            try:
-                await db.notifications.update_one(
-                    {"id": notification["id"]},
-                    {"$set": {"is_notified": True}}
-                )
-            except Exception as e:
-                logger.warning(f"Erro ao marcar notificação {notification['id']} como notificada: {e}")
-    else:
-        # O push continua a depender da presença LOCAL. Saber se alguém
-        # está ligado noutro worker exigiria um registo de presença
-        # partilhado; sem ele, um utilizador ligado ao worker vizinho pode
-        # receber push a mais — que é exactamente o que já acontecia antes
-        # desta migração, e não uma regressão introduzida aqui.
+    # PRESENÇA GLOBAL (Ponto 2) — era aqui que a mentira custava dinheiro.
+    #
+    # Esta pergunta era `manager.is_user_connected(user_id)`, memória
+    # LOCAL. Com dois workers, um utilizador com o socket no worker B
+    # lia-se como desligado no worker A e levava um push no telemóvel
+    # **enquanto estava a olhar para a aplicação**.
+    #
+    # O `is_notified` que se escrevia neste ramo foi REMOVIDO: era
+    # escrito e não era lido em lado nenhum. Não prevenia re-emissão
+    # nenhuma, ao contrário do que o comentário original afirmava.
+    from services.presenca import esta_online
+
+    if not await esta_online(user_id):
         logger.info(f"Utilizador {user_id} não conectado. Notificação guardada na DB.")
         # Enviar push notification quando o utilizador não está conectado via WebSocket
         await send_push_notification(

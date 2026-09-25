@@ -5,7 +5,6 @@ Extraído de `routes/chat.py`.
 from __future__ import annotations
 
 from database import db
-from services.websocket_manager import manager
 from services.chat_helpers import _block_parceiro
 
 
@@ -60,6 +59,13 @@ async def run_get_conversations(user: dict):
 
     direct_conversations = await db.chat_messages.aggregate(direct_pipeline).to_list(100)
 
+    # Presença GLOBAL numa só leitura, ANTES do ciclo (Ponto 2). Era um
+    # `is_user_connected` por conversa, e cada um só via o worker que
+    # atendesse o pedido.
+    from services.presenca import online_entre
+
+    online = await online_entre(c["_id"] for c in direct_conversations)
+
     conversations = []
 
     # Processar conversas diretas
@@ -78,7 +84,7 @@ async def run_get_conversations(user: dict):
                 "last_message": conv["last_message"][:50] + "..." if len(conv["last_message"]) > 50 else conv["last_message"],
                 "last_message_time": conv["last_message_time"],
                 "unread_count": conv["unread_count"],
-                "is_online": manager.is_user_connected(other_user_id),
+                "is_online": other_user_id in online,
                 "is_group": False
             })
 

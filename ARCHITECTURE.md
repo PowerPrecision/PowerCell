@@ -5022,3 +5022,87 @@ isolamento quando o problema era o `db`.
 
 O helper `_tenant_db` passou a patchar os três. **Uma cadeia nova de `db`
 entra aí**, e o docstring di-lo.
+
+---
+
+## Presença global no Redis (Limpeza Estrutural, Pontos 2 e 3 — Set 2026)
+
+### O defeito custava um push no bolso
+
+`manager.is_user_connected` responde pela memória DESTE processo. Com
+`UVICORN_WORKERS=2`, um utilizador com o socket no worker B lê-se como
+desligado no worker A. Em `realtime_notifications` isso decidia o **push no
+telemóvel**: quem estava a olhar para a aplicação levava notificação no
+telefone porque a emissão calhou no worker vizinho.
+
+### A estrutura: um ZSET
+
+`presenca:online` — membro = `user_id`, score = **instante de expiração**.
+
+| Pergunta | Comando | Custo |
+|---|---|---|
+| está online? | `ZSCORE` > agora | O(1) |
+| quem está online? | `ZRANGEBYSCORE agora +inf` | **uma** chamada |
+| estes 50 estão? | o mesmo `ZRANGEBYSCORE` | **uma** chamada |
+
+O lote é o ponto: `chat_presence` e `chat_conversations` perguntavam **dentro
+de um ciclo**, um por utilizador. Passou a uma leitura — ficou mais barato do
+que a memória local que substituiu.
+
+### O batimento já existia
+
+O `useWebSocket` manda `ping` de 30 em 30s e o `websocket_api_notifications`
+já o tratava. É aí que se renova, com TTL de **90s** (3×, tolera um ping
+perdido). Sem temporizador novo e sem tarefa de fundo. A ligação marca
+**logo**, sem esperar pelo primeiro ping — senão eram 30s em que quem acabou
+de entrar apanhava push.
+
+### Porque é que a desconexão NÃO remove
+
+Se o worker A removesse ao fechar o seu socket, o worker B — que ainda tem um
+separador aberto do mesmo utilizador — só repunha no batimento seguinte, e
+nesse intervalo o utilizador apanhava push estando online: o defeito que isto
+vem corrigir, de volta pela porta das traseiras.
+
+Deixando expirar, a entrada só morre quando **nenhum** worker a renova. Zero
+fantasmas depois de um crash (o que um `SET` simples nunca resolve), ao preço
+de até 90s de "online" a mais depois do último separador fechar. Esse erro é
+para o lado seguro: **push a menos**, e a notificação fica na base de dados.
+
+A higiene (`ZREMRANGEBYSCORE`) boleia no `background_job_monitor` que já
+existia. As leituras já filtram por score, portanto não corrige nada — só
+impede o conjunto de crescer com todos os que alguma vez se ligaram.
+
+### A degradação é ABERTA, e de propósito
+
+Redis em baixo → responde o `ConnectionManager` local, que é o comportamento
+de hoje. É o contrário da regra que sigo no isolamento por rede e no
+Explorador de ficheiros, e a razão está escrita no módulo: **presença não é
+fronteira de segurança** — nenhum dado muda de dono por causa dela. Uma
+leitura falhada que respondesse "ninguém está online" partia o Chat e enchia
+telemóveis de push. Não "corrigir" isto para fail-closed.
+
+Há ainda um caso subtil: quando o `ZSCORE` devolve `None`, o serviço consulta
+**na mesma** o manager local. Uma ligação acabada de abrir cuja escrita no
+Redis falhou existe de facto — dizer "offline" mandava push a quem está
+mesmo online.
+
+### Como é que a falésia se testa sem dois processos
+
+Não se simula o processo: simula-se o que o distingue. Cada "worker" tem o
+**seu** `ConnectionManager` e os dois partilham **um** Redis falso. Trocar
+qual está activo é exactamente a diferença entre atender o pedido no worker A
+ou no B — e é a única coisa de que o defeito dependia.
+`tests/unit/test_presenca_global.py` afirma o defeito **e** a correcção.
+
+### Ponto 3 — `is_notified` extinto
+
+Escrito em dois sítios, lido em zero. Não prevenia re-emissão nenhuma, ao
+contrário do que o comentário original afirmava. A escrita saiu do código; o
+`$unset` dos documentos antigos vive em `scripts/limpar_is_notified.py`, que
+**só conta** sem `--aplicar` e trabalha em lotes — um `update_many` sobre
+centenas de milhares de documentos segura o servidor, e esta colecção é lida
+pelo sino das notificações de toda a gente.
+
+Uma guarda sobre o código-fonte varre `services/`, `routes/` e `models/` a
+afirmar que ninguém volta a escrever nem a ler o campo.

@@ -47,6 +47,13 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
         from services.email_realtime import join_user_email_room
         join_user_email_room(user_id)
 
+        # Presença GLOBAL (Ponto 2). Marca já, sem esperar pelo primeiro
+        # `ping`: são 30s em que um utilizador acabado de entrar apanhava
+        # push no telemóvel por parecer offline.
+        from services.presenca import marcar_online
+
+        await marcar_online(user_id)
+
         # Âmbito de tenant da ligação (Épico 10, Fase 2): resolvido UMA vez,
         # aqui, e não por evento — é o que torna o encaminhamento por
         # audiência gratuito. O âmbito vem do JWT (lado servidor); um chapéu
@@ -113,6 +120,11 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
                 msg_type = data.get("type")
 
                 if msg_type == "ping":
+                    # O batimento do cliente (30s) é o que renova a
+                    # presença: sem temporizador novo e sem tarefa de
+                    # fundo. Nunca falha o `pong` — a presença é
+                    # acessória à ligação, não o contrário.
+                    await marcar_online(user_id)
                     try:
                         await websocket.send_json(create_ws_message(
                             WSEventType.HEARTBEAT,
