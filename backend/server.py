@@ -1067,6 +1067,11 @@ async def startup():
     try:
         from services.workflow_lookup import ensure_workflow_purpose_flags_backfill
         await ensure_workflow_purpose_flags_backfill()
+        # Épico 10, Parte 2 — semeia `macro_fase` nas fases que ainda não
+        # a têm. Idempotente: nunca toca numa fase já classificada pelo
+        # administrador, por isso pode correr em todos os arranques.
+        from services.workflow_phases import ensure_macro_fase_backfill
+        await ensure_macro_fase_backfill()
     except (ImportError, ValueError, KeyError) as wf_err:
         logger.warning(f"⚠️ Backfill de flags do workflow falhou (não fatal): {wf_err}")
     

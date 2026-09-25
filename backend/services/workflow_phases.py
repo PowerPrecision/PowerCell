@@ -47,6 +47,7 @@ from dataclasses import dataclass
 from typing import Iterable, Optional
 
 from database import db
+from models.workflow import MacroFase
 from services.process_status import INACTIVE_STATUSES, STATUS_VALUE_ALIASES
 
 logger = logging.getLogger(__name__)
@@ -296,9 +297,20 @@ def pode_ver_desconhecidas(papel) -> bool:
 # ====================================================================
 # MACRO-FASES — o agrupamento do funil de negócio
 # ====================================================================
-# Enum FECHADO. Texto livre criaria um grupo novo com uma gralha e o
-# funil partia-se em silêncio — a lição do Campo de Rede (Lote 5).
-MACRO_FASES_VALIDAS = ("novo", "analise", "aprovado", "concluido", "perdido")
+# Enum FECHADO, derivado do modelo — não copiado. Duas cópias divergiriam,
+# e a divergência aqui seria o Pydantic a recusar um valor que este módulo
+# aceita (ou pior, ao contrário).
+#
+# São os VALORES em `str`, não os membros do Enum. Com o mixin `str` é o
+# `str.__hash__` que ganha, portanto `MacroFase.NOVO in {"novo"}` até é
+# verdadeiro — mas essa igualdade depende INTEIRAMENTE do mixin: num
+# `Enum` puro, `__hash__` é o do NOME e a pertença passa a False em
+# silêncio (a igualdade `==` também). Tirar `str` da declaração do Enum é
+# uma linha inocente que partiria o agrupamento inteiro sem um erro.
+#
+# Daqui para dentro circula `str` simples: é o que vai para o Mongo, para
+# o JSON e para as comparações, venha o documento do Pydantic ou da BD.
+MACRO_FASES_VALIDAS: tuple[str, ...] = tuple(m.value for m in MacroFase)
 
 # A SEMENTE, não a verdade. A partir da Parte 2 quem manda é o campo
 # `macro_fase` no documento da fase, editável no WorkflowEditor; este
@@ -359,8 +371,11 @@ def macro_da_fase(fase: dict) -> Optional[str]:
         return None
     declarada = fase.get("macro_fase")
     if declarada:
-        if declarada in MACRO_FASES_VALIDAS:
-            return declarada
+        # `.value` porque o documento pode vir do Pydantic (membro do
+        # Enum) ou da base de dados (string). Daqui sai SEMPRE `str`.
+        texto = str(getattr(declarada, "value", declarada))
+        if texto in MACRO_FASES_VALIDAS:
+            return texto
         logger.warning(
             f"[WORKFLOW-PHASES] Fase {fase.get('name')!r} declara a macro-fase "
             f"{declarada!r}, que não pertence ao enum — ignorada."
@@ -380,3 +395,73 @@ def nomes_por_macro(fases: Iterable[dict], *macros: str) -> list[str]:
         f["name"] for f in fases
         if isinstance(f, dict) and f.get("name") and macro_da_fase(f) in pedidas
     ]
+
+
+# ====================================================================
+# BACKFILL IDEMPOTENTE DA MACRO-FASE
+# ====================================================================
+
+async def ensure_macro_fase_backfill() -> dict:
+    """Semeia `macro_fase` nas fases que ainda não a têm (arranque).
+
+    Mesmo padrão do `ensure_workflow_purpose_flags_backfill`: a semântica
+    fica NA BASE DE DADOS e o runtime só lê a partir daí.
+
+    IDEMPOTENTE, e a idempotência aqui é a parte que interessa:
+
+    - Só escreve onde `macro_fase` está AUSENTE ou a `None`. Uma fase que
+      o administrador já classificou nunca é tocada — correr isto outra
+      vez não desfaz uma decisão humana, e é isso que torna seguro
+      chamá-lo em todos os arranques.
+    - A condição de ausência está na QUERY, não num `if` em Python: entre
+      ler e escrever há uma janela em que o admin pode gravar, e o Mongo
+      resolve-a por nós.
+    - O que o mapa de omissão não cobre fica por classificar, de
+      propósito. `None` é uma resposta: a fase aparece em "Outras fases",
+      com o nome à vista, até alguém decidir. Inventar um grupo seria
+      pior do que não ter nenhum.
+
+    Nunca levanta — um arranque não pode falhar por causa disto.
+    """
+    escritas = 0
+    ja_classificadas = 0
+    sem_proposta: list[str] = []
+    try:
+        fases = await db.workflow_statuses.find({}, {"_id": 0}).to_list(500)
+        for fase in fases:
+            nome = fase.get("name")
+            if not nome:
+                continue
+            if fase.get("macro_fase"):
+                ja_classificadas += 1
+                continue
+            proposta = MACRO_FASE_POR_OMISSAO.get(nome)
+            if not proposta:
+                sem_proposta.append(nome)
+                continue
+            resultado = await db.workflow_statuses.update_one(
+                {
+                    "id": fase.get("id", nome),
+                    "$or": [
+                        {"macro_fase": {"$exists": False}},
+                        {"macro_fase": None},
+                    ],
+                },
+                {"$set": {"macro_fase": proposta}},
+            )
+            escritas += resultado.modified_count
+        if escritas or sem_proposta:
+            logger.info(
+                f"[WORKFLOW-PHASES] Backfill de macro-fases: {escritas} "
+                f"semeada(s), {ja_classificadas} já classificada(s), "
+                f"{len(sem_proposta)} sem proposta ({sem_proposta})."
+            )
+    except Exception as e:  # pragma: no cover — arranque nunca falha
+        logger.warning(
+            f"[WORKFLOW-PHASES] Backfill de macro-fases falhou (não fatal): {e}"
+        )
+    return {
+        "escritas": escritas,
+        "ja_classificadas": ja_classificadas,
+        "sem_proposta": sem_proposta,
+    }

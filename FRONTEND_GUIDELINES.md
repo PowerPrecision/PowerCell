@@ -1182,3 +1182,36 @@ diagnóstico não ter de refazer a conta.
 `'desistencias'` que ainda existem no `KanbanBoard`, `KanbanColumn`,
 `KanbanCard` e `useKanbanCompletedQuery` **não cresceram** nesta parte e
 continuam a ser dívida. Código novo não lhes acrescenta nada.
+
+---
+
+## 36. O grupo do funil é uma lista fechada (Épico 10, Parte 2)
+
+**36.1 — Cinco grupos, `<Select>`, nunca `<Input>`.** `novo`, `analise`,
+`aprovado`, `concluido`, `perdido`. Texto livre criaria um grupo novo com
+uma gralha (`aprovdo`) e o funil partia-se em silêncio: os processos dessa
+fase saíam do grupo certo e apareciam num grupo de um só, com ar de
+categoria legítima. O backend recusa ao gravar; a UI tem de recusar antes,
+senão o utilizador só descobre no submit.
+
+**36.2 — "Sem grupo" é uma opção, e tem de existir.** Obrigar a escolher é
+obrigar a inventar. Uma fase sem grupo cai em «Outras fases», com o nome à
+vista — nunca desaparece. Atenção ao detalhe do Radix: `<SelectItem>` não
+aceita `value=""`, por isso a opção usa uma chave interna
+(`__sem_grupo__`) que é traduzida para `""` **antes** do payload. Se
+escapasse, o backend recusava-a pelo enum.
+
+**36.3 — A lista de fases saiu do `funilDeFases.js`.** Ficaram as
+etiquetas e as cores dos grupos. Quem classifica é `macro_fase`, vindo do
+motor com as `workflow_statuses`. O `CLASSIFICACAO_DE_RECURSO` só socorre
+uma fase que o motor ainda não classificou, perde sempre para ele, e **não
+cresce** — uma fase nova classifica-se na UI, não neste ficheiro.
+
+**36.4 — `statuses` de um grupo é o que caiu lá, não o que foi declarado.**
+Mudou de significado na Parte 2. É o que serve para clicar num segmento do
+funil e filtrar a lista.
+
+**36.5 — As duas listas do frontend e o enum do backend são cruzados por
+testes.** `workflowEditorMacroFase.test.js` compara o `<Select>` com o
+`MACRO_FASES` do funil; do lado do Python, `test_macro_fase.py` lê os dois
+ficheiros JS e compara-os com o enum. Mexer numa obriga a mexer nas outras.

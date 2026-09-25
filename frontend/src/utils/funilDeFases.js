@@ -20,52 +20,96 @@
  *   couber nos grupos conhecidos cai num grupo "Outras fases" — que só
  *   aparece quando tem conteúdo, para não ser ruído permanente.
  *
- * PORQUE É QUE OS GRUPOS CONTINUAM A SER UMA LISTA
- *   O motor não tem campo de macro-fase: `workflow_statuses` sabe
- *   `order`, `label` e `color`, não "isto é análise". Inventar o
- *   agrupamento a partir da ordem seria outra mentira, só que com ar
- *   automático. Os grupos ficam como CLASSIFICAÇÃO CONHECIDA; o que a
- *   classificação não cobre é dito, em vez de ser deitado fora.
+ * O MOTOR PASSOU A TER O CAMPO (Épico 10, Parte 2)
+ *   `workflow_statuses.macro_fase` — enum fechado
+ *   (`novo|analise|aprovado|concluido|perdido`), editável pelo
+ *   administrador no WorkflowEditor. A lista de fases SAIU deste
+ *   ficheiro: aqui ficam só as etiquetas e as cores dos cinco grupos.
+ *
+ *   O mapa `CLASSIFICACAO_DE_RECURSO` sobrevive como RECURSO para uma
+ *   fase que o motor ainda não classificou, e perde sempre para ele —
+ *   a mesma regra dos aliases da timeline. Não cresce: uma fase nova
+ *   classifica-se na UI.
+ *
+ *   O que continua sem grupo aparece em "Outras fases", com o nome à
+ *   vista. `null` é uma resposta; inventar um grupo seria pior.
  *
  * @module utils/funilDeFases
  */
 
-/** Macro-fases conhecidas. Uma fase pertence no MÁXIMO a um grupo. */
+/**
+ * Os grupos do funil, pela ordem em que o negócio acontece.
+ *
+ * A LISTA DE FASES SAIU DAQUI (Épico 10, Parte 2). Cada grupo tem só
+ * identidade visual — quem diz a que grupo pertence uma fase é o MOTOR,
+ * pelo campo `macro_fase` que o administrador edita no WorkflowEditor.
+ */
 export const MACRO_FASES = [
-  {
-    key: "novo",
-    label: "Novo",
-    statuses: ["clientes_espera", "fase_documental", "fase_documental_ii", "documentacao"],
-    color: "hsl(var(--chart-4))",
-  },
-  {
-    key: "analise",
-    label: "Em Análise",
-    statuses: [
-      "enviado_bruno", "enviado_luis", "enviado_bcp_rui", "entradas_precision",
-      "fase_bancaria", "fase_visitas", "analise", "pre_aprovacao",
-    ],
-    color: "hsl(var(--chart-1))",
-  },
-  {
-    key: "aprovado",
-    label: "Aprovado",
-    statuses: [
-      "ch_aprovado", "fase_escritura", "escritura_agendada",
-      "credito_aprovado", "pedido_avaliacao", "avaliacao", "cpcv", "minuta",
-      "aprovado",
-    ],
-    color: "hsl(var(--chart-2))",
-  },
-  {
-    key: "concluido",
-    label: "Concluído",
-    // `escritura` estava TAMBÉM em "Aprovado": o mesmo processo era
-    // contado conforme a ordem de iteração. Fica aqui, que é o desfecho.
-    statuses: ["concluidos", "concluido", "escritura"],
-    color: "hsl(var(--chart-3))",
-  },
+  { key: "novo", label: "Novo", color: "hsl(var(--chart-4))" },
+  { key: "analise", label: "Em Análise", color: "hsl(var(--chart-1))" },
+  { key: "aprovado", label: "Aprovado", color: "hsl(var(--chart-2))" },
+  { key: "concluido", label: "Concluído", color: "hsl(var(--chart-3))" },
+  { key: "perdido", label: "Perdido", color: "hsl(var(--chart-5))" },
 ];
+
+/**
+ * Classificação de RECURSO, para uma fase que o motor ainda não
+ * classificou — instalação que não correu o backfill, ou fase criada
+ * antes dele. Perde SEMPRE para o `macro_fase` do motor, e não cresce:
+ * uma fase nova classifica-se na UI, não aqui.
+ */
+const CLASSIFICACAO_DE_RECURSO = {
+  clientes_espera: "novo",
+  fase_documental: "novo",
+  fase_documental_ii: "novo",
+  documentacao: "novo",
+  enviado_bruno: "analise",
+  enviado_luis: "analise",
+  enviado_bcp_rui: "analise",
+  entradas_precision: "analise",
+  fase_bancaria: "analise",
+  fase_visitas: "analise",
+  analise: "analise",
+  pre_aprovacao: "analise",
+  renegociacao: "analise",
+  pausa_cliente: "analise",
+  ch_aprovado: "aprovado",
+  fase_escritura: "aprovado",
+  escritura_agendada: "aprovado",
+  credito_aprovado: "aprovado",
+  pedido_avaliacao: "aprovado",
+  avaliacao: "aprovado",
+  cpcv: "aprovado",
+  minuta: "aprovado",
+  aprovado: "aprovado",
+  concluidos: "concluido",
+  concluido: "concluido",
+  escritura: "concluido",
+  desistencias: "perdido",
+  desistencia: "perdido",
+  desistido: "perdido",
+  cancelado: "perdido",
+  perdido: "perdido",
+  arquivo: "perdido",
+};
+
+const CHAVES_VALIDAS = new Set(MACRO_FASES.map((g) => g.key));
+
+/**
+ * A que grupo pertence uma fase. O motor ganha sempre.
+ *
+ * Um `macro_fase` fora do enum é ignorado — o backend já o recusa ao
+ * gravar, mas um documento antigo pode trazê-lo, e um grupo inventado
+ * partiria o funil com ar de categoria legítima.
+ */
+function grupoDoEstado(estado, fasesDoMotor) {
+  const doMotor = (Array.isArray(fasesDoMotor) ? fasesDoMotor : []).find(
+    (f) => f && f.name === estado,
+  );
+  const declarada = doMotor?.macro_fase;
+  if (declarada && CHAVES_VALIDAS.has(declarada)) return declarada;
+  return CLASSIFICACAO_DE_RECURSO[estado] || null;
+}
 
 const CHAVE_OUTRAS = "outras";
 const SEM_ESTADO = "__sem_estado__";
@@ -81,24 +125,24 @@ const SEM_ESTADO = "__sem_estado__";
 export function agruparEmFunil(processos, fasesDoMotor) {
   const lista = Array.isArray(processos) ? processos : [];
 
-  const grupoDaFase = new Map();
-  for (const grupo of MACRO_FASES) {
-    for (const fase of grupo.statuses) {
-      // Primeiro grupo a declarar a fase fica com ela — e há um teste a
-      // afirmar que nenhuma é declarada duas vezes.
-      if (!grupoDaFase.has(fase)) grupoDaFase.set(fase, grupo.key);
-    }
-  }
-
   const contagens = new Map(MACRO_FASES.map((g) => [g.key, 0]));
+  const fasesPorGrupo = new Map(MACRO_FASES.map((g) => [g.key, new Set()]));
   const fasesForaDeGrupo = new Set();
   let foraDeGrupo = 0;
 
+  // Memoiza por ESTADO: uma lista de 1000 processos tem dezenas de
+  // estados distintos, e `grupoDoEstado` percorre as fases do motor.
+  const cache = new Map();
+
   for (const processo of lista) {
     const estado = processo?.status || SEM_ESTADO;
-    const chave = grupoDaFase.get(estado);
+    if (!cache.has(estado)) {
+      cache.set(estado, estado === SEM_ESTADO ? null : grupoDoEstado(estado, fasesDoMotor));
+    }
+    const chave = cache.get(estado);
     if (chave) {
       contagens.set(chave, contagens.get(chave) + 1);
+      fasesPorGrupo.get(chave).add(estado);
     } else {
       foraDeGrupo += 1;
       if (estado !== SEM_ESTADO) fasesForaDeGrupo.add(estado);
@@ -110,7 +154,7 @@ export function agruparEmFunil(processos, fasesDoMotor) {
     name: grupo.label,
     value: contagens.get(grupo.key),
     color: grupo.color,
-    statuses: grupo.statuses,
+    statuses: [...fasesPorGrupo.get(grupo.key)],
   }));
 
   if (foraDeGrupo === 0) return funil;

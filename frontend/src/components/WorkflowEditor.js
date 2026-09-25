@@ -37,6 +37,7 @@ import {
   DollarSign,
   Clock,
   CalendarClock,
+  BarChart3,
 } from "lucide-react";
 import {
   getWorkflowStatuses,
@@ -70,6 +71,9 @@ const WorkflowEditor = () => {
     description: "",
     portal_label: "",
     visible_in_portal: true,
+    // Épico 10, Parte 2 — grupo do funil de negócio. "" = não
+    // classificada (cai em "Outras fases", com o nome à vista).
+    macro_fase: "",
     // PACOTE BS — Dynamic Workflow Purpose Flags
     // null = não configurado (fallback ativo no backend); true/false = configurado
     is_active: null,
@@ -112,6 +116,7 @@ const WorkflowEditor = () => {
         description: formData.description || undefined,
         portal_label: formData.portal_label || undefined,
         visible_in_portal: formData.visible_in_portal,
+        macro_fase: formData.macro_fase || undefined,
         // PACOTE BS — Dynamic Workflow Purpose Flags
         is_active: formData.is_active,
         trigger_finance: formData.trigger_finance,
@@ -143,6 +148,7 @@ const WorkflowEditor = () => {
         description: formData.description || undefined,
         portal_label: formData.portal_label || null,
         visible_in_portal: formData.visible_in_portal,
+        macro_fase: formData.macro_fase || null,
         // PACOTE BS — Dynamic Workflow Purpose Flags
         is_active: formData.is_active,
         trigger_finance: formData.trigger_finance,
@@ -218,6 +224,7 @@ const WorkflowEditor = () => {
       description: status.description || "",
       portal_label: status.portal_label || "",
       visible_in_portal: status.visible_in_portal !== false,
+      macro_fase: status.macro_fase || "",
       // PACOTE BS — Dynamic Workflow Purpose Flags (lê do status existente; null = fallback)
       is_active: status.is_active ?? null,
       trigger_finance: status.trigger_finance ?? null,
@@ -241,6 +248,7 @@ const WorkflowEditor = () => {
       description: "",
       portal_label: "",
       visible_in_portal: true,
+      macro_fase: "",
       // PACOTE BS — reset flags a null (fallback ativo)
       is_active: null,
       trigger_finance: null,
@@ -268,6 +276,65 @@ const WorkflowEditor = () => {
   // está incluído no payload para configuração avançada via API se necessário.
   // null = não configurado (fallback ativo); true/false = configurado pelo admin.
   // ====================================================================
+  /**
+   * As cinco macro-fases do funil de negócio (Épico 10, Parte 2).
+   *
+   * LISTA FECHADA, e é essa a razão de ser um `<Select>` e não um
+   * `<Input>`: texto livre criaria um grupo novo com uma gralha
+   * (`aprovdo`) e o funil partia-se em silêncio — os processos dessa
+   * fase saíam do grupo certo e apareciam num grupo de um só, com ar de
+   * categoria legítima. É a lição do Campo de Rede (Lote 5, ponto 2).
+   *
+   * Tem de coincidir com o enum `MacroFase` do backend, que recusa
+   * qualquer outro valor ao gravar.
+   */
+  const macroFaseOptions = [
+    { value: "novo", label: "Novo", hint: "Entrada e recolha de documentos" },
+    { value: "analise", label: "Em Análise", hint: "Em avaliação interna ou bancária" },
+    { value: "aprovado", label: "Aprovado", hint: "Crédito aprovado, a caminho da escritura" },
+    { value: "concluido", label: "Concluído", hint: "Negócio fechado com sucesso" },
+    { value: "perdido", label: "Perdido", hint: "Desistência, cancelamento ou arquivo" },
+  ];
+
+  const SEM_MACRO_FASE = "__sem_grupo__";
+
+  const renderMacroFaseField = (prefix) => (
+    <div className="space-y-2">
+      <Label htmlFor={`${prefix}-macro-fase`} className="flex items-center gap-1.5">
+        <BarChart3 className="h-3.5 w-3.5 text-muted-foreground" />
+        Grupo no funil de negócio
+      </Label>
+      <Select
+        value={formData.macro_fase || SEM_MACRO_FASE}
+        onValueChange={(value) =>
+          setFormData({
+            ...formData,
+            macro_fase: value === SEM_MACRO_FASE ? "" : value,
+          })
+        }
+      >
+        <SelectTrigger id={`${prefix}-macro-fase`} data-testid={`${prefix}-select-macro-fase`}>
+          <SelectValue placeholder="Sem grupo" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value={SEM_MACRO_FASE}>Sem grupo (aparece em «Outras fases»)</SelectItem>
+          {macroFaseOptions.map((opcao) => (
+            <SelectItem key={opcao.value} value={opcao.value}>
+              <div className="flex flex-col">
+                <span>{opcao.label}</span>
+                <span className="text-xs text-muted-foreground">{opcao.hint}</span>
+              </div>
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
+      <p className="text-xs text-muted-foreground">
+        Define onde esta fase entra no funil do Dashboard. Sem grupo, os
+        processos continuam visíveis em «Outras fases» — nunca desaparecem.
+      </p>
+    </div>
+  );
+
   const renderAutomationTriggersSection = (prefix) => (
     <div className="space-y-3 p-4 bg-gradient-to-br from-teal-50/50 to-emerald-50/30 dark:from-teal-950/20 dark:to-emerald-950/10 border border-teal-200/50 dark:border-teal-800/30 rounded-lg" data-testid={`${prefix}-automation-triggers`}>
       <div className="flex items-center gap-2 pb-2 border-b border-teal-200/50 dark:border-teal-800/30">
@@ -554,6 +621,7 @@ const WorkflowEditor = () => {
                 </Select>
               </div>
             </div>
+            {renderMacroFaseField("create")}
             <div className="space-y-2">
               <Label htmlFor="create-description">Descrição (opcional)</Label>
               <Textarea
@@ -673,6 +741,7 @@ const WorkflowEditor = () => {
                 </Select>
               </div>
             </div>
+            {renderMacroFaseField("edit")}
             <div className="space-y-2">
               <Label htmlFor="edit-description">Descrição (opcional)</Label>
               <Textarea

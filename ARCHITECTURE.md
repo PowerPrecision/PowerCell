@@ -4888,3 +4888,68 @@ de omissão. O runtime já está pronto para a Parte 2: quando o campo existir
 na base de dados e for editável no `WorkflowEditor`, nada aqui muda. Um valor
 fora do enum é ignorado e registado — um grupo inventado parte o funil em
 silêncio, que é o que o enum fechado evita.
+
+---
+
+## `macro_fase`: o campo que faltava (Épico 10, Parte 2 — Set 2026)
+
+A Parte 1 deixou o runtime pronto (`macro_da_fase` já lia o campo antes de
+ele existir). A Parte 2 criou-o.
+
+### O enum é fechado, e há três defesas
+
+| Onde | O quê |
+|---|---|
+| `models/workflow.py` | `MacroFase(str, Enum)` — o Pydantic recusa ao gravar (422) |
+| `workflow_phases.macro_da_fase` | valor fora do enum é ignorado **ao ler** |
+| `WorkflowEditor` | `<Select>` com cinco opções, nunca um `<Input>` |
+
+A defesa de leitura não é redundante: um documento gravado antes do campo
+existir, ou por um script, pode trazer qualquer coisa. O modelo protege o
+que entra hoje; `macro_da_fase` protege o que já lá está.
+
+**`MACRO_FASES_VALIDAS` deriva do Enum** (`tuple(m.value for m in MacroFase)`),
+não é uma cópia. E circula sempre `str` simples: com o mixin `str` o
+`MacroFase.NOVO in {"novo"}` até é verdadeiro, mas essa igualdade depende
+inteiramente do mixin — tirar `str` da declaração é uma linha inocente que
+partia o agrupamento sem um único erro. Há um teste a afirmar o mixin.
+
+### O backfill, e porque é que pode correr em todos os arranques
+
+`ensure_macro_fase_backfill()` corre no `server.py`, a seguir ao das flags.
+
+- Só escreve onde `macro_fase` está **ausente ou `None`**. Uma fase que o
+  administrador classificou nunca é tocada — sem isto, cada reinício do
+  servidor repunha a omissão por cima da decisão humana, e ninguém
+  perceberia porquê.
+- A condição de ausência está **na query**, não num `if` em Python: entre
+  ler e escrever há uma janela, e o Mongo resolve-a.
+- O que o mapa não cobre fica **por classificar**. `None` é uma resposta:
+  a fase aparece em «Outras fases», com o nome à vista. Inventar um grupo
+  seria pior do que não ter nenhum.
+
+### Quem lê
+
+- **Funil de BI** — `funilDeFases.js` perdeu a lista de fases. Ficaram as
+  etiquetas e cores dos cinco grupos; quem classifica é o motor. O
+  `CLASSIFICACAO_DE_RECURSO` sobrevive para uma fase ainda não classificada
+  e **perde sempre** para o campo — a mesma regra dos aliases da timeline.
+  O `statuses` de cada grupo passou a ser o que **realmente** caiu lá
+  dentro, não a lista declarada: é o que serve para clicar e filtrar.
+- **Portal** — cada passo do stepper e o estado actual levam `macro_fase`.
+  O Portal passa a poder agrupar sem inventar uma segunda classificação,
+  que era como as duas vistas divergiam no princípio deste épico.
+
+### Paridade entre linguagens
+
+O `<Select>` e o enum são a mesma lista escrita duas vezes. Se divergirem, o
+administrador escolhe um grupo e leva um 422 — ou um grupo válido desaparece
+da UI e a fase fica impossível de classificar. Dois testes cruzam os
+ficheiros: um compara `macroFaseOptions` com `MacroFase`, outro compara
+`MACRO_FASES` do funil com o mesmo enum.
+
+### O funil deixou de perder as desistências
+
+No agrupamento anterior não havia grupo `perdido`: as desistências caíam em
+«Outras fases». Num funil de negócio o processo perdido é informação — é a
+taxa de conversão — e não sobra.

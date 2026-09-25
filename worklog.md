@@ -6305,3 +6305,96 @@ terminal (essa é a flag `is_active`) e passou a ser o **resíduo legado** —
 mudança de estatuto, não de conteúdo. Convertê-los todos obrigaria a tornar
 assíncronos os construtores de listagem e é um lote próprio, não uma nota
 de rodapé deste.
+
+---
+
+# Iteração — Estado & Workflow, Parte 2: as Macro-Fases (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+A Parte 1 deixou o runtime pronto — `macro_da_fase` já lia o campo antes de
+ele existir. A Parte 2 criou-o.
+
+## `cpcv → fase_escritura` confirmado
+
+O lapso do JSON foi reconhecido e o mapeamento original fica. Os 120
+processos em CPCV continuam a resolver para a antecâmara da escritura, não
+para o início do funil.
+
+## O enum fechado tem TRÊS defesas, não uma
+
+| Onde | O quê |
+|---|---|
+| `models/workflow.py` | `MacroFase(str, Enum)` — Pydantic recusa ao gravar |
+| `workflow_phases.macro_da_fase` | valor fora do enum ignorado **ao ler** |
+| `WorkflowEditor` | `<Select>` de cinco opções, nunca `<Input>` |
+
+A defesa de leitura não é redundante: um documento gravado antes do campo
+existir, ou por um script, pode trazer qualquer coisa. O modelo protege o
+que entra hoje; `macro_da_fase` protege o que já lá está.
+
+**`MACRO_FASES_VALIDAS` deriva do Enum**, não é cópia. E circula sempre
+`str` simples — com o mixin `str`, `MacroFase.NOVO in {"novo"}` até é
+verdadeiro, mas depende inteiramente do mixin: tirar `str` da declaração é
+uma linha inocente que partia o agrupamento sem um único erro. Há um teste
+a afirmar o mixin.
+
+Uma correcção minha: escrevi primeiro que a pertença falharia com o mixin
+(`enum.Enum.__hash__` é o do nome). Verifiquei e é falso — o `str.__hash__`
+ganha. Corrigi o comentário no código: uma afirmação de facto errada no
+código-fonte é pior do que nenhuma.
+
+## O backfill pode correr em todos os arranques
+
+Só escreve onde `macro_fase` está ausente ou `None`, e a condição está **na
+query**, não num `if` em Python. Uma fase que o administrador classificou
+nunca é tocada — sem isso, cada reinício do servidor repunha a omissão por
+cima da decisão humana e ninguém perceberia porquê.
+
+O que o mapa não cobre fica **por classificar**. Inventar um grupo seria
+pior do que não ter nenhum.
+
+## O funil deixou de perder as desistências
+
+No agrupamento anterior não havia grupo `perdido` e as desistências caíam em
+«Outras fases». Num funil de negócio o processo perdido é informação — é a
+taxa de conversão — e não sobra.
+
+O `funilDeFases.js` perdeu a lista de fases; ficaram as etiquetas e as cores
+dos cinco grupos. O `statuses` de cada grupo passou a ser o que REALMENTE
+caiu lá dentro, não a lista declarada: é o que serve para clicar e filtrar.
+
+## Erros meus
+
+**Três mutações sobreviveram, e uma nem chegou a aplicar** (o padrão da N1
+não casava — corrigido e re-corrida).
+
+- **N8 e N9 — lacunas reais.** Testei o modelo e testei o resolvedor, e não
+  testei **a costura**: o handler que pega no que o Pydantic validou e o
+  grava. Entre os dois havia duas maneiras de falhar em silêncio — gravar o
+  membro do Enum em vez do valor, e ignorar o campo no `update`. A segunda
+  é a pior: o `<Select>` da UI ficava decorativo, o administrador escolhia,
+  gravava, recebia 200 e nada mudava.
+- **N6 — nem teste fraco nem código morto.** A condição de ausência na query
+  do `update_one` protege de uma corrida entre a leitura e a escrita do
+  backfill, e essa corrida não se reproduz num só fio. Afirmei a forma da
+  query e disse porquê, em vez de fingir um teste de comportamento.
+
+E a minha própria fixture de teste construía fases sem `color`, que faz
+parte do contrato do `WorkflowStatusResponse` — o handler de actualização
+rebentou a devolver a fase. É a lição do Lote 5, ponto 4 (usar os
+construtores reais), outra vez.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3270 passed, 5 skipped** (baseline 3226).
+- `yarn test` → **1093 passed / 95 ficheiros** (baseline 1077 / 94).
+- `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `vite build` verde.
+- Mutação dirigida ao modelo, ao backfill, ao CRUD do admin e ao Portal:
+  **12 aplicadas, 12 mortas** (3 sobreviveram à primeira passagem).
+
+## A fazer em produção
+
+O backfill corre sozinho no arranque seguinte. Confirmar nos logs a linha
+`[WORKFLOW-PHASES] Backfill de macro-fases:` — e o número de `sem proposta`,
+que são as fases que ficam à espera de classificação na UI.

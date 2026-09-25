@@ -102,6 +102,10 @@ async def run_create_workflow_status(data: WorkflowStatusCreate, user: dict):
         "trigger_countdown": data.trigger_countdown,
         "trigger_property_check": data.trigger_property_check,
         "trigger_deed_reminder": data.trigger_deed_reminder,
+        # Épico 10, Parte 2 — agrupamento no funil. `.value` porque o
+        # Pydantic entrega o membro do Enum e o que fica gravado tem de
+        # ser a `str`, igual ao que vem da BD em todos os outros sítios.
+        "macro_fase": data.macro_fase.value if data.macro_fase else None,
     }
 
     await db.workflow_statuses.insert_one(status_doc)
@@ -154,6 +158,8 @@ async def run_update_workflow_status(status_id: str, data: WorkflowStatusUpdate,
         update_data["trigger_property_check"] = data.trigger_property_check
     if data.trigger_deed_reminder is not None:
         update_data["trigger_deed_reminder"] = data.trigger_deed_reminder
+    if data.macro_fase is not None:
+        update_data["macro_fase"] = data.macro_fase.value
 
     if update_data:
         await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})
