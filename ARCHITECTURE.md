@@ -4953,3 +4953,72 @@ ficheiros: um compara `macroFaseOptions` com `MacroFase`, outro compara
 No agrupamento anterior não havia grupo `perdido`: as desistências caíam em
 «Outras fases». Num funil de negócio o processo perdido é informação — é a
 taxa de conversão — e não sobra.
+
+---
+
+## O fim do `INACTIVE_STATUSES` como definição (Épico 10, Ponto 1 — Set 2026)
+
+### A dívida era menor do que eu tinha declarado
+
+Escrevi "~30 sítios, quase todos construtores síncronos". Contei por AST:
+
+| | |
+|---|---|
+| Usos já dentro de `async def` | **13** |
+| Usos em funções síncronas | **19 linhas**, em **5 funções**, **2 módulos** |
+| Constantes derivadas no import | **6** |
+
+### Injecção, não conversão para `async`
+
+Os cinco construtores são funções **puras** que montam dicionários de query,
+e é isso que as mantém testáveis sem Mongo no `backend-fast`. Ganharam
+`terminais: Optional[list[str]] = None`; quem resolve é o chamador, que já
+era assíncrono. A omissão mantém `INACTIVE_STATUSES` — nada muda por
+acidente.
+
+É o mesmo padrão do `build_active_inactive_count_queries` (Parte 1).
+`assert_process_editable_for_role` seguiu-o também: é uma regra de
+permissão, o sítio onde um teste tem de poder afirmar o comportamento sem
+base de dados nenhuma.
+
+`_arquivadas(terminais)` **deriva** o histórico dos terminais, tirando o
+`eliminado` (soft-delete gerido pela flag `is_deleted`, não uma fase). Uma
+segunda lista divergiria da primeira assim que o admin fechasse uma fase.
+
+### As seis constantes derivadas eram o pior caso
+
+`set(INACTIVE_STATUSES) | {...}` calculado **no import** congela o motor no
+arranque do processo. Com um servidor de pé durante dias, uma fase fechada
+pelo administrador só passava a contar no deploy seguinte — e ninguém ligava
+as duas coisas. Passaram a funções resolvidas no pedido; os extras locais
+(`pre_registo`, `fila_espera`, `arquivado`) sobrevivem como conjuntos à
+parte, porque não são fases e nunca serão.
+
+### A cache, e o que ela custa
+
+`carregar_fases()` tem TTL de **30s, local ao processo**. Com
+`UVICORN_WORKERS=2` cada worker tem a sua: uma edição invalida a de quem
+gravou e o outro fica até 30s desactualizado. Para "que fases são terminais"
+isso é inofensivo e cura-se sozinho — e é por isso que o TTL é curto.
+
+Duas decisões que não são óbvias:
+
+- **Uma leitura falhada NÃO fica em cache.** Guardar `[]` por 30s
+  transformava um soluço do Mongo em meio minuto de listagens vazias e um
+  quadro sem colunas nenhumas.
+- **Um `autouse` no `conftest` limpa a cache entre testes.** Sem ele, um
+  teste que patche o `db` herdava as fases do anterior e o resultado passava
+  a depender da ORDEM de recolha do pytest — a mesma armadilha do
+  `from database import db` ao nível do módulo.
+
+### A cadeia de `db` cresceu — e apanhou-me
+
+`workflow_phases` importa `db` no topo. O primeiro teste vermelho depois
+desta mudança foi um do isolamento por rede: patchava `kanban.db` e
+`tenant_network.db`, não `workflow_phases.db`. O `carregar_fases` falava com
+o proxy real, a excepção era engolida pela degradação graciosa, devolvia
+`[]` — e o quadro vinha **sem colunas**, com o teste a apontar para o
+isolamento quando o problema era o `db`.
+
+O helper `_tenant_db` passou a patchar os três. **Uma cadeia nova de `db`
+entra aí**, e o docstring di-lo.

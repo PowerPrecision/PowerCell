@@ -34,6 +34,7 @@ import logging
 from typing import Any, Optional, Sequence, Union
 
 from database import db
+from services.workflow_phases import carregar_fases, nomes_terminais
 from services.process_list_enrichment import (
     load_workflow_status_order,
     sort_process_list,
@@ -152,6 +153,7 @@ async def run_get_process_neighbours(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        terminais=nomes_terminais(await carregar_fases()),
     )
 
     status_order = await load_workflow_status_order()

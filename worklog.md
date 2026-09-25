@@ -6398,3 +6398,88 @@ construtores reais), outra vez.
 O backfill corre sozinho no arranque seguinte. Confirmar nos logs a linha
 `[WORKFLOW-PHASES] Backfill de macro-fases:` — e o número de `sem proposta`,
 que são as fases que ficam à espera de classificação na UI.
+
+---
+
+# Iteração — Limpeza Estrutural, Ponto 1: o fim do `INACTIVE_STATUSES` (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+## A dívida era menor do que eu declarei
+
+Escrevi "~30 sítios, quase todos construtores síncronos". Contei por AST antes
+de tocar em código:
+
+| | |
+|---|---|
+| Já dentro de `async def` | **13** |
+| Em funções síncronas | **19 linhas**, em **5 funções**, **2 módulos** |
+| Constantes derivadas no import | **6** |
+
+## Injecção, não conversão para `async`
+
+Os cinco construtores são **puros** — é isso que os mantém testáveis sem
+Mongo no `backend-fast`. Ganharam `terminais: Optional[list[str]] = None`;
+quem resolve é o chamador, que já era assíncrono. A omissão mantém
+`INACTIVE_STATUSES`, portanto nada muda por acidente.
+
+`_arquivadas(terminais)` **deriva** o histórico dos terminais tirando o
+`eliminado` (soft-delete, não uma fase). Uma segunda lista divergiria da
+primeira assim que o admin fechasse uma fase.
+
+## As 6 constantes derivadas eram o pior caso
+
+`set(INACTIVE_STATUSES) | {...}` calculado **no import** congela o motor no
+arranque do processo. Com um servidor de pé durante dias, uma fase fechada
+pelo administrador só passava a contar no deploy seguinte — e ninguém ligava
+as duas coisas.
+
+## A cache
+
+TTL de 30s, local ao processo. Duas decisões que não são óbvias:
+
+- **Uma leitura falhada não fica em cache.** Guardar `[]` por 30s
+  transformava um soluço do Mongo em meio minuto de listagens vazias.
+- **Um `autouse` no `conftest` limpa-a entre testes.** Sem ele, um teste que
+  patche o `db` herdava as fases do anterior e o resultado dependia da ORDEM
+  de recolha do pytest.
+
+## O primeiro teste vermelho não era o que parecia
+
+`workflow_phases` importa `db` no topo, e o helper `_tenant_db` patchava
+`kanban.db` e `tenant_network.db` mas não este. O `carregar_fases` falava com
+o proxy real, a excepção era engolida pela degradação graciosa, devolvia `[]`
+— e o quadro vinha **sem colunas**, com um teste de ISOLAMENTO a ficar
+vermelho por causa do `db`. Uma cadeia nova entra no helper, e o docstring
+di-lo agora.
+
+## Erros meus
+
+**Três mutações sobreviveram. Duas eram testes fracos meus, do mesmo tipo
+que já me apanhou no M14.**
+
+- **P8** — o teste do TTL aquecia a cache DEPOIS de inserir a segunda fase e
+  afirmava que via duas. A cache já tinha duas: o valor em cache e o fresco
+  eram iguais, portanto a expiração era invisível. `agora < expira_em` →
+  `True` passava à mesma.
+- **P10** — afirmei que `usar_cache=False` devolve dados frescos, e nunca que
+  **não escreve** na cache. Se escrevesse, continuava verdade — e a leitura
+  seguinte passava a servir o que uma chamada de "não uses cache" lá deixou.
+- **P11 — lacuna real: nunca testei a costura.** Testei os construtores um a
+  um e não o `run_get_kanban_board` a resolver as fases e a passá-las. Com
+  `terminais=None` as colunas vinham do motor e o FILTRO da lista legada —
+  os dois dialectos outra vez, agora dentro do mesmo pedido.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3310 passed, 5 skipped** (baseline 3270).
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação dirigida à injecção, às constantes e à cache: **11 aplicadas**.
+
+## O que fica
+
+`INACTIVE_STATUSES` continua a existir e está certo assim: deixou de ser a
+**definição** de terminal (essa é a flag `is_active`) e é o **resíduo
+legado** — `perdido`/`cancelado`/`arquivo`, que existem em dados reais e não
+são fases. Os 13 usos que já eram `async` e os que sobram lêem-no por omissão
+quando ninguém injecta, o que é o comportamento correcto e não dívida.

@@ -346,22 +346,37 @@ def merge_field_metadata(existing: Optional[dict], incoming: dict) -> dict:
 # legadas singular/plural (ver services/process_status.py), para que um
 # processo com status="concluido" (singular legado) fique bloqueado para
 # edição tal como "concluidos".
-TERMINAL_PROCESS_STATUSES = tuple(INACTIVE_STATUSES)
+# ÉPICO 10, PONTO 1 — deixou de ser constante de import. Uma fase
+# fechada pelo admin passava a bloquear a edição só no deploy seguinte.
+async def terminal_process_statuses() -> tuple[str, ...]:
+    from services.workflow_phases import carregar_fases, nomes_terminais
+
+    return tuple(nomes_terminais(await carregar_fases()))
 FINANCE_RELEVANT_STATUSES = ("concluidos", "escritura", "escritura_agendada")
 VALID_PRIORIDADES = ("baixa", "media", "alta")
 
 
-def assert_process_editable_for_role(status: Optional[str], role: str) -> None:
+def assert_process_editable_for_role(
+    status: Optional[str],
+    role: str,
+    terminais: Optional[tuple[str, ...]] = None,
+) -> None:
     """
     Bloqueia edição em estados terminais (exceto admin/CEO).
+
+    ``terminais`` vem do MOTOR. Continua SÍNCRONA e pura de propósito: é
+    uma regra de permissão, o sítio onde um teste tem de poder afirmar o
+    comportamento sem base de dados nenhuma. Quem resolve as fases é o
+    chamador, que já é assíncrono.
 
     Raises:
         HTTPException(403)
     """
     from fastapi import HTTPException
 
+    fechadas = tuple(terminais) if terminais else tuple(INACTIVE_STATUSES)
     is_admin_or_ceo = role in [UserRole.ADMIN, UserRole.CEO]
-    if status in TERMINAL_PROCESS_STATUSES and not is_admin_or_ceo:
+    if status in fechadas and not is_admin_or_ceo:
         raise HTTPException(
             status_code=403,
             detail=(
@@ -930,7 +945,9 @@ async def run_update_process(
         log_audit_event_fn=log_audit_event_fn,
     )
 
-    assert_process_editable_for_role(process.get("status"), role)
+    assert_process_editable_for_role(
+        process.get("status"), role, await terminal_process_statuses(),
+    )
     update_data = seed_update_data(
         process=process,
         client_id_before=client_id,

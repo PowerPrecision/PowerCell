@@ -9,7 +9,6 @@ from typing import Optional
 from database import db
 from models.auth import UserRole
 from models.deadline import DeadlineResponse
-from services.process_status import INACTIVE_STATUSES
 
 
 async def run_get_deadlines(process_id: Optional[str], user: dict):
@@ -59,7 +58,12 @@ async def run_get_my_deadlines(user: dict):
     # (todas as variações legadas singular/plural), preservando também o
     # typo legado "arquivado" (vs. o valor canónico "arquivo") por
     # compatibilidade com documentos antigos.
-    FINISHED_STATUS = INACTIVE_STATUSES + ["arquivado"]
+    # ÉPICO 10, PONTO 1 — fases fechadas ditadas pelo motor. "arquivado"
+    # (com D) não é fase nenhuma: é um valor legado que nunca existiu no
+    # workflow e que se mantém só para não ressuscitar prazos antigos.
+    from services.workflow_phases import carregar_fases, nomes_terminais
+
+    FINISHED_STATUS = nomes_terminais(await carregar_fases()) + ["arquivado"]
 
     if user["role"] in [
         UserRole.ADMIN, UserRole.CEO, UserRole.ADMINISTRATIVO,

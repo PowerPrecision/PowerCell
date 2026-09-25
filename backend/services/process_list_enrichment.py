@@ -10,6 +10,7 @@ import logging
 from typing import Any, Optional
 
 from database import db
+from services.workflow_phases import carregar_fases, nomes_terminais
 from services.tenant_network import build_tenant_condition
 from services.process_my_clients import (
     fetch_unread_messages_map,
@@ -362,6 +363,7 @@ async def run_get_processes(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        terminais=nomes_terminais(await carregar_fases()),
     )
 
     status_order = await load_workflow_status_order()
@@ -435,6 +437,7 @@ async def run_get_processes_paginated(
         process_type=process_type,
         labels=labels,
         labels_logic=labels_logic,
+        terminais=nomes_terminais(await carregar_fases()),
     )
 
     order = -1 if sort_order.lower() == "desc" else 1

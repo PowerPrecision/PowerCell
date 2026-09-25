@@ -43,6 +43,7 @@ O QUE ESTE MÓDULO NÃO FAZ
 from __future__ import annotations
 
 import logging
+import time
 from dataclasses import dataclass
 from typing import Iterable, Optional
 
@@ -245,21 +246,65 @@ def nomes_activos(fases: Iterable[dict]) -> list[str]:
     return [n for n in nomes_das_fases(fases) if n not in terminais]
 
 
-async def carregar_fases() -> list[dict]:
+# ====================================================================
+# CACHE DAS FASES
+# ====================================================================
+# As fases passaram a ser lidas em CADA pedido de listagem — é o preço
+# de o motor mandar. São 14 documentos com índice, mas numa listagem de
+# alta frequência é uma ida ao Mongo a mais por pedido.
+#
+# TTL curto, LOCAL AO PROCESSO. Com `UVICORN_WORKERS=2` cada worker tem a
+# sua: uma edição de fase invalida a do worker que a gravou e o outro
+# fica até 30s desactualizado. Para "que fases são terminais" isso é
+# inofensivo e cura-se sozinho — e é por isso que o TTL é curto e não
+# longo. Um cache mais esperto (invalidação por Pub/Sub) só se paga se o
+# desfasamento passar a custar alguma coisa.
+_TTL_DA_CACHE_SEGUNDOS = 30.0
+_cache_de_fases: Optional[tuple[float, list[dict]]] = None
+
+
+def invalidar_cache_de_fases() -> None:
+    """Esquece as fases em cache. Chamada por quem ESCREVE uma fase.
+
+    Também é o gancho dos testes: sem ela, uma bateria que patcha o `db`
+    herdava as fases de um teste anterior e o resultado dependia da
+    ORDEM de recolha do pytest — a mesma armadilha do
+    `from database import db` ao nível do módulo.
+    """
+    global _cache_de_fases
+    _cache_de_fases = None
+
+
+async def carregar_fases(*, usar_cache: bool = True) -> list[dict]:
     """As fases do motor, por `order`. Degrada para `[]`, nunca levanta.
 
     Uma leitura falhada não pode abrir o que a leitura bem sucedida
     fecharia (Gestor S3, Passo 3): sem fases, `nomes_activos` devolve
     vazio e `nomes_terminais` devolve só o resíduo legado — os filtros
     ficam restritivos, não permissivos.
+
+    Uma leitura falhada TAMBÉM não fica em cache: guardar `[]` por 30s
+    transformava um soluço do Mongo em meio minuto de listagens vazias.
     """
+    global _cache_de_fases
+
+    agora = time.monotonic()
+    if usar_cache and _cache_de_fases is not None:
+        expira_em, fases = _cache_de_fases
+        if agora < expira_em:
+            return fases
+
     try:
-        return await db.workflow_statuses.find(
+        fases = await db.workflow_statuses.find(
             {}, {"_id": 0},
         ).sort("order", 1).to_list(500)
     except Exception as e:  # pragma: no cover — degradação graciosa
         logger.warning(f"[WORKFLOW-PHASES] Falha ao ler as fases: {e}")
         return []
+
+    if usar_cache:
+        _cache_de_fases = (agora + _TTL_DA_CACHE_SEGUNDOS, fases)
+    return fases
 
 
 # ====================================================================

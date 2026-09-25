@@ -452,3 +452,24 @@ def fake_async_db() -> FakeAsyncDatabase:
         stored = await fake_async_db.minha_colecao.find_one({...})
     """
     return FakeAsyncDatabase()
+
+
+@pytest.fixture(autouse=True)
+def _limpar_cache_de_fases():
+    """Esquece as fases do workflow antes e depois de CADA teste.
+
+    O `workflow_phases.carregar_fases` guarda as fases 30s num cache
+    local ao processo. Sem esta limpeza, um teste que patche o `db` com
+    um `fake_async_db` herdava as fases do teste anterior — e o
+    resultado passava a depender da ORDEM em que o pytest recolhe os
+    ficheiros. É a mesma armadilha do `from database import db` ao nível
+    do módulo (ver AGENTS.md): verde isolado, vermelho na suite.
+
+    Autouse de propósito: quem escrever um teste novo não tem de saber
+    que a cache existe.
+    """
+    from services.workflow_phases import invalidar_cache_de_fases
+
+    invalidar_cache_de_fases()
+    yield
+    invalidar_cache_de_fases()

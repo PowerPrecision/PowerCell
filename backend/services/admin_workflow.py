@@ -19,6 +19,9 @@ from models.workflow import WorkflowStatusCreate, WorkflowStatusUpdate, Workflow
 from models.email_config import EmailConfigCreate, EmailConfigResponse
 from services.auth import hash_password, require_roles, get_current_user
 from services.admin_helpers import _safe_float, _audit_log
+# A cache das fases é local ao processo: quem escreve uma fase tem de a
+# esquecer, senão o próprio admin continua a ver a versão antiga.
+from services.workflow_phases import invalidar_cache_de_fases
 from services.permissions import (
     get_default_permissions_for_role,
     get_all_available_permissions,
@@ -109,6 +112,7 @@ async def run_create_workflow_status(data: WorkflowStatusCreate, user: dict):
     }
 
     await db.workflow_statuses.insert_one(status_doc)
+    invalidar_cache_de_fases()
     return WorkflowStatusResponse(**{k: v for k, v in status_doc.items() if k != "_id"})
 
 
@@ -163,6 +167,7 @@ async def run_update_workflow_status(status_id: str, data: WorkflowStatusUpdate,
 
     if update_data:
         await db.workflow_statuses.update_one({"id": status_id}, {"$set": update_data})
+        invalidar_cache_de_fases()
 
     updated = await db.workflow_statuses.find_one({"id": status_id}, {"_id": 0})
     return WorkflowStatusResponse(**updated)
@@ -231,6 +236,7 @@ async def run_delete_workflow_status(status_id: str, user: dict):
     
     # Eliminar a fase
     await db.workflow_statuses.delete_one({"id": status_id})
+    invalidar_cache_de_fases()
     
     return {
         "message": f"Fase '{status.get('label', status_name)}' eliminada",

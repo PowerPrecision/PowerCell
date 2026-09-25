@@ -112,14 +112,25 @@ def _tenant_db(fake_db):
     faz `from database import db` DENTRO da função. Patchar só um dos
     dois deixa metade da cadeia a falar com o proxy real — e o resultado
     passa ou falha conforme a ORDEM de recolha do pytest (ver AGENTS.md).
+
+    ÉPICO 10, PONTO 1 — a cadeia cresceu: `workflow_phases` também
+    importa `db` no topo, e o quadro passou a perguntar-lhe que fases
+    estão fechadas. Sem este patch o `carregar_fases` falava com o proxy
+    real, a excepção era engolida (degradação graciosa), devolvia `[]` e
+    o quadro vinha SEM COLUNAS — um teste vermelho a apontar para o
+    isolamento quando o problema era o `db`. **Uma cadeia nova de `db`
+    entra aqui.**
     """
     import contextlib
 
     import services.tenant_network as tn
+    import services.workflow_phases as wp
 
     @contextlib.contextmanager
     def _ctx():
-        with patch.object(tn, "db", fake_db), patch("database.db", fake_db):
+        with patch.object(tn, "db", fake_db), \
+             patch.object(wp, "db", fake_db), \
+             patch("database.db", fake_db):
             yield
 
     return _ctx()

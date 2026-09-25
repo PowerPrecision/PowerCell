@@ -12,7 +12,7 @@ from typing import Any, Optional
 
 from database import db
 from services.process_status import STATUS_VALUE_ALIASES
-from services.workflow_phases import nomes_terminais
+from services.workflow_phases import carregar_fases, nomes_terminais
 
 logger = logging.getLogger(__name__)
 
@@ -432,6 +432,14 @@ async def run_get_kanban_board(
     tenant_condition = await build_tenant_condition(user)
 
     user_id = user["id"]
+
+    # As fases vêm ANTES da query: é delas que sai o conjunto de fases
+    # fechadas (`is_active: False`), que o filtro de vista usa. Lê-las
+    # depois deixaria a query a usar a lista legada enquanto as colunas
+    # já vinham do motor — os dois dialectos outra vez.
+    statuses = await carregar_fases()
+    terminais = nomes_terminais(statuses)
+
     query = build_kanban_query(
         user,
         # Perfil ACTIVO, não o do JWT (achado lateral do ponto 15): este
@@ -447,6 +455,7 @@ async def run_get_kanban_board(
         completed_days=completed_days,
         labels=labels,
         labels_logic=labels_logic,
+        terminais=terminais,
     )
     if str(role).lower() == "indexacao":
         logger.info(
@@ -454,9 +463,6 @@ async def run_get_kanban_board(
             f"atribuídos a si OU em fila_espera"
         )
 
-    statuses = await db.workflow_statuses.find(
-        {}, {"_id": 0},
-    ).sort("order", 1).to_list(100)
     processes = await db.processes.find(query, kanban_projection).to_list(1000)
     processes = decrypt_list_fn(
         processes,
@@ -490,7 +496,7 @@ async def run_get_kanban_board(
     total_desconhecidos = len(processes_by_status.get(FASE_DESCONHECIDA) or [])
 
     active_count, inactive_count = await count_kanban_active_inactive(
-        query, terminais=nomes_terminais(statuses),
+        query, terminais=terminais,
     )
     sort_all_kanban_columns(processes_by_status)
 
