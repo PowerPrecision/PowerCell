@@ -45,18 +45,34 @@ def test_stats_modules_export_run_entrypoints():
     assert callable(stats_branches.run_get_branch_performance)
 
 
-def test_stats_branches_exports_status_constants():
-    from services.stats_branches import (
-        _APPROVED_STATUSES,
-        _COMPLETED_STATUSES,
-        _ACTIVE_STATUSES,
-        _MS_PER_DAY,
-    )
+def test_stats_branches_ja_nao_crava_nomes_de_fases():
+    """INVERTIDO (Épico 10, Parte 3).
 
-    assert "credito_aprovado" in _APPROVED_STATUSES
-    assert "concluido" in _COMPLETED_STATUSES
-    assert "documentacao" in _ACTIVE_STATUSES
-    assert _MS_PER_DAY == 1000 * 60 * 60 * 24
+    Este teste afirmava que as três listas de nomes de fases existiam.
+    O retrato de produção mostrou que NENHUM dos nomes existia no motor
+    — `_COMPLETED_STATUSES` apanhava 0 de 12.450 processos — e o
+    dashboard de balcões apresentava o resultado como um número.
+
+    Agora afirma o contrário: que as listas desapareceram.
+    """
+    import services.stats_branches as sb
+
+    for morta in ("_APPROVED_STATUSES", "_COMPLETED_STATUSES", "_ACTIVE_STATUSES"):
+        assert not hasattr(sb, morta), (
+            f"{morta} voltou — os nomes de fases vêm do motor"
+        )
+    assert sb._MS_PER_DAY == 1000 * 60 * 60 * 24
+
+
+def test_stats_branches_resolve_as_fases_pelo_motor():
+    """Contraprova: sem isto, apagar as listas bastava para passar."""
+    from tests.unit.helpers_fonte import codigo_da_funcao_sem_comentarios
+    from services.stats_branches import run_get_branch_performance
+
+    fonte = codigo_da_funcao_sem_comentarios(run_get_branch_performance)
+    assert "carregar_fases()" in fonte
+    assert "nomes_por_macro(" in fonte
+    assert "nomes_activos(" in fonte
 
 
 def test_stats_router_is_thin_stubs_only():

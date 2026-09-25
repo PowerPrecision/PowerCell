@@ -1147,3 +1147,38 @@ processos mente com ar de relatório.
 **34.5 — Terminal não se decide por lista.** Uma fase é terminal quando o
 motor diz `is_active: false`. Um `status === 'concluidos'` num componente é a
 mesma dívida do 34.1 com outra forma.
+
+---
+
+## 35. A coluna de reconciliação do Kanban (Épico 10, Parte 3)
+
+O quadro deixou de perder cartões. Os processos cujo `status` gravado o
+motor não reconhece deixam de desaparecer e passam a juntar-se numa coluna
+própria — `reconciliacao: true` no objecto da coluna.
+
+**35.1 — Não é uma fase; é uma caixa de entrada.** Vem no fim, não mostra
+número de passo, e **não aceita cartões**: `onDragOver` e `onDrop` são
+ignorados quando `column.reconciliacao === true`. Largar lá um cartão seria
+pedir ao servidor um estado que não existe — ele responde **400 "Estado
+inválido"** e o utilizador leva um erro por uma acção que a UI lhe deixou
+fazer. Os cartões só **saem** dela, para uma fase a sério, e é isso que
+reconcilia o processo.
+
+**35.2 — A comparação é estrita (`=== true`).** `reconciliacao` ausente não
+é `false`: uma coluna normal nunca pode cair neste ramo por omissão.
+
+**35.3 — Esconder a coluna não é esconder o problema.** Só `ADMIN`/`CEO` a
+recebem, mas `total_desconhecidos` vem na resposta do `/kanban` para toda a
+gente. Se alguma vez for preciso mostrar o número a outros perfis, o dado já
+lá está — o que não pode acontecer é o número deixar de existir.
+
+**35.4 — `status_resolvido_de` diz que o cartão está ali por tradução.** Um
+processo gravado como `escriturado` aparece na coluna `concluidos` com
+`status_resolvido_de: "escriturado"`, e o `status` continua `escriturado`. A
+resolução é de leitura; o campo existe para a UI poder dizê-lo e para um
+diagnóstico não ter de refazer a conta.
+
+**35.5 — Continua a valer a regra 34.1.** Os literais `'concluidos'` /
+`'desistencias'` que ainda existem no `KanbanBoard`, `KanbanColumn`,
+`KanbanCard` e `useKanbanCompletedQuery` **não cresceram** nesta parte e
+continuam a ser dívida. Código novo não lhes acrescenta nada.

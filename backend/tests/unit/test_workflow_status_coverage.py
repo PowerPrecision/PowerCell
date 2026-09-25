@@ -118,12 +118,30 @@ class TestGralhas:
     def test_none_nao_rebenta(self):
         assert normalizar_para_gralha(None) == ""
 
-    def test_analisar_sinaliza_a_gralha_e_nao_a_trata_como_fase_antiga(self):
+    def test_a_gralha_resolve_para_a_fase_certa(self):
+        """INVERTIDO pela decisão de produto sobre o retrato de produção.
+
+        Antes, uma gralha ficava órfã: "não se adivinha". Mas `"Concluidos "`
+        não é uma adivinhação — é a MESMA string, mal gravada, e a
+        normalização cai numa única fase configurada. Adivinhar é escolher
+        entre candidatos; isto é reconhecer.
+
+        Continua a aparecer em `suspeitas_de_gralha`: o dado gravado está
+        errado e quem reconcilia tem de o ver, mesmo com o cartão já na
+        coluna certa.
+        """
         retrato = analisar({"Concluidos ": 3}, [fase("concluidos")])
         assert retrato.suspeitas_de_gralha == {"Concluidos ": "concluidos"}
-        # Continua a ser órfão: o dado gravado está errado e ninguém o
-        # corrige por adivinhação — mas agora aparece com nome.
-        assert "Concluidos " in retrato.orfaos_desconhecidos
+        assert retrato.orfaos_resoluveis == {"Concluidos ": "concluidos"}
+        assert "Concluidos " not in retrato.orfaos_desconhecidos
+
+    def test_a_gralha_ambigua_continua_a_nao_ser_adivinhada(self):
+        """Duas fases que normalizam para a mesma chave → ninguém escolhe."""
+        retrato = analisar(
+            {"escritura ": 3}, [fase("escritura"), fase("Escritura")],
+        )
+        assert retrato.orfaos_resoluveis == {}
+        assert "escritura " in retrato.orfaos_desconhecidos
 
 
 # ====================================================================
@@ -228,10 +246,33 @@ class TestMacroFases:
     def test_os_grupos_propostos_sao_o_enum_fechado(self):
         assert set(MACRO_FASES_PROPOSTAS) == set(MACRO_FASES_VALIDAS)
 
-    def test_a_proposta_acrescenta_perdido_e_nao_mexe_no_resto(self):
+    def test_a_proposta_acrescenta_perdido_e_so_alarga_o_resto(self):
+        """AJUSTADO: a proposta agora também acolhe fases de produção.
+
+        Antes era "não mexe no resto". O retrato de produção trouxe
+        `renegociacao` e `pausa_cliente` — fases criadas pelo admin que
+        nenhum grupo cobria — e a decisão foi mapeá-las para "Em Análise"
+        até serem editáveis na UI.
+
+        A invariante que interessa não é "os grupos não mudam": é que a
+        proposta nunca REMOVE uma fase de um grupo, só acrescenta. Remover
+        seria um processo a mudar de sítio no funil sem ninguém pedir.
+        """
         assert set(MACRO_FASES_PROPOSTAS) - set(MACRO_FASES_DE_HOJE) == {"perdido"}
         for macro, nomes in MACRO_FASES_DE_HOJE.items():
-            assert MACRO_FASES_PROPOSTAS[macro] == nomes
+            assert set(nomes) <= set(MACRO_FASES_PROPOSTAS[macro])
+
+    def test_as_fases_novas_de_producao_ficam_em_analise(self):
+        retrato = analisar(
+            {"renegociacao": 1, "pausa_cliente": 1},
+            [fase("renegociacao"), fase("pausa_cliente")],
+        )
+        assert retrato.macro_proposta == {
+            "renegociacao": "analise", "pausa_cliente": "analise",
+        }
+        assert retrato.fases_sem_macro_proposta == []
+        # Hoje continuam sem grupo — é a diferença que a Parte 2 fecha.
+        assert set(retrato.fases_sem_macro_hoje) == {"renegociacao", "pausa_cliente"}
 
     def test_as_desistencias_hoje_nao_pertencem_a_grupo_nenhum(self):
         """É o buraco que a proposta fecha, e o retrato mostra-o."""
@@ -252,34 +293,67 @@ class TestMacroFases:
 # ====================================================================
 
 class TestListasCravadas:
-    def test_mede_as_listas_reais_e_nao_uma_copia(self):
+    def test_so_sobram_as_duas_listas_que_sao_residuo_legado(self):
+        """INVERTIDO: as três do `stats_branches` já não existem.
+
+        Antes media-se cinco listas. As do BI foram implodidas na Parte
+        3 e não há nada para medir onde não há lista.
+        """
         retrato = analisar({"clientes_espera": 10}, [fase("clientes_espera")])
         assert set(retrato.cobertura_das_listas) == {
             "process_status.INACTIVE_STATUSES",
             "process_status.ARCHIVED_STATUSES",
-            "stats_branches._ACTIVE_STATUSES",
-            "stats_branches._APPROVED_STATUSES",
-            "stats_branches._COMPLETED_STATUSES",
         }
 
-    def test_o_funil_bi_mede_fases_que_o_motor_nao_tem(self):
-        """A descoberta do raio-x, afirmada como propriedade.
+    def test_o_funil_bi_passou_a_medir_fases_que_existem(self):
+        """A INVERSÃO PRINCIPAL desta parte.
 
-        Com o workflow REAL do seed configurado, a lista de "concluídos"
-        do dashboard de balcões não apanha a fase terminal do produto:
-        ela procura `concluido`/`arquivo` e a fase chama-se `concluidos`.
+        Antes: `stats_branches._COMPLETED_STATUSES` procurava
+        `concluido`/`arquivo`, a fase terminal chamava-se `concluidos`, e
+        o tempo médio de fecho por balcão saía de um conjunto vazio — 0
+        de 12.450 processos, apresentado como um número no dashboard.
+
+        Agora os conjuntos vêm do motor por macro-fase, e são
+        exactamente os nomes que o motor tem.
         """
+        from services.workflow_phases import nomes_activos, nomes_por_macro
+
         fases_do_seed = [
             fase(n) for n in (
                 "clientes_espera", "fase_documental", "fase_bancaria",
                 "ch_aprovado", "fase_escritura", "escritura_agendada",
-                "concluidos", "desistencias",
             )
+        ] + [
+            fase("concluidos", is_active=False),
+            fase("desistencias", is_active=False),
         ]
-        retrato = analisar({"concluidos": 500}, fases_do_seed)
-        medida = retrato.cobertura_das_listas["stats_branches._COMPLETED_STATUSES"]
-        assert medida["existem_no_motor"] == []
-        assert medida["processos_abrangidos"] == 0
+
+        concluidos = nomes_por_macro(fases_do_seed, "concluido")
+        assert concluidos == ["concluidos"]
+
+        aprovados = nomes_por_macro(fases_do_seed, "aprovado", "concluido")
+        assert set(aprovados) == {
+            "ch_aprovado", "fase_escritura", "escritura_agendada", "concluidos",
+        }
+
+        activos = nomes_activos(fases_do_seed)
+        assert "clientes_espera" in activos
+        assert "concluidos" not in activos and "desistencias" not in activos
+
+        # A propriedade que faltava: TUDO o que o BI mede existe no motor.
+        conhecidas = {f["name"] for f in fases_do_seed}
+        for conjunto in (concluidos, aprovados, activos):
+            assert set(conjunto) <= conhecidas
+
+    def test_uma_fase_nova_entra_no_bi_sem_deploy(self):
+        """Era isto que uma lista cravada tornava impossível."""
+        from services.workflow_phases import nomes_por_macro
+
+        fases = [fase("concluidos", is_active=False), fase("arquivo_morto")]
+        assert nomes_por_macro(fases, "concluido") == ["concluidos"]
+
+        fases[1]["macro_fase"] = "concluido"
+        assert nomes_por_macro(fases, "concluido") == ["concluidos", "arquivo_morto"]
 
     def test_contraprova_uma_lista_alinhada_apanharia_os_processos(self):
         """Sem isto, a asserção acima passaria com a medição sempre a zero."""

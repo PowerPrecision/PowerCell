@@ -12,6 +12,7 @@ from typing import Any, Optional
 
 from database import db
 from services.process_status import STATUS_VALUE_ALIASES
+from services.workflow_phases import nomes_terminais
 
 logger = logging.getLogger(__name__)
 
@@ -22,13 +23,51 @@ CONCLUDED_STATUSES = STATUS_VALUE_ALIASES["concluidos"]
 DROPPED_STATUSES = STATUS_VALUE_ALIASES["desistencias"]
 
 
-def group_processes_by_status(processes: list[dict]) -> dict[str, list[dict]]:
-    """Agrupa processos por status (lookup O(1) por coluna)."""
-    processes_by_status: dict[str, list[dict]] = {}
+def group_processes_by_status(
+    processes: list[dict],
+    fases: Optional[list[dict]] = None,
+) -> dict[str, list[dict]]:
+    """Agrupa processos pela fase do motor (lookup O(1) por coluna).
+
+    Com ``fases``, o nome gravado passa pelo RESOLVEDOR
+    (`workflow_phases.resolver_nome`): gralhas e nomes antigos caem na
+    coluna certa e o que não resolve vai para `FASE_DESCONHECIDA`, em vez
+    de desaparecer.
+
+    Sem ``fases`` mantém-se o agrupamento por igualdade exacta. Não é um
+    atalho de compatibilidade: é o comportamento correcto quando não há
+    motor para consultar — inventar colunas a partir de nada seria pior.
+
+    O processo traduzido entra numa CÓPIA rasa com `status_resolvido_de`
+    preenchido. Cópia, porque o `status` gravado não muda: a resolução é
+    de leitura. O campo existe para a UI poder dizer "este cartão está
+    aqui por tradução" e para um diagnóstico não ter de refazer a conta.
+    """
+    if not fases:
+        processes_by_status: dict[str, list[dict]] = {}
+        for p in processes:
+            s = p.get("status", "")
+            processes_by_status.setdefault(s, []).append(p)
+        return processes_by_status
+
+    from services.workflow_phases import FASE_DESCONHECIDA, resolver_muitos
+
+    resolucoes = resolver_muitos(
+        [p.get("status") for p in processes if isinstance(p, dict)], fases,
+    )
+    agrupados: dict[str, list[dict]] = {}
     for p in processes:
-        s = p.get("status", "")
-        processes_by_status.setdefault(s, []).append(p)
-    return processes_by_status
+        if not isinstance(p, dict):
+            continue
+        gravado = p.get("status") or ""
+        resolucao = resolucoes.get(gravado)
+        if resolucao is None or not resolucao.resolvida:
+            agrupados.setdefault(FASE_DESCONHECIDA, []).append(p)
+            continue
+        if resolucao.traduzida:
+            p = {**p, "status_resolvido_de": gravado}
+        agrupados.setdefault(resolucao.fase, []).append(p)
+    return agrupados
 
 
 def sort_kanban_column_processes(processes: list[dict]) -> list[dict]:
@@ -130,8 +169,17 @@ def build_kanban_columns(
     processes_by_status: dict[str, list[dict]],
     user_map: dict[str, dict],
     current_user_id: str,
+    *,
+    incluir_desconhecidas: bool = False,
 ) -> list[dict]:
-    """Monta a lista de colunas do Kanban com cards enriquecidos."""
+    """Monta a lista de colunas do Kanban com cards enriquecidos.
+
+    ``incluir_desconhecidas`` acrescenta no fim a coluna que recolhe os
+    processos cujo `status` o motor não reconhece. Só quem reconcilia
+    (ADMIN/CEO) a recebe — mas esconder a coluna NÃO é esconder o
+    problema: o número vai na resposta para toda a gente
+    (`total_desconhecidos`), e a coluna é onde ele se resolve.
+    """
     kanban: list[dict] = []
     for status in statuses:
         if not isinstance(status, dict):
@@ -154,6 +202,29 @@ def build_kanban_columns(
             "processes": enriched_processes,
             "count": len(enriched_processes),
         })
+
+    if incluir_desconhecidas:
+        from services.workflow_phases import (
+            ETIQUETA_DESCONHECIDA, FASE_DESCONHECIDA,
+        )
+
+        orfaos = processes_by_status.get(FASE_DESCONHECIDA) or []
+        if orfaos:
+            kanban.append({
+                "id": FASE_DESCONHECIDA,
+                "name": FASE_DESCONHECIDA,
+                "label": ETIQUETA_DESCONHECIDA,
+                "color": "#6B7280",
+                # Depois de todas as fases: é uma caixa de entrada de
+                # reconciliação, não um passo do workflow.
+                "order": 10_000,
+                "reconciliacao": True,
+                "processes": [
+                    enrich_kanban_process_card(p, user_map, current_user_id)
+                    for p in orfaos if isinstance(p, dict)
+                ],
+                "count": len([p for p in orfaos if isinstance(p, dict)]),
+            })
     return kanban
 
 
@@ -225,19 +296,31 @@ async def fill_missing_process_client_contacts(processes: list[dict]) -> None:
 
 def build_active_inactive_count_queries(
     query: Optional[dict],
+    terminais: Optional[list[str]] = None,
 ) -> tuple[dict, dict]:
-    """Queries de contagem activa/inactiva alinhadas com o filtro do board."""
+    """Queries de contagem activa/inactiva alinhadas com o filtro do board.
+
+    ``terminais`` vem do motor (`workflow_phases.nomes_terminais`). Sem
+    ele mantém-se a lista legada — que era a origem da contradição: o
+    contador conhecia aliases que o quadro ignorava, e o número por cima
+    do quadro contava cartões que não estavam lá.
+    """
+    nomes = list(terminais) if terminais else CONCLUDED_STATUSES + DROPPED_STATUSES
     base = dict(query) if query else {}
     active = dict(base)
-    active["status"] = {"$nin": CONCLUDED_STATUSES + DROPPED_STATUSES}
+    active["status"] = {"$nin": nomes}
     inactive = dict(base)
-    inactive["status"] = {"$in": CONCLUDED_STATUSES + DROPPED_STATUSES}
+    inactive["status"] = {"$in": nomes}
     return active, inactive
 
 
-async def count_kanban_active_inactive(query: Optional[dict]) -> tuple[int, int]:
+async def count_kanban_active_inactive(
+    query: Optional[dict],
+    *,
+    terminais: Optional[list[str]] = None,
+) -> tuple[int, int]:
     """Conta processos activos e inactivos em paralelo."""
-    active_q, inactive_q = build_active_inactive_count_queries(query)
+    active_q, inactive_q = build_active_inactive_count_queries(query, terminais)
     active_count, inactive_count = await asyncio.gather(
         db.processes.count_documents(active_q),
         db.processes.count_documents(inactive_q),
@@ -250,6 +333,8 @@ def safe_build_kanban_columns(
     processes_by_status: dict[str, list[dict]],
     user_map: dict[str, dict],
     current_user_id: str,
+    *,
+    incluir_desconhecidas: bool = False,
 ) -> list[dict]:
     """
     PACOTE AY failsafe: nunca propaga exceção — devolve [] se build falhar.
@@ -257,6 +342,7 @@ def safe_build_kanban_columns(
     try:
         return build_kanban_columns(
             statuses, processes_by_status, user_map, current_user_id,
+            incluir_desconhecidas=incluir_desconhecidas,
         )
     except Exception as e:
         logger.exception(
@@ -275,12 +361,19 @@ def build_kanban_board_payload(
     user_id: str,
     view_mode: Optional[str],
     completed_days: Optional[int],
+    total_desconhecidos: int = 0,
 ) -> dict[str, Any]:
-    """Payload JSON do GET /kanban."""
+    """Payload JSON do GET /kanban.
+
+    `total_desconhecidos` vai para TODA a gente, mesmo para quem não
+    recebe a coluna. Esconder a coluna é uma decisão de arrumação;
+    esconder o número seria varrer o problema para baixo do tapete.
+    """
     return {
         "columns": columns if columns else [],
         "total_processes": active_count,
         "total_inactive": inactive_count,
+        "total_desconhecidos": total_desconhecidos,
         "user_role": role,
         "current_user_id": user_id,
         "view_mode": view_mode,
@@ -386,10 +479,33 @@ async def run_get_kanban_board(
         f"{indexacao_count} com indexação, {parceiro_count} com parceiro"
     )
 
-    processes_by_status = group_processes_by_status(processes)
-    active_count, inactive_count = await count_kanban_active_inactive(query)
+    # As colunas são DITADAS pelo motor, e o agrupamento passa pelo
+    # resolvedor: gralhas e nomes antigos caem na coluna certa em vez de
+    # desaparecerem do quadro (Épico 10, Parte 3).
+    from services.workflow_phases import (
+        FASE_DESCONHECIDA, pode_ver_desconhecidas,
+    )
+
+    processes_by_status = group_processes_by_status(processes, statuses)
+    total_desconhecidos = len(processes_by_status.get(FASE_DESCONHECIDA) or [])
+
+    active_count, inactive_count = await count_kanban_active_inactive(
+        query, terminais=nomes_terminais(statuses),
+    )
     sort_all_kanban_columns(processes_by_status)
-    kanban = safe_build_kanban_columns(statuses, processes_by_status, user_map, user_id)
+
+    # O papel do QUADRO (perfil activo), o mesmo que já decide o filtro —
+    # não o do JWT. Quem entra como Indexação não reconcilia.
+    reconcilia = pode_ver_desconhecidas(resolver_papel_do_quadro(role, user))
+    kanban = safe_build_kanban_columns(
+        statuses, processes_by_status, user_map, user_id,
+        incluir_desconhecidas=reconcilia,
+    )
+    if total_desconhecidos and not reconcilia:
+        logger.info(
+            f"[KANBAN] {total_desconhecidos} processo(s) em fases que o motor "
+            f"não reconhece — coluna oculta para o papel {role}."
+        )
 
     return build_kanban_board_payload(
         columns=kanban,
@@ -399,4 +515,5 @@ async def run_get_kanban_board(
         user_id=user_id,
         view_mode=view_mode,
         completed_days=completed_days,
+        total_desconhecidos=total_desconhecidos,
     )

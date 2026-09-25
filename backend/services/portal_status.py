@@ -19,7 +19,7 @@ from services.portal_status_helpers import (
     _get_rgpd_status,
     _get_team_info,
 )
-from services.process_status import INACTIVE_STATUSES
+from services.workflow_phases import nomes_terminais
 
 logger = logging.getLogger(__name__)
 
@@ -129,7 +129,13 @@ async def run_get_portal_status(client_data: dict):
     # Excluir statuses terminais E ocultos no portal
     # Fix: Normalize process status filters — reutiliza a constante central
     # (com variações singular/plural) em vez de uma lista local.
-    terminal_statuses = INACTIVE_STATUSES
+    # Terminal é o que o MOTOR diz (`is_active: False`), não uma lista.
+    # O Portal tinha a sua própria definição e divergia do Kanban: uma
+    # fase que o admin fechasse continuava a aparecer no stepper do
+    # cliente, e `perdido`/`cancelado`/`arquivo` — que existem em dados
+    # reais mas não são fases — contavam como passos por percorrer.
+    # `all_statuses` já está carregado; isto não custa uma leitura nova.
+    terminal_statuses = nomes_terminais(all_statuses)
     active_steps = [
         s for s in all_statuses
         if s.get("name") not in terminal_statuses

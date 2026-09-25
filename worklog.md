@@ -6211,3 +6211,97 @@ Os números de produção. O motor diz 14 fases, o `stats_branches` diz outras
 13, e o ambiente de dev é mockado — recusei-me a inventar a distribuição, pela
 mesma razão que recusei inventar a cobertura do S3. O backfill das macro-fases
 parte do JSON que o script devolver, não do seed.
+
+---
+
+# Iteração — Estado & Workflow, Parte 1: o Resolvedor (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+O retrato de produção deu os números e desbloqueou a intervenção:
+**12.450 processos, 342 invisíveis no quadro** (205 com nome antigo, 12 com
+gralha, 125 em fases que o motor não tem) e o BI de balcões a apanhar
+**0 de 12.450**.
+
+## Um ponto do JSON que não podia ter saído do script
+
+O retorno trazia `cpcv → fase_documental`. A tabela do produto
+(`processTimeline.js`, escrita antes de mim) diz `cpcv → fase_escritura`, e
+o código não tem caminho nenhum de `cpcv` para `fase_documental` — verifiquei
+antes de escrever uma linha.
+
+Não apliquei o destino do JSON. Um CPCV acontece **depois** do crédito
+aprovado e antes da escritura: mandá-lo para a fase documental moveria 120
+processos para TRÁS no funil, de quase-fechados para o início do trabalho.
+Implementei o mecanismo com a tabela do produto e há um teste com esse nome
+(`test_cpcv_vai_para_a_escritura_e_nao_para_a_documental`). Fica para
+confirmação.
+
+## O que foi feito
+
+- **`services/workflow_phases.py`** — o ponto único dos NOMES (o
+  `workflow_lookup` já era o das FLAGS). Ordem fixa: `exacto` → `gralha` →
+  `alias` → `desconhecido`. A gralha vem antes do alias porque
+  `"Concluidos "` não é uma fase de outra época, é a mesma fase mal gravada.
+- **O quadro deixou de perder cartões.** O agrupamento passa pelo resolvedor
+  e o que sobra vai para a coluna `Fases desconhecidas`, visível a
+  `ADMIN`/`CEO` pelo papel **efectivo**. A resolução é de LEITURA: o cartão
+  muda de coluna, o `status` gravado não muda. Reescrever 205 processos em
+  massa dispararia automações sobre processos que ninguém tocou — o defeito
+  do `run_delete_workflow_status`.
+- **Cinco módulos varridos:** `stats_branches` (3 listas), `scheduled_tasks`
+  (12 nomes), `portal_status` (terminal por lista), `portal_profile` (a
+  mesma regra à mão em DOIS sítios) e `alerts` (3 nomes na contagem da
+  pré-aprovação + 3 títulos de notificação, que agora vêm do `label` que o
+  admin escreveu).
+- Cache do BI para `stats:branches:v2` — servir a antiga mostraria durante
+  mais uma hora o número medido sobre fases inexistentes.
+- `macro_da_fase` lê **primeiro** `fase["macro_fase"]`: o runtime já está
+  pronto para a Parte 2 sem mudar nada.
+
+## Os testes a inverter
+
+| Ficheiro | Antes | Agora |
+|---|---|---|
+| `test_kanban_cartoes_perdidos.py` | 2 processos → 1 cartão | 2 → 2, e nada desaparece |
+| `test_stats_extraction_helpers.py` | as 3 listas existem | as 3 listas desapareceram |
+| `test_workflow_status_coverage.py` | o BI mede fases inexistentes | tudo o que o BI mede existe |
+| idem (gralha) | gralha fica órfã | gralha resolve (directriz 2) |
+| idem (macro) | a proposta não mexe no resto | só alarga, nunca remove |
+
+## Erros meus
+
+**Três mutações sobreviveram, e as três eram lacunas reais.**
+
+- **M8** — o enum fechado de macro-fases era desenho e comentário, nunca
+  afirmação: uma fase podia declarar `macro_fase: "inventado"` e passar. É
+  o ponto todo do agrupamento aprovado.
+- **M10** — `pode_ver_desconhecidas(None)`. Testei admin, ceo e consultor e
+  não testei o papel que não se resolve. A propriedade que interessa não é
+  "o admin vê", é que quem não se identifica **não** vê.
+- **M14 — teste fraco, não mutação perdida.** Afirmei que `concluidos`
+  estava no `$in` e `clientes_espera` não. Isso é verdade TAMBÉM com a
+  lista legada: escolhi dois nomes em que os dois dialectos concordam, e
+  portanto não testei nada. A asserção que distingue precisa de uma fase
+  terminal PARA O MOTOR e ausente da lista legada.
+
+Também tinha decidido deixar passar os três títulos de notificação do
+`alerts.py` por serem "cosméticos" — a guarda que eu próprio escrevi
+apanhou-os. Corrigi em vez de abrandar a guarda.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3226 passed, 5 skipped** (baseline 2725).
+- `yarn test` → **1077 passed / 94 ficheiros** (baseline 1071 / 93).
+- `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `vite build` verde.
+- Mutação dirigida ao resolvedor, ao quadro e ao Portal: **15 aplicadas, 15
+  mortas** (3 sobreviveram à primeira passagem — ver acima).
+
+## O que NÃO foi feito, e porquê
+
+`INACTIVE_STATUSES` continua a ser lido em ~30 sítios, quase todos
+construtores de query **síncronos**. Deixou de ser a **definição** de
+terminal (essa é a flag `is_active`) e passou a ser o **resíduo legado** —
+mudança de estatuto, não de conteúdo. Convertê-los todos obrigaria a tornar
+assíncronos os construtores de listagem e é um lote próprio, não uma nota
+de rodapé deste.

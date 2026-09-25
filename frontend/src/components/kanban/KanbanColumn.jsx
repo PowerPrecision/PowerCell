@@ -10,7 +10,10 @@
  * - Suportar estado colapsado/expandido
  * - Na coluna 'concluidos': seletor de datas e botão "Ver mais antigos"
  * 
- * @param {Object} column - Dados da coluna (id, name, label, color, order, count, processes)
+ * @param {Object} column - Dados da coluna (id, name, label, color, order,
+ *   count, processes, reconciliacao). `reconciliacao: true` marca a coluna
+ *   de "Fases desconhecidas": recebe os processos cujo estado o motor não
+ *   reconhece e NÃO aceita cartões (só os deixa sair).
  * @param {boolean} isCollapsed - Se a coluna está colapsada
  * @param {string} dragOverColumn - Nome da coluna sobre a qual está a ser feito drag
  * @param {Function} onDragOver - Handler de drag over
@@ -61,14 +64,26 @@ const KanbanColumn = memo(({
   const isDesistenciasColumn = column.name === 'desistencias';
   const isInactiveColumn = isConcluidosColumn || isDesistenciasColumn;
 
+  // Coluna de reconciliação (Épico 10, Parte 3): recolhe os processos
+  // cujo estado gravado o motor de workflow não reconhece. NÃO é uma
+  // fase — é uma caixa de entrada. Arrastar um cartão PARA ela seria
+  // pedir ao servidor um estado que não existe, e ele responde 400; o
+  // certo é o cartão só poder SAIR daqui, para uma fase a sério.
+  const isReconciliacao = column.reconciliacao === true;
+
   // Handlers memoizados
   const handleDragOver = useCallback((e) => {
+    if (isReconciliacao) return;
     onDragOver?.(e, column.name);
-  }, [onDragOver, column.name]);
+  }, [onDragOver, column.name, isReconciliacao]);
 
   const handleDrop = useCallback((e) => {
+    if (isReconciliacao) {
+      e.preventDefault();
+      return;
+    }
     onDrop?.(e, column.name);
-  }, [onDrop, column.name]);
+  }, [onDrop, column.name, isReconciliacao]);
 
   const handleToggleCollapse = useCallback(() => {
     onToggleCollapse?.(column.id);
@@ -98,7 +113,7 @@ const KanbanColumn = memo(({
               className="text-white text-xs font-medium text-center overflow-hidden"
               style={{ writingMode: 'vertical-rl', textOrientation: 'mixed' }}
             >
-              {column.order || ''} - {safeLabel(column.label)}
+              {isReconciliacao ? '' : `${column.order || ''} - `}{safeLabel(column.label)}
             </span>
           </div>
           <ChevronRight className="h-4 w-4 text-white/70" />
@@ -125,7 +140,7 @@ const KanbanColumn = memo(({
       >
         <div className="flex items-center justify-between">
           <h3 className="font-semibold text-white text-sm truncate">
-            {column.order || ''} - {safeLabel(column.label)}
+            {isReconciliacao ? '' : `${column.order || ''} - `}{safeLabel(column.label)}
           </h3>
           <div className="flex items-center gap-1">
             <Badge variant="secondary" className="bg-white/20 text-white hover:bg-white/30">

@@ -719,14 +719,16 @@ class ScheduledTasksService:
         }
         prev_month_name = month_names[prev_month]
         
-        # Buscar processos ativos (não concluídos ou desistidos)
-        active_statuses = [
-            "clientes_espera", "fase_documental", "fase_documental_ii",
-            "enviado_bruno", "enviado_luis", "enviado_bcp_rui",
-            "entradas_precision", "fase_bancaria", "fase_visitas",
-            "ch_aprovado", "fase_escritura", "escritura_agendada"
-        ]
-        
+        # Processos activos, DITADOS PELO MOTOR (Épico 10, Parte 3).
+        #
+        # Viviam aqui doze nomes de fases escritos à mão. Uma fase nova
+        # criada pelo admin nunca entrava no relatório mensal e uma fase
+        # renomeada saía dele — em silêncio, porque um relatório com
+        # menos processos parece um mês calmo.
+        from services.workflow_phases import carregar_fases, nomes_activos
+
+        active_statuses = nomes_activos(await carregar_fases())
+
         processes = await self.db.processes.find({
             "status": {"$in": active_statuses}
         }, {"_id": 0}).to_list(1000)

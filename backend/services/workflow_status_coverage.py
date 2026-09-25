@@ -37,32 +37,38 @@ from typing import Iterable, Optional
 from services.process_status import (
     ARCHIVED_STATUSES,
     INACTIVE_STATUSES,
-    STATUS_VALUE_ALIASES,
 )
+from services.workflow_phases import (
+    ALIASES_LEGADOS_DO_PRODUTO,
+    MACRO_FASES_VALIDAS,
+    MACRO_FASE_POR_OMISSAO,
+    construir_tabela_de_aliases,
+    normalizar_para_gralha,
+    resolver_nome,
+)
+
+__all__ = [
+    "ALIASES_LEGADOS_DO_PRODUTO",
+    "construir_tabela_de_aliases",
+    "normalizar_para_gralha",
+    "MACRO_FASES_DE_HOJE",
+    "MACRO_FASES_PROPOSTAS",
+    "MACRO_FASES_VALIDAS",
+    "Retrato",
+    "analisar",
+    "candidatos_de_alias",
+    "formatar_relatorio",
+    "para_json",
+]
 
 # ====================================================================
 # OS VOCABULÁRIOS QUE HOJE VIVEM CRAVADOS, TRAZIDOS PARA UM SÓ SÍTIO
 # ====================================================================
-# Não é a lista de fases — essa vem do motor. É o retrato do que o código
-# ACREDITA hoje, para se poder medir a distância até ao que existe.
-
-# Nomes antigos de fases, portados de `frontend/src/utils/processTimeline.js`
-# (`ALIASES_LEGADOS`). O backend não os conhecia: o `STATUS_VALUE_ALIASES`
-# só sabe de singular/plural dos terminais. São duas tabelas do mesmo
-# assunto em lados opostos da aplicação — a Parte 1 funde-as; aqui estão
-# juntas para a medição não ficar cega a metade dos casos.
-ALIASES_LEGADOS_DO_PRODUTO: dict[str, str] = {
-    "clientes_em_espera": "clientes_espera",
-    "enviado_ao_bruno": "enviado_bruno",
-    "enviado_ao_luis": "enviado_luis",
-    "banco_em_analise": "fase_bancaria",
-    "aprovado_pelo_banco": "ch_aprovado",
-    "cpcv": "fase_escritura",
-    "a_escriturar": "escritura_agendada",
-    "escriturado": "concluidos",
-    "recusado": "desistencias",
-    "desistiu": "desistencias",
-}
+# A tabela de aliases e a normalização de gralhas MUDARAM-SE para
+# `services/workflow_phases.py`, que é o resolvedor que o produto passou
+# a usar. Aqui só se reexportam: a medição e o runtime têm de ver
+# exactamente a mesma tabela, senão o retrato deixa de descrever o
+# sistema que descreve.
 
 # As macro-fases COMO ESTÃO HOJE (`frontend/src/utils/funilDeFases.js`).
 # Quatro grupos; `desistencias` não pertence a nenhum e cai em "Outras".
@@ -92,69 +98,30 @@ MACRO_FASES_DE_HOJE: dict[str, list[str]] = {
 # Isto é uma PROPOSTA, não o comportamento actual. O relatório mostra os
 # dois lado a lado de propósito: quem decide o agrupamento é o produto,
 # e a partir da Parte 2 a decisão vive na base de dados, não aqui.
+# A PROPOSTA, derivada do mapa ÚNICO que o runtime usa
+# (`workflow_phases.MACRO_FASE_POR_OMISSAO`). Derivada e não copiada: uma
+# segunda cópia divergiria, e o retrato passaria a descrever um
+# agrupamento que o produto não faz.
 MACRO_FASES_PROPOSTAS: dict[str, list[str]] = {
-    **MACRO_FASES_DE_HOJE,
-    "perdido": [
-        "desistencias", "desistencia", "desistido",
-        "cancelado", "perdido", "arquivo",
-    ],
+    macro: [n for n, m in MACRO_FASE_POR_OMISSAO.items() if m == macro]
+    for macro in MACRO_FASES_VALIDAS
 }
 
-MACRO_FASES_VALIDAS = ("novo", "analise", "aprovado", "concluido", "perdido")
 
 
 # ====================================================================
-# TABELA DE ALIASES UNIFICADA
+# CANDIDATOS DE ALIAS (leitura; o resolvedor é quem decide no runtime)
 # ====================================================================
-
-def _fundir_grupos(grupos: list[set[str]]) -> list[set[str]]:
-    """Funde grupos que partilhem pelo menos um nome.
-
-    `escriturado -> concluidos` e `{concluido, concluidos}` são o mesmo
-    assunto visto de dois sítios; sem a fusão, procurar por `escriturado`
-    não encontraria `concluido`.
-    """
-    fundidos: list[set[str]] = []
-    for grupo in grupos:
-        actual = set(grupo)
-        restantes: list[set[str]] = []
-        for existente in fundidos:
-            if existente & actual:
-                actual |= existente
-            else:
-                restantes.append(existente)
-        restantes.append(actual)
-        fundidos = restantes
-    return fundidos
-
-
-def construir_tabela_de_aliases() -> dict[str, set[str]]:
-    """``nome -> outros nomes que significam o mesmo`` (sem o próprio)."""
-    grupos = [set(v) for v in STATUS_VALUE_ALIASES.values()]
-    grupos += [{antigo, actual} for antigo, actual in ALIASES_LEGADOS_DO_PRODUTO.items()]
-    tabela: dict[str, set[str]] = {}
-    for grupo in _fundir_grupos(grupos):
-        for nome in grupo:
-            tabela[nome] = grupo - {nome}
-    return tabela
-
 
 def candidatos_de_alias(status: str, nomes_de_fases: Iterable[str]) -> list[str]:
     """Fases do motor que um alias de ``status`` poderia designar.
 
-    Devolve ordenado para o relatório ser estável entre execuções.
+    Ordenado para o relatório ser estável entre execuções. É a mesma
+    tabela que `workflow_phases.resolver_nome` usa — aqui devolve-se a
+    LISTA (para se poder ver a ambiguidade) em vez da decisão.
     """
     conhecidas = set(nomes_de_fases)
     return sorted(construir_tabela_de_aliases().get(status, set()) & conhecidas)
-
-
-def normalizar_para_gralha(nome: Optional[str]) -> str:
-    """Forma canónica para detectar gralhas invisíveis.
-
-    Um espaço à direita é outra chave no Mongo e a diferença não se vê no
-    ecrã — a mesma armadilha do Campo de Rede (Lote 5, ponto 2).
-    """
-    return (nome or "").strip().lower().replace("-", "_")
 
 
 # ====================================================================
@@ -258,26 +225,29 @@ def analisar(
         ),
     )
 
-    tabela = construir_tabela_de_aliases()
-    normalizadas = {normalizar_para_gralha(n): n for n in nomes_de_fases}
-
+    # A classificação é feita pelo RESOLVEDOR do runtime, não por uma
+    # cópia da lógica. Se as duas divergissem, o retrato descreveria um
+    # sistema que não é este — que é exactamente o defeito que o retrato
+    # existe para encontrar.
     for status, quantos in contagens.items():
-        if status in conjunto_de_fases:
+        resolucao = resolver_nome(status, fases)
+        if resolucao.motivo == "exacto":
             continue
 
-        # Gralha invisível antes de tudo: `Concluidos ` não é um nome
-        # antigo, é o mesmo nome mal gravado.
-        canonica = normalizadas.get(normalizar_para_gralha(status))
-        if canonica and canonica != status:
-            retrato.suspeitas_de_gralha[status] = canonica
-
-        candidatos = sorted(tabela.get(status, set()) & conjunto_de_fases)
-        if len(candidatos) == 1:
-            retrato.orfaos_resoluveis[status] = candidatos[0]
-        elif len(candidatos) > 1:
-            retrato.orfaos_ambiguos[status] = candidatos
+        if resolucao.motivo == "gralha":
+            retrato.suspeitas_de_gralha[status] = resolucao.fase
+            retrato.orfaos_resoluveis[status] = resolucao.fase
+        elif resolucao.motivo == "alias":
+            retrato.orfaos_resoluveis[status] = resolucao.fase
         else:
-            retrato.orfaos_desconhecidos[status] = quantos
+            # `desconhecido` cobre o zero candidatos E a ambiguidade. Só
+            # o relatório precisa de os distinguir, e aí sim vale a pena
+            # perguntar à tabela quantos candidatos havia.
+            candidatos = candidatos_de_alias(status, conjunto_de_fases)
+            if len(candidatos) > 1:
+                retrato.orfaos_ambiguos[status] = candidatos
+            else:
+                retrato.orfaos_desconhecidos[status] = quantos
 
     for nome in nomes_de_fases:
         hoje = _macro_de(nome, MACRO_FASES_DE_HOJE)
@@ -291,26 +261,20 @@ def analisar(
         else:
             retrato.fases_sem_macro_proposta.append(nome)
 
-    # As listas cravadas que o raio-x encontrou. Importadas dos módulos
-    # REAIS (incluindo privadas) de propósito: uma cópia aqui mediria a
-    # cópia, não o que o produto usa.
-    from services.stats_branches import (
-        _ACTIVE_STATUSES,
-        _APPROVED_STATUSES,
-        _COMPLETED_STATUSES,
-    )
-
+    # As listas que AINDA são cravadas. As três do `stats_branches`
+    # desapareceram na Parte 3 — hoje vêm do motor por macro-fase — e por
+    # isso deixaram de ser mensuráveis aqui: não há lista para medir.
+    #
+    # Estas duas sobrevivem, e de propósito: `INACTIVE_STATUSES` deixou
+    # de ser a DEFINIÇÃO de terminal (essa é a flag `is_active`) e passou
+    # a ser o RESÍDUO legado — nomes como `perdido`/`cancelado`/`arquivo`
+    # que existem em dados reais e não são fases. Medi-las continua a
+    # dizer quanto desse resíduo ainda está vivo.
     retrato.cobertura_das_listas = {
         "process_status.INACTIVE_STATUSES": _medir_lista(
             INACTIVE_STATUSES, contagens, conjunto_de_fases),
         "process_status.ARCHIVED_STATUSES": _medir_lista(
             ARCHIVED_STATUSES, contagens, conjunto_de_fases),
-        "stats_branches._ACTIVE_STATUSES": _medir_lista(
-            _ACTIVE_STATUSES, contagens, conjunto_de_fases),
-        "stats_branches._APPROVED_STATUSES": _medir_lista(
-            _APPROVED_STATUSES, contagens, conjunto_de_fases),
-        "stats_branches._COMPLETED_STATUSES": _medir_lista(
-            _COMPLETED_STATUSES, contagens, conjunto_de_fases),
     }
     return retrato
 

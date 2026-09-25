@@ -4801,3 +4801,90 @@ com contraprova de que lê mesmo as duas colecções.
 **A macro-fase é para LEITURA** (funil, Portal, BI). As `trigger_*` continuam
 a ser a única coisa que as automações lêem — fundi-las faria uma edição do
 funil mudar o que dispara.
+
+---
+
+## O resolvedor de fases — a Parte 1 executada (Set 2026)
+
+O retrato de produção deu os números: **12.450 processos, 342 invisíveis
+no quadro** — 205 com nome antigo, 12 com gralha, 125 em fases que o motor
+não tem. E `stats_branches._COMPLETED_STATUSES` a apanhar **0 de 12.450**.
+
+### `services/workflow_phases.py` — o ponto único dos NOMES
+
+O `workflow_lookup` já era o ponto único das FLAGS de propósito. Faltava o
+dos nomes. A ordem da resolução é fixa e cada degrau tem uma razão:
+
+| # | Motivo | O que é |
+|---|---|---|
+| 1 | `exacto` | o nome gravado É uma fase |
+| 2 | `gralha` | normaliza (maiúsculas, espaços, hífen) para UMA fase |
+| 3 | `alias` | nome legítimo de uma versão anterior do produto |
+| 4 | `desconhecido` | não se adivinha |
+
+**A gralha vem antes do alias** de propósito: `"Concluidos "` não é uma
+fase de outra época, é a mesma fase mal gravada. É o caso mais
+determinístico dos dois e não deve ficar refém de uma tabela de nomes
+antigos.
+
+**A regra do alias mantém-se:** só vence quando o motor NÃO conhece o nome
+gravado E conhece o destino; com mais do que um candidato, ninguém escolhe.
+Basta o admin criar uma fase chamada `cpcv` para a tradução ter de
+calar-se — é o teste `test_uma_fase_chamada_cpcv_nao_e_traduzida`.
+
+**A resolução é de LEITURA.** O cartão aparece na coluna certa e o `status`
+gravado fica como está, numa cópia rasa com `status_resolvido_de`.
+Reescrever 205 processos em massa dispararia automações sobre processos que
+ninguém tocou — exactamente o defeito do `run_delete_workflow_status`. Quem
+muda a fase é o `run_move_process_kanban`, um de cada vez, com o motor a
+reagir.
+
+### `nomes_terminais` — porque é que a lista legada não morreu toda
+
+A verdade é a flag `is_active: False`. Duas ressalvas, ambas a preservar
+comportamento:
+
+- Fase configurada **sem** a flag cai na lista legada — a mesma regra de
+  fallback do `resolve_workflow_purpose_flags`, para não mudar o
+  significado de uma instalação que ainda não correu o backfill.
+- Nomes da lista legada que **não são fases** (`perdido`, `cancelado`,
+  `arquivo` — os 125 do retrato) continuam terminais. Deixá-los de fora
+  fá-los-ia aparecer como ACTIVOS, que é pior do que aparecerem órfãos.
+
+`INACTIVE_STATUSES` deixou de ser a **definição** de terminal e passou a ser
+o **resíduo legado**. É uma mudança de estatuto, não de conteúdo.
+
+### A coluna de reconciliação
+
+`FASE_DESCONHECIDA` recolhe o que não resolve. Só `ADMIN`/`CEO` a recebem
+(pelo papel **efectivo**), mas **esconder a coluna não é esconder o
+problema**: `total_desconhecidos` vai na resposta para toda a gente. No
+frontend não aceita cartões — largar lá um seria pedir ao servidor um
+estado que não existe (400) —, só os deixa sair, e não mostra número de
+passo porque não é um passo.
+
+### As listas imploduídas
+
+| Módulo | Antes | Agora |
+|---|---|---|
+| `stats_branches` | 3 listas, 0/2 nomes existiam | `nomes_por_macro` / `nomes_activos`, por pedido |
+| `scheduled_tasks` | 12 nomes no relatório mensal | `nomes_activos` |
+| `portal_status` | `INACTIVE_STATUSES` | `nomes_terminais(all_statuses)` |
+| `portal_profile` | a regra escrita à mão em DOIS sítios | `construir_query_de_processo_a_trancar` |
+| `alerts` | 3 nomes na contagem + 3 títulos | macro-fase `aprovado` + `label` do motor |
+
+A cache do BI passou a `stats:branches:v2`: servir a antiga seria mostrar
+durante mais uma hora o número medido sobre fases inexistentes.
+
+**Guarda:** `tests/unit/test_listas_de_fases_implodidas.py` afirma, módulo a
+módulo, que nenhum serviço tem três ou mais nomes de fases cravados. A lista
+`COM_DIREITO` tem cinco entradas e cada uma diz porquê. Ignora comentários —
+senão a explicação da lista implodida fazia a guarda ficar vermelha.
+
+### `macro_fase`: o campo antes do campo
+
+`macro_da_fase(fase)` lê **primeiro** `fase["macro_fase"]` e só depois o mapa
+de omissão. O runtime já está pronto para a Parte 2: quando o campo existir
+na base de dados e for editável no `WorkflowEditor`, nada aqui muda. Um valor
+fora do enum é ignorado e registado — um grupo inventado parte o funil em
+silêncio, que é o que o enum fechado evita.
