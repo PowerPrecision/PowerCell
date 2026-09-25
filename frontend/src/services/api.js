@@ -811,6 +811,39 @@ export const bulkDownloadS3Files = (payload) =>
     skipErrorToast: true,
   });
 
+// ── Explorador global de ficheiros (`/ficheiros`) ──
+// Reaberto ao staff no Épico 10, com isolamento por rede decidido no
+// servidor (`services/s3_explorer_scope.py`). Passou a falar por Axios: um
+// `fetch` cru perde o `X-Company-Id` / `X-Active-Role` (incidente de
+// 2026-09-21), e num endpoint cujo resultado depende do contexto isso
+// deixou de ser um detalhe.
+//
+// `skipErrorToast` nas seis: a página mostra o erro LOCALIZADO (403 sem
+// permissões, 404 pasta fora do âmbito, 503 S3 por configurar), e um toast
+// global por cima seria a mesma informação duas vezes, a segunda sem
+// contexto.
+export const getS3FolderContents = (folderPath) =>
+  api.get("/admin/s3-folder-contents", {
+    params: { folder_path: folderPath || "" },
+    skipErrorToast: true,
+  });
+export const uploadS3ExplorerFile = (formData) =>
+  // Sem `Content-Type`: o interceptor anula-o para o browser gerar o
+  // `boundary` (ver `utils/formDataTransport.js`).
+  api.post("/admin/s3-upload", formData, { skipErrorToast: true });
+export const downloadS3ExplorerFile = (path) =>
+  api.get("/admin/s3-download", {
+    params: { path },
+    responseType: "blob",
+    skipErrorToast: true,
+  });
+export const renameS3ExplorerEntry = (payload) =>
+  api.post("/admin/s3-rename", payload, { skipErrorToast: true });
+export const deleteS3ExplorerEntry = (payload) =>
+  api.post("/admin/s3-delete", payload, { skipErrorToast: true });
+export const createS3ExplorerFolder = (payload) =>
+  api.post("/admin/s3-create-folder", payload, { skipErrorToast: true });
+
 // ── Proxy de conteúdo (é o que evita o CORS do S3) ──
 // NUNCA substituir por um URL pré-assinado do bucket: o download directo
 // falha no browser por falta de cabeçalhos CORS no bucket, e foi por isso

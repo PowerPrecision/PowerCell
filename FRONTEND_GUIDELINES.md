@@ -1085,3 +1085,29 @@ o endpoint no ficheiro.
 node`, levanta um `http.createServer` e lê os bytes que chegam. Um duplo do
 adaptador do Axios teria "confirmado" o comportamento errado, porque o defeito
 está no `transformRequest` — antes do adaptador.
+
+## 33. Explorador de Ficheiros: o que a UI pode e não pode assumir (Épico 10, Set 2026)
+
+**33.1 — A lista que chega já vem filtrada.** O servidor devolve só as pastas da
+rede de quem pede (`services/s3_explorer_scope.py`). A UI não filtra, não conta
+"quantas faltam" e não oferece um "ver tudo" — não há tudo para ver.
+
+**33.2 — 404 não é "erro", é "não é sua".** Uma pasta de outra rede responde
+404, como se não existisse. Mostrar "sem permissões" nesse caso confirmaria que
+a pasta existe, e o nome da pasta é o nome do cliente. A mensagem é *"Pasta não
+encontrada"*, igual à de uma pasta que de facto não existe — a indistinção é
+intencional.
+
+**33.3 — 403 continua a existir e significa outra coisa:** o perfil não entra na
+página. Os dois ramos são distintos no `catch` e têm de continuar a sê-lo.
+
+**33.4 — Renomear é uma operação de dados, não de cosmética.** O servidor move
+os objectos no S3 **e** reaponta o mapeamento do processo, os metadados dos
+documentos e os pedidos do Portal. A resposta traz `relink` com as contagens;
+se aparecer `relink.erro`, os ficheiros moveram-se e as ligações ficaram
+partidas — vale a pena dizê-lo ao utilizador em vez de celebrar sucesso.
+
+**33.5 — O menu e a rota têm de concordar.** A lista de papéis do item
+"Ficheiros" no `DashboardLayout` e as `allowedRoles` da rota em `App.js` são
+lidas e cruzadas por `App.rotasMenu.test.js`. Abrir um sem o outro dá um item de
+menu que redirecciona — o produto a contradizer-se, sem erro em lado nenhum.

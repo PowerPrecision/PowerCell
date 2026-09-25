@@ -282,6 +282,14 @@ async def create_indexes(db) -> dict:
         
         # Índice no tipo de processo
         {"keys": [("process_type", 1)], "name": "idx_process_type"},
+        # Gestor de Ficheiros S3 (Épico 10): a ponte pasta → rede. A
+        # listagem da raiz resolve TODAS as pastas da página numa só query
+        # `{"s3_folder": {"$in": [...]}}`; sem índice, cada navegação no
+        # Explorador varria a colecção inteira (12.450 pastas em produção).
+        {"keys": [("s3_folder", 1)], "name": "idx_s3_folder"},
+        # O carimbo de rede é lido em quase todas as listagens desde o
+        # Lote 4 e nunca teve índice próprio.
+        {"keys": [("network_id", 1)], "name": "idx_network_id"},
         
         # Índice de texto para pesquisa full-text
         {

@@ -132,31 +132,73 @@ def _ids_do_quadro(resposta) -> set:
 
 
 class TestExploradorDeFicheirosRestrito:
-    """Decisão do dono: o S3 Explorer global é de Admin e CEO."""
+    """A restrição do Lote 5 foi LEVANTADA, e a razão importa.
 
-    def test_ver_ficheiros_e_so_para_a_gestao_de_topo(self):
+    O explorador foi trancado a [ADMIN, CEO] porque o bucket está arrumado
+    por pasta de CLIENTE e não havia `network_id` num prefixo S3 — era
+    isolamento por ausência de utilizadores, não por desenho.
+
+    O Épico 10 construiu a ponte (`processes.s3_folder` →
+    `processes.network_id`, em `services/s3_explorer_scope.py`), pelo que a
+    página pôde reabrir. A INTENÇÃO original — "um consultor de uma empresa
+    isolada não navega o bucket inteiro" — continua verdadeira e é agora
+    afirmada onde se decide de facto: `test_s3_explorer_isolation.py`, uma
+    asserção por cada uma das seis operações.
+
+    O que estes testes passam a guardar é a NOVA invariante: a página está
+    aberta ao staff, e fechada a quem não é staff.
+    """
+
+    def test_o_staff_operacional_recuperou_o_explorador(self):
         from models.auth import UserRole
         from services.admin_s3_explorer import FILE_VIEW_ROLES
-
-        assert set(FILE_VIEW_ROLES) == {UserRole.ADMIN, UserRole.CEO}
-
-    def test_operar_sobre_ficheiros_e_so_para_a_gestao_de_topo(self):
-        from models.auth import UserRole
-        from services.admin_s3_explorer import FILE_OPS_ROLES
-
-        assert set(FILE_OPS_ROLES) == {UserRole.ADMIN, UserRole.CEO}
-
-    def test_o_consultor_perde_o_explorador_global(self):
-        """O que estava a vazar: um consultor de uma empresa isolada
-        navegava o bucket inteiro."""
-        from models.auth import UserRole
-        from services.admin_s3_explorer import FILE_OPS_ROLES, FILE_VIEW_ROLES
 
         for papel in (UserRole.CONSULTOR, UserRole.INTERMEDIARIO,
                       UserRole.INDEXACAO, UserRole.DIRETOR,
                       UserRole.ADMINISTRATIVO):
-            assert papel not in FILE_VIEW_ROLES
+            assert papel in FILE_VIEW_ROLES
+
+    def test_apagar_e_renomear_ficam_na_gestao(self):
+        """Apagar uma pasta de cliente leva o histórico documental inteiro.
+        Ver é reversível; apagar não."""
+        from models.auth import UserRole
+        from services.admin_s3_explorer import FILE_OPS_ROLES
+
+        assert set(FILE_OPS_ROLES) == {
+            UserRole.ADMIN, UserRole.CEO,
+            UserRole.DIRETOR, UserRole.ADMINISTRATIVO,
+        }
+        for papel in (UserRole.CONSULTOR, UserRole.INTERMEDIARIO, UserRole.INDEXACAO):
             assert papel not in FILE_OPS_ROLES
+
+    def test_parceiro_e_cliente_continuam_fora(self):
+        """`parceiro` é conta fantasma e `cliente` tem o Portal — nenhum
+        deles tem o que fazer num explorador de ficheiros da empresa."""
+        from models.auth import UserRole
+        from services.admin_s3_explorer import (
+            FILE_OPS_ROLES, FILE_VIEW_ROLES, FILE_WRITE_ROLES,
+        )
+
+        for lista in (FILE_VIEW_ROLES, FILE_WRITE_ROLES, FILE_OPS_ROLES):
+            assert UserRole.PARCEIRO not in lista
+            assert UserRole.CLIENTE not in lista
+
+    def test_abrir_a_pagina_exige_a_parede_ligada(self):
+        """Contraprova: reabrir os papéis sem o âmbito seria o Lote 5 ao
+        contrário. As seis operações TÊM de resolver o âmbito."""
+        from pathlib import Path
+
+        from tests.unit.helpers_fonte import codigo_sem_comentarios
+
+        fonte = codigo_sem_comentarios(
+            (Path(__file__).resolve().parents[2] / "services" /
+             "admin_s3_explorer.py").read_text("utf-8")
+        )
+        assert fonte.count("assert_pasta_no_ambito") >= 6, (
+            "uma das seis operações do explorador deixou de resolver o "
+            "âmbito por rede"
+        )
+        assert "filtrar_subpastas" in fonte
 
     def test_a_listagem_do_explorador_usa_a_constante_restrita(self):
         """Guarda: a rota tinha a lista de papéis escrita À MÃO, mais
@@ -174,7 +216,10 @@ class TestExploradorDeFicheirosRestrito:
         assert "FILE_VIEW_ROLES" in bloco, (
             "a rota do explorador volta a declarar os papéis à mão"
         )
-        assert "UserRole.CONSULTOR" not in bloco
+        # Escrever os papéis à mão na rota foi como a lista divergiu da
+        # constante da última vez. Continua proibido, agora que a lista é
+        # mais larga e o engano seria mais caro.
+        assert "UserRole." not in bloco
 
     def test_os_ficheiros_do_PROCESSO_continuam_acessiveis(self):
         """O consultor perde o explorador GLOBAL, não os ficheiros dos

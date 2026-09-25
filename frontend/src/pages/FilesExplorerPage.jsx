@@ -23,6 +23,15 @@ import DashboardLayout from "../layouts/DashboardLayout";
 import { useAuth } from "../contexts/AuthContext";
 import { hasAnyRole } from "../utils/roleUtils";
 import { extractErrorMessage } from "../utils/extractErrorMessage";
+import {
+  createS3ExplorerFolder,
+  deleteS3ExplorerEntry,
+  downloadS3ExplorerFile,
+  getS3FolderContents,
+  readBlobErrorBody,
+  renameS3ExplorerEntry,
+  uploadS3ExplorerFile,
+} from "../services/api";
 import { Card, CardContent } from "../components/ui/card";
 import { Button } from "../components/ui/button";
 import { Input } from "../components/ui/input";
@@ -84,7 +93,6 @@ import { toast } from "sonner";
 import { pt } from "date-fns/locale";
 import { safeFormat } from "../lib/utils";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
 
 // ── Helpers ────────────────────────────────────────────────────────────────
 
@@ -162,29 +170,27 @@ const FilesExplorerPage = () => {
     if (!token) return;
     setLoading(true);
     try {
-      const res = await fetch(
-        `${API_URL}/api/admin/s3-folder-contents?folder_path=${encodeURIComponent(path || "")}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (res.ok) {
-        const data = await res.json();
-        setS3Configured(true);
-        setFolders(data.subfolders || []);
-        setFiles(data.files || []);
+      const { data } = await getS3FolderContents(path);
+      setS3Configured(true);
+      setFolders(data.subfolders || []);
+      setFiles(data.files || []);
+    } catch (erro) {
+      const estado = erro?.response?.status;
+      const corpo = erro?.response?.data || {};
+      console.error("Erro ao carregar ficheiros:", estado, corpo);
+      if (estado === 403) {
+        toast.error("Sem permissões para aceder ao explorador de ficheiros.");
+      } else if (estado === 404) {
+        // Épico 10: uma pasta fora da rede do utilizador responde 404, como
+        // se não existisse — um 403 confirmaria a carteira da concorrência.
+        toast.error("Pasta não encontrada.");
+      } else if (estado === 503) {
+        setS3Configured(false);
+      } else if (estado) {
+        toast.error(extractErrorMessage(corpo.detail, "Erro ao carregar ficheiros"));
       } else {
-        const err = await res.json().catch(() => ({}));
-        console.error("Erro ao carregar ficheiros:", res.status, err);
-        if (res.status === 403) {
-          toast.error("Sem permissões para aceder ao explorador de ficheiros.");
-        } else if (res.status === 503) {
-          setS3Configured(false);
-        } else {
-          toast.error(extractErrorMessage(err.detail, "Erro ao carregar ficheiros"));
-        }
+        toast.error("Erro de ligação ao servidor");
       }
-    } catch (err) {
-      console.error("Erro fetchContents:", err);
-      toast.error("Erro de ligação ao servidor");
     } finally {
       setLoading(false);
     }
@@ -254,24 +260,11 @@ const FilesExplorerPage = () => {
       formData.append("folder_path", currentPath);
 
       try {
-        const res = await fetch(
-          `${API_URL}/api/admin/s3-upload`,
-          {
-            method: "POST",
-            headers: { Authorization: `Bearer ${token}` },
-            body: formData,
-          }
-        );
-
-        if (res.ok) {
-          successCount++;
-        } else {
-          const err = await res.json().catch(() => ({}));
-          toast.error(`${file.name}: ${extractErrorMessage(err.detail, "Erro")}`);
-          errorCount++;
-        }
-      } catch {
-        toast.error(`Erro ao enviar ${file.name}`);
+        await uploadS3ExplorerFile(formData);
+        successCount++;
+      } catch (erro) {
+        const detalhe = erro?.response?.data?.detail;
+        toast.error(`${file.name}: ${extractErrorMessage(detalhe, "Erro")}`);
         errorCount++;
       }
 
@@ -294,26 +287,20 @@ const FilesExplorerPage = () => {
   // ── Download ─────────────────────────────────────────────────────────────
   const handleDownload = async (file) => {
     try {
-      const res = await fetch(
-        `${API_URL}/api/admin/s3-download?path=${encodeURIComponent(file.path)}`,
-        { headers: { Authorization: `Bearer ${token}` } }
-      );
-      if (res.ok) {
-        const blob = await res.blob();
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement("a");
-        a.href = url;
-        a.download = file.name || "download";
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(extractErrorMessage(err.detail, "Erro ao fazer download"));
-      }
-    } catch {
-      toast.error("Erro ao fazer download");
+      const { data: blob } = await downloadS3ExplorerFile(file.path);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = file.name || "download";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      URL.revokeObjectURL(url);
+    } catch (erro) {
+      // `responseType: "blob"` faz o corpo de ERRO vir também como Blob:
+      // sem o ler como texto, a mensagem do servidor desaparece.
+      const corpo = await readBlobErrorBody(erro);
+      toast.error(extractErrorMessage(corpo.detail, "Erro ao fazer download"));
     }
   };
 
@@ -327,31 +314,17 @@ const FilesExplorerPage = () => {
     setRenaming(true);
     try {
       // S3 rename = copy + delete (or use rename API if exists)
-      const res = await fetch(
-        `${API_URL}/api/admin/s3-rename`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            old_path: renameDialog.item.path || `${renameDialog.item.path}/`,
-            new_name: renameDialog.newName.trim(),
-            is_folder: !!renameDialog.item.isFolder,
-          }),
-        }
-      );
-      if (res.ok) {
-        toast.success("Renomeado com sucesso");
-        fetchContents(currentPath);
-        setRenameDialog({ open: false, item: null, newName: "" });
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(extractErrorMessage(err.detail, "Erro ao renomear"));
-      }
-    } catch {
-      toast.error("Erro ao renomear");
+      await renameS3ExplorerEntry({
+        old_path: renameDialog.item.path || `${renameDialog.item.path}/`,
+        new_name: renameDialog.newName.trim(),
+        is_folder: !!renameDialog.item.isFolder,
+      });
+      toast.success("Renomeado com sucesso");
+      fetchContents(currentPath);
+      setRenameDialog({ open: false, item: null, newName: "" });
+    } catch (erro) {
+      const detalhe = erro?.response?.data?.detail;
+      toast.error(extractErrorMessage(detalhe, "Erro ao renomear"));
     } finally {
       setRenaming(false);
     }
@@ -366,30 +339,16 @@ const FilesExplorerPage = () => {
     if (!deleteDialog.item) return;
     setDeleting(true);
     try {
-      const res = await fetch(
-        `${API_URL}/api/admin/s3-delete`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({
-            path: deleteDialog.item.path,
-            is_folder: !!deleteDialog.item.isFolder,
-          }),
-        }
-      );
-      if (res.ok) {
-        toast.success(deleteDialog.item.isFolder ? "Pasta eliminada" : "Ficheiro eliminado");
-        fetchContents(currentPath);
-        setDeleteDialog({ open: false, item: null });
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(extractErrorMessage(err.detail, "Erro ao eliminar"));
-      }
-    } catch {
-      toast.error("Erro ao eliminar");
+      await deleteS3ExplorerEntry({
+        path: deleteDialog.item.path,
+        is_folder: !!deleteDialog.item.isFolder,
+      });
+      toast.success(deleteDialog.item.isFolder ? "Pasta eliminada" : "Ficheiro eliminado");
+      fetchContents(currentPath);
+      setDeleteDialog({ open: false, item: null });
+    } catch (erro) {
+      const detalhe = erro?.response?.data?.detail;
+      toast.error(extractErrorMessage(detalhe, "Erro ao eliminar"));
     } finally {
       setDeleting(false);
     }
@@ -403,27 +362,13 @@ const FilesExplorerPage = () => {
       const folderPath = currentPath
         ? `${currentPath}/${newFolderDialog.name.trim()}/`
         : `${newFolderDialog.name.trim()}/`;
-      const res = await fetch(
-        `${API_URL}/api/admin/s3-create-folder`,
-        {
-          method: "POST",
-          headers: {
-            Authorization: `Bearer ${token}`,
-            "Content-Type": "application/json",
-          },
-          body: JSON.stringify({ folder_path: folderPath }),
-        }
-      );
-      if (res.ok) {
-        toast.success("Pasta criada com sucesso");
-        fetchContents(currentPath);
-        setNewFolderDialog({ open: false, name: "" });
-      } else {
-        const err = await res.json().catch(() => ({}));
-        toast.error(extractErrorMessage(err.detail, "Erro ao criar pasta"));
-      }
-    } catch {
-      toast.error("Erro ao criar pasta");
+      await createS3ExplorerFolder({ folder_path: folderPath });
+      toast.success("Pasta criada com sucesso");
+      fetchContents(currentPath);
+      setNewFolderDialog({ open: false, name: "" });
+    } catch (erro) {
+      const detalhe = erro?.response?.data?.detail;
+      toast.error(extractErrorMessage(detalhe, "Erro ao criar pasta"));
     } finally {
       setCreatingFolder(false);
     }

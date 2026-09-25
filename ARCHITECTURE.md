@@ -4599,3 +4599,116 @@ apaga, nunca reescreve um mapeamento existente, nunca toca no S3.
 
 O script **recusa-se a correr sem S3 configurado** em vez de reportar zeros:
 um relatório de cobertura falso levaria a uma decisão de produto errada.
+
+## Gestor de Ficheiros S3 — Passos 3 e 4: a Parede e o religamento (Set 2026)
+
+### A página reabriu, e a razão do tranco desapareceu
+
+O Lote 5, ponto 1 trancou `/ficheiros` a `[ADMIN, CEO]` porque o bucket está
+arrumado por pasta de CLIENTE e não havia `network_id` num prefixo S3 — era
+isolamento **por ausência de utilizadores**, não por desenho. A ponte
+(`processes.s3_folder` → `processes.network_id`) existe desde o Lote 4; faltava
+consultá-la.
+
+### A decisão pertence ao primeiro segmento, e só a ele
+
+`services/s3_explorer_scope.py`. Tudo abaixo de
+`Documentação Clientes/Joao_Silva/` é do Joao_Silva, pelo que navegar cinco
+níveis custa a mesma decisão que navegar um:
+
+```
+listar a raiz  → 1 chamada S3 (paginada) + 1 query em LOTE   (12.450 pastas)
+listar fundo   → 1 chamada S3 + 1 query de um documento
+```
+
+Nunca N+1. Índices novos: `idx_s3_folder` (a ponte) e `idx_network_id` (lido em
+quase todas as listagens desde o Lote 4, e nunca teve índice próprio).
+
+### Só a Camada 1 — e um dialecto só
+
+Decisão de produto: o Explorador é ferramenta de arrumação documental da
+empresa, não uma vista de carteira. Um consultor da Domus vê as pastas de todos
+os clientes da Domus, incluindo as dos colegas.
+
+O predicado é **o mesmo** do tempo real: `realtime_audience.passa_a_rede`, que
+passou de privado a público em vez de ser reescrito. `TestOsDoisDialectos`
+cobre-o agora para os dois usos.
+
+### Órfãs e ambíguas: os números decidiram
+
+Medição em produção: **12.450 pastas, 9.800 mapeadas, 2.650 órfãs** (2.400
+resolúveis por backfill), **45 ambíguas**, **205 ligações partidas**.
+
+| Caso | Quem vê |
+|---|---|
+| Pasta com uma rede | quem tem essa rede no âmbito |
+| Pasta **órfã** (sem dono) | só ADMIN/CEO, para reconciliar |
+| Pasta **ambígua** (>1 rede) | só ADMIN/CEO — nunca nenhuma das redes |
+
+A excepção é de **reconciliação, não de hierarquia**: um director não entra
+nela, porque veria pastas cuja rede não se sabe qual é. Duas *empresas* da mesma
+rede não são ambiguidade — a Power e a Precision partilham dados.
+
+**404, nunca 403.** O nome da pasta É o nome do cliente: um 403 confirmaria a
+carteira da concorrência. A mensagem também não repete o caminho pedido.
+
+**Falha fechada em três pontos**, os três provados por mutação: pasta
+desconhecida (`None`) não é visível; âmbito ausente não é visível; e uma
+**leitura falhada** da base de dados torna todas as pastas órfãs — invisíveis a
+quem não reconcilia. Uma leitura falhada não pode abrir o que a leitura bem
+sucedida fecharia.
+
+### Papéis em três níveis
+
+| Nível | Quem | Porquê |
+|---|---|---|
+| **Ver / descarregar / carregar / criar pasta** | todo o staff | reversível |
+| **Renomear / apagar** | admin, ceo, diretor, administrativo | apagar uma pasta de cliente leva o histórico documental inteiro |
+| — | `parceiro` e `cliente` ficam fora dos dois | conta fantasma; o cliente tem o Portal |
+
+O isolamento por rede aplica-se a **todos**, admin/CEO incluídos. O que eles têm
+a mais é ver as órfãs e ambíguas.
+
+### Passo 4 — o `rename` move a chave E o mapeamento
+
+`services/s3_folder_relink.py`. O `rename` copiava os objectos, apagava os
+antigos e não tocava em nada na base de dados. Com o isolamento, isso passou de
+incómodo a **cegueira auto-infligida**: um `s3_folder` a apontar para o nome
+antigo torna a pasta órfã, logo invisível. Renomear era apagar do mundo.
+
+São **quatro** coisas a mover, não uma:
+
+1. `processes.s3_folder` — o mapeamento (só quando se renomeia a pasta do
+   CLIENTE; renomear `Financeiros` não o muda).
+2. `document_metadata.s3_path` — sustenta o separador Documentos, o badge IA,
+   as validades e a análise. Sem isto os ficheiros somem da ficha.
+3. `documents.s3_path` e `attached_files` — os pedidos do Portal. O cliente
+   ficava a ver um documento que já não está onde diz.
+
+**Fronteira de segmento, sempre:** `Joao_Silva_2` começa pelo mesmo texto e é
+OUTRO cliente — e o sufixo `_2` é precisamente como o sistema desambigua
+homónimos, portanto é o caso comum.
+
+**Nunca bloqueia.** Quando corre, os objectos JÁ se moveram no S3; levantar aqui
+mostraria um erro sobre uma operação bem sucedida. Mesma lei do
+`document_portal_revoke`.
+
+O `rename` de pasta também não paginava: acima de 1000 objectos movia alguns e
+apagava-os, deixando o resto para trás. É a origem mecânica das 205 ligações
+partidas.
+
+### O inventário das seis operações
+
+`tests/unit/test_s3_explorer_isolation.py` tem uma asserção por operação, e
+acrescentar uma sétima obriga a acrescentá-la lá — a lição do Lote 5, ponto 1,
+onde o Kanban tinha construtor próprio e ficou de fora por não haver inventário
+das superfícies. As asserções são sobre comportamento observável (404, chaves
+que chegam ao S3, pastas devolvidas), não sobre o código-fonte.
+
+### O frontend deixou o `fetch` cru
+
+Sétima instância do incidente de 2026-09-21. Enquanto a página era só de admin
+não pesava; num endpoint cujo RESULTADO depende do contexto, pesa. Seis funções
+em `services/api.js`, guarda em `pages/filesExplorerTransport.test.js`. A página
+distingue **404** (pasta fora da rede) de **403** (sem acesso à página): dizer
+"sem permissões" a um 404 confirmaria que a pasta existe.

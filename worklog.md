@@ -6044,3 +6044,77 @@ cabeçalho do script.
 - `flake8 --select=E9,F63,F7,F82` → 0.
 - Mutação: **13 aplicadas, 13 mortas** (5 na contenção, 5 no explorador
   incluindo a paginação, 3 na medição).
+
+---
+
+# Iteração — Gestor de Ficheiros S3, Passos 3 e 4 (Set 2026)
+
+## Os números que decidiram
+
+Medição em produção: **12.450 pastas, 9.800 mapeadas, 2.650 órfãs** (2.400
+resolúveis), **45 ambíguas**, **205 ligações partidas**. As 205 provam
+empiricamente o diagnóstico do `rename`.
+
+Uma precisão sobre as categorias, porque muda o que fica invisível: as 45
+ambíguas **estão mapeadas** (têm donos, só que de redes diferentes), e as 205
+ligações partidas são **processos** a apontar para o vazio, não pastas. Depois
+do backfill ficam ~250 pastas órfãs + 45 ambíguas invisíveis ao staff normal —
+e as 205 ligações partidas provavelmente apontam para pastas que estão entre
+essas órfãs, porque foram renomeadas.
+
+## Passo 3 — a Parede
+
+`services/s3_explorer_scope.py`: decisão no **primeiro segmento**, uma query em
+LOTE por página, nunca N+1. Índices `idx_s3_folder` e `idx_network_id`.
+
+Só a Camada 1, e com **um dialecto só**: `realtime_audience.passa_a_rede`
+passou de privado a público em vez de ser reescrito.
+
+Órfãs e ambíguas só para ADMIN/CEO — excepção de **reconciliação, não de
+hierarquia** (um director não entra). 404, nunca 403.
+
+Papéis em três níveis: ver/carregar para todo o staff; renomear/apagar na
+gestão (apagar uma pasta de cliente leva o histórico inteiro); `parceiro` e
+`cliente` fora dos dois.
+
+## Passo 4 — o religamento
+
+São **quatro** coisas a mover, não uma: `processes.s3_folder`,
+`document_metadata.s3_path` (que sustenta o separador Documentos, o badge IA e
+as validades) e `documents.s3_path` + `attached_files` (pedidos do Portal).
+Fronteira de segmento — `Joao_Silva_2` é outro cliente, e o sufixo `_2` é
+exactamente como o sistema desambigua homónimos. Nunca bloqueia: os objectos já
+se moveram.
+
+O `rename` de pasta também não paginava — acima de 1000 objectos movia alguns e
+apagava-os. É a origem mecânica das 205 ligações partidas.
+
+## Guardas do Lote 5 que ficaram obsoletas — e o que fiz com elas
+
+Quatro testes afirmavam a página trancada a admin/ceo. Não os apaguei:
+reescrevi-os para a invariante NOVA (staff entra, `parceiro`/`cliente` não;
+apagar fica na gestão) e acrescentei uma guarda que afirma que **as seis
+operações resolvem o âmbito** — reabrir os papéis sem a parede seria o Lote 5 ao
+contrário.
+
+## Erros meus
+
+- **Duas mutações sobreviveram** e as duas eram lacunas reais: propriedades que
+  escrevi em comentário e nunca afirmei. Uma pasta desconhecida (`None`) não ser
+  visível, e uma **leitura falhada** da base de dados esconder tudo em vez de
+  abrir. A segunda é a mais séria: uma leitura falhada não pode abrir o que a
+  leitura bem sucedida fecharia.
+- **Uma terceira sobreviveu por o meu teste não cobrir o ramo do ficheiro
+  solto** no `rename` — só testei o de pasta.
+- A minha própria guarda de transporte ficou vermelha por causa do comentário
+  que explica a regra; era exactamente o caso que ela existe para evitar.
+- A transformação automática dos `fetch` deixou dois `catch` seguidos (JS
+  inválido) e um bloco `else` órfão. Apanhados pelo ESLint, não por mim.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **2660 passed** (baseline 2603, +57).
+- `yarn test` → **1071 passed / 95 ficheiros** (baseline 1064 / 93).
+- `flake8 --select=E9,F63,F7,F82` → 0. `eslint --quiet` → 0. `vite build` verde.
+- Mutação: **13 aplicadas, 13 mortas** (7 no âmbito, 3 no religamento, 3 no
+  explorador).

@@ -120,10 +120,30 @@ describe("O leitor do spread condicional", () => {
   });
 
   it("e desaparece de quem não o pode abrir", () => {
-    for (const perfil of ["consultor", "intermediario", "diretor"]) {
+    // ÉPICO 10: o explorador foi REABERTO ao staff — o Lote 5 tinha-o
+    // trancado a admin/ceo porque não havia isolamento por rede, e agora
+    // há (`services/s3_explorer_scope.py`, 404 para pasta de outra rede).
+    // A contraprova mantém-se, com outro item restrito: o leitor do
+    // spread tem de TIRAR alguma coisa, senão passaria por não ver nada,
+    // que é o pior estado possível para uma guarda.
+    const doParceiro = hrefsDoPerfil(LAYOUT, "parceiro");
+    const doAdmin = hrefsDoPerfil(LAYOUT, "admin");
+    assert.ok(
+      doParceiro.length < doAdmin.length,
+      "o leitor do spread deixou de tirar itens a perfis restritos",
+    );
+    assert.ok(
+      !doParceiro.includes("/ficheiros"),
+      "parceiro (conta fantasma) continua a ver o explorador no menu",
+    );
+  });
+
+  it("o explorador reaberto aparece ao staff operacional", () => {
+    for (const perfil of ["consultor", "intermediario", "diretor",
+                          "administrativo", "indexacao"]) {
       assert.ok(
-        !hrefsDoPerfil(LAYOUT, perfil).includes("/ficheiros"),
-        `${perfil} continua a ver o explorador global no menu`,
+        hrefsDoPerfil(LAYOUT, perfil).includes("/ficheiros"),
+        `${perfil} não vê o explorador, mas a rota deixa-o entrar`,
       );
     }
   });

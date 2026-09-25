@@ -230,8 +230,15 @@ def audiencia_do_processo(
     )
 
 
-def _passa_a_rede(aud: Audiencia, scope: TenantScope) -> bool:
-    """Camada 1 — espelha `build_network_scope_condition`."""
+def passa_a_rede(aud: Audiencia, scope: TenantScope) -> bool:
+    """Camada 1 — a fronteira de REDE, espelho de `build_network_scope_condition`.
+
+    Pública de propósito: o Gestor de Ficheiros S3 aplica **só** esta camada
+    (um utilizador da Domus vê as pastas de todos os clientes da Domus; o
+    limite da carteira individual não se aplica a uma ferramenta de
+    arrumação documental). Reutilizar em vez de reescrever mantém UM
+    dialecto em Python — `TestOsDoisDialectos` cobre-o para os dois usos.
+    """
     if aud.network_id and aud.network_id in scope.network_ids:
         return True
 
@@ -290,7 +297,7 @@ def alcanca(
     """
     if aud is None or scope is None:
         return False
-    if not _passa_a_rede(aud, scope):
+    if not passa_a_rede(aud, scope):
         return False
     return _passa_a_necessidade_de_saber(aud, user_id=user_id, role=role)
 

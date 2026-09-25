@@ -912,16 +912,20 @@ function App() {
           />
           
           {/* Ficheiros — Explorador global do bucket S3.
-              Lote 5, ponto 1: navega o bucket INTEIRO e o bucket está
-              organizado por pasta de cliente, não por empresa — não há
-              por onde aplicar o filtro de Rede sem mapear pasta →
-              processo → rede em cada listagem. Fica com quem já tem
-              visão global; as empresas comuns chegam aos ficheiros pela
-              ficha do processo. */}
+              REABERTO no Épico 10. O Lote 5, ponto 1 trancou-o a
+              admin/ceo porque o bucket está organizado por pasta de
+              CLIENTE e não havia `network_id` num prefixo S3 — era
+              isolamento por ausência de utilizadores.
+              Hoje a ponte existe (`processes.s3_folder` →
+              `processes.network_id`) e o servidor decide pasta a pasta:
+              ver `services/s3_explorer_scope.py`. Uma pasta de outra rede
+              responde 404, como se não existisse.
+              Apagar e renomear continuam na gestão (FILE_OPS_ROLES no
+              backend) — esta lista é só quem ENTRA na página. */}
           <Route
             path="/ficheiros"
             element={
-              <ProtectedRoute allowedRoles={["admin", "ceo"]}>
+              <ProtectedRoute allowedRoles={["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"]}>
                 <RouteBoundary name="Explorador de Ficheiros">
                   <FilesExplorerPage />
                 </RouteBoundary>

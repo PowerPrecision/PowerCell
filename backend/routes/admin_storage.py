@@ -10,7 +10,7 @@ Do not overwrite s3_storage.py / storage_service.py.
 import logging
 from typing import List
 
-from fastapi import APIRouter, Depends, Query, Body, UploadFile, File, Form
+from fastapi import APIRouter, Depends, Query, Body, Request, UploadFile, File, Form
 
 from models.auth import UserRole
 from services.auth import require_roles
@@ -30,6 +30,7 @@ from services.admin_s3_process_mappings import (
 from services.admin_s3_explorer import (
     FILE_OPS_ROLES,
     FILE_VIEW_ROLES,
+    FILE_WRITE_ROLES,
     S3RenameRequest,
     S3DeleteRequest,
     S3CreateFolderRequest,
@@ -186,48 +187,54 @@ async def batch_update_process_s3_mappings(
 
 @router.get("/s3-folder-contents")
 async def get_s3_folder_contents(
+    request: Request,
     folder_path: str = Query("", description="Caminho da pasta S3 (vazio = raiz)"),
     user: dict = Depends(require_roles(FILE_VIEW_ROLES))
 ):
-    return await run_get_s3_folder_contents(folder_path, user)
+    return await run_get_s3_folder_contents(folder_path, user, request)
 
 
 @router.post("/s3-rename")
 async def s3_rename(
     data: S3RenameRequest,
+    request: Request,
     user: dict = Depends(require_roles(FILE_OPS_ROLES))
 ):
-    return await run_s3_rename(data, user)
+    return await run_s3_rename(data, user, request)
 
 
 @router.post("/s3-delete")
 async def s3_delete(
     data: S3DeleteRequest,
+    request: Request,
     user: dict = Depends(require_roles(FILE_OPS_ROLES))
 ):
-    return await run_s3_delete(data, user)
+    return await run_s3_delete(data, user, request)
 
 
 @router.post("/s3-create-folder")
 async def s3_create_folder(
     data: S3CreateFolderRequest,
-    user: dict = Depends(require_roles(FILE_OPS_ROLES))
+    request: Request,
+    user: dict = Depends(require_roles(FILE_WRITE_ROLES))
 ):
-    return await run_s3_create_folder(data, user)
+    return await run_s3_create_folder(data, user, request)
 
 
 @router.post("/s3-upload")
 async def s3_upload(
+    request: Request,
     file: UploadFile = File(...),
     folder_path: str = Form(""),
-    user: dict = Depends(require_roles(FILE_OPS_ROLES))
+    user: dict = Depends(require_roles(FILE_WRITE_ROLES))
 ):
-    return await run_s3_upload(file, folder_path, user)
+    return await run_s3_upload(file, folder_path, user, request)
 
 
 @router.get("/s3-download")
 async def s3_download(
+    request: Request,
     path: str = Query(..., description="Caminho S3 do ficheiro"),
     user: dict = Depends(require_roles(FILE_VIEW_ROLES))
 ):
-    return await run_s3_download(path, user)
+    return await run_s3_download(path, user, request)

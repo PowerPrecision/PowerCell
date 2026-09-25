@@ -17,6 +17,12 @@ from services.s3_explorer_paths import (
     RAIZ_DO_EXPLORADOR,
     assert_dentro_da_raiz,
 )
+from services.s3_folder_relink import religar_apos_rename
+from services.s3_explorer_scope import (
+    ambito_do_utilizador,
+    assert_pasta_no_ambito,
+    filtrar_subpastas,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -25,22 +31,45 @@ logger = logging.getLogger(__name__)
 # seria uma fronteira de segurança a discordar de si própria.
 S3_EXPLORER_BASE_PATH = RAIZ_DO_EXPLORADOR
 
-# Roles that can perform file operations
 # ────────────────────────────────────────────────────────────────────
-# EXPLORADOR GLOBAL DE FICHEIROS — só a gestão de topo (Lote 5, ponto 1)
+# EXPLORADOR GLOBAL DE FICHEIROS — reaberto com isolamento (Épico 10)
 #
-# Este explorador navega o BUCKET INTEIRO. O bucket está organizado por
-# pasta de CLIENTE, não por empresa, portanto não há um `network_id` num
-# prefixo S3 para filtrar: isolar por rede obrigaria a mapear pasta →
-# processo → rede em cada listagem.
+# O Lote 5, ponto 1 trancou esta página a [ADMIN, CEO] porque o bucket está
+# arrumado por pasta de CLIENTE e não havia `network_id` num prefixo S3
+# para filtrar — era isolamento por ausência de utilizadores.
 #
-# Decisão do dono: restringir a página a quem já tem visão global e
-# adiar o filtro por pasta. Com o multi-tenant, as empresas comuns
-# chegam aos ficheiros pela ficha do processo (`/documents/*`), que é
-# outro caminho e mantém o âmbito do processo — não por aqui.
+# Hoje a ponte existe: `processes.s3_folder` → `processes.network_id`, e
+# `services/s3_explorer_scope.py` decide pasta a pasta (ver lá o desenho).
+# A página pode reabrir.
+#
+# TRÊS NÍVEIS, porque as operações não pesam todas o mesmo:
+#   VER        — navegar e descarregar. Todo o staff.
+#   ESCREVER   — carregar ficheiros e criar pastas. Reversível.
+#   DESTRUTIVO — renomear e APAGAR. Irreversível, e apagar uma pasta de
+#                cliente leva com ela o histórico documental inteiro.
+#
+# `parceiro` (conta fantasma) e `cliente` (que tem o Portal) ficam de fora
+# dos três. O isolamento por rede aplica-se a TODOS, incluindo admin/CEO —
+# o que eles têm a mais é ver as pastas órfãs e ambíguas, para reconciliar.
 # ────────────────────────────────────────────────────────────────────
-FILE_OPS_ROLES = [UserRole.ADMIN, UserRole.CEO]
-FILE_VIEW_ROLES = [UserRole.ADMIN, UserRole.CEO]
+FILE_VIEW_ROLES = [
+    UserRole.ADMIN,
+    UserRole.CEO,
+    UserRole.DIRETOR,
+    UserRole.ADMINISTRATIVO,
+    UserRole.CONSULTOR,
+    UserRole.INTERMEDIARIO,
+    UserRole.INDEXACAO,
+]
+
+FILE_WRITE_ROLES = list(FILE_VIEW_ROLES)
+
+FILE_OPS_ROLES = [
+    UserRole.ADMIN,
+    UserRole.CEO,
+    UserRole.DIRETOR,
+    UserRole.ADMINISTRATIVO,
+]
 
 
 class S3RenameRequest(BaseModel):
@@ -71,7 +100,7 @@ def _resolve_explorer_path(path: str) -> str:
     return assert_dentro_da_raiz(path)
 
 
-async def run_get_s3_folder_contents(folder_path: str, user: dict):
+async def run_get_s3_folder_contents(folder_path: str, user: dict, request=None):
     """Lista conteúdo de uma pasta S3. Se folder_path vazio, lista a raiz do bucket (Documentação Clientes/)."""
     from services.s3_storage import s3_service
 
@@ -80,6 +109,12 @@ async def run_get_s3_folder_contents(folder_path: str, user: dict):
 
     # Se folder_path vazio, usar a pasta principal "Documentação Clientes/" como raiz
     prefix = _resolve_explorer_path(folder_path.strip())
+
+    # A PAREDE (Épico 10, Passo 3). Duas coisas distintas:
+    #   1. entrar numa pasta de outra rede → 404, como se não existisse;
+    #   2. listar a raiz → devolve só o que é da rede de quem pede.
+    scope, papel = await ambito_do_utilizador(request, user)
+    await assert_pasta_no_ambito(prefix, scope, role=papel)
 
     try:
         list_prefix = prefix if prefix.endswith("/") else f"{prefix}/"
@@ -143,6 +178,10 @@ async def run_get_s3_folder_contents(folder_path: str, user: dict):
                 )
                 break
 
+        # O filtro é uma leitura EM LOTE para a página inteira — nunca uma
+        # query por pasta. É aqui que o desenho compra a performance.
+        subfolders = await filtrar_subpastas(subfolders, scope, role=papel)
+
         return {
             "folder_path": folder_path,
             "subfolders": subfolders,
@@ -155,7 +194,7 @@ async def run_get_s3_folder_contents(folder_path: str, user: dict):
         raise HTTPException(status_code=500, detail=f"Erro ao listar pasta: {str(e)}")
 
 
-async def run_s3_rename(data: S3RenameRequest, user: dict):
+async def run_s3_rename(data: S3RenameRequest, user: dict, request=None):
     """Renomeia um ficheiro ou pasta no S3 (copy + delete)."""
     from services.s3_storage import s3_service
 
@@ -168,6 +207,9 @@ async def run_s3_rename(data: S3RenameRequest, user: dict):
     # Recebia a chave CRUA: `old_path="backups/"` movia os backups da base
     # de dados. Contido antes de tocar no S3.
     old_path = _resolve_explorer_path(data.old_path)
+
+    scope, papel = await ambito_do_utilizador(request, user)
+    await assert_pasta_no_ambito(old_path, scope, role=papel)
     new_name = data.new_name.strip()
     if "/" in new_name:
         # O novo nome é um SEGMENTO, não um caminho: senão renomear era
@@ -185,35 +227,64 @@ async def run_s3_rename(data: S3RenameRequest, user: dict):
             old_prefix = old_path.rstrip("/") + "/"
             new_prefix = new_path.rstrip("/") + "/"
 
-            # List all objects under the old prefix
-            response = s3_service.s3_client.list_objects_v2(
-                Bucket=s3_service.bucket_name,
-                Prefix=old_prefix
-            )
-
+            # PAGINAÇÃO: uma só chamada movia no máximo 1000 objectos E
+            # apagava-os, deixando o resto da pasta para trás sem que
+            # ninguém desse por isso. O `delete` já paginava; o `rename`,
+            # que é o que gera as ligações partidas, não.
             moved_count = 0
-            for obj in response.get("Contents", []):
-                old_key = obj["Key"]
-                # Replace old prefix with new prefix
-                new_key = new_prefix + old_key[len(old_prefix):]
+            continuation_token = None
 
-                # Copy to new location
-                copy_source = {'Bucket': s3_service.bucket_name, 'Key': old_key}
-                s3_service.s3_client.copy_object(
-                    CopySource=copy_source,
-                    Bucket=s3_service.bucket_name,
-                    Key=new_key
-                )
+            while True:
+                kwargs = {"Bucket": s3_service.bucket_name, "Prefix": old_prefix}
+                if continuation_token:
+                    kwargs["ContinuationToken"] = continuation_token
+                response = s3_service.s3_client.list_objects_v2(**kwargs)
 
-                # Delete from old location
-                s3_service.s3_client.delete_object(
-                    Bucket=s3_service.bucket_name,
-                    Key=old_key
-                )
-                moved_count += 1
+                for obj in response.get("Contents", []):
+                    old_key = obj["Key"]
+                    # Replace old prefix with new prefix
+                    new_key = new_prefix + old_key[len(old_prefix):]
+
+                    # Copy to new location
+                    copy_source = {'Bucket': s3_service.bucket_name, 'Key': old_key}
+                    s3_service.s3_client.copy_object(
+                        CopySource=copy_source,
+                        Bucket=s3_service.bucket_name,
+                        Key=new_key
+                    )
+
+                    # Delete from old location
+                    s3_service.s3_client.delete_object(
+                        Bucket=s3_service.bucket_name,
+                        Key=old_key
+                    )
+                    moved_count += 1
+
+                if not response.get("IsTruncated"):
+                    break
+                continuation_token = response.get("NextContinuationToken")
+                if not continuation_token:
+                    logger.warning(
+                        "[S3-EXPLORER] Rename truncado sem cursor em '%s' — "
+                        "%d objecto(s) movidos, o resto ficou por mover.",
+                        old_prefix, moved_count,
+                    )
+                    break
+
+            # PASSO 4 — mover a chave sem mover o mapeamento era apagar a
+            # pasta do mundo: com o isolamento, um `s3_folder` a apontar
+            # para o nome antigo torna-a órfã e invisível. Nunca bloqueia:
+            # os objectos já se moveram.
+            religacao = await religar_apos_rename(old_path, new_path)
 
             logger.info(f"Pasta renomeada: {old_path} -> {new_path} ({moved_count} objetos movidos)")
-            return {"success": True, "old_path": old_path, "new_path": new_path, "objects_moved": moved_count}
+            return {
+                "success": True,
+                "old_path": old_path,
+                "new_path": new_path,
+                "objects_moved": moved_count,
+                "relink": religacao,
+            }
 
         except Exception as e:
             logger.error(f"Erro ao renomear pasta S3: {e}")
@@ -222,12 +293,21 @@ async def run_s3_rename(data: S3RenameRequest, user: dict):
         # Rename a single file
         success = s3_service.rename_file(old_path, new_path)
         if success:
-            return {"success": True, "old_path": old_path, "new_path": new_path}
+            # Um ficheiro solto também consta do `document_metadata` e dos
+            # pedidos do Portal — renomeá-lo sem reapontar fazia-o
+            # desaparecer do separador Documentos da ficha.
+            religacao = await religar_apos_rename(old_path, new_path)
+            return {
+                "success": True,
+                "old_path": old_path,
+                "new_path": new_path,
+                "relink": religacao,
+            }
         else:
             raise HTTPException(status_code=500, detail="Erro ao renomear ficheiro")
 
 
-async def run_s3_delete(data: S3DeleteRequest, user: dict):
+async def run_s3_delete(data: S3DeleteRequest, user: dict, request=None):
     """Elimina um ficheiro ou pasta (e todo o seu conteúdo) do S3."""
     from services.s3_storage import s3_service
 
@@ -240,6 +320,9 @@ async def run_s3_delete(data: S3DeleteRequest, user: dict):
     # Recebia a chave CRUA: `path="backups/"` + `is_folder=True` apagava
     # todos os backups da base de dados, sem `../` nenhum.
     path = _resolve_explorer_path(data.path)
+
+    scope, papel = await ambito_do_utilizador(request, user)
+    await assert_pasta_no_ambito(path, scope, role=papel)
 
     if data.is_folder:
         try:
@@ -286,7 +369,7 @@ async def run_s3_delete(data: S3DeleteRequest, user: dict):
             raise HTTPException(status_code=500, detail="Erro ao eliminar ficheiro")
 
 
-async def run_s3_create_folder(data: S3CreateFolderRequest, user: dict):
+async def run_s3_create_folder(data: S3CreateFolderRequest, user: dict, request=None):
     """Cria uma pasta no S3 (cria um ficheiro marcador .keep vazio).
 
     O caminho é resolvido relativamente ao base path do explorador
@@ -305,6 +388,9 @@ async def run_s3_create_folder(data: S3CreateFolderRequest, user: dict):
 
     # Resolver caminho relativo ao base path do explorador
     folder_path = _resolve_explorer_path(folder_path)
+
+    scope, papel = await ambito_do_utilizador(request, user)
+    await assert_pasta_no_ambito(folder_path, scope, role=papel)
 
     # Ensure path ends with /
     if not folder_path.endswith("/"):
@@ -327,7 +413,7 @@ async def run_s3_create_folder(data: S3CreateFolderRequest, user: dict):
         raise HTTPException(status_code=500, detail=f"Erro ao criar pasta: {str(e)}")
 
 
-async def run_s3_upload(file: UploadFile, folder_path: str, user: dict):
+async def run_s3_upload(file: UploadFile, folder_path: str, user: dict, request=None):
     """Faz upload de um ficheiro para uma pasta S3 (usado pelo File Explorer).
 
     O caminho é resolvido relativamente ao base path do explorador
@@ -345,6 +431,9 @@ async def run_s3_upload(file: UploadFile, folder_path: str, user: dict):
 
     # Resolver caminho relativo ao base path do explorador
     base_path = _resolve_explorer_path(folder_path.strip())
+
+    scope, papel = await ambito_do_utilizador(request, user)
+    await assert_pasta_no_ambito(base_path, scope, role=papel)
     if not base_path.endswith("/"):
         base_path += "/"
 
@@ -374,7 +463,7 @@ async def run_s3_upload(file: UploadFile, folder_path: str, user: dict):
         raise HTTPException(status_code=500, detail=f"Erro ao enviar ficheiro: {str(e)}")
 
 
-async def run_s3_download(path: str, user: dict):
+async def run_s3_download(path: str, user: dict, request=None):
     """Faz download de um ficheiro do S3 (streaming response)."""
     from services.s3_storage import s3_service
 
@@ -387,6 +476,9 @@ async def run_s3_download(path: str, user: dict):
     # Recebia a chave CRUA e fazia `get_object`: `backups/dump.gz` devolvia
     # a base de dados inteira em streaming.
     path = _resolve_explorer_path(path)
+
+    scope, papel = await ambito_do_utilizador(request, user)
+    await assert_pasta_no_ambito(path, scope, role=papel)
 
     try:
         response = s3_service.s3_client.get_object(

@@ -318,10 +318,12 @@ const DashboardLayout = ({ children, title }) => {
         },
         // PACOTE BU — Menu temporariamente oculto:
         // { label: "Minutas", icon: FileArchive, href: "/minutas" },
-        // Explorador global do bucket: só a gestão de topo (ver a rota
-        // em App.js). Um item de menu que leva a um redireccionamento é
-        // o produto a contradizer-se — ver `App.rotasMenu.test.js`.
-        ...(["admin", "ceo"].includes(userRole)
+        // Explorador do bucket, reaberto ao staff no Épico 10 com
+        // isolamento por rede decidido no servidor. Esta lista TEM de
+        // casar com as `allowedRoles` da rota em App.js: um item de menu
+        // que leva a um redireccionamento é o produto a contradizer-se
+        // — ver `App.rotasMenu.test.js`.
+        ...(["admin", "ceo", "diretor", "administrativo", "consultor", "intermediario", "indexacao"].includes(userRole)
           ? [{
               label: "Ficheiros",
               icon: Database,
