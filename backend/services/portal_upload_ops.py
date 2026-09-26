@@ -14,12 +14,115 @@ from fastapi import HTTPException
 
 from database import db
 from services.s3_storage import s3_service
+from services.document_process_resolve import (
+    assert_path_within_document_root,
+    assert_s3_file_belongs_to_process,
+)
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.portal_onboarding_advance import _trigger_onboarding_check
 from services.notification_service import send_notification_with_preference_check
 from services.redis_cache import invalidate_stats_cache
 
 logger = logging.getLogger(__name__)
+
+
+# ====================================================================
+# INCIDENTE P0 (Set 2026) — o `file_key` do cliente NÃO é de confiança
+# ====================================================================
+# O `confirm-upload` recebia o `file_key` do CORPO do pedido e validava-o
+# apenas com `s3_service.file_exists()`. Um cliente autenticado no Portal
+# pedia `backups/dump-2026-09-01.zip` e recebia de volta um URL pré-assinado
+# para o descarregar — mais um registo em `db.documents` que passava a
+# autorizar a mesma chave no `/portal/download-url` para sempre.
+#
+# As duas guardas que impedem isto existem desde o Épico 9
+# (`document_process_resolve`), mas estavam ligadas só aos endpoints do CRM.
+# O Portal — a ÚNICA superfície exposta a utilizadores externos — ficou de
+# fora. Cada camada validava; a combinação não.
+#
+# NÃO se acrescenta aqui uma terceira verificação (ex.: rejeitar `..`): as
+# chaves S3 são opacas, o `..` não é normalizado pelo serviço e a assinatura
+# pré-assinada fica presa à chave EXACTA — uma guarda que não previne nada
+# é um placebo, e este projecto já pagou por um
+# (`build_company_scope_condition`).
+
+
+def _dono_do_prefixo_s3(
+    process: Optional[dict], client: Optional[dict]
+) -> Optional[dict]:
+    """Documento de onde sai o prefixo S3 autorizado para este cliente.
+
+    O Portal tem DOIS fluxos e ambos têm de ser cobertos:
+      * com processo — a pasta é a do processo (é a que o `upload-url` usa);
+      * sem processo (onboarding) — a pasta é a do cliente.
+
+    Devolve o dicionário na forma que as guardas partilhadas entendem
+    (`s3_folder` / `client_name`); no cliente o nome vive em `nome`.
+
+    Devolve `None` quando NADA identifica um dono — e aí o chamador recusa.
+    Sem dono não há como provar posse, e o degradado de
+    `assert_s3_file_belongs_to_process` com nome vazio aceitaria toda a raiz
+    de documentos: o que num ecrã do CRM é um incómodo, aqui era a fuga.
+    """
+    # O processo vem primeiro de propósito: é a pasta que o `upload-url`
+    # escolhe quando há processo, e as duas podem divergir.
+    for candidato in (process, client):
+        if not candidato:
+            continue
+        s3_folder = candidato.get("s3_folder")
+        nome = candidato.get("client_name") or candidato.get("nome") or ""
+        if s3_folder or nome.strip():
+            return {"s3_folder": s3_folder, "client_name": nome}
+    return None
+
+
+def assert_portal_file_key_e_do_cliente(
+    file_key: str,
+    *,
+    process: Optional[dict],
+    client: Optional[dict],
+) -> None:
+    """Recusa (403) qualquer chave S3 que não esteja na pasta deste cliente.
+
+    São duas guardas, não uma, e NENHUMA das duas é redundante — mas o
+    motivo da primeira não é o óbvio, e só uma mutação o mostrou:
+
+      1. `assert_s3_file_belongs_to_process` tira do alcance a pasta do
+         cliente do vizinho (e da outra REDE), que começa pela mesma raiz.
+         Como os prefixos que ela deriva começam sempre por
+         `Documentação Clientes/`, ela já implica a raiz — e é por isso que
+         apagar a guarda (2) não matava, à primeira, nenhum teste.
+      2. `assert_path_within_document_root` é a defesa contra um prefixo de
+         dono ENVENENADO: se o `s3_folder` gravado no processo apontar para
+         fora da árvore de documentos (ex.: `backups`), a guarda (1) autoriza
+         alegremente tudo o que estiver lá, porque do ponto de vista dela
+         aquela É a pasta do cliente. O cliente não consegue escrever
+         `s3_folder` (campo protegido no PUT /portal/me), mas a equipa e o
+         `ensure_client_folder_mapping` conseguem — e um valor mau grava-se
+         uma vez e vale para sempre.
+
+    A ordem é essa de propósito: a raiz primeiro, porque é a que não confia
+    no prefixo do dono.
+
+    Raises:
+        HTTPException(403): chave fora do âmbito, ou dono indeterminável.
+    """
+    from services.document_constants import ERROR_FILE_ACCESS_DENIED
+
+    assert_path_within_document_root(file_key)
+
+    dono = _dono_do_prefixo_s3(process, client)
+    if dono is None:
+        logger.warning(
+            "[PORTAL][SECURITY] Sem pasta S3 nem nome para provar posse de "
+            "%s (processo=%s, cliente=%s) — recusado.",
+            file_key,
+            (process or {}).get("id"),
+            (client or {}).get("id"),
+        )
+        raise HTTPException(status_code=403, detail=ERROR_FILE_ACCESS_DENIED)
+
+    assert_s3_file_belongs_to_process(file_key, dono)
 
 
 async def _create_document_record(
@@ -326,6 +429,14 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
     if not client_id and not process_id:
         raise HTTPException(status_code=400, detail="Sem cliente/processo associado")
 
+    # INCIDENTE P0 — a posse da chave é verificada ANTES de tudo o resto:
+    # antes de sondar o S3 (não se confirma a existência de uma chave que
+    # vamos recusar — isso sozinho é um oráculo que diz o que há no bucket) e,
+    # sobretudo, antes de QUALQUER escrita. Uma recusa que deixasse o registo
+    # em `db.documents` não seria recusa nenhuma: é o registo que faz o
+    # `/portal/download-url` autorizar a chave daí para a frente.
+    assert_portal_file_key_e_do_cliente(file_key, process=process, client=client)
+
     if not s3_service.file_exists(file_key):
         raise HTTPException(
             status_code=400,
@@ -489,7 +600,13 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
 
         await _notify_assigned_team_upload(process, original_filename, category)
 
-    temporary_url = s3_service.get_presigned_url(file_key) or ""
+    # INCIDENTE P0 — o `temporary_url` SAIU da resposta de propósito.
+    # Era ele a carga útil do ataque: um URL pré-assinado de leitura devolvido
+    # no mesmo pedido que nomeava a chave. E não serve a ninguém — o cliente
+    # acabou de enviar o ficheiro, já o tem; o `ClientPortal.jsx` lê apenas
+    # `success` e nunca tocou neste campo. Sem ele, mesmo que uma guarda
+    # regrida um dia, deixa de haver fuga de conteúdo no mesmo pedido: o
+    # atacante teria de passar TAMBÉM pelo `/portal/download-url`.
 
     # Gatilho onboarding (criar processo se checklist completa)
     try:
@@ -527,7 +644,6 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
         "filename": original_filename,
         "category": category,
         "s3_path": file_key,
-        "temporary_url": temporary_url,
         "ai_categorization": ai_categorization_info,
         "process_id": process_id,
         "client_id": client_id,
@@ -565,6 +681,17 @@ async def run_get_portal_download_url(file_key: str, client_data: dict):
         )
 
     process_id = process["id"]
+
+    # INCIDENTE P0 — a mesma guarda AQUI, e não por excesso de zelo.
+    # Este endpoint autoriza pela EXISTÊNCIA de um registo em `db.documents`
+    # com este `s3_path` e este `process_id`. Durante a janela em que o
+    # `confirm-upload` aceitava chaves arbitrárias, qualquer exploração deixou
+    # exactamente esse registo — logo fechar só a escrita não fecha o que já
+    # foi escrito. Com a guarda no caminho da LEITURA, os registos herdados
+    # dessa janela deixam de ser servidos sem ser preciso limpar a colecção.
+    assert_portal_file_key_e_do_cliente(
+        file_key, process=process, client=client_data.get("client")
+    )
 
     # Verificar se o documento existe na BD e pertence a este processo
     doc = await db.documents.find_one(

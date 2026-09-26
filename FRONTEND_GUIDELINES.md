@@ -169,6 +169,15 @@ O Portal do Cliente **nunca** substitui ficheiros previamente carregados pelo cl
 - **Frontend**: o input de ficheiro tem `multiple={true}` e está **sempre visível** (o botão não se esconde após o primeiro upload — muda o label para "➕ Adicionar ficheiros"). A lista de ficheiros anexados é mostrada numa `ScrollArea` com `Badge`s (filename + tamanho + botão de download por ficheiro).
 - **Presigned URLs**: o upload usa o padrão presigned S3 (client → S3 direto, backend nunca recebe bytes). **Não** usar `List[UploadFile]` — seria uma regressão arquitetural.
 
+### O `file_key` do upload é do SERVIDOR, e a resposta do `confirm-upload` não traz URL (Incidente P0, Set 2026)
+
+O upload do Portal é presigned (client → S3 directo) e **isso mantém-se**, mas o contrato mudou em dois pontos que o frontend tem de respeitar:
+
+- **O `file_key` a enviar no `confirm-upload` é, sem excepção, o que veio no `upload-url`.** O `confirm-upload` valida-o agora contra o prefixo S3 do processo/cliente e devolve **403** a qualquer outro. Não construir, derivar, concatenar nem "corrigir" a chave no cliente — um `file_key` calculado no browser é indistinguível de um ataque e vai ser recusado. O `ClientPortal.jsx` já faz o correcto (`const { upload_url, file_key } = await urlRes.json()` e devolve esse `file_key` tal e qual).
+- **A resposta do `confirm-upload` já não traz `temporary_url`.** Era um URL pré-assinado de *leitura* devolvido no mesmo pedido que nomeava a chave — a carga útil de uma vulnerabilidade de path traversal. O campo nunca foi lido pelo Portal (o `doUpload` devolve só `{ success, filename }`), pelo que nada quebrou; **não o reintroduzir**. Se um ecrã precisar de mostrar o ficheiro logo após o upload, o caminho é `GET /portal/download-url?file_key=…`, que verifica a posse antes de assinar.
+
+Os três endpoints do Portal passaram também a ter limite de pedidos (`20/minute` nos de upload, `60/minute` no download). Um lote grande de ficheiros pode por isso apanhar **429** — o tratamento de erro do upload tem de mostrar o `detail` da resposta em vez de assumir falha de rede, e nunca fazer *retry* imediato em ciclo (é o comportamento que o limite existe para travar). Detalhes e diagnóstico completo em `ARCHITECTURE.md` → "Incidente P0 — o `file_key` do Portal do Cliente não era de confiança".
+
 ### Documentos legais gerados — sempre pré-preenchidos do backend
 
 Documentos legais gerados pelo sistema (RGPD, Minuta, CPCV) **devem** vir pré-preenchidos com os dados reais do cliente/processo quando o staff os descarrega para assinatura manual. O backend é a única fonte de verdade para os dados — o frontend não pré-preenche nada.

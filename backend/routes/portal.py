@@ -13,6 +13,8 @@ from typing import Optional
 from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks, Request, Query
 from fastapi.responses import JSONResponse
 
+from middleware.rate_limit import limiter
+
 from services.portal_security import get_current_client
 from services.auth import get_current_user, require_staff
 
@@ -113,8 +115,17 @@ async def get_portal_status(client_data: dict = Depends(get_current_client)):
     return await run_get_portal_status(client_data)
 
 
+# INCIDENTE P0 (Set 2026) — estes três endpoints não tinham limite NENHUM.
+# O `/public/client-registration`, ao lado, tem `5/hour`; aqui, a exploração
+# do `confirm-upload` podia ser repetida à vontade para varrer o bucket chave
+# a chave. O `_get_rate_limit_key` do limiter resolve a chave pelo `sub` do
+# JWT — e no Portal o `sub` É o `process_id`, pelo que o limite fica por
+# processo (não por IP partilhado), que é exactamente o âmbito certo.
+# 20/minuto deixa passar um lote de ficheiros do cliente e fecha o varrimento.
 @router.post("/upload-url")
+@limiter.limit("20/minute")
 async def generate_portal_upload_url(
+    request: Request,
     data: dict,
     client_data: dict = Depends(get_current_client),
 ):
@@ -122,7 +133,9 @@ async def generate_portal_upload_url(
 
 
 @router.post("/confirm-upload")
+@limiter.limit("20/minute")
 async def confirm_portal_upload(
+    request: Request,
     data: dict,
     client_data: dict = Depends(get_current_client),
 ):
@@ -130,7 +143,9 @@ async def confirm_portal_upload(
 
 
 @router.get("/download-url")
+@limiter.limit("60/minute")
 async def get_portal_download_url(
+    request: Request,
     file_key: str,
     client_data: dict = Depends(get_current_client),
 ):

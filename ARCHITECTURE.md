@@ -5504,3 +5504,137 @@ O que **não** está lá é deliberado: `$facet` e `$bucket` meio-implementados
 dariam confiança falsa. Os pipelines que os usam são construtores **puros**,
 afirmados pela forma (fronteiras do `$bucket`, facetas presentes, condição de
 rede no primeiro `$match`).
+
+---
+
+## Incidente P0 — o `file_key` do Portal do Cliente não era de confiança (Set 2026)
+
+### O defeito
+
+`POST /portal/confirm-upload` recebia o `file_key` do **corpo do pedido** e
+validava-o com uma única verificação:
+
+```python
+file_key = data.get("file_key")          # ← escolhido pelo cliente
+if not s3_service.file_exists(file_key):
+    raise HTTPException(400, "Ficheiro não encontrado…")
+```
+
+Um cliente autenticado no Portal (um titular legítimo, com o seu magic link)
+conseguia, **num único pedido**, nomear qualquer chave do bucket e:
+
+1. receber de volta um URL pré-assinado de leitura (`temporary_url` na
+   resposta) — a fuga e o pedido eram o mesmo;
+2. deixar em `db.documents` um registo com esse `s3_path` ancorado ao **seu**
+   processo, o que fazia o `GET /portal/download-url` (esse, bem guardado)
+   passar a autorizar a mesma chave para sempre.
+
+O bucket é partilhado por prefixos irmãos: os documentos de **todos** os
+clientes de **todas** as redes, os `backups/*.zip` e os `companies/*`. Não
+havia limite de pedidos em nenhum dos três endpoints do Portal — o
+`/public/client-registration`, ao lado, tem `5/hour` desde sempre.
+
+### Porque é que passou
+
+As duas guardas que impedem exactamente isto existem desde o **Épico 9**
+(`services/document_process_resolve.py`), e a docstring de
+`assert_path_within_document_root` descreve o ataque palavra por palavra. Mas
+foram ligadas apenas aos endpoints do **CRM**. O **Portal** — a única
+superfície exposta a utilizadores externos — ficou fora da parede.
+
+**Cada camada validava; a combinação não.** É a mesma forma do placebo do
+Lote 4 (`build_company_scope_condition`): um ponto único que não é usado no
+sítio que mais precisa dele não é um ponto único, é uma biblioteca.
+
+### O fecho
+
+`portal_upload_ops.assert_portal_file_key_e_do_cliente(file_key, process=, client=)`
+é o ponto único do Portal, ligado aos **dois** caminhos:
+
+| Caminho | Porquê |
+|---|---|
+| `run_confirm_portal_upload` (escrita) | fecha a porta |
+| `run_get_portal_download_url` (leitura) | fecha o **resíduo**: qualquer exploração anterior deixou já o registo em `db.documents`, e este endpoint autoriza pela existência dele. Sem a guarda na leitura, fechar a escrita não fecha o que já foi escrito. |
+
+**São duas guardas e nenhuma é redundante — mas o motivo da primeira não é o
+óbvio, e só uma mutação o mostrou.** `assert_s3_file_belongs_to_process`
+deriva prefixos que começam sempre por `Documentação Clientes/`, logo *já
+implica* a raiz: apagar a guarda da raiz não matava, à primeira, nenhum teste.
+O trabalho real dela é outro — é a defesa contra um **prefixo de dono
+envenenado**: se o `s3_folder` do processo apontar para fora da árvore de
+documentos (ex.: `backups`), a guarda de posse autoriza tudo o que estiver lá,
+porque do ponto de vista dela aquela *é* a pasta do cliente. O cliente não
+consegue escrever `s3_folder` (campo protegido no `PUT /portal/me`), mas a
+equipa e o `ensure_client_folder_mapping` conseguem, e um valor mau grava-se
+uma vez e vale para sempre. **A raiz vem primeiro porque é a que não confia no
+prefixo do dono.**
+
+Três decisões que acompanham o fecho:
+
+- **A guarda corre ANTES do `s3_service.file_exists`.** Se corresse depois, o
+  código de resposta passava a depender do conteúdo do bucket (403 para uma
+  chave estranha que existe, 400 para uma que não existe) — um **oráculo de
+  mapeamento**: o atacante perdia a leitura mas mantinha a capacidade de
+  adivinhar nomes de backups e ler a diferença nos códigos.
+- **Sem dono, recusa-se.** `_dono_do_prefixo_s3` devolve `None` quando nem o
+  processo nem o cliente têm `s3_folder` ou nome. O degradado de
+  `assert_s3_file_belongs_to_process` com nome vazio aceita toda a raiz
+  `Documentação Clientes/`: num ecrã do CRM é um incómodo, no Portal era a
+  fuga a entrar pela porta que a devia fechar. O processo tem precedência
+  sobre o cliente porque é a pasta que o `upload-url` escolhe quando há
+  processo, e as duas podem divergir.
+- **O `temporary_url` SAIU da resposta do `confirm-upload`.** Era a carga útil
+  do ataque, e não serve a ninguém: o cliente acabou de enviar o ficheiro, já
+  o tem, e o `ClientPortal.jsx` lê apenas `success`/`detail` — nunca tocou no
+  campo. Sem ele, mesmo que uma guarda regrida um dia, deixa de haver fuga de
+  conteúdo no mesmo pedido; o atacante teria de furar **também** o
+  `/portal/download-url`.
+
+**O que NÃO se acrescentou, e porquê:** rejeitar `..` no `file_key`. As chaves
+S3 são opacas, o serviço não normaliza `..`, e a assinatura pré-assinada fica
+presa à chave exacta — a verificação não previne nada. Uma guarda que não
+previne nada é um placebo, e este projecto já pagou por um.
+
+### Limites de pedidos
+
+Os três endpoints passaram a ter `@limiter.limit` (`20/minute` nos dois de
+upload, `60/minute` no download). O `_get_rate_limit_key` do limiter resolve a
+chave pelo `sub` do JWT — e no Portal o `sub` **é** o `process_id`, pelo que o
+limite fica por **processo** e não por IP partilhado, que é o âmbito certo:
+vários titulares atrás do mesmo NAT não se prejudicam, e um varrimento do
+bucket a partir de uma sessão é travado em ~20 tentativas.
+
+### Cobertura
+
+`backend/tests/unit/test_portal_upload_path_traversal.py` (29 testes). Os de
+`TestAExploracao` são o ataque escrito na linguagem do código de produção —
+ficaram **vermelhos** no código vulnerável (`DID NOT RAISE`, seis vezes) antes
+de ficarem verdes. Ao lado, `TestOUploadLegitimoContinuaAFuncionar` e as
+contraprovas dos guardas impedem a "correcção" que recusa tudo. Nove mutações
+aplicadas; as duas que sobreviveram à primeira ronda (a guarda da raiz e a
+ordem face ao `file_exists`) eram **testes fracos** e não mutantes
+equivalentes, e estão cobertas em `TestAGuardaDaRaizNaoERedundante` e
+`TestAOrdemDaGuardaNaoEDetalhe`.
+
+### Superfície que fica aberta (lotes seguintes, já desenhados)
+
+- **A parede de magic bytes não cobre o Portal.** `services/file_validation.py`
+  é chamado por `routes/documents.py`, `ai_bulk_analyze` e
+  `async_jobs_api_session` — nunca pelo Portal, e não pode ser: com
+  pre-signed PUT os bytes vão do browser para o S3 sem passar pelo backend. O
+  `file_size` e o `content_type` gravados são os **declarados** pelo cliente.
+  Desenho aprovado: validação a posteriori no `confirm-upload` (HEAD +
+  `Range: bytes=0-2047` → `validate_file_content`), com o registo a nascer só
+  depois de passar, e o tamanho/tipo lidos do HEAD e não do cliente.
+- **O namespace dos WebSockets está fechado por coincidência, não por regra.**
+  `verify_websocket_token` decifra com o mesmo `JWT_SECRET`, lê `sub` e nunca
+  verifica a claim `type`; os tokens do Portal declaram `type` mas só o
+  `get_current_client` o verifica. O que hoje os impede de entrar é o `sub`
+  ser um `process_id` que não existe em `db.users`. Decisão tomada: tornar o
+  `type` **autoritativo nos dois lados** antes de abrir o namespace (segredos
+  separados ficam para lote próprio, para não invalidar magic links em
+  trânsito).
+- `services/gov_auth_api_helpers.py:20` —
+  `os.environ.get("GOV_AUTH_JWT_SECRET", "dev-secret-change-in-prod")`: um
+  segredo com valor por omissão em código. O `gov_token` carrega
+  `verified_by_gov: True`.

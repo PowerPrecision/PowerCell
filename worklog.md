@@ -6926,3 +6926,121 @@ Na MESMA janela do índice `{network_id: 1, is_deleted: 1, status: 1}`. Os
 limiares de SLA (`dashboard_slas`: novo 7, análise 15, aprovado 30 dias) estão
 no painel de admin e são por empresa — vale a pena confirmá-los antes de olhar
 para a coluna "acima do limiar".
+
+---
+
+## Iteração hotfix-p0 — Path traversal no `confirm-upload` do Portal do Cliente (Set 2026)
+
+Lote isolado, à frente do resto do Caminho 4, por decisão do dono do produto:
+o raio-x ao Portal encontrou uma vulnerabilidade **viva em produção** e ela
+não devia esperar por uma ronda de desenho.
+
+### Diagnóstico
+
+`POST /portal/confirm-upload` aceitava o `file_key` do corpo do pedido e
+validava-o apenas com `s3_service.file_exists(file_key)`. Um cliente
+autenticado no Portal enviava `file_key: "backups/dump-2026-09-01.zip"` e
+recebia, na resposta HTTP 200, um URL pré-assinado para descarregar o backup
+completo da base de dados — mais um registo em `db.documents` que passava a
+autorizar a mesma chave no `/portal/download-url` daí para a frente. Nenhum
+dos três endpoints do Portal tinha limite de pedidos.
+
+As duas guardas que impedem isto existem desde o Épico 9 e a docstring de
+`assert_path_within_document_root` descreve o ataque palavra por palavra —
+mas estavam ligadas só ao CRM. **O Portal, a única superfície externa, ficou
+fora da parede.**
+
+### O teste que morde, primeiro
+
+`tests/unit/test_portal_upload_path_traversal.py`, escrito **antes** da
+correcção e contra o código vulnerável. Seis caminhos de ataque, seis
+`DID NOT RAISE`:
+
+```
+FAILED TestAExploracao::test_o_backup_da_base_de_dados_e_recusado
+FAILED TestAExploracao::test_nenhum_registo_fica_na_base_de_dados
+FAILED TestAExploracao::test_a_pasta_de_um_cliente_de_outra_rede_e_recusada
+FAILED TestAExploracao::test_o_logotipo_da_empresa_e_recusado
+FAILED TestAExploracao::test_o_fluxo_sem_processo_tambem_esta_fechado
+FAILED TestAExploracao::test_satisfazer_um_pedido_do_checklist_nao_e_porta_de_serviço
+```
+
+E a resposta real que o cliente recebia:
+
+```json
+{ "success": true, "s3_path": "backups/dump-2026-09-01.zip",
+  "temporary_url": "https://…/backups/dump-2026-09-01.zip?X-Amz-Signature=…",
+  "process_id": "proc-1" }
+```
+
+Os dois ramos do código estão cobertos de propósito: o do documento novo **e**
+o do `document_id` (satisfazer um pedido do checklist), que é o caminho que o
+Portal usa mais — uma guarda só no primeiro deixava o segundo aberto.
+
+### O fecho
+
+- `assert_portal_file_key_e_do_cliente` — ponto único do Portal, reutiliza as
+  **duas** guardas do Épico 9 e acrescenta a precondição de que exista um dono
+  (sem `s3_folder` nem nome, recusa: o degradado da guarda partilhada
+  aceitaria toda a raiz de documentos).
+- Ligada aos **dois** caminhos: escrita (`confirm-upload`) e leitura
+  (`download-url`). A leitura não é zelo a mais — é o que neutraliza os
+  registos que qualquer exploração anterior já deixou na colecção.
+- A guarda corre **antes** do `file_exists`, para o código de resposta não se
+  tornar um oráculo do conteúdo do bucket.
+- `temporary_url` **fora** da resposta do `confirm-upload` (o
+  `ClientPortal.jsx` nunca o leu; era só a carga útil do ataque).
+- `@limiter.limit` nos três endpoints. O `sub` do JWT do Portal é o
+  `process_id`, logo o limite é por processo — o âmbito certo.
+
+### Prova ponta a ponta, contra o servidor a correr
+
+Com um magic token real (`role: client_portal`) e o backend em `:8001`:
+
+```
+POST /api/portal/confirm-upload  {"file_key":"backups/dump-2026-09-01.zip"}      → 403
+POST /api/portal/confirm-upload  {"file_key":"…/Cliente Da Domus/Index/irs.pdf"} → 403
+POST /api/portal/confirm-upload  {"file_key":"…/Ana Legitima/Index/recibo.pdf"}  → 400
+25 tentativas seguidas → 403×17, 429×8
+```
+
+O **400** na chave legítima é o detalhe que importa: significa que a guarda a
+deixou passar e o pedido só falhou na sondagem ao S3 (desligado em dev). As
+chaves estranhas dão o **mesmo 403** exista o objecto ou não — sem oráculo.
+
+### Erros meus, apanhados por mutação
+
+Nove mutações. Duas sobreviveram à primeira ronda e **nenhuma era mutante
+equivalente** — eram testes fracos meus:
+
+1. **Apagar `assert_path_within_document_root` não matava nada.** Pareceu
+   redundância (a guarda de posse deriva prefixos que já começam pela raiz).
+   Não é: a guarda da raiz é a defesa contra um `s3_folder` **envenenado** que
+   aponte para fora da árvore de documentos — aí a posse autoriza tudo o que
+   estiver lá, porque do ponto de vista dela é a pasta do cliente. Coberto em
+   `TestAGuardaDaRaizNaoERedundante`, e a docstring da função passou a explicar
+   o motivo certo (o primeiro que escrevi estava errado).
+2. **Mover a guarda para depois do `file_exists` não matava nada.** É o
+   oráculo de mapeamento descrito acima. Coberto em
+   `TestAOrdemDaGuardaNaoEDetalhe`, nos dois sentidos (403 para a chave
+   estranha inexistente, 400 para a legítima inexistente).
+
+Também tropecei na regra de ordem de imports do AGENTS.md: o ramo do
+`document_id` passa por `document_portal_counts`, que faz
+`from database import db` no topo e não estava na cadeia de `patch` — o teste
+rebentava com `Event loop is closed`, verde ou vermelho conforme a ordem de
+recolha do pytest.
+
+### Estado
+
+- `tests/unit`: **3730 passed, 5 skipped** (0 regressões; 3701 antes + 29).
+- `flake8` nos selectores bloqueantes do CI (`E9,F63,F7,F82`) sobre
+  `services/`, `routes/` e `tests/unit/`: **0**.
+- App arranca, os três endpoints registam, OpenAPI gera (631 caminhos).
+
+### Continua aberto (desenho já aprovado, lote seguinte)
+
+Quarentena de magic bytes no `confirm-upload` (HEAD + `Range: bytes=0-2047`,
+registo só depois de validar, tamanho/tipo do HEAD e não do cliente) e `type`
+autoritativo nos JWTs antes de abrir o namespace dos WebSockets aos clientes.
+Fica também registado o `GOV_AUTH_JWT_SECRET` com valor por omissão em código.
