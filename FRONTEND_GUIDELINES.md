@@ -1215,3 +1215,40 @@ funil e filtrar a lista.
 testes.** `workflowEditorMacroFase.test.js` compara o `<Select>` com o
 `MACRO_FASES` do funil; do lado do Python, `test_macro_fase.py` lê os dois
 ficheiros JS e compara-os com o enum. Mexer numa obriga a mexer nas outras.
+
+## 37. Páginas de BI: quem agrega é o servidor (Dashboard, Set 2026)
+
+**37.1 — Uma página de estatísticas não puxa a colecção para contar.** O
+`StatisticsPage` faz `getProcesses()` sem filtro e conta em JavaScript. Com
+12.450 processos em produção, isso é a base de dados inteira pela rede para
+desenhar um gráfico de barras — e o risco de desempenho do BI não está no
+Mongo, está aqui. Contagens, médias e distribuições vêm de um endpoint que
+as calcula numa agregação; a página recebe números, não registos.
+
+**37.2 — Nunca agrupar pelo valor CRU de `status`.** Estas três linhas ainda
+estão no `StatisticsPage`:
+
+```javascript
+filteredProcesses.filter(p => !['concluidos', 'desistencias'].includes(p.status))
+filteredProcesses.filter(p => p.status === 'concluidos')
+acc[p.status] = (acc[p.status] || 0) + 1        // agrupa pelo valor cru
+```
+
+São listas cravadas de nomes de fases — exactamente o que o Épico 10 implodiu
+no backend — e o agrupamento pelo valor cru faz com que os 205 processos em
+`cpcv`/`escriturado` e as 12 gralhas `"Concluidos "` apareçam como barras
+próprias. O quadro resolve-os para a coluna certa e o gráfico não: **duas
+verdades sobre os mesmos dados no mesmo produto**. Quem agrupa é
+`grupoDoEstado`/`agruparEmFunil` (`utils/funilDeFases.js`), com as fases do
+motor, ou o endpoint de funil quando ele existir.
+
+A guarda de listas cravadas do Épico 10 varre `backend/services/` e por isso
+não apanhou isto. Está registado para o lote do funil.
+
+**37.3 — Um número estimado tem de se ver que é estimado.** O relógio de
+fases só começa a contar no dia em que o carimbo entrar; os processos
+anteriores levam uma estimativa marcada com `fase_desde_estimado`. Um gráfico
+que misture medido com estimado sem o dizer é pior do que um gráfico vazio —
+a resposta do servidor traz as duas amostras separadas e a UI tem de as
+distinguir (nota de rodapé, cor diferente, o que for), nunca somá-las em
+silêncio.

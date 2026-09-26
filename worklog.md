@@ -6571,3 +6571,171 @@ gente.
 `python -m scripts.limpar_is_notified` (conta) e depois `--aplicar`. A
 presença entra sozinha no arranque seguinte; se `REDIS_URL` não estiver
 definido, tudo continua a funcionar pela memória local, como hoje.
+
+# Iteração — o relógio de fases medido e o BI isolado (Dashboard, Passo Zero + Ponto 1)
+
+## O que o raio-x encontrou antes de eu escrever código
+
+**Não existe relógio.** Nenhum processo sabe quando entrou na fase em que
+está. O `stats_branches` calculava "tempo médio de fecho" como
+`updated_at - created_at` — que é o tempo entre a criação e o último toque em
+**qualquer** campo. Um documento carregado hoje num processo escriturado há um
+ano acrescentava 365 dias ao tempo médio daquele balcão. O número era
+plausível, e é isso que o torna pior do que um erro visível.
+
+**O `history` não pode ser a fonte dos SLAs, e não é um defeito.** Inventariei
+os seis caminhos que escrevem `status`: dois são filtrados por stealth, o
+`process_indexing` silencia-se quando é a Indexação a avançar, o
+`portal_onboarding_advance` grava com `track_history: False` e o
+`workflow_engine.change_status` não escreve nada. Metade das transições é
+invisível **porque a regra de ouro do perfil `indexacao` assim manda**. Um SLA
+medido sobre o histórico ficava enviesado a favor de quem tem de ser invisível.
+Daí o desenho aprovado: o relógio é estado do processo, sem ator — funciona
+exactamente onde o rasto não pode existir.
+
+**Zero filtro de rede em todas as estatísticas.** `grep tenant\|network_id` nos
+seis módulos e no `analytics_service`: zero ocorrências. O pior não é uma
+contagem — o `stats_communications` devolvia a admin/ceo/administrativo/diretor
+os primeiros 150 caracteres do que os clientes escreveram no Portal e os
+assuntos dos emails não lidos, de todas as redes.
+
+## Passo Zero — `medir_relogio_de_fases`
+
+Leitura crua, sem `--aplicar`, sem `env_guard` (corre contra produção de
+propósito). Responde a cinco perguntas: processos por macro-fase **resolvidos
+pelo motor**, cobertura do relógio, distribuição de permanência nas bandas que
+o `$bucket` vai usar, onde é que o `updated_at` mente e **em que sentido**, e
+que carimbo de rede existe.
+
+Duas decisões de desenho que me interessam:
+
+- **A macro-fase vem do resolvedor, não do valor cru.** Os 205 processos em
+  `cpcv`/`escriturado` e as 12 gralhas contam na macro certa, como já contam no
+  quadro. Agrupar por `status` numa agregação era mais rápido e dava duas
+  verdades sobre os mesmos 217 processos.
+- **`agora` é injectado.** Uma medição que dependa do relógio da máquina não se
+  afirma num teste, e há uma guarda sobre o código-fonte a proibir
+  `datetime.now` no módulo.
+
+## Ponto 1 — a blindagem
+
+`services/stats_scope.py` é o ponto único: `resolver_ambito`, `com_ambito`,
+`ambito.chave(...)` e `processos_no_ambito`. Ligado aos cinco endpoints, às
+contagens de utilizadores (pelo `admin_users_scope` que já existia) e ao
+relatório de Desempenho da Equipa.
+
+**A cache era metade do problema.** `stats:branches:v2` e
+`stats:global:conversion` eram chaves globais: com o filtro posto, o primeiro
+pedido semeava a cache para todos. Um filtro sobre uma cache partilhada é
+teatro. As chaves por utilizador já eram seguras por construção.
+
+**O sentido barato.** `processos_no_ambito` parte da colecção **pequena** (via
+`distinct` sobre prazos abertos e mensagens não lidas) e verifica esses poucos
+ids contra a rede. O contrário — trazer os processos da rede para um `$in` —
+funcionava hoje com 12.450 e morria à primeira multiplicação de volume.
+
+**As leads passam a ser carimbadas nos DOIS sítios de escrita**, com guarda de
+código-fonte: um carimbo parcial é pior do que nenhum, porque a metade sem
+marca fica visível ao grupo incumbente para sempre.
+
+## Duas mudanças de significado que assumo
+
+1. O cartão de prazos da Direção somava os lembretes **pessoais** de todos os
+   utilizadores de todas as redes. Passa a contar os prazos dos processos da
+   rede mais os pessoais do próprio — a regra que o ramo dos consultores já
+   aplicava.
+2. Um email **sem processo** deixa de aparecer no feed aos papéis
+   privilegiados. `db.emails` não é carimbada (oito sítios de escrita mais o
+   sync IMAP/Gmail) e um email que não se consegue atribuir a uma rede não se
+   pode mostrar a uma.
+
+## Erros meus
+
+- **Dois sobreviventes de mutação eram lacunas reais, não mutantes
+  equivalentes.** (a) `tocado == criado` contra `tocado <= criado`: uma data
+  invertida — dado corrompido, já contado em `datas_invalidas` — era somada
+  também em `nunca_tocado`, inflacionando o número pelo qual se decide se a
+  estimativa serve. (b) A janela de `tocado_apos_fecho` tinha o limite
+  **superior** por testar: um processo terminal tocado há 200 dias tem no
+  `updated_at` uma data de entrada plausível e não devia ser marcado como
+  suspeito. Os dois têm agora teste.
+- **Um terceiro sobrevivente é mutante equivalente, e verifiquei-o em vez de o
+  assumir:** `if valor is None or valor == ""` contra `if valor is None` — o
+  `fromisoformat("")` levanta de qualquer maneira e o ramo de excepção devolve
+  `None` igualmente. Nenhum teste o pode matar. Escrevi no código que aquele
+  `if` é **atalho** e não guarda de correcção, que é o que faltava para um
+  leitor seguinte não se enganar.
+- **Dois erros meus nos próprios testes.** Comparei `chaves_domus[0]` com
+  `chaves_power[0]` quando as duas variáveis apontavam para a **mesma lista**
+  acumulada pela fixture — a asserção era trivialmente falsa e foi o teste a
+  denunciá-la. E patchei um `cache_get` em `stats_communications`, que não tem
+  cache nenhuma; o `AttributeError` é informação.
+- **O inventário de módulos de estatísticas apanhou-me.** O
+  `test_stats_modules_exist` ficou vermelho com o `stats_scope.py` novo — a
+  guarda a fazer o seu trabalho. Actualizei a lista com a razão escrita ao
+  lado, em vez de a relaxar.
+- **O cenário de tenant estava a caminho de ser duplicado.** Extraí-o para
+  `tests/unit/helpers_tenant.py` e apontei o ficheiro do Lote 4 para lá: duas
+  cópias divergem na primeira empresa que alguém acrescente a uma delas.
+- **Quase estraguei a invalidação da cache ao corrigi-la.** Pôr o sufixo do
+  âmbito nas chaves globais fez o `invalidate_stats_cache` deixar de acertar em
+  nenhuma delas — apagava por NOME EXACTO, e o nome exacto passou a não
+  existir. A invalidação cirúrgica ficava silenciosamente sem efeito e as
+  estatísticas ficavam 24h desactualizadas depois de cada mutação. Apanhei-o a
+  reler o meu próprio diff, não num teste. Passou a apagar por PADRÃO, com
+  testes nos dois sentidos (apanha as chaves com sufixo, **não** apanha as de
+  utilizador — o padrão errado deitava fora a cache de toda a gente).
+- **Mais dois testes fracos meus, apanhados por mutação.** (a) A contagem de
+  prazos não tinha teste NENHUM: o mutante que trocava
+  `processos_no_ambito(ids, ambito)` por `ids` passava porque nunca semeei
+  prazos. (b) Escrevi um teste da chave de cache que comparava a chave do Bruno
+  com a da Ana — utilizadores diferentes já tinham chaves diferentes **sem
+  sufixo nenhum**, portanto a asserção era verdadeira também no código antigo.
+  Reescrito para o que interessa: o MESMO utilizador, dois âmbitos, depois de
+  lhe mudar a empresa.
+- **Um terceiro sobrevivente era contrato de CUSTO, não de resultado.** Trocar
+  o filtro do `distinct` dos prazos por `{}` não muda a contagem — muda o
+  tamanho do conjunto que vai para o `$in` da verificação de rede. Afirmei-o
+  como contrato de custo, o mesmo género de teste que o "uma chamada para 50
+  utilizadores" da presença global.
+- **Voltei a deixar uma linha sem sentido num teste** (`ss.resolve_tenant_scope`
+  como expressão solta, resíduo de edição). É a segunda vez; removida.
+- **Um teste meu passava isolado e rebentava na bateria completa.** O
+  `admin_users_scope` importa `db` no topo e eu não o tinha na cadeia de
+  patches do helper — o teste do utilizador órfão (que é admin) falava com o
+  proxy real e só dava `Event loop is closed` com a suite toda. É exactamente o
+  defeito de ordem de import que está escrito no `AGENTS.md`, e a cadeia de
+  `db` que cresce a cada lote: acrescentei-a ao helper, que agora recebe os
+  módulos por parâmetro para a próxima não ficar esquecida.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3494 passed, 5 skipped** (baseline 3352).
+- `yarn test` → **1093 passed / 95 ficheiros** (inalterado; não toquei no
+  frontend neste lote).
+- `flake8 --select=E9,F63,F7,F82` sobre `services/ scripts/ tests/ routes/` → 0.
+- Mutação dirigida, em quatro passagens: **21 na medição** (18 + 3 de
+  reforço) e **28 na blindagem** (22 + 6 de reforço). Uma sobreviveu e
+  fica registada como **mutante equivalente**, verificada em vez de assumida:
+  `if valor is None or valor == ""` contra `if valor is None`, porque o
+  `fromisoformat("")` levanta de qualquer maneira. Escrevi no código que aquele
+  `if` é atalho e não guarda de correcção.
+
+## O que fica de fora, e é dito
+
+O email automático de Segunda ao CEO mantém âmbito global — não tem utilizador
+a pedir, e decidir se passa a ser um email **por rede** é decisão de produto.
+Fica um `logger.warning` no caminho e um teste a afirmar que ele sai.
+
+`db.emails` continua sem carimbo de rede (oito sítios de escrita + sync). O
+conteúdo está fechado pelo processo; a contagem de não lidos segue a mesma
+regra. O carimbo próprio pertence ao lote do webmail.
+
+## A fazer em produção
+
+```bash
+python -m scripts.medir_relogio_de_fases --json relogio.json
+```
+
+E o índice `{network_id: 1, is_deleted: 1, status: 1}` em `processes` deixou de
+ser opcional: todas as agregações do BI passam a filtrar por rede.

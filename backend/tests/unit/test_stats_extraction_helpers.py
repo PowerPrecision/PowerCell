@@ -22,6 +22,9 @@ def test_stats_modules_exist():
         "stats_health.py",
         "stats_leads.py",
         "stats_overview.py",
+        # O ponto único do âmbito de rede (Dashboard, ponto 1). Não é um
+        # endpoint: é a condição de tenant que os outros cinco pedem.
+        "stats_scope.py",
     ]
     stats_files = sorted(p.name for p in services_dir.glob("stats_*.py"))
     assert stats_files == expected

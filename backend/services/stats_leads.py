@@ -12,6 +12,7 @@ from services.redis_cache import (
     cache_get, cache_set,
     build_user_leads_key,
 )
+from services.stats_scope import com_ambito, resolver_ambito
 
 logger = logging.getLogger(__name__)
 
@@ -24,21 +25,34 @@ async def run_get_leads_stats(user: dict):
     """
     # O13 - Redis cache: chave hierárquica por user
     # TTL longo (24h) porque invalidação cirúrgica garante fresh data
-    cache_key = build_user_leads_key(user['id'])
+    # A chave leva o sufixo do âmbito — ver a nota em `stats_overview`.
+    ambito = await resolver_ambito(user)
+    cache_key = f"{build_user_leads_key(user['id'])}:{ambito.sufixo}"
     cached = await cache_get(cache_key)
     if cached:
         return cached
     
     lead_statuses = ["novo", "contactado", "visita_agendada", "proposta", "reservado", "descartado"]
-    
+
+    # ISOLAMENTO DE REDE (Dashboard, ponto 1) — as seis contagens, o
+    # agrupamento por origem e o top de consultores eram sobre a colecção
+    # INTEIRA. As leads passaram a ser carimbadas na escrita (ver
+    # `lead_crud` e `lead_extract`); a pilha anterior a esta mudança fica
+    # por carimbar e segue a regra da rede de omissão, como os processos.
+    # (O `ambito` foi resolvido acima, para a chave de cache.)
+
     # ── BUSCA PARALELA: 6 contagens por status + agregação por source + top consultores ──
-    status_coros = [db.property_leads.count_documents({"status": s}) for s in lead_statuses]
+    status_coros = [
+        db.property_leads.count_documents(com_ambito({"status": s}, ambito))
+        for s in lead_statuses
+    ]
     source_cursor = db.property_leads.aggregate([
+        {"$match": ambito.condicao},
         {"$group": {"_id": "$source", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}}
     ])
     consultor_cursor = db.property_leads.aggregate([
-        {"$match": {"created_by_id": {"$ne": None}}},
+        {"$match": com_ambito({"created_by_id": {"$ne": None}}, ambito)},
         {"$group": {"_id": "$created_by_id", "count": {"$sum": 1}}},
         {"$sort": {"count": -1}},
         {"$limit": 5}

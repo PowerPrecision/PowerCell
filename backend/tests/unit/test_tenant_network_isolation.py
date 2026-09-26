@@ -30,122 +30,28 @@ import pytest
 
 
 # ────────────────────────────────────────────────────────────────────
-# Cenário partilhado: duas redes, três empresas, um utilizador em cada.
+# O cenário vive em `helpers_tenant.py` desde o lote do Dashboard: o BI
+# precisa exactamente das mesmas duas redes, e duas cópias do mesmo
+# cenário divergem na primeira empresa que alguém acrescente a um deles.
 # ────────────────────────────────────────────────────────────────────
-REDE_INCUMBENTE = "grupo_power_precision"
-REDE_DOMUS = "grupo_domus"
-
-EMPRESAS = [
-    {"id": "cmp-power", "name": "Power Real Estate", "network_id": REDE_INCUMBENTE},
-    {"id": "cmp-precision", "name": "Precision Crédito", "network_id": REDE_INCUMBENTE},
-    {"id": "cmp-domus", "name": "Domus", "network_id": REDE_DOMUS},
-]
-
-UCRS = [
-    {"user_id": "u-ana", "company_id": "cmp-power", "company_name": "Power Real Estate",
-     "role": "diretor", "is_default": True},
-    {"user_id": "u-bruno", "company_id": "cmp-domus", "company_name": "Domus",
-     "role": "diretor", "is_default": True},
-    # Carla trabalha nas duas redes — não é fuga, são os dois empregos dela.
-    {"user_id": "u-carla", "company_id": "cmp-precision", "company_name": "Precision Crédito",
-     "role": "consultor", "is_default": True},
-    {"user_id": "u-carla", "company_id": "cmp-domus", "company_name": "Domus",
-     "role": "consultor", "is_default": False},
-]
-
-ANA = {"id": "u-ana", "name": "Ana", "email": "ana@power.pt", "role": "diretor"}
-BRUNO = {"id": "u-bruno", "name": "Bruno", "email": "bruno@domus.pt", "role": "diretor"}
-CARLA = {"id": "u-carla", "name": "Carla", "email": "carla@precision.pt", "role": "consultor"}
-ORFAO = {"id": "u-orfao", "name": "Orfão", "email": "orfao@sistema.pt", "role": "admin"}
-
-PROCESSOS = [
-    {"id": "p-power", "client_name": "Cliente da Power", "status": "novo",
-     "company_id": "cmp-power", "network_id": REDE_INCUMBENTE},
-    {"id": "p-domus", "client_name": "Cliente da Domus", "status": "novo",
-     "company_id": "cmp-domus", "network_id": REDE_DOMUS},
-    # O processo que já lá estava antes desta mudança: sem carimbo nenhum.
-    {"id": "p-legado", "client_name": "Cliente Antigo", "status": "novo"},
-    # Carimbado com empresa mas ainda sem rede (criado entre a camada 3 e
-    # a migração). NÃO é "sem marca de tenant" — ver teste dedicado.
-    {"id": "p-domus-sem-rede", "client_name": "Outro da Domus", "status": "novo",
-     "company_id": "cmp-domus"},
-]
-
-CLIENTES = [
-    {"id": "c-power", "nome": "Silva da Power", "network_id": REDE_INCUMBENTE,
-     "company_id": "cmp-power", "contacto": {}, "dados_pessoais": {"nif": "111111111"}},
-    {"id": "c-domus", "nome": "Silva da Domus", "network_id": REDE_DOMUS,
-     "company_id": "cmp-domus", "contacto": {}, "dados_pessoais": {"nif": "222222222"}},
-    {"id": "c-legado", "nome": "Silva Antigo", "contacto": {},
-     "dados_pessoais": {"nif": "333333333"}},
-]
-
-
-def _semear(fake_db):
-    for empresa in EMPRESAS:
-        fake_db.companies.docs.append(dict(empresa))
-    for ucr in UCRS:
-        fake_db.user_company_roles.docs.append(dict(ucr))
-    for proc in PROCESSOS:
-        fake_db.processes.docs.append(dict(proc))
-    for cli in CLIENTES:
-        fake_db.clients.docs.append(dict(cli))
-    return fake_db
-
-
-def _casa(doc: dict, condicao: dict) -> bool:
-    """Aplica uma condição Mongo a um documento com o matcher da fake."""
-    from tests.unit.conftest import FakeAsyncCollection
-
-    return FakeAsyncCollection._matches(doc, condicao)
-
-
-def _por_id(docs):
-    return {d["id"] for d in docs}
-
-
-def _tenant_db(fake_db):
-    """Patcha a BD em TODA a cadeia de resolução do âmbito.
-
-    `tenant_network` importa `db` no topo (referência própria), mas
-    delega a lista de empresas válidas em `auth.get_user_companies`, que
-    faz `from database import db` DENTRO da função. Patchar só um dos
-    dois deixa metade da cadeia a falar com o proxy real — e o resultado
-    passa ou falha conforme a ORDEM de recolha do pytest (ver AGENTS.md).
-
-    ÉPICO 10, PONTO 1 — a cadeia cresceu: `workflow_phases` também
-    importa `db` no topo, e o quadro passou a perguntar-lhe que fases
-    estão fechadas. Sem este patch o `carregar_fases` falava com o proxy
-    real, a excepção era engolida (degradação graciosa), devolvia `[]` e
-    o quadro vinha SEM COLUNAS — um teste vermelho a apontar para o
-    isolamento quando o problema era o `db`. **Uma cadeia nova de `db`
-    entra aqui.**
-    """
-    import contextlib
-
-    import services.tenant_network as tn
-    import services.workflow_phases as wp
-
-    @contextlib.contextmanager
-    def _ctx():
-        with patch.object(tn, "db", fake_db), \
-             patch.object(wp, "db", fake_db), \
-             patch("database.db", fake_db):
-            yield
-
-    return _ctx()
-
-
-@pytest.fixture
-def db_tenant(fake_async_db):
-    return _semear(fake_async_db)
-
-
-@pytest.fixture
-def rede_de_omissao_incumbente(monkeypatch):
-    """Produção: a pilha por carimbar pertence ao grupo incumbente."""
-    monkeypatch.setenv("TENANT_DEFAULT_NETWORK_ID", REDE_INCUMBENTE)
-    yield REDE_INCUMBENTE
+from tests.unit.helpers_tenant import (  # noqa: E402
+    ANA,
+    BRUNO,
+    CARLA,
+    CLIENTES,
+    EMPRESAS,
+    ORFAO,
+    PROCESSOS,
+    REDE_DOMUS,
+    REDE_INCUMBENTE,
+    UCRS,
+    casa as _casa,
+    db_tenant,  # noqa: F401  (fixture usada pelos testes deste ficheiro)
+    por_id as _por_id,
+    rede_de_omissao_incumbente,  # noqa: F401  (idem)
+    semear as _semear,
+    tenant_db as _tenant_db,
+)
 
 
 # ════════════════════════════════════════════════════════════════════

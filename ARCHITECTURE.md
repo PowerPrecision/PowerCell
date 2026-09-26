@@ -5106,3 +5106,162 @@ pelo sino das notificações de toda a gente.
 
 Uma guarda sobre o código-fonte varre `services/`, `routes/` e `models/` a
 afirmar que ninguém volta a escrever nem a ler o campo.
+
+## O relógio de fases e o isolamento do BI (Dashboard, Passo Zero + Ponto 1 — Set 2026)
+
+### Não existia relógio
+
+Nenhum processo sabia quando entrou na fase em que está. Há dois instantes
+gravados, `created_at` e `updated_at`, e o segundo muda com **qualquer**
+escrita: um comentário, uma nota de voz, um documento carregado.
+
+O `stats_branches` calculava o "tempo médio de fecho" como
+`updated_at - created_at`. Isso não é o tempo de fecho — é o tempo entre a
+criação e o último toque em qualquer campo. Um documento carregado hoje num
+processo escriturado há um ano acrescentava 365 dias ao tempo médio daquele
+balcão. O número era plausível, o que o tornava pior do que um erro visível.
+
+### Porque é que o `history` não pode ser a fonte dos SLAs
+
+Foi a primeira hipótese: reconstruir as permanências a partir da colecção
+`history`, que grava `field="status"`, `old_value`, `new_value` e `created_at`.
+O inventário dos **seis** caminhos que escrevem `status` fecha a hipótese:
+
+| Caminho | Registo em `history` |
+|---|---|
+| `process_update` ("Alterou estado") | sim — filtrado por stealth |
+| `process_kanban_move` ("Moveu processo") | sim — filtrado por stealth |
+| `process_indexing` (salto dinâmico) | `track_history: role != "indexacao"` |
+| `portal_onboarding_advance` (auto-avanço) | `track_history: False` — silenciado |
+| `workflow_engine.change_status` (automação) | **nenhum** |
+| `admin_workflow` (fase eliminada) | um registo agregado, `process_id: None` |
+
+Metade das transições é invisível, e **a invisibilidade é a regra de ouro do
+perfil `indexacao` a funcionar**, não uma falha a corrigir. Um SLA medido
+sobre o histórico ficava sistematicamente enviesado a favor de quem tem de ser
+invisível: o tempo em Análise aparecia inflacionado sempre que fosse a
+Indexação a fazer avançar o processo, porque o cronómetro só parava na
+transição seguinte feita por alguém com rasto.
+
+O `audit_trail` (deliberadamente fora do stealth) também não serve: o caminho
+do Kanban não escreve auditoria nenhuma — só o `process_update` o faz — e a
+retenção é configurável pelo admin, pelo que o histórico de SLAs encolheria em
+silêncio quando alguém lhe mexesse.
+
+**Daí o desenho: o relógio é estado do PROCESSO, não rasto de um utilizador.**
+Sem ator, funciona exactamente onde o rasto não pode existir.
+
+### `phase_clock_coverage` — medir antes de intervir
+
+O carimbo só começa a contar no dia em que entrar. Para os 12.450 processos
+que já existem o melhor aproximado é o `updated_at`, e
+`services/phase_clock_coverage.py` existe para dizer **quão mau** é esse
+aproximado e **em que sentido erra**:
+
+- `nunca_tocado` (`updated_at == created_at`) → a estimativa cai na data de
+  criação e **sobrestima** a permanência.
+- `tocado_apos_fecho` (macro terminal, tocado há ≤30d, criado há ≥90d) →
+  **subestima**: parece ter entrado na fase esta semana.
+
+A análise é pura e recebe `agora` **injectado**: uma medição que dependa do
+relógio da máquina não se afirma num teste.
+
+As bandas de permanência (`0-7`, `8-15`, `16-30`, `31-60`, `61+`) são as mesmas
+que o `$bucket` do futuro endpoint de SLAs vai usar. Se fossem diferentes, o
+retrato e o gráfico contavam histórias distintas sobre os mesmos dados.
+
+A macro-fase de cada linha vem do **resolvedor** (`resolver_muitos` +
+`macro_da_fase`), não do valor cru: os 205 processos em `cpcv`/`escriturado` e
+as 12 gralhas `"Concluidos "` contam na macro certa, como já contam no quadro.
+Reimplementar a resolução em expressões `$switch` dava duas verdades sobre os
+mesmos 217 processos.
+
+`scripts/medir_relogio_de_fases.py` é só leitura — não tem `--aplicar` e não
+chama o `env_guard`, porque é contra produção que tem de correr. Há uma guarda
+sobre o código-fonte a afirmar que nenhuma operação de escrita aparece lá, com
+contraprova de que lê mesmo as duas colecções e de que a projecção não toca em
+`personal_data`.
+
+### O isolamento que faltava: zero filtro de rede em TODAS as estatísticas
+
+`grep "tenant\|network_id"` nos seis módulos de estatísticas e no
+`analytics_service`: **zero ocorrências**. O Lote 4 fechou as listagens e as
+pesquisas, o Lote 5 acrescentou o quadro Kanban e o explorador de ficheiros; o
+Dashboard nunca entrou nesse inventário. É a lição do Lote 5, ponto 1 — um
+ponto único para a CONDIÇÃO não chega, é preciso inventariar os sítios que
+**agregam**.
+
+| Superfície | O que atravessava a rede |
+|---|---|
+| `stats_overview` | `process_query = {}` + filtro por PAPEL; admin/ceo/administrativo/diretor sem filtro nenhum. Seis contagens sobre `db.users` inteira |
+| `stats_branches` | volume financiado, taxa de aprovação e tempo de fecho de todos os bancos de todas as redes |
+| `stats_communications` | **conteúdo**: 150 caracteres do que os clientes escreveram no Portal, assuntos e remetentes dos emails não lidos |
+| `stats_leads` / `stats_conversion` | a colecção `property_leads` inteira |
+| `analytics_service` → Desempenho da Equipa | nome, email e produtividade de cada pessoa das duas redes |
+
+### A cache era metade do problema
+
+`stats:branches:v2` e `stats:global:conversion` são chaves **globais**. Mesmo
+com o filtro posto, o primeiro pedido a chegar semeava a cache para todos:
+quem pedisse a seguir recebia os números da outra rede vindos do Redis, com o
+filtro a funcionar perfeitamente. **Um filtro sobre uma cache partilhada é
+teatro.**
+
+As chaves por utilizador (`stats:user:{id}:kpis`, `:leads`) já eram seguras por
+construção — o âmbito é função do utilizador. Só as globais precisavam do
+sufixo.
+
+### `stats_scope` — o ponto único do âmbito de BI
+
+```python
+ambito = await resolver_ambito(user)      # TenantScope + condição + sufixo
+query  = com_ambito(query, ambito)        # $and, nunca fusão de dicionários
+chave  = ambito.chave("stats:branches:v3")
+ids    = await processos_no_ambito(candidatos, ambito)
+```
+
+- **`com_ambito` usa `$and`** e não uma actualização de chaves: a query de
+  negócio pode já trazer um `$or` (as visibilidades por papel trazem) e fundir
+  os dicionários apagaria um deles em silêncio — o pior resultado possível,
+  porque a query continuava válida e devolvia **mais**.
+- **O sufixo é um resumo do âmbito COMPLETO** (redes, empresas, bandeira da
+  rede de omissão), ordenado antes de resumir: as associações chegam do Mongo
+  na ordem que ele quiser e sem ordenar a mesma pessoa teria duas chaves em
+  pedidos consecutivos. Duas pessoas na mesma rede mas em empresas diferentes
+  têm condições **diferentes** e não podem partilhar a entrada da cache.
+- **`processos_no_ambito` inverte o sentido da pergunta.** O natural seria
+  "dá-me os processos da minha rede" e filtrar prazos/mensagens por esse
+  conjunto — mas `processes` é a colecção grande (12.450 e a crescer) e um
+  `$in` com doze mil identificadores por pedido de dashboard funciona hoje e
+  morre à primeira multiplicação de volume. O conjunto de partida vem da
+  colecção **pequena** (prazos abertos, mensagens não lidas, via `distinct`) e
+  a verificação é um `$in` limitado por esse número. O custo acompanha o que
+  se está mesmo a mostrar.
+
+### Duas mudanças de significado, deliberadas
+
+1. **Prazos pessoais.** O cartão da Direção somava os lembretes pessoais de
+   todos os utilizadores de todas as redes — um número que não era de ninguém.
+   Passa a contar os prazos dos processos da rede **mais os pessoais do
+   próprio**, a mesma regra que o ramo dos consultores já aplicava.
+2. **Emails sem processo.** `db.emails` não é carimbada com a rede (oito
+   sítios de escrita mais o sync IMAP/Gmail — fica para o lote do webmail),
+   por isso o âmbito do feed resolve-se pelo **processo** do email. Um email
+   sem processo deixa de aparecer aos papéis privilegiados. Era já o que
+   acontecia aos consultores, e um email que não se consegue atribuir a uma
+   rede não se pode mostrar a uma.
+
+### As leads passam a ser carimbadas na escrita
+
+`property_leads` não tinha campo de empresa nenhum — a mesma fuga que os
+processos tinham antes do Lote 4, com outro nome. Os **dois** sítios de
+`insert_one` resolvem agora `resolve_tenant_stamp`, e há uma guarda sobre o
+código-fonte a afirmá-lo nos dois: **um carimbo parcial é pior do que nenhum**,
+porque a metade sem marca fica visível ao grupo incumbente para sempre.
+
+### O que fica de fora, e é dito
+
+O email automático de Segunda ao CEO (`scheduled_tasks` →
+`generate_weekly_team_report` sem utilizador) mantém o âmbito global: decidir
+se passa a ser um email **por rede** é uma decisão de produto. Não fica em
+silêncio — há um `logger.warning` no caminho e um teste a afirmar que ele sai.

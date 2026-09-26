@@ -15,6 +15,7 @@ from services.workflow_phases import (
     nomes_por_macro,
 )
 from services.redis_cache import cache_get, cache_set
+from services.stats_scope import com_ambito, resolver_ambito
 
 logger = logging.getLogger(__name__)
 
@@ -73,11 +74,24 @@ async def run_get_branch_performance(user: dict):
     if not resolve_capability(user, "STATS_VIEW"):
         raise HTTPException(status_code=403, detail="Sem permissão para ver estatísticas")
 
+    # ISOLAMENTO DE REDE (Dashboard, ponto 1)
+    # ====================================================================
+    # Esta agregação devolvia o volume financiado, a taxa de aprovação e o
+    # tempo de fecho de TODOS os bancos de TODAS as redes a qualquer
+    # utilizador com a capability STATS_VIEW.
+    #
+    # E a chave de cache era GLOBAL — `stats:branches:v2`. Mesmo com o
+    # filtro posto, o primeiro pedido a chegar semeava a cache para todos:
+    # quem pedisse a seguir recebia os números da outra rede vindos do
+    # Redis, com o filtro a funcionar perfeitamente. Por isso o âmbito
+    # entra na CHAVE e não só na query.
+    ambito = await resolver_ambito(user)
+
     # Cache: TTL de 1h (métricas de balcões são menos voláteis que KPIs)
-    # v2: a chave muda porque o SIGNIFICADO das métricas mudou. Servir a
-    # cache antiga seria continuar a mostrar o número medido sobre fases
-    # inexistentes durante mais uma hora.
-    cache_key = "stats:branches:v2"
+    # v3: a chave muda porque o ÂMBITO passou a fazer parte do
+    # significado. Servir a entrada `v2` a alguém seria servir-lhe os
+    # números de todas as redes durante mais uma hora.
+    cache_key = ambito.chave("stats:branches:v3")
     cached = await cache_get(cache_key)
     if cached:
         return cached
@@ -91,12 +105,15 @@ async def run_get_branch_performance(user: dict):
     activos = nomes_activos(fases)
 
     pipeline = [
-        # ── Stage 1: Filtrar processos com banco preenchido (excluir eliminados) ──
+        # ── Stage 1: rede, banco preenchido, excluir eliminados ──
+        # A condição de rede entra no PRIMEIRO estágio de propósito: um
+        # `$match` depois do `$group` já teria contado os processos da
+        # outra rede nas somas.
         {
-            "$match": {
+            "$match": com_ambito({
                 "is_deleted": {"$ne": True},
                 "credit_data.bank_name": {"$nin": [None, ""]},
-            }
+            }, ambito)
         },
         # ── Stage 2: Projetar campos + bandeiras computadas ──
         {

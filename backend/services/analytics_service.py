@@ -22,7 +22,8 @@ logger = logging.getLogger(__name__)
 async def generate_weekly_team_report(
     db,
     period_start: Optional[datetime] = None,
-    period_end: Optional[datetime] = None
+    period_end: Optional[datetime] = None,
+    user: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Any]:
     """
     Gerar relatório semanal de produtividade da equipa.
@@ -34,6 +35,10 @@ async def generate_weekly_team_report(
         db: Instância Motor da base de dados MongoDB (async)
         period_start: Data de início do período (UTC). Por defeito, há 7 dias.
         period_end: Data de fim do período (UTC). Por defeito, agora.
+        user: Quem pede. Restringe o relatório aos utilizadores da REDE
+            de quem pede (Dashboard, ponto 1). `None` mantém o âmbito
+            global — é o caso do email automático de Segunda-feira, que
+            não tem utilizador a pedir; ver o aviso no log.
 
     Returns:
         Dict com:
@@ -65,8 +70,34 @@ async def generate_weekly_team_report(
         ["consultor", "intermediario", "administrativo", "indexacao", "diretor", "ceo", "admin"]
     )
 
+    # ISOLAMENTO DE REDE (Dashboard, ponto 1)
+    # ----------------------------------------------------------------
+    # Este relatório é o nome, o email e a produtividade de cada pessoa.
+    # Sem âmbito, o painel de Desempenho da Equipa mostrava a uma Diretora
+    # da Domus quantos processos cada consultor da Power avançou na
+    # semana. O `user_map` governa TODO o resultado — as agregações de
+    # `history` e `task_logs` só entram no relatório através dele —, por
+    # isso restringi-lo aqui restringe o relatório inteiro.
+    condicoes = [staff_filter, {"is_active": {"$ne": False}}]
+    if user:
+        from services.admin_users_scope import (
+            build_users_scope_query,
+            empresas_do_ambito,
+        )
+
+        condicoes.append(await build_users_scope_query(await empresas_do_ambito(user)))
+    else:
+        # O email automático não tem quem peça. Fica global como estava —
+        # decidir se passa a ser um email POR REDE é uma decisão de
+        # produto, não uma mudança a fazer de passagem — mas nunca em
+        # silêncio.
+        logger.warning(
+            "[Analytics] Relatório gerado SEM utilizador: âmbito global, "
+            "atravessa todas as redes. Só o email automático deve chegar aqui."
+        )
+
     users_cursor = db.users.find(
-        {"$and": [staff_filter, {"is_active": {"$ne": False}}]},
+        {"$and": condicoes},
         {"_id": 0, "id": 1, "name": 1, "email": 1, "role": 1}
     )
     users_list = await users_cursor.to_list(200)
