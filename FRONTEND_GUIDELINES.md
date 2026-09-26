@@ -1225,25 +1225,41 @@ desenhar um gráfico de barras — e o risco de desempenho do BI não está no
 Mongo, está aqui. Contagens, médias e distribuições vêm de um endpoint que
 as calcula numa agregação; a página recebe números, não registos.
 
-**37.2 — Nunca agrupar pelo valor CRU de `status`.** Estas três linhas ainda
-estão no `StatisticsPage`:
+**37.2 — Nunca agrupar pelo valor CRU de `status`. FEITO.** Estas três linhas
+estavam no `StatisticsPage` e foram removidas na Camada 2:
 
 ```javascript
 filteredProcesses.filter(p => !['concluidos', 'desistencias'].includes(p.status))
 filteredProcesses.filter(p => p.status === 'concluidos')
-acc[p.status] = (acc[p.status] || 0) + 1        // agrupa pelo valor cru
+acc[p.status] = (acc[p.status] || 0) + 1        // agrupava pelo valor cru
 ```
 
-São listas cravadas de nomes de fases — exactamente o que o Épico 10 implodiu
-no backend — e o agrupamento pelo valor cru faz com que os 205 processos em
-`cpcv`/`escriturado` e as 12 gralhas `"Concluidos "` apareçam como barras
-próprias. O quadro resolve-os para a coluna certa e o gráfico não: **duas
-verdades sobre os mesmos dados no mesmo produto**. Quem agrupa é
-`grupoDoEstado`/`agruparEmFunil` (`utils/funilDeFases.js`), com as fases do
-motor, ou o endpoint de funil quando ele existir.
+Eram listas cravadas de nomes de fases — exactamente o que o Épico 10 implodiu
+no backend — e o agrupamento pelo valor cru punha os 205 processos em
+`cpcv`/`escriturado` e as 12 gralhas `"Concluidos "` em barras próprias. O
+quadro resolvia-os para a coluna certa e o gráfico não: **duas verdades sobre
+os mesmos dados no mesmo produto**.
+
+Hoje a página consome `GET /stats/funil` e `GET /stats/sla`, onde a ponte com o
+motor de workflow garante que uma barra conta o mesmo que uma coluna. As
+transformações que restam são apresentação e vivem em `utils/statsFunil.js`,
+puras e testadas. **Nada neste ficheiro pode voltar a saber nomes de fases** —
+quem sabe isso é o motor, no servidor.
+
+**37.2.1 — Dois campos que a página lia errados, e ninguém viu.** O filtro por
+utilizador comparava `p.assigned_consultor` (os canónicos são
+`assigned_consultor_id` / `consultor_id` / `consultant_id`) e o gráfico de
+prioridades contava `p.priority === 'high'` (o campo é `prioridade` e os valores
+são `baixa`/`media`/`alta`). Nenhum dos dois dava erro: um esvaziava todos os
+gráficos ao escolher um utilizador, o outro mostrava zero desde sempre. **Um
+campo que não existe lê-se como `undefined` e compara-se em silêncio** — é por
+isto que o filtro passou para o servidor, onde a condição canónica já existe e
+está testada.
 
 A guarda de listas cravadas do Épico 10 varre `backend/services/` e por isso
-não apanhou isto. Está registado para o lote do funil.
+não apanhou nada disto. Quem apanhou foi o teste de integração da página
+(`pages/__tests__/StatisticsPage.test.jsx`), que afirma por COMPORTAMENTO que
+`getProcesses` não é chamado.
 
 **37.3 — Um número estimado tem de se ver que é estimado.** O relógio de
 fases só começa a contar no dia em que o carimbo entrar; os processos

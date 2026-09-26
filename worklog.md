@@ -6828,3 +6828,101 @@ O backfill estimado corre na MESMA janela do deploy. Até correr, a primeira
 transição de um processo legado acumula um intervalo derivado do `created_at`,
 que sobrestima; o que o backfill carimba fica marcado como estimado e deixa de
 acumular.
+
+# Iteração — o BI por macro-fase e o backfill (Dashboard, Camadas 1.5 e 2)
+
+## O backfill: três níveis em vez de um booleano
+
+3.105 processos `nunca_tocado` e 1.840 `tocado_apos_fecho`. Um `estimado: true`
+cego obrigava o BI a escolher entre ignorar 12.450 processos e desenhar médias
+sobre cinco mil valores aberrantes.
+
+São **dois** aberrantes e não um porque erram para lados opostos: juntá-los numa
+classe perdia exactamente a informação que permite excluí-los, e em média não se
+anulam — anulam-se na aparência, e cada gráfico fica errado de uma maneira
+diferente.
+
+A bandeira e a qualidade são campos SEPARADOS:
+`macro_fase_desde_estimado` diz ao relógio para não acumular;
+`fase_desde_qualidade` diz ao BI o que pode mostrar. Juntá-las obrigava um dos
+dois a interpretar a intenção do outro.
+
+**Uma classificação, duas utilizações.** `classificar_estimativa` é usada pela
+medição (que conta) e pelo backfill (que carimba), com um teste a cruzar as
+duas: se divergissem, o `relogio.json` que se lê antes de aplicar deixava de
+descrever o que fica na base de dados.
+
+## A ponte: o que faz o gráfico contar o mesmo que o quadro
+
+`$distinct` sobre `status` (indexado) → resolvedor REAL → `$switch` com listas
+literais. As duas alternativas eram piores: `$lookup` por processo (doze mil
+junções para ler catorze documentos) ou reimplementar a resolução em expressões
+de agregação (segunda implementação do `resolver_nome`, divergente no primeiro
+alias novo).
+
+## Três endpoints, três decisões de leitura
+
+- **Funil:** a conversão assume monotonia e o `perdido` fica FORA da cadeia — um
+  processo perde-se de qualquer etapa e não se sabe de qual.
+- **SLA:** duas perguntas diferentes, dois números. "Preso agora"
+  (`macro_fase_desde`) e "demorou em média" (`tempos_macro`, só medido). A média
+  nunca vai sozinha: vai com o histograma `$bucket` e com a BANDA mediana.
+- **Redes:** compara as redes que o utilizador JÁ pode ver. Uma conta com uma
+  rede vê uma linha, e a resposta di-lo (`redes_no_ambito`) para ninguém
+  interpretar isso como falta de dados.
+
+## Dois campos que a página lia errados
+
+Encontrados a integrar o frontend, e nenhum dava erro:
+
+- O filtro por utilizador comparava `p.assigned_consultor` — campo que não
+  existe nos processos. Escolher um utilizador **esvaziava todos os gráficos**,
+  e como `selectedUser` arrancava com o próprio `user.id`, a página abria VAZIA
+  para um administrador.
+- O gráfico de prioridades contava `p.priority === 'high'`. O campo é
+  `prioridade` e os valores são `baixa`/`media`/`alta`: mostrava **zero desde
+  sempre**.
+
+Um campo que não existe lê-se como `undefined` e compara-se em silêncio.
+
+## Erros meus
+
+- **Um teste meu passava pela razão errada.** `test_os_eliminados_nao_entram`
+  afirmava `analise == 0` e sobrevivia à remoção do filtro `is_deleted` do
+  funil: a PONTE também filtra os eliminados, pelo que o status do processo
+  morto nem chegava ao `$switch` e ele caía na reconciliação em vez da etapa.
+  Verde, e a deixar passar um funil que contava processos eliminados. Passou a
+  afirmar o TOTAL.
+- **Escrevi outra mutação inútil** e quase a contei como sobrevivente: pôr as
+  linhas cruas da agregação na resposta de redes não leva fuga nenhuma, porque
+  as linhas já são agregados. Mas o exercício apanhou um teste fraco meu — eu
+  procurava duas cadeias de caracteres em vez de afirmar a FORMA da resposta.
+  Passou a ser uma lista fechada de chaves, que apanha qualquer campo novo.
+- **Uma mutação ficou registada como equivalente**, com o contrato afirmado pelo
+  custo e não pelo resultado: incluir os eliminados no `distinct` da ponte não
+  muda a saída (nenhum documento alcança o ramo extra do `$switch`), muda o
+  tamanho da expressão e a coerência com o `$match` do funil.
+- O inventário `test_stats_modules_exist` apanhou-me outra vez, agora com quatro
+  módulos novos — e a lista tem de estar por ordem alfabética, que é como se
+  compara. A guarda a fazer o seu trabalho duas vezes no mesmo épico.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3701 passed, 5 skipped** (baseline 3575).
+- `yarn test` → **1122 passed / 97 ficheiros** (baseline 1093 / 95).
+- `eslint --quiet` → 0 erros. `yarn build` → OK.
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação: **31 aplicadas, 31 mortas** (2 passagens; 2 sobreviventes reais
+  corrigidos, 1 registada como equivalente com contrato de custo).
+
+## A fazer em produção
+
+```bash
+python -m scripts.semear_relogio_de_fases            # simula
+python -m scripts.semear_relogio_de_fases --aplicar  # escreve
+```
+
+Na MESMA janela do índice `{network_id: 1, is_deleted: 1, status: 1}`. Os
+limiares de SLA (`dashboard_slas`: novo 7, análise 15, aprovado 30 dias) estão
+no painel de admin e são por empresa — vale a pena confirmá-los antes de olhar
+para a coluna "acima do limiar".

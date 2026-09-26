@@ -725,6 +725,25 @@ export const setPrimaryEmailAccount = (accountId) =>
 export const getStats = () => api.get("/stats");
 export const getCommunicationsFeed = () => api.get("/stats/communications");
 
+/**
+ * BI por macro-fase (Dashboard, Camada 2).
+ *
+ * TUDO POR AXIOS, ZERO `fetch`. O `StatisticsPage` chamava `/stats/leads` e
+ * `/stats/conversion` com `fetch` cru, e um `fetch` cru não leva o
+ * `X-Active-Role` que o interceptor injecta — o `resolve_capability` do
+ * servidor decidia a permissão pelo papel do JWT em vez do PERFIL ACTIVO.
+ * É a quinta instância do incidente de 2026-09-21, agora numa página de
+ * estatísticas. Ver `FRONTEND_GUIDELINES` § 37.
+ *
+ * Estes quatro substituem a agregação que a página fazia no browser sobre
+ * os 12.450 processos crus.
+ */
+export const getStatsFunil = (params = {}) => api.get("/stats/funil", { params });
+export const getStatsSla = () => api.get("/stats/sla");
+export const getStatsRedes = () => api.get("/stats/redes");
+export const getStatsLeads = () => api.get("/stats/leads");
+export const getStatsConversion = () => api.get("/stats/conversion");
+
 // Team Performance (Admin/CEO) — desempenho da equipa por período
 export const getTeamPerformance = (params = {}) => api.get("/admin/team-performance", { params });
 

@@ -5393,3 +5393,114 @@ O recurso ao `created_at` é exacto para processos nascidos depois do deploy e
 uma sobre-estimativa para um legado que o backfill ainda não tocou. O backfill
 corre por isso na mesma janela do deploy: o que ele carimba fica marcado como
 estimado e deixa de acumular.
+
+## O BI por macro-fase (Dashboard, Camada 2 — Set 2026)
+
+### A ponte entre o `status` gravado e a macro-fase
+
+A `macro_fase` vive nos 14 documentos de `workflow_statuses`; o `status` vive
+nos 12.450 processos. Para agrupar por macro-fase numa agregação faltava a
+ponte, e as duas formas óbvias eram ambas más:
+
+1. `$lookup` por processo — doze mil junções para ler uma colecção de catorze.
+2. Reimplementar a resolução (`cpcv`, `escriturado`, `"Concluidos "`) em
+   expressões `$switch`. Seria uma **segunda** implementação do `resolver_nome`,
+   e as duas divergiam no primeiro alias novo.
+
+`stats_macro_bridge.construir_ponte` faz um `$distinct` sobre `status` (campo
+indexado), passa os valores reais pelo resolvedor **real** e devolve um mapa
+`valor gravado → macro-fase` que se traduz num `$switch` com listas literais.
+Uma consulta indexada barata, a regra num só sítio, e os 205 processos de alias
+mais as 12 gralhas a contar na macro-fase certa — a mesma coluna que o quadro
+lhes desenha.
+
+O `default` do `$switch` é a coluna de reconciliação: um valor que o motor não
+conhece **nunca** é somado a um grupo onde não está. Uma ponte vazia devolve
+`{"$literal": …}` em vez de um `$switch` sem ramos, que é inválido no Mongo — um
+dashboard que rebenta porque a colecção de fases está vazia é pior do que um que
+diz "nada classificado".
+
+### `/api/stats/funil`
+
+`$match` (rede + não eliminados) → `$project` (macro via `$switch`, valores) →
+`$group`. O `$match` é o **primeiro** estágio: depois do `$group` já teria somado
+os processos da outra rede.
+
+**A conversão assume monotonia.** `alcancaram(etapa)` soma quem está nessa etapa
+ou numa posterior — um processo em `aprovado` passou necessariamente por
+`analise`. O `perdido` fica **fora** dessa soma: um processo perde-se de
+qualquer etapa e não se sabe de qual; contá-lo em `alcancaram(novo)` inflacionava
+o denominador da primeira conversão. Vai à parte, com o número à vista.
+
+Quando o relógio tiver história (`tempos_macro` preenchido por transições reais)
+esta soma pode ser substituída por "passou mesmo por aqui". Hoje `tempos_macro`
+está vazio em toda a parte e a substituição não acrescentava informação.
+
+### `/api/stats/sla` — duas perguntas, dois números
+
+- **Quem está preso agora**: `agora - macro_fase_desde` (recurso ao
+  `created_at`), em histograma `$bucket`.
+- **Quanto demorou em média**: o acumulador `tempos_macro`, que só tem
+  transições **medidas**.
+
+Misturar as duas num só número era o erro fácil: a primeira mede o que está a
+acontecer, a segunda o que aconteceu.
+
+**`$bucket` dentro de `$facet`**, um por macro-fase: o `$bucket` agrupa por uma
+chave numérica e não sabe agrupar também por macro. As etapas partilhadas
+(`$match`, `$project`) correm uma vez. As bandas são as **mesmas** do script de
+medição — bandas diferentes fariam o retrato de produção e o gráfico contar
+histórias distintas sobre os mesmos dados.
+
+**A média nunca vai sozinha.** Num gargalo mente sempre no mesmo sentido: um
+processo esquecido há 400 dias arrasta-a e esconde que 80% passa em 9 dias. Vai
+com o histograma e com a **banda** mediana — um intervalo, que é o que se sabe
+sem ordenar todas as permanências.
+
+**As macro-fases terminais não entram.** A medição mostra 3.200 processos na
+banda `61+` de `concluido`: incluí-las fazia o painel gritar sobre processos que
+estão exactamente onde devem estar, e um painel que grita sem razão ensina toda
+a gente a ignorá-lo (a lição do `desactivado ≠ em baixo`).
+
+**As estimativas aberrantes ficam fora das médias** (`nunca_tocado`,
+`tocado_apos_fecho`) e a resposta di-lo, para a UI poder explicar qual é o
+universo medido.
+
+Os limiares vêm do `SystemConfig.dashboard_slas`, por EMPRESA — o que resolve
+metade da comparação entre redes: a Domus pode ter SLAs diferentes da Power sem
+que "está atrasado" signifique coisas diferentes no mesmo gráfico. Um limiar
+inválido cai no anterior e regista; zero dias é recusado (marcava todos os
+processos como atrasados no dia 1).
+
+### `/api/stats/redes`
+
+Um `$group` por rede **e** macro-fase: a matriz é o que a comparação precisa, e
+uma segunda passagem pela colecção para os totais por rede era trabalho a dobrar.
+
+Compara **as redes que o utilizador já pode ver**, pelo mesmo
+`resolve_tenant_scope` de todas as listagens. Sem cláusula de excepção, sem
+papel que veja tudo, sem parâmetro que amplie o âmbito. Uma conta com uma só
+rede vê **uma** linha, e a resposta traz `redes_no_ambito` para ninguém
+interpretar isso como falta de dados.
+
+Só agregados: nunca um processo, nunca um cliente, nunca um nome. Há um teste a
+afirmar que as chaves da resposta são uma **lista fechada** — procurar nomes
+concretos não afirmava a forma, e um campo acrescentado "só para depurar"
+passava por baixo.
+
+**A taxa de conclusão é sobre os DECIDIDOS** (concluídos + perdidos) e não sobre
+o total: com o total no denominador, uma carteira jovem com muitos processos em
+curso parecia pior do que uma antiga — media a idade da carteira, não a
+eficiência.
+
+### A base de dados falsa dos testes cresceu
+
+`FakeAsyncCollection` ganhou `$project` e um avaliador mínimo de expressões
+(`$switch`, `$in`, `$ifNull`, `$literal`). A ponte é um `$switch`, e é ele que
+faz os processos gravados como `cpcv` contarem na macro certa: testar isso contra
+um ciclo em Python provava o ciclo, não o pipeline que corre em produção.
+
+O que **não** está lá é deliberado: `$facet` e `$bucket` meio-implementados
+dariam confiança falsa. Os pipelines que os usam são construtores **puros**,
+afirmados pela forma (fronteiras do `$bucket`, facetas presentes, condição de
+rede no primeiro `$match`).

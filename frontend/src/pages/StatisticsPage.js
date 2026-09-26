@@ -1,10 +1,29 @@
 /**
  * StatisticsPage — Página de estatísticas e relatórios do CRM.
  *
- * PORQUÊ: Fornece dados agregados sobre o estado do sistema (processos por estado, tempos médios,
- * distribuição por consultor). Essencial para acompanhar produtividade e identificar gargalos.
+ * PORQUÊ: Fornece dados agregados sobre o estado do sistema (processos por
+ * macro-fase, gargalos, distribuição por consultor). Essencial para
+ * acompanhar produtividade e identificar onde os processos ficam presos.
  *
- * @context {AuthContext} — Consome user, token para autenticação e permissões
+ * A AGREGAÇÃO É DO SERVIDOR (Dashboard, Camada 2)
+ *   Esta página fazia `getProcesses()` sem filtro, trazia os 12.450
+ *   processos de produção para o browser e contava em JavaScript. Três
+ *   consequências, todas reais:
+ *
+ *   1. A base de dados inteira pela rede para desenhar barras.
+ *   2. Listas de nomes de fases CRAVADAS (`['concluidos','desistencias']`)
+ *      — exactamente o que o Épico 10 implodiu no servidor.
+ *   3. O agrupamento pelo valor CRU de `status` punha os 205 processos em
+ *      `cpcv`/`escriturado` e as 12 gralhas `"Concluidos "` em barras
+ *      próprias: o Kanban resolvia-os para a coluna certa e o gráfico não.
+ *      Duas verdades sobre os mesmos dados, no mesmo produto.
+ *
+ *   Hoje consome `/stats/funil` e `/stats/sla`, onde a ponte com o motor de
+ *   workflow garante que uma barra conta o mesmo que uma coluna do quadro.
+ *   O que resta neste ficheiro é apresentação; as transformações puras
+ *   vivem em `utils/statsFunil.js`, testadas.
+ *
+ * @context {AuthContext} — Consome user para permissões
  */
 
 import { useState, useEffect } from "react";
@@ -21,23 +40,43 @@ import {
   TrendingUp, TrendingDown, FileText, CheckCircle, 
   Clock, Euro, Target, Building, Trophy
 } from "lucide-react";
-import { getStats, getProcesses, getUsers } from "../services/api";
+import {
+  getStats,
+  getStatsConversion,
+  getStatsFunil,
+  getStatsLeads,
+  getStatsSla,
+  getUsers,
+} from "../services/api";
+import {
+  avisosDaAmostra,
+  barrasDeValor,
+  barrasDoFunil,
+  fatiasDePrioridade,
+  linhasDeSla,
+  linhasForaDoFunil,
+} from "../utils/statsFunil";
 import { toast } from "sonner";
 import { hasAnyRole } from "../utils/roleUtils";
 import SafeChartContainer from "../components/ui/SafeChartContainer";
 import { Spinner } from "../components/ui/Spinner";
 
-const API_URL = process.env.REACT_APP_BACKEND_URL;
-
 const COLORS = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#ec4899'];
 
 const StatisticsPage = () => {
-  const { user, token } = useAuth();
+  const { user } = useAuth();
   const [loading, setLoading] = useState(true);
   const [, setStats] = useState({});
-  const [processes, setProcesses] = useState([]);
+  const [funil, setFunil] = useState(null);
+  const [sla, setSla] = useState(null);
   const [users, setUsers] = useState([]);
-  const [selectedUser, setSelectedUser] = useState(user?.id);
+  // "all" por omissão para quem vê tudo. Antes arrancava com o `user.id` e
+  // o filtro era feito no cliente sobre `p.assigned_consultor` — um campo
+  // que não existe nos processos —, pelo que a página abria VAZIA para um
+  // administrador e só mostrava dados depois de ele escolher "Todos".
+  const [selectedUser, setSelectedUser] = useState(
+    hasAnyRole(user, ["admin", "ceo"]) ? "all" : user?.id,
+  );
   const [timeRange, setTimeRange] = useState("30");
   
   // Estado para estatísticas de leads
@@ -53,21 +92,30 @@ const StatisticsPage = () => {
   const fetchData = async () => {
     try {
       setLoading(true);
-      const [statsRes, processesRes, usersRes] = await Promise.all([
+      // O `consultor_id` vai para o SERVIDOR. Antes, o filtro por
+      // utilizador era feito no cliente sobre `p.assigned_consultor` — um
+      // campo que não existe nos processos (os canónicos são
+      // `assigned_consultor_id` / `consultor_id` / `consultant_id`), pelo
+      // que escolher um utilizador esvaziava TODOS os gráficos sem dar
+      // erro. Agora a condição é a canónica, do lado do servidor.
+      const params = {};
+      if (canViewAllStats && selectedUser && selectedUser !== "all") {
+        params.consultor_id = selectedUser;
+      }
+
+      const [statsRes, funilRes, slaRes, usersRes] = await Promise.all([
         getStats(),
-        getProcesses(),
-        canViewAllStats ? getUsers() : Promise.resolve({ data: [] })
+        getStatsFunil(params),
+        getStatsSla(),
+        canViewAllStats ? getUsers() : Promise.resolve({ data: [] }),
       ]);
 
       setStats(statsRes.data || {});
-      // API pode retornar resposta paginada {items: [...]} ou array direto
-      const processData = processesRes.data;
-      const extractedProcesses = Array.isArray(processData) ? processData : (processData?.items || []);
-      setProcesses(extractedProcesses);
+      setFunil(funilRes.data || null);
+      setSla(slaRes.data || null);
       const usersData = usersRes.data;
       setUsers(Array.isArray(usersData) ? usersData : (usersData?.items || []));
-      
-      // Fetch estatísticas de leads
+
       await fetchLeadsStats();
     } catch (error) {
       console.error("Erro ao carregar estatísticas:", error);
@@ -78,74 +126,59 @@ const StatisticsPage = () => {
   };
 
   const fetchLeadsStats = async () => {
+    // Por AXIOS e não por `fetch`: um `fetch` cru não leva o
+    // `X-Active-Role` que o interceptor injecta, e é por ele que o
+    // servidor decide a permissão de estatísticas pelo PERFIL ACTIVO.
     try {
       const [leadsRes, convRes] = await Promise.all([
-        fetch(`${API_URL}/api/stats/leads`, {
-          headers: { Authorization: `Bearer ${token}` }
-        }),
-        fetch(`${API_URL}/api/stats/conversion`, {
-          headers: { Authorization: `Bearer ${token}` }
-        })
+        getStatsLeads(),
+        getStatsConversion(),
       ]);
-      
-      if (leadsRes.ok) {
-        const data = await leadsRes.json();
-        setLeadsStats(data);
-      }
-      
-      if (convRes.ok) {
-        const data = await convRes.json();
-        setConversionStats(data);
-      }
+      setLeadsStats(leadsRes.data || null);
+      setConversionStats(convRes.data || null);
     } catch (error) {
       console.error("Erro ao carregar estatísticas de leads:", error);
     }
   };
 
-  // Filtrar processos baseado no utilizador selecionado
-  const safeProcesses = Array.isArray(processes) ? processes : [];
-  const filteredProcesses = safeProcesses.filter(p => {
-    if (!canViewAllStats || selectedUser === "all") return true;
-    return p.assigned_consultor === selectedUser || p.assigned_intermediario === selectedUser;
-  });
+  // ==================================================================
+  // OS NÚMEROS VÊM DO SERVIDOR (Dashboard, Camada 2)
+  // ==================================================================
+  // Nenhuma lista de nomes de fases, nenhuma contagem sobre processos
+  // crus. O que está aqui é escolha de etiqueta e formatação.
+  const etapas = barrasDoFunil(funil);
+  const foraDoFunil = linhasForaDoFunil(funil);
+  const statusData = etapas.map((e) => ({ name: e.name, value: e.processos }))
+    .concat(foraDoFunil.map((l) => ({ name: l.name, value: l.processos })));
+  const prioridadeData = fatiasDePrioridade(funil);
+  const valorPorFaseData = barrasDeValor(funil).map((b) => ({
+    name: b.name,
+    value: b.valor,
+  }));
+  const linhasSla = linhasDeSla(sla);
+  const avisos = avisosDaAmostra(funil, sla);
 
-  // Calcular estatísticas personalizadas
-  const totalProcessos = filteredProcesses.length;
-  const processosAtivos = filteredProcesses.filter(p => !['concluidos', 'desistencias'].includes(p.status)).length;
-  const processosConcluidos = filteredProcesses.filter(p => p.status === 'concluidos').length;
-  const desistencias = filteredProcesses.filter(p => p.status === 'desistencias').length;
-  
-  const valorTotal = filteredProcesses.reduce((sum, p) => sum + (p.property_value || 0), 0);
+  const totalProcessos = funil?.total_processos || 0;
+  const concluidos = etapas.find((e) => e.key === "concluido")?.processos || 0;
+  const perdidos = foraDoFunil.find((l) => l.key === "perdido")?.processos || 0;
+  const emCurso = etapas
+    .filter((e) => e.key !== "concluido")
+    .reduce((soma, e) => soma + e.processos, 0);
+
+  // Taxa sobre os DECIDIDOS (concluídos + perdidos), a mesma regra do
+  // endpoint de redes: com o total no denominador, uma carteira jovem com
+  // muitos processos em curso parecia pior do que uma antiga — media a
+  // idade da carteira, não a eficiência.
+  const taxaSucesso =
+    concluidos + perdidos > 0
+      ? ((concluidos / (concluidos + perdidos)) * 100).toFixed(1)
+      : "—";
+
+  const valorTotal = (funil?.etapas || []).reduce(
+    (soma, etapa) => soma + (etapa.valor_imovel || 0),
+    0,
+  );
   const valorMedio = totalProcessos > 0 ? valorTotal / totalProcessos : 0;
-  
-  const taxaSucesso = totalProcessos > 0 
-    ? ((processosConcluidos / (processosConcluidos + desistencias)) * 100).toFixed(1)
-    : 0;
-
-  // Dados para gráficos
-  const statusData = Object.entries(
-    filteredProcesses.reduce((acc, p) => {
-      acc[p.status] = (acc[p.status] || 0) + 1;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ name, value }));
-
-  const prioridadeData = [
-    { name: 'Alta', value: filteredProcesses.filter(p => p.priority === 'high').length },
-    { name: 'Média', value: filteredProcesses.filter(p => p.priority === 'medium').length },
-    { name: 'Baixa', value: filteredProcesses.filter(p => p.priority === 'low').length },
-  ].filter(d => d.value > 0);
-
-  const valorPorFaseData = Object.entries(
-    filteredProcesses.reduce((acc, p) => {
-      if (!acc[p.status]) acc[p.status] = 0;
-      acc[p.status] += p.property_value || 0;
-      return acc;
-    }, {})
-  ).map(([name, value]) => ({ 
-    name, 
-    value: Math.round(value / 1000) // em milhares
-  })).slice(0, 10);
 
   return (
     <DashboardLayout title="Estatísticas e Análise">
@@ -195,7 +228,7 @@ const StatisticsPage = () => {
             <CardContent>
               <div className="text-2xl font-bold">{totalProcessos}</div>
               <p className="text-xs text-muted-foreground mt-1">
-                {processosAtivos} ativos
+                {emCurso} em curso
               </p>
             </CardContent>
           </Card>
@@ -208,7 +241,7 @@ const StatisticsPage = () => {
             <CardContent>
               <div className="text-2xl font-bold">{taxaSucesso}%</div>
               <p className="text-xs text-muted-foreground mt-1">
-                {processosConcluidos} concluídos vs {desistencias} desistências
+                {concluidos} concluídos vs {perdidos} perdidos
               </p>
             </CardContent>
           </Card>
@@ -242,22 +275,107 @@ const StatisticsPage = () => {
           </Card>
         </div>
 
+        {/*
+          Avisos sobre a AMOSTRA, não sobre erros.
+
+          Um gráfico que mistura medido com estimado sem o dizer é pior do
+          que um gráfico vazio: o utilizador tira conclusões sobre um
+          universo que não sabe qual é. As frases vêm de `avisosDaAmostra`,
+          que é pura e testada — a UI não decide o que avisar.
+        */}
+        {avisos.length > 0 && (
+          <Card>
+            <CardHeader className="pb-3">
+              <CardTitle className="text-base">Sobre estes números</CardTitle>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {avisos.map((aviso) => (
+                <p key={aviso} className="text-sm text-muted-foreground">
+                  {aviso}
+                </p>
+              ))}
+            </CardContent>
+          </Card>
+        )}
+
         {/* Gráficos */}
         <Tabs defaultValue="status" className="space-y-4">
           <TabsList>
             <TabsTrigger value="status">Por Fase</TabsTrigger>
+            <TabsTrigger value="sla">Gargalos</TabsTrigger>
             <TabsTrigger value="priority">Por Prioridade</TabsTrigger>
             <TabsTrigger value="value">Valor por Fase</TabsTrigger>
             <TabsTrigger value="leads">Funil de Leads</TabsTrigger>
             <TabsTrigger value="ranking">Ranking Consultores</TabsTrigger>
           </TabsList>
 
+          {/*
+            GARGALOS — permanência por macro-fase.
+
+            A média vai ao lado da MEDIANA de propósito: num gargalo a média
+            mente sempre no mesmo sentido (um processo esquecido há 400 dias
+            arrasta-a) e o histograma mostra a forma real da distribuição.
+            As macro-fases terminais não aparecem: um processo concluído não
+            demora em concluído, fica lá.
+          */}
+          <TabsContent value="sla" className="space-y-4">
+            {linhasSla.length === 0 ? (
+              <Card>
+                <CardContent className="py-10 text-center text-sm text-muted-foreground">
+                  Sem dados de permanência para mostrar.
+                </CardContent>
+              </Card>
+            ) : (
+              linhasSla.map((linha) => (
+                <Card key={linha.key}>
+                  <CardHeader>
+                    <CardTitle className="capitalize">{linha.key}</CardTitle>
+                    <CardDescription>
+                      {linha.emCurso} em curso
+                      {linha.limiarDias
+                        ? ` · ${linha.emRisco} acima de ${linha.limiarDias} dias`
+                        : " · sem limiar configurado"}
+                      {linha.bandaMediana
+                        ? ` · mediana na banda ${linha.bandaMediana} dias`
+                        : ""}
+                      {linha.diasMedios !== null && linha.diasMedios !== undefined
+                        ? ` · média ${linha.diasMedios} dias`
+                        : ""}
+                      {linha.amostraHistorico > 0
+                        ? ` · histórico medido: ${linha.diasMediosHistorico} dias em ${linha.amostraHistorico} processos`
+                        : ""}
+                    </CardDescription>
+                  </CardHeader>
+                  <CardContent>
+                    <SafeChartContainer className="h-[200px] min-w-0">
+                      <ResponsiveContainer width="100%" height="100%">
+                        <BarChart data={linha.bandas}>
+                          <CartesianGrid strokeDasharray="3 3" />
+                          <XAxis dataKey="name" />
+                          <YAxis />
+                          <Tooltip />
+                          <Bar
+                            dataKey="processos"
+                            fill={COLORS[0]}
+                            name="Processos"
+                          />
+                        </BarChart>
+                      </ResponsiveContainer>
+                    </SafeChartContainer>
+                  </CardContent>
+                </Card>
+              ))
+            )}
+          </TabsContent>
+
           <TabsContent value="status" className="space-y-4">
             <Card>
               <CardHeader>
-                <CardTitle>Distribuição por Fase</CardTitle>
+                <CardTitle>Distribuição por Macro-Fase</CardTitle>
                 <CardDescription>
-                  Número de processos em cada fase do workflow
+                  Processos por grupo do funil, agrupados pelo motor de
+                  workflow — inclui as fases legadas resolvidas para o grupo
+                  correcto
                 </CardDescription>
               </CardHeader>
               <CardContent>
