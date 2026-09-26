@@ -342,13 +342,58 @@ class FakeAsyncCollection:
     async def count_documents(self, query: dict) -> int:
         return sum(1 for doc in self.docs if self._matches(doc, query))
 
-    def aggregate(self, pipeline: list):
-        """Pipeline mínimo: `$match` + `$group` com `$sum`.
+    @classmethod
+    def _avaliar(cls, expressao, doc: dict):
+        """Avalia uma expressão de agregação sobre um documento.
+
+        SUPORTE MÍNIMO E DELIBERADO: `$switch`, `$in`, `$ifNull`,
+        `$literal` e caminhos `"$campo"` / `"$a.b"`.
+
+        Acrescentado para o BI por macro-fase (Dashboard, Camada 2). A
+        ponte `status -> macro_fase` é um `$switch` construído pelo
+        resolvedor, e é ELA que faz os processos gravados como `cpcv` ou
+        `"Concluidos "` contarem na macro certa. Testar isso contra um
+        ciclo em Python provava o ciclo, não o pipeline que corre em
+        produção — e era exactamente o defeito que se quer apanhar.
+
+        O que não está aqui não é suportado de propósito: um `$facet` ou um
+        `$bucket` meio-implementados dariam confiança falsa. Os pipelines
+        que os usam são construtores PUROS, afirmados pela forma.
+        """
+        if isinstance(expressao, str) and expressao.startswith("$"):
+            return cls._lookup_path(doc, expressao[1:])
+        if not isinstance(expressao, dict):
+            return expressao
+
+        if "$literal" in expressao:
+            return expressao["$literal"]
+        if "$ifNull" in expressao:
+            valor, alternativa = expressao["$ifNull"]
+            lido = cls._avaliar(valor, doc)
+            return cls._avaliar(alternativa, doc) if lido is None else lido
+        if "$in" in expressao:
+            alvo, conjunto = expressao["$in"]
+            return cls._avaliar(alvo, doc) in cls._avaliar(conjunto, doc)
+        if "$switch" in expressao:
+            spec = expressao["$switch"]
+            for ramo in spec.get("branches", []):
+                if cls._avaliar(ramo.get("case"), doc):
+                    return cls._avaliar(ramo.get("then"), doc)
+            return cls._avaliar(spec.get("default"), doc)
+        return expressao
+
+    def aggregate(self, pipeline: list, **kwargs):
+        """Pipeline mínimo: `$match`, `$project` e `$group` com `$sum`.
 
         Acrescentado para a contagem de utilizadores por empresa (ponto
         11), que mata um N+1 com uma agregação. Testar isso contra um
         ciclo em Python provaria outra coisa que não o que corre em
-        produção.
+        produção. Cresceu no Dashboard (Camada 2) com o `$project` e as
+        expressões que a ponte de macro-fases usa — ver `_avaliar`.
+
+        `**kwargs` absorve o `allowDiskUse` e afins: são opções do motor
+        real que não têm significado aqui, e rejeitá-las fazia um teste
+        falhar por causa de uma opção de desempenho.
         """
         docs = [dict(d) for d in self.docs]
         grupos = None
@@ -356,6 +401,22 @@ class FakeAsyncCollection:
         for etapa in pipeline or []:
             if "$match" in etapa:
                 docs = [d for d in docs if self._matches(d, etapa["$match"])]
+            elif "$project" in etapa:
+                spec = etapa["$project"]
+                projectados = []
+                for doc in docs:
+                    saida = {}
+                    if spec.get("_id", 1):
+                        saida["_id"] = doc.get("_id")
+                    for nome, expressao in spec.items():
+                        if nome == "_id":
+                            continue
+                        if expressao in (1, True):
+                            saida[nome] = doc.get(nome)
+                        else:
+                            saida[nome] = self._avaliar(expressao, doc)
+                    projectados.append(saida)
+                docs = projectados
             elif "$group" in etapa:
                 spec = etapa["$group"]
                 chave_spec = spec.get("_id")

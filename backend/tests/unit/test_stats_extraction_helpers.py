@@ -19,12 +19,19 @@ def test_stats_modules_exist():
         "stats_branches.py",
         "stats_communications.py",
         "stats_conversion.py",
+        # BI por macro-fase (Dashboard, Camada 2): o funil, os SLAs, a
+        # comparação de redes e a ponte `status -> macro_fase` que os três
+        # partilham. `stats_scope.py` é o âmbito de rede (ponto 1) — não é
+        # um endpoint, é a condição de tenant que os outros pedem.
+        # A lista está por ORDEM ALFABÉTICA porque é assim que se compara.
+        "stats_funnel.py",
         "stats_health.py",
         "stats_leads.py",
+        "stats_macro_bridge.py",
+        "stats_networks.py",
         "stats_overview.py",
-        # O ponto único do âmbito de rede (Dashboard, ponto 1). Não é um
-        # endpoint: é a condição de tenant que os outros cinco pedem.
         "stats_scope.py",
+        "stats_sla.py",
     ]
     stats_files = sorted(p.name for p in services_dir.glob("stats_*.py"))
     assert stats_files == expected
