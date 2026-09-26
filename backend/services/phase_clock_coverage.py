@@ -54,6 +54,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import Any, Iterable, Optional
 
+from services.process_phase_clock import MACROS_SEM_PERMANENCIA
 from services.workflow_phases import (
     FASE_DESCONHECIDA,
     MACRO_FASES_VALIDAS,
@@ -83,7 +84,9 @@ ETIQUETAS_DAS_BANDAS: tuple[str, ...] = (
 _DIAS_RECENTES = 30
 _DIAS_MATUROS = 90
 
-_MACROS_TERMINAIS = ("concluido", "perdido")
+#: Importado do relógio: duas listas de "o que é terminal" divergem na
+#: primeira mudança, e esta decide em que sentido a estimativa erra.
+_MACROS_TERMINAIS = MACROS_SEM_PERMANENCIA
 
 
 def instante(valor: Any) -> Optional[datetime]:

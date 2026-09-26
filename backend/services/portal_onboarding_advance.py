@@ -182,9 +182,29 @@ async def _auto_advance_from_pre_registo(process_id: str, client_id: str):
 
     # ── 3. Avançar status (STEALTH — track_history=False para não gerar ruído) ──
     now = datetime.now(timezone.utc).isoformat()
+
+    # RELÓGIO DE FASES (Camada 1). O registo em `history` deste caminho é
+    # silenciado de propósito (`track_history: False` abaixo) e o relógio
+    # avança à mesma: é estado do processo, não rasto de um utilizador.
+    # Sem ele, o tempo que o cliente levou a submeter os documentos
+    # obrigatórios ficava a contar como permanência na fase SEGUINTE.
+    from services.process_phase_clock import (
+        PROJECCAO_DO_RELOGIO,
+        montar_update,
+        transicao_de_fase,
+    )
+
+    processo_antes = await db.processes.find_one(
+        {"id": process_id}, PROJECCAO_DO_RELOGIO,
+    )
+    transicao = await transicao_de_fase(processo_antes, target_status)
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": {"status": target_status, "workflow_step": target_status, "updated_at": now}}
+        montar_update(
+            {"status": target_status, "workflow_step": target_status,
+             "updated_at": now},
+            transicao,
+        ),
     )
 
     # Log silencioso: o system user tem track_history=False, pelo que o

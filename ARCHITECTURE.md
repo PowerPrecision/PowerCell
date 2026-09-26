@@ -5265,3 +5265,131 @@ O email automático de Segunda ao CEO (`scheduled_tasks` →
 `generate_weekly_team_report` sem utilizador) mantém o âmbito global: decidir
 se passa a ser um email **por rede** é uma decisão de produto. Não fica em
 silêncio — há um `logger.warning` no caminho e um teste a afirmar que ele sai.
+
+## O cronómetro sem ator (Dashboard, Camada 1 — Set 2026)
+
+### O que a medição de produção provou
+
+O retrato do relógio sobre os 12.450 processos reais fechou a discussão sobre
+se o `updated_at` servia de aproximado:
+
+| Sinal | Processos | Sentido do erro |
+|---|---|---|
+| `nunca_tocado` (`updated_at == created_at`) | 3.105 | **sobrestima** — a estimativa cai na data de criação |
+| `tocado_apos_fecho` | 1.840 | **subestima** — parece ter entrado na fase esta semana |
+
+Quase 5.000 aproximações falsas, e 3.200 processos na banda `61+` de
+`concluido`: um processo concluído não "demora" em concluído, fica lá. Daí
+`MACROS_SEM_PERMANENCIA` — quem lê o relógio para encontrar gargalos exclui as
+macro-fases terminais, senão o painel grita sobre processos que estão
+exactamente onde devem estar.
+
+### Os campos
+
+```
+fase_desde                    instante de entrada na FASE actual
+fase_desde_estimado           o carimbo acima veio do backfill?
+macro_fase_desde              instante de entrada na MACRO-FASE actual
+macro_fase_desde_estimado     idem, para o carimbo da macro
+tempos_macro                  {macro: segundos} acumulado À SAÍDA
+```
+
+**Duas bandeiras e não uma.** Cada uma diz respeito ao seu carimbo: um
+movimento dentro da mesma macro-fase torna o `fase_desde` medido e deixa o
+`macro_fase_desde` como estava. Uma bandeira só não conseguia dizer isso sem
+mentir sobre metade — e a transição seguinte acumulava segundos estimados.
+
+**`macro_fase_desde` só reinicia quando a macro muda.** Mover de
+`fase_documental` para `fase_escritura` não sai da Análise; se reiniciasse,
+medir o gargalo passava a contar só a última sub-fase e o número ficava bonito
+à custa de ser falso.
+
+**A `macro_fase` NÃO é desnormalizada no processo.** Seria uma cópia da verdade
+do motor em 12.450 documentos, desactualizada no dia em que o administrador
+reclassificasse uma fase no `<Select>` da Parte 2 — o `INACTIVE_STATUSES` outra
+vez, com outro nome. As chaves de `tempos_macro`, pelo contrário, são **factos
+históricos**: o tempo foi passado enquanto aquela fase pertencia àquela macro.
+É essa a diferença entre memória e dívida.
+
+### Porque o relógio não tem ator
+
+Dos seis caminhos que escrevem `status`, dois são filtrados pelo stealth, o
+`process_indexing` silencia-se quando é a Indexação a avançar, o
+`portal_onboarding_advance` grava com `track_history: False` e o
+`workflow_engine.change_status` não grava nada. Metade das transições é
+invisível **porque a regra de ouro do perfil `indexacao` assim manda**.
+
+O relógio é por isso **estado do processo**: não recebe `user`, não sabe quem
+move, não escreve em `history` nem em `activities`. Funciona exactamente onde o
+rasto não pode existir. Há uma guarda sobre o código-fonte a afirmar que nenhuma
+noção de utilizador (`user`, `user_id`, `created_by`, `track_history`,
+`_is_stealth_user`, `log_history`, `effective_role`, `audit`, `activities`)
+entra no módulo, com contraprova de que ele faz mesmo o trabalho.
+
+### O acumulador, e porque não uma colecção de transições
+
+Um processo que volta de `aprovado` para `renegociacao` passa por Análise DUAS
+vezes, e o que interessa é a soma. Com o `$inc` no documento:
+
+- A média por macro-fase é um `$avg` sobre um campo que já existe — sem
+  colecção nova, sem `$lookup`, sem pipeline sobre strings de histórico.
+- O código **nunca lê o total para o reescrever**, por isso não há corrida.
+
+**O acumulador só leva tempo MEDIDO.** Um carimbo marcado como estimado nunca
+entra no `tempos_macro`: misturar medido com estimado é o erro que este épico
+existe para não cometer. A transição que sai de um carimbo estimado limpa a
+bandeira e a seguinte já acumula.
+
+Três casos em `_segundos_na_macro`, e o terceiro é o que interessa:
+
+1. Carimbo **estimado** → `None`, não acumula.
+2. Carimbo presente e legível → a diferença.
+3. **Sem carimbo nenhum** → recurso ao `created_at`. Para um processo nascido
+   depois deste código, a entrada na primeira fase É a criação: exacto, não
+   estimado. É isto que dispensa editar os cinco sítios de criação de
+   processos, presentes e futuros.
+   Um carimbo presente mas **ilegível** não cai neste recurso: o `created_at`
+   daria a idade total do processo, um valor credível e falso, que é o pior
+   resultado possível num acumulador.
+
+Um carimbo no futuro (relógios dessincronizados) também não acumula: um `$inc`
+negativo **subtrai** tempo já medido de outras passagens pela mesma macro-fase.
+
+### Uma escrita, não duas
+
+`montar_update(conjunto, transicao)` devolve `{"$set": ..., "$inc": ...}` e
+omite o `$inc` vazio (o Mongo recusa um operador sem campos, e a transição
+dentro da mesma macro produz exactamente isso). Os cinco caminhos passaram a
+usá-lo **na mesma** `update_one` que já escrevia o `status`: duas escritas
+separadas deixavam uma janela com a fase nova e o relógio da antiga, e se a
+segunda falhasse ficava assim para sempre.
+
+### Inventário dos seis caminhos
+
+| Caminho | Relógio |
+|---|---|
+| `process_update` | sim — lê a fase do `update_data`, não do pedido |
+| `process_kanban_move` | sim |
+| `process_indexing` (salto dinâmico) | sim |
+| `portal_onboarding_advance` | sim |
+| `workflow_engine.change_status` | sim — e é o único sítio onde esse movimento fica medido |
+| `admin_workflow` (fase eliminada) | **não, por decisão** |
+
+E dois que não são transições de fase: **soft-delete e restauro** escrevem
+`status` (`eliminado` e de volta) e são ciclo de vida. Apagar e restaurar um
+processo não pode limpar a prova de que esteve 90 dias em Análise. Os três
+casos têm teste — a omissão deliberada precisa de teste mais do que a presença,
+senão alguém "corrige" a falta de boa fé daqui a seis meses.
+
+### Guardar sem mudar de fase devolve transição VAZIA
+
+Um `PUT` com o mesmo `status` não é uma transição. Sem esta guarda, cada
+gravação reiniciava o cronómetro e **nenhum processo aparecia preso** — um
+defeito invisível, porque os números continuavam a existir.
+
+### Ordem de operações em produção
+
+O recurso ao `created_at` é exacto para processos nascidos depois do deploy e
+uma sobre-estimativa para um legado que o backfill ainda não tocou. O backfill
+corre por isso na mesma janela do deploy: o que ele carimba fica marcado como
+estimado e deixa de acumular.

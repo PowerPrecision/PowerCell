@@ -11,6 +11,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
+from services.process_phase_clock import (
+    montar_update,
+    transicao_de_fase,
+)
 from models.auth import UserRole
 from services.encryption import generate_nif_hash, generate_email_hash
 from services.auth import get_effective_role, resolve_concrete_role
@@ -990,7 +994,23 @@ async def run_update_process(
     inject_cdc_fn(update_data, user)
     attach_field_metadata_if_present(update_data, process, raw_body)
 
-    await db.processes.update_one({"id": process_id}, {"$set": update_data})
+    # RELÓGIO DE FASES (Camada 1).
+    #
+    # A fase nova lê-se do `update_data` e NÃO do `data.status` pedido: o
+    # `apply_staff_business_updates` só lá põe o estado quando o papel o
+    # pode mudar e a fase existe no motor. O `update_data` é o que vai ser
+    # escrito; o pedido é só um pedido.
+    #
+    # Um `PUT` com o MESMO estado devolve transição vazia e não reinicia o
+    # cronómetro — sem essa guarda, cada gravação punha a permanência a
+    # zero e nenhum processo aparecia preso.
+    #
+    # `status` não é um campo encriptado (ver `encrypt_sensitive_data`),
+    # por isso lê-se igual depois do `encrypt_process_update_payload`.
+    transicao = await transicao_de_fase(process, update_data.get("status"))
+    await db.processes.update_one(
+        {"id": process_id}, montar_update(update_data, transicao),
+    )
     updated = await db.processes.find_one({"id": process_id}, {"_id": 0})
 
     await run_process_update_side_effects(

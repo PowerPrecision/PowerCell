@@ -18,6 +18,10 @@ from datetime import datetime, timezone
 from typing import Any, Optional
 
 from database import db
+from services.process_phase_clock import (
+    montar_update,
+    transicao_de_fase,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -377,9 +381,15 @@ async def run_move_process_kanban(
 
     move_update_data = build_kanban_move_update(new_status, flags["is_active"])
     inject_cdc_fn(move_update_data, user)
+
+    # RELÓGIO DE FASES (Camada 1) — sem ator, de propósito. O arrastar de
+    # um cartão pelo indexador não deixa rasto em `history` (regra de ouro
+    # do perfil `indexacao`) e o cronómetro tem de ficar correcto mesmo
+    # assim: é estado do processo, não rasto de quem o moveu.
+    transicao = await transicao_de_fase(process, new_status)
     await db.processes.update_one(
         {"id": process_id},
-        {"$set": move_update_data},
+        montar_update(move_update_data, transicao),
     )
 
     return await run_kanban_move_side_effects(

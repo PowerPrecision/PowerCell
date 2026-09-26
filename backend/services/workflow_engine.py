@@ -284,12 +284,26 @@ async def execute_action(rule: dict, context: dict) -> bool:
         elif action == "change_status":
             new_status = config.get("new_status")
             if new_status and context.get("process_id"):
+                # RELÓGIO DE FASES (Camada 1). Este caminho não escreve
+                # NADA em `history` — uma automação move o processo e não
+                # há transição registada em lado nenhum. O relógio é o
+                # único sítio onde esse movimento fica medido.
+                from services.process_phase_clock import (
+                    PROJECCAO_DO_RELOGIO,
+                    montar_update,
+                    transicao_de_fase,
+                )
+
+                processo_antes = await db.processes.find_one(
+                    {"id": context["process_id"]}, PROJECCAO_DO_RELOGIO,
+                )
+                transicao = await transicao_de_fase(processo_antes, new_status)
                 await db.processes.update_one(
                     {"id": context["process_id"]},
-                    {"$set": {
+                    montar_update({
                         "status": new_status,
                         "updated_at": datetime.now(timezone.utc).isoformat()
-                    }}
+                    }, transicao),
                 )
         
         elif action == "assign_user":

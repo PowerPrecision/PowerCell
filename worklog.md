@@ -6739,3 +6739,92 @@ python -m scripts.medir_relogio_de_fases --json relogio.json
 
 E o índice `{network_id: 1, is_deleted: 1, status: 1}` em `processes` deixou de
 ser opcional: todas as agregações do BI passam a filtrar por rede.
+
+# Iteração — o cronómetro sem ator (Dashboard, Camada 1)
+
+## O que a medição de produção decidiu
+
+O `relogio.json` sobre os 12.450 processos reais: **3.105 nunca tocados** (a
+estimativa cairia na data de criação — sobrestima) e **1.840 tocados depois de
+fechar** (subestima). Quase 5.000 aproximações falsas. E 3.200 processos na
+banda `61+` de `concluido`, que não é um gargalo: um processo concluído não
+demora em concluído, fica lá. Daí `MACROS_SEM_PERMANENCIA` — quem procurar
+gargalos exclui as terminais, senão o painel grita sobre processos que estão
+exactamente onde devem estar.
+
+`dependencia_tenant_default: 0` é boa notícia à parte: não há pilha por
+carimbar, portanto o isolamento que entrou no lote anterior é exacto e não
+depende da variável de ambiente para os processos.
+
+## O desenho, e as duas decisões que não são óbvias
+
+**Duas bandeiras de estimativa, não uma.** `fase_desde_estimado` e
+`macro_fase_desde_estimado`. Um movimento dentro da mesma macro-fase torna o
+`fase_desde` medido e deixa o `macro_fase_desde` como estava; com uma bandeira
+só, limpá-la ali fazia a transição SEGUINTE acumular segundos estimados.
+
+**O recurso ao `created_at` dispensa editar os cinco sítios de criação.** Para
+um processo nascido depois deste código, a entrada na primeira fase É a
+criação — exacto, não estimado. Um carimbo presente mas ILEGÍVEL não cai neste
+recurso: o `created_at` daria a idade total do processo, um valor credível e
+falso, que é o pior resultado possível num acumulador.
+
+**Uma escrita, não duas.** `montar_update` mete o `$inc` na mesma `update_one`
+que já escrevia o `status`. Duas escritas separadas deixavam uma janela com a
+fase nova e o relógio da antiga, e se a segunda falhasse ficava assim para
+sempre. O `$inc` vazio é omitido — o Mongo recusa um operador sem campos, e é
+exactamente o que uma transição entre sub-fases produz.
+
+## O que NÃO carimba, e tem teste por isso
+
+- `admin_workflow` (fase eliminada): decisão do dono. Reestruturar o funil não
+  é avançar.
+- Soft-delete e restauro: ciclo de vida. Apagar e restaurar um processo não
+  pode limpar a prova de que esteve 90 dias em Análise.
+
+A omissão deliberada precisa de teste mais do que a presença — sem ele, alguém
+"corrige" a falta de boa fé daqui a seis meses.
+
+## Erros meus
+
+- **Terceira vez que uma guarda minha casa uma GRAFIA em vez de um
+  comportamento.** Escrevi `assert "PROJECCAO_DO_RELOGIO" in fonte` e a linha
+  do `import` satisfazia-a: a mutação que trocava a projecção por `{"_id": 0}`
+  passou por baixo. Passou a ser uma guarda por AST sobre a CHAMADA
+  `find_one`. Depois de Q13 e da guarda das leads, isto já não é acidente —
+  procurar um nome num módulo prova que ele é mencionado, não que é usado onde
+  importa.
+- **Uma mutação que nenhum teste podia matar era sinal de que o facto estava no
+  sítio errado.** Tirar o `status` da projecção fazia o cronómetro carimbar sem
+  nunca acumular, e era invisível porque a base de dados falsa IGNORA
+  projecções (contrato documentado no `conftest`). Em vez de a aceitar como
+  "só observável contra o Mongo real", movi o facto para uma constante
+  (`PROJECCAO_DO_RELOGIO`) — e uma constante afirma-se.
+- **Um teste meu passava por acidente de calendário.** A mutação que fazia um
+  instante ilegível devolver "agora" sobrevivia porque o `agora` injectado nos
+  testes está no PASSADO em relação ao relógio da máquina, e o resultado caía
+  na guarda dos segundos negativos. Passei a testar a leitura de instantes
+  directamente, onde não depende de mais nada.
+- **Escrevi uma mutação inútil e quase a contei como sobrevivente.** `None or
+  await find_one(...)` é semanticamente idêntico ao original. Substituí-a por
+  uma que muda mesmo o comportamento (ler um processo vazio), e essa morre.
+- Os dois primeiros testes de ponta a ponta falharam por eu não ter injectado
+  o `agora_utc` do módulo — comparavam com o relógio da máquina. É para isso
+  que ele está isolado.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3575 passed, 5 skipped** (baseline 3494).
+- `yarn test` → **1093 passed / 95 ficheiros** (inalterado).
+- `flake8 --select=E9,F63,F7,F82` → 0.
+- Mutação em quatro passagens: **24 aplicadas, 24 mortas**. Inclui a costura
+  (o documento na base de dados a mudar pelo caminho da automação, que é o
+  único dos seis que não escreve nada em `history`) e as três omissões
+  deliberadas.
+
+## A fazer em produção
+
+O backfill estimado corre na MESMA janela do deploy. Até correr, a primeira
+transição de um processo legado acumula um intervalo derivado do `created_at`,
+que sobrestima; o que o backfill carimba fica marcado como estimado e deixa de
+acumular.

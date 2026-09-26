@@ -214,6 +214,18 @@ async def run_delete_workflow_status(status_id: str, user: dict):
         target_label = target_status.get("label", target_name)
         
         # Mover todos os processos para a fase de destino
+        #
+        # SEM RELÓGIO DE FASES, de propósito (decisão do dono, Camada 1):
+        # "mover um processo entre colunas porque uma fase foi apagada é
+        # uma reestruturação do funil, não um avanço operacional. O tempo
+        # continua a contar como antes; não queremos esconder ineficiência
+        # reiniciando os SLAs à força."
+        #
+        # Um processo parado há 90 dias continua a mostrar 90 dias depois
+        # desta operação. Há um teste em `test_process_phase_clock.py` a
+        # afirmar que este `update_many` não toca em `fase_desde` nem em
+        # `macro_fase_desde` — é o género de decisão que alguém "corrige"
+        # de boa fé daqui a seis meses.
         result = await db.processes.update_many(
             {"status": status_name},
             {"$set": {"status": target_name, "updated_at": datetime.now(timezone.utc).isoformat()}}
