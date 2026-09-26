@@ -81,12 +81,76 @@ ETIQUETAS_DAS_BANDAS: tuple[str, ...] = (
 # Um processo terminal tocado nos últimos `_DIAS_RECENTES` dias, tendo
 # sido criado há mais de `_DIAS_MATURO`, é um candidato a "tocado depois
 # de fechar": a estimativa dir-lhe-ia que entrou na fase esta semana.
-_DIAS_RECENTES = 30
-_DIAS_MATUROS = 90
-
 #: Importado do relógio: duas listas de "o que é terminal" divergem na
 #: primeira mudança, e esta decide em que sentido a estimativa erra.
 _MACROS_TERMINAIS = MACROS_SEM_PERMANENCIA
+
+_DIAS_RECENTES = 30
+_DIAS_MATUROS = 90
+
+# ====================================================================
+# QUALIDADE DA ESTIMATIVA — três níveis, uma só regra
+# ====================================================================
+# A medição CONTA e o backfill CARIMBA. Se cada um classificasse à sua
+# maneira, o relatório deixava de descrever os dados que o backfill
+# escreveu — e a discrepância só apareceria meses depois, num gráfico.
+# Por isso a classificação é uma função pura, usada pelos dois, com um
+# teste a afirmar que as contagens do retrato são exactamente o que o
+# backfill escreveria.
+QUALIDADE_PLAUSIVEL = "plausivel"
+QUALIDADE_NUNCA_TOCADO = "nunca_tocado"
+QUALIDADE_TOCADO_APOS_FECHO = "tocado_apos_fecho"
+QUALIDADE_SEM_ESTIMATIVA = "sem_estimativa"
+
+QUALIDADES: tuple[str, ...] = (
+    QUALIDADE_PLAUSIVEL,
+    QUALIDADE_NUNCA_TOCADO,
+    QUALIDADE_TOCADO_APOS_FECHO,
+    QUALIDADE_SEM_ESTIMATIVA,
+)
+
+#: As qualidades que o BI NÃO deve usar para desenhar médias. O
+#: `plausivel` entra; estes dois são valores aberrantes por construção e
+#: um deles erra para cada lado, pelo que nem se anulam.
+QUALIDADES_ABERRANTES: tuple[str, ...] = (
+    QUALIDADE_NUNCA_TOCADO,
+    QUALIDADE_TOCADO_APOS_FECHO,
+)
+
+
+def classificar_estimativa(
+    *,
+    criado: Optional[datetime],
+    tocado: Optional[datetime],
+    macro: Optional[str],
+    agora: datetime,
+) -> str:
+    """Quanto vale o `updated_at` como data de entrada na fase. Pura.
+
+    - `sem_estimativa`: não há `updated_at` legível. Não há nada a semear.
+    - `nunca_tocado`: `updated_at == created_at`. Ninguém escreveu no
+      processo depois de o criar, logo a estimativa é a data de criação e
+      a permanência aparece como a idade TOTAL do processo — SOBRESTIMA.
+      `==` e não `<=`: um `updated_at` anterior ao `created_at` é dado
+      corrompido, contado à parte.
+    - `tocado_apos_fecho`: processo numa macro terminal, tocado há pouco e
+      criado há muito. Alguém anexou a escritura ou a factura meses depois
+      de fechar, e a estimativa dir-lhe-ia que entrou na fase esta
+      semana — SUBESTIMA.
+    - `plausivel`: o resto. É a única que o BI pode usar para médias.
+    """
+    if tocado is None:
+        return QUALIDADE_SEM_ESTIMATIVA
+    if criado is not None and tocado == criado:
+        return QUALIDADE_NUNCA_TOCADO
+    if (
+        macro in _MACROS_TERMINAIS
+        and criado is not None
+        and (dias_entre(tocado, agora) or 0) <= _DIAS_RECENTES
+        and (dias_entre(criado, agora) or 0) >= _DIAS_MATUROS
+    ):
+        return QUALIDADE_TOCADO_APOS_FECHO
+    return QUALIDADE_PLAUSIVEL
 
 
 def instante(valor: Any) -> Optional[datetime]:
@@ -173,12 +237,13 @@ class Retrato:
     cobertura_do_relogio: dict[str, int]
     permanencia_por_macro: dict[str, Permanencia]
     proxy_suspeito: dict[str, int]
+    qualidade_da_estimativa: dict[str, int]
     datas_invalidas: dict[str, int]
     carimbo_de_rede: dict[str, int]
     redes: dict[str, int]
 
 
-def _macro_por_valor(valores: Iterable[Optional[str]], fases: list[dict]) -> dict[str, Optional[str]]:
+def macro_por_valor(valores: Iterable[Optional[str]], fases: list[dict]) -> dict[str, Optional[str]]:
     """``valor cru de status -> macro-fase``, pelo motor e pelo resolvedor.
 
     Duas passagens numa: o `resolver_muitos` diz qual a fase real de cada
@@ -220,7 +285,7 @@ def analisar(
     linhas = list(linhas)
 
     valores = [linha.get("status") for linha in linhas]
-    macro_por_valor = _macro_por_valor(valores, fases)
+    mapa_de_macros = macro_por_valor(valores, fases)
 
     por_macro: dict[str, int] = {m: 0 for m in MACRO_FASES_VALIDAS}
     por_macro[FASE_DESCONHECIDA] = 0
@@ -239,6 +304,7 @@ def analisar(
         "tocado_apos_fecho": 0,
         "sem_updated_at": 0,
     }
+    qualidade = {nivel: 0 for nivel in QUALIDADES}
     invalidas = {
         "created_at_ausente": 0,
         "updated_at_antes_de_created_at": 0,
@@ -260,7 +326,7 @@ def analisar(
         if not bruto:
             sem_status += 1
 
-        macro = macro_por_valor.get(bruto) or FASE_DESCONHECIDA
+        macro = mapa_de_macros.get(bruto) or FASE_DESCONHECIDA
         por_macro[macro] = por_macro.get(macro, 0) + 1
         if macro == FASE_DESCONHECIDA and bruto:
             desconhecidos_por_valor[bruto] = desconhecidos_por_valor.get(bruto, 0) + 1
@@ -285,26 +351,20 @@ def analisar(
             invalidas["created_at_ausente"] += 1
         if tocado is None:
             suspeito["sem_updated_at"] += 1
-        elif criado is not None and tocado < criado:
+        if tocado is not None and criado is not None and tocado < criado:
             invalidas["updated_at_antes_de_created_at"] += 1
 
         # ── Qualidade do aproximado ──
-        # `updated_at == created_at` significa que ninguém escreveu no
-        # processo depois de o criar: a estimativa cai na data de criação
-        # e a permanência aparece como a idade TOTAL do processo.
-        # `==` e não `<=`: um `updated_at` ANTERIOR ao `created_at` é dado
-        # corrompido, já contado em `datas_invalidas`. Somá-lo aqui
-        # também inflacionava o número que decide o backfill.
-        if tocado is not None and criado is not None and tocado == criado:
-            suspeito["nunca_tocado"] += 1
-        if (
-            macro in _MACROS_TERMINAIS
-            and tocado is not None
-            and criado is not None
-            and (dias_entre(tocado, agora) or 0) <= _DIAS_RECENTES
-            and (dias_entre(criado, agora) or 0) >= _DIAS_MATUROS
-        ):
-            suspeito["tocado_apos_fecho"] += 1
+        # UMA classificação, duas vistas: o `qualidade` é a partição
+        # exaustiva (é o que o backfill carimba) e o `suspeito` é a
+        # leitura por sinal. Derivar o segundo do primeiro é o que impede
+        # o relatório de descrever dados diferentes dos que se escreveram.
+        nivel = classificar_estimativa(
+            criado=criado, tocado=tocado, macro=macro, agora=agora,
+        )
+        qualidade[nivel] = qualidade.get(nivel, 0) + 1
+        if nivel in QUALIDADES_ABERRANTES:
+            suspeito[nivel] += 1
 
         # ── Permanência que a estimativa produziria ──
         # Preferimos o carimbo real quando já existe; só na sua ausência
@@ -358,6 +418,7 @@ def analisar(
         cobertura_do_relogio=cobertura,
         permanencia_por_macro=permanencia,
         proxy_suspeito=suspeito,
+        qualidade_da_estimativa=qualidade,
         datas_invalidas=invalidas,
         carimbo_de_rede=carimbo,
         redes=dict(sorted(redes.items(), key=lambda kv: -kv[1])),
@@ -429,6 +490,12 @@ def formatar_relatorio(retrato: Retrato) -> str:
        f"{sus['tocado_apos_fecho']}")
     ad("    → SUBESTIMA a permanência: parece ter entrado na fase esta semana.")
     ad(f"  sem `updated_at`: {sus['sem_updated_at']}")
+    ad("")
+    ad("  Qualidade que o backfill vai carimbar:")
+    for nivel, quantos in retrato.qualidade_da_estimativa.items():
+        ad(f"    {nivel:<22} {quantos}")
+    ad("  (só o `plausivel` serve para médias; os outros dois erram para")
+    ad("   lados OPOSTOS, pelo que nem se anulam em média)")
 
     inv = retrato.datas_invalidas
     if any(inv.values()):
@@ -487,6 +554,7 @@ def para_json(retrato: Retrato) -> dict:
             for macro, perm in retrato.permanencia_por_macro.items()
         },
         "proxy_suspeito": retrato.proxy_suspeito,
+        "qualidade_da_estimativa": retrato.qualidade_da_estimativa,
         "datas_invalidas": retrato.datas_invalidas,
         "carimbo_de_rede": retrato.carimbo_de_rede,
         "redes": retrato.redes,
