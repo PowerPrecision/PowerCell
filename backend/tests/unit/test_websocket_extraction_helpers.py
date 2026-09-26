@@ -8,6 +8,11 @@ def test_websocket_api_modules_exist():
     expected = [
         "websocket_api_helpers.py",
         "websocket_api_notifications.py",
+        # WebSockets externos (Set 2026): o socket do CLIENTE do Portal vive num
+        # endpoint SEPARADO do de staff, de propósito — o laço do staff trata
+        # seis tipos de mensagem e meter um cliente externo lá dentro faria a
+        # segurança depender de nenhum ramo novo se esquecer da guarda.
+        "websocket_api_portal.py",
         "websocket_api_status.py",
     ]
     for name in expected:

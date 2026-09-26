@@ -13,6 +13,7 @@ from fastapi import WebSocket, WebSocketDisconnect
 from database import db
 from services.websocket_manager import manager, WSEventType, create_ws_message
 from services.realtime_delivery import entregar_as_redes, entregar_na_sala
+from services.ws_client_identity import sem_clientes
 from services.websocket_api_helpers import (
     verify_websocket_token,
     is_disconnect_error,
@@ -81,7 +82,10 @@ async def run_websocket_notifications(websocket: WebSocket, token: str) -> None:
                 "status": "connected",
                 "user_id": user_id,
                 "user_name": user.get("name", ""),
-                "connected_users": len(manager.get_connected_users())
+                # Sem os sockets do Portal: são ligações do MESMO
+                # `ConnectionManager`, e contá-las aqui mostrava à equipa um
+                # número de "utilizadores online" inflacionado por clientes.
+                "connected_users": len(sem_clientes(manager.get_connected_users()))
             }
         ))
 

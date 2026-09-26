@@ -25,6 +25,88 @@ from services.realtime_delivery import entregar_na_sala, sala_do_processo
 logger = logging.getLogger(__name__)
 
 
+# ====================================================================
+# NOTIFICAÇÃO DO FIM DE UMA RECOLHA — dois eventos, duas audiências
+# ====================================================================
+# Motivos de falha que o CLIENTE pode ver, porque são sobre acções DELE: as
+# credenciais que introduziu e o código de confirmação que lhe foi pedido.
+# Tudo o que não estiver neste mapa colapsa em `indisponivel` — o cliente não
+# precisa do nosso classificador interno, e um "unexpected_error" no ecrã dele
+# é ruído que não o ajuda a agir.
+#
+# É um mapa FECHADO com omissão segura, e não um `.replace()` ou um passa-tudo:
+# um motivo novo do lado do scraper aparece ao cliente como "indisponível" até
+# alguém decidir que ele o deve ver.
+MOTIVOS_VISIVEIS_AO_CLIENTE: dict[str, str] = {
+    "credenciais_invalidas": "credenciais_invalidas",
+    "mfa_requerido": "confirmacao_necessaria",
+    "mfa_timeout": "confirmacao_expirada",
+    "mfa_codigo_incorreto": "confirmacao_incorreta",
+}
+MOTIVO_GENERICO = "indisponivel"
+
+
+def motivo_para_o_cliente(error_type: str | None) -> str:
+    """Traduz o classificador interno no motivo que o cliente pode ver."""
+    return MOTIVOS_VISIVEIS_AO_CLIENTE.get(error_type or "", MOTIVO_GENERICO)
+
+
+async def _notificar_recolha(
+    process_id: str,
+    source: str,
+    *,
+    docs_count: int = 0,
+    error_type: str | None = None,
+) -> None:
+    """Notifica a sala do processo sobre o fim de uma recolha no Estado.
+
+    Emite DOIS eventos, e são dois de propósito:
+
+    * `DOCUMENT_UPLOADED` — para a EQUIPA, com o payload de sempre (incluindo o
+      `error` interno). É o que o comentário original deste ficheiro dizia:
+      "Notificar equipa via WebSocket".
+    * `PORTAL_GOV_PROGRESS` — para o CLIENTE, e é o único dos dois que está na
+      lista de permissão do socket do Portal (`ws_client_identity`).
+
+    Porque não reaproveitar o primeiro para o cliente: `document_uploaded` tem
+    nome genérico e nada impede que amanhã um upload da equipa o emita com o
+    NOME do ficheiro no payload — e nesse dia o cliente passaria a ver nomes de
+    documentos internos, em silêncio. Um evento próprio tem um contrato próprio.
+
+    Nunca levanta: uma notificação perdida degrada a UI para polling e não pode
+    fazer falhar a recolha que já correu.
+    """
+    para_a_equipa: dict = {"process_id": process_id, "source": source}
+    para_o_cliente: dict = {"process_id": process_id, "source": source}
+
+    if error_type:
+        para_a_equipa["error"] = error_type
+        para_o_cliente["estado"] = "falhou"
+        para_o_cliente["motivo"] = motivo_para_o_cliente(error_type)
+    else:
+        para_a_equipa["documents_count"] = docs_count
+        para_o_cliente["estado"] = "concluido"
+        para_o_cliente["documents_count"] = docs_count
+
+    try:
+        await entregar_na_sala(
+            sala_do_processo(process_id),
+            WSEventType.DOCUMENT_UPLOADED,
+            para_a_equipa,
+        )
+    except Exception as ws_err:
+        logger.warning(f"[PORTAL-BG] Erro ao notificar a equipa via WebSocket: {ws_err}")
+
+    try:
+        await entregar_na_sala(
+            sala_do_processo(process_id),
+            WSEventType.PORTAL_GOV_PROGRESS,
+            para_o_cliente,
+        )
+    except Exception as ws_err:
+        logger.warning(f"[PORTAL-BG] Erro ao notificar o cliente via WebSocket: {ws_err}")
+
+
 async def _run_financas_background(nif: str, password: str, process_id: str, client_name: str, client_email: str, process: dict, scraper_job_id: str):
     """
     Background task para o scraper das Finanças.
@@ -74,18 +156,7 @@ async def _run_financas_background(nif: str, password: str, process_id: str, cli
 
             # Notificar equipa via WebSocket
             await _notify_assigned_team_fetch(process, "Portal das Finanças", docs_count)
-            try:
-                await entregar_na_sala(
-                    sala_do_processo(process_id),
-                    WSEventType.DOCUMENT_UPLOADED,
-                    {
-                        "process_id": process_id,
-                        "source": "auto_financas",
-                        "documents_count": docs_count,
-                    },
-                )
-            except Exception as ws_err:
-                logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
+            await _notificar_recolha(process_id, "auto_financas", docs_count=docs_count)
 
             # Libertar memória: limpar screenshot e documentos do result
             result.pop("screenshot_b64", None)
@@ -139,18 +210,7 @@ async def _run_financas_background(nif: str, password: str, process_id: str, cli
                 pass
 
             # Notificar via WebSocket sobre o erro
-            try:
-                await entregar_na_sala(
-                    sala_do_processo(process_id),
-                    WSEventType.DOCUMENT_UPLOADED,
-                    {
-                        "process_id": process_id,
-                        "source": "auto_financas_error",
-                        "error": error_type,
-                    },
-                )
-            except Exception:
-                pass
+            await _notificar_recolha(process_id, "auto_financas_error", error_type=error_type)
 
     except Exception as e:
         logger.error(f"[PORTAL-BG] Erro inesperado no scraper Finanças: {type(e).__name__}: {e}", exc_info=True)
@@ -223,18 +283,7 @@ async def _run_seguranca_social_background(niss: str, password: str, process_id:
 
             # Notificar equipa
             await _notify_assigned_team_fetch(process, "Segurança Social", docs_count)
-            try:
-                await entregar_na_sala(
-                    sala_do_processo(process_id),
-                    WSEventType.DOCUMENT_UPLOADED,
-                    {
-                        "process_id": process_id,
-                        "source": "auto_seguranca_social",
-                        "documents_count": docs_count,
-                    },
-                )
-            except Exception as ws_err:
-                logger.warning(f"[PORTAL-BG] Erro ao notificar via WebSocket: {ws_err}")
+            await _notificar_recolha(process_id, "auto_seguranca_social", docs_count=docs_count)
 
             # Libertar memória: limpar screenshot e documentos do result
             result.pop("screenshot_b64", None)
@@ -284,18 +333,7 @@ async def _run_seguranca_social_background(niss: str, password: str, process_id:
             except Exception:
                 pass
 
-            try:
-                await entregar_na_sala(
-                    sala_do_processo(process_id),
-                    WSEventType.DOCUMENT_UPLOADED,
-                    {
-                        "process_id": process_id,
-                        "source": "auto_seguranca_social_error",
-                        "error": error_type,
-                    },
-                )
-            except Exception:
-                pass
+            await _notificar_recolha(process_id, "auto_seguranca_social_error", error_type=error_type)
 
     except Exception as e:
         logger.error(f"[PORTAL-BG] Erro inesperado no scraper Seg. Social: {type(e).__name__}: {e}", exc_info=True)

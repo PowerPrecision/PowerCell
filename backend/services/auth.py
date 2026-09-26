@@ -164,6 +164,20 @@ def needs_rehash(hashed: str) -> bool:
     return not (hashed.startswith("$2b$") or hashed.startswith("$2a$"))
 
 
+def _tipo_de_token_do_staff() -> str:
+    """O valor da claim `type` dos tokens de staff, vindo do ponto ÚNICO.
+
+    Import TARDIO de propósito: o `ws_client_identity` importa o
+    `websocket_manager` (para o `WSEventType`) e um import no topo deste módulo
+    fecharia um ciclo — o `services/__init__` começa por importar o `auth`.
+    Duplicar aqui o literal `"staff"` seria a alternativa, e seria a forma de
+    os dois lados divergirem sem ninguém dar por isso.
+    """
+    from services.ws_client_identity import TIPO_DO_STAFF
+
+    return TIPO_DO_STAFF
+
+
 def create_token(user_id: str, email: str, role: str) -> str:
     """Cria um token JWT com os dados essenciais do utilizador autenticado.
 
@@ -186,6 +200,14 @@ def create_token(user_id: str, email: str, role: str) -> str:
         "sub": user_id,
         "email": email,
         "role": role,
+        # Claim `type` — acrescentada no lote dos WebSockets externos.
+        # Os tokens do Portal do Cliente são assinados com o MESMO `JWT_SECRET`
+        # e declaram `type` desde sempre; o do staff não declarava nada, pelo
+        # que a única coisa que separava as duas famílias era o `sub` de um
+        # token de Portal ser um `process_id` que não existe em `db.users` —
+        # uma coincidência de namespaces, não uma regra. Com esta claim, a
+        # separação passa a ser afirmada dos dois lados.
+        "type": _tipo_de_token_do_staff(),
         "exp": datetime.now(timezone.utc) + timedelta(hours=JWT_EXPIRATION_HOURS)
     }
     return jwt.encode(payload, JWT_SECRET, algorithm=JWT_ALGORITHM)
@@ -347,6 +369,26 @@ async def get_current_user(
     """
     try:
         payload = jwt.decode(credentials.credentials, JWT_SECRET, algorithms=[JWT_ALGORITHM])
+
+        # A claim `type` é AUTORITATIVA. Um token do Portal do Cliente (ou um
+        # `gov_auth`) é recusado aqui EXPLICITAMENTE, mesmo que o `sub` viesse
+        # a casar com um utilizador — até este lote, o que os separava era
+        # apenas o `sub` de um token de Portal ser um `process_id`.
+        # `None` é aceite de propósito: os tokens de staff emitidos antes desta
+        # alteração não têm a claim, e recusá-los invalidava todas as sessões
+        # abertas no deploy (ver `ws_client_identity`).
+        from services.ws_client_identity import tipo_de_token_e_de_staff
+
+        if not tipo_de_token_e_de_staff(payload.get("type")):
+            logger.warning(
+                "[AUTH] Token de tipo '%s' recusado na API de staff (sub=%s)",
+                payload.get("type"), payload.get("sub"),
+            )
+            raise HTTPException(
+                status_code=401,
+                detail="Este token não tem permissão para acessar a API.",
+            )
+
         user = await db.users.find_one({"id": payload["sub"]}, {"_id": 0})
         if not user:
             raise HTTPException(status_code=401, detail="Utilizador não encontrado")

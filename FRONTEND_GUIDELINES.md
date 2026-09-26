@@ -190,6 +190,17 @@ Distinguir 400 de 503 no `catch` é o que separa "o teu ficheiro não serve" de 
 
 O `file_size` e o `content_type` que o cliente envia no `confirm-upload` continuam a ser aceites no corpo por retrocompatibilidade, mas **são ignorados**: o que fica gravado é o que o S3 e os magic bytes dizem. Não construir UI que assuma que o tipo declarado é o que ficou (um `.pdf` que é na verdade um PNG aparecerá como `image/png` na lista de documentos, e está correcto).
 
+### O Portal tem WebSocket próprio: `/api/ws/portal` (Set 2026)
+
+O backend está feito e testado; a **subscrição do frontend ainda não está ligada** (o `useProcessPortalMessages` continua em polling de 30s — dívida D-9). Quando for, estas são as regras do contrato, e nenhuma é negociável do lado do cliente:
+
+- **Endpoint próprio.** `/api/ws/portal?token=<magic token do Portal>` — **não** o `/api/ws/notifications` da equipa, que recusa tokens de Portal com o código de fecho `4002`. O token é o mesmo que o Portal já usa nas chamadas REST (`getPortalToken()`).
+- **Não enviar `join_process_room`.** A sala é derivada do token **no servidor** e um pedido de sala é ignorado e registado como sondagem. Não há nada a subscrever: a ligação já está na sala do processo do cliente.
+- **A única mensagem a enviar é `{"type":"ping"}`**, de 30 em 30s — é ela que renova a presença. Tudo o mais é descartado em silêncio.
+- **Dois eventos, e só dois:** `portal_message` (mensagem do consultor) e `portal_gov_progress` (`{process_id, source, estado, documents_count}` no sucesso; `{process_id, source, estado:"falhou", motivo}` na falha, onde `motivo` ∈ `credenciais_invalidas` / `confirmacao_necessaria` / `confirmacao_expirada` / `confirmacao_incorreta` / `indisponivel`). Qualquer outro evento da sala do processo é retido no servidor por uma lista de permissão — **não** escrever handlers para eventos internos (`process_updated`, `document_uploaded`, …): eles nunca chegam, e um handler para eles é código morto que sugere que chegam.
+- **Códigos de fecho:** `4001` sessão expirada (pedir novo magic link), `4002` acesso inválido. Em ambos, **não** reconectar em ciclo.
+- **O polling FICA como recurso** — a regra do Épico 10: para quando `isConnected`, retoma quando o WS cai. Apagá-lo deixa o Portal sem mensagens quando o WebSocket não liga.
+
 ### Documentos legais gerados — sempre pré-preenchidos do backend
 
 Documentos legais gerados pelo sistema (RGPD, Minuta, CPCV) **devem** vir pré-preenchidos com os dados reais do cliente/processo quando o staff os descarrega para assinatura manual. O backend é a única fonte de verdade para os dados — o frontend não pré-preenche nada.

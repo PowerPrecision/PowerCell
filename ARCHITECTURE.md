@@ -5792,3 +5792,146 @@ mesmo pré-assinado e a mesma ausência de validação a posteriori. O risco é
 menor (utilizadores internos autenticados, não a Internet) mas a lacuna é
 idêntica e o `exigir_conteudo_valido` serve-lhe tal como está. Fica registado,
 não feito.
+
+---
+
+## WebSockets externos — ligar o cliente à rede sem lhe dar a rede (Set 2026)
+
+Terceiro passo do Caminho 4. O namespace dos WebSockets era interno; este lote
+abre-o aos clientes do Portal e a pergunta que resolve é a de sempre com outra
+forma: **estar na sala não é ter direito a tudo o que a sala transporta.**
+
+### A coincidência que passou a regra
+
+O `verify_websocket_token` decifrava com o **mesmo** `JWT_SECRET` dos tokens do
+Portal, lia o `sub`, procurava em `db.users` e **nunca** olhava para a claim
+`type`. O que impedia um token do Portal de abrir o socket interno era o `sub`
+de um token de Portal ser um `process_id` que não existe em `db.users` — um
+acidente de namespaces, não uma decisão. Abrir o namespace sem mudar isto
+transformava esse acidente em autorização por omissão.
+
+Hoje a claim `type` é **autoritativa dos dois lados**
+(`services/ws_client_identity.py`):
+
+| Lado | Regra | Forma |
+|---|---|---|
+| Staff (`/ws/notifications`, `get_current_user`) | recusa tipos **estranhos** (`magic_link`, `verified_session`, `access_code_session`, `gov_auth`); aceita `staff` e `None` | deny-list + `None` tolerado |
+| Cliente (`/ws/portal`) | aceita **só** os três tipos do `portal_security`, e exige `role == client_portal` | allow-list nos dois eixos |
+
+O `None` do lado do staff é deliberado: o `create_token` só passou a estampar
+`type: "staff"` neste lote e recusar `None` invalidava todas as sessões abertas
+no deploy. A segurança está no outro lado — um tipo estranho é recusado — e a
+tolerância tem data de morte registada (`TECHNICAL_DEBT.md` D-5).
+
+### Endpoint separado, e não um ramo
+
+`/ws/portal` é um endpoint próprio (`services/websocket_api_portal.py`). O laço
+do staff trata seis tipos de mensagem (`mark_notification_read`,
+`mark_all_read`, `process_locked`, `process_unlocked`, `join_process_room`,
+`leave_process_room`); meter um cliente externo lá dentro obrigava a semear
+`if é_cliente:` por cada ramo, e a segurança passava a depender de **nenhum ramo
+novo se esquecer da guarda**. O laço do cliente aceita **uma** mensagem: `ping`.
+Não há ramo que esquecer porque não há ramos.
+
+### O prefixo `cliente:` paga três coisas de uma vez
+
+A identidade do socket de um cliente é `cliente:<process_id>`, nunca o
+`process_id` cru. O `ConnectionManager` e o ZSET de presença são indexados por
+`user_id`, e essa decisão única resolve:
+
+- **Presença** — o "quem está online" interno (`chat_presence` →
+  `presenca.todos_online`) lê o ZSET inteiro; sem namespace, um cliente do
+  Portal aparecia na lista de consultores activos do Chat da equipa. O filtro
+  (`sem_clientes`) vive **dentro** do `todos_online`, não em cada chamador: um
+  chamador novo herda a regra em silêncio, que é a direcção certa para a
+  omissão.
+- **Reconhecimento** — a camada de entrega precisa de saber, olhando só para o
+  identificador de um membro da sala, se aquele socket é de um cliente. Sem
+  isso não há onde aplicar a lista de permissão.
+- **Imunidade a eventos dirigidos** — os envelopes endereçados a `user_id` usam
+  ids de `db.users`; nenhum emissor escreve `cliente:...`. Nenhum evento
+  dirigido pode alcançar um cliente, nem por colisão de ids.
+
+### Nunca `register_scope` — e a exclusão é estrutural
+
+Um cliente não tem UCRs, e o `resolve_tenant_scope` de um utilizador sem
+empresa devolve a **rede de omissão** — a do grupo incumbente. O encaminhamento
+por audiência (`entregar_a_processo`, `entregar_as_redes`) casa por
+`network_id`: um socket de cliente com âmbito receberia **todos** os deltas de
+processo dessa rede, com `client_name` e `process_number` dentro.
+
+O endpoint do cliente não chama `register_scope`. O `_route_por_audiencia` já
+faz `if not registo: continue` — a exclusão não é uma verificação que alguém
+tenha de lembrar, é a consequência de não haver âmbito.
+
+### A lista é de PERMISSÃO, e é aplicada na ENTREGA
+
+A sala `process_<id>` é de staff: transporta deltas do processo, bloqueios de
+edição, progresso interno dos scrapers e mensagens do Portal, emitidos de sete
+módulos diferentes — e vai crescer.
+
+Com uma lista de **bloqueio**, um emissor novo fuga por omissão. Com uma lista
+de **permissão** aplicada na **entrega** (`websocket_manager._route_por_sala` →
+`ws_client_identity.pode_entregar`), um emissor novo **não chega ao cliente até
+alguém decidir que deve**. É na entrega porque é o único ponto por onde todos os
+emissores passam; na emissão seria uma regra a repetir em sete módulos.
+
+Permitidos hoje, e só estes:
+
+- `portal_message` — a conversa com o consultor, a razão de ser da ligação;
+- `portal_gov_progress` — o progresso dos scrapers do Estado.
+
+**Porque é que `document_uploaded` NÃO está na lista**, apesar de ser o evento
+que os scrapers emitiam: o comentário na origem dizia "Notificar **equipa** via
+WebSocket". É um evento genérico, com nome genérico, e nada impede que amanhã um
+upload da equipa o emita com o **nome do ficheiro** no payload — e nesse dia o
+cliente passaria a ver nomes de documentos internos, em silêncio. Um evento
+próprio tem um contrato próprio: `_notificar_recolha` emite **dois** eventos, o
+da equipa (com o classificador interno) e o do cliente
+(`{process_id, source, estado, documents_count}` — uma lista fechada de chaves,
+asserida por um teste).
+
+O motivo de falha que chega ao cliente passa por um **mapa fechado**:
+`credenciais_invalidas` e os `mfa_*` passam traduzidos (são acções DELE, sobre
+as credenciais que introduziu); `scraper_unavailable` e `unexpected_error`
+colapsam em `indisponivel`. Um motivo novo do lado do scraper aparece como
+"indisponível" até alguém decidir que o cliente o deve ver.
+
+### A sala é ditada pelo servidor
+
+O `sub` do token **é** o `process_id`; a sala é calculada no handshake. Uma
+mensagem `join_process_room` enviada pelo cliente é **ignorada e registada** —
+vindo de um cliente é uma sondagem, porque não existe interface que a envie.
+
+### Cobertura
+
+`backend/tests/unit/test_ws_portal_isolation.py` (84 testes). As duas provas
+que o dono do produto pediu, ambas contra o `ConnectionManager` e o
+`route_system_event` **reais**:
+
+1. **O cliente A não escuta o processo de B** — com a contra-asserção de que B
+   recebe, para o teste não passar por a entrega estar simplesmente quebrada.
+2. **O cliente A não ouve os eventos internos do SEU processo** — 18 tipos de
+   evento, parametrizados, cada um com um socket de **staff** na mesma sala a
+   receber o mesmo evento. Sem essa metade, o teste passava por a sala estar
+   vazia e não pela barreira.
+
+Mais a contraprova (o que o cliente **pode** ouvir chega mesmo) e um evento
+**inventado** (`relatorio_de_risco_interno`), que nenhuma lista de bloqueio
+previa e que a de permissão retém.
+
+Dezoito mutações. **Cinco** sobreviveram à primeira ronda e nenhuma era mutante
+equivalente:
+
+- acrescentar `register_scope` ao endpoint e tirar-lhe o `join_room` não
+  matavam nada, porque o helper do teste **reimplementa** o handshake para
+  deixar a ligação aberta — a mesma lição do lote da quarentena, noutra roupa.
+  Corrigido com um teste um nível abaixo, que corre o endpoint verdadeiro e
+  **espia as chamadas ao `ConnectionManager`**, mais uma guarda de código-fonte
+  a afirmar que o duplo não divergiu do original;
+- tirar a verificação do `role` no socket do Portal não matava nada, porque o
+  token de staff do meu teste também falha o `type` — coberto agora com um
+  token **forjado** (tipo de Portal + role de staff);
+- `todos_online` a devolver clientes não matava nada, porque o meu teste só
+  cobria o ramo **sem** Redis e a mutação vivia no ramo **com** Redis;
+- o `get_current_user` não tinha teste nenhum — endureci-o e não o provei.

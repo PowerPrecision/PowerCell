@@ -7160,3 +7160,126 @@ formato, não inocência — antivírus/sandbox é outro lote.
 pré-assinado e a mesma ausência de validação a posteriori. Risco menor
 (utilizadores internos) mas lacuna idêntica, e o `exigir_conteudo_valido` serve
 tal como está. Registado, não feito.
+
+---
+
+## Iteração ws-externos — Abrir o WebSocket aos clientes do Portal (Set 2026)
+
+Terceiro passo do Caminho 4, depois do hotfix P0 e da quarentena.
+
+### Diagnóstico
+
+O que impedia um token do Portal de abrir o WebSocket interno era uma
+**coincidência**: o `verify_websocket_token` decifrava com o MESMO `JWT_SECRET`,
+lia o `sub` e nunca olhava para a claim `type` — e o `sub` de um token de
+Portal é um `process_id` que não existe em `db.users`. Abrir o namespace sem
+mudar isto transformava o acidente em autorização por omissão.
+
+### As quatro regras implementadas
+
+1. **`type` autoritativo nos dois lados.** Staff recusa tipos estranhos
+   (`magic_link`/`verified_session`/`access_code_session`/`gov_auth`) e aceita
+   `staff` ou `None`; o `/ws/portal` aceita **só** os três tipos do Portal e
+   exige `role == client_portal`. O `None` do lado do staff é deliberado — o
+   `create_token` só passou a estampar `type` agora, e recusá-lo deslogava a
+   equipa no deploy (dívida D-5, com data de morte: 24h).
+2. **Nunca `register_scope`.** Um cliente não tem UCRs e o
+   `resolve_tenant_scope` dar-lhe-ia a **rede de omissão**; o encaminhamento
+   por audiência casa por `network_id` e ele receberia os deltas de processo de
+   toda a rede incumbente. Sem âmbito, o `_route_por_audiencia` salta-o — a
+   exclusão é **estrutural**, não uma verificação a lembrar.
+3. **Lista de PERMISSÃO na ENTREGA** (`_route_por_sala` → `pode_entregar`).
+   `portal_message` e `portal_gov_progress`, e mais nada. Na entrega e não na
+   emissão porque é o único ponto por onde os sete módulos emissores passam.
+4. **Presença com namespace** — `cliente:<process_id>`, e o filtro
+   (`sem_clientes`) dentro do `todos_online` e não em cada chamador.
+
+Endpoint **separado** (`/ws/portal`): o laço do staff trata seis tipos de
+mensagem e meter um cliente lá dentro faria a segurança depender de nenhum ramo
+novo se esquecer da guarda. O laço do cliente aceita `ping` e mais nada.
+
+### A decisão que não estava no pedido
+
+`document_uploaded` **não** entrou na lista de permissão, apesar de ser o evento
+que os scrapers do Estado emitiam. O comentário na origem dizia "Notificar
+**equipa** via WebSocket": é genérico, e nada impede que amanhã um upload da
+equipa o emita com o nome do ficheiro no payload — e nesse dia o cliente veria
+nomes de documentos internos, em silêncio. Criei o `PORTAL_GOV_PROGRESS`, com
+contrato próprio e uma lista fechada de chaves, e os quatro sítios dos scrapers
+passaram por um `_notificar_recolha` que emite os **dois** eventos.
+
+O motivo de falha que chega ao cliente passa por um mapa fechado:
+`credenciais_invalidas` e os `mfa_*` passam traduzidos (são acções dele);
+`scraper_unavailable` e `unexpected_error` colapsam em `indisponivel`.
+
+### As duas provas, ao vivo pelo ASGI real
+
+```
+┌─ HANDSHAKE ─────────────────────────────────────────────────
+│ ✓ token de STAFF  → /ws/portal         RECUSADO
+│ ✓ token de PORTAL → /ws/notifications  RECUSADO
+├─ ESTADO DO MANAGER ─────────────────────────────────────────
+│ identidade de A .... cliente:proc-cliente-A
+│ salas de A ......... {'process_proc-cliente-A'}
+│ ÂMBITO de rede de A  None
+├─ PROVA 1: A não escuta o processo de B ─────────────────────
+│ B recebeu: portal_message → "Ola Sr. B, o seu credito foi aprovado..."
+│ A recebeu: nada
+├─ PROVA 2: A não ouve os eventos internos do SEU processo ───
+│ process_updated · process_status_changed · process_locked
+│ document_uploaded · new_chat_message · relatorio_de_risco_interno
+│ A não recebeu NENHUM dos 6
+├─ O QUE A PODE OUVIR (contraprova) ──────────────────────────
+│ portal_message · portal_gov_progress
+├─ A SALA É DITADA PELO SERVIDOR ─────────────────────────────
+│ A pediu a sala de B; salas de A continuam {'process_proc-cliente-A'}
+└─────────────────────────────────────────────────────────────
+```
+
+Na bateria, os 18 tipos de evento interno estão parametrizados, **cada um com
+um socket de staff na mesma sala a receber o mesmo evento** — sem essa metade o
+teste passava por a sala estar vazia e não pela barreira.
+
+### Erros meus, apanhados por mutação
+
+Dezoito mutações; **cinco** sobreviveram à primeira ronda e nenhuma era mutante
+equivalente:
+
+1. **`register_scope` acrescentado ao endpoint não matava nada** e
+2. **tirar-lhe o `join_room` também não** — porque o meu helper de teste
+   **reimplementa** o handshake (para deixar a ligação aberta enquanto disparo
+   eventos). É a lição do lote anterior outra vez: um duplo que reimplementa a
+   lógica valida o duplo. Corrigido com um teste um nível abaixo, que corre o
+   endpoint verdadeiro e **espia as chamadas ao `ConnectionManager`**, mais uma
+   guarda de código-fonte a afirmar que o duplo não divergiu.
+3. **Tirar a verificação do `role`** no socket do Portal não matava nada: o
+   token de staff do meu teste também falha o `type`. Coberto com um token
+   forjado (tipo de Portal + role de staff).
+4. **`todos_online` a devolver clientes** não matava nada: o meu teste só cobria
+   o ramo **sem** Redis e a mutação vivia no ramo **com** Redis.
+5. **O `get_current_user` não tinha teste nenhum** — endureci-o e não o provei.
+   É a metade REST da decisão do `type`, e a mais importante.
+
+O guarda-inventário dos módulos `websocket_api_*` disparou (terceira vez no
+projecto) — lista actualizada com o motivo, em ordem alfabética.
+
+### Estado
+
+- `tests/unit`: **3880 passed, 5 skipped** (0 regressões; 3794 antes, +86).
+- `flake8` nos selectores bloqueantes do CI sobre `services/`, `routes/` e
+  `tests/unit/`: **0**.
+- App arranca; `/api/ws/portal` registado ao lado de `/ws/notifications`.
+
+### Novo: `TECHNICAL_DEBT.md`
+
+Dívida conhecida deixou de viver só em comentários de código. Nove entradas com
+o que está mal, porque foi adiado, quem é atingido e o que fecha cada uma —
+incluindo o `document_direct_upload.py` (D-1), a separação física dos segredos
+JWT (D-2) e o resíduo `INACTIVE_STATUSES` (D-6). O `AGENTS.md` aponta para lá.
+
+### Por fazer (D-9)
+
+O hook `useProcessPortalMessages` continua em polling de 30s: a fronteira de
+segurança está feita e testada, mas a **subscrição do frontend não está
+ligada**. Não a misturei no mesmo commit de propósito — é trabalho de UI com o
+seu próprio risco, e o polling continua a ser o recurso por desenho.

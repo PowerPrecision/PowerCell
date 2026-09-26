@@ -260,6 +260,13 @@ class WSEventType:
 
     # Chat / Portal Messages
     PORTAL_MESSAGE = "portal_message"
+    # Progresso dos scrapers do Estado VISÍVEL AO CLIENTE. Existe separado do
+    # `DOCUMENT_UPLOADED` de propósito: esse é para a EQUIPA (di-lo o
+    # comentário na origem), tem nome genérico e nada impede que amanhã leve o
+    # nome de um ficheiro no payload. Este tem um contrato só dele — origem e
+    # contagem, nunca nomes nem ids internos — e é o único dos dois que está
+    # na lista de permissão do cliente (`ws_client_identity`).
+    PORTAL_GOV_PROGRESS = "portal_gov_progress"
     NEW_CHAT_MESSAGE = "new_chat_message"
     CHAT_TYPING = "chat_typing"
     
@@ -368,6 +375,18 @@ async def route_system_event(envelope: dict) -> bool:
             return await _route_por_audiencia(event_type, audiencia_bruta, envelope)
         return await _route_por_sala(event_type, envelope)
 
+    # A MESMA lista de permissão no ramo dirigido. Hoje nenhum emissor
+    # endereça um `cliente:<process_id>` — os envelopes por `user_id` usam ids
+    # de `db.users` —, pelo que esta guarda não muda comportamento nenhum. Está
+    # aqui para que TODOS os caminhos que chegam a um socket de cliente passem
+    # pela mesma decisão: quando alguém quiser mesmo notificar um cliente
+    # directamente, tem de acrescentar o evento à lista, não de descobrir que
+    # já funcionava por um caminho que ninguém guardou.
+    from services.ws_client_identity import pode_entregar
+
+    if not pode_entregar(user_id, event_type):
+        return False
+
     if not manager.is_user_connected(user_id):
         # Normal em multi-worker: o socket vive noutro processo.
         logger.debug(
@@ -470,9 +489,21 @@ async def _route_por_sala(event_type: str, envelope: dict) -> bool:
     excluido = envelope.get("exclude_user_id")
     mensagem = _mensagem_do_envelope(event_type, envelope)
 
+    # Sockets de CLIENTE do Portal: lista de PERMISSÃO, aplicada aqui.
+    #
+    # A sala `process_<id>` é de staff — transporta deltas do processo,
+    # bloqueios de edição, progresso de scrapers e mensagens do Portal,
+    # emitidos de sete módulos diferentes. Com uma lista de bloqueio, um
+    # emissor novo fuga por omissão; com esta, um emissor novo não alcança o
+    # cliente até alguém o decidir. E é NA ENTREGA porque é o único ponto por
+    # onde todos os emissores passam. Ver `services/ws_client_identity.py`.
+    from services.ws_client_identity import pode_entregar
+
     entregue = False
     for user_id in manager.get_room_members(sala):
         if excluido and user_id == excluido:
+            continue
+        if not pode_entregar(user_id, event_type):
             continue
         try:
             await manager.send_personal_message(mensagem, user_id)

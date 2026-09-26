@@ -217,13 +217,29 @@ async def online_entre(user_ids: Iterable[str]) -> set[str]:
 
 
 async def todos_online() -> set[str]:
-    """Todos os utilizadores com sessão aberta, em qualquer worker."""
+    """Todos os utilizadores de STAFF com sessão aberta, em qualquer worker.
+
+    Os clientes do Portal do Cliente são EXCLUÍDOS. O ZSET é um só — é o que
+    permite responder numa chamada — e desde que os clientes externos têm
+    WebSocket também entram nele, com a identidade `cliente:<process_id>`
+    (`ws_client_identity`). Sem este filtro, um cliente aparecia na lista de
+    consultores activos do Chat interno.
+
+    O filtro vive AQUI, e não em cada chamador, por duas razões: todos os
+    chamadores de hoje querem staff, e um chamador novo que não soubesse da
+    regra herdava-a em silêncio — que é a direcção certa para a omissão.
+    Quando fizer falta saber se um CLIENTE está online, isso pede uma função
+    própria (`esta_online` já responde para qualquer identidade), não o
+    alargamento desta.
+    """
+    from services.ws_client_identity import sem_clientes
+
     cliente = await _cliente()
     if cliente is None:
-        return _local_todos()
+        return sem_clientes(_local_todos())
     try:
         vivos = await cliente.zrangebyscore(CHAVE_PRESENCA, _agora(), "+inf")
     except Exception as e:
         logger.warning(f"[PRESENCA] Falha a listar — recurso local: {e}")
-        return _local_todos()
-    return set(vivos) | _local_todos()
+        return sem_clientes(_local_todos())
+    return sem_clientes(set(vivos) | _local_todos())
