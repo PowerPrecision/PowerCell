@@ -59,21 +59,52 @@ CLIENTE = {
 }
 
 
+# Um PDF que o `libmagic` reconhece de facto — a quarentena (Set 2026)
+# inspecciona os primeiros 2 KB de tudo o que é confirmado, pelo que uma
+# chave legítima já não basta: os BYTES também têm de ser válidos.
+PDF_VALIDO = b"%PDF-1.7\n" + b"0" * 512
+
+
 class S3Falso:
     """S3 que confirma a existência de QUALQUER chave.
 
-    É esse o ponto: no bucket real o backup EXISTE, logo o
-    ``file_exists`` do código de produção respondia `True` e era a única
-    validação que havia.
+    É esse o ponto: no bucket real o backup EXISTE, logo o `file_exists` do
+    código de produção respondia `True` e era a única validação que havia.
+
+    O conteúdo por omissão é um PDF VÁLIDO, de propósito: a exploração do
+    incidente P0 não depende de o ficheiro ser mau, depende de a chave ser de
+    outra pessoa. Misturar as duas coisas faria estes testes passarem pela
+    razão errada — seria a quarentena a recusar, não a guarda de posse.
     """
 
     def __init__(self):
         self.chaves_assinadas: list[str] = []
+        self.apagados: list[str] = []
+        self.conteudos: dict[str, bytes] = {}
+        self.chaves_inexistentes: set[str] = set()
 
     def is_configured(self) -> bool:
         return True
 
+    def _corpo(self, object_name: str) -> bytes:
+        return self.conteudos.get(object_name, PDF_VALIDO)
+
     def file_exists(self, object_name: str) -> bool:
+        return object_name not in self.chaves_inexistentes
+
+    def head_object_metadata(self, object_name: str):
+        if object_name in self.chaves_inexistentes:
+            return "ausente", None
+        corpo = self._corpo(object_name)
+        return "ok", {"tamanho": len(corpo), "tipo": "application/pdf", "etag": "abc"}
+
+    def get_object_prefix(self, object_name: str, num_bytes: int):
+        if object_name in self.chaves_inexistentes:
+            return None
+        return self._corpo(object_name)[:num_bytes]
+
+    def delete_file(self, object_name: str) -> bool:
+        self.apagados.append(object_name)
         return True
 
     def get_presigned_url(self, object_name: str, expiration: int = 3600):
@@ -100,11 +131,13 @@ def portal(fake_async_db, s3_falso):
     # proxy REAL e o teste rebentava com "Event loop is closed": verde ou
     # vermelho conforme a ORDEM de recolha do pytest.
     from services import document_portal_counts
+    from services import s3_content_quarantine
 
     with patch.object(puo, "db", fake_async_db), \
          patch.object(document_portal_counts, "db", fake_async_db), \
          patch("database.db", fake_async_db), \
          patch.object(puo, "s3_service", s3_falso), \
+         patch.object(s3_content_quarantine, "s3_service", s3_falso), \
          patch.object(puo, "invalidate_stats_cache", _nada_async), \
          patch("services.background_tasks.spawn_background_task", _nada_sync), \
          patch("services.history.log_history", _nada_async), \
@@ -728,8 +761,11 @@ class TestAOrdemDaGuardaNaoEDetalhe:
     async def test_chave_estranha_inexistente_da_403_e_nao_404(
         self, portal, s3_falso
     ):
-        # O S3 passa a dizer que NADA existe.
-        s3_falso.file_exists = lambda object_name: False
+        # O S3 passa a dizer que NADA existe. Hoje a inexistência chega
+        # pelo `HEAD` da quarentena, que substituiu o `file_exists`
+        # bloqueante — a propriedade em teste é a mesma: a guarda de posse
+        # responde ANTES de o S3 ser consultado.
+        s3_falso.chaves_inexistentes.update({CHAVE_DO_BACKUP, CHAVE_LEGITIMA})
 
         with pytest.raises(HTTPException) as erro:
             await portal.run_confirm_portal_upload(
@@ -754,7 +790,7 @@ class TestAOrdemDaGuardaNaoEDetalhe:
         Sem esta metade, um 403 indiscriminado passaria o teste acima e o
         cliente deixaria de saber que o upload para o S3 falhou.
         """
-        s3_falso.file_exists = lambda object_name: False
+        s3_falso.chaves_inexistentes.add(CHAVE_LEGITIMA)
 
         with pytest.raises(HTTPException) as erro:
             await portal.run_confirm_portal_upload(
@@ -767,3 +803,197 @@ class TestAOrdemDaGuardaNaoEDetalhe:
                 _dados_do_cliente(),
             )
         assert erro.value.status_code == 400
+
+
+# ====================================================================
+# A QUARENTENA, PONTA A PONTA PELO `confirm-upload`
+# ====================================================================
+# A decisão da quarentena tem a sua própria bateria
+# (`test_s3_content_quarantine.py`); estes testes provam a LIGAÇÃO — que ela
+# corre no sítio certo do fluxo do Portal, e que o registo na base de dados
+# depende dela. Vivem aqui porque é aqui que estão as fixtures do
+# `confirm-upload` do Portal, e duplicá-las era garantir que divergiriam.
+
+ELF_DISFARCADO = (
+    b"\x7fELF" + bytes([2, 1, 1, 0]) + b"\x00" * 8
+    + b"\x02\x00>\x00\x01\x00\x00\x00\x00\x10@\x00\x00\x00\x00\x00"
+    + b"@\x00\x00\x00\x00\x00\x00\x00" + b"\x00" * 24
+    + b"@\x008\x00\x01\x00@\x00\x00\x00\x00\x00" + b"\x00" * 128
+)
+
+
+class TestAQuarentenaNoFluxoDoPortal:
+    """Um executável renomeado para `.pdf`, enviado para a pasta CERTA.
+
+    É o caso que a guarda de posse não apanha e não tem de apanhar: a chave
+    é legítima, o cliente é legítimo, o que está mau são os BYTES. Sem a
+    quarentena, isto era gravado como "PDF" e ficava a ser servido por URL
+    pré-assinado a quem abrisse o processo no CRM.
+    """
+
+    @pytest.mark.asyncio
+    async def test_um_executavel_na_pasta_certa_e_recusado_com_400(
+        self, portal, s3_falso
+    ):
+        s3_falso.conteudos[CHAVE_LEGITIMA] = ELF_DISFARCADO
+
+        with pytest.raises(HTTPException) as erro:
+            await portal.run_confirm_portal_upload(
+                {
+                    "file_key": CHAVE_LEGITIMA,
+                    "original_filename": "IRS_2025.pdf",
+                    "file_size": 1024,
+                    "content_type": "application/pdf",
+                },
+                _dados_do_cliente(),
+            )
+
+        assert erro.value.status_code == 400
+
+    @pytest.mark.asyncio
+    async def test_o_objecto_e_apagado_do_s3(self, portal, s3_falso):
+        s3_falso.conteudos[CHAVE_LEGITIMA] = ELF_DISFARCADO
+
+        with pytest.raises(HTTPException):
+            await portal.run_confirm_portal_upload(
+                {
+                    "file_key": CHAVE_LEGITIMA,
+                    "original_filename": "IRS_2025.pdf",
+                    "file_size": 1024,
+                },
+                _dados_do_cliente(),
+            )
+
+        assert s3_falso.apagados == [CHAVE_LEGITIMA]
+
+    @pytest.mark.asyncio
+    async def test_nao_nasce_registo_na_base_de_dados(
+        self, portal, s3_falso, fake_async_db
+    ):
+        """A ordem importa: inspeccionar ANTES de gravar.
+
+        Um registo criado e depois desfeito deixaria uma janela em que o
+        `/portal/download-url` autorizava a chave — e o ficheiro já não
+        estaria lá para servir, ou pior, ainda estaria.
+        """
+        s3_falso.conteudos[CHAVE_LEGITIMA] = ELF_DISFARCADO
+
+        with pytest.raises(HTTPException):
+            await portal.run_confirm_portal_upload(
+                {
+                    "file_key": CHAVE_LEGITIMA,
+                    "original_filename": "IRS_2025.pdf",
+                    "file_size": 1024,
+                },
+                _dados_do_cliente(),
+            )
+
+        assert await fake_async_db.documents.count_documents({}) == 0
+
+    @pytest.mark.asyncio
+    async def test_um_pedido_do_checklist_nao_fica_satisfeito(
+        self, portal, s3_falso, fake_async_db
+    ):
+        """O ramo do `document_id` — o caminho normal do cliente.
+
+        Sem a quarentena antes dos DOIS ramos, um executável satisfazia o
+        pedido de IRS e o processo avançava com base nele.
+        """
+        await fake_async_db.documents.insert_one({
+            "id": "pedido-1",
+            "process_id": PROCESSO["id"],
+            "client_id": CLIENTE["id"],
+            "status": "REQUESTED",
+            "category": "IRS",
+            "expected_count": 1,
+        })
+        s3_falso.conteudos[CHAVE_LEGITIMA] = ELF_DISFARCADO
+
+        with pytest.raises(HTTPException):
+            await portal.run_confirm_portal_upload(
+                {
+                    "file_key": CHAVE_LEGITIMA,
+                    "original_filename": "IRS_2025.pdf",
+                    "document_id": "pedido-1",
+                    "file_size": 1024,
+                },
+                _dados_do_cliente(),
+            )
+
+        pedido = await fake_async_db.documents.find_one({"id": "pedido-1"})
+        assert pedido["status"] == "REQUESTED"
+        assert pedido.get("s3_path") is None
+
+    @pytest.mark.asyncio
+    async def test_o_tamanho_gravado_e_o_REAL_nao_o_declarado(
+        self, portal, fake_async_db
+    ):
+        """O cliente declarou 1 byte; o objecto tem 512+.
+
+        Era isto que fazia a base de dados acreditar que um ficheiro de 5 GB
+        era um "PDF de 12 KB" — e o `file_size` alimenta quotas e relatórios.
+        """
+        resposta = await portal.run_confirm_portal_upload(
+            {
+                "file_key": CHAVE_LEGITIMA,
+                "original_filename": "recibo.pdf",
+                "file_size": 1,
+                "content_type": "application/x-mentira",
+            },
+            _dados_do_cliente(),
+        )
+
+        assert resposta["success"] is True
+        gravado = await fake_async_db.documents.find_one({"s3_path": CHAVE_LEGITIMA})
+        assert gravado["file_size"] == len(PDF_VALIDO)
+        assert gravado["content_type"] == "application/pdf"
+
+    @pytest.mark.asyncio
+    async def test_uma_falha_de_leitura_da_503_e_NAO_apaga(
+        self, portal, s3_falso, fake_async_db
+    ):
+        """Um soluço do S3 não destrói o upload legítimo de um cliente.
+
+        O 503 diz "tenta outra vez"; o objecto fica no bucket e a
+        reconfirmação resolve. Um 400 com apagar, aqui, perdia o ficheiro.
+        """
+        s3_falso.get_object_prefix = lambda object_name, num_bytes: None
+
+        with pytest.raises(HTTPException) as erro:
+            await portal.run_confirm_portal_upload(
+                {
+                    "file_key": CHAVE_LEGITIMA,
+                    "original_filename": "recibo.pdf",
+                    "file_size": 1024,
+                },
+                _dados_do_cliente(),
+            )
+
+        assert erro.value.status_code == 503
+        assert s3_falso.apagados == []
+        assert await fake_async_db.documents.count_documents({}) == 0
+
+    @pytest.mark.asyncio
+    async def test_a_guarda_de_posse_corre_ANTES_da_quarentena(
+        self, portal, s3_falso
+    ):
+        """Uma chave de outra pessoa nunca chega a ser lida.
+
+        Se a ordem se invertesse, o backend passava a descarregar 2 KB de
+        qualquer chave do bucket que um cliente nomeasse — um oráculo de
+        conteúdo construído com a própria parede de segurança.
+        """
+        s3_falso.conteudos[CHAVE_DO_BACKUP] = PDF_VALIDO
+
+        with pytest.raises(HTTPException) as erro:
+            await portal.run_confirm_portal_upload(
+                {
+                    "file_key": CHAVE_DO_BACKUP,
+                    "original_filename": "dump.zip",
+                    "file_size": 1024,
+                },
+                _dados_do_cliente(),
+            )
+
+        assert erro.value.status_code == 403
+        assert s3_falso.apagados == [], "nem apagar uma chave que não é dele"

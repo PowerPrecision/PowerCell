@@ -7044,3 +7044,119 @@ Quarentena de magic bytes no `confirm-upload` (HEAD + `Range: bytes=0-2047`,
 registo só depois de validar, tamanho/tipo do HEAD e não do cliente) e `type`
 autoritativo nos JWTs antes de abrir o namespace dos WebSockets aos clientes.
 Fica também registado o `GOV_AUTH_JWT_SECRET` com valor por omissão em código.
+
+---
+
+## Iteração quarentena — Magic bytes pós-upload no Portal do Cliente (Set 2026)
+
+Segundo passo do Caminho 4. O hotfix P0 fechou *"esta chave é dele?"*; este
+lote fecha *"estes bytes são o que dizem ser?"*.
+
+### O problema
+
+Com upload pré-assinado os bytes vão do browser para o S3 **sem passar pelo
+backend** — logo a parede de magic bytes (`file_validation.py`) não pode ser
+chamada no ponto de entrada, e não é esquecimento: é a razão de ser do
+pré-assinado. O cliente carregava o que quisesse e o `file_size`/`content_type`
+gravados eram os que ele **declarou**.
+
+### O desenho
+
+`services/s3_content_quarantine.py`: `HEAD` (tamanho e tipo reais) + `GET` com
+`Range: bytes=0-2047` (assinatura) → `validate_file_content` → só então nasce o
+registo. Reprovação de conteúdo apaga o objecto e devolve 400; falha de leitura
+devolve 503 e **mantém** o objecto.
+
+Quatro decisões, todas com teste:
+
+1. **O tamanho vem do `HEAD`, nunca da amostra.** O `validate_file_content`
+   também verifica tamanho, mas contra o `len()` dos 2 KB que lhe damos — essa
+   verificação é vácua e confiar nela dava uma parede que valida o tipo e
+   carimba qualquer tamanho. Os limites por tipo saem do `ALLOWED_MIME_TYPES` do
+   CRM, não de uma tabela nova que divergiria.
+2. **Falha de infraestrutura não é reprovação.** S3 em baixo → 503 **sem
+   apagar**. Apagar aqui destruía o upload legítimo de um cliente por causa de
+   um soluço da rede.
+3. **Reprovar é apagar E não gravar**, e antes dos **dois** ramos do
+   `confirm-upload` (documento novo e `document_id` do checklist).
+4. **Posse antes de conteúdo.** Invertido, o backend passava a ler 2 KB de
+   qualquer chave que um cliente nomeasse — um oráculo feito com a própria
+   parede.
+
+Novas primitivas em `s3_storage.py`: `head_object_metadata` (estado de **três**
+valores: `ok`/`ausente`/`erro`) e `get_object_prefix` (`Range`). Ambas de chave
+**exacta**, sem as variações underscore↔espaço do `get_file_content` — numa
+parede de segurança, inspeccionar uma chave e gravar outra é a forma mais
+discreta de a parede não valer nada.
+
+### Fora do event loop
+
+Todo o `boto3` (`HEAD`/`Range`/`DELETE`) por `asyncio.to_thread`. Pelo caminho:
+
+- o `confirm-upload` **perdeu** o `s3_service.file_exists()` — era a mesma
+  chamada `head_object`, bloqueante e a responder a menos perguntas;
+- o `file_exists` do `download-url` passou para `to_thread` (era um
+  `head_object` síncrono numa corotina — a família do `smtplib`).
+
+### A quarentena em acção
+
+Com o `S3Service` real e só a rede falseada:
+
+```
+recibo.pdf    HEAD -> 4,009 bytes   GET Range: bytes=0-2047   → ACEITE
+foto.png      HEAD -> 69 bytes      GET Range: bytes=0-2047   → ACEITE (tipo corrigido p/ image/png)
+IRS_2025.pdf  HEAD -> 192 bytes     GET Range: bytes=0-2047   → 400 + DELETE  (x-executable)
+enorme.pdf    HEAD -> 524,288,000 bytes  (sem GET)            → 400 + DELETE  (500 MB > 50 MB)
+vazio.pdf     HEAD -> 0 bytes       (sem GET)                 → 400 + DELETE
+
+Registos criados: 2 de 5.  recibo.pdf tamanho=4,009  ·  foto.png tipo=image/png
+```
+
+O `enorme.pdf` e o `vazio.pdf` são recusados **sem se lerem bytes** — o `HEAD`
+já os condena. E o `foto.png` mostra o ponto todo: o cliente declarou
+`application/pdf`, ficou gravado `image/png`.
+
+### Erros meus, apanhados por mutação
+
+Treze mutações. As **duas** que sobreviveram à primeira ronda estavam ambas nas
+primitivas novas do `s3_storage` — apagar o cabeçalho `Range` (passaria a
+descarregar o objecto inteiro) e confundir `"ausente"` com `"erro"` (passaria a
+apagar ficheiros legítimos). Sobreviveram porque **todos** os meus testes usavam
+um S3 falseado que implementava ele próprio o corte dos bytes e os três
+estados: o duplo de teste escondia a única coisa que aquelas funções fazem.
+Terceira variante da mesma lição no projecto (mutação perdida vs teste fraco) e
+a primeira em que o culpado é o duplo ser demasiado esperto. Cobertas agora com
+um cliente `boto3` falseado ao nível da chamada, a afirmar sobre os parâmetros
+que saem.
+
+Também tive de refazer as amostras de teste: um `b"\x89PNG..."` seguido de lixo
+é detectado como `application/octet-stream`, pelo que o meu primeiro "teste do
+PNG aceite" provava que o genérico é recusado — não que um PNG passa.
+
+### Achado sobre o `file_validation`
+
+Um executável de **Linux** (`application/x-executable`) bate na blacklist
+`DANGEROUS_MIME_TYPES` (log `critical`). Um de **Windows** é detectado como
+`application/x-dosexec`, que **não** está lá — é a whitelist que o recusa (log
+`warning`). Mesmo 400 para o cliente, e é o fail-closed que salva o caso; mas
+quem contar com a blacklist para alertar sobre `.exe` de Windows não vê nada.
+Fixado em `TestQualParedeApanhaOQue`.
+
+### Limites honestos da parede (com teste)
+
+Um ZIP renomeado passa como `.docx` (`.docx` *é* um ZIP e `application/zip` está
+na whitelist); um PDF com JavaScript dentro é um PDF. Magic bytes provam
+formato, não inocência — antivírus/sandbox é outro lote.
+
+### Estado
+
+- `tests/unit`: **3794 passed, 5 skipped** (0 regressões; 3730 antes, +64).
+- `flake8` nos selectores bloqueantes do CI sobre `services/`, `routes/` e
+  `tests/unit/`: **0**.
+
+### Por fazer
+
+`services/document_direct_upload.py` (o `confirm-upload` do **CRM**) tem o mesmo
+pré-assinado e a mesma ausência de validação a posteriori. Risco menor
+(utilizadores internos) mas lacuna idêntica, e o `exigir_conteudo_valido` serve
+tal como está. Registado, não feito.

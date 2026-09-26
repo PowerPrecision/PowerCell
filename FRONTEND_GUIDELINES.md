@@ -178,6 +178,18 @@ O upload do Portal é presigned (client → S3 directo) e **isso mantém-se**, m
 
 Os três endpoints do Portal passaram também a ter limite de pedidos (`20/minute` nos de upload, `60/minute` no download). Um lote grande de ficheiros pode por isso apanhar **429** — o tratamento de erro do upload tem de mostrar o `detail` da resposta em vez de assumir falha de rede, e nunca fazer *retry* imediato em ciclo (é o comportamento que o limite existe para travar). Detalhes e diagnóstico completo em `ARCHITECTURE.md` → "Incidente P0 — o `file_key` do Portal do Cliente não era de confiança".
 
+### O `confirm-upload` do Portal pode agora recusar o ficheiro (quarentena, Set 2026)
+
+Os bytes passaram a ser validados **depois** de chegarem ao S3 (`HEAD` + `Range` de 2 KB → magic bytes). O upload pré-assinado mantém-se exactamente como está, mas o passo 3 do fluxo deixou de ser uma formalidade e o tratamento de erro tem de acompanhar:
+
+- **400** — o ficheiro foi recusado e **já foi apagado do S3**. O `detail` traz a razão em português (formato não permitido, demasiado grande, vazio) e é o que se mostra ao cliente. Não vale a pena repetir o pedido: o objecto já não existe. Reenviar significa recomeçar do passo 1 (`/upload-url`).
+- **503** — não foi possível **verificar** o ficheiro (S3 em baixo). O objecto **continua lá** e a confirmação pode ser repetida tal e qual. É o único caso em que faz sentido oferecer "tentar novamente" sobre o mesmo `file_key`.
+- **429** — limite de pedidos (ver acima). Mostrar o `detail`, nunca fazer *retry* imediato em ciclo.
+
+Distinguir 400 de 503 no `catch` é o que separa "o teu ficheiro não serve" de "tenta outra vez dentro de um minuto" — e dizer a primeira coisa quando a verdade é a segunda faz o cliente desistir de um upload que estava bom.
+
+O `file_size` e o `content_type` que o cliente envia no `confirm-upload` continuam a ser aceites no corpo por retrocompatibilidade, mas **são ignorados**: o que fica gravado é o que o S3 e os magic bytes dizem. Não construir UI que assuma que o tipo declarado é o que ficou (um `.pdf` que é na verdade um PNG aparecerá como `image/png` na lista de documentos, e está correcto).
+
 ### Documentos legais gerados — sempre pré-preenchidos do backend
 
 Documentos legais gerados pelo sistema (RGPD, Minuta, CPCV) **devem** vir pré-preenchidos com os dados reais do cliente/processo quando o staff os descarrega para assinatura manual. O backend é a única fonte de verdade para os dados — o frontend não pré-preenche nada.

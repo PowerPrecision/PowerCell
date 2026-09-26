@@ -18,6 +18,7 @@ from services.document_process_resolve import (
     assert_path_within_document_root,
     assert_s3_file_belongs_to_process,
 )
+from services.s3_content_quarantine import exigir_conteudo_valido
 from services.portal_assigned_users import get_all_assigned_user_ids as _get_all_assigned_user_ids
 from services.portal_onboarding_advance import _trigger_onboarding_check
 from services.notification_service import send_notification_with_preference_check
@@ -437,11 +438,31 @@ async def run_confirm_portal_upload(data: dict, client_data: dict):
     # `/portal/download-url` autorizar a chave daí para a frente.
     assert_portal_file_key_e_do_cliente(file_key, process=process, client=client)
 
-    if not s3_service.file_exists(file_key):
-        raise HTTPException(
-            status_code=400,
-            detail="Ficheiro não encontrado. O upload pode ter falhado. Tente novamente."
-        )
+    # ── QUARENTENA (Set 2026) — validar os BYTES antes de existir registo ──
+    # Com upload pré-assinado o backend nunca vê o ficheiro a passar, pelo que
+    # a parede de magic bytes do CRM (`file_validation`) não pode ser chamada
+    # no ponto de entrada. É chamada AQUI, depois do facto: um `HEAD` (tamanho
+    # e tipo reais) e um `GET` de 2 KB (assinatura), ambos por
+    # `asyncio.to_thread` — o `boto3` é síncrono e chamá-lo de uma corotina
+    # pararia o event loop do worker inteiro à espera da rede.
+    #
+    # Isto SUBSTITUI o antigo `s3_service.file_exists(file_key)`: era a mesma
+    # chamada `head_object`, feita de forma bloqueante e a responder a menos
+    # perguntas. Fazer as duas seria pagar dois acessos pela mesma resposta —
+    # e deixar a alguém, mais tarde, a escolha de apagar a errada.
+    #
+    # Reprovar aqui apaga o objecto e levanta 400; uma falha de LEITURA (S3 em
+    # baixo) levanta 503 e **não apaga** — não se destrói o upload de um
+    # cliente por causa de um soluço da infraestrutura.
+    veredicto = await exigir_conteudo_valido(
+        file_key, filename=original_filename
+    )
+
+    # O tamanho e o tipo passam a ser os REAIS, lidos do objecto — nunca os
+    # que o cliente declarou no corpo do pedido. Era isto que fazia a base de
+    # dados acreditar que um executável de 5 GB era um "PDF de 12 KB".
+    file_size = veredicto.tamanho if veredicto.tamanho is not None else file_size
+    content_type = veredicto.tipo_detectado or content_type
 
     now = datetime.now(timezone.utc).isoformat()
 
@@ -718,7 +739,11 @@ async def run_get_portal_download_url(file_key: str, client_data: dict):
         )
 
     # Verificar se o ficheiro existe no S3
-    if not s3_service.file_exists(file_key):
+    # `file_exists` faz um `head_object` — rede. Síncrono numa corotina, pára
+    # o event loop do worker inteiro enquanto o S3 não responder (a mesma
+    # família de defeito do `smtplib` no `send_email`). A assinatura do URL,
+    # logo abaixo, é local e não precisa de thread.
+    if not await asyncio.to_thread(s3_service.file_exists, file_key):
         raise HTTPException(
             status_code=404,
             detail="Ficheiro não encontrado no armazenamento."

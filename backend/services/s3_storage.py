@@ -778,6 +778,97 @@ class S3Service:
             logger.error(f"Erro ao verificar ficheiro S3: {e}")
             return False
 
+    # ================================================================
+    # QUARENTENA DE CONTEÚDO — primitivas de CHAVE EXACTA
+    # ================================================================
+    # Estas duas existem para a validação pós-upload do Portal
+    # (`services/s3_content_quarantine.py`) e têm duas diferenças
+    # deliberadas em relação ao `get_file_content`:
+    #
+    #   1. **Chave EXACTA, sem variações.** O `get_file_content` tenta
+    #      variantes do caminho (underscore <-> espaço) para sobreviver a
+    #      dados legados. Numa parede de segurança isso seria fatal:
+    #      inspeccionar-se-iam os bytes de UMA chave e gravava-se OUTRA no
+    #      registo. O que se valida tem de ser exactamente o que se guarda.
+    #   2. **Nunca descarregam o ficheiro inteiro.** O `head` traz só
+    #      metadados e o `prefixo` traz N bytes por `Range`. Um upload de
+    #      5 GB não pode passar pela RAM do worker só para se lerem os
+    #      primeiros 2 KB.
+
+    def head_object_metadata(self, object_name: str) -> tuple[str, Optional[dict]]:
+        """Metadados REAIS do objecto (tamanho e tipo declarado no S3).
+
+        Devolve um estado de TRÊS valores porque a pergunta tem três
+        respostas e confundi-las é o que transforma uma falha de
+        infraestrutura numa acusação ao utilizador:
+
+            ("ok", {"tamanho": int, "tipo": str, "etag": str})
+            ("ausente", None)   -> o objecto não existe (404)
+            ("erro", None)      -> falha transitória (rede, credenciais, 5xx)
+
+        Quem chama trata "ausente" e "erro" de maneira DIFERENTE: o
+        primeiro é culpa do upload, o segundo não é culpa de ninguém — e
+        apagar o objecto por causa do segundo destruiria um ficheiro
+        legítimo.
+        """
+        if not self.is_configured():
+            return "erro", None
+
+        try:
+            resposta = self.s3_client.head_object(
+                Bucket=self.bucket_name,
+                Key=object_name,
+            )
+        except ClientError as e:
+            codigo = str(e.response.get('Error', {}).get('Code', ''))
+            if codigo in ('404', 'NoSuchKey', 'NotFound'):
+                return "ausente", None
+            logger.error(f"Erro no head_object de {object_name}: {e}")
+            return "erro", None
+        except Exception as e:
+            logger.error(f"Erro inesperado no head_object de {object_name}: {e}")
+            return "erro", None
+
+        return "ok", {
+            "tamanho": resposta.get('ContentLength'),
+            "tipo": resposta.get('ContentType') or "",
+            "etag": (resposta.get('ETag') or "").strip('"'),
+        }
+
+    def get_object_prefix(self, object_name: str, num_bytes: int) -> Optional[bytes]:
+        """Primeiros `num_bytes` do objecto, por `Range` — chave EXACTA.
+
+        Devolve `None` em qualquer falha (incluindo objecto inexistente):
+        quem chama já sabe, pelo `head_object_metadata`, se o objecto lá
+        está, pelo que um `None` aqui é sempre um problema de leitura.
+
+        Um objecto MENOR do que `num_bytes` devolve o que tem — o S3
+        satisfaz o `Range` parcialmente e não é erro. Um objecto VAZIO
+        devolve `b""`, que o chamador tem de tratar como reprovação (um
+        ficheiro sem bytes não tem assinatura nenhuma para validar).
+        """
+        if not self.is_configured() or num_bytes <= 0:
+            return None
+
+        try:
+            resposta = self.s3_client.get_object(
+                Bucket=self.bucket_name,
+                Key=object_name,
+                Range=f"bytes=0-{num_bytes - 1}",
+            )
+            return resposta['Body'].read()
+        except ClientError as e:
+            codigo = str(e.response.get('Error', {}).get('Code', ''))
+            # Um objecto vazio faz o S3 recusar o Range (416): não é falha
+            # de leitura, é um ficheiro sem conteúdo.
+            if codigo in ('416', 'InvalidRange', 'RequestedRangeNotSatisfiable'):
+                return b""
+            logger.error(f"Erro ao ler o prefixo de {object_name}: {e}")
+            return None
+        except Exception as e:
+            logger.error(f"Erro inesperado ao ler o prefixo de {object_name}: {e}")
+            return None
+
     def get_presigned_url(self, object_name: str, expiration: int = 3600) -> Optional[str]:
         """
         Gera um link temporário (1 hora por defeito) para download/visualização.

@@ -5638,3 +5638,157 @@ equivalentes, e estão cobertas em `TestAGuardaDaRaizNaoERedundante` e
   `os.environ.get("GOV_AUTH_JWT_SECRET", "dev-secret-change-in-prod")`: um
   segredo com valor por omissão em código. O `gov_token` carrega
   `verified_by_gov: True`.
+
+---
+
+## Quarentena de conteúdo do Portal — validar os bytes depois de eles chegarem (Set 2026)
+
+Segundo passo do Caminho 4, imediatamente após o hotfix P0. O P0 fechou a
+pergunta **"esta chave é dele?"**; a quarentena fecha a pergunta
+**"estes bytes são o que dizem ser?"**.
+
+### O problema que o pré-assinado cria
+
+`services/file_validation.py` valida magic bytes contra uma whitelist e a sua
+própria docstring avisa que "NUNCA se deve confiar apenas na extensão". É
+chamada pelo `routes/documents.py`, pelo `ai_bulk_analyze` e pelo
+`async_jobs_api_session` — todos caminhos em que os bytes **atravessam** o
+backend.
+
+O Portal não pode chamá-la no mesmo ponto, e não é distracção: com upload
+pré-assinado os bytes vão do browser **directamente** para o S3 e o backend
+nunca os vê. Foi para isso que o pré-assinado existe — foi precisamente para
+tirar ficheiros de clientes do event loop, a mesma razão que levou o
+`send_email` para `asyncio.to_thread`.
+
+Resultado, até aqui: o cliente carregava o que quisesse (um `.exe` renomeado,
+HTML com script, um SVG com JavaScript, 5 GB) e o `file_size`/`content_type`
+gravados em `db.documents` eram os que ele **declarou** no corpo do pedido.
+
+### O desenho
+
+`services/s3_content_quarantine.py` — validação **a posteriori**, entre o
+upload e o registo:
+
+```
+confirm-upload
+  ├─ 1. guarda de posse (403)            ← sem tocar no S3
+  ├─ 2. HEAD  (asyncio.to_thread)        ← tamanho e tipo REAIS
+  ├─ 3. GET Range: bytes=0-2047          ← a assinatura
+  ├─ 4. validate_file_content(amostra)   ← whitelist do CRM
+  │      reprova → DELETE do objecto + 400, sem registo
+  │      ilegível → 503, objecto MANTIDO
+  └─ 5. registo em db.documents, com o tamanho/tipo do HEAD
+```
+
+`exigir_conteudo_valido(file_key, filename=…)` é o ponto único a chamar de um
+`confirm-upload`: quando devolve, o objecto foi visto e aprovado; quando
+levanta, já não está no bucket (excepto na reprovação transitória, que não
+apaga nada).
+
+### As quatro decisões que sustentam isto
+
+**1. O tamanho vem do `HEAD`, nunca da amostra.** O `validate_file_content`
+também verifica tamanho — mas a partir do `len()` do que lhe dermos, e nós
+damos-lhe 2 KB. Essa verificação é, no nosso caso, **vácua**: 2 KB passa
+sempre. Confiar nela dava uma parede que valida o tipo e carimba qualquer
+tamanho — um placebo, exactamente como o `build_company_scope_condition` do
+Lote 4. A amostra responde "o que é isto?"; o `HEAD` responde "que tamanho
+tem?". Nenhuma responde à pergunta da outra. Os limites por tipo saem do mesmo
+`ALLOWED_MIME_TYPES` do CRM (PNG 20 MB, PDF 50 MB); um tipo sem limite
+declarado cai num tecto absoluto, nunca em "sem limite".
+
+**2. Falha de infraestrutura NÃO é reprovação.** Se o `HEAD` ou o `GET`
+falharem (rede, credenciais, 5xx, `libmagic` em falta), não sabemos o que lá
+está — e apagar o objecto por não o conseguirmos ler destruiria o upload
+legítimo de um cliente por causa de um soluço do S3. Esses casos são
+`Veredicto.transitorio` → **503, sem apagar**, e a reconfirmação resolve. Só
+uma reprovação de **conteúdo** apaga. É a decisão mais importante do módulo e
+tem um teste em cada sentido.
+
+**3. Reprovar é apagar E não gravar.** Apagar sem impedir o registo deixava um
+documento a apontar para o vazio; gravar sem apagar deixava o objecto mau num
+bucket cujos prefixos são servidos por URL pré-assinado. A inspecção corre
+antes dos **dois** ramos do `confirm-upload` (documento novo **e**
+`document_id` do checklist) — uma guarda só no primeiro deixava o segundo
+aberto, que é o caminho que o Portal usa mais.
+
+**4. A ordem é posse → conteúdo.** Se se invertesse, o backend passava a
+descarregar 2 KB de qualquer chave do bucket que um cliente nomeasse: um
+oráculo de conteúdo construído com a própria parede de segurança.
+
+### Primitivas de chave EXACTA (`s3_storage.py`)
+
+`head_object_metadata` e `get_object_prefix` são novas e têm duas diferenças
+deliberadas face ao `get_file_content`:
+
+- **Chave exacta, sem variações.** O `get_file_content` tenta variantes do
+  caminho (underscore ↔ espaço) para sobreviver a dados legados. Numa parede de
+  segurança isso seria fatal: inspeccionavam-se os bytes de **uma** chave e
+  gravava-se **outra** no registo.
+- **Nunca descarregam o ficheiro inteiro.** Um upload de 5 GB não pode passar
+  pela RAM do worker só para se lerem os primeiros 2 KB.
+
+`head_object_metadata` devolve um estado de **três** valores
+(`"ok"` / `"ausente"` / `"erro"`) porque a pergunta tem três respostas e
+confundi-las é o que transforma uma falha de infraestrutura numa acusação ao
+utilizador — ou o contrário.
+
+### Fora do event loop
+
+Todo o I/O do `boto3` (`HEAD`, `Range`, `DELETE`) vai por `asyncio.to_thread`:
+o `boto3` é síncrono e chamá-lo de uma corotina pára o event loop do worker
+**inteiro** enquanto a rede não responder — é o incidente do `smtplib` no
+`send_email` (CI 2026-09-21) com outro nome. São dois saltos de thread por
+upload. O `magic.from_buffer` fica em linha: 2 KB são microssegundos e um salto
+de thread custaria mais do que poupa.
+
+Pelo caminho, o `run_confirm_portal_upload` **perdeu** o
+`s3_service.file_exists(file_key)`: era a mesma chamada `head_object`, feita de
+forma **bloqueante** e a responder a menos perguntas. Fazer as duas era pagar
+dois acessos pela mesma resposta — e deixar a alguém, mais tarde, a escolha de
+apagar a errada. O `file_exists` do `run_get_portal_download_url` também passou
+para `asyncio.to_thread` (mesma família de defeito, mesma linha de correcção).
+
+### O que esta parede NÃO faz
+
+Magic bytes provam o **formato**, não a inocência. Está documentado em código e
+com testes, para ninguém concluir que o bucket está limpo:
+
+- **Um ZIP renomeado passa como documento Office.** `.docx`/`.xlsx` *são* ZIPs
+  (`PK\x03\x04`) e `application/zip` está na whitelist. Distinguir exigiria
+  abrir o arquivo e procurar o `[Content_Types].xml` — o que precisa do ficheiro
+  inteiro, não dos primeiros 2 KB.
+- **Um PDF válido com JavaScript dentro é um PDF.** A parede não o abre.
+- Quem quiser mais do que isto precisa de antivírus/sandbox: outro lote.
+
+**Achado sobre as duas listas do `file_validation`:** um executável de Linux
+(`application/x-executable`) bate na **blacklist** `DANGEROUS_MIME_TYPES` e
+dispara log `critical`; um executável de **Windows** é detectado como
+`application/x-dosexec`, que **não** está nessa lista (ela tem
+`application/x-msdos-program` e `application/x-msdownload`) — é a **whitelist**
+que o recusa, com log `warning`. O resultado para o cliente é o mesmo 400, e é
+a arquitectura fail-closed que salva o caso; mas quem contar com a blacklist
+para **alertar** sobre executáveis de Windows não vai ver nada. Fixado em
+`TestQualParedeApanhaOQue`.
+
+### Cobertura
+
+`backend/tests/unit/test_s3_content_quarantine.py` (56) +
+`TestAQuarentenaNoFluxoDoPortal` em
+`test_portal_upload_path_traversal.py` (7 ponta a ponta pelo `confirm-upload`).
+Treze mutações; as **duas** que sobreviveram à primeira ronda estavam ambas nas
+primitivas novas do `s3_storage` — apagar o cabeçalho `Range` e confundir
+`"ausente"` com `"erro"` — e sobreviveram porque todos os testes usavam um S3
+falseado que implementava ele próprio o corte dos bytes e os três estados. **O
+duplo de teste escondia a única coisa que aquelas funções fazem.** Estão agora
+cobertas com um cliente `boto3` falseado ao nível da chamada, com asserções
+sobre os parâmetros que saem.
+
+### Por fazer (mesma lacuna, outro caminho)
+
+`services/document_direct_upload.py` — o `confirm-upload` **do CRM** — tem o
+mesmo pré-assinado e a mesma ausência de validação a posteriori. O risco é
+menor (utilizadores internos autenticados, não a Internet) mas a lacuna é
+idêntica e o `exigir_conteudo_valido` serve-lhe tal como está. Fica registado,
+não feito.
