@@ -8123,3 +8123,93 @@ CI 0, `yarn build` OK. Prova de ponta a ponta do ponto 1: o mesmo
 4. Reavaliar se as tarefas antigas ficaram por carimbar: quem tiver a rede de
    omissão no âmbito continua a vê-las (`TENANT_DEFAULT_NETWORK_ID` está
    definido em produção), mas vale medir quantas são.
+
+---
+
+# ENGATILHADO — Ponto 8: fuga de notificações para consultores e intermediários
+
+Relatado pelo dono do produto depois da bateria em produção, **a fazer assim
+que o deploy deste lote passar**. Fica aqui o que já foi verificado, para o
+próximo passo não começar pela premissa errada — como aconteceu três vezes
+nesta iteração.
+
+## O relato
+
+> Os consultores e intermediários estão a receber alertas e notificações push
+> (via WebSocket) de processos que não lhes pertencem. O evento de publicação
+> das mensagens está a ignorar quem é o `assigned_to` ou o mediador do
+> processo e está a fazer broadcast indiscriminado.
+
+## O que JÁ ESTÁ DESCARTADO (medido, não presumido)
+
+A parte da premissa que fala de "broadcast indiscriminado" **não se
+confirma**. Três paredes que já existem e que eu verifiquei antes de escrever
+esta entrada:
+
+1. **A ACL das salas de processo é apertada.**
+   `websocket_api_helpers.user_can_join_process_room` recusa um consultor que
+   não esteja em `assigned_consultor_ids` / `assigned_consultor_id` /
+   `assigned_to`, recusa `parceiro`, recusa processo inexistente e recusa
+   roles desconhecidas. Um consultor não entra na sala de um processo que não
+   é dele, logo não é por aqui que um `portal_message` ou um delta chega.
+2. **Os deltas de processo já têm a parede no envelope.** O
+   `manager.broadcast()` foi removido no Épico 10, Fase 2 e substituído por
+   `realtime_audience`, com DUAS camadas que têm de passar ambas (rede +
+   necessidade de saber, esta a espelhar `build_kanban_role_base_query`) e
+   falha fechada — uma audiência sem ramos não alcança ninguém.
+3. **`route_system_event` descarta o envelope sem `user_id`** em vez de o
+   difundir (tenant-safety fail-closed), e `send_realtime_notification` é
+   **por `user_id`**, não por sala.
+
+Ou seja: o mecanismo de ENTREGA está filtrado. O que não está é a **escolha
+dos destinatários** a montante — quem é posto na lista antes de a entrega
+acontecer. É uma distinção que muda inteiramente onde se procura.
+
+## Os candidatos concretos
+
+**(a) `services/alerts.py` — a lista de atribuídos está incompleta, com o
+sinal ao contrário do esperado.** A recolha (linhas ~351-362, ~508-515,
+~845-851) lê `assigned_consultor_id`, `consultor_id`,
+`assigned_mediador_id` e `intermediario_id` — e **não** lê os plurais
+`assigned_consultor_ids` / `assigned_mediador_ids`, nem o legado
+`consultant_id`. Isto por si **perde** notificações, não as espalha.
+
+Mas cruza-se com o defeito do Lote 5, ponto 4: `build_clear_consultor_fields`
+limpava apenas quatro dos seis campos canónicos, deixando `consultor_id` e
+`consultant_id` com o valor ANTIGO. A correcção parou de produzir o problema,
+**não limpou o que já existia**. Um processo desatribuído antes dessa
+correcção continua a carregar o `consultor_id` do ex-consultor — e é
+exactamente `consultor_id` que o `alerts.py` lê. **Hipótese principal: não é
+broadcast, é dado residual a apontar para a pessoa errada.**
+
+Primeiro passo, e é de medição, não de código: contar em produção quantos
+processos têm `consultor_id` (ou `consultant_id`) preenchido sem o id
+constar de `assigned_consultor_ids`. Se forem muitos, a fuga é esta e a
+correcção é uma migração mais a leitura pelos construtores canónicos —
+nunca por campos escolhidos à mão.
+
+**(b) `services/alerts.py` — a gestão é notificada sem filtro de rede.** Nas
+linhas ~518 e ~857 há um `db.users.find(deep_role_in_filter(["admin", "ceo",
+"diretor"]))` **sem qualquer condição de tenant**: um alerta de um processo da
+Power notifica a direcção da Domus, que é uma ilha. Não é o sintoma que o
+dono relatou (ele falou de consultores), mas é a MESMA classe de defeito do
+ponto 4 deste lote e a tolerância de cruzamento entre redes é zero. Entra no
+mesmo varrimento.
+
+## A regra que se aplica, e o erro que não se pode repetir
+
+A correcção usa o mesmo desenho das tarefas: a condição vem de
+`services/tenant_network.py` e a leitura dos atribuídos vem dos
+**construtores canónicos** (`CONSULTOR_ID_FIELDS` / `MEDIADOR_ID_FIELDS` de
+`process_assignment`), nunca de uma lista de campos escrita à mão neste
+ficheiro — foi ter a lista escrita duas vezes que produziu o defeito do
+Lote 5.
+
+E o inventário é do lado que EMITE: não basta corrigir `alerts.py`. Há que
+enumerar todos os chamadores de `send_realtime_notification` e verificar, um
+por um, como cada um escolhe os destinatários. É a terceira lição desta
+iteração (Kanban, notificações, tarefas) e a que continua a falhar.
+
+**O teste vem primeiro e tem de ter as duas contraprovas:** um consultor não
+atribuído NÃO recebe, e o consultor atribuído RECEBE — sem a segunda, "não
+notificar ninguém" passa o teste e é uma regressão pior do que a fuga.
