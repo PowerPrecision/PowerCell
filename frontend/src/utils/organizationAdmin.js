@@ -142,6 +142,52 @@ export function rolesForNewAccess(assignableRoles, companyId, selectedRoles) {
   return roles.filter((role) => !taken.has(role));
 }
 
+/**
+ * Retira um utilizador de UMA página já em cache, corrigindo o total.
+ *
+ * A página é `{utilizadores, total}` e não um array — foi confundir as
+ * duas formas que tornou a remoção optimista invisível. Devolve o mesmo
+ * objecto quando não há nada a retirar, para o TanStack não re-renderizar
+ * páginas que não mudaram.
+ *
+ * O total desce com a linha porque é ele que escreve "1–25 de 132": tirar
+ * a linha e deixar o total mostrava uma contagem que não corresponde ao
+ * que está no ecrã. Nunca desce abaixo de zero — um total negativo era o
+ * que uma subtracção cega daria se a mesma remoção corresse duas vezes.
+ */
+export function removerUtilizadorDaPagina(pagina, userId) {
+  if (!pagina || !Array.isArray(pagina.utilizadores) || !userId) return pagina;
+  const restantes = pagina.utilizadores.filter((u) => u?.id !== userId);
+  if (restantes.length === pagina.utilizadores.length) return pagina;
+  const removidos = pagina.utilizadores.length - restantes.length;
+  return {
+    ...pagina,
+    utilizadores: restantes,
+    total: Math.max(0, (Number(pagina.total) || 0) - removidos),
+  };
+}
+
+/**
+ * Repõe um utilizador numa página, na ordem alfabética do nome.
+ *
+ * É a operação inversa da remoção, para o "Desfazer" e para o caminho de
+ * ERRO do servidor. Idempotente: repor duas vezes não duplica a linha
+ * nem inflaciona o total — o desfazer e o `restoreUser()` do ramo de erro
+ * podem ambos correr para o mesmo utilizador.
+ */
+export function reporUtilizadorNaPagina(pagina, user) {
+  if (!pagina || !Array.isArray(pagina.utilizadores) || !user?.id) return pagina;
+  if (pagina.utilizadores.some((u) => u?.id === user.id)) return pagina;
+  const utilizadores = [...pagina.utilizadores, user].sort((a, b) =>
+    (a?.name || "").localeCompare(b?.name || ""),
+  );
+  return {
+    ...pagina,
+    utilizadores,
+    total: (Number(pagina.total) || 0) + 1,
+  };
+}
+
 export const LAST_UCR_DELETE_MESSAGE =
   "Não é possível remover o único acesso deste utilizador. Um utilizador tem de ter pelo menos um acesso UCR.";
 

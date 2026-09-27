@@ -43,6 +43,8 @@ import {
   companiesForNewAccess,
   rolesForNewAccess,
   isUcrComboTaken,
+  removerUtilizadorDaPagina,
+  reporUtilizadorNaPagina,
   LAST_UCR_DELETE_MESSAGE,
 } from "../../utils/organizationAdmin";
 import {
@@ -231,9 +233,16 @@ export default function UsersAccessAdminTab() {
     queryClient.invalidateQueries({ queryKey: queryKeys.users.all });
   };
 
-  const setUsersCache = (updater) =>
-    queryClient.setQueryData(queryKeys.orgAdmin.users(), (prev = []) =>
-      typeof updater === "function" ? updater(prev) : updater,
+  // Escrever na cache exige chave EXACTA — e a que o ecrã LÊ é a
+  // paginada. Escrever em `users()` criava uma entrada fantasma: a
+  // remoção optimista e o "Desfazer" não mexiam no ecrã, e só o
+  // `clearTimeout` é que salvava o utilizador de ser apagado. Com o
+  // prefixo, todas as páginas em cache são actualizadas — a lista pode
+  // estar aberta na página 3 e a pesquisa activa.
+  const actualizarPaginasEmCache = (transformar) =>
+    queryClient.setQueriesData(
+      { queryKey: queryKeys.orgAdmin.usersPaginatedAll() },
+      (pagina) => (pagina ? transformar(pagina) : pagina),
     );
 
   const openAccessSheet = (user) => {
@@ -346,11 +355,11 @@ export default function UsersAccessAdminTab() {
   const handleDeleteUser = (user) => {
     if (!user?.id) return;
     const restoreUser = () =>
-      setUsersCache((prev) =>
-        [...prev, user].sort((a, b) => (a.name || "").localeCompare(b.name || "")),
-      );
+      actualizarPaginasEmCache((pagina) => reporUtilizadorNaPagina(pagina, user));
 
-    setUsersCache((prev) => prev.filter((u) => u.id !== user.id));
+    actualizarPaginasEmCache((pagina) =>
+      removerUtilizadorDaPagina(pagina, user.id),
+    );
 
     const commitTimer = setTimeout(async () => {
       try {

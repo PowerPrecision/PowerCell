@@ -132,6 +132,69 @@ dívida mais fácil desta lista.
 
 ---
 
+### D-11 · Os sourcemaps do frontend são servidos em produção
+**Onde:** `frontend/vite.config.js` (`sourcemap: isProduction ? 'hidden' : true`)
+
+`'hidden'` remove o comentário `//# sourceMappingURL=` do ficheiro mas
+**continua a emitir os `.map`**, que vão no artefacto de deploy e são
+servidos: `GET https://www.powercell.pt/assets/<chunk>.js.map` devolve 200
+com o código-fonte completo, comentários incluídos.
+
+Foi o que permitiu diagnosticar o erro desta iteração sem a mensagem de
+erro — resolver `6:23816` para `UsersAccessAdminTab.jsx:103` — e é o que
+permite a qualquer pessoa ler o frontend todo.
+
+**Porque foi adiado:** não é uma correcção óbvia, é um **compromisso**.
+Apagar os `.map` do artefacto cega o diagnóstico de todos os erros futuros,
+incluindo os do Sentry. Enviá-los para o Sentry e não os servir mantém as
+duas coisas, mas é trabalho de pipeline (o plugin do Sentry já está no
+`vite.config.js`, ver o bloco `sourcemaps:`) e uma decisão de quem paga a
+conta.
+
+**Quem é atingido:** ninguém directamente — não há autenticação nem segredos
+nos mapas (o DSN do Sentry num bundle é público por desenho). O que se
+expõe é estrutura, nomes de endpoints internos e os comentários que
+explicam regras de negócio, o que baixa o custo de quem procure uma
+fraqueja.
+
+**Para fechar:** decidir entre (a) `sourcemap: false` em produção, (b)
+upload para o Sentry com `filesToDeleteAfterUpload` no artefacto, ou (c)
+manter e assumir a decisão por escrito. A opção (b) é a que não perde nada.
+
+---
+
+### D-10 · As definições de índices vivem dentro de `create_indexes`
+**Onde:** `backend/services/db_indexes.py::create_indexes`
+
+Os índices são 15 literais de lista **locais** dentro de uma função async
+de ~380 linhas, cada um seguido do seu ciclo de criação. Não há forma de
+um teste (nem de um script de diagnóstico) obter as definições sem
+executar a função contra uma base de dados.
+
+Foi isso que permitiu o placebo: o `test_db_indexes.py` mantinha uma
+CÓPIA das definições escrita à mão e injectava-a em
+`sys.modules['services.db_indexes']`, substituindo o módulo inteiro. A
+cópia tinha 2 colecções e 6 índices de `processes`; o módulo real tem 13 e
+18. Hoje o teste lê o módulo por **AST** — honesto, mas é uma leitura de
+texto a fazer o trabalho que uma estrutura de dados faria.
+
+**Porque foi adiado:** mover 380 linhas do caminho de ARRANQUE da
+aplicação, no dia de um deploy, por um ganho que é de forma e não de
+comportamento. O AST fecha o problema que importava (o teste passou a
+poder falhar) sem tocar em produção.
+
+**Quem é atingido:** ninguém em produção. Quem escrever o próximo teste ou
+script sobre índices paga o preço: ou repete a leitura por AST, ou
+recria a cópia que acabámos de apagar — e a cópia é o defeito.
+
+**Para fechar:** extrair um `INDEX_DEFINITIONS: dict[str, list[dict]]` ao
+nível do módulo, `create_indexes` passa a iterá-lo (`for colecao, indices
+in INDEX_DEFINITIONS.items()`), e o leitor por AST do teste é substituído
+por um import. A lista de colecções que o `get_index_stats` reporta sai da
+mesma estrutura, em vez de ser uma segunda lista à mão.
+
+---
+
 ## Correcção e modelo de dados
 
 ### D-6 · `INACTIVE_STATUSES` é resíduo legado, não definição

@@ -7457,3 +7457,173 @@ partilhada não serve: move os dois lados ao mesmo tempo, e o defeito era uma
 - `pytest` com o comando e o ambiente exactos do `backend-full`: **4079 passed,
   13 skipped** (CI tinha 25 failed / 4042 passed).
 - `flake8` nos selectores bloqueantes: **0**.
+
+---
+
+## Iteração indices-e-cache — O índice que era tarefa manual, o "Desfazer" placebo e um teste que se validava a si mesmo (Set 2026)
+
+**Commit:** ver `git log`. **Branch:** `dev`.
+
+Esta iteração começou por um erro de produção no painel de administração e
+por três perguntas de operação. Nenhuma das três coisas que corrigi era o
+erro reportado — e isso é o registo honesto do que aconteceu.
+
+## O erro do painel: o que consegui estabelecer e o que não
+
+Pilha de componentes, sem a linha do erro. Resolvi as posições minificadas
+contra os **sourcemaps de produção** (estão publicamente servidos, ver
+achado no fim):
+
+| frame | resolve para |
+|---|---|
+| `ws` `UsersAccessAdminTab-D__JHBU9.js:6:23816` | `UsersAccessAdminTab.jsx:103:22` |
+| `Gs` `SystemAdminPanel-CgIJgPjI.js:12:10995` | `SystemAdminPanel.jsx:98:19` |
+| `Zo` `DashboardLayout-DuB-Eavz.js:191:101306` | `DashboardLayout.js:90:27` |
+
+O caminho é `DashboardLayout → SystemAdminPanel → Tabs → TabsContent →
+UsersAccessAdminTab`, e a posição do frame mais interno é a PRIMEIRA linha
+do corpo do componente (o `useQueryClient`) — é assim que o React
+identifica um componente, não é o sítio do erro. Só há **um** frame desse
+chunk, logo o erro nasce ao renderizar este componente e não num filho.
+
+Verifiquei ainda, com precisão em vez de vista de olhos:
+
+- **os 24 bindings importados resolvem todos** (script que confirma cada
+  named/default import contra os exports do módulo alvo) — não é um
+  elemento de tipo `undefined` vindo deste ficheiro;
+- **o `sourcesContent` do sourcemap de produção é byte-a-byte igual ao
+  working tree** — produção corre exactamente este código;
+- **o build local não emite um único aviso de dependência circular**;
+- **12 formas de dados** (registo sem id, UCR sem empresa, empresa sem id,
+  chaves repetidas, total incoerente, payload aninhado, servidor a devolver
+  500) montam sem rebentar.
+
+**O que NÃO consegui:** identificar o erro. E corrijo uma inferência que
+fiz a meio: vi nos logs o painel a ser aberto às 11:21:47 sem nenhum pedido
+a `/admin/users/paginated` e concluí "rebenta antes do fetch". **A conclusão
+não se sustenta** — os logs cobrem 11:07–11:23 e o crash pode ter sido fora
+dessa janela. O sítio certo para o ir buscar é o **Sentry**, que está activo
+em produção (DSN no bundle) com `replaysOnErrorSampleRate: 1.0`: lá está a
+mensagem, os breadcrumbs e um vídeo do ecrã.
+
+## Ponto 1 — o índice do BI era uma tarefa manual, e as tarefas manuais esquecem-se
+
+Os logs do arranque de produção mostram `idx_network_id` e `idx_s3_folder` a
+nascerem sozinhos (`services/db_indexes.py` cria tudo no arranque) e o
+composto `{network_id, is_deleted, status}` a **faltar** — porque o worklog
+o tinha registado como um comando a correr à mão "na mesma janela do
+backfill".
+
+É o índice com que `stats_funnel`, `stats_branches` e `stats_overview`
+abrem as agregações. Declarado agora como os outros: nasce no arranque, é
+idempotente, e existe em dev e em CI — que é onde as consultas se escrevem.
+A ordem das chaves vai do prefixo mais presente para o menos, para o Mongo
+poder servir com o mesmo índice uma consulta que traga só as duas primeiras.
+
+**Regra: um índice de que a aplicação depende declara-se no código, nunca
+num passo de operações.**
+
+## Ponto 2 — o "Desfazer" da eliminação de utilizadores era um placebo
+
+```js
+// LÊ:      ['org-admin','users','paginated', pesquisa, pagina, '']
+// ESCREVIA: ['org-admin','users']
+```
+
+`invalidateQueries` casa por **prefixo** e sempre funcionou; foi essa metade
+que escondeu a outra. O `setQueryData` casa por chave **exacta**: criava uma
+entrada fantasma. Consequências: clicar Eliminar não retirava a linha, o
+"Desfazer" não repunha nada (só o `clearTimeout` salvava o registo), e um
+erro do servidor deixava a linha desaparecida.
+
+Hoje: `usersPaginatedAll()` é a chave-prefixo (e a paginada deriva dela),
+a escrita é por `setQueriesData` sobre o prefixo — apanha todas as páginas
+em cache, porque a lista pode estar na página 3 com pesquisa activa — e a
+transformação vive em dois helpers PUROS
+(`removerUtilizadorDaPagina` / `reporUtilizadorNaPagina`), com o `total` a
+descer com a linha, chão em zero e reposição idempotente.
+
+## Ponto 3 — um ficheiro de teste que se validava a si mesmo, e envenenava a sessão
+
+O `test_db_indexes.py` mantinha uma **cópia** das definições de índices
+escrita à mão e fazia:
+
+```python
+sys.modules['services.db_indexes'] = type(sys)('services.db_indexes')
+sys.modules['services.db_indexes'].get_index_definitions = get_index_definitions
+```
+
+Substituía o **módulo inteiro** por um objecto vazio. Duas consequências:
+
+1. **Os testes validavam o duplo.** A cópia tinha 2 colecções e 6 índices de
+   `processes`; o módulo real tem 13 e 18. Passavam com o `db_indexes.py` a
+   declarar o que quisesse — foi por aqui que o `idx_network_scope` pôde
+   faltar em produção sem um teste vermelho. Terceira variante da lição "um
+   duplo que reimplementa a lógica valida o duplo".
+2. **O `sys.modules` envenenado sobrevivia à sessão.** Qualquer módulo
+   importado depois via um `services.db_indexes` vazio: o
+   `test_db_index_stats.py` rebentava com *cannot import name
+   'get_index_stats' (unknown location)* — e só não parte o CI porque a
+   ordem alfabética o coloca antes. Eu próprio dei de cara com isto a meio
+   da iteração e **despachei-o como artefacto do ambiente**; era o defeito.
+
+O leitor passou a ser por **AST** sobre o módulo real, com a associação
+lista → colecção a sair do próprio `_create_index_safe(db.<colecção>, …)`
+que a consome (a única fonte que não pode divergir do que é criado), mais
+uma **contraprova** de que o leitor não degenerou — sem ela trocava-se um
+placebo por outro, porque todas as asserções são da forma `"idx_x" in nomes`
+e um leitor que devolva pouco continua a passá-las.
+
+Dois testes antigos caíram ao ver a realidade, e ambos por bom motivo:
+- procuravam `idx_email_unique`, um nome que **nunca existiu** no código
+  (invenção da cópia); o índice real é `idx_email`. A asserção passou a ser
+  sobre a `unique: True`, que é a regra de que o login depende;
+- exigiam direcção `int` em todas as chaves, o que "provava" que não há
+  índices de texto — e `processes` tem um desde sempre. Lista fechada
+  (`1, -1, "text", "hashed", "2dsphere"`) em vez de aceitar qualquer string.
+
+## Ponto 4 — um teste meu, intermitente
+
+`ClientPortal.tempoReal.test.jsx` passou numa execução (4386ms) e estourou
+na seguinte. Medido por teste: o **primeiro** custa 4940ms e os outros dez
+30–90ms. Não é espera escondida — é o `await import("../ClientPortal")` a
+transformar a árvore inteira da página, encostado ao limite de 5s. Limite
+explícito de 20s no ficheiro, com o motivo escrito: o custo é de arranque,
+e encurtar a asserção não lhe tira um milissegundo.
+
+## Validação
+
+- `pytest tests/unit --no-cov` → **3894 passed, 5 skipped** (baseline 3892).
+- `yarn test` → **1217 passed / 103 ficheiros** (baseline 1195 / 101).
+- `flake8 . --select=E9,F63,F7,F82` → **0**. `eslint --quiet` → **0**.
+- Mutação dirigida, **medida** e não estimada:
+  - retirar o `idx_network_scope` do `db_indexes.py` → **1 morto**
+    (foi a ordem em que isto se escreveu: o teste falhou primeiro);
+  - devolver o `setQueryData(queryKeys.orgAdmin.users(), …)` → **2 mortos**
+    (a linha não sai da tabela, o total não desce);
+  - degenerar o leitor por AST para devolver `{}` → **4 mortos**, a
+    contraprova entre eles. `test_index_structure` **sobrevive** — itera as
+    definições e um ciclo sobre o vazio não afirma nada. Fica registado como
+    o que é: um teste vácuo sem a contraprova ao lado, que é precisamente a
+    razão de ela existir.
+
+## A fazer em produção
+
+**Nada.** O índice nasce no arranque do próximo deploy — era exactamente o
+ponto. Se se quiser confirmar antes, `db.processes.getIndexes()` mostra
+`idx_network_scope` depois do primeiro arranque com este código.
+
+## Achado à parte: os sourcemaps de produção são públicos
+
+`vite.config.js` usa `sourcemap: 'hidden'`, que remove o comentário do
+ficheiro mas **não deixa de os publicar**: `GET
+/assets/<chunk>.js.map` devolve 200 e com ele o código-fonte completo do
+frontend, comentários incluídos. Foi o que me deixou resolver as posições
+desta iteração — e é o que deixa qualquer pessoa ler o frontend todo.
+
+Não é uma falha de autenticação e não expõe segredos (o DSN do Sentry num
+bundle é público por desenho), mas expõe estrutura, nomes de endpoints e os
+comentários que explicam as regras de negócio. **Fica como decisão para
+tomar, não como correcção feita** — apagar os `.map` do artefacto de deploy
+custa a legibilidade de todos os erros futuros; a alternativa é enviá-los
+para o Sentry e não os servir. Registado em `TECHNICAL_DEBT.md`.

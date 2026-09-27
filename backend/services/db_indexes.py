@@ -290,6 +290,19 @@ async def create_indexes(db) -> dict:
         # O carimbo de rede é lido em quase todas as listagens desde o
         # Lote 4 e nunca teve índice próprio.
         {"keys": [("network_id", 1)], "name": "idx_network_id"},
+        # O âmbito COMPLETO do BI: rede + não eliminado + fase. É a
+        # combinação com que `stats_funnel`, `stats_branches` e
+        # `stats_overview` abrem as agregações, e estava registada no
+        # worklog como tarefa MANUAL de produção — que é a forma certa de
+        # se esquecer. Declarada aqui, nasce no arranque como as outras.
+        # A ordem é do prefixo mais presente para o menos: `network_id`
+        # está em todas as consultas, `status` só em algumas, e é isso
+        # que deixa o Mongo reaproveitar o índice para as duas primeiras
+        # chaves sem precisar de um segundo.
+        {
+            "keys": [("network_id", 1), ("is_deleted", 1), ("status", 1)],
+            "name": "idx_network_scope",
+        },
         
         # Índice de texto para pesquisa full-text
         {

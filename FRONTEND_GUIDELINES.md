@@ -886,6 +886,56 @@ paginada, esconde correspondências que o servidor colocou noutra página.
 E uma pesquisa de pessoas procura por **empresa** também, não só por
 nome e email — é assim que um administrador procura alguém.
 
+### 27.5 `invalidateQueries` casa por PREFIXO, `setQueryData` por chave EXACTA
+
+A diferença entre as duas parece trivia de biblioteca e produz um
+**placebo**. O separador Utilizadores lia
+`usersPaginated(pesquisa, pagina)` = `['org-admin','users','paginated',…]`
+e escrevia em `users()` = `['org-admin','users']`:
+
+```js
+queryClient.invalidateQueries({ queryKey: users() });  // casa em prefixo → FUNCIONAVA
+queryClient.setQueryData(users(), updater);            // chave exacta → entrada FANTASMA
+```
+
+Foi a metade que funcionava que escondeu a outra. Consequências, todas
+invisíveis sem montar a tabela: clicar "Eliminar" não retirava a linha, o
+"Desfazer" não repunha nada (só o `clearTimeout` salvava o registo), e um
+erro do servidor deixava a linha desaparecida.
+
+**Regras:**
+
+- **Quem escreve na cache de uma listagem paginada usa `setQueriesData`
+  com o PREFIXO** (`usersPaginatedAll()`), não `setQueryData` com uma
+  chave montada à mão: a lista pode estar aberta na página 3 e com
+  pesquisa activa, e há uma entrada por combinação.
+- **A chave-prefixo existe como função própria** e a paginada deriva
+  dela. Duas listas de segmentos escritas à mão divergem, e a divergência
+  não dá erro.
+- **A forma do que está em cache não é um array.** A página é
+  `{utilizadores, total}`; tratá-la como array foi metade do defeito. A
+  transformação vive em helpers PUROS
+  (`removerUtilizadorDaPagina` / `reporUtilizadorNaPagina`), que é o que
+  permite testar a idempotência e o chão do total sem montar nada.
+- **O `total` desce com a linha.** Retirar a linha e deixar o total
+  mostra "1–1 de 2" — uma contagem que contradiz o ecrã.
+
+### 27.6 Um separador só está coberto quando alguém o MONTA
+
+O `UsersAccessAdminTab` tem 789 linhas e nenhum teste o montava; o único
+que o mencionava lia o **código-fonte** para verificar a forma da chave.
+Um erro de render chegou a produção sem o CI dar um pio, e o defeito do
+27.5 viveu meses num ecrã que ninguém renderizava num teste. É a mesma
+regra do `WebmailPage` e do `ProcessDetails`, e vale para separadores de
+painéis de administração exactamente como para páginas.
+
+O primeiro teste de um ecrã destes é o mais estúpido possível — montar e
+sobreviver — seguido de uma tabela de **formas que os dados reais tomam**
+(registo sem id, relação sem nome de empresa, empresa sem id, chaves
+repetidas, total incoerente, payload aninhado em vez de array). Essa
+tabela escreve-se a ler os normalizadores e a perguntar, por cada `||`,
+o que acontece quando nenhum dos lados existe.
+
 ## 28. Edição inline e navegação contígua (Lote 5, Secção B, Set 2026)
 
 ### 28.1 Um controlo dentro de uma linha clicável começa por travar o clique
